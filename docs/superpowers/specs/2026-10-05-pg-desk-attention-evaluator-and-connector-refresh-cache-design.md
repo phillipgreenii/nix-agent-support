@@ -3,11 +3,12 @@
 **Status**: Draft for operator review. Nothing here is implemented, and no bead named in the final
 section has been filed.
 **Date**: 2026-10-05
-**Bead**: `pg2-m482k` (P0 pointer bead, label `agent-support`)
+**Bead**: `pg2-m482k` (P0 pointer bead, labels `agent-support` and `ziprecruiter`)
 **Related**: ADR 0077 (entity change flow); `pg2-aehpr` (batched `list`, closed); `pg2-2hzcc`
 (cross-reference links, landed as `pg-desk links`); `pg2-ph0o4` (pr-github event log, landed);
-`pg2-px61p` (menu bar degraded rows, landed); `pg2-ii38x` (fast per-type change check, open);
-`pg2-w977` (reserve ruling)
+`pg2-px61p` (menu bar degraded rows, landed); `pg2-ii38x` (fast per-type change check, design
+closed, landed with a proposed ADR 0077 amendment whose approval is pending on the operator
+decision bead `pg2-32wg6`); `pg2-w977` (reserve ruling)
 
 Like the other files under `docs/superpowers/specs/`, this file is an extraction source, not a
 durable citation target. "Durable decision homes" names the ADR and behavior-docs changes that
@@ -169,7 +170,8 @@ default threshold is 24 hours) from a Jira `duedate` or a bead `--due`
 - Per-row `as_of` is not a freshness signal. Method: `strftime('%s','now') - strftime('%s', as_of)`
   over the store on 2026-10-05, counting rows older than 3600 seconds: 225 of 299 entity rows and
   222 of 299 interpretation rows (75 percent) were older than one hour, which is normal for an
-  event-driven store.
+  event-driven store. These counts are time-dependent (the store is read live and changes every
+  minute), so read them as an order of magnitude, not a fixed fact.
 - The menu bar plugin already renders a degraded source row as `"<source>: <status>[: <reason>];
 data N min old"` when the `sources[]` row carries `age_seconds` or `as_of`
   (`modules/local-alert-triage/lat-menubar/lat-menubar.sh` in the deployment repo, bead
@@ -206,19 +208,19 @@ and a connector's attention MUST be about interesting things in the data (`ATTN-
 duplicate an alert (`OBS-4`). The table records what each registered or candidate source emits
 today, verified in code, and the change this design implies.
 
-| Source                          | Emits today (verified)                                                                                                                                                 | Owner after this design        | Change                                                                                                                                                                                                   |
-| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| alert-grafana                   | One item per firing alert in the configured `attention_query` set (`pg-connector-alert-grafana/internal/backend.go`, `ListAttention`, line 204).                       | alert-grafana                  | None.                                                                                                                                                                                                    |
-| calendar-osx-bridge             | A time-based ramp over events inside the attention window (`computeSeverity`, `internal/backend.go`, line 597), type `calendar_event`. Already time-only.              | calendar-osx-bridge            | None.                                                                                                                                                                                                    |
-| agentsession-pa-monitor         | `blocked` sessions (severity by blocker: `human_input` and `human_authn` high, `usage_limit` medium) and `LongIdle` sessions (low) (`internal/attention.go`, line 33). | agentsession-pa-monitor        | Drop the `usage_limit` blocker items (they duplicate Prometheus alert rules, `OBS-4`); keep `human_input`, `human_authn` and long-idle. Already filed as `pg2-psftz`; not part of this spec's breakdown. |
-| pr-github                       | `pr` and `pr-ci` items (section 2.2).                                                                                                                                  | pg-desk                        | Registered out of `attention.sources` (done). Code deleted after the plugin lands (section 9). The `pr-ci` rule is re-expressed as a desk rule; the stale-approval leg is open (Open questions, item 4). |
-| issue-jira                      | Deadline items from `duedate` within `attention_threshold` (default 24 hours), plus overdue.                                                                           | pg-desk                        | Registered out (done). Code deleted after the plugin lands. A desk rule needs `issue` entities hydrated, which the live store has none of (section 4.3, "Deferred and later rules").                     |
-| issue-beads                     | Deadline items from a bead's `due_at` within the same threshold, plus overdue.                                                                                         | pg-desk                        | Same as issue-jira.                                                                                                                                                                                      |
-| mail-osx-bridge                 | An EMPTY list on purpose (`internal/backend.go`, `ListAttention`, line 368; `INV-MAIL-3`, `INV-MAIL-4`). Registered under `search.sources` only.                       | pg-desk (later)                | Out of scope here. The operator ruled on 2026-10-05 that email attention lives in a pg-desk attention rule; it needs a `mail` entity type that does not exist yet.                                       |
-| thread-slack                    | No `list_attention` at all (not in the list of backends that implement it).                                                                                            | pg-desk (later) or a connector | Out of scope here. Unread-chat attention is named by `ATTN-0` as an example; its owner is undecided (Open questions, item 10).                                                                           |
-| pg-desk attention plugin        | New: one item per entity that needs the operator now, grouped by work context (section 4).                                                                             | pg-desk                        | New standalone `list_attention` backend, registered in `attention.sources`.                                                                                                                              |
-| Connector health (auth, outage) | Nothing, by decision `ATTN-0` and `OBS-4`. pr-github and thread-slack now write their own rotating event log (`pkg/eventlog`, bead `pg2-ph0o4`) for Loki alert rules.  | each connector's own telemetry | None in this spec.                                                                                                                                                                                       |
-| Data freshness (this design)    | Not an attention source. A stale feed is reported through the freshness channel (section 5), because a stale source still has items worth showing.                     | pg-desk                        | New `pg-desk freshness` verb and dashboard fields.                                                                                                                                                       |
+| Source                          | Emits today (verified)                                                                                                                                                                 | Owner after this design        | Change                                                                                                                                                                                                   |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| alert-grafana                   | One item per firing alert in the configured `attention_query` set (`pg-connector-alert-grafana/internal/backend.go`, `ListAttention`, line 204).                                       | alert-grafana                  | None.                                                                                                                                                                                                    |
+| calendar-osx-bridge             | A time-based ramp over events inside the attention window (`computeSeverity`, `internal/backend.go`, line 562; `ListAttention` at line 597), type `calendar_event`. Already time-only. | calendar-osx-bridge            | None.                                                                                                                                                                                                    |
+| agentsession-pa-monitor         | `blocked` sessions (severity by blocker: `human_input` and `human_authn` high, `usage_limit` medium) and `LongIdle` sessions (low) (`internal/attention.go`, line 33).                 | agentsession-pa-monitor        | Drop the `usage_limit` blocker items (they duplicate Prometheus alert rules, `OBS-4`); keep `human_input`, `human_authn` and long-idle. Already filed as `pg2-psftz`; not part of this spec's breakdown. |
+| pr-github                       | `pr` and `pr-ci` items (section 2.2).                                                                                                                                                  | pg-desk                        | Registered out of `attention.sources` (done). Code deleted after the plugin lands (section 9). The `pr-ci` rule is re-expressed as a desk rule; the stale-approval leg is open (Open questions, item 4). |
+| issue-jira                      | Deadline items from `duedate` within `attention_threshold` (default 24 hours), plus overdue.                                                                                           | pg-desk                        | Registered out (done). Code deleted after the plugin lands. A desk rule needs `issue` entities hydrated, which the live store has none of (section 4.3, "Deferred and later rules").                     |
+| issue-beads                     | Deadline items from a bead's `due_at` within the same threshold, plus overdue.                                                                                                         | pg-desk                        | Same as issue-jira.                                                                                                                                                                                      |
+| mail-osx-bridge                 | An EMPTY list on purpose (`internal/backend.go`, `ListAttention`, line 368; `INV-MAIL-3`, `INV-MAIL-4`). Registered under `search.sources` only.                                       | pg-desk (later)                | Out of scope here. The operator ruled on 2026-10-05 that email attention lives in a pg-desk attention rule; it needs a `mail` entity type that does not exist yet.                                       |
+| thread-slack                    | No `list_attention` at all (not in the list of backends that implement it).                                                                                                            | pg-desk (later) or a connector | Out of scope here. Unread-chat attention is named by `ATTN-0` as an example; its owner is undecided (Open questions, item 10).                                                                           |
+| pg-desk attention plugin        | New: one item per entity that needs the operator now, grouped by work context (section 4).                                                                                             | pg-desk                        | New standalone `list_attention` backend, registered in `attention.sources`.                                                                                                                              |
+| Connector health (auth, outage) | Nothing, by decision `ATTN-0` and `OBS-4`. pr-github and thread-slack now write their own rotating event log (`pkg/eventlog`, bead `pg2-ph0o4`) for Loki alert rules.                  | each connector's own telemetry | None in this spec.                                                                                                                                                                                       |
+| Data freshness (this design)    | Not an attention source. A stale feed is reported through the freshness channel (section 5), because a stale source still has items worth showing.                                     | pg-desk                        | New `pg-desk freshness` verb and dashboard fields.                                                                                                                                                       |
 
 ## 4. Direction 1: the pg-desk attention evaluator
 
@@ -239,8 +241,23 @@ The shared registry SHAPE with pg-decider is deliberate and the shared RUNTIME i
 decider is event-driven and write-side: it creates beads and annotations when an entity changes. A
 "needs me" annotation written that way would be stale for every time-based rule and every rule
 that depends on a sibling, because no event fires on the entity when the clock advances or a
-sibling merges. The evaluator is read-time and pure, so it is correct at every read by
-construction.
+sibling merges. The evaluator is read-time and pure, which fixes that for the parts that are
+actually computed at read time. Be precise about which parts those are:
+
+- **Read time, every call:** the suppression chain (annotations, the dependency check that reads
+  sibling entities' CURRENT rows), grouping, ordering, and any time-based rule (the clock is an
+  input). A sibling that merges changes its own row through its own event, and the next read sees
+  it with no event on the dependent entity.
+- **Write time:** the first-release raise rules project the STORED interpretation row
+  (`panel`, `approvals`, `match_reasons`), which interpret computed at the entity's last
+  hydration. They are exactly as fresh as that run, and cross-entity inputs INSIDE interpret (for
+  example `waiting_on_me`, computed from the `Facts.Deps` stored at the last gather) stay stale
+  until the entity is re-run. Only the own-PR CI rule re-derives a fact at read time (from the
+  stored CI facts).
+
+So the first release is "read-time over stored interpretations", not "everything re-derived at
+every read". Re-deriving interpretation at read time (running the pure `Interpret` over the
+stored facts on each read) is a real alternative with a per-read cost, and it is Open question 13.
 
 ```mermaid
 flowchart TB
@@ -335,15 +352,16 @@ block. The block lives in pg-desk's config (resolved through `PG_DESK_CONFIG` or
 
 ### 4.3 The initial rule set (proposed for review)
 
-The first rules deliberately add no new notion of "needs me". They reuse the dashboard's existing
-definition, the two "awaiting me" panels, and break them out by reason so the severity and the
-summary say why. This keeps the dashboard and the menu bar in agreement by construction.
+The first rules deliberately add no new notion of "needs me". They start from the dashboard's
+existing definition, the two "awaiting me" panels (stored, write-time, see section 4.1), and break
+them out by reason so the severity and the summary say why. The dashboard and the menu bar agree
+because both read the same stored panel through the same `Evaluate`.
 
-| Rule kind             | Raises when                                                                                                                                                        | Reads                                         | Default severity                        | Parity with today                                                                                                                                        |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------- | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pr.review-requested` | Team PR in panel `team_awaiting_me` (live review request on me, not hard-blocked).                                                                                 | `interpretation.panel`, `match_reasons`       | `medium`                                | Replaces the first-review half of the `pr` item. The semantics shift from "no review by me yet" to "review requested of me" (the operator's own phrase). |
-| `pr.own-ci-failing`   | Own open, non-draft PR in panel `mine_awaiting_me` whose CI rollup fails after `check_interpreters` exclusions.                                                    | `panel`, stored CI facts via `cirun`          | `high`                                  | Replaces `pr-ci` and `INV-ATTN-CI-1`. Severity matches.                                                                                                  |
-| `pr.own-needs-action` | Own PR in panel `mine_awaiting_me` for another reason: human changes requested, bot disapproval, merge conflict, unresolved thread, or approved and ready to land. | `approvals`, `ready_to_promote`, stored facts | `medium` (`low` for approved and ready) | New breakdown of the panel; no connector item existed for these.                                                                                         |
+| Rule kind             | Raises when                                                                                                                                                                                                                                                                            | Reads                                                    | Default severity                        | Parity with today                                                                                                                                        |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pr.review-requested` | Team PR in panel `team_awaiting_me` (live review request on me, not hard-blocked).                                                                                                                                                                                                     | `interpretation.panel`, `match_reasons`                  | `medium`                                | Replaces the first-review half of the `pr` item. The semantics shift from "no review by me yet" to "review requested of me" (the operator's own phrase). |
+| `pr.own-ci-failing`   | Own, open, non-draft PR whose CI rollup `State` is `failure` after `check_interpreters` exclusions. It does NOT use the panel as its trigger, does NOT fire for a `none` or `pending` rollup, and does NOT apply the `review_exempt_checks` softening (see below).                     | stored CI facts via `cirun` (`State`, not `ReviewState`) | `high`                                  | Replaces `pr-ci` and `INV-ATTN-CI-1`. Severity matches, and the failing set matches the `pg-desk links` build links.                                     |
+| `pr.own-needs-action` | Own, open PR in panel `mine_awaiting_me` for a NON-CI reason: human changes requested, bot disapproval, merge conflict, unresolved thread, or approved and ready to land. It MUST NOT raise when the only cause of the panel is CI (that is `pr.own-ci-failing`'s) or a `none` rollup. | `approvals`, `ready_to_promote`, stored facts            | `medium` (`low` for approved and ready) | New breakdown of the panel; no connector item existed for these.                                                                                         |
 
 Parameters, shown as the config the operator can veto (defaults in the right column):
 
@@ -352,6 +370,27 @@ Parameters, shown as the config the operator can veto (defaults in the right col
 | `attention.rules.<kind>.enabled`  | `true` for all three initial kinds                              |
 | `attention.rules.<kind>.severity` | as in the table above                                           |
 | `attention.ordering.ties`         | severity descending, then group size descending, then entity id |
+
+**CI knobs and the differing `none` semantics.** Today the connector item is configured with
+`ci_exclude` (regular expressions matched against a check's name and its workflow name,
+`ciExcluderFrom` in `provider.go`). The desk's equivalent is `check_interpreters[].patterns`
+(`cirun.CompileExcluder`, `internal/cirun/cirun.go`, line 71: the union of every entry's regexes,
+whatever its `type`), the same list the CI rollup and the `pg-desk links` build links already use,
+so the "operators SHOULD keep the two in step" advice of `INV-ATTN-CI-1` becomes automatic.
+`review_exempt_checks` is a DIFFERENT knob (exact job names, case-sensitive,
+`cirun.CompileExempt`): it only softens `ReviewState` and `ReviewerState`, which decide the
+panels (`ciRollupResult`, `internal/interpret/urgency.go`, lines 238 to 258). Two consequences
+that the rules above are written around:
+
+- The own-PR panel treats a `none` rollup (no countable run) as blocked and so places that PR in
+  `mine_awaiting_me`, while the connector item never fired on it. And a PR that fails only because
+  of review-exempt jobs is NOT placed in `mine_awaiting_me` by CI, while the connector item DID
+  fire on it (`ciFailingForPR` exempts nothing by default). The CI rule therefore reads the
+  rollup `State` directly, which is also what `docs/behavior/pg-desk/links.md` says the build
+  links do ("those rules affect whether the PR is reviewable, never what is reported as
+  failing").
+- The panel and the CI rule can disagree for one PR (a `none` rollup puts it in the panel with no
+  CI item). That is intended and is why `pr.own-needs-action` excludes CI-only causes.
 
 **Deferred and later rules.** None of these is in the first release, and each names what blocks it.
 
@@ -382,6 +421,14 @@ through `pkg/scriptout` (`ServeLoop`, one request on stdin, one response on stdo
   pg-connector, never the reverse, and the umbrella learns of the plugin only through its
   registry. It is explicitly NOT a `pg-connector-pr-desk` backend inside pg-connector, which would
   invert that direction.
+- **ADR 0077's "one-way" dependency direction needs an explicit carve-out.** ADR 0077's Ownership
+  split says dependency direction is one-way and pg-desk depends on pg-connector. At RUNTIME this
+  design has `pg-connector attention list` exec a pg-desk-owned binary, which is a call from the
+  umbrella to a pg-desk artifact. It is allowed only because the umbrella knows the plugin by a
+  bare name in its `attention.sources` registry, exactly as it knows every other source, and holds
+  no import of, and no compiled-in knowledge of, pg-desk. The ADR amendment (section 11) MUST say
+  so: compile-time and code-level dependency stays pg-desk to pg-connector only; a registry entry
+  that happens to name a pg-desk binary is configuration, not a dependency.
 - **`INV-COMP-1` and the pg-desk composition rule.** The plugin execs nothing. It reads pg-desk's
   local store. `docs/behavior/pg-desk/README.md`'s composition rule (pg-desk execs only
   `pg-connector` and the configured browser) and the pg-connector composition guard
@@ -410,9 +457,37 @@ through `pkg/scriptout` (`ServeLoop`, one request on stdin, one response on stdo
 3. Otherwise the bead that tracks it (xref relation `work`).
 4. Otherwise a singleton group keyed by the entity.
 
-**Order.** Inside a group, items are most urgent first (severity descending, then entity id).
-Groups are ordered by their most urgent item, then by size. The feed's own order (the umbrella's
-severity sort) is preserved for the first item of each group.
+**Order, and where it is computed.** Inside a group, items are most urgent first (severity
+descending, then entity id). Groups are ordered by their most urgent item, then by size. The
+evaluator computes this once, in `Evaluate`, and emits `list_attention` items in that canonical
+order. The umbrella then re-sorts the merged feed by severity rank (a STABLE sort, `INV-ATTN-1`), and
+among items of equal rank it keeps the plugin's own order, so the evaluator's tie-breaks survive.
+The menu bar plugin therefore MUST NOT carry a second ordering: it groups items by `group.key` in
+order of first appearance in the feed and keeps feed order inside each group. For the items of
+this source that reproduces the evaluator's group order (a group appears where its most urgent
+item appears), and the dashboard, which calls `Evaluate` directly, gets the same order. Items from
+other sources have no `group` and render as singletons in feed order. A test in the plugin bead
+MUST assert that the feed order round-trips to the evaluator's order.
+
+**What `--cap` does to a group.** `--cap N` truncates the merged ITEM list (`INV-ATTN-1`), not
+groups, so a capped consumer can see a group cut part way. `df-attention` passes `--cap 50` by
+default; the menu bar plugin passes none. A consumer MUST NOT infer a group's size or completeness
+from a capped feed. The full groups are always available from the uncapped dashboard payload and
+from `pg-desk attention list`.
+
+**Which grouping levels exist on the live (version 1) store.** The levels are not all available
+before the cutover:
+
+| Level                                | Version 1 store (live today)                                                                                                                     | Version 2 store |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ | --------------- |
+| Jira issue (xref `jira`)             | Available: the legacy PR-to-issue rows written by gather's ticket-key scan are read in `pg-desk links` degraded mode.                            | Available.      |
+| PR stack (`stack` dependency source) | Available once `A5` and `A5b` land: it is derived at read time from the stored `base` and `branch` of entity rows, which both versions hold.     | Available.      |
+| Bead (xref `work`, `parent`)         | NOT available: the work-item extractor and its derived links are version 2 (`internal/pipeline/links.go`). Falls through to the singleton group. | Available.      |
+| External `depends_on` link           | NOT available: `pg-desk pr link add` and origin-tagged links are version 2.                                                                      | Available.      |
+
+So until the cutover, `A5` supplies only the `stack` source, grouping falls back from the Jira
+issue to the stack to a singleton, and the bead level and the external dependency source switch on
+at the cutover with no code change (Open questions, item 11).
 
 **How a group reaches the menu bar.** The feed stays the single source. The item shape gains ONE
 additive optional field, `group`, as an object `{key, label}`, and `AttentionSchemaVersion`
@@ -581,7 +656,7 @@ sequenceDiagram
 
 - **Membership** answers "which ids match this criterion". It is cheap, and its diff against the
   ledger index decides additions and removals. A removal needs a confirmation read before a
-  tombstone, the same rule `pg2-ii38x` proposes.
+  tombstone, the same rule the `pg2-ii38x` design proposes (still pending the decision bead `pg2-32wg6`).
 - **Refresh** fetches details for tracked ids that are new or older than `refresh_after`, in as few
   batched requests as the origin allows, never once per criterion.
 - **The refresher is the only scheduled caller of the origin.** Readers are served from the cache
@@ -647,8 +722,8 @@ design opened no network connection). The arithmetic is shown so a reader can ch
 
 So the cadence change alone leaves the baseline at about 28.8 percent, still above the 25 percent
 target, and the folded probe leaves about 1,349 per hour (27 percent). The remaining reduction
-has to come from Direction 2's read-through for desk's per-event runs and from `pg2-ii38x`, which
-removes the reconcile event class. Neither can be quantified from the bead's data, so **the 25
+has to come from Direction 2's read-through for desk's per-event runs and from the `pg2-ii38x` design (if
+the operator approves it on `pg2-32wg6`), which removes the reconcile event class. Neither can be quantified from the bead's data, so **the 25
 percent target is a Direction 2 acceptance measurement, not a spec guarantee**. The first task in
 Direction 2 is a measurement spike (section 14, bead `D1`) that settles the cost of the
 membership-only query, a refresh by ids, and a read-through hit, before the policy is built.
@@ -697,6 +772,9 @@ base PR may hydrate later, so a derived edge would be stale in exactly the case 
 cares about. A read-time derivation is always consistent with the current store, and only the
 `external` source writes anything.
 
+On the live version 1 store only the `stack` source works (it reads entity rows); `external` needs the
+version 2 link verbs and the bead-dependency source, if added, needs the version 2 `work` links.
+
 A plain "same Jira issue" relation is NOT a dependency: three PRs on one issue are siblings (a
 group), and only an explicit base-branch stack or an operator-recorded link says one waits for
 another. The suppression rule is then: a candidate raised because the entity itself is broken is
@@ -712,9 +790,17 @@ After the desk plugin is registered and in use (decision D3), one bead removes:
   `needsAttentionForPR`, `ciFailingForPR`, `listCIFailingAttention`, `attention_query`,
   `ci_exclude` and their tests), keeping the dispatch-table behavior of answering `unknown_op` so a
   stale registration degrades to "not applicable" rather than failing;
-- the nix `attention.perBackend` options that only those backends read (`attentionQuery` is still
-  needed by the alert backend, so the option is narrowed, not removed);
-- the `pr-ci` alias in `internal/links` (`refTypeAliases`), once nothing emits `pr-ci`.
+- the nix `attention.perBackend` options that only those backends read, in
+  `home/programs/pg-connector/default.nix` (`threshold` rendered as `attention_threshold` and
+  `exclude` rendered as `attention_exclude`; `attentionQuery` is still needed by the alert backend,
+  so the option set is narrowed, not removed);
+- the `pr-ci` alias in `packages/pg-desk/internal/links/links.go` (`refTypeAliases`), once nothing
+  emits `pr-ci` (so this bead also carries the `pg-desk` label);
+- any deployment-side use of `attention_threshold`, `attention_exclude`, `attention_query` or
+  `ci_exclude`. On 2026-10-05 none is set in the deployment's machine config (the only
+  `attention.perBackend` entry is the alert backend's `attentionQuery`), so this is a
+  verification step inside the bead; if one has appeared by then, it MUST be removed from the
+  deployment before the nix option is narrowed, or evaluation fails.
 
 and amends:
 
@@ -724,56 +810,105 @@ and amends:
 | `packages/pg-connector/docs/behavior/journeys.md`   | Reword `STORY-OP-8` so "everything needing my attention across every registered source" no longer implies each entity backend contributes entity attention.                                                                      |
 | `packages/pg-connector/docs/behavior/interfaces.md` | Rewrite the `list_attention` bullet (the PR backend no longer reports `pr` and `pr-ci` items), add the local-store standalone plugin clause, and correct the stale "no `backends.<binary>` config block" sentence (section 4.4). |
 
-The bead MUST be blocked by the desk plugin bead and SHOULD NOT start until the operator has ruled
-on the stale-approval leg (Open questions, item 4), because deleting the code is irreversible
-for that behavior if the leg is wanted. Also record the new behavior in `packages/pg-desk`'s docs
+The bead MUST be blocked by the desk plugin bead. The operator's words are "blocked by the desk
+plugin bead"; this breakdown deliberately tightens that to two task edges, `A4` (the plugin is
+built) AND `A8` (it is registered in `attention.sources`), because deleting the old code is only
+safe once the replacement is actually wired. It is also blocked by the decision bead `H1`
+(restore or drop the stale-approval leg, Open questions item 4) because deleting the code is
+irreversible for that behavior if the leg is wanted. Also record the new behavior in `packages/pg-desk`'s docs
 before the old text is removed, so no moment exists with the invariant in neither place.
 
 ## 10. Sequencing
 
+Every arrow below is a task-to-task `blocks` edge and is listed in the section 14 tables. There
+are no epic-to-epic edges (section 14 explains why) and no soft links in this diagram.
+
 ```mermaid
 flowchart TB
-    subgraph E1["Epic 1: Direction 1, desk evaluator and plugin"]
+    subgraph E1["E1: Direction 1, desk evaluator and plugin"]
         direction TB
-        A0["docs and ADR first"] --> A1["evaluator core and rules"]
-        A1 --> A2["grouping stage"]
-        A3["attention schema v3, group"] --> A2
-        A1 --> A4["plugin binary and packaging"]
+        A0["A0 docs and ADR first"]
+        A1["A1 evaluator core and rules"]
+        A3["A3 attention schema v3, group"]
+        A2["A2 grouping stage"]
+        A4["A4 plugin binary and packaging"]
+        A5["A5 PR dependency source"]
+        A5b["A5b activate stack grouping"]
+        A7["A7 dependency suppression rule"]
+        A6["A6 dashboard payload attention"]
+        A8["A8 deployment: register plugin"]
+        A8b["A8b menu bar renders groups"]
+        VA8["V-A8 live verification"]
+        A0 --> A1
+        A0 --> A3
+        A1 --> A2
+        A3 --> A2
+        A1 --> A4
         A3 --> A4
-        A2 --> A6["dashboard payload attention"]
-        A5["PR dependency source"] --> A7["dependency suppression rule"]
+        A2 --> A5b
+        A5 --> A5b
         A1 --> A7
-        A4 --> A8["deployment: register, render groups"]
+        A5 --> A7
+        A2 --> A6
+        A4 --> A8
+        A8 --> A8b
+        A8 --> VA8
+        A8b --> VA8
     end
-    subgraph E2["Epic 2: freshness contract"]
+    subgraph E5["E5: Direction 1 follow-ups, on no gating path"]
         direction TB
-        F1["ledger refreshed_at, last_error"] --> F2["pg-desk source ages, verb, metric"]
-        F2 --> F3["My Work indicator"]
-        F2 --> F4["menu bar indicator"]
+        A9["A9 My Work panel for groups"]
+        A10["A10 restore stale-approval leg, conditional"]
+        A11["A11 Jira and bead due rules"]
     end
-    subgraph E3["Epic 3: Direction 2, membership and refresh cache"]
+    subgraph E2["E2: freshness contract"]
         direction TB
-        D1["measurement spike"] --> D2["cache policy in the umbrella"]
-        D2 --> D3["Jira adoption"]
-        D2 --> D4["Slack adoption, conditional"]
-        D5["fold rate-limit read into batched query"]
-        D6["pr-team cadence 120 s"]
-        D2 --> D7["verify budget against target"]
+        F1["F1 ledger refreshed_at, last_error"]
+        F2["F2 source ages, verb, metric"]
+        F3["F3 My Work indicator"]
+        F4["F4 menu bar indicator"]
+        VF4["V-F4 live verification"]
+        F1 --> F2
+        F2 --> F3
+        F2 --> F4
+        F4 --> VF4
+    end
+    subgraph E3["E3: Direction 2, membership and refresh cache"]
+        direction TB
+        D1["D1 measurement spike"]
+        D2["D2 cache policy in the umbrella"]
+        D3["D3 Jira adoption"]
+        D4["D4 Slack adoption, conditional"]
+        D5["D5 fold rate-limit read into query"]
+        D6["D6 pr-team cadence 120 s"]
+        D7["D7 verify budget against target"]
+        VD6["V-D6 live verification"]
+        D1 --> D2
+        D1 --> D5
+        D2 --> D3
+        D2 --> D4
+        D2 --> D7
         D5 --> D7
         D6 --> D7
+        D6 --> VD6
     end
-    subgraph E4["Epic 4: retirement"]
-        R1["delete list_attention, amend docs"]
+    subgraph E4["E4: retirement"]
+        R1["R1 delete list_attention, amend docs"]
     end
-    E1 --> E3
-    E1 --> E4
-    F1 -.-> D2
+    H1["H1 human decision: stale-approval leg"]
+    A6 --> A9
+    A1 --> A10
+    A1 --> A11
+    H1 --> A10
+    F1 --> D2
     A4 --> R1
     A8 --> R1
+    H1 --> R1
 ```
 
-Epic-to-epic edges gate the phases (the tracker rejects mixed epic and task `blocks` edges), and
-task-to-task edges are used inside a phase and where the operator named a specific bead.
+The ordering "Direction 1 before Direction 2" is the operator's preference, but no Direction 2
+task technically depends on a Direction 1 task, so it is carried by priority (P1 against P2), not
+by an edge.
 
 ## 11. Durable decision homes
 
@@ -781,6 +916,13 @@ task-to-task edges are used inside a phase and where the operator named a specif
   It records the rule model, the single-evaluator rule, the plugin's dependency direction, and
   amends ADR 0077's ownership split with the statement that pg-desk owns entity attention and a
   connector's attention is limited to data it alone can see.
+- **ADR carve-out wording.** The same ADR MUST contain the explicit runtime-versus-compile-time
+  statement of section 4.4: the umbrella may exec a pg-desk-owned plugin named in its
+  `attention.sources` registry, while code-level dependency stays pg-desk to pg-connector only.
+- **`ATTN-0` and `OBS-1` to `OBS-4`** currently live only in bead `pg2-m482k`'s design field. They
+  MUST be written into `packages/pg-connector/docs/behavior/invariants.md` (an "Attention content
+  and connector observability" group, RFC 2119, with fresh stable ids) by bead `A3`, so they
+  survive the bead.
 - **`docs/behavior/pg-desk/attention.md`** (new): the evaluator contract, `INV-ATTNEVAL-1` to
   `INV-ATTNEVAL-6`, the `attention list` and `attention explain` verbs, the plugin.
 - **`docs/behavior/pg-desk/freshness.md`** (new): `INV-FRESH-1` to `INV-FRESH-5`, the verb, the
@@ -803,9 +945,11 @@ list` test with a fixture store.
   advance the stamp.
 - Direction 2: a contract test that a `show` after a `list` never returns a summary, a
   single-flight test with concurrent readers, and the budget measurement bead.
-- Live checks (after an operator apply, so they are verification beads gated on `pn:applied`):
-  `pg-connector attention list` shows desk items; the menu bar renders groups and links; the
-  freshness row appears when a source is deliberately held stale.
+- Live checks (after an operator apply). They are the verification beads `V-A8`, `V-F4` and
+  `V-D6` in section 14, each to be gated on `pn:applied`: `pg-connector attention list` shows desk
+  items and the menu bar renders groups and links (`V-A8`); the freshness row appears for a
+  stale source, exercised against a fixture store and not by disturbing the live pipeline
+  (`V-F4`); the `pr-team` tick runs every 120 seconds (`V-D6`).
 
 ## 13. Open questions for spec review
 
@@ -833,118 +977,173 @@ These are undecided. Each has a recommendation but none is a decision.
 8. **Where the refresh cache lives.** Recommended: the umbrella, reusing `cache.go` and the
    ledger (backends stay stateless; Jira and Slack adopt it by configuration). The operator's
    wording named `pg-connector-pr-github`. Also confirm `read_ttl` and `refresh_after` (section 7).
-9. **Order against `pg2-ii38x`.** That design moves the change-detection baseline into pg-desk
-   (proposed rows S29 to S34 of ADR 0077). Direction 2's membership diff overlaps it. Should
-   Direction 2 wait for the operator's ruling on `pg2-ii38x`, or proceed on the current
-   ledger-based flow and adapt?
+9. **Order against the `pg2-ii38x` design.** That design (closed; its ADR 0077 amendment, proposed
+   rows S29 to S34, is awaiting the operator's approval on decision bead `pg2-32wg6`, which is
+   in progress and human-owned) moves the change-detection baseline into pg-desk. Direction 2's
+   membership diff overlaps it. Should Direction 2 wait for the ruling on `pg2-32wg6`, or proceed
+   on the current ledger-based flow and adapt?
 10. **Owners of unread-chat and email attention.** `ATTN-0` names unread chat; the operator ruled
     email attention lives in a desk rule. Neither has an entity type or a rule yet, and thread-slack
     has no `list_attention`. Out of scope here; confirm they are separate future work.
 11. **Store schema version.** The live store is version 1. The evaluator runs there, but
-    `suppress.*` overrides and the change log only exist after `pg-desk migrate --cutover`
-    (program epic `pg2-2j5ac.52`), and `issue` entities depend on the generic entity pipeline
-    being wired. Is shipping Direction 1 on version 1
-    (hidden and wip overrides only) acceptable until the cutover?
+    `suppress.*` overrides, the bead and external-link grouping and dependency levels, and the
+    change log only exist after `pg-desk migrate --cutover` (program epic `pg2-2j5ac.52`), and
+    `issue` entities depend on the generic entity pipeline being wired. Section 4.5 lists exactly
+    what groups and depends on version 1 (Jira issue, stack and singleton only; `A5` supplies only
+    the `stack` source before the cutover). Is shipping Direction 1 that way (hidden and `wip`
+    overrides only, no bead level) acceptable until the cutover?
 12. **An alert on source age.** Not requested. Recommended against for now, because the menu bar
     and My Work indicators already surface it and `OBS-4` discourages duplicating an alert with an
     attention surface. A Grafana rule on `pg_desk_source_age_seconds` is a one-line follow-up if
     wanted.
+13. **Raise rules over stored or re-derived interpretation.** The first-release raise rules read
+    the STORED interpretation (write-time, section 4.1), recommended because it is cheap and
+    matches what My Work shows today. The alternative is to run the pure `Interpret` over stored
+    facts on every read, which removes interpretation staleness at the cost of decoding every
+    entity's facts on each menu bar refresh, and still would not fix cross-entity inputs that come
+    from facts stored at the last gather. Which does the operator want?
+14. **Should `R1` also wait for the live verification `V-A8`?** The breakdown blocks `R1` on `A4`,
+    `A8` and `H1`. Recommended: also add `V-A8` (plugin verified live after the operator's apply),
+    because deleting the old source before the replacement is proven live is the riskier order.
+    It ties retirement to an operator apply, which is why it is a question and not an edge.
 
 ## 14. Proposed bead breakdown
 
 For the orchestrator to file. Notes that apply to all of it:
 
-- Phases are epics. Cross-phase gating uses epic-to-epic `blocks` edges only (the tracker rejects
-  mixed epic and task edges). Tasks are children of their epic (parent-child), and a blocked epic
-  cascades to its children. Task-to-task edges appear inside a phase and where the operator
-  named a specific bead (the retirement bead).
-- Repo labels: `agent-support` (this repo, plus the project label from `ls packages`:
-  `pg-desk` or `pg-connector`), `ziprecruiter` (the deployment repo, plus its project label), and
-  `support-apps` for the My Work dashboard, which lives in `phillipgreenii-nix-support-apps` and
-  not in either of the two repos named in the brief. File each bead in the tracker of the repo
-  where its fix lands (rule BF-1).
-- Sizes are t-shirt sizes.
-- `pg2-m482k` closes with an absorption trace once these exist; the map is at the end.
+- **No epic-to-epic edges.** Epics only group their children (parent-child). An epic-level `blocks`
+  edge cascades the block to every child, which would hold unrelated tasks behind each other
+  (for example retirement, the measurement spike and the cadence change behind follow-up tasks
+  they do not depend on) and can deadlock. All gating is by task-to-task `blocks` edges, listed
+  per task and in the summary table. The operator's "Direction 1 first" is carried by priority.
+- **`R1` is blocked by `A4` and `A8`, a deliberate tightening.** The operator's words are "blocked
+  by the desk plugin bead". `A4` builds the plugin and `A8` registers it in `attention.sources`;
+  deleting the old backends' code needs the replacement wired, not merely built. `R1` is also
+  blocked by the human decision bead `H1` (a real edge, not prose).
+- Nothing waits on the follow-up epic `E5` (`A9`, `A10`, `A11`).
+- Repo labels: `agent-support` (this repo, plus the project label from `ls packages`: `pg-desk`
+  or `pg-connector`), `ziprecruiter` (the deployment repo, plus its project label where the work
+  is in one project directory), and `support-apps` for the My Work dashboard, which lives in
+  `phillipgreenii-nix-support-apps` and not in either repo named in the brief. All beads go in the
+  one shared `pg2-` tracker; the repo label (and project label) says which repo owns the fix, so
+  apply each repo's "Beads Labels" rule.
+- Verification beads (`V-A8`, `V-F4`, `V-D6`) are created as children of their epic, blocked by
+  their implementation bead, and are to be gated on `pn:applied` through the gate lifecycle once the
+  implementation is committed. They never hold the implementation bead open.
+- Sizes are t-shirt sizes. `pg2-m482k` closes with an absorption trace once these exist; the map
+  is at the end.
 
-### Epics
+### Epics (no blocking edges between them)
 
-| Key  | Title                                                                         | Repo label      | Priority | Blocked by |
-| ---- | ----------------------------------------------------------------------------- | --------------- | -------- | ---------- |
-| `E1` | Direction 1: pg-desk attention evaluator and menu bar plugin                  | `agent-support` | P1       | none       |
-| `E2` | Freshness contract: per-source data age on My Work and the menu bar           | `agent-support` | P2       | none       |
-| `E3` | Direction 2: connector membership and refresh cache (PR, then Jira and Slack) | `agent-support` | P2       | `E1`       |
-| `E4` | Retirement: delete connector `list_attention` and amend the behavior docs     | `agent-support` | P3       | `E1`       |
+| Key  | Title                                                                         | Repo label      | Priority |
+| ---- | ----------------------------------------------------------------------------- | --------------- | -------- |
+| `E1` | Direction 1: pg-desk attention evaluator and menu bar plugin                  | `agent-support` | P1       |
+| `E2` | Freshness contract: per-source data age on My Work and the menu bar           | `agent-support` | P2       |
+| `E3` | Direction 2: connector membership and refresh cache (PR, then Jira and Slack) | `agent-support` | P2       |
+| `E4` | Retirement: delete connector `list_attention` and amend the behavior docs     | `agent-support` | P3       |
+| `E5` | Direction 1 follow-ups that gate nothing                                      | `agent-support` | P3       |
+
+### Decision bead (not in an epic)
+
+- **`H1` Decision: restore or drop the stale-approval ("re-review after my approval") attention
+  leg** (labels `agent-support`, `pg-desk`, `human`; P2; blocked by none). Today's `pr` attention
+  item has this leg and the desk cannot answer it (no review commit oid). Options: restore it
+  through `A10` (additive review commit oid, oid in the batched review query, a desk staleness
+  rule), or drop it deliberately when `R1` deletes the connector code. Recommended in the spec:
+  restore, as a deferred follow-up. Blocks `A10` and `R1`. When ruled, record the ruling verbatim
+  on the bead and either unblock `A10` or close it as not needed.
 
 ### Epic 1 tasks
 
-- **`A0` Docs first: pg-desk attention evaluator behavior doc and ADR** (children of `E1`; labels
-  `agent-support`, `pg-desk`; P1; size S; blocked by none). Write
-  `docs/behavior/pg-desk/attention.md` with `INV-ATTNEVAL-1` to `INV-ATTNEVAL-6`, the
-  `attention list` and `attention explain` verbs and the plugin contract, update the pg-desk
-  README index, and add the ADR "Entity attention is evaluated at read time in pg-desk" amending
-  ADR 0077's ownership split. Behavior docs land before the code (repo convention). The source is
-  this spec's sections 4 and 11, which are the operator-approved shape once reviewed.
+- **`A0` Docs first: pg-desk attention evaluator behavior doc and ADR** (`E1`; `agent-support`,
+  `pg-desk`; P1; size S; blocked by none). Write `docs/behavior/pg-desk/attention.md` with
+  `INV-ATTNEVAL-1` to `INV-ATTNEVAL-6`, the `attention list` and `attention explain` verbs and
+  the plugin contract, update the pg-desk README index, and add the ADR "Entity attention is
+  evaluated at read time in pg-desk" amending ADR 0077's ownership split, including the explicit
+  runtime-versus-compile-time carve-out of spec section 4.4. Behavior docs land before the code
+  (repo convention). Source: spec sections 4 and 11, once the operator has reviewed them.
 - **`A1` pg-desk: attention evaluator core, registry, config and the initial rules** (`E1`;
   `agent-support`, `pg-desk`; P1; size L; blocked by `A0`). New `internal/attention`: the pure
   `Evaluate` function, the rule registry (panic on duplicate, as `classify.Register`), the
-  `attention` config block with unknown-id rejection, the projector over the stored interpretation
-  rows, the suppression chain with `hidden`, `wip` and `suppress.attention` or
+  `attention` config block with unknown-id rejection, the projector over the stored
+  interpretation rows, the suppression chain with `hidden` and `suppress.attention` or
   `suppress.<rule kind>` (version 2) and the old columns (version 1), one-item-per-entity
-  collapse, and the rules `pr.review-requested`, `pr.own-ci-failing` and `pr.own-needs-action`.
-  Add `pg-desk attention list` and `attention explain`. Test with a fixed clock; assert the
-  package imports no `os/exec` or `net`. No grouping yet.
+  collapse, and the rules `pr.review-requested`, `pr.own-ci-failing` (rollup `State` after
+  `check_interpreters` exclusions, no `review_exempt_checks` softening, never on `none`) and
+  `pr.own-needs-action` (non-CI causes only). Add `pg-desk attention list` and
+  `attention explain`. Test with a fixed clock; assert the package imports no `os/exec` or `net`.
+  No grouping yet.
 - **`A3` pg-connector: attention schema version 3 with an optional `group`** (`E1`;
   `agent-support`, `pg-connector`; P1; size S; blocked by `A0`). Add the optional `group {key,
 label}` to `schema.AttentionItem`, bump `AttentionSchemaVersion` to 3, register it in
-  `CurrentSchemaVersions`, confirm the umbrella merge passes it through unread and that the
-  winning contributor's group is kept, update the conformance schemas and the pg-connector
-  behavior docs. Additive only; a v2 consumer ignores it.
+  `CurrentSchemaVersions`, confirm the umbrella merge passes it through unread and keeps the
+  winning contributor's group, and confirm `humanizeAttentionList` and the `df-attention` relay
+  (a pass-through of the umbrella's output) are unaffected. Update the conformance schemas and
+  the pg-connector behavior docs, and write `ATTN-0` and `OBS-1` to `OBS-4` into
+  `invariants.md` (spec section 11). Additive only; a version 2 consumer ignores the field.
 - **`A2` pg-desk: grouping and ordering stage of the evaluator** (`E1`; `agent-support`,
   `pg-desk`; P1; size M; blocked by `A1`, `A3`). Implement the group key (Jira issue, else PR
-  stack, else bead, else singleton) with the deterministic tie rule, in-group and between-group
-  ordering, and `group.key` as a `pg-desk links` ref. Uses only the existing xref reads; the PR
-  stack part activates when `A5` lands.
+  stack, else bead, else singleton) with the deterministic tie rule, canonical in-group and
+  between-group order emitted in `list_attention` order, and `group.key` as a `pg-desk links`
+  ref. Uses only existing xref reads; the stack level is switched on by `A5b`. Respect the
+  version 1 limits of spec section 4.5.
 - **`A4` pg-desk: `pg-desk-attention` plugin binary and packaging** (`E1`; `agent-support`,
-  `pg-desk`; P1; size M; blocked by `A1`, `A3`). New command `packages/pg-desk/cmd/pg-desk-attention`
-  speaking `list_attention` and `capabilities` over `pkg/scriptout`, calling `attention.Evaluate`,
-  one item per entity with `type` equal to the entity type. Per-binary nix packaging following the
-  `pg-connector-*` mkGoApp pattern, and the home-manager option to register it in
-  `attention.sources`. Conformance test against the script-out schema, plus an end-to-end
-  `pg-connector attention list` test with a fixture store. It must exec nothing.
+  `pg-desk`; P1; size M; blocked by `A1`, `A3`). New command
+  `packages/pg-desk/cmd/pg-desk-attention` speaking `list_attention` and `capabilities` over
+  `pkg/scriptout`, calling `attention.Evaluate`, one item per entity with `type` equal to the
+  entity type, items in the evaluator's canonical order. Per-binary nix packaging following the
+  `pg-connector-*` mkGoApp pattern and the home-manager option to register it in
+  `attention.sources`. Conformance test, an end-to-end `pg-connector attention list` test with a
+  fixture store, and a test that the merged feed order round-trips to the evaluator's order. It
+  must exec nothing.
 - **`A5` pg-desk: PR-to-PR dependency source (prerequisite)** (`E1`; `agent-support`, `pg-desk`;
   P2; size M; blocked by none). Add a `DependencySource` registry with the `stack` source (PR A
-  depends on B when A's base branch equals B's head branch in the same repo and B is open, derived
-  at read time from stored rows) and the `external` source (xref relation `depends_on` added with
-  the existing `pr link add --relation`). Expose a read API for the evaluator and show
-  dependencies in `pg-desk links` and `show`. No suppression rule here. Pre-resolved decisions
-  are in spec section 8; open questions item 5 is the review gate.
+  depends on B when A's base branch equals B's head branch in the same repo and B is open,
+  derived at read time from stored rows; works on the version 1 store) and the `external` source
+  (xref relation `depends_on` added with `pg-desk pr link add`; version 2 only). Expose a read
+  API for the evaluator and show dependencies in `pg-desk links` and `show`. No suppression rule
+  and no grouping here. Spec section 8 holds the design; open question 5 is the review gate.
+- **`A5b` pg-desk: activate PR-stack grouping** (`E1`; `agent-support`, `pg-desk`; P2; size S;
+  blocked by `A2`, `A5`). Make the grouping stage use the dependency API for the "PR stack" level
+  (connected component named by its root PR), with tests on a three-PR stack. This keeps `A2` and
+  the first release independent of the prerequisite.
 - **`A7` pg-desk: dependency suppression rule (`blocked-by-open-dependency`)** (`E1`;
   `agent-support`, `pg-desk`; P2; size S; blocked by `A1`, `A5`). The context suppressor from
   section 4.2: a candidate raised because the entity itself is broken is suppressed while any
   dependency is open, and fires after the last one merges. Tests with a three-PR stack.
 - **`A6` pg-desk serve: dashboard payload carries the evaluator's attention groups** (`E1`;
   `agent-support`, `pg-desk`; P2; size S; blocked by `A2`). Add the additive `attention` field to
-  `GET /api/v1/dashboard` from the same `Evaluate` call, update `serve.md`. A test asserts the
+  `GET /api/v1/dashboard` from the same `Evaluate` call and update `serve.md`. A test asserts the
   plugin and the payload return the same groups for the same store.
-- **`A9` support-apps: My Work panel for attention groups** (`E1`; repo label `support-apps` only;
-  P3; size S; blocked by `A6`). Render the payload's `attention` groups on the My Work dashboard
-  in `darwin/modules/observability/dashboards/pg-desk.json`.
-- **`A8` deployment: register the plugin, render groups and links in the menu bar** (`E1`; repo
-  label `ziprecruiter`, project label `local-alert-triage`; P1; size M; blocked by `A4`). Add the
-  `pg-desk-attention` plugin to `attention.sources` and the pg-desk `attention` config block, and
-  teach `lat-menubar.sh` to render items grouped by `group.key`, with the group's links from the
-  one existing `pg-desk links` call (group anchor refs included). Keep the 1m cadence. Update the
-  plugin header note. Applying is an operator action.
-- **`A10` pg-desk: restore the stale-approval leg (conditional)** (`E1`; `agent-support`,
-  `pg-connector` and `pg-desk`; P3; size M; blocked by `A1`). ONLY if the operator rules to
-  restore it (open questions item 4): add the submitted-against commit oid to `PRReview`
-  (additive), request it in the batched review query, store it, add the interpret staleness rule
-  and the desk rule `pr.review-stale-after-push`. File it deferred if the answer is pending.
-- **`A11` pg-desk: issue-due rules for Jira and beads (later)** (`E1`; `agent-support`,
+- **`A8` deployment: register the `pg-desk-attention` plugin in `attention.sources`** (`E1`; repo
+  label `ziprecruiter` only, because the attention registration is machine-wide config; P1; size
+  S; blocked by `A4`). Add the plugin to `attention.sources` and the pg-desk `attention` config
+  block. Keep the `1m` plugin cadence. Applying is an operator action.
+- **`A8b` deployment: menu bar renders groups and links** (`E1`; labels `ziprecruiter`,
+  `local-alert-triage`; P1; size M; blocked by `A8`). Teach `lat-menubar.sh` to group items by
+  `group.key` in first-appearance order (no second ordering, spec section 4.5), with the group
+  anchors' links from the one existing `pg-desk links` call, and update the plugin header note.
+  Applying is an operator action.
+- **`V-A8` verification: desk attention live in the menu bar** (`E1`; labels `ziprecruiter`,
+  `local-alert-triage`; P2; size S; blocked by `A8`, `A8b`). After the operator's apply (gated on
+  `pn:applied`): `pg-connector attention list` shows desk items with groups, the menu bar renders
+  them with links, and a GraphQL budget check shows no attention spend.
+
+### Epic 5 tasks (follow-ups; nothing waits on them)
+
+- **`A9` support-apps: My Work panel for attention groups** (`E5`; repo label `support-apps`
+  only; P3; size S; blocked by `A6`). Render the payload's `attention` groups on the My Work
+  dashboard in `darwin/modules/observability/dashboards/pg-desk.json`.
+- **`A10` pg-desk: restore the stale-approval leg (conditional)** (`E5`; `agent-support`,
+  `pg-connector`, `pg-desk`; P3; size M; blocked by `A1`, `H1`). ONLY if `H1` rules to restore
+  it: add the submitted-against commit oid to `PRReview` (additive), request it in the batched
+  review query, store it, add the interpret staleness rule and the desk rule
+  `pr.review-stale-after-push`. If `H1` drops the leg, close this as not needed.
+- **`A11` pg-desk: issue-due rules for Jira and beads (later)** (`E5`; `agent-support`,
   `pg-desk`; P3; size M; blocked by `A1`). Hydrate the operator's own Jira issues and beads as
-  `issue` entities through the watched set and add the `issue.due-soon` and `issue.overdue` rules
-  reading `DueDate`. Needs the generic entity pipeline wired for `issue` (open questions item 11) and watch
-  configuration from the deployment repo; split the deployment half into its own bead when started.
+  `issue` entities through the watched set and add `issue.due-soon` and `issue.overdue` reading
+  `DueDate`. Needs the generic entity pipeline wired for `issue` (open question 11) and watch
+  configuration from the deployment repo; split that half into its own bead when started.
 
 ### Epic 2 tasks (freshness; parallel with Epic 1)
 
@@ -958,108 +1157,126 @@ label}` to `schema.AttentionItem`, bump `AttentionSchemaVersion` to 3, register 
 show` and writes `meta` `source_fetch.*` keys (monotonic, idempotent); add `pg-desk freshness
 --json`, the additive `sources[]` on the dashboard payload, `pg_desk_source_age_seconds{source}`
   (no series when unknown), `freshness.source_stale_after` (default 15m, per-source override) and
-  display labels. Reword `pg_desk_dashboard_stale` as pipeline liveness in `metrics.go`, `serve.md`
-  and the alerts file comment, without flipping its polarity. Write `freshness.md` with
-  `INV-FRESH-1` to `INV-FRESH-5`.
+  display labels. Reword `pg_desk_dashboard_stale` as pipeline liveness in `metrics.go`,
+  `serve.md` and the alerts file comment, without flipping its polarity. Write `freshness.md`
+  with `INV-FRESH-1` to `INV-FRESH-5`.
 - **`F3` support-apps: My Work data-age indicator, shown when stale** (`E2`; repo label
   `support-apps` only; P2; size S; blocked by `F2`). A stat panel on the payload's `sources[]`,
   hidden unless a source is stale, in `darwin/modules/observability/dashboards/pg-desk.json`.
-- **`F4` deployment: menu bar data-age row and warning marker** (`E2`; repo label `ziprecruiter`,
-  project label `local-alert-triage`; P2; size S; blocked by `F2`). Call `pg-desk freshness` on
-  every refresh (independent of whether the feed has items, with its own small budget, silent on
-  failure) and show one "`<label>` data N min old" row, plus the existing degraded warning marker,
-  only for a stale source. Applying is an operator action.
+- **`F4` deployment: menu bar data-age row and warning marker** (`E2`; labels `ziprecruiter`,
+  `local-alert-triage`; P2; size S; blocked by `F2`). Call `pg-desk freshness` on every refresh
+  (independent of whether the feed has items, with its own small budget, silent on failure) and
+  show one "`<label>` data N min old" row, plus the existing degraded warning marker, only for a
+  stale source. Applying is an operator action.
+- **`V-F4` verification: freshness row in the menu bar** (`E2`; labels `ziprecruiter`,
+  `local-alert-triage`; P3; size S; blocked by `F4`). After the apply (gated on `pn:applied`):
+  against a fixture store whose stamp is older than the threshold, the row appears; against a
+  fresh one it does not. Do not disturb the live pipeline to produce staleness.
 
 ### Epic 3 tasks (Direction 2)
 
-- **`D1` pg-connector-pr-github and umbrella: GraphQL cost measurement spike** (`E3`;
-  `agent-support`, `pg-connector`; P2; size S; blocked by none within the epic). Measure, against
-  a public test repository and the operator's own account, the points per call for the
-  membership-only query, a refresh by ids at 100, and the batched search page, so the policy's
-  expected saving is evidence and not an estimate. Record the numbers in the bead and amend spec
-  section 6.6. No production code.
+- **`D1` GraphQL cost measurement spike** (`E3`; `agent-support`, `pg-connector`; P2; size S;
+  blocked by none). Measure, against a public test repository and the operator's own account,
+  the points per call for the membership-only query, a refresh by ids at 100, and the batched
+  search page, so the policy's expected saving is evidence and not an estimate. Record the
+  numbers in the bead and amend spec section 6.6. No production code.
 - **`D2` pg-connector: membership plus refresh cache policy in the umbrella** (`E3`;
   `agent-support`, `pg-connector`; P2; size L; blocked by `D1`, `F1`). Implement spec section 6:
   detail-level and query-scoped cache entries, `read_ttl` read-through for `pr show` and `issue
 show` with a flock single-flight, `served_from` and `age_seconds`, `--fresh`, `changes` as the
   refresher (TTL bypass, stamps freshness), membership diff with removal confirmation, and
   refresh of only new or aged ids. Behavior docs first. Keep the opt-out and the unavailable
-  fallback working. Coordinate with `pg2-ii38x` (open questions item 9).
+  fallback working. Coordinate with the `pg2-ii38x` design and its pending decision `pg2-32wg6`
+  (open question 9).
 - **`D5` pr-github: fold the rate-limit read into the batched query** (`E3`; `agent-support`,
   `pg-connector`; P3; size S; blocked by `D1`). Read `rateLimit { remaining resetAt cost }` in the
   same GraphQL document as the search so the separate 1-point guard probe disappears while the
   reserve check (default 1000, `pg2-w977`) still gates the call. Include the own-PR CI contexts
   with the per-PR fallback past 100 contexts only if `D1` shows the saving is real.
-- **`D6` deployment: `pr-team` poll cadence 60 s to 120 s** (`E3`; repo label `ziprecruiter`,
-  project label `zm`; P2; size S; blocked by none within the epic). The cadence change from
-  section 7. File it as a task that applies after the operator approves the parameter at spec
-  review. Applying is an operator action.
+- **`D6` deployment: `pr-team` poll cadence 60 s to 120 s** (`E3`; labels `ziprecruiter`, `zm`;
+  P2; size S; blocked by none). The cadence change from section 7, applied after the operator
+  approves the parameter at spec review. Applying is an operator action.
+- **`V-D6` verification: `pr-team` runs every 120 seconds** (`E3`; labels `ziprecruiter`, `zm`;
+  P3; size S; blocked by `D6`). After the apply (gated on `pn:applied`): the router's `pr-team`
+  tick interval reads 120 seconds.
 - **`D3` Jira: adopt membership plus refresh cache** (`E3`; `agent-support`, `pg-connector`; P3;
   size M; blocked by `D2`). Verify the Jira backend's `list` and `show` meet the cache contract,
   enable the policy for `issue`, and test.
 - **`D4` Slack: verify, then adopt TTL read-through (conditional)** (`E3`; `agent-support`,
-  `pg-connector`; P3; size M; blocked by `D2`). Slack thread listing is one non-deterministic LLM
-  call per expression, so first verify what is cacheable; adopt only TTL read-through for
+  `pg-connector`; P3; size M; blocked by `D2`). Slack thread listing is one non-deterministic
+  LLM call per expression, so first verify what is cacheable; adopt only TTL read-through for
   `thread show` and list results if verification supports it, otherwise close with the finding.
 - **`D7` verification: GraphQL budget against the 25 percent target** (`E3`; `agent-support`;
-  P3; size S; blocked by `D2`, `D5`, `D6`). A verification bead gated on `pn:applied`: after the
-  changes are applied, measure points per hour by source against the section 6.6 table and report
-  the result against 1,250 per hour. Do not hold the implementation beads open for it.
+  P3; size S; blocked by `D2`, `D5`, `D6`). Gated on `pn:applied`: after the changes are applied,
+  measure points per hour by source against the section 6.6 table and report the result against
+  1,250 per hour. Do not hold the implementation beads open for it.
 
 ### Epic 4 task (retirement)
 
-- **`R1` Delete pr-github, issue-jira and issue-beads `list_attention` and amend three docs**
-  (`E4`; `agent-support`, `pg-connector`; P3; size M; blocked by `A4` and `A8`, and the
-  operator's ruling on open questions item 4). Remove the three backends' `ListAttention` code,
-  config keys and tests (answering `unknown_op` thereafter), narrow the nix `attention.perBackend`
-  options, remove the `pr-ci` alias from `internal/links`, remove `INV-ATTN-CI-1`, reword
-  `STORY-OP-8`, and update `interfaces.md` (section 9). Land the pg-desk behavior text before the
-  old text is deleted.
+- **`R1` Delete the pr-github, issue-jira and issue-beads `list_attention` code and amend three
+  docs** (`E4`; `agent-support`, `pg-connector`, `pg-desk`; P3; size M; blocked by `A4`, `A8`,
+  `H1`). Scope is spec section 9: remove the three backends' `ListAttention` code, config keys
+  and tests (answering `unknown_op` thereafter); narrow the `attention.perBackend` options in
+  `home/programs/pg-connector/default.nix` (keep `attentionQuery`); remove the `pr-ci` alias from
+  `packages/pg-desk/internal/links/links.go`; verify no deployment config still sets
+  `attention_threshold`, `attention_exclude`, `attention_query` or `ci_exclude` (none on
+  2026-10-05) and remove any that has appeared BEFORE narrowing the nix option; remove
+  `INV-ATTN-CI-1`, reword `STORY-OP-8`, and update `interfaces.md`. Land the pg-desk behavior
+  text before the old text is deleted. If a deployment key must change, file that half as a
+  `ziprecruiter` sibling.
 
 ### Summary table
 
-| Key   | Title                                              | Epic | Labels                                     | Pri | Size | Blocked by       |
-| ----- | -------------------------------------------------- | ---- | ------------------------------------------ | --- | ---- | ---------------- |
-| `E1`  | Direction 1: desk evaluator and plugin             | -    | `agent-support`                            | P1  | -    | none             |
-| `E2`  | Freshness contract                                 | -    | `agent-support`                            | P2  | -    | none             |
-| `E3`  | Direction 2: membership and refresh cache          | -    | `agent-support`                            | P2  | -    | `E1`             |
-| `E4`  | Retirement                                         | -    | `agent-support`                            | P3  | -    | `E1`             |
-| `A0`  | Docs first: attention behavior doc and ADR         | E1   | `agent-support`, `pg-desk`                 | P1  | S    | none             |
-| `A1`  | Evaluator core, registry, config, initial rules    | E1   | `agent-support`, `pg-desk`                 | P1  | L    | `A0`             |
-| `A3`  | Attention schema v3 with `group`                   | E1   | `agent-support`, `pg-connector`            | P1  | S    | `A0`             |
-| `A2`  | Grouping and ordering stage                        | E1   | `agent-support`, `pg-desk`                 | P1  | M    | `A1`, `A3`       |
-| `A4`  | `pg-desk-attention` plugin binary and packaging    | E1   | `agent-support`, `pg-desk`                 | P1  | M    | `A1`, `A3`       |
-| `A5`  | PR-to-PR dependency source (prerequisite)          | E1   | `agent-support`, `pg-desk`                 | P2  | M    | none             |
-| `A7`  | Dependency suppression rule                        | E1   | `agent-support`, `pg-desk`                 | P2  | S    | `A1`, `A5`       |
-| `A6`  | Dashboard payload carries attention groups         | E1   | `agent-support`, `pg-desk`                 | P2  | S    | `A2`             |
-| `A9`  | My Work panel for attention groups                 | E1   | `support-apps`                             | P3  | S    | `A6`             |
-| `A8`  | Deployment: register plugin, render groups         | E1   | `ziprecruiter`, `local-alert-triage`       | P1  | M    | `A4`             |
-| `A10` | Restore stale-approval leg (conditional)           | E1   | `agent-support`, `pg-connector`, `pg-desk` | P3  | M    | `A1`             |
-| `A11` | Issue-due rules for Jira and beads (later)         | E1   | `agent-support`, `pg-desk`                 | P3  | M    | `A1`             |
-| `F1`  | Ledger `refreshed_at` and `last_error`             | E2   | `agent-support`, `pg-connector`            | P2  | S    | none             |
-| `F2`  | Source ages, `freshness` verb, `sources[]`, metric | E2   | `agent-support`, `pg-desk`                 | P2  | M    | `F1`             |
-| `F3`  | My Work data-age indicator                         | E2   | `support-apps`                             | P2  | S    | `F2`             |
-| `F4`  | Menu bar data-age row                              | E2   | `ziprecruiter`, `local-alert-triage`       | P2  | S    | `F2`             |
-| `D1`  | GraphQL cost measurement spike                     | E3   | `agent-support`, `pg-connector`            | P2  | S    | none             |
-| `D2`  | Membership plus refresh cache policy               | E3   | `agent-support`, `pg-connector`            | P2  | L    | `D1`, `F1`       |
-| `D5`  | Fold rate-limit read into batched query            | E3   | `agent-support`, `pg-connector`            | P3  | S    | `D1`             |
-| `D6`  | `pr-team` cadence 60 s to 120 s                    | E3   | `ziprecruiter`, `zm`                       | P2  | S    | none             |
-| `D3`  | Jira adopts the cache                              | E3   | `agent-support`, `pg-connector`            | P3  | M    | `D2`             |
-| `D4`  | Slack verify then adopt (conditional)              | E3   | `agent-support`, `pg-connector`            | P3  | M    | `D2`             |
-| `D7`  | Verify budget against 25 percent target            | E3   | `agent-support`                            | P3  | S    | `D2`, `D5`, `D6` |
-| `R1`  | Delete connector `list_attention`, amend docs      | E4   | `agent-support`, `pg-connector`            | P3  | M    | `A4`, `A8`       |
+| Key    | Title                                              | Epic | Labels                                     | Pri | Size | Blocked by       |
+| ------ | -------------------------------------------------- | ---- | ------------------------------------------ | --- | ---- | ---------------- |
+| `E1`   | Direction 1: desk evaluator and plugin             | -    | `agent-support`                            | P1  | -    | none             |
+| `E2`   | Freshness contract                                 | -    | `agent-support`                            | P2  | -    | none             |
+| `E3`   | Direction 2: membership and refresh cache          | -    | `agent-support`                            | P2  | -    | none             |
+| `E4`   | Retirement                                         | -    | `agent-support`                            | P3  | -    | none             |
+| `E5`   | Direction 1 follow-ups                             | -    | `agent-support`                            | P3  | -    | none             |
+| `H1`   | Decision: stale-approval leg, restore or drop      | -    | `agent-support`, `pg-desk`, `human`        | P2  | -    | none             |
+| `A0`   | Docs first: attention behavior doc and ADR         | E1   | `agent-support`, `pg-desk`                 | P1  | S    | none             |
+| `A1`   | Evaluator core, registry, config, initial rules    | E1   | `agent-support`, `pg-desk`                 | P1  | L    | `A0`             |
+| `A3`   | Attention schema v3 with `group`                   | E1   | `agent-support`, `pg-connector`            | P1  | S    | `A0`             |
+| `A2`   | Grouping and ordering stage                        | E1   | `agent-support`, `pg-desk`                 | P1  | M    | `A1`, `A3`       |
+| `A4`   | `pg-desk-attention` plugin binary and packaging    | E1   | `agent-support`, `pg-desk`                 | P1  | M    | `A1`, `A3`       |
+| `A5`   | PR-to-PR dependency source (prerequisite)          | E1   | `agent-support`, `pg-desk`                 | P2  | M    | none             |
+| `A5b`  | Activate PR-stack grouping                         | E1   | `agent-support`, `pg-desk`                 | P2  | S    | `A2`, `A5`       |
+| `A7`   | Dependency suppression rule                        | E1   | `agent-support`, `pg-desk`                 | P2  | S    | `A1`, `A5`       |
+| `A6`   | Dashboard payload carries attention groups         | E1   | `agent-support`, `pg-desk`                 | P2  | S    | `A2`             |
+| `A8`   | Deployment: register the plugin                    | E1   | `ziprecruiter`                             | P1  | S    | `A4`             |
+| `A8b`  | Deployment: menu bar renders groups                | E1   | `ziprecruiter`, `local-alert-triage`       | P1  | M    | `A8`             |
+| `V-A8` | Verification: desk attention live in the menu bar  | E1   | `ziprecruiter`, `local-alert-triage`       | P2  | S    | `A8`, `A8b`      |
+| `A9`   | My Work panel for attention groups                 | E5   | `support-apps`                             | P3  | S    | `A6`             |
+| `A10`  | Restore stale-approval leg (conditional)           | E5   | `agent-support`, `pg-connector`, `pg-desk` | P3  | M    | `A1`, `H1`       |
+| `A11`  | Issue-due rules for Jira and beads (later)         | E5   | `agent-support`, `pg-desk`                 | P3  | M    | `A1`             |
+| `F1`   | Ledger `refreshed_at` and `last_error`             | E2   | `agent-support`, `pg-connector`            | P2  | S    | none             |
+| `F2`   | Source ages, `freshness` verb, `sources[]`, metric | E2   | `agent-support`, `pg-desk`                 | P2  | M    | `F1`             |
+| `F3`   | My Work data-age indicator                         | E2   | `support-apps`                             | P2  | S    | `F2`             |
+| `F4`   | Menu bar data-age row                              | E2   | `ziprecruiter`, `local-alert-triage`       | P2  | S    | `F2`             |
+| `V-F4` | Verification: freshness row in the menu bar        | E2   | `ziprecruiter`, `local-alert-triage`       | P3  | S    | `F4`             |
+| `D1`   | GraphQL cost measurement spike                     | E3   | `agent-support`, `pg-connector`            | P2  | S    | none             |
+| `D2`   | Membership plus refresh cache policy               | E3   | `agent-support`, `pg-connector`            | P2  | L    | `D1`, `F1`       |
+| `D5`   | Fold rate-limit read into batched query            | E3   | `agent-support`, `pg-connector`            | P3  | S    | `D1`             |
+| `D6`   | `pr-team` cadence 60 s to 120 s                    | E3   | `ziprecruiter`, `zm`                       | P2  | S    | none             |
+| `V-D6` | Verification: `pr-team` runs every 120 s           | E3   | `ziprecruiter`, `zm`                       | P3  | S    | `D6`             |
+| `D3`   | Jira adopts the cache                              | E3   | `agent-support`, `pg-connector`            | P3  | M    | `D2`             |
+| `D4`   | Slack verify then adopt (conditional)              | E3   | `agent-support`, `pg-connector`            | P3  | M    | `D2`             |
+| `D7`   | Verify budget against 25 percent target            | E3   | `agent-support`                            | P3  | S    | `D2`, `D5`, `D6` |
+| `R1`   | Delete connector `list_attention`, amend docs      | E4   | `agent-support`, `pg-connector`, `pg-desk` | P3  | M    | `A4`, `A8`, `H1` |
 
 ### Absorption map for `pg2-m482k`
 
 | Bead item                                                      | Traces to                             |
 | -------------------------------------------------------------- | ------------------------------------- |
 | Decision 1, rule model (read-time pure evaluator)              | `A0`, `A1`, `A4`                      |
-| Decision 1, PR-to-PR dependency source as its own prerequisite | `A5`, `A7`                            |
-| Decision 2 (D3), delete after the plugin lands                 | `R1`                                  |
-| Decision 3, group by work context and links                    | `A2`, `A3`, `A6`, `A8`, `A9`          |
+| Decision 1, PR-to-PR dependency source as its own prerequisite | `A5`, `A5b`, `A7`                     |
+| Decision 2 (D3), delete after the plugin lands                 | `R1` (and `H1` for the open leg)      |
+| Decision 3, group by work context and links                    | `A2`, `A3`, `A6`, `A8`, `A8b`, `A9`   |
 | Decision 4, freshness contract                                 | `F1`, `F2`, `F3`, `F4`                |
 | Decision 5, Direction 2 membership and refresh cache           | `E3` (`D1` to `D7`)                   |
 | Small parameters for veto                                      | section 7; `D5`, `D6`                 |
+| Live verification                                              | `V-A8`, `V-F4`, `V-D6`, `D7`          |
 | Follow-ups already filed elsewhere                             | `pg2-psftz`, `pg2-jgbnp`, `pg2-px61p` |
 
 ## Appendix A: bead claims that were false or stale
