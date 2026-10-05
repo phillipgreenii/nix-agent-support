@@ -10,6 +10,7 @@ import (
 	otelprometheus "go.opentelemetry.io/otel/exporters/prometheus"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/changes"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/metrics"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
@@ -76,6 +77,17 @@ func newMetricsHandler(st *store.Store, cfg *config.Config) (http.Handler, error
 
 	if _, err := metrics.New(mp, snapshotFn); err != nil {
 		return nil, fmt.Errorf("httpapi: new metrics emitter: %w", err)
+	}
+
+	// The change-flow families (design: observability) are computed fresh on
+	// every scrape from the store and the persisted hydration totals. On a
+	// store that is not on the new schema Observe returns a zero Flow, so
+	// serve keeps working there and simply omits these series.
+	flowFn := func() (changes.Flow, error) {
+		return changes.Observe(st, nowUTC(), cfg.SweepMaxAge())
+	}
+	if err := metrics.RegisterChangeFlow(mp, flowFn); err != nil {
+		return nil, fmt.Errorf("httpapi: register change-flow metrics: %w", err)
 	}
 
 	return promhttp.HandlerFor(registry, promhttp.HandlerOpts{}), nil

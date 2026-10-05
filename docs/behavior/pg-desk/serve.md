@@ -58,6 +58,27 @@ log lines additionally export over OTLP as `{service_name="pg-desk-serve"}`
 `~/Library/Logs/pg-desk-serve.log`. This resolves the observability review's (`pg2-7kizi`) `serve`
 half.
 
+### Change-flow metrics
+
+`/metrics` also exposes the change-flow families, per entity `type` (and, where noted, `kind`,
+`origin` and `consumer`), computed fresh from the store at every scrape:
+
+- `pg_desk_change_log_records{type,kind,origin}` — change-log records currently retained, by kind
+  and origin (a gauge: the log is pruned, so it can fall).
+- `pg_desk_hydrations_total{type}`, `pg_desk_hydration_failures_total{type}` and
+  `pg_desk_occ_retries_total{type}` — hydrations, hydrations that errored or came back degraded, and
+  optimistic-concurrency retries. These happen in the `changes` and `refresh` processes, not in
+  `serve`, so they are read from the totals those processes persist.
+- `pg_desk_repeated_degraded_entities{type}` — entities with repeated degraded hydrations (the one
+  definition `status` and `doctor` share).
+- `pg_desk_due_backlog{type}` — active entities whose `hydrated_at` is older than the sweep max age
+  (or that were never hydrated).
+- `pg_desk_consumer_lag{type,consumer}` — the type's highest change sequence minus the consumer's
+  cursor.
+
+On a store that has not been cut over to the new schema these families MUST be absent from the
+scrape; `serve` keeps answering with the dashboard families and MUST NOT refuse or fail the scrape.
+
 ## Out of scope (Phase 9, narrowed by Phase 10)
 
 The primary port (`9818`) and the removal of the temporary soak board are the Phase 11 flip.

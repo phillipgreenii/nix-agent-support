@@ -23,8 +23,21 @@ and non-transient — see [`sync.md`](sync.md)'s "Automatic retry"), and — whe
 `plan` — planned sync rows by kind (anchor / feedback-cycle / review-request; see
 [`sync.md`](sync.md)). It also prints `pg-connector ledger show` for the configured consumer.
 
+It prints a `change_flow` section, human-readable, per entity type and per consumer, matching the
+change-flow families `serve` exposes on `/metrics` (see [`serve.md`](serve.md)). Per type it
+reports the active entity count, the due backlog (active entities whose `hydrated_at` is older than
+the sweep max age, or that were never hydrated), the change-log records by kind and origin, the
+hydration and hydration-failure totals, the optimistic-concurrency retries, and the entities with
+repeated degraded hydrations. Per consumer it reports the cursor, the lag (the type's highest change
+sequence minus the cursor) and `seen_at`, which is the consumer's liveness now that the heartbeat is
+retired. For the sweep bound (`active_count / N x poll_interval <= D`), `status` reports only its
+inputs (`active_count`, `N`, `D`) and `poll_interval: unknown`, with NO verdict: the poll interval is
+the router's timer period, which `pg-desk` does not own, so only `doctor` evaluates the bound (with
+`--router-config`). On a store that has not been cut over, the section reads `unmigrated` instead of
+failing.
+
 Exit codes: `0` on success; `1` when the store cannot be opened. A config-load failure (needed
-only to check `sync.mode`) degrades to omitting the planned-sync-rows section rather than failing
+only to check `sync.mode`, and to read the sweep bound's inputs) degrades to omitting the planned-sync-rows section rather than failing
 `status` outright — status's own exit-code floor stays "1 only when the store cannot be opened."
 
 ## sweep

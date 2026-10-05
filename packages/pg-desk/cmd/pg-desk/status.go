@@ -6,9 +6,12 @@ import (
 	"io"
 	"os/exec"
 	"sort"
+	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/changes"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/sync"
 )
@@ -138,6 +141,10 @@ func runStatus(cmd *cobra.Command) error {
 		}
 	}
 
+	if err := printChangeFlow(cmd.Context(), w, st, version); err != nil {
+		return fmt.Errorf("status: %w", err)
+	}
+
 	ledgerOut, ledgerErr := statusRunPgConnectorLedgerShow(cmd.Context())
 	if ledgerErr != nil {
 		fmt.Fprintf(w, "pg-connector ledger show: unavailable (%v)\n", ledgerErr)
@@ -176,6 +183,78 @@ func printPlannedSyncRows(w io.Writer, st *store.Store) error {
 	sort.Strings(kinds)
 	for _, k := range kinds {
 		fmt.Fprintf(w, "  %s: %d\n", k, counts[k])
+	}
+	return nil
+}
+
+// printChangeFlow prints the change-flow section [design 11]: per type, the
+// records logged by kind and origin, hydrations, hydration failures, due
+// backlog, optimistic-concurrency retries, repeated degraded hydrations and
+// the sweep bound's inputs; and per consumer, its cursor, lag and liveness
+// (seen_at, which replaces the retired heartbeat). A store that is not on the
+// new schema has none of this data, so the section reports "unmigrated"
+// instead of failing.
+//
+// The sweep bound active_count / N x poll_interval <= D needs the router's
+// poll interval, which pg-desk does not own and status has no router-config
+// input for, so status prints the bound's inputs with poll_interval: unknown
+// and NO verdict; only `doctor --router-config` evaluates it.
+func printChangeFlow(ctx context.Context, w io.Writer, st *store.Store, version int) error {
+	fmt.Fprintln(w, "change_flow:")
+	if version < store.NewSchemaVersion {
+		fmt.Fprintln(w, "  unmigrated: run pg-desk migrate --cutover")
+		return nil
+	}
+	// A config-load failure degrades to the documented defaults rather than
+	// failing status (config resolution is doctor's check).
+	cfg, cfgErr := deskConfigLoad(ctx)
+	if cfgErr != nil || cfg == nil {
+		cfg = &config.Config{}
+		fmt.Fprintf(w, "  config: unavailable (%v); defaults assumed\n", cfgErr)
+	}
+	flow, err := changes.Observe(st, changesNow(), cfg.SweepMaxAge())
+	if err != nil {
+		return fmt.Errorf("observe change flow: %w", err)
+	}
+	for _, t := range flow.Types {
+		in := changes.SweepInputsFor(cfg, t)
+		fmt.Fprintf(w, "  type %s:\n", t.Type)
+		fmt.Fprintf(w, "    active: %d\n", t.Active)
+		fmt.Fprintf(w, "    due_backlog: %d\n", t.Due)
+		fmt.Fprintf(w, "    sweep_bound: active_count=%d max_per_poll=%d max_age=%s poll_interval=unknown\n",
+			in.ActiveCount, in.MaxPerPoll, in.MaxAge.Round(time.Second))
+		fmt.Fprintf(w, "    hydrations: %d\n", t.Stats.Hydrations)
+		fmt.Fprintf(w, "    hydration_failures: %d\n", t.Stats.Failures)
+		fmt.Fprintf(w, "    occ_retries: %d\n", t.Stats.OCCRetries)
+		fmt.Fprintf(w, "    repeated_degraded: %d\n", len(t.Repeated))
+		ids := make([]string, 0, len(t.Repeated))
+		for id := range t.Repeated {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		for _, id := range ids {
+			fmt.Fprintf(w, "      %s count=%d since=%s\n", id, t.Repeated[id].Count, t.Repeated[id].Since)
+		}
+		if len(t.Records) == 0 {
+			fmt.Fprintln(w, "    records: none")
+		} else {
+			fmt.Fprintln(w, "    records:")
+			for _, r := range t.Records {
+				fmt.Fprintf(w, "      kind=%s origin=%s count=%d\n", r.Kind, r.Origin, r.Count)
+			}
+		}
+		fmt.Fprintln(w, "    consumers:")
+		found := false
+		for _, c := range flow.Consumers {
+			if c.Type != t.Type {
+				continue
+			}
+			found = true
+			fmt.Fprintf(w, "      %s cursor=%d lag=%d seen_at=%s\n", c.Name, c.Cursor, c.Lag, orDash(c.SeenAt))
+		}
+		if !found {
+			fmt.Fprintln(w, "      none")
+		}
 	}
 	return nil
 }
