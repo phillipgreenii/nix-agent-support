@@ -58,6 +58,12 @@ committed `internal/embeddedspecs/data/help-hashes.json`.
 go run ./cmd/claude-extended-tool-approver spec-drift-check --embedded
 ```
 
+Hashes are only meaningful against the PINNED tool versions of the nix check's sandbox: run it
+there (`nix build .#checks.<system>.claude-extended-tool-approver-spec-help-drift`), and record
+new names with `spec-drift-check --embedded --record` in that same environment. A name with no
+on-PATH binary is exempt (`specdrift.Exempt`: `cd`, `export`, `launchctl`, `man`; every `*.sh`
+plugin helper script). A new on-PATH tool must be added to that check's `nativeBuildInputs`.
+
 ## 4. Goldens pass
 
 **Tool/runner**: **none is currently wired.** tc-o14i5.4.1's `SKILL.md` ("Generated goldens"

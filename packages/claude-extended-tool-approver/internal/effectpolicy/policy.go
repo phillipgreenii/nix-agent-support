@@ -870,8 +870,43 @@ func (NetworkAccess) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) 
 //     3n) — Permitted. Reading is not a mutation; the resource's content
 //     flowing somewhere dangerous is the flow policies' concern.
 //
-//   - "push", "mutate": a write needing explicit consent — Unknown, never
-//     Permitted here ("mutate" is bd's issue-writing verbs, slice 3n).
+//   - "push", "push-lease": an ordinary `git push [--force-with-lease]` —
+//     Permitted (ADR 0075 R6) for a configured remote NAME or the default
+//     remote; a URL/path remote is Unknown. "push-bulk" (--all, --branches,
+//     --tags, --prune, --mirror) is Forbidden, as are "force-push" and
+//     "delete-ref" below.
+//
+//   - "pr-create-draft" / "pr-create": `gh pr create` — Permitted with
+//     --draft on the "github" resource, Forbidden without it (operator
+//     ruling, Phillip, 2026-07-30, pg2-4yy4r item 2 / pg2-25oru: this
+//     workspace lands PRs draft-first; a human marks them ready).
+//
+//   - "fetch": `git fetch <remote>` — Permitted for a plain configured
+//     remote NAME (no scheme, no path separator, not option-shaped): objects
+//     flow INTO this clone's own refs/object store and no modeled flag runs a
+//     program. A URL or filesystem path source, and the dynamic default
+//     remote of a bare `git fetch`, stay Unknown (P3). R6 ruled the PUSH
+//     direction only; fetch is the symmetric read, instructed by the
+//     beads-lifecycle premise-freshness probes and both landing skills.
+//
+//   - "tracker-write": an ordinary issue-tracker bookkeeping write (bd
+//     create/update/close/comment/defer/undefer/q, `dep add`, `label
+//     add|remove`, `comments add`) against the "beads" resource —
+//     Permitted. Operator ruling (Phillip, 2026-10-04, recorded on the
+//     parent epic pg2-cjfpy, verbatim): "for pb *, any command which is
+//     supposed to work as part of a skill should be autoapproved ... check
+//     on plugins in any repo of this workspace"; every first-party skill,
+//     command and agent instructs exactly these bd forms, and the approval
+//     history is unanimous (the old engine's bd rule approved them). The
+//     Permitted verdict is scoped to Resource "beads" by DATA: a
+//     tracker-write aimed at any other resource is not covered by that
+//     ruling and fails closed to Unknown. The destructive/bulk bd verbs and
+//     the Dolt lifecycle/VCS verbs are deliberately NOT tracker-write
+//     (cmddesc.bdSubcommands); they keep "mutate"/"dolt-server".
+//
+//   - "mutate": a write needing explicit consent — Unknown, never
+//     Permitted here ("mutate" is bd's non-bookkeeping write verbs, slice
+//     3n).
 //     EXCEPTION: a DryRun-marked "push" (TransformDryRun, cmddesc/
 //     transform.go) is Permitted — see the DryRun paragraph below.
 //
@@ -940,17 +975,51 @@ func (RemoteMutation) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool)
 	if e.Kind != cmddesc.EffectRemote || e.Family != "" {
 		return Finding{}, false
 	}
-	if e.Dynamic {
+	// A bare `git push`/`git push --force-with-lease` has no remote operand;
+	// the schema stands in an implicit, Dynamic "<default-remote>" because
+	// WHICH remote is a git-config fact, not argv. That config is the
+	// repository's own (R2 repo trust, ADR 0053), so it is not a runtime
+	// expansion in the sense the check below guards (a `$REMOTE` the shell
+	// substitutes) — the plain push forms treat it as a configured remote.
+	defaultRemotePush := e.Dynamic && e.Resource == defaultRemoteResource && e.Source == "implicit" && (e.Operation == "push" || e.Operation == "push-lease")
+	if e.Dynamic && !defaultRemotePush {
 		return Finding{Verdict: Unknown, Reason: "remote resource is a runtime expansion"}, true
 	}
 	switch e.Operation {
 	case "read":
 		return Finding{Verdict: Permitted, Reason: "read of a named remote resource"}, true
-	case "push":
+	case "push", "push-lease":
 		if e.DryRun {
 			return Finding{Verdict: Permitted, Reason: "dry run of an ordinary push mutates nothing"}, true
 		}
-		return Finding{Verdict: Unknown, Reason: "remote ref update requires consent"}, true
+		// ADR 0075 R6: "git push and --force-with-lease approvable ...
+		// Server-side protection is the backstop." Scoped to a configured
+		// remote NAME (or the default remote): a URL or path remote would
+		// send repository contents to an arbitrary host (the old engine's
+		// pg2-abb65 exfiltration incident).
+		if defaultRemotePush || isPlainRemoteName(e.Resource) {
+			return Finding{Verdict: Permitted, Reason: "ordinary push to a configured remote (ADR 0075 R6)"}, true
+		}
+		return Finding{Verdict: Unknown, Reason: "push target is not a plain configured remote name"}, true
+	case "push-bulk":
+		return Finding{Verdict: Forbidden, Reason: "pushes or prunes more than the named refs (--all/--branches/--tags/--prune/--mirror; ADR 0075 R6)"}, true
+	case "pr-create-draft":
+		if e.Resource == "github" {
+			return Finding{Verdict: Permitted, Reason: "draft pull request creation (draft-first landing; pg2-25oru, operator ruling 2026-07-30)"}, true
+		}
+		return Finding{Verdict: Unknown, Reason: "pr-create-draft is only covered for the github resource"}, true
+	case "pr-create":
+		return Finding{Verdict: Forbidden, Reason: "a non-draft pull request skips the draft-first landing step (operator ruling 2026-07-30, pg2-25oru: gh pr create without --draft is rejected)"}, true
+	case "fetch":
+		if isPlainRemoteName(e.Resource) {
+			return Finding{Verdict: Permitted, Reason: "fetch from a named git remote only brings objects into this clone's own refs"}, true
+		}
+		return Finding{Verdict: Unknown, Reason: "fetch source is not a plain configured remote name"}, true
+	case "tracker-write":
+		if e.Resource == "beads" {
+			return Finding{Verdict: Permitted, Reason: "issue-tracker bookkeeping write on the beads database (skill-instructed; operator ruling 2026-10-04, pg2-cjfpy)"}, true
+		}
+		return Finding{Verdict: Unknown, Reason: "tracker-write is only covered for the beads resource"}, true
 	case "mutate":
 		return Finding{Verdict: Unknown, Reason: "remote resource mutation requires consent"}, true
 	case "force-push":
@@ -1738,3 +1807,26 @@ func workspaceVouchesForVerb(kinds []pathspec.Kind, abs, tool, verb string) bool
 	}
 	return false
 }
+
+// isPlainRemoteName reports whether s looks like a configured git remote name
+// (as opposed to a URL, a path, or an option-shaped token): non-empty and made
+// only of letters, digits and `._-`. It deliberately rejects `/`, `:`, `@`
+// and `~`, so `origin` passes while `https://host/x`, `../repo` and
+// `git@host:x` do not.
+func isPlainRemoteName(s string) bool {
+	if s == "" || s[0] == '-' || s[0] == '.' {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '_', r == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// defaultRemoteResource is the placeholder Resource the git push schema gives
+// the implicit default-remote effect of a bare `git push`.
+const defaultRemoteResource = "<default-remote>"

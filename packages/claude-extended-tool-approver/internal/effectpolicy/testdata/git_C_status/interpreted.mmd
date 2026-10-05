@@ -1,2 +1,5 @@
 flowchart LR
-    n0["command: git -C sub status<br/>mark=insufficient: unknown flag -C"]
+    n0["command: git -C sub status<br/>- path:read sub [arg 1] (command working directory)<br/>- path:read sub [implicit]<br/>- stdio:stdout metadata<br/>mark=permitted"]
+    n1[/"file: sub"/]
+    n0 -->|"reads: read"| n1
+    n0 -->|"reads: read"| n1

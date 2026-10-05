@@ -1,0 +1,5 @@
+flowchart LR
+    n0["command: echo hi #gt; /dev/nullx<br/>- stdio:stdout content<br/>- path:truncate /dev/nullx [redirect #gt;]<br/>mark=insufficient: path:truncate /dev/nullx [redirect #gt;]: path-access (zone unknown)"]
+    n1[/"file: /dev/nullx"/]
+    n0 -->|"redirect-out: #gt;"| n1
+    n0 -->|"writes: truncate"| n1

@@ -37,7 +37,14 @@ func (r Registry) Names() []string {
 // tee are the proof that another command is ONLY a registry entry; sh is the
 // proof that a second NAME for the same semantics is only a second key.
 func DefaultRegistry() Registry {
-	return NewRegistry(append([]CommandSchema{
+	return NewRegistry(append(append(coreSchemas(), pluginToolSchemas()...), repoBaseToolSchemas()...)...)
+}
+
+// coreSchemas is the registry as it stood before pg2-cjfpy.2/.3; the plugin-
+// instructed CLIs (registry_plugin_tools.go, registry_repo_base.go) are
+// appended in DefaultRegistry.
+func coreSchemas() []CommandSchema {
+	return []CommandSchema{
 		catSchema, headSchema, sedSchema, rmSchema, cpSchema, teeSchema,
 		bashSchema, renamed(bashSchema, "sh"),
 		xargsSchema, curlSchema,
@@ -82,7 +89,7 @@ func DefaultRegistry() Registry {
 		// passthrough registration — see registry_breadth.go's rtkSchema
 		// doc comment.
 		rtkSchema,
-	}, repoBaseToolSchemas()...)...)
+	}
 }
 
 // renamed returns a copy of s registered under another basename. The Flags
@@ -408,10 +415,17 @@ var gitSchema = CommandSchema{
 		"--noglob-pathspecs":   inert,
 		"--icase-pathspecs":    inert,
 		"--no-replace-objects": inert,
+		// pg2-cjfpy.2: the two global options the integrate-branch and
+		// session-wrapup skills pass. -C is the per-command working-directory
+		// role (the command's relative paths re-base against it); -c is
+		// inert only for a closed set of provably inert key=value pairs (see
+		// registry_git_ext.go).
+		"-C": {Arity: ArityOne, Operand: CommandDir},
+		"-c": gitInertConfigPairFlag,
 	},
 	UnknownFlag:  UnknownFlagInsufficient,
 	EndOfOptions: true,
-	Subcommands: map[string]CommandSchema{
+	Subcommands: withGitExtensions(map[string]CommandSchema{
 		"status":    gitStatusSchema,
 		"clean":     gitCleanSchema,
 		"push":      gitPushSchema,
@@ -427,7 +441,7 @@ var gitSchema = CommandSchema{
 		"commit":    gitCommitSchema,
 		"rm":        gitRmSchema,
 		"mv":        gitMvSchema,
-	},
+	}),
 }
 
 // gitStatusSchema: an implicit PathRead of "." ALWAYS fires (git status
@@ -506,50 +520,71 @@ var gitCleanSchema = CommandSchema{
 
 // gitPushSchema: the leading positional (when any positional is given at
 // all — LeadingOptional) names the remote, a KindRemote operand whose default
-// Operation is "push"; -f/--force/--force-with-lease upgrade that to
-// "force-push", -d/--delete to "delete-ref" (TransformForce/
-// TransformDeleteRef, applied generically by effect shape); -n/--dry-run
-// MARKS it via TransformDryRun (cmddesc/transform.go) rather than removing
-// it — slice 3w (tc-lc8f item 4d; tc-ife3 item 2): a dry run of an ordinary
-// push still nets Approve (effectpolicy's RemoteMutation treats a
-// DryRun-marked "push" as Permitted), but a dry run of what would otherwise
-// be a FORBIDDEN operation (force-push, delete-ref) abstains instead of
-// silently auto-approving, per an operator ruling recorded on RemoteMutation
-// and TransformDryRun's own doc comments — this holds regardless of whether
-// -n or the force/delete flag appears first on the command line. With NO
-// positional at all, an implicit effect stands in for the default remote,
-// marked Dynamic because which remote that is comes from git config at
-// runtime, not from argv. Deliberately left unmodeled (abstain): --no-verify
-// (skips the pre-push hook — a materially different trust boundary),
-// --mirror (mirrors ALL refs, not just what a modeled refspec would name),
-// --signed[=] (changes what the push cryptographically asserts),
-// --recurse-submodules (recurses into repositories this schema knows
-// nothing about). Flags verified against this host's `git push -h`.
+// Operation is "push"; -f/--force upgrade that to "force-push" and -d/--delete
+// to "delete-ref" (TransformForce/TransformDeleteRef, applied generically by
+// effect shape); a BARE --force-with-lease marks it "push-lease"
+// (TransformForceWithLease); -n/--dry-run MARKS it via TransformDryRun
+// (cmddesc/transform.go) rather than removing it — slice 3w (tc-lc8f item
+// 4d; tc-ife3 item 2): a dry run of an ordinary push still nets Approve
+// (effectpolicy's RemoteMutation treats a DryRun-marked "push" as
+// Permitted), but a dry run of what would otherwise be a FORBIDDEN operation
+// (force-push, delete-ref) abstains instead of silently auto-approving, per
+// an operator ruling recorded on RemoteMutation and TransformDryRun's own
+// doc comments — this holds regardless of whether -n or the force/delete flag
+// appears first on the command line. With NO positional at all, an implicit
+// effect stands in for the default remote, marked Dynamic because which
+// remote that is comes from git config at runtime, not from argv.
+//
+// pg2-cjfpy.2 (R6, ADR 0075: "git push and --force-with-lease approvable;
+// plain --force REJECT; --mirror and --prune REJECT"): the plugin skills
+// instruct `git push -u <remote> <branch>` and `git push --force-with-lease
+// -u <remote> <branch>` (integrate-branch:pull-request), so the plain forms
+// are now Permitted by RemoteMutation — but ONLY for the shapes the old
+// engine's incident history (pg2-abb65, pg2-bohpm) showed are the real
+// holes, each closed here in DATA:
+//   - the remote must be a plain configured remote NAME (policy: a URL or
+//     path remote is Unknown — repository contents would leave to an
+//     arbitrary host);
+//   - the refspec positionals are Literal-gated: a `+src:dst` (force) or
+//     `:dst` (delete) refspec, or one with a glob, is insufficient;
+//   - --force-with-lease takes NO glued value: `--force-with-lease=<ref>`
+//     (cross-branch lease) is an error → insufficient;
+//   - --all/--branches/--tags/--prune/--mirror push or delete MORE than the
+//     named refs: retargeted to the Forbidden "push-bulk" operation (R6
+//     rejects --mirror and --prune; the golden corpus pins --all/--tags/
+//     --branches the same);
+//   - --receive-pack/--exec (a program run on the remote side — or locally
+//     for a path remote) are NOT modeled at all, so they abstain.
+//
+// Deliberately left unmodeled (abstain): --no-verify (skips the pre-push
+// hook — a materially different trust boundary), --signed[=] (changes what
+// the push cryptographically asserts), --recurse-submodules (recurses into
+// repositories this schema knows nothing about), --repo, --force-if-includes.
+// Flags verified against this host's `git push -h`.
 var gitPushSchema = CommandSchema{
 	Name:       "push",
 	Provenance: "git version 2.54.0, git push -h",
 	Flags: map[string]FlagSpec{
 		"-n": {Transform: EffectTransform{Kind: TransformDryRun}}, "--dry-run": {Transform: EffectTransform{Kind: TransformDryRun}},
 		"-f": {Transform: EffectTransform{Kind: TransformForce}}, "--force": {Transform: EffectTransform{Kind: TransformForce}},
-		"--force-with-lease": {Arity: ArityOptionalGlued, Operand: Literal, Transform: EffectTransform{Kind: TransformForce}},
+		"--force-with-lease": {Transform: EffectTransform{Kind: TransformForceWithLease}},
 		"-d":                 {Transform: EffectTransform{Kind: TransformDeleteRef}}, "--delete": {Transform: EffectTransform{Kind: TransformDeleteRef}},
 		"-v": inert, "--verbose": inert,
 		"-q": inert, "--quiet": inert,
 		"--porcelain": inert,
 		"--progress":  inert, "--no-progress": inert,
 		"-u": inert, "--set-upstream": inert,
-		"--tags": inert, "--follow-tags": inert,
-		"--all": inert, "--branches": inert,
-		"--prune":  inert,
+		"--follow-tags": inert,
+		"--tags":        pushBulk, "--all": pushBulk, "--branches": pushBulk,
+		"--prune": pushBulk, "--mirror": pushBulk,
 		"--atomic": inert, "--no-atomic": inert,
 		"--thin": inert, "--no-thin": inert,
 		"-o": literal1, "--push-option": literal1,
-		"--receive-pack": literal1, "--exec": literal1,
 	},
 	Positionals: PositionalSpec{
 		Leading:         []OperandRole{Remote("push")},
 		LeadingOptional: true,
-		Rest:            Literal,
+		Rest:            AllowedLiteral("git-plain-refspec"),
 	},
 	ImplicitEffects: []ImplicitEffect{
 		{Role: Remote("push"), Target: "<default-remote>", Dynamic: true, WhenNoPositionals: true},
@@ -559,6 +594,11 @@ var gitPushSchema = CommandSchema{
 	UnknownFlag:  UnknownFlagInsufficient,
 	EndOfOptions: true,
 }
+
+// pushBulk is the flag shape for git push options that push or delete more
+// than the refs the command line names: it retargets BOTH push spellings to
+// the Forbidden "push-bulk" operation.
+var pushBulk = FlagSpec{Transform: EffectTransform{Kind: TransformRetargetRemote, From: "push,push-lease", To: "push-bulk"}}
 
 // gitLogSchema, gitShowSchema, gitDiffSchema, gitRevParseSchema,
 // gitRevListSchema: read-only history/plumbing queries, verified against
@@ -633,8 +673,22 @@ var gitDiffSchema = CommandSchema{
 		"--cached": inert, "--staged": inert,
 		"-S": literal1, "-G": literal1,
 		"--output": {Arity: ArityOne, Operand: PathTruncate},
+		// pg2-cjfpy.2: the diff options the skills and CLAUDE.md instruct.
+		// --no-ext-diff (never run the configured external differ),
+		// --diff-filter (a status-letter filter), the summary forms, and
+		// --no-index (compare two filesystem paths: both operands are then
+		// path READS — the RestOverride below — instead of revisions).
+		"--no-ext-diff": inert,
+		"--diff-filter": literalOpt,
+		"--numstat":     inert, "--shortstat": inert, "--summary": inert,
+		"--check": inert, "--exit-code": inert, "--quiet": inert,
+		"--no-color": inert, "--no-renames": inert,
+		"--no-index": inert,
 	},
-	Positionals: PositionalSpec{Rest: Literal},
+	Positionals: PositionalSpec{
+		Rest:         Literal,
+		RestOverride: RestOverride{Flags: []string{"--no-index"}, Role: PathRead},
+	},
 	ImplicitEffects: []ImplicitEffect{
 		{Role: PathRead, Target: "."},
 	},
@@ -653,6 +707,15 @@ var gitRevParseSchema = CommandSchema{
 		"--show-toplevel": inert,
 		"--git-dir":       inert,
 		"--verify":        inert,
+		// pg2-cjfpy.2: the plumbing queries the landing skills use to
+		// locate the canonical clone and rebase state. Every one prints a
+		// path or a ref name; none reads file content or mutates.
+		"--git-common-dir": inert, "--absolute-git-dir": inert,
+		"--git-path":           literal1,
+		"--path-format":        literal1,
+		"--symbolic-full-name": inert, "--symbolic": inert,
+		"--is-inside-work-tree": inert, "--is-bare-repository": inert,
+		"--show-prefix": inert, "--show-cdup": inert,
 	},
 	Positionals: PositionalSpec{Rest: Literal},
 	ImplicitEffects: []ImplicitEffect{
@@ -668,6 +731,8 @@ var gitRevListSchema = CommandSchema{
 	Name:       "rev-list",
 	Provenance: "git version 2.54.0, git help rev-list",
 	Flags: map[string]FlagSpec{
+		"--count": inert, "--reverse": inert, "--no-merges": inert,
+		"--left-right": inert, "--first-parent": inert,
 		"-n": literal1, "--max-count": literal1,
 		"--since": literal1, "--after": literal1,
 		"--until": literal1, "--before": literal1,
@@ -720,10 +785,20 @@ var gitBranchSchema = CommandSchema{
 		"--contains":     literal1,
 		"--merged":       literalOpt, "--no-merged": literalOpt,
 		"--format": literal1,
+		// pg2-cjfpy.2: `-d`/`--delete` is git's SAFE delete (refuses a branch
+		// not fully merged; it is `-D` that forces) — what the cleanup steps
+		// of wtdone and session-wrapup do after a landing. The branch names
+		// are Literal via the RestOverride below; `-D`, `-m`/`-M`, `-c`/`-C`
+		// stay unmodeled. A ref deletion is the same ".git" metadata write
+		// the other ref-moving verbs state.
+		"-d": inert, "--delete": inert,
 	},
 	Positionals: PositionalSpec{
 		Rest:         Unmodeled,
-		RestOverride: RestOverride{Flags: []string{"-l", "--list"}, Role: Literal},
+		RestOverride: RestOverride{Flags: []string{"-l", "--list", "-d", "--delete"}, Role: Literal},
+	},
+	ImplicitEffects: []ImplicitEffect{
+		{Role: PathModify, Target: ".git", WhenFlags: []string{"-d", "--delete"}},
 	},
 	Stdin:        StdinNever,
 	Stdout:       StdoutMetadata,
@@ -1315,10 +1390,17 @@ var sortSchema = CommandSchema{
 // tailSchema: `-f`/`-F`/`--follow` just keeps reading the same file(s) as
 // they grow; `--pid` is the one glued value spelling worth modeling
 // (literal). Flags verified against this host's `tail --help`.
+//
+// pg2-cjfpy.2: the legacy single-digit `-N` line count (`tail -1`, the form
+// beads-lifecycle's worktree-review probe pipes into) is registered as
+// "-1".."-9". It is the same inert count `-n N` is. A multi-digit `-10` is
+// NOT enumerated: it parses as the bundle -1,-0 and the unregistered "-0"
+// makes it insufficient (abstain), the fail-closed direction.
 var tailSchema = CommandSchema{
 	Name:       "tail",
 	Provenance: "tail (GNU coreutils) 9.11, tail --help",
 	Flags: map[string]FlagSpec{
+		"-1": inert, "-2": inert, "-3": inert, "-4": inert, "-5": inert, "-6": inert, "-7": inert, "-8": inert, "-9": inert,
 		"-n": literal1, "--lines": literal1,
 		"-c": literal1, "--bytes": literal1,
 		"-f": inert, "-F": inert, "--follow": literalOpt,

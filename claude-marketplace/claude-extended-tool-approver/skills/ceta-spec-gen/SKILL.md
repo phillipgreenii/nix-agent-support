@@ -63,11 +63,16 @@ you actually read, not what you remember reading.
 
 ## Step-by-step procedure (command spec)
 
-1. **Classify: built-in or custom.** Built-in = the name already has an entry in
-   `cmddesc.DefaultRegistry()` (`internal/cmddesc/registry.go`) and/or an existing file at
-   `internal/embeddedspecs/data/<name>.json`. Custom = neither. This decides your output location
-   (see "Output routing" below) and which severity a thin citation would trigger if you slipped
-   (WARN for builtin-only `lint --embedded`, HARD everywhere else per
+1. **Classify: built-in, workspace-instructed, or custom.** Built-in = the name already has an
+   entry in `cmddesc.DefaultRegistry()` (`internal/cmddesc/registry.go`,
+   `registry_breadth.go`, `registry_git_ext.go`, `registry_plugin_tools.go`) and/or an existing
+   file at `internal/embeddedspecs/data/<name>.json`. **Workspace-instructed** = a CLI that a
+   first-party plugin skill/command/agent in this pn-workspace instructs an agent to run (the
+   epic `pg2-cjfpy` set: `bgcheck`, `pg-ccaudit`, `pn`, `pb`, `ccpool`, ...): it is made built-in
+   by adding its Go `CommandSchema` to the registry (see "Output routing" below — this is the
+   one route that reaches the engine). Custom = none of these (a machine- or repo-local tool no
+   plugin ships). This decides your output location and which severity a thin citation would
+   trigger if you slipped (WARN for builtin-only `lint --embedded`, HARD everywhere else per
    `internal/speclint/lint.go`'s `citationFinding`) — but you must never rely on that severity
    distinction: skill-generated specs carry real citations unconditionally, per this docket's own
    binding decision.
@@ -255,10 +260,34 @@ commands/<name>.goldens.json` — a directory NAME distinct from (a sibling of, 
 **A custom (non-built-in) command's spec MUST be written to the user-level or repo-level layer —
 never into this repo's own `internal/embeddedspecs/data/`, which is built-in-only.** A built-in
 command's _regenerated_ spec (re-sourcing its citations) is the one case that DOES go into
-`internal/embeddedspecs/data/<name>.json` — that is what makes it "built-in" — but that file is
-generated/maintained data, and the backfill of all 45 embedded specs is explicitly out of this
-packet's own scope (tc-o14i5.4.3's job); this skill only documents the mechanism, it does not
-itself edit that directory's checked-in files as part of authoring this skill.
+`internal/embeddedspecs/data/<name>.json` — that is what makes it "built-in".
+
+**Workspace-instructed CLIs are built-in (epic `pg2-cjfpy`, operator ruling Phillip 2026-10-04:
+"any command which is supposed to work as part of a skill should be autoapproved").** The
+user-level / repo-level JSON layers are read today ONLY by `lint`, `spec-drift-check` and
+`genspecs`; the new engine decides from `cmddesc.DefaultRegistry()` alone (`evaluate --corpus`
+grades with exactly that registry, and the live cutover will too), so a JSON spec in a P17 layer
+changes NO verdict. For a CLI a first-party plugin instructs, the route is therefore:
+
+1. add or extend its Go `CommandSchema` in `internal/cmddesc` (a new file next to
+   `registry_plugin_tools.go` is fine; register it in `pluginToolSchemas()`), approving only the
+   shapes the skills use — every unlisted flag stays insufficient;
+2. regenerate the embedded JSON with `go run ./cmd/genspecs` (it PRESERVES every real citation
+   already on disk and never touches `help-hashes*.json`; only the NEW facts come out thin), then
+   run the repo formatter over `internal/embeddedspecs/data/`;
+3. replace each remaining thin citation with a real `--help`/man/source citation (see "Citation
+   methodology"; a flag you cannot find in the tool's own help is a flag you must not model);
+4. record the tool's `--help` hash (`spec-drift-check --embedded --record` in the same pinned
+   environment the `claude-extended-tool-approver-spec-help-drift` check uses; a tool with no
+   on-PATH binary is added to `specdrift.Exempt` / the `.sh` helper-script rule instead) and add
+   the package to that check's `nativeBuildInputs` in `flake.nix`;
+5. add `approve` rows (and guardrail `not-approve`/`reject` rows) to
+   `internal/goldencorpus/testdata/corpus.json` and grade them with `evaluate --corpus`.
+
+This supersedes the older "custom specs MUST NOT go in embeddedspecs/data" sentence for those
+tools only; a tool NO plugin ships still routes to the user/repo layer as below. (The former
+sentence that "the backfill of all 45 embedded specs is out of this packet's scope" was stale:
+the back-fill landed in `aa2eb014`, tc-o14i5.4.3.)
 
 For a **custom** command's spec:
 
@@ -287,12 +316,12 @@ For a **`KindTarget`** spec, the same user-level/repo-level roots apply; convent
 From the module root (`packages/claude-extended-tool-approver`):
 
 - **Built-in regeneration**: `go run ./cmd/claude-extended-tool-approver lint --embedded` lints
-  the compiled-in `internal/embeddedspecs.FS`. To exercise a REGENERATED built-in spec, temporarily
-  overwrite the corresponding `internal/embeddedspecs/data/<name>.json` with your new content,
-  re-run the command above (`go run` recompiles the embed each time), confirm no NEW
-  `citation-presence` finding fires for that command's own entries, then **discard the change**
-  (`git checkout -- internal/embeddedspecs/data/<name>.json`) — do not leave a partial backfill
-  committed from a single spec-authoring pass.
+  the compiled-in `internal/embeddedspecs.FS`. After `go run ./cmd/genspecs` (which keeps every
+  real citation already on disk) and filling the new facts' citations, re-run it (`go run`
+  recompiles the embed each time) and confirm zero HARD findings; `go test
+./internal/embeddedspecs/...` (`TestRoundTrip`) must also pass — the JSON must equal
+  `cmddesc.DefaultRegistry()` exactly. The older "temporarily overwrite then discard" recipe
+  applies only to re-sourcing the citations of a schema you are NOT changing.
 - **Custom / bare-file spec**: `go run ./cmd/claude-extended-tool-approver lint
 <path-to-your-spec.json>` lints one file directly (no `Repository`/layer machinery, so no
   overrides-conflict detection — that only fires when loaded through `--user-dir`/`--repo-dir`).

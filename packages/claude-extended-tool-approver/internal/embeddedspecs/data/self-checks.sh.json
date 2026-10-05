@@ -1,0 +1,45 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "self-checks.sh",
+  "command": {
+    "name": "self-checks.sh",
+    "provenance": "self-checks.sh --help / header comment (behavior-docs INTRA evaluator: mechanical self-checks, read-only), this repo 2026-10-05",
+    "citations": {
+      "provenance": {
+        "source": "self-checks.sh --help: \"Deterministic self-checks for a single behavior-docs set.\""
+      },
+      "stdin": {
+        "source": "self-checks.sh --help: \"Usage: self-checks.sh \u003cset-dir\u003e (a directory of .md files, usually .../docs/behavior)\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+      },
+      "stdout": {
+        "source": "self-checks.sh --help: \"Usage: self-checks.sh \u003cset-dir\u003e (a directory of .md files, usually .../docs/behavior)\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+      },
+      "unknownFlag": {
+        "source": "self-checks.sh --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "positionals": {
+      "leading": [
+        {
+          "kind": "path-read"
+        }
+      ],
+      "rest": {
+        "kind": "unmodeled"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "self-checks.sh --help: \"Usage: self-checks.sh \u003cset-dir\u003e (a directory of .md files, usually .../docs/behavior)\""
+      }
+    },
+    "stdin": "never",
+    "stdout": "content",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

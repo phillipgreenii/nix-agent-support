@@ -116,6 +116,18 @@
           "source": "git -h: \"[-p | --paginate | -P | --no-pager] [--no-replace-objects] [--no-lazy-fetch]\""
         }
       },
+      "-C": {
+        "arity": "one",
+        "operand": {
+          "kind": "command-dir"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "git --help: \"usage: git [-v | --version] [-h | --help] [-C \u003cpath\u003e] [-c \u003cname\u003e=\u003cvalue\u003e]\""
+        }
+      },
       "-P": {
         "arity": "none",
         "operand": {
@@ -126,6 +138,19 @@
         },
         "citation": {
           "source": "git -h: \"[-p | --paginate | -P | --no-pager] [--no-replace-objects] [--no-lazy-fetch]\""
+        }
+      },
+      "-c": {
+        "arity": "one",
+        "operand": {
+          "kind": "allowed-literal",
+          "set": "git-inert-config-pair"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "git --help: \"usage: git [-v | --version] [-h | --help] [-C \u003cpath\u003e] [-c \u003cname\u003e=\u003cvalue\u003e]\""
         }
       },
       "-p": {
@@ -417,6 +442,18 @@
               "source": "git branch -h: \"--contains \\u003ccommit\\u003e print only branches that contain the commit\""
             }
           },
+          "--delete": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git branch --help: \"-d, --delete\""
+            }
+          },
           "--format": {
             "arity": "one",
             "operand": {
@@ -513,6 +550,18 @@
               "source": "git branch -h: \"-a, --all list both remote-tracking and local branches\""
             }
           },
+          "-d": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git branch --help: \"or: git branch [\u003coptions\u003e] [-r] (-d | -D) \u003cbranch-name\u003e...\""
+            }
+          },
           "-l": {
             "arity": "none",
             "operand": {
@@ -555,7 +604,7 @@
             "kind": "unmodeled"
           },
           "restOverride": {
-            "flags": ["-l", "--list"],
+            "flags": ["-l", "--list", "-d", "--delete"],
             "role": {
               "kind": "literal"
             }
@@ -564,6 +613,151 @@
             "source": "git branch -h: \"usage: git branch [\\u003coptions\\u003e] [-r | -a] [--merged] [--no-merged] or: git branch [\\u003coptions\\u003e] [-f] [--recurse-submodules] \\u003cbranch-name\\u003e [\\u003cstart-point\\u003e] or: git branch [\\u003coptions\\u003e] [-l] [\\u003cpattern\\u003e...] or: git branch [\\u003coptions\\u003e] [-r] (-d | -D) \\u003cbranch-name\\u003e...\""
           }
         },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "path-modify"
+            },
+            "target": ".git",
+            "whenFlags": ["-d", "--delete"],
+            "citation": {
+              "source": "git branch --help: \"usage: git branch [\u003coptions\u003e] [-r | -a] [--merged] [--no-merged] or: git branch [\u003coptions\u003e] [-f] [--recurse-submodules] \u003cbranch-name\u003e [\u003cstart-point\u003e] or: git branch [\u003coptions\u003e] [-l] [\u003cpattern\u003e...]\" -- documents the command whose implicit effect (target \".git\", role \"path-modify\") is derived from this synopsis"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "metadata",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "checkout": {
+        "name": "checkout",
+        "provenance": "git version 2.54.0, git help checkout",
+        "citations": {
+          "provenance": {
+            "source": "git checkout --help: \"usage: git checkout [\u003coptions\u003e] \u003cbranch\u003e\""
+          },
+          "stdin": {
+            "source": "git checkout --help: \"usage: git checkout [\u003coptions\u003e] \u003cbranch\u003e or: git checkout [\u003coptions\u003e] [\u003cbranch\u003e] -- \u003cfile\u003e...\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "git checkout --help: \"usage: git checkout [\u003coptions\u003e] \u003cbranch\u003e or: git checkout [\u003coptions\u003e] [\u003cbranch\u003e] -- \u003cfile\u003e...\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "git checkout --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git checkout --help: \"or: git checkout [\u003coptions\u003e] [\u003cbranch\u003e] -- \u003cfile\u003e...\""
+            }
+          },
+          "--ours": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git checkout --help: \"-2, --ours checkout our version for unmerged files\""
+            }
+          },
+          "--theirs": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git checkout --help: \"-3, --theirs checkout their version for unmerged files\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "unmodeled"
+          },
+          "restOverride": {
+            "flags": ["--"],
+            "role": {
+              "kind": "path-modify"
+            }
+          },
+          "citation": {
+            "source": "git checkout --help: \"usage: git checkout [\u003coptions\u003e] \u003cbranch\u003e or: git checkout [\u003coptions\u003e] [\u003cbranch\u003e] -- \u003cfile\u003e...\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "none",
+        "unknownFlag": "insufficient"
+      },
+      "cherry": {
+        "name": "cherry",
+        "provenance": "git version 2.54.0, git help cherry",
+        "citations": {
+          "provenance": {
+            "source": "git cherry --help: \"usage: git cherry [-v] [\u003cupstream\u003e [\u003chead\u003e [\u003climit\u003e]]]\""
+          },
+          "stdin": {
+            "source": "git cherry --help: \"usage: git cherry [-v] [\u003cupstream\u003e [\u003chead\u003e [\u003climit\u003e]]]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "git cherry --help: \"usage: git cherry [-v] [\u003cupstream\u003e [\u003chead\u003e [\u003climit\u003e]]]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "git cherry --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "-v": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git cherry --help: \"usage: git cherry [-v] [\u003cupstream\u003e [\u003chead\u003e [\u003climit\u003e]]]\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "git cherry --help: \"usage: git cherry [-v] [\u003cupstream\u003e [\u003chead\u003e [\u003climit\u003e]]]\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "path-read"
+            },
+            "target": ".git",
+            "citation": {
+              "source": "git cherry --help: \"usage: git cherry [-v] [\u003cupstream\u003e [\u003chead\u003e [\u003climit\u003e]]]\" -- documents the command whose implicit effect (target \".git\", role \"path-read\") is derived from this synopsis"
+            }
+          }
+        ],
         "stdin": "never",
         "stdout": "metadata",
         "unknownFlag": "insufficient",
@@ -1118,6 +1312,42 @@
               "source": "git diff -h: \"or: git diff [\\u003coptions\\u003e] --cached [--merge-base] [\\u003ccommit\\u003e] [--] [\\u003cpath\\u003e...]\""
             }
           },
+          "--check": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git diff --help: \"--check\""
+            }
+          },
+          "--diff-filter": {
+            "arity": "optional-glued",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git diff --help: \"scription of the --diff-filter option on what the status letters mean.\""
+            }
+          },
+          "--exit-code": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git diff --help: \"trolled by Git. This form implies --exit-code. If both paths point to\""
+            }
+          },
           "--name-only": {
             "arity": "none",
             "operand": {
@@ -1142,6 +1372,66 @@
               "source": "git diff -h: \"--name-status show names and status of changed files.\""
             }
           },
+          "--no-color": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git diff --help: \"--no-color\""
+            }
+          },
+          "--no-ext-diff": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git diff --help: \"--no-ext-diff\""
+            }
+          },
+          "--no-index": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git diff --help: \"or: git diff [\u003coptions\u003e] --no-index [--] \u003cpath\u003e \u003cpath\u003e [\u003cpathspec\u003e...]\""
+            }
+          },
+          "--no-renames": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git diff --help: \"--no-renames\""
+            }
+          },
+          "--numstat": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git diff --help: \"--numstat show numeric diffstat instead of patch.\""
+            }
+          },
           "--output": {
             "arity": "one",
             "operand": {
@@ -1152,6 +1442,30 @@
             },
             "citation": {
               "source": "git diff -h (full): \"--output=\\u003cfile\\u003e Output to a specific file instead of stdout.\""
+            }
+          },
+          "--quiet": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git diff --help: \"--quiet\""
+            }
+          },
+          "--shortstat": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git diff --help: \"--shortstat\""
             }
           },
           "--staged": {
@@ -1176,6 +1490,18 @@
             },
             "citation": {
               "source": "git diff -h: \"--stat show diffstat instead of patch.\""
+            }
+          },
+          "--summary": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git diff --help: \"--summary\""
             }
           },
           "-G": {
@@ -1220,8 +1546,9 @@
             "kind": "literal"
           },
           "restOverride": {
+            "flags": ["--no-index"],
             "role": {
-              "kind": "literal"
+              "kind": "path-read"
             }
           },
           "citation": {
@@ -1236,6 +1563,784 @@
             "target": ".",
             "citation": {
               "source": "git diff -h: \"usage: git diff [\\u003coptions\\u003e] [\\u003ccommit\\u003e] [--] [\\u003cpath\\u003e...] or: git diff [\\u003coptions\\u003e] --cached [--merge-base] [\\u003ccommit\\u003e] [--] [\\u003cpath\\u003e...] or: git diff [\\u003coptions\\u003e] [--merge-base] \\u003ccommit\\u003e [\\u003ccommit\\u003e...] \\u003ccommit\\u003e [--] [\\u003cpath\\u003e...] or: git diff [\\u003coptions\\u003e] \\u003ccommit\\u003e...\\u003ccommit\\u003e [--] [\\u003cpath\\u003e...]\" -- documents the optional/omittable operand shape this implicit default (target \".\", role \"path-read\") is derived from"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "fetch": {
+        "name": "fetch",
+        "provenance": "git version 2.54.0, git help fetch",
+        "citations": {
+          "provenance": {
+            "source": "git fetch --help: \"usage: git fetch [\u003coptions\u003e] [\u003crepository\u003e [\u003crefspec\u003e...]]\""
+          },
+          "stdin": {
+            "source": "git fetch --help: \"usage: git fetch [\u003coptions\u003e] [\u003crepository\u003e [\u003crefspec\u003e...]] or: git fetch [\u003coptions\u003e] \u003cgroup\u003e or: git fetch --multiple [\u003coptions\u003e] [(\u003crepository\u003e|\u003cgroup\u003e)...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "git fetch --help: \"usage: git fetch [\u003coptions\u003e] [\u003crepository\u003e [\u003crefspec\u003e...]] or: git fetch [\u003coptions\u003e] \u003cgroup\u003e or: git fetch --multiple [\u003coptions\u003e] [(\u003crepository\u003e|\u003cgroup\u003e)...]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "git fetch --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--all": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git fetch --help: \"or: git fetch --all [\u003coptions\u003e]\""
+            }
+          },
+          "--append": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git fetch --help: \"-a, --append\""
+            }
+          },
+          "--atomic": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git fetch --help: \"--atomic\""
+            }
+          },
+          "--depth": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git fetch --help: \"--depth=\u003cdepth\u003e\""
+            }
+          },
+          "--no-tags": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git fetch --help: \"-n do not fetch all tags (--no-tags)\""
+            }
+          },
+          "--prune": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git fetch --help: \"-p, --prune\""
+            }
+          },
+          "--quiet": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git fetch --help: \"-q, --quiet\""
+            }
+          },
+          "--tags": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git fetch --help: \"interested in. This default behavior can be changed by using the --tags or\""
+            }
+          },
+          "--unshallow": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git fetch --help: \"--unshallow convert to a complete repository\""
+            }
+          },
+          "--verbose": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git fetch --help: \"-v, --verbose\""
+            }
+          },
+          "-a": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git fetch --help: \"-a, --[no-]append append to .git/FETCH_HEAD instead of overwriting\""
+            }
+          },
+          "-p": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git fetch --help: \"-p, --[no-]prune prune remote-tracking branches no longer on remote\""
+            }
+          },
+          "-q": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git fetch --help: \"-q, --[no-]quiet be more quiet\""
+            }
+          },
+          "-t": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git fetch --help: \"-t, --[no-]tags fetch all tags and associated objects\""
+            }
+          },
+          "-v": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git fetch --help: \"-v, --[no-]verbose be more verbose\""
+            }
+          }
+        },
+        "positionals": {
+          "leading": [
+            {
+              "kind": "remote",
+              "operation": "fetch"
+            }
+          ],
+          "leadingOptional": true,
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "git fetch --help: \"usage: git fetch [\u003coptions\u003e] [\u003crepository\u003e [\u003crefspec\u003e...]] or: git fetch [\u003coptions\u003e] \u003cgroup\u003e or: git fetch --multiple [\u003coptions\u003e] [(\u003crepository\u003e|\u003cgroup\u003e)...]\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "fetch"
+            },
+            "target": "\u003cdefault-remote\u003e",
+            "dynamic": true,
+            "whenNoPositionals": true,
+            "citation": {
+              "source": "git fetch --help: \"usage: git fetch [\u003coptions\u003e] [\u003crepository\u003e [\u003crefspec\u003e...]] or: git fetch [\u003coptions\u003e] \u003cgroup\u003e or: git fetch --multiple [\u003coptions\u003e] [(\u003crepository\u003e|\u003cgroup\u003e)...]\" -- documents the command whose implicit effect (target \"\u003cdefault-remote\u003e\", role \"remote:fetch\") is derived from this synopsis"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "none",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "grep": {
+        "name": "grep",
+        "provenance": "git version 2.54.0, git help grep",
+        "citations": {
+          "provenance": {
+            "source": "git grep --help: \"usage: git grep [\u003coptions\u003e] [-e] \u003cpattern\u003e [\u003crev\u003e...] [[--] \u003cpath\u003e...]\""
+          },
+          "stdin": {
+            "source": "git grep --help: \"usage: git grep [\u003coptions\u003e] [-e] \u003cpattern\u003e [\u003crev\u003e...] [[--] \u003cpath\u003e...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "git grep --help: \"usage: git grep [\u003coptions\u003e] [-e] \u003cpattern\u003e [\u003crev\u003e...] [[--] \u003cpath\u003e...]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "git grep --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--basic-regexp": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"[-E | --extended-regexp] [-G | --basic-regexp]\""
+            }
+          },
+          "--cached": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"[ [--[no-]exclude-standard] [--cached | --untracked | --no-index] | \u003ctree\u003e...]\""
+            }
+          },
+          "--count": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"[ -o | --only-matching ] [-c | --count] [--all-match] [-q | --quiet]\""
+            }
+          },
+          "--extended-regexp": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"[-E | --extended-regexp] [-G | --basic-regexp]\""
+            }
+          },
+          "--files-with-matches": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"--[no-]name-only synonym for --files-with-matches\""
+            }
+          },
+          "--files-without-match": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"[-l | --files-with-matches] [-L | --files-without-match]\""
+            }
+          },
+          "--fixed-strings": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"[-F | --fixed-strings] [-n | --line-number] [--column]\""
+            }
+          },
+          "--ignore-case": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"git grep [-a | --text] [-I] [--textconv] [-i | --ignore-case] [-w | --word-regexp]\""
+            }
+          },
+          "--invert-match": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"[-v | --invert-match] [-h|-H] [--full-name]\""
+            }
+          },
+          "--line-number": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"[-F | --fixed-strings] [-n | --line-number] [--column]\""
+            }
+          },
+          "--max-count": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"[(-m | --max-count) \u003cnum\u003e]\""
+            }
+          },
+          "--name-only": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"-l, --files-with-matches, --name-only, -L, --files-without-match\""
+            }
+          },
+          "--no-color": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"[--color[=\u003cwhen\u003e] | --no-color]\""
+            }
+          },
+          "--null": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"[-z | --null]\""
+            }
+          },
+          "--perl-regexp": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"[-P | --perl-regexp]\""
+            }
+          },
+          "--quiet": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"[ -o | --only-matching ] [-c | --count] [--all-match] [-q | --quiet]\""
+            }
+          },
+          "--text": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"git grep [-a | --text] [-I] [--textconv] [-i | --ignore-case] [-w | --word-regexp]\""
+            }
+          },
+          "--untracked": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"[ [--[no-]exclude-standard] [--cached | --untracked | --no-index] | \u003ctree\u003e...]\""
+            }
+          },
+          "--word-regexp": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"git grep [-a | --text] [-I] [--textconv] [-i | --ignore-case] [-w | --word-regexp]\""
+            }
+          },
+          "-A": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"-A, --after-context \u003cn\u003e\""
+            }
+          },
+          "-B": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"-B, --before-context \u003cn\u003e\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"-C, --[no-]context \u003cn\u003e\""
+            }
+          },
+          "-E": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"-E, --[no-]extended-regexp\""
+            }
+          },
+          "-F": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"-F, --[no-]fixed-strings\""
+            }
+          },
+          "-G": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"-G, --[no-]basic-regexp\""
+            }
+          },
+          "-H": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"-H show filenames\""
+            }
+          },
+          "-I": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"-I don't match patterns in binary files\""
+            }
+          },
+          "-L": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"-L, --[no-]files-without-match\""
+            }
+          },
+          "-P": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"-P, --[no-]perl-regexp\""
+            }
+          },
+          "-a": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"-a, --[no-]text process binary files as text\""
+            }
+          },
+          "-c": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"-c, --[no-]count show the number of matches instead of matching lines\""
+            }
+          },
+          "-e": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"usage: git grep [\u003coptions\u003e] [-e] \u003cpattern\u003e [\u003crev\u003e...] [[--] \u003cpath\u003e...]\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"-h don't show filenames\""
+            }
+          },
+          "-i": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"-i, --[no-]ignore-case\""
+            }
+          },
+          "-l": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"-l, --[no-]files-with-matches\""
+            }
+          },
+          "-m": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"-m, --[no-]max-count \u003cn\u003e\""
+            }
+          },
+          "-n": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"-n, --[no-]line-number\""
+            }
+          },
+          "-q": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"-q, --[no-]quiet indicate hit with exit status without output\""
+            }
+          },
+          "-v": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"-v, --[no-]invert-match\""
+            }
+          },
+          "-w": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"-w, --[no-]word-regexp\""
+            }
+          },
+          "-z": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git grep --help: \"-z, --[no-]null print NUL after filenames\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "git grep --help: \"usage: git grep [\u003coptions\u003e] [-e] \u003cpattern\u003e [\u003crev\u003e...] [[--] \u003cpath\u003e...]\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "path-read"
+            },
+            "target": ".",
+            "citation": {
+              "source": "git grep --help: \"usage: git grep [\u003coptions\u003e] [-e] \u003cpattern\u003e [\u003crev\u003e...] [[--] \u003cpath\u003e...]\" -- documents the command whose implicit effect (target \".\", role \"path-read\") is derived from this synopsis"
             }
           }
         ],
@@ -1508,6 +2613,652 @@
         "unknownFlag": "insufficient",
         "endOfOptions": true
       },
+      "ls-files": {
+        "name": "ls-files",
+        "provenance": "git version 2.54.0, git help ls-files",
+        "citations": {
+          "provenance": {
+            "source": "git ls-files --help: \"usage: git ls-files [\u003coptions\u003e] [\u003cfile\u003e...]\""
+          },
+          "stdin": {
+            "source": "git ls-files --help: \"usage: git ls-files [\u003coptions\u003e] [\u003cfile\u003e...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "git ls-files --help: \"usage: git ls-files [\u003coptions\u003e] [\u003cfile\u003e...]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "git ls-files --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--cached": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git ls-files --help: \"[-c|--cached] [-d|--deleted] [-o|--others] [-i|--ignored]\""
+            }
+          },
+          "--deleted": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git ls-files --help: \"[-c|--cached] [-d|--deleted] [-o|--others] [-i|--ignored]\""
+            }
+          },
+          "--error-unmatch": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git ls-files --help: \"[--error-unmatch] [--with-tree=\u003ctree-ish\u003e]\""
+            }
+          },
+          "--exclude-standard": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git ls-files --help: \"--exclude-standard add the standard git exclusions\""
+            }
+          },
+          "--full-name": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git ls-files --help: \"--full-name make the output relative to the project top directory\""
+            }
+          },
+          "--modified": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git ls-files --help: \"[-s|--stage] [-u|--unmerged] [-k|--killed] [-m|--modified]\""
+            }
+          },
+          "--others": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git ls-files --help: \"[-c|--cached] [-d|--deleted] [-o|--others] [-i|--ignored]\""
+            }
+          },
+          "--stage": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git ls-files --help: \"[-s|--stage] [-u|--unmerged] [-k|--killed] [-m|--modified]\""
+            }
+          },
+          "-c": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git ls-files --help: \"-c, --[no-]cached show cached files in the output (default)\""
+            }
+          },
+          "-d": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git ls-files --help: \"-d, --[no-]deleted show deleted files in the output\""
+            }
+          },
+          "-m": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git ls-files --help: \"-m, --[no-]modified show modified files in the output\""
+            }
+          },
+          "-o": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git ls-files --help: \"-o, --[no-]others show other files in the output\""
+            }
+          },
+          "-s": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git ls-files --help: \"-s, --[no-]stage show staged contents' object name in the output\""
+            }
+          },
+          "-z": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git ls-files --help: \"-z separate paths with the NUL character\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "git ls-files --help: \"usage: git ls-files [\u003coptions\u003e] [\u003cfile\u003e...]\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "path-read"
+            },
+            "target": ".",
+            "citation": {
+              "source": "git ls-files --help: \"usage: git ls-files [\u003coptions\u003e] [\u003cfile\u003e...]\" -- documents the command whose implicit effect (target \".\", role \"path-read\") is derived from this synopsis"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "metadata",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "ls-tree": {
+        "name": "ls-tree",
+        "provenance": "git version 2.54.0, git help ls-tree",
+        "citations": {
+          "provenance": {
+            "source": "git ls-tree --help: \"usage: git ls-tree [\u003coptions\u003e] \u003ctree-ish\u003e [\u003cpath\u003e...]\""
+          },
+          "stdin": {
+            "source": "git ls-tree --help: \"usage: git ls-tree [\u003coptions\u003e] \u003ctree-ish\u003e [\u003cpath\u003e...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "git ls-tree --help: \"usage: git ls-tree [\u003coptions\u003e] \u003ctree-ish\u003e [\u003cpath\u003e...]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "git ls-tree --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--abbrev": {
+            "arity": "optional-glued",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git ls-tree --help: \"[--name-only] [--name-status] [--object-only] [--full-name] [--full-tree] [--abbrev[=\u003cn\u003e]] [--format=\u003cformat\u003e]\""
+            }
+          },
+          "--full-name": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git ls-tree --help: \"--[no-]full-tree list entire tree; not just current directory (implies --full-name)\""
+            }
+          },
+          "--full-tree": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git ls-tree --help: \"[--name-only] [--name-status] [--object-only] [--full-name] [--full-tree] [--abbrev[=\u003cn\u003e]] [--format=\u003cformat\u003e]\""
+            }
+          },
+          "--long": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git ls-tree --help: \"-l, --long include object size\""
+            }
+          },
+          "--name-only": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git ls-tree --help: \"--name-only list only filenames\""
+            }
+          },
+          "--name-status": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git ls-tree --help: \"--name-status list only filenames\""
+            }
+          },
+          "-d": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git ls-tree --help: \"-d only show trees\""
+            }
+          },
+          "-l": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git ls-tree --help: \"-l, --long include object size\""
+            }
+          },
+          "-r": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git ls-tree --help: \"-r recurse into subtrees\""
+            }
+          },
+          "-t": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git ls-tree --help: \"-t show trees when recursing\""
+            }
+          },
+          "-z": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git ls-tree --help: \"-z terminate entries with NUL byte\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "git ls-tree --help: \"usage: git ls-tree [\u003coptions\u003e] \u003ctree-ish\u003e [\u003cpath\u003e...]\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "path-read"
+            },
+            "target": ".git",
+            "citation": {
+              "source": "git ls-tree --help: \"usage: git ls-tree [\u003coptions\u003e] \u003ctree-ish\u003e [\u003cpath\u003e...]\" -- documents the command whose implicit effect (target \".git\", role \"path-read\") is derived from this synopsis"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "metadata",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "merge": {
+        "name": "merge",
+        "provenance": "git version 2.54.0, git help merge",
+        "citations": {
+          "provenance": {
+            "source": "git merge --help: \"usage: git merge [\u003coptions\u003e] [\u003ccommit\u003e...]\""
+          },
+          "stdin": {
+            "source": "git merge --help: \"usage: git merge [\u003coptions\u003e] [\u003ccommit\u003e...] or: git merge --abort or: git merge --continue\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "git merge --help: \"usage: git merge [\u003coptions\u003e] [\u003ccommit\u003e...] or: git merge --abort or: git merge --continue\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "git merge --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--ff-only": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git merge --help: \"--ff-only abort if fast-forward is not possible\""
+            }
+          },
+          "--no-stat": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git merge --help: \"--stat, -n, --no-stat\""
+            }
+          },
+          "--quiet": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git merge --help: \"-q, --quiet\""
+            }
+          },
+          "--verbose": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git merge --help: \"-v, --verbose\""
+            }
+          },
+          "-q": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git merge --help: \"-q, --[no-]quiet be more quiet\""
+            }
+          },
+          "-v": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git merge --help: \"-v, --[no-]verbose be more verbose\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "unmodeled"
+          },
+          "restOverride": {
+            "flags": ["--ff-only"],
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "git merge --help: \"usage: git merge [\u003coptions\u003e] [\u003ccommit\u003e...] or: git merge --abort or: git merge --continue\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "path-modify"
+            },
+            "target": ".",
+            "citation": {
+              "source": "git merge --help: \"usage: git merge [\u003coptions\u003e] [\u003ccommit\u003e...] or: git merge --abort or: git merge --continue\" -- documents the command whose implicit effect (target \".\", role \"path-modify\") is derived from this synopsis"
+            }
+          },
+          {
+            "role": {
+              "kind": "path-modify"
+            },
+            "target": ".git",
+            "citation": {
+              "source": "git merge --help: \"usage: git merge [\u003coptions\u003e] [\u003ccommit\u003e...] or: git merge --abort or: git merge --continue\" -- documents the command whose implicit effect (target \".git\", role \"path-modify\") is derived from this synopsis"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "metadata",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "merge-base": {
+        "name": "merge-base",
+        "provenance": "git version 2.54.0, git help merge-base",
+        "citations": {
+          "provenance": {
+            "source": "git merge-base --help: \"usage: git merge-base [-a | --all] \u003ccommit\u003e \u003ccommit\u003e...\""
+          },
+          "stdin": {
+            "source": "git merge-base --help: \"usage: git merge-base [-a | --all] \u003ccommit\u003e \u003ccommit\u003e... or: git merge-base [-a | --all] --octopus \u003ccommit\u003e... or: git merge-base --is-ancestor \u003ccommit\u003e \u003ccommit\u003e\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "git merge-base --help: \"usage: git merge-base [-a | --all] \u003ccommit\u003e \u003ccommit\u003e... or: git merge-base [-a | --all] --octopus \u003ccommit\u003e... or: git merge-base --is-ancestor \u003ccommit\u003e \u003ccommit\u003e\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "git merge-base --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--all": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git merge-base --help: \"usage: git merge-base [-a | --all] \u003ccommit\u003e \u003ccommit\u003e...\""
+            }
+          },
+          "--fork-point": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git merge-base --help: \"or: git merge-base --fork-point \u003cref\u003e [\u003ccommit\u003e]\""
+            }
+          },
+          "--independent": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git merge-base --help: \"or: git merge-base --independent \u003ccommit\u003e...\""
+            }
+          },
+          "--is-ancestor": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git merge-base --help: \"or: git merge-base --is-ancestor \u003ccommit\u003e \u003ccommit\u003e\""
+            }
+          },
+          "--octopus": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git merge-base --help: \"or: git merge-base [-a | --all] --octopus \u003ccommit\u003e...\""
+            }
+          },
+          "-a": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git merge-base --help: \"usage: git merge-base [-a | --all] \u003ccommit\u003e \u003ccommit\u003e...\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "git merge-base --help: \"usage: git merge-base [-a | --all] \u003ccommit\u003e \u003ccommit\u003e... or: git merge-base [-a | --all] --octopus \u003ccommit\u003e... or: git merge-base --is-ancestor \u003ccommit\u003e \u003ccommit\u003e\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "path-read"
+            },
+            "target": ".git",
+            "citation": {
+              "source": "git merge-base --help: \"usage: git merge-base [-a | --all] \u003ccommit\u003e \u003ccommit\u003e... or: git merge-base [-a | --all] --octopus \u003ccommit\u003e... or: git merge-base --is-ancestor \u003ccommit\u003e \u003ccommit\u003e\" -- documents the command whose implicit effect (target \".git\", role \"path-read\") is derived from this synopsis"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "metadata",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
       "mv": {
         "name": "mv",
         "provenance": "git version 2.54.0, git mv -h",
@@ -1670,7 +3421,9 @@
               "kind": "literal"
             },
             "transform": {
-              "kind": "none"
+              "kind": "retarget-remote",
+              "from": "push,push-lease",
+              "to": "push-bulk"
             },
             "citation": {
               "source": "git push -h: \"--[no-]branches alias of --all\""
@@ -1694,7 +3447,9 @@
               "kind": "literal"
             },
             "transform": {
-              "kind": "none"
+              "kind": "retarget-remote",
+              "from": "push,push-lease",
+              "to": "push-bulk"
             },
             "citation": {
               "source": "git push -h: \"--[no-]tags push tags (can't be used with --all or --branches or --mirror)\""
@@ -1724,18 +3479,6 @@
               "source": "git push -h: \"-n, --[no-]dry-run dry run\""
             }
           },
-          "--exec": {
-            "arity": "one",
-            "operand": {
-              "kind": "literal"
-            },
-            "transform": {
-              "kind": "none"
-            },
-            "citation": {
-              "source": "git push -h: \"--[no-]exec \\u003creceive-pack\\u003e receive pack program\""
-            }
-          },
           "--follow-tags": {
             "arity": "none",
             "operand": {
@@ -1761,15 +3504,29 @@
             }
           },
           "--force-with-lease": {
-            "arity": "optional-glued",
+            "arity": "none",
             "operand": {
               "kind": "literal"
             },
             "transform": {
-              "kind": "force"
+              "kind": "force-with-lease"
             },
             "citation": {
               "source": "git push -h: \"--[no-]force-with-lease[=\\u003crefname\\u003e:\\u003cexpect\\u003e] require old value of ref to be at this value\""
+            }
+          },
+          "--mirror": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "retarget-remote",
+              "from": "push,push-lease",
+              "to": "push-bulk"
+            },
+            "citation": {
+              "source": "git push --help: \"--[no-]tags push tags (can't be used with --all or --branches or --mirror)\""
             }
           },
           "--no-atomic": {
@@ -1838,7 +3595,9 @@
               "kind": "literal"
             },
             "transform": {
-              "kind": "none"
+              "kind": "retarget-remote",
+              "from": "push,push-lease",
+              "to": "push-bulk"
             },
             "citation": {
               "source": "git push -h: \"--[no-]prune prune locally removed refs\""
@@ -1868,18 +3627,6 @@
               "source": "git push -h: \"-q, --[no-]quiet be more quiet\""
             }
           },
-          "--receive-pack": {
-            "arity": "one",
-            "operand": {
-              "kind": "literal"
-            },
-            "transform": {
-              "kind": "none"
-            },
-            "citation": {
-              "source": "git push -h: \"--[no-]receive-pack \\u003creceive-pack\\u003e receive pack program\""
-            }
-          },
           "--set-upstream": {
             "arity": "none",
             "operand": {
@@ -1898,7 +3645,9 @@
               "kind": "literal"
             },
             "transform": {
-              "kind": "none"
+              "kind": "retarget-remote",
+              "from": "push,push-lease",
+              "to": "push-bulk"
             },
             "citation": {
               "source": "git push -h: \"--[no-]tags push tags (can't be used with --all or --branches or --mirror)\""
@@ -2022,7 +3771,8 @@
           ],
           "leadingOptional": true,
           "rest": {
-            "kind": "literal"
+            "kind": "allowed-literal",
+            "set": "git-plain-refspec"
           },
           "restOverride": {
             "role": {
@@ -2049,6 +3799,399 @@
         ],
         "stdin": "never",
         "stdout": "none",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "range-diff": {
+        "name": "range-diff",
+        "provenance": "git version 2.54.0, git help range-diff",
+        "citations": {
+          "provenance": {
+            "source": "git range-diff --help: \"usage: git range-diff [\u003coptions\u003e] \u003cold-base\u003e..\u003cold-tip\u003e \u003cnew-base\u003e..\u003cnew-tip\u003e\""
+          },
+          "stdin": {
+            "source": "git range-diff --help: \"usage: git range-diff [\u003coptions\u003e] \u003cold-base\u003e..\u003cold-tip\u003e \u003cnew-base\u003e..\u003cnew-tip\u003e or: git range-diff [\u003coptions\u003e] \u003cold-tip\u003e...\u003cnew-tip\u003e or: git range-diff [\u003coptions\u003e] \u003cbase\u003e \u003cold-tip\u003e \u003cnew-tip\u003e\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "git range-diff --help: \"usage: git range-diff [\u003coptions\u003e] \u003cold-base\u003e..\u003cold-tip\u003e \u003cnew-base\u003e..\u003cnew-tip\u003e or: git range-diff [\u003coptions\u003e] \u003cold-tip\u003e...\u003cnew-tip\u003e or: git range-diff [\u003coptions\u003e] \u003cbase\u003e \u003cold-tip\u003e \u003cnew-tip\u003e\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "git range-diff --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--creation-factor": {
+            "arity": "optional-glued",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git range-diff --help: \"[--no-dual-color] [--creation-factor=\u003cfactor\u003e]\""
+            }
+          },
+          "--no-color": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git range-diff --help: \"git range-diff [--color=[\u003cwhen\u003e]] [--no-color] [\u003cdiff-options\u003e]\""
+            }
+          },
+          "--stat": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git range-diff --help: \"--patch-with-stat synonym for '-p --stat'\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "git range-diff --help: \"usage: git range-diff [\u003coptions\u003e] \u003cold-base\u003e..\u003cold-tip\u003e \u003cnew-base\u003e..\u003cnew-tip\u003e or: git range-diff [\u003coptions\u003e] \u003cold-tip\u003e...\u003cnew-tip\u003e or: git range-diff [\u003coptions\u003e] \u003cbase\u003e \u003cold-tip\u003e \u003cnew-tip\u003e\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "path-read"
+            },
+            "target": ".git",
+            "citation": {
+              "source": "git range-diff --help: \"usage: git range-diff [\u003coptions\u003e] \u003cold-base\u003e..\u003cold-tip\u003e \u003cnew-base\u003e..\u003cnew-tip\u003e or: git range-diff [\u003coptions\u003e] \u003cold-tip\u003e...\u003cnew-tip\u003e or: git range-diff [\u003coptions\u003e] \u003cbase\u003e \u003cold-tip\u003e \u003cnew-tip\u003e\" -- documents the command whose implicit effect (target \".git\", role \"path-read\") is derived from this synopsis"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "rebase": {
+        "name": "rebase",
+        "provenance": "git version 2.54.0, git help rebase",
+        "citations": {
+          "provenance": {
+            "source": "git rebase --help: \"usage: git rebase [-i] [options] [--exec \u003ccmd\u003e] [--onto \u003cnewbase\u003e | --keep-base] [\u003cupstream\u003e [\u003cbranch\u003e]]\""
+          },
+          "stdin": {
+            "source": "git rebase --help: \"usage: git rebase [-i] [options] [--exec \u003ccmd\u003e] [--onto \u003cnewbase\u003e | --keep-base] [\u003cupstream\u003e [\u003cbranch\u003e]] or: git rebase [-i] [options] [--exec \u003ccmd\u003e] [--onto \u003cnewbase\u003e] --root [\u003cbranch\u003e] or: git rebase --continue | --abort | --skip | --edit-todo\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "git rebase --help: \"usage: git rebase [-i] [options] [--exec \u003ccmd\u003e] [--onto \u003cnewbase\u003e | --keep-base] [\u003cupstream\u003e [\u003cbranch\u003e]] or: git rebase [-i] [options] [--exec \u003ccmd\u003e] [--onto \u003cnewbase\u003e] --root [\u003cbranch\u003e] or: git rebase --continue | --abort | --skip | --edit-todo\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "git rebase --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--abort": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git rebase --help: \"or: git rebase --continue | --abort | --skip | --edit-todo\""
+            }
+          },
+          "--autostash": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git rebase --help: \"sult. If a temporary stash entry was created using --autostash, it\""
+            }
+          },
+          "--continue": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git rebase --help: \"or: git rebase --continue | --abort | --skip | --edit-todo\""
+            }
+          },
+          "--keep-base": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git rebase --help: \"usage: git rebase [-i] [options] [--exec \u003ccmd\u003e] [--onto \u003cnewbase\u003e | --keep-base] [\u003cupstream\u003e [\u003cbranch\u003e]]\""
+            }
+          },
+          "--no-autostash": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git rebase --help: \"--autostash, --no-autostash\""
+            }
+          },
+          "--no-reapply-cherry-picks": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git rebase --help: \"--reapply-cherry-picks, --no-reapply-cherry-picks\""
+            }
+          },
+          "--onto": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git rebase --help: \"usage: git rebase [-i] [options] [--exec \u003ccmd\u003e] [--onto \u003cnewbase\u003e | --keep-base] [\u003cupstream\u003e [\u003cbranch\u003e]]\""
+            }
+          },
+          "--quiet": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git rebase --help: \"dropped commit (unless --quiet is given). Advice will also be issued\""
+            }
+          },
+          "--quit": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git rebase --help: \"--quit abort but keep HEAD where it is\""
+            }
+          },
+          "--reapply-cherry-picks": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git rebase --help: \"nary step (unless --reapply-cherry-picks or --keep-base is passed).\""
+            }
+          },
+          "--root": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git rebase --help: \"or: git rebase [-i] [options] [--exec \u003ccmd\u003e] [--onto \u003cnewbase\u003e] --root [\u003cbranch\u003e]\""
+            }
+          },
+          "--skip": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git rebase --help: \"or: git rebase --continue | --abort | --skip | --edit-todo\""
+            }
+          },
+          "--verbose": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git rebase --help: \"-v, --verbose\""
+            }
+          },
+          "-q": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git rebase --help: \"-q, --[no-]quiet be quiet. implies --no-stat\""
+            }
+          },
+          "-v": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git rebase --help: \"-v, --[no-]verbose display a diffstat of what changed upstream\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "git rebase --help: \"usage: git rebase [-i] [options] [--exec \u003ccmd\u003e] [--onto \u003cnewbase\u003e | --keep-base] [\u003cupstream\u003e [\u003cbranch\u003e]] or: git rebase [-i] [options] [--exec \u003ccmd\u003e] [--onto \u003cnewbase\u003e] --root [\u003cbranch\u003e] or: git rebase --continue | --abort | --skip | --edit-todo\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "path-modify"
+            },
+            "target": ".",
+            "citation": {
+              "source": "git rebase --help: \"usage: git rebase [-i] [options] [--exec \u003ccmd\u003e] [--onto \u003cnewbase\u003e | --keep-base] [\u003cupstream\u003e [\u003cbranch\u003e]] or: git rebase [-i] [options] [--exec \u003ccmd\u003e] [--onto \u003cnewbase\u003e] --root [\u003cbranch\u003e] or: git rebase --continue | --abort | --skip | --edit-todo\" -- documents the command whose implicit effect (target \".\", role \"path-modify\") is derived from this synopsis"
+            }
+          },
+          {
+            "role": {
+              "kind": "path-modify"
+            },
+            "target": ".git",
+            "citation": {
+              "source": "git rebase --help: \"usage: git rebase [-i] [options] [--exec \u003ccmd\u003e] [--onto \u003cnewbase\u003e | --keep-base] [\u003cupstream\u003e [\u003cbranch\u003e]] or: git rebase [-i] [options] [--exec \u003ccmd\u003e] [--onto \u003cnewbase\u003e] --root [\u003cbranch\u003e] or: git rebase --continue | --abort | --skip | --edit-todo\" -- documents the command whose implicit effect (target \".git\", role \"path-modify\") is derived from this synopsis"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "metadata",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "remote": {
+        "name": "remote",
+        "provenance": "git version 2.54.0, git help remote",
+        "citations": {
+          "provenance": {
+            "source": "git remote --help: \"usage: git remote [-v | --verbose]\""
+          },
+          "stdin": {
+            "source": "git remote --help: \"usage: git remote [-v | --verbose] or: git remote add [-t \u003cbranch\u003e] [-m \u003cmaster\u003e] [-f] [--tags | --no-tags] [--mirror=\u003cfetch|push\u003e] \u003cname\u003e \u003curl\u003e or: git remote rename [--[no-]progress] \u003cold\u003e \u003cnew\u003e\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "git remote --help: \"usage: git remote [-v | --verbose] or: git remote add [-t \u003cbranch\u003e] [-m \u003cmaster\u003e] [-f] [--tags | --no-tags] [--mirror=\u003cfetch|push\u003e] \u003cname\u003e \u003curl\u003e or: git remote rename [--[no-]progress] \u003cold\u003e \u003cnew\u003e\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "git remote --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--verbose": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git remote --help: \"usage: git remote [-v | --verbose]\""
+            }
+          },
+          "-v": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git remote --help: \"usage: git remote [-v | --verbose]\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "unmodeled"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "git remote --help: \"usage: git remote [-v | --verbose] or: git remote add [-t \u003cbranch\u003e] [-m \u003cmaster\u003e] [-f] [--tags | --no-tags] [--mirror=\u003cfetch|push\u003e] \u003cname\u003e \u003curl\u003e or: git remote rename [--[no-]progress] \u003cold\u003e \u003cnew\u003e\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "path-read"
+            },
+            "target": ".git",
+            "citation": {
+              "source": "git remote --help: \"usage: git remote [-v | --verbose] or: git remote add [-t \u003cbranch\u003e] [-m \u003cmaster\u003e] [-f] [--tags | --no-tags] [--mirror=\u003cfetch|push\u003e] \u003cname\u003e \u003curl\u003e or: git remote rename [--[no-]progress] \u003cold\u003e \u003cnew\u003e\" -- documents the command whose implicit effect (target \".git\", role \"path-read\") is derived from this synopsis"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "metadata",
         "unknownFlag": "insufficient",
         "endOfOptions": true
       },
@@ -2106,6 +4249,30 @@
               "source": "git rev-list -h (full): \"--until=\\u003cdate\\u003e, --before=\\u003cdate\\u003e Show commits older than \\u003cdate\\u003e.\""
             }
           },
+          "--count": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git rev-list --help: \"--count\""
+            }
+          },
+          "--first-parent": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git rev-list --help: \"--first-parent\""
+            }
+          },
           "--grep": {
             "arity": "one",
             "operand": {
@@ -2118,6 +4285,18 @@
               "source": "git rev-list -h (full): \"--grep=\\u003cpattern\\u003e further limits to commits whose log message has a line that matches \\u003cpattern\\u003e), unless otherwise noted.\""
             }
           },
+          "--left-right": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git rev-list --help: \"--left-right\""
+            }
+          },
           "--max-count": {
             "arity": "one",
             "operand": {
@@ -2128,6 +4307,30 @@
             },
             "citation": {
               "source": "git rev-list -h: \"--max-count=\\u003cn\\u003e\""
+            }
+          },
+          "--no-merges": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git rev-list --help: \"--no-merges\""
+            }
+          },
+          "--reverse": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git rev-list --help: \"--reverse\""
             }
           },
           "--since": {
@@ -2226,6 +4429,30 @@
               "source": "git rev-parse -h (full): \"--abbrev-ref[=(strict|loose)] A non-ambiguous short name of the objects name. The option core.war-\""
             }
           },
+          "--absolute-git-dir": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git rev-parse --help: \"--absolute-git-dir\""
+            }
+          },
+          "--git-common-dir": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git rev-parse --help: \"--git-common-dir\""
+            }
+          },
           "--git-dir": {
             "arity": "none",
             "operand": {
@@ -2236,6 +4463,54 @@
             },
             "citation": {
               "source": "git rev-parse -h (full): \"--git-dir Show $GIT_DIR if defined. Otherwise show the path to the .git direc-\""
+            }
+          },
+          "--git-path": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git rev-parse --help: \"--git-path \u003cpath\u003e\""
+            }
+          },
+          "--is-bare-repository": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git rev-parse --help: \"--is-bare-repository\""
+            }
+          },
+          "--is-inside-work-tree": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git rev-parse --help: \"--is-inside-work-tree\""
+            }
+          },
+          "--path-format": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git rev-parse --help: \"--path-format=(absolute|relative)\""
             }
           },
           "--short": {
@@ -2250,6 +4525,30 @@
               "source": "git rev-parse -h (full): \"--short[=\\u003clength\\u003e] Same as --verify but shortens the object name to a unique prefix with\""
             }
           },
+          "--show-cdup": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git rev-parse --help: \"--show-cdup\""
+            }
+          },
+          "--show-prefix": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git rev-parse --help: \"prefix=$(git rev-parse --show-prefix)\""
+            }
+          },
           "--show-toplevel": {
             "arity": "none",
             "operand": {
@@ -2260,6 +4559,30 @@
             },
             "citation": {
               "source": "git rev-parse -h (full): \"--show-toplevel Show the (by default, absolute) path of the top-level directory of the\""
+            }
+          },
+          "--symbolic": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git rev-parse --help: \"--symbolic\""
+            }
+          },
+          "--symbolic-full-name": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git rev-parse --help: \"--symbolic-full-name\""
             }
           },
           "--verify": {
@@ -2592,6 +4915,89 @@
         "unknownFlag": "insufficient",
         "endOfOptions": true
       },
+      "stash": {
+        "name": "stash",
+        "provenance": "git version 2.54.0, git help stash",
+        "citations": {
+          "provenance": {
+            "source": "git stash --help: \"usage: git stash list [\u003clog-options\u003e]\""
+          },
+          "stdin": {
+            "source": "git stash --help: \"usage: git stash list [\u003clog-options\u003e] or: git stash show [-u | --include-untracked | --only-untracked] [\u003cdiff-options\u003e] [\u003cstash\u003e] or: git stash drop [-q | --quiet] [\u003cstash\u003e]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "git stash --help: \"usage: git stash list [\u003clog-options\u003e] or: git stash show [-u | --include-untracked | --only-untracked] [\u003cdiff-options\u003e] [\u003cstash\u003e] or: git stash drop [-q | --quiet] [\u003cstash\u003e]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "git stash --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "git stash --help: \"usage: git stash list [\u003clog-options\u003e] or: git stash show [-u | --include-untracked | --only-untracked] [\u003cdiff-options\u003e] [\u003cstash\u003e] or: git stash drop [-q | --quiet] [\u003cstash\u003e]\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "none",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true,
+        "subcommands": {
+          "list": {
+            "name": "list",
+            "provenance": "git version 2.54.0, git help stash",
+            "citations": {
+              "provenance": {
+                "source": "git stash list --help: \"usage: git stash list [\u003clog-options\u003e]\""
+              },
+              "stdin": {
+                "source": "git stash list --help: \"usage: git stash list [\u003clog-options\u003e]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+              },
+              "stdout": {
+                "source": "git stash list --help: \"usage: git stash list [\u003clog-options\u003e]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+              },
+              "unknownFlag": {
+                "source": "git stash list --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "git stash list --help: \"usage: git stash list [\u003clog-options\u003e]\""
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "path-read"
+                },
+                "target": ".git",
+                "citation": {
+                  "source": "git stash list --help: \"usage: git stash list [\u003clog-options\u003e]\" -- documents the command whose implicit effect (target \".git\", role \"path-read\") is derived from this synopsis"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          }
+        }
+      },
       "status": {
         "name": "status",
         "provenance": "git version 2.54.0, git status -h",
@@ -2884,6 +5290,107 @@
             "target": ".",
             "citation": {
               "source": "git status -h: \"usage: git status [\\u003coptions\\u003e] [--] [\\u003cpathspec\\u003e...]\" -- documents the optional/omittable operand shape this implicit default (target \".\", role \"path-read\") is derived from"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "metadata",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "symbolic-ref": {
+        "name": "symbolic-ref",
+        "provenance": "git version 2.54.0, git help symbolic-ref",
+        "citations": {
+          "provenance": {
+            "source": "git symbolic-ref --help: \"usage: git symbolic-ref [-m \u003creason\u003e] \u003cname\u003e \u003cref\u003e\""
+          },
+          "stdin": {
+            "source": "git symbolic-ref --help: \"usage: git symbolic-ref [-m \u003creason\u003e] \u003cname\u003e \u003cref\u003e or: git symbolic-ref [-q] [--short] [--no-recurse] \u003cname\u003e or: git symbolic-ref --delete [-q] \u003cname\u003e\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "git symbolic-ref --help: \"usage: git symbolic-ref [-m \u003creason\u003e] \u003cname\u003e \u003cref\u003e or: git symbolic-ref [-q] [--short] [--no-recurse] \u003cname\u003e or: git symbolic-ref --delete [-q] \u003cname\u003e\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "git symbolic-ref --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--no-recurse": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git symbolic-ref --help: \"or: git symbolic-ref [-q] [--short] [--no-recurse] \u003cname\u003e\""
+            }
+          },
+          "--quiet": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git symbolic-ref --help: \"-q, --quiet\""
+            }
+          },
+          "--short": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git symbolic-ref --help: \"or: git symbolic-ref [-q] [--short] [--no-recurse] \u003cname\u003e\""
+            }
+          },
+          "-q": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git symbolic-ref --help: \"or: git symbolic-ref [-q] [--short] [--no-recurse] \u003cname\u003e\""
+            }
+          }
+        },
+        "positionals": {
+          "leading": [
+            {
+              "kind": "literal"
+            }
+          ],
+          "rest": {
+            "kind": "unmodeled"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "git symbolic-ref --help: \"usage: git symbolic-ref [-m \u003creason\u003e] \u003cname\u003e \u003cref\u003e or: git symbolic-ref [-q] [--short] [--no-recurse] \u003cname\u003e or: git symbolic-ref --delete [-q] \u003cname\u003e\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "path-read"
+            },
+            "target": ".git",
+            "citation": {
+              "source": "git symbolic-ref --help: \"usage: git symbolic-ref [-m \u003creason\u003e] \u003cname\u003e \u003cref\u003e or: git symbolic-ref [-q] [--short] [--no-recurse] \u003cname\u003e or: git symbolic-ref --delete [-q] \u003cname\u003e\" -- documents the command whose implicit effect (target \".git\", role \"path-read\") is derived from this synopsis"
             }
           }
         ],

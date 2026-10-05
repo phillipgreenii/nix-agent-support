@@ -7,6 +7,7 @@ import (
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmddesc"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
+	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hooktypes"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/patheval"
 )
 
@@ -399,6 +400,16 @@ func (b *builder) interpret(i int, reg cmddesc.Registry, ctx cmddesc.Context, ch
 	}
 
 	for _, r := range leaf.Redirections {
+		// pg2-cjfpy.2: a redirect to one of the standard device sinks
+		// (/dev/null, /dev/stdout, /dev/stderr, /dev/tty, /dev/fd/N) carries
+		// no data anywhere — the old engine short-circuited exactly these
+		// (hooktypes.IsSafeRedirectTarget, pg2-9ctmb) because the path
+		// evaluator classifies them "zone unknown", which made every
+		// `2>/dev/null` / `>/dev/null 2>&1` demote an otherwise-approved
+		// command to abstain. A live expansion is never a known device.
+		if !r.LiveExpansion && hooktypes.IsSafeRedirectTarget(r.Path) {
+			continue
+		}
 		effects = append(effects, redirectionEffect(r.Path, r.Operator, r.Kind.IsWrite(), r.Kind.IsReadWrite(), r.LiveExpansion, r.Append))
 	}
 

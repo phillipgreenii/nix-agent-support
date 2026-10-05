@@ -154,8 +154,8 @@ func TestSpecDriftCommandNamesCoversRealEmbeddedSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CommandNames(embeddedspecs.FS): %v", err)
 	}
-	if len(names) != 48 {
-		t.Fatalf("CommandNames(embeddedspecs.FS) = %d names, want 48: %v", len(names), names)
+	if len(names) != 77 {
+		t.Fatalf("CommandNames(embeddedspecs.FS) = %d names, want 77 (46 original built-ins + pn/pnwf from pg2-cjfpy.3 + 29 more plugin-instructed names from pg2-cjfpy.2): %v", len(names), names)
 	}
 	want := map[string]bool{"bash": false, "sh": false, "[": false, "cd": false, "export": false}
 	for _, n := range names {
@@ -199,6 +199,13 @@ func TestIsExemptByPlatform(t *testing.T) {
 		{"linux", "ps", false},
 		{"linux", "pgrep", false},
 		{"darwin", "bash", false},
+		// pg2-cjfpy.2: plugin helper scripts (no on-PATH binary), launchctl
+		// (macOS system tool) and man (implementation differs per platform).
+		{"linux", "create-packet.sh", true},
+		{"darwin", "impl-traces.sh", true},
+		{"linux", "launchctl", true},
+		{"darwin", "man", true},
+		{"linux", "rg", false},
 	}
 	for _, c := range cases {
 		if got := IsExempt(c.goos, c.name); got != c.want {

@@ -2,6 +2,7 @@ package cmddesc
 
 import (
 	"reflect"
+	"sort"
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
@@ -258,11 +259,23 @@ func TestExportNUnexportUnknownFlag(t *testing.T) {
 }
 
 func TestRegistryNames(t *testing.T) {
+	// The pre-pg2-cjfpy.2 registry, then the plugin-instructed additions
+	// (registry_plugin_tools.go): kept as two lists so a reader can see which
+	// names are the original core and which the epic added.
 	want := []string{
 		"[", "awk", "bash", "bd", "cat", "cd", "cp", "curl", "devbox", "echo", "export", "false", "find", "gawk", "git", "go", "gofmt", "grep",
 		"head", "jq", "just", "kubectl", "ls", "mkdir", "nix", "npm", "pgrep", "pn", "pnwf", "printf", "ps", "rm", "rtk", "scp", "sed", "sh", "sleep", "sort", "ssh", "tail", "tee",
 		"test", "treefmt", "true", "wc", "which", "xargs", "yq",
 	}
+	want = append(
+		want,
+		"audit-docket-label-leak.sh", "bats", "bgcheck", "capture-prefix-snapshots.sh", "chunk-for-bd-field.sh",
+		"claude-extended-tool-approver", "create-packet.sh", "du", "fd", "gh", "handoff-create", "impl-traces.sh",
+		"integrate-branch-support", "launchctl", "lsof", "man", "name-collisions.sh", "pg-ccaudit", "pg-go-mutate",
+		"pg-hooks", "pg-wi-flow", "prek", "relocation-check.sh", "resolve-imports.sh", "rg", "self-checks.sh",
+		"session-mode", "trace-extract.sh", "wtdone",
+	)
+	sort.Strings(want)
 	if got := DefaultRegistry().Names(); !reflect.DeepEqual(got, want) {
 		t.Errorf("names = %v, want %v", got, want)
 	}

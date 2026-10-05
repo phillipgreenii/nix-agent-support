@@ -2781,7 +2781,8 @@
               # packet tc-o14i5.4.2: runs the new `spec-drift-check
               # --embedded` CLI subcommand (internal/specdrift,
               # cmd_spec_drift_check.go) in its default --check mode over
-              # packet 1.2's 46 embedded built-in command specs
+              # packet 1.2's 46 embedded built-in command specs plus the 30
+              # plugin-instructed ones pg2-cjfpy.2 added
               # (internal/embeddedspecs/data/*.json), comparing each
               # command's LIVE --help output (SHA-256 hash) against the
               # committed, embedded internal/embeddedspecs/data/help-hashes.json
@@ -2820,14 +2821,40 @@
                       pkgs.yq-go # yq (mikefarah) -- see internal/embeddedspecs/data/yq.json's own provenance
                       pkgs.bash # bash, sh
                       pkgs.nix
+                      # pg2-cjfpy.2: the plugin-instructed CLIs now embedded as built-in
+                      # specs (cmddesc/registry_plugin_tools.go). Third-party:
+                      pkgs.gh
+                      pkgs.bats
+                      pkgs.ripgrep # rg
+                      pkgs.fd
+                      pkgs.lsof
+                      pkgs.prek
+                      # This repo's own CLIs (overlay attrs; bgcheck ships in bg-tools):
+                      pkgs.bg-tools # bgcheck
+                      pkgs.integrate-branch-support
+                      pkgs.wtdone
+                      pkgs.handoff-create
+                      pkgs.session-mode
+                      pkgs.pg-wi-flow
+                      pkgs.pg-ccaudit
+                      pkgs.claude-extended-tool-approver
+                      # Not on this PATH by design (specdrift.Exempt/IsExempt): launchctl (macOS
+                      # system tool), man (per-platform implementation), and every *.sh plugin
+                      # helper script (a repo file resolved by relative path, no binary).
                     ]
-                    # pn / pnwf (pg2-cjfpy.3): built in repo-base, which publishes
-                    # them for x86_64-linux + aarch64-darwin only, so they are
-                    # added where present (this check is expected to fail on a
+                    # pn / pnwf (pg2-cjfpy.3) and pg-hooks / pg-go-mutate (pg2-cjfpy.2): built in
+                    # repo-base, which publishes them for x86_64-linux + aarch64-darwin only, so
+                    # they are added where present (this check is expected to fail on a
                     # system repo-base does not publish: "binary not on PATH").
                     ++ pkgs.lib.optional (
                       (phillipgreenii-nix-base.packages.${pkgs.stdenv.hostPlatform.system} or { }) ? pn
                     ) phillipgreenii-nix-base.packages.${pkgs.stdenv.hostPlatform.system}.pn
+                    ++ pkgs.lib.optional (
+                      (phillipgreenii-nix-base.packages.${pkgs.stdenv.hostPlatform.system} or { }) ? pg-hooks
+                    ) phillipgreenii-nix-base.packages.${pkgs.stdenv.hostPlatform.system}.pg-hooks
+                    ++ pkgs.lib.optional (
+                      (phillipgreenii-nix-base.packages.${pkgs.stdenv.hostPlatform.system} or { }) ? pg-go-mutate
+                    ) phillipgreenii-nix-base.packages.${pkgs.stdenv.hostPlatform.system}.pg-go-mutate
                     ++ pkgs.lib.optional (pkgs ? pnwf) pkgs.pnwf
                     ++ [
                       # No top-level bd/rtk overlay attr in THIS standalone flake --

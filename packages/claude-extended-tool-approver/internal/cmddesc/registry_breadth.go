@@ -44,15 +44,39 @@ package cmddesc
 // subcommands are Unknown whatever their flags, so they are inert too — a
 // flag cannot make a consent-requiring write need MORE than consent. An
 // unlisted subcommand (`bd config`, `bd epic`, ...) is an unmodeled
-// subcommand => Abstain. Global flags: `-C`/`--directory` (chdir) and
-// `--profile` (writes a profile file) are deliberately unmodeled. Verified
-// against this host's `bd --help` (beads with Dolt backend).
+// subcommand => Abstain. Global flags: `-C`/`--directory` ("Change to this
+// directory before running the command (like git -C)") is the per-command
+// working-directory role (CommandDir, pg2-cjfpy.2): a metadata read of the
+// directory plus a re-base of the verb's relative file operands, never a
+// shell chdir. `--profile` (writes a profile file) stays deliberately
+// unmodeled. Verified against this host's `bd --help` (beads with Dolt
+// backend).
+//
+// # Skill-instructed tracker writes (pg2-cjfpy.2)
+//
+// Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy, verbatim):
+// "any command which is supposed to work as part of a skill should be
+// autoapproved". The bd verbs the first-party skills/commands/agents
+// instruct for ordinary tracker bookkeeping — create, update, close,
+// comment, q, defer, undefer, `dep add`, `label add|remove`, `comments add`
+// — carry Operation "tracker-write" (effectpolicy.RemoteMutation: Permitted
+// for the beads resource). Every OTHER mutating verb keeps "mutate"
+// (consent, i.e. abstain): reopen/assign/note/delete/priority/tag/..., the
+// destructive or bulk ones (import, restore, flatten, gc, compact, batch,
+// forget), and the Dolt server/VCS group (`bd dolt start|stop|killall` stay
+// "dolt-server" with the operator's no-rogue-server invariant; `bd dolt
+// commit|push|pull|remote|set|clean-databases` stay "mutate"). A file-reading
+// flag of a tracker-write verb (--body-file, --design-file, --file,
+// --reason-file, --graph, --metadata @file) is a modeled path read so a
+// secret path cannot be smuggled into an issue body.
 var bdSchema = CommandSchema{
 	Name:       "bd",
 	Provenance: "bd --help (beads, Dolt backend, this host 2026-09-07)",
 	Flags: map[string]FlagSpec{
 		"--actor":            literal1,
 		"--db":               {Arity: ArityOne, Operand: PathRead},
+		"-C":                 {Arity: ArityOne, Operand: CommandDir},
+		"--directory":        {Arity: ArityOne, Operand: CommandDir},
 		"--dolt-auto-commit": literal1,
 		"--global":           inert,
 		"--json":             inert,
@@ -68,21 +92,24 @@ var bdSchema = CommandSchema{
 	Subcommands:  bdSubcommands(),
 }
 
-// bdSubcommands builds the dispatch table from three verb lists so the
+// bdSubcommands builds the dispatch table from verb lists so the
 // classification of every verb is visible in one place.
 func bdSubcommands() map[string]CommandSchema {
 	m := map[string]CommandSchema{}
 	for _, v := range []string{
-		"list", "show", "ready", "search", "count", "query", "children", "comments",
+		"list", "show", "ready", "search", "count", "query", "children",
 		"graph", "history", "stale", "status", "statuses", "types", "info", "where",
-		"context", "human", "quickstart", "prime", "onboard", "memories", "recall",
-		"state", "lint", "export",
+		"context", "quickstart", "prime", "onboard", "memories", "recall",
+		"state", "lint", "export", "stats", "version",
 	} {
 		m[v] = bdRemote(v, "read")
 	}
+	for _, v := range []string{"create", "update", "close", "comment", "q", "defer", "undefer"} {
+		m[v] = bdRemote(v, "tracker-write")
+	}
 	for _, v := range []string{
-		"create", "update", "close", "reopen", "assign", "comment", "note", "delete",
-		"priority", "tag", "link", "promote", "q", "set-state", "todo", "duplicate",
+		"reopen", "assign", "note", "delete",
+		"priority", "tag", "link", "promote", "set-state", "todo", "duplicate",
 		"duplicates", "supersede", "swarm", "batch", "import", "backup", "restore",
 		"compact", "flatten", "gc", "doctor", "bootstrap", "init", "hooks", "forget",
 		"remember", "setup", "kv", "merge-slot", "gate", "branch", "federation", "vc",
@@ -92,18 +119,29 @@ func bdSubcommands() map[string]CommandSchema {
 	}
 	m["dep"] = bdNested("dep", map[string]string{
 		"list": "read", "tree": "read", "cycles": "read",
-		"add": "mutate", "remove": "mutate", "relate": "mutate", "unrelate": "mutate",
-	})
+		"add": "tracker-write", "remove": "mutate", "relate": "mutate", "unrelate": "mutate",
+	}, "")
 	m["label"] = bdNested("label", map[string]string{
 		"list": "read", "list-all": "read",
-		"add": "mutate", "remove": "mutate", "propagate": "mutate",
-	})
+		"add": "tracker-write", "remove": "tracker-write", "propagate": "mutate",
+	}, "")
+	// `bd comments <id>` LISTS; `bd comments add <id> "text"` WRITES. The
+	// default subcommand keeps the bare list form a read while the add verb
+	// is judged on its own (it used to be flat-classified "read", which made
+	// the write form look like a read).
+	m["comments"] = bdNested("comments", map[string]string{
+		"list": "read", "add": "tracker-write",
+	}, "list")
+	// `bd human list|stats` read; respond/dismiss close or comment on a bead.
+	m["human"] = bdNested("human", map[string]string{
+		"list": "read", "stats": "read", "respond": "mutate", "dismiss": "mutate",
+	}, "list")
 	m["dolt"] = bdNested("dolt", map[string]string{
 		"show": "read", "status": "read", "test": "read",
 		"start": "dolt-server", "stop": "dolt-server", "killall": "dolt-server",
 		"commit": "mutate", "push": "mutate", "pull": "mutate", "remote": "mutate",
 		"set": "mutate", "clean-databases": "mutate",
-	})
+	}, "")
 	return m
 }
 
@@ -111,6 +149,33 @@ func bdSubcommands() map[string]CommandSchema {
 // query, a title), and the verb's whole effect is the implicit remote
 // operation on the beads database.
 func bdRemote(name, operation string) CommandSchema {
+	return bdRemoteIn("", name, operation)
+}
+
+// bdFileFlags are, per tracker-write verb (keyed "parent name" or "name"),
+// the flags bd's own `--help` documents as reading a FILE whose content lands
+// in the issue ("--body-file string  Read description from file (use - for
+// stdin)", "--file string  Read comment text from file", ...). Each is a
+// modeled path READ so a secret path is refused by PathAccessPolicy instead of
+// riding an inert unknown flag; a flag a verb does not have is not listed for
+// it. `--metadata` (JSON string or @file.json) is the data-or-@file role.
+// `bd close -f` is --force (NOT a file) and `bd create -f` is --file.
+var bdFileFlags = map[string][]string{
+	"create":       {"--body-file", "--design-file", "--file", "-f", "--graph"},
+	"update":       {"--body-file", "--design-file"},
+	"comment":      {"--file"},
+	"comments add": {"--file", "-f"},
+	"close":        {"--reason-file"},
+	"dep add":      {"--file"},
+}
+
+// bdMetadataVerbs take --metadata (JSON string or @file.json).
+var bdMetadataVerbs = map[string]bool{"create": true, "update": true}
+
+// bdRemoteIn is bdRemote for a verb nested under parent ("" for a top-level
+// verb), so nested verbs sharing a name (dep add / label add / comments add)
+// get their own flag tables.
+func bdRemoteIn(parent, name, operation string) CommandSchema {
 	stdout := StdoutMetadata
 	if operation == "read" {
 		stdout = StdoutContent // issue text flows: `bd show x | curl -d @-` must reach the flow policy
@@ -119,10 +184,36 @@ func bdRemote(name, operation string) CommandSchema {
 	if operation == "dolt-server" {
 		target = "dolt"
 	}
+	// -C/--directory is a persistent bd flag: it may follow the verb as well
+	// as precede it (`bd show x -C /repo`).
+	flags := map[string]FlagSpec{
+		"-C":          {Arity: ArityOne, Operand: CommandDir},
+		"--directory": {Arity: ArityOne, Operand: CommandDir},
+	}
+	if operation == "tracker-write" {
+		key := name
+		if parent != "" {
+			key = parent + " " + name
+		}
+		for _, f := range bdFileFlags[key] {
+			flags[f] = FlagSpec{Arity: ArityOne, Operand: PathRead}
+		}
+		if bdMetadataVerbs[key] {
+			flags["--metadata"] = FlagSpec{Arity: ArityOne, Operand: DataOrAtFile}
+		}
+	}
+	if name == "export" {
+		// `bd export -o <file>` writes the JSONL export to an arbitrary path
+		// (bd export --help: "bd export -o issues.jsonl # Export issues to
+		// file"); it was filed under the read verbs with -o an inert unknown
+		// flag, so `bd export -o /etc/x` looked like a read. pg2-cjfpy.2.
+		flags["-o"] = FlagSpec{Arity: ArityOne, Operand: PathTruncate}
+		flags["--output"] = FlagSpec{Arity: ArityOne, Operand: PathTruncate}
+	}
 	return CommandSchema{
 		Name:       name,
 		Provenance: "bd " + name + " --help",
-		Flags:      map[string]FlagSpec{},
+		Flags:      flags,
 		Positionals: PositionalSpec{
 			Rest: Literal,
 		},
@@ -136,19 +227,25 @@ func bdRemote(name, operation string) CommandSchema {
 	}
 }
 
-// bdNested is a bd verb with its own subcommands (dep, label, dolt).
-func bdNested(name string, verbs map[string]string) CommandSchema {
+// bdNested is a bd verb with its own subcommands (dep, label, dolt, comments,
+// human). defaultSub, when non-empty, names the subcommand a bare first
+// positional falls through to (CommandSchema.DefaultSubcommand).
+func bdNested(name string, verbs map[string]string, defaultSub string) CommandSchema {
 	subs := map[string]CommandSchema{}
 	for v, op := range verbs {
-		subs[v] = bdRemote(v, op)
+		subs[v] = bdRemoteIn(name, v, op)
 	}
 	return CommandSchema{
-		Name:         name,
-		Provenance:   "bd " + name + " --help",
-		Flags:        map[string]FlagSpec{},
-		UnknownFlag:  UnknownFlagInsufficient,
-		EndOfOptions: true,
-		Subcommands:  subs,
+		Name:       name,
+		Provenance: "bd " + name + " --help",
+		Flags: map[string]FlagSpec{
+			"-C":          {Arity: ArityOne, Operand: CommandDir},
+			"--directory": {Arity: ArityOne, Operand: CommandDir},
+		},
+		UnknownFlag:       UnknownFlagInsufficient,
+		EndOfOptions:      true,
+		Subcommands:       subs,
+		DefaultSubcommand: defaultSub,
 	}
 }
 
@@ -2004,16 +2101,19 @@ var devboxRunSchema = CommandSchema{
 // family policy already lives in, not a parsing concern this package should
 // own.
 //
-// nixSchema only models the "run" subcommand (the target this sub-slice's
-// job names); every other nix subcommand (build, develop, shell, flake,
-// eval, ...) is DELIBERATELY ABSENT — falls through to interpretSubcommand's
-// own "unmodeled subcommand" Insufficiency, the SAME scope decision
-// npmSchema/devboxSchema make for their own tool's much larger CLI surface.
-// `nix build`/`nix flake check`/`nix eval` etc. are read-plus-daemon-side-
-// store-writes territory (tc-vn5z's own 2026-09-07 design note, item 3) —
-// a DIFFERENT effect shape from a wrapper's verb dispatch, and explicitly
-// named there as a gap this sub-slice does not close (no declared
-// deletable.Kind for the Nix store exists either). `nix shell ... -c <cmd>`
+// nixSchema models the "run" subcommand (the target this sub-slice's job
+// names) and — added by pg2-cjfpy.2, see registry_plugin_tools.go's
+// nixBuildSchema/nixFlakeSchema — `nix build` and `nix flake
+// check|update|lock` of the LOCAL flake (closed to "." / ".#attr"
+// installables, KindExec in a trusted checkout). Every other nix subcommand
+// (develop, shell, eval, ...) is DELIBERATELY ABSENT — falls through to
+// interpretSubcommand's own "unmodeled subcommand" Insufficiency, the SAME
+// scope decision npmSchema/devboxSchema make for their own tool's much larger
+// CLI surface. `nix eval` etc. are read-plus-daemon-side-store-writes
+// territory (tc-vn5z's own 2026-09-07 design note, item 3) — a DIFFERENT
+// effect shape from a wrapper's verb dispatch, and explicitly named there as
+// a gap this sub-slice does not close (no declared deletable.Kind for the Nix
+// store exists either). `nix shell ... -c <cmd>`
 // is ALSO deliberately out of scope: production's own internal/rules/nix
 // already handles it by a DIFFERENT mechanism entirely (recursively
 // evaluating the inner `-c` command as a shell-dialect child, the same
@@ -2041,6 +2141,10 @@ var nixSchema = CommandSchema{
 	EndOfOptions: true,
 	Subcommands: map[string]CommandSchema{
 		"run": nixRunSchema,
+		// pg2-cjfpy.2: `nix build` and `nix flake check|update|lock` of the
+		// LOCAL flake — see registry_plugin_tools.go.
+		"build": nixBuildSchema,
+		"flake": nixFlakeSchema,
 	},
 }
 

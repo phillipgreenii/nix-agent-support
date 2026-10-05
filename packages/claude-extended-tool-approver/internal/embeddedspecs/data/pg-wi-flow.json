@@ -1,0 +1,1293 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "pg-wi-flow",
+  "command": {
+    "name": "pg-wi-flow",
+    "provenance": "pg-wi-flow --help ('bead-workflow CLI framework'), packages/pg-wi-flow/pg-wi-flow.sh, this repo 2026-10-05",
+    "citations": {
+      "provenance": {
+        "source": "pg-wi-flow --help: \"pg-wi-flow: bead-workflow CLI framework\""
+      },
+      "stdin": {
+        "source": "pg-wi-flow --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+      },
+      "stdout": {
+        "source": "pg-wi-flow --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
+      },
+      "unknownFlag": {
+        "source": "pg-wi-flow --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "flags": {
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pg-wi-flow --help: \"-h, --help Show this help message\""
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pg-wi-flow --help: \"-h, --help Show this help message\""
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "pg-wi-flow --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\""
+      }
+    },
+    "stdin": "never",
+    "stdout": "none",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true,
+    "subcommands": {
+      "claim": {
+        "name": "claim",
+        "provenance": "pg-wi-flow --help, claim (packages/pg-wi-flow/pg-wi-flow.sh), this repo 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "pg-wi-flow claim --help: \"pg-wi-flow: bead-workflow CLI framework\""
+          },
+          "stdin": {
+            "source": "pg-wi-flow claim --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "pg-wi-flow claim --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "pg-wi-flow claim --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow claim --help: \"-h, --help Show this help message\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow claim --help: \"-h, --help Show this help message\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-wi-flow claim --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "tracker-write"
+            },
+            "target": "beads",
+            "citation": {
+              "source": "pg-wi-flow claim --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" -- documents the command whose implicit effect (target \"beads\", role \"remote:tracker-write\") is derived from this synopsis"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "context": {
+        "name": "context",
+        "provenance": "pg-wi-flow --help, context (packages/pg-wi-flow/pg-wi-flow.sh), this repo 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "pg-wi-flow context --help: \"pg-wi-flow: bead-workflow CLI framework\""
+          },
+          "stdin": {
+            "source": "pg-wi-flow context --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "pg-wi-flow context --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "pg-wi-flow context --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--concern": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow context --help: \"context [--render] ID [--role reviewer --concern C | --role researcher --gap G]\""
+            }
+          },
+          "--gap": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow context --help: \"context [--render] ID [--role reviewer --concern C | --role researcher --gap G]\""
+            }
+          },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow context --help: \"-h, --help Show this help message\""
+            }
+          },
+          "--render": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow context --help: \"context [--render] ID [--role reviewer --concern C | --role researcher --gap G]\""
+            }
+          },
+          "--role": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow context --help: \"context [--render] ID [--role reviewer --concern C | --role researcher --gap G]\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow context --help: \"-h, --help Show this help message\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-wi-flow context --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "read"
+            },
+            "target": "beads",
+            "citation": {
+              "source": "pg-wi-flow context --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" -- documents the command whose implicit effect (target \"beads\", role \"remote:read\") is derived from this synopsis"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "docs": {
+        "name": "docs",
+        "provenance": "pg-wi-flow --help, docs (packages/pg-wi-flow/pg-wi-flow.sh), this repo 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "pg-wi-flow docs --help: \"pg-wi-flow: bead-workflow CLI framework\""
+          },
+          "stdin": {
+            "source": "pg-wi-flow docs --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "pg-wi-flow docs --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "pg-wi-flow docs --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow docs --help: \"-h, --help Show this help message\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow docs --help: \"-h, --help Show this help message\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-wi-flow docs --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "read"
+            },
+            "target": "beads",
+            "citation": {
+              "source": "pg-wi-flow docs --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" -- documents the command whose implicit effect (target \"beads\", role \"remote:read\") is derived from this synopsis"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "duplicates": {
+        "name": "duplicates",
+        "provenance": "pg-wi-flow --help, duplicates (packages/pg-wi-flow/pg-wi-flow.sh), this repo 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "pg-wi-flow duplicates --help: \"pg-wi-flow: bead-workflow CLI framework\""
+          },
+          "stdin": {
+            "source": "pg-wi-flow duplicates --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "pg-wi-flow duplicates --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "pg-wi-flow duplicates --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow duplicates --help: \"-h, --help Show this help message\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow duplicates --help: \"-h, --help Show this help message\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-wi-flow duplicates --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "read"
+            },
+            "target": "beads",
+            "citation": {
+              "source": "pg-wi-flow duplicates --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" -- documents the command whose implicit effect (target \"beads\", role \"remote:read\") is derived from this synopsis"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "escalate": {
+        "name": "escalate",
+        "provenance": "pg-wi-flow --help, escalate (packages/pg-wi-flow/pg-wi-flow.sh), this repo 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "pg-wi-flow escalate --help: \"pg-wi-flow: bead-workflow CLI framework\""
+          },
+          "stdin": {
+            "source": "pg-wi-flow escalate --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "pg-wi-flow escalate --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "pg-wi-flow escalate --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow escalate --help: \"-h, --help Show this help message\""
+            }
+          },
+          "--question": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow escalate --help: \"escalate ID [--question T --trigger t]...\""
+            }
+          },
+          "--trigger": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow escalate --help: \"escalate ID [--question T --trigger t]...\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow escalate --help: \"-h, --help Show this help message\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-wi-flow escalate --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "tracker-write"
+            },
+            "target": "beads",
+            "citation": {
+              "source": "pg-wi-flow escalate --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" -- documents the command whose implicit effect (target \"beads\", role \"remote:tracker-write\") is derived from this synopsis"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "explain": {
+        "name": "explain",
+        "provenance": "pg-wi-flow --help, explain (packages/pg-wi-flow/pg-wi-flow.sh), this repo 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "pg-wi-flow explain --help: \"pg-wi-flow: bead-workflow CLI framework\""
+          },
+          "stdin": {
+            "source": "pg-wi-flow explain --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "pg-wi-flow explain --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "pg-wi-flow explain --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow explain --help: \"-h, --help Show this help message\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow explain --help: \"-h, --help Show this help message\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-wi-flow explain --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "read"
+            },
+            "target": "beads",
+            "citation": {
+              "source": "pg-wi-flow explain --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" -- documents the command whose implicit effect (target \"beads\", role \"remote:read\") is derived from this synopsis"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "history": {
+        "name": "history",
+        "provenance": "pg-wi-flow --help, history (packages/pg-wi-flow/pg-wi-flow.sh), this repo 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "pg-wi-flow history --help: \"pg-wi-flow: bead-workflow CLI framework\""
+          },
+          "stdin": {
+            "source": "pg-wi-flow history --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "pg-wi-flow history --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "pg-wi-flow history --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow history --help: \"-h, --help Show this help message\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow history --help: \"-h, --help Show this help message\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-wi-flow history --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "read"
+            },
+            "target": "beads",
+            "citation": {
+              "source": "pg-wi-flow history --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" -- documents the command whose implicit effect (target \"beads\", role \"remote:read\") is derived from this synopsis"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "list": {
+        "name": "list",
+        "provenance": "pg-wi-flow --help, list (packages/pg-wi-flow/pg-wi-flow.sh), this repo 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "pg-wi-flow list --help: \"pg-wi-flow: bead-workflow CLI framework\""
+          },
+          "stdin": {
+            "source": "pg-wi-flow list --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "pg-wi-flow list --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "pg-wi-flow list --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--attended": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow list --help: \"query [--stage S]... [--attended]\""
+            }
+          },
+          "--days": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow list --help: \"[--stale --days N | --stale --reserved-hours H]\""
+            }
+          },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow list --help: \"-h, --help Show this help message\""
+            }
+          },
+          "--questions": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow list --help: \"list [--stage S]... [--attended] [--questions] [--unpooled]\""
+            }
+          },
+          "--reserved-hours": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow list --help: \"[--stale --days N | --stale --reserved-hours H]\""
+            }
+          },
+          "--stage": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow list --help: \"query [--stage S]... [--attended]\""
+            }
+          },
+          "--stale": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow list --help: \"[--stale --days N | --stale --reserved-hours H]\""
+            }
+          },
+          "--unpooled": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow list --help: \"list [--stage S]... [--attended] [--questions] [--unpooled]\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow list --help: \"-h, --help Show this help message\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-wi-flow list --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "read"
+            },
+            "target": "beads",
+            "citation": {
+              "source": "pg-wi-flow list --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" -- documents the command whose implicit effect (target \"beads\", role \"remote:read\") is derived from this synopsis"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "next": {
+        "name": "next",
+        "provenance": "pg-wi-flow --help, next (packages/pg-wi-flow/pg-wi-flow.sh), this repo 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "pg-wi-flow next --help: \"pg-wi-flow: bead-workflow CLI framework\""
+          },
+          "stdin": {
+            "source": "pg-wi-flow next --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "pg-wi-flow next --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "pg-wi-flow next --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow next --help: \"-h, --help Show this help message\""
+            }
+          },
+          "--id": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow next --help: \"next [--stage S]... | next --id ID\""
+            }
+          },
+          "--stage": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow next --help: \"query [--stage S]... [--attended]\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow next --help: \"-h, --help Show this help message\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-wi-flow next --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "tracker-write"
+            },
+            "target": "beads",
+            "citation": {
+              "source": "pg-wi-flow next --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" -- documents the command whose implicit effect (target \"beads\", role \"remote:tracker-write\") is derived from this synopsis"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "query": {
+        "name": "query",
+        "provenance": "pg-wi-flow --help, query (packages/pg-wi-flow/pg-wi-flow.sh), this repo 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "pg-wi-flow query --help: \"pg-wi-flow: bead-workflow CLI framework\""
+          },
+          "stdin": {
+            "source": "pg-wi-flow query --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "pg-wi-flow query --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "pg-wi-flow query --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--attended": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow query --help: \"query [--stage S]... [--attended]\""
+            }
+          },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow query --help: \"-h, --help Show this help message\""
+            }
+          },
+          "--stage": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow query --help: \"query [--stage S]... [--attended]\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow query --help: \"-h, --help Show this help message\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-wi-flow query --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "read"
+            },
+            "target": "beads",
+            "citation": {
+              "source": "pg-wi-flow query --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" -- documents the command whose implicit effect (target \"beads\", role \"remote:read\") is derived from this synopsis"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "release": {
+        "name": "release",
+        "provenance": "pg-wi-flow --help, release (packages/pg-wi-flow/pg-wi-flow.sh), this repo 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "pg-wi-flow release --help: \"pg-wi-flow: bead-workflow CLI framework\""
+          },
+          "stdin": {
+            "source": "pg-wi-flow release --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "pg-wi-flow release --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "pg-wi-flow release --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow release --help: \"-h, --help Show this help message\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow release --help: \"-h, --help Show this help message\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-wi-flow release --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "tracker-write"
+            },
+            "target": "beads",
+            "citation": {
+              "source": "pg-wi-flow release --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" -- documents the command whose implicit effect (target \"beads\", role \"remote:tracker-write\") is derived from this synopsis"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "resolve": {
+        "name": "resolve",
+        "provenance": "pg-wi-flow --help, resolve (packages/pg-wi-flow/pg-wi-flow.sh), this repo 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "pg-wi-flow resolve --help: \"pg-wi-flow: bead-workflow CLI framework\""
+          },
+          "stdin": {
+            "source": "pg-wi-flow resolve --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "pg-wi-flow resolve --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "pg-wi-flow resolve --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--abandon": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow resolve --help: \"--abandon --reason-code r | --defer d)\""
+            }
+          },
+          "--answer": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow resolve --help: \"resolve ID (--decision D --rationale R | --answer A |\""
+            }
+          },
+          "--decision": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow resolve --help: \"resolve ID (--decision D --rationale R | --answer A |\""
+            }
+          },
+          "--defer": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow resolve --help: \"--abandon --reason-code r | --defer d)\""
+            }
+          },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow resolve --help: \"-h, --help Show this help message\""
+            }
+          },
+          "--rationale": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow resolve --help: \"resolve ID (--decision D --rationale R | --answer A |\""
+            }
+          },
+          "--reason-code": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow resolve --help: \"--abandon --reason-code r | --defer d)\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow resolve --help: \"-h, --help Show this help message\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-wi-flow resolve --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "tracker-write"
+            },
+            "target": "beads",
+            "citation": {
+              "source": "pg-wi-flow resolve --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" -- documents the command whose implicit effect (target \"beads\", role \"remote:tracker-write\") is derived from this synopsis"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "round": {
+        "name": "round",
+        "provenance": "pg-wi-flow --help, round (packages/pg-wi-flow/pg-wi-flow.sh), this repo 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "pg-wi-flow round --help: \"pg-wi-flow: bead-workflow CLI framework\""
+          },
+          "stdin": {
+            "source": "pg-wi-flow round --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "pg-wi-flow round --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "pg-wi-flow round --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow round --help: \"-h, --help Show this help message\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-wi-flow round --help: \"-h, --help Show this help message\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-wi-flow round --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "tracker-write"
+            },
+            "target": "beads",
+            "citation": {
+              "source": "pg-wi-flow round --help: \"Usage: pg-wi-flow COMMAND [ARGS...]\" -- documents the command whose implicit effect (target \"beads\", role \"remote:tracker-write\") is derived from this synopsis"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      }
+    }
+  }
+}

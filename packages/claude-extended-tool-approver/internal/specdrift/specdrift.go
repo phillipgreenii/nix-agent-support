@@ -28,7 +28,21 @@ const HelpHashesFile = "help-hashes.json"
 var Exempt = map[string]bool{
 	"cd":     true,
 	"export": true,
+	// pg2-cjfpy.2: launchctl is a macOS system tool absent from a linux (and a
+	// nix-sandboxed darwin) PATH, and `man` is man-db on linux but a different
+	// implementation on darwin, so neither has ONE pinned --help text to hash —
+	// the same reason ps/pgrep are exempt per-platform below, here universal.
+	"launchctl": true,
+	"man":       true,
 }
+
+// ScriptSuffix marks a spec whose command is a plugin HELPER SCRIPT resolved
+// by repo-relative path (create-packet.sh, impl-traces.sh, ...). Such a script
+// is a file in the checkout, not an on-PATH binary, so there is no executable
+// to run `--help` against in the check sandbox: every name with this suffix is
+// exempt (pg2-cjfpy.2; the engine looks these up by script basename —
+// effectgraph/build.go's relative-argv0 path — see cmddesc.pluginScriptSchemas).
+const ScriptSuffix = ".sh"
 
 // ExemptOn names, per GOOS, the commands whose on-PATH binary in the nix
 // check sandbox is not the one the embedded spec models, so Record/Check
@@ -47,7 +61,7 @@ var ExemptOn = map[string]map[string]bool{
 // IsExempt reports whether name is exempt from capture/compare on goos:
 // either universally (Exempt) or for that platform only (ExemptOn).
 func IsExempt(goos, name string) bool {
-	return Exempt[name] || ExemptOn[goos][name]
+	return Exempt[name] || ExemptOn[goos][name] || strings.HasSuffix(name, ScriptSuffix)
 }
 
 // PlatformHashesFile returns the name of the per-GOOS overlay file

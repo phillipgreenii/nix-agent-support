@@ -9,12 +9,12 @@ import (
 // roleKindByName is the reverse of cmddesc.RoleKind.String(), built BY
 // CALLING that method over every known constant so the two directions can
 // never drift apart (there is exactly one place, cmddesc/schema.go, that
-// spells "path-read" etc.). KindLiteral..KindKeyMaterial are contiguous
+// spells "path-read" etc.). KindLiteral..KindAllowedLiteral are contiguous
 // iota values in cmddesc (verified 2026-09-29 against schema.go), so the
 // range loop below visits every one of them.
 var roleKindByName = func() map[string]cmddesc.RoleKind {
 	m := make(map[string]cmddesc.RoleKind)
-	for k := cmddesc.KindLiteral; k <= cmddesc.KindKeyMaterial; k++ {
+	for k := cmddesc.KindLiteral; k <= cmddesc.KindAllowedLiteral; k++ {
 		m[k.String()] = k
 	}
 	return m
@@ -27,10 +27,10 @@ func roleKindFromString(s string) (cmddesc.RoleKind, bool) {
 
 // transformKindByName is roleKindByName's TransformKind analogue — same
 // rationale, built from cmddesc.TransformKind.String().
-// TransformNone..TransformDeleteRef are contiguous iota values in cmddesc.
+// TransformNone..TransformRetargetRemote are contiguous iota values in cmddesc.
 var transformKindByName = func() map[string]cmddesc.TransformKind {
 	m := make(map[string]cmddesc.TransformKind)
-	for k := cmddesc.TransformNone; k <= cmddesc.TransformDeleteRef; k++ {
+	for k := cmddesc.TransformNone; k <= cmddesc.TransformRetargetRemote; k++ {
 		m[k.String()] = k
 	}
 	return m
@@ -164,7 +164,7 @@ func unknownFlagFromString(v string) (cmddesc.UnknownFlagPolicy, error) {
 }
 
 func roleToV1(r cmddesc.OperandRole) OperandRoleV1 {
-	return OperandRoleV1{Kind: r.Kind.String(), Dialect: r.Dialect, Operation: r.Operation}
+	return OperandRoleV1{Kind: r.Kind.String(), Dialect: r.Dialect, Operation: r.Operation, Set: r.Set}
 }
 
 func roleFromV1(r OperandRoleV1) (cmddesc.OperandRole, error) {
@@ -172,7 +172,7 @@ func roleFromV1(r OperandRoleV1) (cmddesc.OperandRole, error) {
 	if !ok {
 		return cmddesc.OperandRole{}, fmt.Errorf("specfmt: unknown role kind %q", r.Kind)
 	}
-	return cmddesc.OperandRole{Kind: k, Dialect: r.Dialect, Operation: r.Operation}, nil
+	return cmddesc.OperandRole{Kind: k, Dialect: r.Dialect, Operation: r.Operation, Set: r.Set}, nil
 }
 
 func rolesToV1(rs []cmddesc.OperandRole) []OperandRoleV1 {
@@ -210,7 +210,7 @@ func flagToV1(f cmddesc.FlagSpec, citation Citation) (FlagSpecV1, error) {
 		Arity:     arity,
 		Operand:   roleToV1(f.Operand),
 		Operands:  rolesToV1(f.Operands),
-		Transform: EffectTransformV1{Kind: f.Transform.Kind.String()},
+		Transform: EffectTransformV1{Kind: f.Transform.Kind.String(), From: f.Transform.From, To: f.Transform.To},
 		Citation:  citation,
 	}, nil
 }
@@ -236,7 +236,7 @@ func flagFromV1(f FlagSpecV1) (cmddesc.FlagSpec, error) {
 		Arity:     arity,
 		Operand:   operand,
 		Operands:  operands,
-		Transform: cmddesc.EffectTransform{Kind: tk},
+		Transform: cmddesc.EffectTransform{Kind: tk, From: f.Transform.From, To: f.Transform.To},
 	}, nil
 }
 

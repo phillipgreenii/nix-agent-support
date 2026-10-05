@@ -164,6 +164,12 @@ type interpState struct {
 	stdinToken bool
 	scanned    bool
 	insuff     string
+	// cmdDir/cmdDirSet/cmdDirDynamic record the per-command working
+	// directory a KindCommandDir operand (`git -C`, `bd -C`) established; see
+	// commandDir and rebaseUnderCommandDir.
+	cmdDir        string
+	cmdDirSet     bool
+	cmdDirDynamic bool
 }
 
 // scan is the flag pass: it walks the argv, records every modeled flag and
@@ -313,6 +319,10 @@ func (st *interpState) operand(op pendingOp, role OperandRole) {
 		st.chdir(op.tok, live, source)
 	case role.Kind == KindKeyMaterial:
 		st.effects = append(st.effects, Effect{Kind: EffectKeyMaterial, Path: op.tok, Dynamic: live, Source: source})
+	case role.Kind == KindCommandDir:
+		st.commandDir(op.tok, live, source)
+	case role.Kind == KindAllowedLiteral:
+		st.allowedLiteral(role, op.tok, live, source)
 	case role.Kind == KindLiteral, role.Kind == KindMessage:
 		// Inert: no effect. A live expansion in a literal slot is still inert —
 		// its value cannot change what the command touches.
@@ -337,6 +347,139 @@ func (st *interpState) chdir(target string, live bool, source string) {
 		Effect{Kind: EffectPath, Path: target, Access: AccessRead, Dynamic: dynamic, Source: source, Detail: detail},
 		Effect{Kind: EffectChdir, Path: target, Dynamic: dynamic, Source: source, Detail: detail},
 	)
+}
+
+// commandDirDetail tags the metadata PathRead a KindCommandDir operand emits
+// so rebaseUnderCommandDir never re-bases the directory against itself.
+const commandDirDetail = "command working directory"
+
+// commandDir records the per-command working directory (KindCommandDir) and
+// emits a metadata PathRead of it. Directories compose left to right like
+// git's own `-C a -C b` (a relative later one is relative to the earlier
+// one). A runtime-expanded directory (or any composition with one) is
+// remembered as dynamic, which rebaseUnderCommandDir turns into Dynamic
+// relative path effects.
+func (st *interpState) commandDir(target string, live bool, source string) {
+	dir := target
+	if st.cmdDirSet && !live && !path.IsAbs(target) && !strings.HasPrefix(target, "~") {
+		dir = path.Join(st.cmdDir, target)
+	}
+	st.cmdDir = dir
+	st.cmdDirSet = true
+	st.cmdDirDynamic = st.cmdDirDynamic || live
+	st.effects = append(st.effects, Effect{Kind: EffectPath, Path: target, Access: AccessRead, Dynamic: live, Source: source, Detail: commandDirDetail})
+}
+
+// rebaseUnderCommandDir re-bases the RELATIVE path effects in effects (those
+// the command's other operands produced) against the command working
+// directory, or makes them Dynamic when that directory is a runtime value.
+// Absolute and `~` paths, non-path effects and the command-dir read itself
+// are left alone. A no-op when no KindCommandDir operand was seen.
+func (st *interpState) rebaseUnderCommandDir(effects []Effect) []Effect {
+	if !st.cmdDirSet {
+		return effects
+	}
+	out := make([]Effect, len(effects))
+	copy(out, effects)
+	for i := range out {
+		e := &out[i]
+		if e.Kind != EffectPath || e.Detail == commandDirDetail || e.Dynamic {
+			continue
+		}
+		if path.IsAbs(e.Path) || strings.HasPrefix(e.Path, "~") {
+			continue
+		}
+		if st.cmdDirDynamic {
+			e.Dynamic = true
+			e.Detail = "command working directory unknown"
+			continue
+		}
+		e.Path = path.Join(st.cmdDir, e.Path)
+	}
+	return out
+}
+
+// allowedLiteralSets are the closed literal sets KindAllowedLiteral roles
+// name (OperandRole.Set). Each entry is a predicate over the exact token: no
+// case folding, no prefix, no pattern unless the predicate itself spells it
+// out — a value the predicate does not accept is insufficient, so a key or
+// value a tool learns tomorrow is excluded by construction (the closedness
+// is the security control, per the old engine's clearedConfigFlagPairs
+// rationale this table ports).
+var allowedLiteralSets = map[string]func(string) bool{
+	// "git-inert-config-pair": the `-c <key>=<value>` pairs git runs with no
+	// way to name a program or path. Provenance per entry (ported from the
+	// old engine's clearedConfigFlagPairs, internal/rules/git, each with its
+	// own operator ruling; none is a widening of another):
+	//   - core.fsmonitor=true|false: pg2-arfw6, operator spec S-2 of
+	//     2026-07-28 (boolean literal only; a non-boolean value names a hook
+	//     program and is NOT in this set).
+	//   - rerere.enabled=true|false: pg2-23z9w (2026-09-21); git documents it
+	//     as a plain boolean. Prescribed by integrate-branch:ff-merge-to-main
+	//     and integrate-branch:pull-request (`git -c rerere.enabled=false -C
+	//     <worktree> rebase <primary>`).
+	//   - core.editor / sequence.editor = "true" | ":": pg2-6qh3p, operator
+	//     ruling on pg2-agprs of 2026-08-13 (the INERT-VALUE editor carve-out:
+	//     `true(1)` and the shell no-op).
+	"git-inert-config-pair": inSet(
+		"core.fsmonitor=true", "core.fsmonitor=false",
+		"rerere.enabled=true", "rerere.enabled=false",
+		"core.editor=true", "core.editor=:",
+		"sequence.editor=true", "sequence.editor=:",
+	),
+	// "git-plain-refspec": a `git push` refspec that is neither a force
+	// (`+src:dst`) nor a delete (`:dst`) nor a glob — the operand shapes
+	// that turn an "ordinary" push into the unreviewable rewrites R6 rejects
+	// or abstains on (the old engine's pg2-bohpm incident: `push origin
+	// +main`, `push origin :main`). Anything else — `main`, `HEAD`,
+	// `feature:feature`, `HEAD:refs/heads/x` — is a plain ref update.
+	"git-plain-refspec": func(tok string) bool {
+		return tok != "" && !strings.HasPrefix(tok, "+") && !strings.HasPrefix(tok, ":") && !strings.Contains(tok, "*") && !strings.HasPrefix(tok, "-")
+	},
+	// "local-flake-installable": a nix installable that names THIS directory's
+	// own flake — "." or ".#<attr>" — the same two spellings the policy layer's
+	// installable-reference class recognises (effectpolicy.isLocalFlakeInstallable).
+	// A path, registry-indirect or URL flakeref (`../x`, `nixpkgs#hello`,
+	// `github:o/r`) is NOT accepted: it can point outside the project tree or
+	// trigger a remote fetch.
+	"local-flake-installable": func(tok string) bool {
+		return tok == "." || strings.HasPrefix(tok, ".#")
+	},
+}
+
+// inSet builds an exact-membership predicate.
+func inSet(members ...string) func(string) bool {
+	set := make(map[string]bool, len(members))
+	for _, m := range members {
+		set[m] = true
+	}
+	return func(tok string) bool { return set[tok] }
+}
+
+// LookupAllowedLiteralSet resolves a KindAllowedLiteral role's Set name. An
+// unknown name reports false so a loader can reject the spec (P13: named
+// references to Go-side tables MUST be rejected when unknown).
+func LookupAllowedLiteralSet(name string) (func(string) bool, bool) {
+	set, ok := allowedLiteralSets[name]
+	return set, ok
+}
+
+// allowedLiteral judges one KindAllowedLiteral operand: inert when the role's
+// set accepts it, insufficient otherwise (including a runtime expansion,
+// whose value is unknowable).
+func (st *interpState) allowedLiteral(role OperandRole, tok string, live bool, source string) {
+	if live {
+		st.fail("operand at %s is a runtime expansion where only a closed literal set (%s) is allowed", source, role.Set)
+		return
+	}
+	set, ok := LookupAllowedLiteralSet(role.Set)
+	if !ok {
+		st.fail("operand at %s names unknown literal set %q", source, role.Set)
+		return
+	}
+	if !set(tok) {
+		st.fail("operand %q at %s is not accepted by the closed literal set %s", tok, source, role.Set)
+	}
 }
 
 // dataOrAtFile applies the `@` convention: `@-` consumes stdin, `@path` reads
@@ -632,7 +775,7 @@ func (st *interpState) stdio() {
 // result applies the collected transforms generically, in flag order, and
 // packages the interpretation.
 func (st *interpState) result() Interpretation {
-	effects := st.effects
+	effects := st.rebaseUnderCommandDir(st.effects)
 	for _, t := range st.transforms {
 		var ok bool
 		effects, ok = applyTransform(t, effects)

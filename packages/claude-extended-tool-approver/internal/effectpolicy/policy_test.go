@@ -78,15 +78,23 @@ func TestPathAccessPolicy_Delete(t *testing.T) {
 	}
 }
 
-// TestRemoteMutationPolicy: dynamic is Unknown, "push" is Unknown (consent),
-// "force-push" and "delete-ref" are Forbidden, "dolt-server" defaults to
+// TestRemoteMutationPolicy: dynamic is Unknown, "push" is Permitted ONLY for
+// a plain configured remote name (ADR 0075 R6; a URL/path remote is Unknown),
+// "tracker-write" ONLY for the beads resource, "fetch" ONLY for a plain remote
+// name, the gh draft-first and pn workspace operations ONLY for their own
+// resources, "force-push"/"delete-ref"/"push-bulk"/"pr-create" are Forbidden,
+// "dolt-server" defaults to
 // Unknown and is Forbidden only when PolicyContext.RemoteLifecycle configures
 // the effect's Resource ("dolt") as "reject" (slice 3u, operator ruling on
 // tc-vn5z), and an unrecognised Operation fails closed to Unknown rather than
-// guessing. It never returns Permitted.
+// guessing. Permitted is returned for exactly the operations above and never
+// for "mutate".
 func TestRemoteMutationPolicy(t *testing.T) {
 	remote := func(op string, dynamic bool) cmddesc.Effect {
 		return cmddesc.Effect{Kind: cmddesc.EffectRemote, Resource: "origin", Operation: op, Dynamic: dynamic}
+	}
+	on := func(op, resource string) cmddesc.Effect {
+		return cmddesc.Effect{Kind: cmddesc.EffectRemote, Resource: resource, Operation: op}
 	}
 	cases := []struct {
 		name    string
@@ -95,9 +103,24 @@ func TestRemoteMutationPolicy(t *testing.T) {
 		verdict FindingVerdict
 	}{
 		{"dynamic resource", remote("push", true), PolicyContext{}, Unknown},
+		{"default-remote push permitted", cmddesc.Effect{Kind: cmddesc.EffectRemote, Resource: "<default-remote>", Operation: "push", Dynamic: true, Source: "implicit"}, PolicyContext{}, Permitted},
+		{"default-remote lease permitted", cmddesc.Effect{Kind: cmddesc.EffectRemote, Resource: "<default-remote>", Operation: "push-lease", Dynamic: true, Source: "implicit"}, PolicyContext{}, Permitted},
+		{"default-remote force still forbidden-class not permitted", cmddesc.Effect{Kind: cmddesc.EffectRemote, Resource: "<default-remote>", Operation: "force-push", Dynamic: true, Source: "implicit"}, PolicyContext{}, Unknown},
+		{"push to url unknown", on("push", "https://example.invalid/r.git"), PolicyContext{}, Unknown},
+		{"push to path unknown", on("push", "../other"), PolicyContext{}, Unknown},
+		{"push-lease to remote name permitted", on("push-lease", "origin"), PolicyContext{}, Permitted},
+		{"push-bulk forbidden", on("push-bulk", "origin"), PolicyContext{}, Forbidden},
+		{"fetch plain remote permitted", on("fetch", "origin"), PolicyContext{}, Permitted},
+		{"fetch url unknown", on("fetch", "https://example.invalid/r.git"), PolicyContext{}, Unknown},
+		{"fetch dynamic default unknown", cmddesc.Effect{Kind: cmddesc.EffectRemote, Resource: "<default-remote>", Operation: "fetch", Dynamic: true, Source: "implicit"}, PolicyContext{}, Unknown},
+		{"tracker-write on beads permitted", on("tracker-write", "beads"), PolicyContext{}, Permitted},
+		{"tracker-write on another resource unknown", on("tracker-write", "dolt"), PolicyContext{}, Unknown},
+		{"pr-create-draft on github permitted", on("pr-create-draft", "github"), PolicyContext{}, Permitted},
+		{"pr-create-draft elsewhere unknown", on("pr-create-draft", "gitlab"), PolicyContext{}, Unknown},
+		{"non-draft pr-create forbidden", on("pr-create", "github"), PolicyContext{}, Forbidden},
 		{"dynamic read is still unknown", remote("read", true), PolicyContext{}, Unknown},
 		{"read permitted", remote("read", false), PolicyContext{}, Permitted},
-		{"push needs consent", remote("push", false), PolicyContext{}, Unknown},
+		{"push to a configured remote permitted (R6)", remote("push", false), PolicyContext{}, Permitted},
 		{"mutate needs consent", remote("mutate", false), PolicyContext{}, Unknown},
 		{"force-push forbidden", remote("force-push", false), PolicyContext{}, Forbidden},
 		{"delete-ref forbidden", remote("delete-ref", false), PolicyContext{}, Forbidden},
@@ -111,8 +134,8 @@ func TestRemoteMutationPolicy(t *testing.T) {
 		if !applies || f.Verdict != tc.verdict {
 			t.Errorf("%s: applies=%v verdict=%s (%s), want %s", tc.name, applies, f.Verdict, f.Reason, tc.verdict)
 		}
-		if f.Verdict == Permitted && tc.e.Operation != "read" {
-			t.Errorf("%s: remote-mutation must never permit a non-read operation", tc.name)
+		if f.Verdict == Permitted && tc.e.Operation == "mutate" {
+			t.Errorf("%s: remote-mutation must never permit the consent-only \"mutate\" operation", tc.name)
 		}
 	}
 	if _, applies := (RemoteMutation{}).Judge(cmddesc.Effect{Kind: cmddesc.EffectPath, Path: "x"}, PolicyContext{}); applies {

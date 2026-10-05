@@ -1,0 +1,48 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "resolve-imports.sh",
+  "command": {
+    "name": "resolve-imports.sh",
+    "provenance": "resolve-imports.sh --help / header comment (behavior-docs INTER evaluator: resolves an imports table by UUID, read-only), this repo 2026-10-05",
+    "citations": {
+      "provenance": {
+        "source": "resolve-imports.sh --help: \"resolve-imports.sh — the mechanical core of the INTER evaluator (bead\""
+      },
+      "stdin": {
+        "source": "resolve-imports.sh --help: \"Usage: resolve-imports.sh \u003cowner-set-dir\u003e \u003cimplementer-set-dir\u003e\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+      },
+      "stdout": {
+        "source": "resolve-imports.sh --help: \"Usage: resolve-imports.sh \u003cowner-set-dir\u003e \u003cimplementer-set-dir\u003e\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+      },
+      "unknownFlag": {
+        "source": "resolve-imports.sh --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "positionals": {
+      "leading": [
+        {
+          "kind": "path-read"
+        },
+        {
+          "kind": "path-read"
+        }
+      ],
+      "rest": {
+        "kind": "unmodeled"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "resolve-imports.sh --help: \"Usage: resolve-imports.sh \u003cowner-set-dir\u003e \u003cimplementer-set-dir\u003e\""
+      }
+    },
+    "stdin": "never",
+    "stdout": "content",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

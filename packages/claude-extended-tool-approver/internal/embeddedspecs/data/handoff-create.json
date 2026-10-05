@@ -1,0 +1,198 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "handoff-create",
+  "command": {
+    "name": "handoff-create",
+    "provenance": "handoff-create --help ('Create a handoff bead correctly'), this host 2026-10-05",
+    "citations": {
+      "provenance": {
+        "source": "handoff-create --help: \"handoff-create: Create a handoff bead correctly (type, P0, title, body, metadata, labels)\""
+      },
+      "stdin": {
+        "source": "handoff-create --help: \"Usage: handoff-create (--attended | --unattended) --session-id ID --title TEXT --body-file FILE [--label L]... [--actor ID] [--bd-dir DIR]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+      },
+      "stdout": {
+        "source": "handoff-create --help: \"Usage: handoff-create (--attended | --unattended) --session-id ID --title TEXT --body-file FILE [--label L]... [--actor ID] [--bd-dir DIR]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+      },
+      "unknownFlag": {
+        "source": "handoff-create --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "flags": {
+      "--actor": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "handoff-create --help: \"--body-file FILE [--label L]... [--actor ID] [--bd-dir DIR]\""
+        }
+      },
+      "--attended": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "handoff-create --help: \"Usage: handoff-create (--attended | --unattended) --session-id ID --title TEXT\""
+        }
+      },
+      "--bd-dir": {
+        "arity": "one",
+        "operand": {
+          "kind": "path-read"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "handoff-create --help: \"--body-file FILE [--label L]... [--actor ID] [--bd-dir DIR]\""
+        }
+      },
+      "--body-file": {
+        "arity": "one",
+        "operand": {
+          "kind": "path-read"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "handoff-create --help: \"--body-file FILE [--label L]... [--actor ID] [--bd-dir DIR]\""
+        }
+      },
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "handoff-create --help: \"-h, --help Show this help message\""
+        }
+      },
+      "--label": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "handoff-create --help: \"--body-file FILE [--label L]... [--actor ID] [--bd-dir DIR]\""
+        }
+      },
+      "--session-id": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "handoff-create --help: \"Usage: handoff-create (--attended | --unattended) --session-id ID --title TEXT\""
+        }
+      },
+      "--title": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "handoff-create --help: \"Usage: handoff-create (--attended | --unattended) --session-id ID --title TEXT\""
+        }
+      },
+      "--unattended": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "handoff-create --help: \"Usage: handoff-create (--attended | --unattended) --session-id ID --title TEXT\""
+        }
+      },
+      "--version": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "handoff-create --help: \"-v, --version Show version information\""
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "handoff-create --help: \"-h, --help Show this help message\""
+        }
+      },
+      "-v": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "handoff-create --help: \"-v, --version Show version information\""
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "unmodeled"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "handoff-create --help: \"Usage: handoff-create (--attended | --unattended) --session-id ID --title TEXT --body-file FILE [--label L]... [--actor ID] [--bd-dir DIR]\""
+      }
+    },
+    "implicitEffects": [
+      {
+        "role": {
+          "kind": "remote",
+          "operation": "tracker-write"
+        },
+        "target": "beads",
+        "citation": {
+          "source": "handoff-create --help: \"Usage: handoff-create (--attended | --unattended) --session-id ID --title TEXT --body-file FILE [--label L]... [--actor ID] [--bd-dir DIR]\" -- documents the command whose implicit effect (target \"beads\", role \"remote:tracker-write\") is derived from this synopsis"
+        }
+      }
+    ],
+    "stdin": "never",
+    "stdout": "metadata",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

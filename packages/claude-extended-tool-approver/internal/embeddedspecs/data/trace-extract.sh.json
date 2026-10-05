@@ -1,0 +1,83 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "trace-extract.sh",
+  "command": {
+    "name": "trace-extract.sh",
+    "provenance": "trace-extract.sh --help / header comment (behavior-docs INTRA evaluator: INV-22 traceability extractor, read-only), this repo 2026-10-05",
+    "citations": {
+      "provenance": {
+        "source": "trace-extract.sh --help: \"trace-extract.sh — the mechanical INV-22 traceability extractor for ONE\""
+      },
+      "stdin": {
+        "source": "trace-extract.sh --help: \"Usage: trace-extract.sh [--strict] \u003cbehavior-docs-set-dir\u003e\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+      },
+      "stdout": {
+        "source": "trace-extract.sh --help: \"Usage: trace-extract.sh [--strict] \u003cbehavior-docs-set-dir\u003e\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+      },
+      "unknownFlag": {
+        "source": "trace-extract.sh --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "flags": {
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "trace-extract.sh --help: \"-h, --help Show this help message\""
+        }
+      },
+      "--strict": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "trace-extract.sh --help: \"Usage: trace-extract.sh [--strict] \u003cbehavior-docs-set-dir\u003e\""
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "trace-extract.sh --help: \"-h, --help Show this help message\""
+        }
+      }
+    },
+    "positionals": {
+      "leading": [
+        {
+          "kind": "path-read"
+        }
+      ],
+      "rest": {
+        "kind": "unmodeled"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "trace-extract.sh --help: \"Usage: trace-extract.sh [--strict] \u003cbehavior-docs-set-dir\u003e\""
+      }
+    },
+    "stdin": "never",
+    "stdout": "content",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

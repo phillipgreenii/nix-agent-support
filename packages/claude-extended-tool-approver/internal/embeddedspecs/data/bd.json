@@ -44,6 +44,18 @@
           "source": "bd --help: \"--db string Database path (default: auto-discover .beads/*.db). In proxied-server mode, a value that isn't an existing path is treated as a database name override (see --database)\""
         }
       },
+      "--directory": {
+        "arity": "one",
+        "operand": {
+          "kind": "command-dir"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "bd --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+        }
+      },
       "--dolt-auto-commit": {
         "arity": "one",
         "operand": {
@@ -152,6 +164,18 @@
           "source": "bd --help: \"-V, --version Print version information\""
         }
       },
+      "-C": {
+        "arity": "one",
+        "operand": {
+          "kind": "command-dir"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "bd --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+        }
+      },
       "-V": {
         "arity": "none",
         "operand": {
@@ -224,6 +248,32 @@
             "source": "bd assign --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd assign --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd assign --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
         "positionals": {
           "rest": {
             "kind": "literal"
@@ -269,6 +319,32 @@
           },
           "unknownFlag": {
             "source": "bd backup --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+          }
+        },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd backup --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd backup --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
           }
         },
         "positionals": {
@@ -318,6 +394,32 @@
             "source": "bd batch --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd batch --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd batch --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
         "positionals": {
           "rest": {
             "kind": "literal"
@@ -363,6 +465,32 @@
           },
           "unknownFlag": {
             "source": "bd bootstrap --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+          }
+        },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd bootstrap --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd bootstrap --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
           }
         },
         "positionals": {
@@ -412,6 +540,32 @@
             "source": "bd branch --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd branch --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd branch --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
         "positionals": {
           "rest": {
             "kind": "literal"
@@ -457,6 +611,32 @@
           },
           "unknownFlag": {
             "source": "bd children --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+          }
+        },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd children --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd children --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
           }
         },
         "positionals": {
@@ -506,6 +686,44 @@
             "source": "bd close --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd close --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "--reason-file": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd close --help: \"--reason-file string Read close reason from file (use - for stdin)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd close --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
         "positionals": {
           "rest": {
             "kind": "literal"
@@ -523,11 +741,11 @@
           {
             "role": {
               "kind": "remote",
-              "operation": "mutate"
+              "operation": "tracker-write"
             },
             "target": "beads",
             "citation": {
-              "source": "bd close --help: \"bd close [id...] [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
+              "source": "bd close --help: \"Usage: bd close [id...] [flags]\" -- documents the command whose implicit effect (target \"beads\", role \"remote:tracker-write\") is derived from this synopsis"
             }
           }
         ],
@@ -553,6 +771,44 @@
             "source": "bd comment --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd comment --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "--file": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd comment --help: \"bd comment bd-123 --file notes.txt\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd comment --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
         "positionals": {
           "rest": {
             "kind": "literal"
@@ -570,11 +826,11 @@
           {
             "role": {
               "kind": "remote",
-              "operation": "mutate"
+              "operation": "tracker-write"
             },
             "target": "beads",
             "citation": {
-              "source": "bd comment --help: \"bd comment \\u003cid\\u003e [text...] [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
+              "source": "bd comment --help: \"Usage: bd comment \u003cid\u003e [text...] [flags]\" -- documents the command whose implicit effect (target \"beads\", role \"remote:tracker-write\") is derived from this synopsis"
             }
           }
         ],
@@ -600,6 +856,32 @@
             "source": "bd comments --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd comments --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd comments --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
         "positionals": {
           "rest": {
             "kind": "literal"
@@ -613,22 +895,183 @@
             "source": "bd comments --help: \"bd comments [issue-id] [flags]\""
           }
         },
-        "implicitEffects": [
-          {
-            "role": {
-              "kind": "remote",
-              "operation": "read"
-            },
-            "target": "beads",
-            "citation": {
-              "source": "bd comments --help: \"bd comments [issue-id] [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
-            }
-          }
-        ],
         "stdin": "never",
-        "stdout": "content",
-        "unknownFlag": "inert",
-        "endOfOptions": true
+        "stdout": "none",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true,
+        "subcommands": {
+          "add": {
+            "name": "add",
+            "provenance": "bd add --help",
+            "citations": {
+              "provenance": {
+                "source": "bd comments add --help: \"Add a comment to an issue.\""
+              },
+              "stdin": {
+                "source": "bd comments add --help: \"Usage: bd comments add [issue-id] [text] [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+              },
+              "stdout": {
+                "source": "bd comments add --help: \"Usage: bd comments add [issue-id] [text] [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+              },
+              "unknownFlag": {
+                "source": "bd comments add --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized flag. \"inert\" is carried over from the pre-existing bd verb schema (a documented FACT MISMATCH: the live tool rejects an unrecognized flag), flag/role structure unchanged"
+              }
+            },
+            "flags": {
+              "--directory": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd comments add --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "--file": {
+                "arity": "one",
+                "operand": {
+                  "kind": "path-read"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd comments add --help: \"-f, --file string Read comment text from file\""
+                }
+              },
+              "-C": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd comments add --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "-f": {
+                "arity": "one",
+                "operand": {
+                  "kind": "path-read"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd comments add --help: \"bd comments add bd-123 -f notes.txt\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "bd comments add --help: \"Usage: bd comments add [issue-id] [text] [flags]\""
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "tracker-write"
+                },
+                "target": "beads",
+                "citation": {
+                  "source": "bd comments add --help: \"Usage: bd comments add [issue-id] [text] [flags]\" -- documents the command whose implicit effect (target \"beads\", role \"remote:tracker-write\") is derived from this synopsis"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "inert",
+            "endOfOptions": true
+          },
+          "list": {
+            "name": "list",
+            "provenance": "bd list --help",
+            "citations": {
+              "provenance": {
+                "source": "bd comments list --help: \"Invalid — use bd comments \u003cissue-id\u003e to list comments\""
+              },
+              "stdin": {
+                "source": "bd comments list --help: \"Usage: bd comments list [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+              },
+              "stdout": {
+                "source": "bd comments list --help: \"Usage: bd comments list [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+              },
+              "unknownFlag": {
+                "source": "bd comments list --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized flag. \"inert\" is carried over from the pre-existing bd verb schema (a documented FACT MISMATCH: the live tool rejects an unrecognized flag), flag/role structure unchanged"
+              }
+            },
+            "flags": {
+              "--directory": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd comments list --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "-C": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd comments list --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "bd comments list --help: \"Usage: bd comments list [flags]\""
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "read"
+                },
+                "target": "beads",
+                "citation": {
+                  "source": "bd comments list --help: \"Usage: bd comments list [flags]\" -- documents the command whose implicit effect (target \"beads\", role \"remote:read\") is derived from this synopsis"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "content",
+            "unknownFlag": "inert",
+            "endOfOptions": true
+          }
+        },
+        "defaultSubcommand": "list"
       },
       "compact": {
         "name": "compact",
@@ -645,6 +1088,32 @@
           },
           "unknownFlag": {
             "source": "bd compact --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+          }
+        },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd compact --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd compact --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
           }
         },
         "positionals": {
@@ -694,6 +1163,32 @@
             "source": "bd context --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd context --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd context --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
         "positionals": {
           "rest": {
             "kind": "literal"
@@ -739,6 +1234,32 @@
           },
           "unknownFlag": {
             "source": "bd count --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+          }
+        },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd count --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd count --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
           }
         },
         "positionals": {
@@ -788,6 +1309,104 @@
             "source": "bd create --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
+        "flags": {
+          "--body-file": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd create --help: \"--body-file string Read description from file (use - for stdin)\""
+            }
+          },
+          "--design-file": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd create --help: \"--design-file string Read design from file (use - for stdin)\""
+            }
+          },
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd create --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "--file": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd create --help: \"-f, --file string Create multiple issues from markdown file\""
+            }
+          },
+          "--graph": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd create --help: \"--graph string Create a graph of issues with dependencies from JSON plan file\""
+            }
+          },
+          "--metadata": {
+            "arity": "one",
+            "operand": {
+              "kind": "data-or-at-file"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd create --help: \"--metadata string Set custom metadata (JSON string or @file.json to read from file)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd create --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-f": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd create --help: \"-f, --file string Create multiple issues from markdown file\""
+            }
+          }
+        },
         "positionals": {
           "rest": {
             "kind": "literal"
@@ -805,11 +1424,11 @@
           {
             "role": {
               "kind": "remote",
-              "operation": "mutate"
+              "operation": "tracker-write"
             },
             "target": "beads",
             "citation": {
-              "source": "bd create --help: \"bd create [title] [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
+              "source": "bd create --help: \"Usage: bd create [title] [flags]\" -- documents the command whose implicit effect (target \"beads\", role \"remote:tracker-write\") is derived from this synopsis"
             }
           }
         ],
@@ -833,6 +1452,32 @@
           },
           "unknownFlag": {
             "source": "bd create-form --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+          }
+        },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd create-form --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd create-form --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
           }
         },
         "positionals": {
@@ -865,6 +1510,79 @@
         "unknownFlag": "inert",
         "endOfOptions": true
       },
+      "defer": {
+        "name": "defer",
+        "provenance": "bd defer --help",
+        "citations": {
+          "provenance": {
+            "source": "bd defer --help: \"Defer issues to put them on ice for later.\""
+          },
+          "stdin": {
+            "source": "bd defer --help: \"Usage: bd defer [id...] [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "bd defer --help: \"Usage: bd defer [id...] [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "bd defer --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized flag. \"inert\" is carried over from the pre-existing bd verb schema (a documented FACT MISMATCH: the live tool rejects an unrecognized flag), flag/role structure unchanged"
+          }
+        },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd defer --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd defer --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "bd defer --help: \"Usage: bd defer [id...] [flags]\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "tracker-write"
+            },
+            "target": "beads",
+            "citation": {
+              "source": "bd defer --help: \"Usage: bd defer [id...] [flags]\" -- documents the command whose implicit effect (target \"beads\", role \"remote:tracker-write\") is derived from this synopsis"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "metadata",
+        "unknownFlag": "inert",
+        "endOfOptions": true
+      },
       "delete": {
         "name": "delete",
         "provenance": "bd delete --help",
@@ -880,6 +1598,32 @@
           },
           "unknownFlag": {
             "source": "bd delete --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+          }
+        },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd delete --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd delete --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
           }
         },
         "positionals": {
@@ -929,6 +1673,32 @@
             "source": "bd dep --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd dep --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd dep --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
         "positionals": {
           "rest": {
             "kind": "literal"
@@ -964,6 +1734,44 @@
                 "source": "bd dep add --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
+            "flags": {
+              "--directory": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd dep add --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "--file": {
+                "arity": "one",
+                "operand": {
+                  "kind": "path-read"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd dep add --help: \"For bulk wiring, pass newline-delimited JSON with --file. Each line must be an\""
+                }
+              },
+              "-C": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd dep add --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              }
+            },
             "positionals": {
               "rest": {
                 "kind": "literal"
@@ -981,11 +1789,11 @@
               {
                 "role": {
                   "kind": "remote",
-                  "operation": "mutate"
+                  "operation": "tracker-write"
                 },
                 "target": "beads",
                 "citation": {
-                  "source": "bd dep add --help: \"bd dep add [issue-id] [depends-on-id] [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
+                  "source": "bd dep add --help: \"Usage: bd dep add [issue-id] [depends-on-id] [flags]\" -- documents the command whose implicit effect (target \"beads\", role \"remote:tracker-write\") is derived from this synopsis"
                 }
               }
             ],
@@ -1009,6 +1817,32 @@
               },
               "unknownFlag": {
                 "source": "bd dep cycles --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+              }
+            },
+            "flags": {
+              "--directory": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd dep cycles --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "-C": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd dep cycles --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
               }
             },
             "positionals": {
@@ -1058,6 +1892,32 @@
                 "source": "bd dep list --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
+            "flags": {
+              "--directory": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd dep list --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "-C": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd dep list --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              }
+            },
             "positionals": {
               "rest": {
                 "kind": "literal"
@@ -1103,6 +1963,32 @@
               },
               "unknownFlag": {
                 "source": "bd dep relate --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+              }
+            },
+            "flags": {
+              "--directory": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd dep relate --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "-C": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd dep relate --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
               }
             },
             "positionals": {
@@ -1152,6 +2038,32 @@
                 "source": "bd dep remove --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
+            "flags": {
+              "--directory": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd dep remove --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "-C": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd dep remove --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              }
+            },
             "positionals": {
               "rest": {
                 "kind": "literal"
@@ -1199,6 +2111,32 @@
                 "source": "bd dep tree --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
+            "flags": {
+              "--directory": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd dep tree --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "-C": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd dep tree --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              }
+            },
             "positionals": {
               "rest": {
                 "kind": "literal"
@@ -1244,6 +2182,32 @@
               },
               "unknownFlag": {
                 "source": "bd dep unrelate --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+              }
+            },
+            "flags": {
+              "--directory": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd dep unrelate --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "-C": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd dep unrelate --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
               }
             },
             "positionals": {
@@ -1295,6 +2259,32 @@
             "source": "bd doctor --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd doctor --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd doctor --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
         "positionals": {
           "rest": {
             "kind": "literal"
@@ -1342,6 +2332,32 @@
             "source": "bd dolt --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd dolt --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd dolt --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
         "positionals": {
           "rest": {
             "kind": "literal"
@@ -1375,6 +2391,32 @@
               },
               "unknownFlag": {
                 "source": "bd dolt clean-databases --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+              }
+            },
+            "flags": {
+              "--directory": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd dolt clean-databases --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "-C": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd dolt clean-databases --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
               }
             },
             "positionals": {
@@ -1424,6 +2466,32 @@
                 "source": "bd dolt commit --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
+            "flags": {
+              "--directory": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd dolt commit --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "-C": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd dolt commit --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              }
+            },
             "positionals": {
               "rest": {
                 "kind": "literal"
@@ -1469,6 +2537,32 @@
               },
               "unknownFlag": {
                 "source": "bd dolt killall --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+              }
+            },
+            "flags": {
+              "--directory": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd dolt killall --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "-C": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd dolt killall --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
               }
             },
             "positionals": {
@@ -1518,6 +2612,32 @@
                 "source": "bd dolt pull --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
+            "flags": {
+              "--directory": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd dolt pull --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "-C": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd dolt pull --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              }
+            },
             "positionals": {
               "rest": {
                 "kind": "literal"
@@ -1563,6 +2683,32 @@
               },
               "unknownFlag": {
                 "source": "bd dolt push --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+              }
+            },
+            "flags": {
+              "--directory": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd dolt push --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "-C": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd dolt push --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
               }
             },
             "positionals": {
@@ -1612,6 +2758,32 @@
                 "source": "bd dolt remote --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
+            "flags": {
+              "--directory": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd dolt remote --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "-C": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd dolt remote --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              }
+            },
             "positionals": {
               "rest": {
                 "kind": "literal"
@@ -1657,6 +2829,32 @@
               },
               "unknownFlag": {
                 "source": "bd dolt set --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+              }
+            },
+            "flags": {
+              "--directory": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd dolt set --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "-C": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd dolt set --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
               }
             },
             "positionals": {
@@ -1706,6 +2904,32 @@
                 "source": "bd dolt show --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
+            "flags": {
+              "--directory": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd dolt show --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "-C": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd dolt show --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              }
+            },
             "positionals": {
               "rest": {
                 "kind": "literal"
@@ -1751,6 +2975,32 @@
               },
               "unknownFlag": {
                 "source": "bd dolt start --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+              }
+            },
+            "flags": {
+              "--directory": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd dolt start --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "-C": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd dolt start --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
               }
             },
             "positionals": {
@@ -1800,6 +3050,32 @@
                 "source": "bd dolt status --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
+            "flags": {
+              "--directory": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd dolt status --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "-C": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd dolt status --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              }
+            },
             "positionals": {
               "rest": {
                 "kind": "literal"
@@ -1847,6 +3123,32 @@
                 "source": "bd dolt stop --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
+            "flags": {
+              "--directory": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd dolt stop --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "-C": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd dolt stop --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              }
+            },
             "positionals": {
               "rest": {
                 "kind": "literal"
@@ -1892,6 +3194,32 @@
               },
               "unknownFlag": {
                 "source": "bd dolt test --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+              }
+            },
+            "flags": {
+              "--directory": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd dolt test --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "-C": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd dolt test --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
               }
             },
             "positionals": {
@@ -1943,6 +3271,32 @@
             "source": "bd duplicate --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd duplicate --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd duplicate --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
         "positionals": {
           "rest": {
             "kind": "literal"
@@ -1988,6 +3342,32 @@
           },
           "unknownFlag": {
             "source": "bd duplicates --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+          }
+        },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd duplicates --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd duplicates --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
           }
         },
         "positionals": {
@@ -2037,6 +3417,32 @@
             "source": "bd edit --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd edit --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd edit --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
         "positionals": {
           "rest": {
             "kind": "literal"
@@ -2082,6 +3488,32 @@
           },
           "unknownFlag": {
             "source": "bd epic --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+          }
+        },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd epic --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd epic --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
           }
         },
         "positionals": {
@@ -2131,6 +3563,56 @@
             "source": "bd export --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd export --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "--output": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-truncate"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd export --help: \"-o, --output string Output file path (default: stdout)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd export --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-o": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-truncate"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd export --help: \"bd export -o issues.jsonl # Export issues to file\""
+            }
+          }
+        },
         "positionals": {
           "rest": {
             "kind": "literal"
@@ -2176,6 +3658,32 @@
           },
           "unknownFlag": {
             "source": "bd federation --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+          }
+        },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd federation --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd federation --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
           }
         },
         "positionals": {
@@ -2225,6 +3733,32 @@
             "source": "bd flatten --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd flatten --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd flatten --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
         "positionals": {
           "rest": {
             "kind": "literal"
@@ -2270,6 +3804,32 @@
           },
           "unknownFlag": {
             "source": "bd forget --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+          }
+        },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd forget --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd forget --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
           }
         },
         "positionals": {
@@ -2319,6 +3879,32 @@
             "source": "bd gate --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd gate --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd gate --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
         "positionals": {
           "rest": {
             "kind": "literal"
@@ -2364,6 +3950,32 @@
           },
           "unknownFlag": {
             "source": "bd gc --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+          }
+        },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd gc --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd gc --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
           }
         },
         "positionals": {
@@ -2413,6 +4025,32 @@
             "source": "bd graph --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd graph --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd graph --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
         "positionals": {
           "rest": {
             "kind": "literal"
@@ -2458,6 +4096,32 @@
           },
           "unknownFlag": {
             "source": "bd history --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+          }
+        },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd history --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd history --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
           }
         },
         "positionals": {
@@ -2507,6 +4171,32 @@
             "source": "bd hooks --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd hooks --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd hooks --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
         "positionals": {
           "rest": {
             "kind": "literal"
@@ -2554,6 +4244,32 @@
             "source": "bd human --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd human --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd human --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
         "positionals": {
           "rest": {
             "kind": "literal"
@@ -2567,22 +4283,305 @@
             "source": "bd human --help: \"bd human [flags]\""
           }
         },
-        "implicitEffects": [
-          {
-            "role": {
-              "kind": "remote",
-              "operation": "read"
-            },
-            "target": "beads",
-            "citation": {
-              "source": "bd human --help: \"bd human [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
-            }
-          }
-        ],
         "stdin": "never",
-        "stdout": "content",
-        "unknownFlag": "inert",
-        "endOfOptions": true
+        "stdout": "none",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true,
+        "subcommands": {
+          "dismiss": {
+            "name": "dismiss",
+            "provenance": "bd dismiss --help",
+            "citations": {
+              "provenance": {
+                "source": "bd human dismiss --help: \"Dismiss a human-needed bead permanently without responding.\""
+              },
+              "stdin": {
+                "source": "bd human dismiss --help: \"Usage: bd human dismiss \u003cissue-id\u003e [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+              },
+              "stdout": {
+                "source": "bd human dismiss --help: \"Usage: bd human dismiss \u003cissue-id\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+              },
+              "unknownFlag": {
+                "source": "bd human dismiss --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized flag. \"inert\" is carried over from the pre-existing bd verb schema (a documented FACT MISMATCH: the live tool rejects an unrecognized flag), flag/role structure unchanged"
+              }
+            },
+            "flags": {
+              "--directory": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd human dismiss --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "-C": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd human dismiss --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "bd human dismiss --help: \"Usage: bd human dismiss \u003cissue-id\u003e [flags]\""
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "mutate"
+                },
+                "target": "beads",
+                "citation": {
+                  "source": "bd human dismiss --help: \"Usage: bd human dismiss \u003cissue-id\u003e [flags]\" -- documents the command whose implicit effect (target \"beads\", role \"remote:mutate\") is derived from this synopsis"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "inert",
+            "endOfOptions": true
+          },
+          "list": {
+            "name": "list",
+            "provenance": "bd list --help",
+            "citations": {
+              "provenance": {
+                "source": "bd human list --help: \"List all issues labeled with 'human' tag.\""
+              },
+              "stdin": {
+                "source": "bd human list --help: \"Usage: bd human list [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+              },
+              "stdout": {
+                "source": "bd human list --help: \"Usage: bd human list [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+              },
+              "unknownFlag": {
+                "source": "bd human list --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized flag. \"inert\" is carried over from the pre-existing bd verb schema (a documented FACT MISMATCH: the live tool rejects an unrecognized flag), flag/role structure unchanged"
+              }
+            },
+            "flags": {
+              "--directory": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd human list --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "-C": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd human list --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "bd human list --help: \"Usage: bd human list [flags]\""
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "read"
+                },
+                "target": "beads",
+                "citation": {
+                  "source": "bd human list --help: \"Usage: bd human list [flags]\" -- documents the command whose implicit effect (target \"beads\", role \"remote:read\") is derived from this synopsis"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "content",
+            "unknownFlag": "inert",
+            "endOfOptions": true
+          },
+          "respond": {
+            "name": "respond",
+            "provenance": "bd respond --help",
+            "citations": {
+              "provenance": {
+                "source": "bd human respond --help: \"Respond to a human-needed bead by adding a comment and closing it.\""
+              },
+              "stdin": {
+                "source": "bd human respond --help: \"Usage: bd human respond \u003cissue-id\u003e [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+              },
+              "stdout": {
+                "source": "bd human respond --help: \"Usage: bd human respond \u003cissue-id\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+              },
+              "unknownFlag": {
+                "source": "bd human respond --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized flag. \"inert\" is carried over from the pre-existing bd verb schema (a documented FACT MISMATCH: the live tool rejects an unrecognized flag), flag/role structure unchanged"
+              }
+            },
+            "flags": {
+              "--directory": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd human respond --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "-C": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd human respond --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "bd human respond --help: \"Usage: bd human respond \u003cissue-id\u003e [flags]\""
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "mutate"
+                },
+                "target": "beads",
+                "citation": {
+                  "source": "bd human respond --help: \"Usage: bd human respond \u003cissue-id\u003e [flags]\" -- documents the command whose implicit effect (target \"beads\", role \"remote:mutate\") is derived from this synopsis"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "inert",
+            "endOfOptions": true
+          },
+          "stats": {
+            "name": "stats",
+            "provenance": "bd stats --help",
+            "citations": {
+              "provenance": {
+                "source": "bd human stats --help: \"Display summary statistics for human-needed beads.\""
+              },
+              "stdin": {
+                "source": "bd human stats --help: \"Usage: bd human stats [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+              },
+              "stdout": {
+                "source": "bd human stats --help: \"Usage: bd human stats [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+              },
+              "unknownFlag": {
+                "source": "bd human stats --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized flag. \"inert\" is carried over from the pre-existing bd verb schema (a documented FACT MISMATCH: the live tool rejects an unrecognized flag), flag/role structure unchanged"
+              }
+            },
+            "flags": {
+              "--directory": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd human stats --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "-C": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd human stats --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "bd human stats --help: \"Usage: bd human stats [flags]\""
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "read"
+                },
+                "target": "beads",
+                "citation": {
+                  "source": "bd human stats --help: \"Usage: bd human stats [flags]\" -- documents the command whose implicit effect (target \"beads\", role \"remote:read\") is derived from this synopsis"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "content",
+            "unknownFlag": "inert",
+            "endOfOptions": true
+          }
+        },
+        "defaultSubcommand": "list"
       },
       "import": {
         "name": "import",
@@ -2599,6 +4598,32 @@
           },
           "unknownFlag": {
             "source": "bd import --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+          }
+        },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd import --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd import --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
           }
         },
         "positionals": {
@@ -2648,6 +4673,32 @@
             "source": "bd info --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd info --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd info --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
         "positionals": {
           "rest": {
             "kind": "literal"
@@ -2693,6 +4744,32 @@
           },
           "unknownFlag": {
             "source": "bd init --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+          }
+        },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd init --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd init --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
           }
         },
         "positionals": {
@@ -2742,6 +4819,32 @@
             "source": "bd kv --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd kv --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd kv --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
         "positionals": {
           "rest": {
             "kind": "literal"
@@ -2789,6 +4892,32 @@
             "source": "bd label --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd label --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd label --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
         "positionals": {
           "rest": {
             "kind": "literal"
@@ -2824,6 +4953,32 @@
                 "source": "bd label add --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
+            "flags": {
+              "--directory": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd label add --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "-C": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd label add --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              }
+            },
             "positionals": {
               "rest": {
                 "kind": "literal"
@@ -2841,11 +4996,11 @@
               {
                 "role": {
                   "kind": "remote",
-                  "operation": "mutate"
+                  "operation": "tracker-write"
                 },
                 "target": "beads",
                 "citation": {
-                  "source": "bd label add --help: \"bd label add [issue-id...] [label[,label...]] [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
+                  "source": "bd label add --help: \"Usage: bd label add [issue-id...] [label] [flags]\" -- documents the command whose implicit effect (target \"beads\", role \"remote:tracker-write\") is derived from this synopsis"
                 }
               }
             ],
@@ -2869,6 +5024,32 @@
               },
               "unknownFlag": {
                 "source": "bd label list --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+              }
+            },
+            "flags": {
+              "--directory": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd label list --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "-C": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd label list --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
               }
             },
             "positionals": {
@@ -2918,6 +5099,32 @@
                 "source": "bd label list-all --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
+            "flags": {
+              "--directory": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd label list-all --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "-C": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd label list-all --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              }
+            },
             "positionals": {
               "rest": {
                 "kind": "literal"
@@ -2963,6 +5170,32 @@
               },
               "unknownFlag": {
                 "source": "bd label propagate --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+              }
+            },
+            "flags": {
+              "--directory": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd label propagate --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "-C": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd label propagate --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
               }
             },
             "positionals": {
@@ -3012,6 +5245,32 @@
                 "source": "bd label remove --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
               }
             },
+            "flags": {
+              "--directory": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd label remove --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              },
+              "-C": {
+                "arity": "one",
+                "operand": {
+                  "kind": "command-dir"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "bd label remove --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+                }
+              }
+            },
             "positionals": {
               "rest": {
                 "kind": "literal"
@@ -3029,11 +5288,11 @@
               {
                 "role": {
                   "kind": "remote",
-                  "operation": "mutate"
+                  "operation": "tracker-write"
                 },
                 "target": "beads",
                 "citation": {
-                  "source": "bd label remove --help: \"bd label remove [issue-id...] [label[,label...]] [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
+                  "source": "bd label remove --help: \"Usage: bd label remove [issue-id...] [label] [flags]\" -- documents the command whose implicit effect (target \"beads\", role \"remote:tracker-write\") is derived from this synopsis"
                 }
               }
             ],
@@ -3059,6 +5318,32 @@
           },
           "unknownFlag": {
             "source": "bd link --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+          }
+        },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd link --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd link --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
           }
         },
         "positionals": {
@@ -3108,6 +5393,32 @@
             "source": "bd lint --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd lint --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd lint --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
         "positionals": {
           "rest": {
             "kind": "literal"
@@ -3153,6 +5464,32 @@
           },
           "unknownFlag": {
             "source": "bd list --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+          }
+        },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd list --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd list --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
           }
         },
         "positionals": {
@@ -3202,6 +5539,32 @@
             "source": "bd memories --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd memories --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd memories --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
         "positionals": {
           "rest": {
             "kind": "literal"
@@ -3247,6 +5610,32 @@
           },
           "unknownFlag": {
             "source": "bd merge-slot --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+          }
+        },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd merge-slot --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd merge-slot --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
           }
         },
         "positionals": {
@@ -3296,6 +5685,32 @@
             "source": "bd note --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd note --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd note --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
         "positionals": {
           "rest": {
             "kind": "literal"
@@ -3341,6 +5756,32 @@
           },
           "unknownFlag": {
             "source": "bd onboard --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+          }
+        },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd onboard --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd onboard --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
           }
         },
         "positionals": {
@@ -3390,6 +5831,32 @@
             "source": "bd prime --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd prime --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd prime --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
         "positionals": {
           "rest": {
             "kind": "literal"
@@ -3435,6 +5902,32 @@
           },
           "unknownFlag": {
             "source": "bd priority --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+          }
+        },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd priority --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd priority --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
           }
         },
         "positionals": {
@@ -3484,6 +5977,32 @@
             "source": "bd promote --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd promote --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd promote --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
         "positionals": {
           "rest": {
             "kind": "literal"
@@ -3531,6 +6050,32 @@
             "source": "bd q --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd q --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd q --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
         "positionals": {
           "rest": {
             "kind": "literal"
@@ -3548,11 +6093,11 @@
           {
             "role": {
               "kind": "remote",
-              "operation": "mutate"
+              "operation": "tracker-write"
             },
             "target": "beads",
             "citation": {
-              "source": "bd q --help: \"bd q [title] [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
+              "source": "bd q --help: \"Usage: bd q [title] [flags]\" -- documents the command whose implicit effect (target \"beads\", role \"remote:tracker-write\") is derived from this synopsis"
             }
           }
         ],
@@ -3576,6 +6121,32 @@
           },
           "unknownFlag": {
             "source": "bd query --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+          }
+        },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd query --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd query --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
           }
         },
         "positionals": {
@@ -3625,6 +6196,32 @@
             "source": "bd quickstart --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd quickstart --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd quickstart --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
         "positionals": {
           "rest": {
             "kind": "literal"
@@ -3670,6 +6267,32 @@
           },
           "unknownFlag": {
             "source": "bd ready --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+          }
+        },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd ready --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd ready --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
           }
         },
         "positionals": {
@@ -3719,6 +6342,32 @@
             "source": "bd recall --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd recall --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd recall --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
         "positionals": {
           "rest": {
             "kind": "literal"
@@ -3764,6 +6413,32 @@
           },
           "unknownFlag": {
             "source": "bd remember --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+          }
+        },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd remember --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd remember --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
           }
         },
         "positionals": {
@@ -3813,6 +6488,32 @@
             "source": "bd reopen --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd reopen --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd reopen --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
         "positionals": {
           "rest": {
             "kind": "literal"
@@ -3858,6 +6559,32 @@
           },
           "unknownFlag": {
             "source": "bd restore --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+          }
+        },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd restore --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd restore --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
           }
         },
         "positionals": {
@@ -3907,6 +6634,32 @@
             "source": "bd search --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd search --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd search --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
         "positionals": {
           "rest": {
             "kind": "literal"
@@ -3952,6 +6705,32 @@
           },
           "unknownFlag": {
             "source": "bd set-state --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+          }
+        },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd set-state --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd set-state --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
           }
         },
         "positionals": {
@@ -4001,6 +6780,32 @@
             "source": "bd setup --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd setup --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd setup --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
         "positionals": {
           "rest": {
             "kind": "literal"
@@ -4046,6 +6851,32 @@
           },
           "unknownFlag": {
             "source": "bd show --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+          }
+        },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd show --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd show --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
           }
         },
         "positionals": {
@@ -4095,6 +6926,32 @@
             "source": "bd stale --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd stale --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd stale --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
         "positionals": {
           "rest": {
             "kind": "literal"
@@ -4142,6 +6999,32 @@
             "source": "bd state --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd state --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd state --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
         "positionals": {
           "rest": {
             "kind": "literal"
@@ -4172,6 +7055,79 @@
         "unknownFlag": "inert",
         "endOfOptions": true
       },
+      "stats": {
+        "name": "stats",
+        "provenance": "bd stats --help",
+        "citations": {
+          "provenance": {
+            "source": "bd stats --help: \"Show a quick snapshot of the issue database state and statistics.\""
+          },
+          "stdin": {
+            "source": "bd stats --help: \"Usage: bd status [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "bd stats --help: \"Usage: bd status [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "bd stats --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized flag. \"inert\" is carried over from the pre-existing bd verb schema (a documented FACT MISMATCH: the live tool rejects an unrecognized flag), flag/role structure unchanged"
+          }
+        },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd stats --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd stats --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "bd stats --help: \"Usage: bd status [flags]\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "read"
+            },
+            "target": "beads",
+            "citation": {
+              "source": "bd stats --help: \"Usage: bd status [flags]\" -- documents the command whose implicit effect (target \"beads\", role \"remote:read\") is derived from this synopsis"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "inert",
+        "endOfOptions": true
+      },
       "status": {
         "name": "status",
         "provenance": "bd status --help",
@@ -4187,6 +7143,32 @@
           },
           "unknownFlag": {
             "source": "bd status --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+          }
+        },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd status --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd status --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
           }
         },
         "positionals": {
@@ -4236,6 +7218,32 @@
             "source": "bd statuses --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd statuses --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd statuses --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
         "positionals": {
           "rest": {
             "kind": "literal"
@@ -4281,6 +7289,32 @@
           },
           "unknownFlag": {
             "source": "bd supersede --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+          }
+        },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd supersede --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd supersede --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
           }
         },
         "positionals": {
@@ -4330,6 +7364,32 @@
             "source": "bd swarm --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd swarm --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd swarm --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
         "positionals": {
           "rest": {
             "kind": "literal"
@@ -4375,6 +7435,32 @@
           },
           "unknownFlag": {
             "source": "bd tag --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+          }
+        },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd tag --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd tag --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
           }
         },
         "positionals": {
@@ -4424,6 +7510,32 @@
             "source": "bd todo --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd todo --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd todo --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
         "positionals": {
           "rest": {
             "kind": "literal"
@@ -4471,6 +7583,32 @@
             "source": "bd types --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
           }
         },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd types --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd types --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
         "positionals": {
           "rest": {
             "kind": "literal"
@@ -4501,6 +7639,79 @@
         "unknownFlag": "inert",
         "endOfOptions": true
       },
+      "undefer": {
+        "name": "undefer",
+        "provenance": "bd undefer --help",
+        "citations": {
+          "provenance": {
+            "source": "bd undefer --help: \"Undefer issues to restore them to open status.\""
+          },
+          "stdin": {
+            "source": "bd undefer --help: \"Usage: bd undefer [id...] [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "bd undefer --help: \"Usage: bd undefer [id...] [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "bd undefer --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized flag. \"inert\" is carried over from the pre-existing bd verb schema (a documented FACT MISMATCH: the live tool rejects an unrecognized flag), flag/role structure unchanged"
+          }
+        },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd undefer --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd undefer --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "bd undefer --help: \"Usage: bd undefer [id...] [flags]\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "tracker-write"
+            },
+            "target": "beads",
+            "citation": {
+              "source": "bd undefer --help: \"Usage: bd undefer [id...] [flags]\" -- documents the command whose implicit effect (target \"beads\", role \"remote:tracker-write\") is derived from this synopsis"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "metadata",
+        "unknownFlag": "inert",
+        "endOfOptions": true
+      },
       "update": {
         "name": "update",
         "provenance": "bd update --help",
@@ -4516,6 +7727,68 @@
           },
           "unknownFlag": {
             "source": "bd update --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+          }
+        },
+        "flags": {
+          "--body-file": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd update --help: \"--body-file string Read description from file (use - for stdin)\""
+            }
+          },
+          "--design-file": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd update --help: \"--design-file string Read design from file (use - for stdin)\""
+            }
+          },
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd update --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "--metadata": {
+            "arity": "one",
+            "operand": {
+              "kind": "data-or-at-file"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd update --help: \"--metadata string Set custom metadata (JSON string or @file.json to read from file)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd update --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
           }
         },
         "positionals": {
@@ -4535,11 +7808,11 @@
           {
             "role": {
               "kind": "remote",
-              "operation": "mutate"
+              "operation": "tracker-write"
             },
             "target": "beads",
             "citation": {
-              "source": "bd update --help: \"bd update [id...] [flags]\" -- documents the optional/omittable operand shape this implicit default (target \"beads\", role \"remote\") is derived from"
+              "source": "bd update --help: \"Usage: bd update [id...] [flags]\" -- documents the command whose implicit effect (target \"beads\", role \"remote:tracker-write\") is derived from this synopsis"
             }
           }
         ],
@@ -4563,6 +7836,32 @@
           },
           "unknownFlag": {
             "source": "bd vc --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+          }
+        },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd vc --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd vc --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
           }
         },
         "positionals": {
@@ -4595,6 +7894,79 @@
         "unknownFlag": "inert",
         "endOfOptions": true
       },
+      "version": {
+        "name": "version",
+        "provenance": "bd version --help",
+        "citations": {
+          "provenance": {
+            "source": "bd version --help: \"Print version information\""
+          },
+          "stdin": {
+            "source": "bd version --help: \"Usage: bd version [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "bd version --help: \"Usage: bd version [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "bd version --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized flag. \"inert\" is carried over from the pre-existing bd verb schema (a documented FACT MISMATCH: the live tool rejects an unrecognized flag), flag/role structure unchanged"
+          }
+        },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd version --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd version --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "bd version --help: \"Usage: bd version [flags]\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "read"
+            },
+            "target": "beads",
+            "citation": {
+              "source": "bd version --help: \"Usage: bd version [flags]\" -- documents the command whose implicit effect (target \"beads\", role \"remote:read\") is derived from this synopsis"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "inert",
+        "endOfOptions": true
+      },
       "where": {
         "name": "where",
         "provenance": "bd where --help",
@@ -4610,6 +7982,32 @@
           },
           "unknownFlag": {
             "source": "bd where --help: `bd create --this-is-not-a-real-flag` -\u003e \"Error: unknown flag: --this-is-not-a-real-flag\", exit 1 -- FACT MISMATCH discovered during citation backfill: live invocation rejects an unrecognized flag outright (Cobra's default unknown-flag handling), the opposite of \"inert\"; flag/role structure left unchanged per this packet's own Binding decisions and recorded via bd comment"
+          }
+        },
+        "flags": {
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd where --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "bd where --help: \"-C, --directory string Change to this directory before running the command (like git -C)\""
+            }
           }
         },
         "positionals": {

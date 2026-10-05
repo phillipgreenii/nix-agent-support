@@ -23,6 +23,12 @@ func interpretSubcommand(leaf cmdparse.ParsedCommand, schema CommandSchema, ctx 
 	if !st.scanned {
 		return st.result()
 	}
+	// scanGlobal only COLLECTS the global flags' operands (st.ops); without
+	// this resolve() a global flag's operand effect (git -C <dir>, bd --db
+	// <path>, git -c <pair>) was silently dropped — neither emitted as an
+	// effect nor judged by its role. Resolving is safe here: scanGlobal stops
+	// at the first positional, so st.ops holds flag operands only.
+	st.resolve()
 	if subIdx < 0 {
 		st.fail("no subcommand given")
 		return st.result()
@@ -64,7 +70,9 @@ func interpretSubcommand(leaf cmdparse.ParsedCommand, schema CommandSchema, ctx 
 	}
 	sub := subIn.Interpret(childLeaf, subSchema, ctx)
 
-	effects := append(append([]Effect(nil), st.effects...), sub.Effects...)
+	// A per-command working directory (`git -C <dir> <sub>`, KindCommandDir)
+	// set at THIS level applies to the subcommand's relative paths too.
+	effects := append(append([]Effect(nil), st.effects...), st.rebaseUnderCommandDir(sub.Effects)...)
 	for _, t := range st.transforms {
 		var ok bool
 		effects, ok = applyTransform(t, effects)
@@ -151,6 +159,7 @@ func interpretVerbDispatch(leaf cmdparse.ParsedCommand, schema CommandSchema, ct
 	if !st.scanned {
 		return st.result()
 	}
+	st.resolve() // the wrapper's own flag operands; see interpretSubcommand
 	if verbIdx < 0 {
 		st.finish()
 		if schema.DefaultVerb != "" {

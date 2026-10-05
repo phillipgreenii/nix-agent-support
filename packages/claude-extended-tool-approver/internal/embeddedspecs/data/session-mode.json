@@ -1,0 +1,247 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "session-mode",
+  "command": {
+    "name": "session-mode",
+    "provenance": "session-mode --help ('Track which named mode is running in THIS Claude Code session'), this host 2026-10-05",
+    "citations": {
+      "provenance": {
+        "source": "session-mode --help: \"session-mode: Track which named \"mode\" (drain-beads, unblock-human-beads,\""
+      },
+      "stdin": {
+        "source": "session-mode --help: \"Usage: session-mode \u003cSUBCOMMAND\u003e [ARGS...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+      },
+      "stdout": {
+        "source": "session-mode --help: \"Usage: session-mode \u003cSUBCOMMAND\u003e [ARGS...]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
+      },
+      "unknownFlag": {
+        "source": "session-mode --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "flags": {
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "session-mode --help: \"-h, --help Show this help message\""
+        }
+      },
+      "--version": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "session-mode --help: \"-v, --version Show version information\""
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "session-mode --help: \"-h, --help Show this help message\""
+        }
+      },
+      "-v": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "session-mode --help: \"-v, --version Show version information\""
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "session-mode --help: \"Usage: session-mode \u003cSUBCOMMAND\u003e [ARGS...]\""
+      }
+    },
+    "stdin": "never",
+    "stdout": "none",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true,
+    "subcommands": {
+      "set-status": {
+        "name": "set-status",
+        "provenance": "session-mode --help, set-status running|stopping|finished [--handoff-bead ID]",
+        "citations": {
+          "provenance": {
+            "source": "session-mode set-status --help: \"session-mode: error: unknown option: --help\""
+          },
+          "stdin": {
+            "source": "session-mode set-status --help: \"session-mode: error: unknown option: --help\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "session-mode set-status --help: \"session-mode: error: unknown option: --help\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "session-mode set-status --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--handoff-bead": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "session-mode --help: \"set-status running|stopping|finished [--handoff-bead ID]\""
+            }
+          }
+        },
+        "positionals": {
+          "leading": [
+            {
+              "kind": "literal"
+            }
+          ],
+          "rest": {
+            "kind": "unmodeled"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "session-mode set-status --help: \"session-mode: error: unknown option: --help\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "metadata",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "show": {
+        "name": "show",
+        "provenance": "session-mode --help, show",
+        "citations": {
+          "provenance": {
+            "source": "session-mode show --help: \"session-mode: error: CLAUDE_SESSION_ID/CLAUDE_CODE_SESSION_ID is not set (run inside a Claude Code session)\""
+          },
+          "stdin": {
+            "source": "session-mode show --help: \"session-mode: error: CLAUDE_SESSION_ID/CLAUDE_CODE_SESSION_ID is not set (run inside a Claude Code session)\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "session-mode show --help: \"session-mode: error: CLAUDE_SESSION_ID/CLAUDE_CODE_SESSION_ID is not set (run inside a Claude Code session)\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "session-mode show --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "unmodeled"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "session-mode show --help: \"session-mode: error: CLAUDE_SESSION_ID/CLAUDE_CODE_SESSION_ID is not set (run inside a Claude Code session)\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "start": {
+        "name": "start",
+        "provenance": "session-mode --help, start KIND [--detail TEXT] [--force]",
+        "citations": {
+          "provenance": {
+            "source": "session-mode start --help: \"session-mode: error: unknown option: --help\""
+          },
+          "stdin": {
+            "source": "session-mode start --help: \"session-mode: error: unknown option: --help\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "session-mode start --help: \"session-mode: error: unknown option: --help\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "session-mode start --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--detail": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "session-mode --help: \"start KIND [--detail TEXT] [--force]\""
+            }
+          },
+          "--force": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "session-mode --help: \"start KIND [--detail TEXT] [--force]\""
+            }
+          }
+        },
+        "positionals": {
+          "leading": [
+            {
+              "kind": "literal"
+            }
+          ],
+          "rest": {
+            "kind": "unmodeled"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "session-mode start --help: \"session-mode: error: unknown option: --help\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "metadata",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      }
+    }
+  }
+}

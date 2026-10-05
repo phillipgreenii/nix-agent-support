@@ -1,0 +1,56 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "capture-prefix-snapshots.sh",
+  "command": {
+    "name": "capture-prefix-snapshots.sh",
+    "provenance": "capture-prefix-snapshots.sh --help / header comment (captures pre-fix git snapshots of behavior-docs sets into \u003cout-dir\u003e), this repo 2026-10-05",
+    "citations": {
+      "provenance": {
+        "source": "capture-prefix-snapshots.sh --help: \"capture-prefix-snapshots.sh — reproducibly capture the PRE-FIX git snapshot of\""
+      },
+      "stdin": {
+        "source": "capture-prefix-snapshots.sh --help: \"Usage: capture-prefix-snapshots.sh \u003cout-dir\u003e\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+      },
+      "stdout": {
+        "source": "capture-prefix-snapshots.sh --help: \"Usage: capture-prefix-snapshots.sh \u003cout-dir\u003e\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+      },
+      "unknownFlag": {
+        "source": "capture-prefix-snapshots.sh --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "positionals": {
+      "leading": [
+        {
+          "kind": "path-create"
+        }
+      ],
+      "rest": {
+        "kind": "unmodeled"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "capture-prefix-snapshots.sh --help: \"Usage: capture-prefix-snapshots.sh \u003cout-dir\u003e\""
+      }
+    },
+    "implicitEffects": [
+      {
+        "role": {
+          "kind": "path-read"
+        },
+        "target": ".git",
+        "citation": {
+          "source": "capture-prefix-snapshots.sh --help: \"Usage: capture-prefix-snapshots.sh \u003cout-dir\u003e\" -- documents the command whose implicit effect (target \".git\", role \"path-read\") is derived from this synopsis"
+        }
+      }
+    ],
+    "stdin": "never",
+    "stdout": "metadata",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

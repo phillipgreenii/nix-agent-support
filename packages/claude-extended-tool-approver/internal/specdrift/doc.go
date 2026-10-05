@@ -35,6 +35,16 @@
 // command names missing from PATH is the genuine "binary not on PATH"
 // environment-gap failure case (see Check's own doc comment).
 //
+// # Plugin-instructed tools (pg2-cjfpy.2)
+//
+// The embedded set also carries the CLIs the agent-support marketplace plugins
+// instruct (bgcheck, pg-ccaudit, pn, gh, rg, ...). Each on-PATH tool needs its
+// package in the nix check's nativeBuildInputs (flake.nix). Three classes of
+// name have no single pinned binary to hash and are exempt (recorded null):
+// launchctl (a macOS system tool), man (man-db vs the darwin implementation),
+// and every plugin helper script (IsExempt's ScriptSuffix rule: create-packet.sh,
+// impl-traces.sh, ... are repo files resolved by relative path, not binaries).
+//
 // # Per-platform exemption and overlay
 //
 // help-hashes.json is the SHARED baseline and is the linux (procps-ng)

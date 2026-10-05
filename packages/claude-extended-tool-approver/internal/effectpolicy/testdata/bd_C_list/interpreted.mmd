@@ -1,2 +1,4 @@
 flowchart LR
-    n0["command: bd -C sub list<br/>mark=insufficient: unknown flag -C"]
+    n0["command: bd -C sub list<br/>- path:read sub [arg 1] (command working directory)<br/>- remote:read beads [implicit]<br/>- stdio:stdout content<br/>mark=permitted"]
+    n1[/"file: sub"/]
+    n0 -->|"reads: read"| n1

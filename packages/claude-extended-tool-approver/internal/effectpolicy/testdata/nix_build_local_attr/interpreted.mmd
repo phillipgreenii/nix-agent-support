@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: nix build .#checks.aarch64-darwin.foo<br/>- exec: nix build (trusted checkout code)<br/>- path:create result [implicit]<br/>- stdio:stdout metadata<br/>mark=permitted"]
+    n1[/"file: result"/]
+    n0 -->|"writes: create"| n1

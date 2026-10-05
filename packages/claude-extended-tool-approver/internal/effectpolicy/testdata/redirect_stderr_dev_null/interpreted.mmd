@@ -1,0 +1,6 @@
+flowchart LR
+    n0["command: git symbolic-ref --short refs/remotes/origin/HEAD 2#gt;/dev/null<br/>- path:read .git [implicit]<br/>- stdio:stdout metadata<br/>mark=permitted"]
+    n1[/"file: /dev/null"/]
+    n2[/"file: .git"/]
+    n0 -->|"redirect-out: 2#gt;"| n1
+    n0 -->|"reads: read"| n2

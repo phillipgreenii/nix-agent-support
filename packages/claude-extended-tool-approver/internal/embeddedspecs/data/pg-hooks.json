@@ -1,0 +1,381 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "pg-hooks",
+  "command": {
+    "name": "pg-hooks",
+    "provenance": "pg-hooks --help ('inspect and run the per-clone hook bundle'), this host 2026-10-05",
+    "citations": {
+      "provenance": {
+        "source": "pg-hooks --help: \"pg-hooks: inspect and run the per-clone hook bundle\""
+      },
+      "stdin": {
+        "source": "pg-hooks --help: \"Usage: pg-hooks [command] [args]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+      },
+      "stdout": {
+        "source": "pg-hooks --help: \"Usage: pg-hooks [command] [args]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
+      },
+      "unknownFlag": {
+        "source": "pg-hooks --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "flags": {
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pg-hooks --help: \"-h, --help Show this help message\""
+        }
+      },
+      "--version": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pg-hooks --help: \"-v, --version Show version information\""
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pg-hooks --help: \"-h, --help Show this help message\""
+        }
+      },
+      "-v": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pg-hooks --help: \"-v, --version Show version information\""
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "pg-hooks --help: \"Usage: pg-hooks [command] [args]\""
+      }
+    },
+    "stdin": "never",
+    "stdout": "none",
+    "unknownFlag": "insufficient",
+    "subcommands": {
+      "explain": {
+        "name": "explain",
+        "provenance": "pg-hooks --help, explain, this host 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "pg-hooks explain --help: \"pg-hooks: inspect and run the per-clone hook bundle\""
+          },
+          "stdin": {
+            "source": "pg-hooks explain --help: \"Usage: pg-hooks [command] [args]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "pg-hooks explain --help: \"Usage: pg-hooks [command] [args]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "pg-hooks explain --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "positionals": {
+          "leading": [
+            {
+              "kind": "literal"
+            }
+          ],
+          "rest": {
+            "kind": "unmodeled"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-hooks explain --help: \"Usage: pg-hooks [command] [args]\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "path-read"
+            },
+            "target": ".git",
+            "citation": {
+              "source": "pg-hooks explain --help: \"Usage: pg-hooks [command] [args]\" -- documents the command whose implicit effect (target \".git\", role \"path-read\") is derived from this synopsis"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "metadata",
+        "unknownFlag": "insufficient"
+      },
+      "fix": {
+        "name": "fix",
+        "provenance": "pg-hooks --help, fix, this host 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "pg-hooks fix --help: \"pg-hooks: inspect and run the per-clone hook bundle\""
+          },
+          "stdin": {
+            "source": "pg-hooks fix --help: \"Usage: pg-hooks [command] [args]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "pg-hooks fix --help: \"Usage: pg-hooks [command] [args]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "pg-hooks fix --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "unmodeled"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-hooks fix --help: \"Usage: pg-hooks [command] [args]\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "path-modify"
+            },
+            "target": ".",
+            "citation": {
+              "source": "pg-hooks fix --help: \"Usage: pg-hooks [command] [args]\" -- documents the command whose implicit effect (target \".\", role \"path-modify\") is derived from this synopsis"
+            }
+          },
+          {
+            "role": {
+              "kind": "path-modify"
+            },
+            "target": ".git",
+            "citation": {
+              "source": "pg-hooks fix --help: \"Usage: pg-hooks [command] [args]\" -- documents the command whose implicit effect (target \".git\", role \"path-modify\") is derived from this synopsis"
+            }
+          },
+          {
+            "role": {
+              "kind": "exec"
+            },
+            "target": "pg-hooks fix",
+            "citation": {
+              "source": "pg-hooks fix --help: \"Usage: pg-hooks [command] [args]\" -- documents the command whose implicit effect (target \"pg-hooks fix\", role \"exec\") is derived from this synopsis"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient"
+      },
+      "list": {
+        "name": "list",
+        "provenance": "pg-hooks --help, list, this host 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "pg-hooks list --help: \"pg-hooks: inspect and run the per-clone hook bundle\""
+          },
+          "stdin": {
+            "source": "pg-hooks list --help: \"Usage: pg-hooks [command] [args]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "pg-hooks list --help: \"Usage: pg-hooks [command] [args]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "pg-hooks list --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "unmodeled"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-hooks list --help: \"Usage: pg-hooks [command] [args]\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "path-read"
+            },
+            "target": ".git",
+            "citation": {
+              "source": "pg-hooks list --help: \"Usage: pg-hooks [command] [args]\" -- documents the command whose implicit effect (target \".git\", role \"path-read\") is derived from this synopsis"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "metadata",
+        "unknownFlag": "insufficient"
+      },
+      "run": {
+        "name": "run",
+        "provenance": "pg-hooks --help, run, this host 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "pg-hooks run --help: \"pg-hooks: inspect and run the per-clone hook bundle\""
+          },
+          "stdin": {
+            "source": "pg-hooks run --help: \"Usage: pg-hooks [command] [args]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "pg-hooks run --help: \"Usage: pg-hooks [command] [args]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "pg-hooks run --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--all-files": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-hooks run --help: \"run \u003cstage\u003e [files...|--all-files] [-- prek-args]\""
+            }
+          }
+        },
+        "positionals": {
+          "leading": [
+            {
+              "kind": "literal"
+            }
+          ],
+          "rest": {
+            "kind": "path-read"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-hooks run --help: \"Usage: pg-hooks [command] [args]\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "path-read"
+            },
+            "target": ".",
+            "citation": {
+              "source": "pg-hooks run --help: \"Usage: pg-hooks [command] [args]\" -- documents the command whose implicit effect (target \".\", role \"path-read\") is derived from this synopsis"
+            }
+          },
+          {
+            "role": {
+              "kind": "exec"
+            },
+            "target": "pg-hooks run",
+            "citation": {
+              "source": "pg-hooks run --help: \"Usage: pg-hooks [command] [args]\" -- documents the command whose implicit effect (target \"pg-hooks run\", role \"exec\") is derived from this synopsis"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient"
+      },
+      "status": {
+        "name": "status",
+        "provenance": "pg-hooks --help, status, this host 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "pg-hooks status --help: \"pg-hooks: inspect and run the per-clone hook bundle\""
+          },
+          "stdin": {
+            "source": "pg-hooks status --help: \"Usage: pg-hooks [command] [args]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "pg-hooks status --help: \"Usage: pg-hooks [command] [args]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "pg-hooks status --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--porcelain": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-hooks status --help: \"status [--porcelain] Report the bundle state (exit code carries the state)\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "unmodeled"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-hooks status --help: \"Usage: pg-hooks [command] [args]\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "path-read"
+            },
+            "target": ".git",
+            "citation": {
+              "source": "pg-hooks status --help: \"Usage: pg-hooks [command] [args]\" -- documents the command whose implicit effect (target \".git\", role \"path-read\") is derived from this synopsis"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "metadata",
+        "unknownFlag": "insufficient"
+      }
+    }
+  }
+}

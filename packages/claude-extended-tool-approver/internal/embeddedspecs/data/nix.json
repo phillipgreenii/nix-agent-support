@@ -37,6 +37,498 @@
     "unknownFlag": "insufficient",
     "endOfOptions": true,
     "subcommands": {
+      "build": {
+        "name": "build",
+        "provenance": "nix build --help (Nix 2.34), this host 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "nix build --help: \"│ Warning\""
+          },
+          "stdin": {
+            "source": "nix build --help: \"│ Warning\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "nix build --help: \"│ Warning\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "nix build --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--dry-run": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "nix build --help: \"· --dry-run\""
+            }
+          },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "nix build --help: \"· --help\""
+            }
+          },
+          "--json": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "nix build --help: \"· --json\""
+            }
+          },
+          "--no-link": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "nix build --help: \"Unless --no-link is specified, after a successful build, it\""
+            }
+          },
+          "--out-link": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-create"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "nix build --help: \"can be overridden using the --out-link option. Each symlink\""
+            }
+          },
+          "--print-build-logs": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "nix build --help: \"· --print-build-logs / -L\""
+            }
+          },
+          "--print-out-paths": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "nix build --help: \"│ # nix build nixpkgs#hello --print-out-paths\""
+            }
+          },
+          "-L": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "nix build --help: \"· --print-build-logs / -L\""
+            }
+          },
+          "-o": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-create"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "nix build --help: \"· --out-link / -o path\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "allowed-literal",
+            "set": "local-flake-installable"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "nix build --help: \"│ Warning\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "exec"
+            },
+            "target": "nix build",
+            "citation": {
+              "source": "nix build --help: \"│ Warning\" -- documents the command whose implicit effect (target \"nix build\", role \"exec\") is derived from this synopsis"
+            }
+          },
+          {
+            "role": {
+              "kind": "path-create"
+            },
+            "target": "result",
+            "citation": {
+              "source": "nix build --help: \"│ Warning\" -- documents the command whose implicit effect (target \"result\", role \"path-create\") is derived from this synopsis"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "metadata",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "flake": {
+        "name": "flake",
+        "provenance": "nix flake --help (Nix 2.34), this host 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "nix flake --help: \"│ Warning\""
+          },
+          "stdin": {
+            "source": "nix flake --help: \"│ Warning\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "nix flake --help: \"│ Warning\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "nix flake --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "nix flake --help: \"│ Warning\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "none",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true,
+        "subcommands": {
+          "check": {
+            "name": "check",
+            "provenance": "nix flake check --help (Nix 2.34), this host 2026-10-05",
+            "citations": {
+              "provenance": {
+                "source": "nix flake check --help: \"│ Warning\""
+              },
+              "stdin": {
+                "source": "nix flake check --help: \"│ Warning\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+              },
+              "stdout": {
+                "source": "nix flake check --help: \"│ Warning\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+              },
+              "unknownFlag": {
+                "source": "nix flake check --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--all-systems": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "nix flake check --help: \"· --all-systems\""
+                }
+              },
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "nix flake check --help: \"· --help\""
+                }
+              },
+              "--no-build": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "nix flake check --help: \"│ # nix flake check --no-build github:NixOS/patchelf\""
+                }
+              },
+              "--no-update-lock-file": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "nix flake check --help: \"· --no-update-lock-file\""
+                }
+              },
+              "--print-build-logs": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "nix flake check --help: \"· --print-build-logs / -L\""
+                }
+              },
+              "-L": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "nix flake check --help: \"· --print-build-logs / -L\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "allowed-literal",
+                "set": "local-flake-installable"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "nix flake check --help: \"│ Warning\""
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "exec"
+                },
+                "target": "nix flake check",
+                "citation": {
+                  "source": "nix flake check --help: \"│ Warning\" -- documents the command whose implicit effect (target \"nix flake check\", role \"exec\") is derived from this synopsis"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "lock": {
+            "name": "lock",
+            "provenance": "nix flake lock --help (Nix 2.34), this host 2026-10-05",
+            "citations": {
+              "provenance": {
+                "source": "nix flake lock --help: \"│ Warning\""
+              },
+              "stdin": {
+                "source": "nix flake lock --help: \"│ Warning\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+              },
+              "stdout": {
+                "source": "nix flake lock --help: \"│ Warning\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+              },
+              "unknownFlag": {
+                "source": "nix flake lock --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "nix flake lock --help: \"· --help\""
+                }
+              },
+              "--print-build-logs": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "nix flake lock --help: \"· --print-build-logs / -L\""
+                }
+              },
+              "-L": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "nix flake lock --help: \"· --print-build-logs / -L\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "nix flake lock --help: \"│ Warning\""
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "path-modify"
+                },
+                "target": "flake.lock",
+                "citation": {
+                  "source": "nix flake lock --help: \"│ Warning\" -- documents the command whose implicit effect (target \"flake.lock\", role \"path-modify\") is derived from this synopsis"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "update": {
+            "name": "update",
+            "provenance": "nix flake update --help (Nix 2.34), this host 2026-10-05",
+            "citations": {
+              "provenance": {
+                "source": "nix flake update --help: \"│ Warning\""
+              },
+              "stdin": {
+                "source": "nix flake update --help: \"│ Warning\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+              },
+              "stdout": {
+                "source": "nix flake update --help: \"│ Warning\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+              },
+              "unknownFlag": {
+                "source": "nix flake update --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "nix flake update --help: \"· --help\""
+                }
+              },
+              "--print-build-logs": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "nix flake update --help: \"· --print-build-logs / -L\""
+                }
+              },
+              "-L": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "nix flake update --help: \"· --print-build-logs / -L\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "nix flake update --help: \"│ Warning\""
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "path-modify"
+                },
+                "target": "flake.lock",
+                "citation": {
+                  "source": "nix flake update --help: \"│ Warning\" -- documents the command whose implicit effect (target \"flake.lock\", role \"path-modify\") is derived from this synopsis"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          }
+        }
+      },
       "run": {
         "name": "run",
         "provenance": "nix (Nix) 2.34.8 (this host, nix run --help), 2026-09-08",

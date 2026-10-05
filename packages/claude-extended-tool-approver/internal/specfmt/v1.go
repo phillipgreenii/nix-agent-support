@@ -45,17 +45,24 @@ func (c Citation) empty() bool { return c.Source == "" }
 // convert.go's roleKindByName, built FROM that method so the two can never
 // drift apart); Dialect and Operation carry the same meaning as the Go type
 // (Dialect only for a KindProgram role, Operation only for a KindRemote
-// role).
+// role, Set only for a KindAllowedLiteral role — a NAMED reference to a
+// closed literal set compiled into cmddesc, which the loader rejects when
+// unknown, exactly like Dialect/Interpreter, P13).
 type OperandRoleV1 struct {
 	Kind      string `json:"kind"`
 	Dialect   string `json:"dialect,omitempty"`
 	Operation string `json:"operation,omitempty"`
+	Set       string `json:"set,omitempty"`
 }
 
 // EffectTransformV1 is the wire form of cmddesc.EffectTransform. Kind is
 // cmddesc.TransformKind.String()'s spelling.
 type EffectTransformV1 struct {
 	Kind string `json:"kind"`
+	// From/To carry a "retarget-remote" transform's Operation spellings
+	// (cmddesc.EffectTransform.From/To); empty for every other kind.
+	From string `json:"from,omitempty"`
+	To   string `json:"to,omitempty"`
 }
 
 // FlagSpecV1 is the wire form of cmddesc.FlagSpec, plus its own mandatory

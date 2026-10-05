@@ -206,9 +206,12 @@ func TestVerbDispatch_NixRun(t *testing.T) {
 	})
 
 	t.Run("an unmodeled nix subcommand stays unmodeled (not this slice's job)", func(t *testing.T) {
-		got := in.Interpret(leaf(t, "nix build .#foo"), schema, Context{})
+		// pg2-cjfpy.2 models `nix build` and `nix flake check|update|lock` of
+		// the LOCAL flake; every other subcommand (develop, shell, eval, ...)
+		// is still an unmodeled subcommand.
+		got := in.Interpret(leaf(t, "nix develop .#foo"), schema, Context{})
 		if got.Sufficient {
-			t.Errorf("got Sufficient=true for nix build, want unmodeled subcommand insufficiency: %+v", got)
+			t.Errorf("got Sufficient=true for nix develop, want unmodeled subcommand insufficiency: %+v", got)
 		}
 	})
 }

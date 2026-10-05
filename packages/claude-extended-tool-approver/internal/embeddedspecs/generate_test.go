@@ -57,6 +57,14 @@ func TestGenerate(t *testing.T) {
 	}
 
 	if os.Getenv(embeddedSpecsWriteEnv) != "" {
+		prior, err := LoadSpecs(dataDir)
+		if err != nil {
+			t.Fatalf("LoadSpecs: %v", err)
+		}
+		specs, err = BuildSpecsPreserving(reg, prior)
+		if err != nil {
+			t.Fatalf("BuildSpecsPreserving: %v", err)
+		}
 		if err := WriteSpecs(dataDir, specs); err != nil {
 			t.Fatalf("WriteSpecs: %v", err)
 		}
@@ -64,4 +72,86 @@ func TestGenerate(t *testing.T) {
 	} else {
 		t.Logf("embeddedspecs: %s not set -- skipping (re)write of %s/*.json (see embeddedSpecsWriteEnv doc comment)", embeddedSpecsWriteEnv, dataDir)
 	}
+}
+
+// TestBuildSpecsPreservingKeepsRealCitations: regenerating must re-marshal the
+// registry's facts WITHOUT discarding the real per-fact citations already on
+// disk (tc-o14i5.4.3's back-fill, or a ceta-spec-gen author's work) — only a
+// fact with no prior real citation comes out thin. pg2-cjfpy.2: the generator
+// used to stamp every fact thin and remove the whole data directory, so the
+// documented regeneration step destroyed the back-fill and help-hashes.
+func TestBuildSpecsPreservingKeepsRealCitations(t *testing.T) {
+	reg := cmddesc.DefaultRegistry()
+	prior, err := LoadSpecs(dataDir)
+	if err != nil {
+		t.Fatalf("LoadSpecs: %v", err)
+	}
+	if len(prior) != len(reg.Names()) {
+		t.Fatalf("LoadSpecs found %d specs, want %d (one per registry name)", len(prior), len(reg.Names()))
+	}
+	got, err := BuildSpecsPreserving(reg, prior)
+	if err != nil {
+		t.Fatalf("BuildSpecsPreserving: %v", err)
+	}
+	for name, sp := range got {
+		old := prior[name]
+		if sp.Command.Citations["provenance"] != old.Command.Citations["provenance"] {
+			t.Errorf("%s: provenance citation changed by a no-op regeneration:\n got %+v\nwant %+v", name, sp.Command.Citations["provenance"], old.Command.Citations["provenance"])
+		}
+		for flag, f := range sp.Command.Flags {
+			if isThinCitation(f.Citation) {
+				t.Errorf("%s flag %s: regeneration left a thin citation (the checked-in data has a real one)", name, flag)
+			}
+		}
+	}
+}
+
+// TestWriteSpecsNeverRemovesHelpHashes: the committed help-hashes*.json files
+// are not spec files and are owned by `spec-drift-check --record`; WriteSpecs
+// removes only STALE command-spec files.
+func TestWriteSpecsNeverRemovesHelpHashes(t *testing.T) {
+	dir := t.TempDir()
+	for _, f := range []string{"help-hashes.json", "help-hashes.darwin.json"} {
+		if err := os.WriteFile(dir+"/"+f, []byte("{}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reg := subsetRegistry(t, "jq", "cat")
+	specs, err := BuildSpecs(reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteSpecs(dir, specs); err != nil {
+		t.Fatalf("WriteSpecs: %v", err)
+	}
+	// A second run with a smaller registry removes the stale spec file but not the hashes.
+	smaller, err := BuildSpecs(subsetRegistry(t, "jq"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteSpecs(dir, smaller); err != nil {
+		t.Fatalf("WriteSpecs (smaller): %v", err)
+	}
+	for _, f := range []string{"help-hashes.json", "help-hashes.darwin.json", "jq.json"} {
+		if _, err := os.Stat(dir + "/" + f); err != nil {
+			t.Errorf("%s was removed: %v", f, err)
+		}
+	}
+	if _, err := os.Stat(dir + "/cat.json"); !os.IsNotExist(err) {
+		t.Errorf("stale cat.json still present (err=%v)", err)
+	}
+}
+
+// subsetRegistry builds a registry of just the named built-in schemas.
+func subsetRegistry(t *testing.T, names ...string) cmddesc.Registry {
+	t.Helper()
+	var schemas []cmddesc.CommandSchema
+	for _, n := range names {
+		s, ok := cmddesc.DefaultRegistry().Lookup(n)
+		if !ok {
+			t.Fatalf("no built-in schema %q", n)
+		}
+		schemas = append(schemas, s)
+	}
+	return cmddesc.NewRegistry(schemas...)
 }

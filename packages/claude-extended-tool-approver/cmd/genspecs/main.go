@@ -32,7 +32,13 @@ func run(args []string) error {
 		return err
 	}
 
-	specs, err := embeddedspecs.BuildSpecs(cmddesc.DefaultRegistry())
+	// Preserve every real citation already on disk (a back-fill or a
+	// ceta-spec-gen author's work): only NEW facts come out thin.
+	prior, err := embeddedspecs.LoadSpecs(*dir)
+	if err != nil {
+		return err
+	}
+	specs, err := embeddedspecs.BuildSpecsPreserving(cmddesc.DefaultRegistry(), prior)
 	if err != nil {
 		return err
 	}

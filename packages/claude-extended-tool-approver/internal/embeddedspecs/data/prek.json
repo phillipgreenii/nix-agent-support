@@ -1,0 +1,533 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "prek",
+  "command": {
+    "name": "prek",
+    "provenance": "prek --help ('A fast Git hook manager written in Rust'), this host 2026-10-05",
+    "citations": {
+      "provenance": {
+        "source": "prek --help: \"A fast Git hook manager written in Rust, designed as a drop-in alternative to pre-commit,\""
+      },
+      "stdin": {
+        "source": "prek --help: \"Usage: prek [OPTIONS] [HOOK|PROJECT]... [COMMAND]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+      },
+      "stdout": {
+        "source": "prek --help: \"Usage: prek [OPTIONS] [HOOK|PROJECT]... [COMMAND]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
+      },
+      "unknownFlag": {
+        "source": "prek --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "flags": {
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "prek --help: \"-h, --help Display the concise help for this command\""
+        }
+      },
+      "--version": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "prek --help: \"-V, --version Display the prek version\""
+        }
+      },
+      "-V": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "prek --help: \"-V, --version Display the prek version\""
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "prek --help: \"-h, --help Display the concise help for this command\""
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "prek --help: \"Usage: prek [OPTIONS] [HOOK|PROJECT]... [COMMAND]\""
+      }
+    },
+    "stdin": "never",
+    "stdout": "none",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true,
+    "subcommands": {
+      "list": {
+        "name": "list",
+        "provenance": "prek list --help, this host 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "prek list --help: \"List hooks configured in the current workspace\""
+          },
+          "stdin": {
+            "source": "prek list --help: \"Usage: prek list [OPTIONS] [HOOK|PROJECT]...\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "prek list --help: \"Usage: prek list [OPTIONS] [HOOK|PROJECT]...\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "prek list --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "prek list --help: \"-h, --help Display the concise help for this command\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "prek list --help: \"-h, --help Display the concise help for this command\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "unmodeled"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "prek list --help: \"Usage: prek list [OPTIONS] [HOOK|PROJECT]...\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "path-read"
+            },
+            "target": ".",
+            "citation": {
+              "source": "prek list --help: \"Usage: prek list [OPTIONS] [HOOK|PROJECT]...\" -- documents the command whose implicit effect (target \".\", role \"path-read\") is derived from this synopsis"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "metadata",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "run": {
+        "name": "run",
+        "provenance": "prek run --help, this host 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "prek run --help: \"Run hooks\""
+          },
+          "stdin": {
+            "source": "prek run --help: \"Usage: prek run [OPTIONS] [HOOK|PROJECT]...\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "prek run --help: \"Usage: prek run [OPTIONS] [HOOK|PROJECT]...\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "prek run --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--all-files": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "prek run --help: \"-a, --all-files Run on all files in the repo\""
+            }
+          },
+          "--cd": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "prek run --help: \"-C, --cd \u003cDIR\u003e Change to directory before running\""
+            }
+          },
+          "--color": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "prek run --help: \"--color \u003cCOLOR\u003e Whether to use color in output [env: PREK_COLOR=] [default: auto]\""
+            }
+          },
+          "--directory": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "prek run --help: \"-d, --directory \u003cDIR\u003e Run hooks on all files in the specified directories\""
+            }
+          },
+          "--dry-run": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "prek run --help: \"--dry-run Do not run the hooks, but print the hooks that would have been run\""
+            }
+          },
+          "--fail-fast": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "prek run --help: \"--fail-fast Stop running hooks after the first failure\""
+            }
+          },
+          "--files": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "prek run --help: \"--files [\u003cFILES\u003e...] Specific filenames to run hooks on\""
+            }
+          },
+          "--from-ref": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "prek run --help: \"-s, --from-ref \u003cFROM_REF\u003e The original ref in a `\u003cfrom_ref\u003e...\u003cto_ref\u003e` diff expression. Files\""
+            }
+          },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "prek run --help: \"-h, --help Display the concise help for this command\""
+            }
+          },
+          "--last-commit": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "prek run --help: \"--last-commit Run hooks against the last commit. Equivalent to `--from-ref HEAD~1\""
+            }
+          },
+          "--no-progress": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "prek run --help: \"--no-progress Hide all progress outputs\""
+            }
+          },
+          "--quiet": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "prek run --help: \"-q, --quiet... Use quiet output [env: PREK_QUIET=]\""
+            }
+          },
+          "--refresh": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "prek run --help: \"--refresh Refresh all cached data\""
+            }
+          },
+          "--show-diff-on-failure": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "prek run --help: \"--show-diff-on-failure When hooks fail, run `git diff` directly afterward\""
+            }
+          },
+          "--skip": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "prek run --help: \"--skip \u003cHOOK|PROJECT\u003e Skip the specified hooks or projects\""
+            }
+          },
+          "--stage": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "prek run --help: \"--stage \u003cSTAGE\u003e The stage during which the hook is fired [possible values: manual,\""
+            }
+          },
+          "--to-ref": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "prek run --help: \"-o, --to-ref \u003cTO_REF\u003e The destination ref in a `from_ref...to_ref` diff expression. Defaults\""
+            }
+          },
+          "--verbose": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "prek run --help: \"-v, --verbose... Use verbose output\""
+            }
+          },
+          "-C": {
+            "arity": "one",
+            "operand": {
+              "kind": "command-dir"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "prek run --help: \"-C, --cd \u003cDIR\u003e Change to directory before running\""
+            }
+          },
+          "-a": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "prek run --help: \"-a, --all-files Run on all files in the repo\""
+            }
+          },
+          "-d": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "prek run --help: \"-d, --directory \u003cDIR\u003e Run hooks on all files in the specified directories\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "prek run --help: \"-h, --help Display the concise help for this command\""
+            }
+          },
+          "-o": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "prek run --help: \"-o, --to-ref \u003cTO_REF\u003e The destination ref in a `from_ref...to_ref` diff expression. Defaults\""
+            }
+          },
+          "-q": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "prek run --help: \"-q, --quiet... Use quiet output [env: PREK_QUIET=]\""
+            }
+          },
+          "-s": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "prek run --help: \"-s, --from-ref \u003cFROM_REF\u003e The original ref in a `\u003cfrom_ref\u003e...\u003cto_ref\u003e` diff expression. Files\""
+            }
+          },
+          "-v": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "prek run --help: \"-v, --verbose... Use verbose output\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "path-read"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "prek run --help: \"Usage: prek run [OPTIONS] [HOOK|PROJECT]...\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "path-read"
+            },
+            "target": ".",
+            "citation": {
+              "source": "prek run --help: \"Usage: prek run [OPTIONS] [HOOK|PROJECT]...\" -- documents the command whose implicit effect (target \".\", role \"path-read\") is derived from this synopsis"
+            }
+          },
+          {
+            "role": {
+              "kind": "exec"
+            },
+            "target": "prek run",
+            "citation": {
+              "source": "prek run --help: \"Usage: prek run [OPTIONS] [HOOK|PROJECT]...\" -- documents the command whose implicit effect (target \"prek run\", role \"exec\") is derived from this synopsis"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      }
+    }
+  }
+}

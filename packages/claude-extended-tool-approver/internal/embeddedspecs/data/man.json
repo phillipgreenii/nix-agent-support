@@ -1,0 +1,41 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "man",
+  "command": {
+    "name": "man",
+    "provenance": "man --help, this host 2026-10-05",
+    "citations": {
+      "provenance": {
+        "source": "man --help: \"Usage: man [OPTION...] [SECTION] PAGE...\""
+      },
+      "stdin": {
+        "source": "man --help: \"Usage: man [OPTION...] [SECTION] PAGE...\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+      },
+      "stdout": {
+        "source": "man --help: \"Usage: man [OPTION...] [SECTION] PAGE...\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+      },
+      "unknownFlag": {
+        "source": "man --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "minRest": 1,
+      "citation": {
+        "source": "man --help: \"Usage: man [OPTION...] [SECTION] PAGE...\""
+      }
+    },
+    "stdin": "never",
+    "stdout": "content",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

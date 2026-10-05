@@ -72,6 +72,38 @@ func TestValidate_KnownDialectAccepted(t *testing.T) {
 	}
 }
 
+// pg2-cjfpy.2: an allowed-literal role names a closed literal set compiled
+// into cmddesc (P13: named references to Go-side tables are rejected when
+// unknown, exactly like a dialect or interpreter).
+func TestValidate_UnknownAllowedLiteralSetRejected(t *testing.T) {
+	s := validCommandSpec()
+	s.Command.Flags = map[string]FlagSpecV1{
+		"-c": {
+			Arity:    arityOne,
+			Operand:  OperandRoleV1{Kind: "allowed-literal", Set: "not-a-real-set"},
+			Citation: cite("test"),
+		},
+	}
+	err := Validate(s)
+	if err == nil || !strings.Contains(err.Error(), "unknown allowed-literal set") {
+		t.Fatalf("Validate = %v, want an unknown-allowed-literal-set error", err)
+	}
+}
+
+func TestValidate_KnownAllowedLiteralSetAccepted(t *testing.T) {
+	s := validCommandSpec()
+	s.Command.Flags = map[string]FlagSpecV1{
+		"-c": {
+			Arity:    arityOne,
+			Operand:  OperandRoleV1{Kind: "allowed-literal", Set: "git-inert-config-pair"},
+			Citation: cite("test"),
+		},
+	}
+	if err := Validate(s); err != nil {
+		t.Fatalf("Validate(known set) = %v, want nil", err)
+	}
+}
+
 func TestValidate_UnknownVerbFamilyRejected(t *testing.T) {
 	s := validCommandSpec()
 	s.Command.VerbFamily = "not-a-real-verb-family"

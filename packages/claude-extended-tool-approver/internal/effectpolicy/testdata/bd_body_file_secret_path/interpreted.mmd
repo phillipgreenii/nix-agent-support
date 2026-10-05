@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: bd update tc-1 --body-file ~/.ssh/id_rsa<br/>- path:read ~/.ssh/id_rsa [arg 2]<br/>- remote:tracker-write beads [implicit]<br/>- stdio:stdout metadata<br/>mark=forbidden: path:read ~/.ssh/id_rsa [arg 2]: path-access (well-known credential store)"]
+    n1[/"file: ~/.ssh/id_rsa"/]
+    n0 -->|"reads: read"| n1

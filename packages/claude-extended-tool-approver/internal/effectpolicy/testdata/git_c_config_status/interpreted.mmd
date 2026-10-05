@@ -1,2 +1,4 @@
 flowchart LR
-    n0["command: git -c core.pager=cat status<br/>mark=insufficient: unknown flag -c"]
+    n0["command: git -c core.pager=cat status<br/>- path:read . [implicit]<br/>- stdio:stdout metadata<br/>mark=insufficient: operand #quot;core.pager=cat#quot; at arg 1 is not accepted by the closed literal set git-inert-config-pair"]
+    n1[/"file: ."/]
+    n0 -->|"reads: read"| n1

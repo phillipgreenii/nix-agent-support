@@ -1,0 +1,6 @@
+flowchart LR
+    n0["command: bd -C #quot;$D#quot; update tc-1 --body-file notes.md<br/>- path:read $D (dynamic) [arg 1] (command working directory)<br/>- path:read notes.md (dynamic) [arg 2] (command working directory unknown)<br/>- remote:tracker-write beads [implicit]<br/>- stdio:stdout metadata<br/>mark=insufficient: path:read $D (dynamic) [arg 1] (command working directory): path-access (path is a runtime expansion)"]
+    n1[/"file: $D (dynamic)"/]
+    n2[/"file: notes.md (dynamic)"/]
+    n0 -->|"reads: read"| n1
+    n0 -->|"reads: read"| n2

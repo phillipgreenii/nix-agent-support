@@ -1,0 +1,98 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "chunk-for-bd-field.sh",
+  "command": {
+    "name": "chunk-for-bd-field.sh",
+    "provenance": "chunk-for-bd-field.sh --help / header comment (splits a file into byte-capped chunks \u003coutput-prefix\u003e.N), this repo 2026-10-05",
+    "citations": {
+      "provenance": {
+        "source": "chunk-for-bd-field.sh --help: \"chunk-for-bd-field.sh\""
+      },
+      "stdin": {
+        "source": "chunk-for-bd-field.sh --help: \"Usage: chunk-for-bd-field.sh [OPTIONS] \u003cinput-file\u003e \u003coutput-prefix\u003e\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+      },
+      "stdout": {
+        "source": "chunk-for-bd-field.sh --help: \"Usage: chunk-for-bd-field.sh [OPTIONS] \u003cinput-file\u003e \u003coutput-prefix\u003e\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+      },
+      "unknownFlag": {
+        "source": "chunk-for-bd-field.sh --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "flags": {
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "chunk-for-bd-field.sh --help: \"-h, --help Show this help message\""
+        }
+      },
+      "--max-bytes": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "chunk-for-bd-field.sh --help: \"Splits a file into sequential chunks, each at most --max-bytes bytes\""
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "chunk-for-bd-field.sh --help: \"-h, --help Show this help message\""
+        }
+      },
+      "-m": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "chunk-for-bd-field.sh --help: \"-m, --max-bytes N Maximum bytes per chunk (default: 65000)\""
+        }
+      }
+    },
+    "positionals": {
+      "leading": [
+        {
+          "kind": "path-read"
+        },
+        {
+          "kind": "path-create"
+        }
+      ],
+      "rest": {
+        "kind": "unmodeled"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "chunk-for-bd-field.sh --help: \"Usage: chunk-for-bd-field.sh [OPTIONS] \u003cinput-file\u003e \u003coutput-prefix\u003e\""
+      }
+    },
+    "stdin": "never",
+    "stdout": "metadata",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

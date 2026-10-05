@@ -132,11 +132,19 @@ func validateCommand(specName string, c CommandSpecV1) []error {
 }
 
 // validateRoleDialect checks the Dialect named by any KindProgram role in
-// roles against cmddesc.LookupDialect, appending a note for an unknown one.
+// roles against cmddesc.LookupDialect, and the Set named by any
+// KindAllowedLiteral role against cmddesc.LookupAllowedLiteralSet, appending a
+// note for an unknown one.
 // note is the caller's closure that already knows the enclosing spec/command
 // name; label identifies which field within it this role came from.
 func validateRoleDialect(note func(format string, args ...any), label string, roles []OperandRoleV1) {
 	for _, r := range roles {
+		if r.Kind == "allowed-literal" {
+			if _, ok := cmddesc.LookupAllowedLiteralSet(r.Set); !ok {
+				note("%s: unknown allowed-literal set %q", label, r.Set)
+			}
+			continue
+		}
 		if r.Kind != "program" || r.Dialect == "" {
 			continue
 		}

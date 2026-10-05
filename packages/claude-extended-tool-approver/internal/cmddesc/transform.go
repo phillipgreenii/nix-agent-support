@@ -1,5 +1,7 @@
 package cmddesc
 
+import "strings"
+
 // remoteMutationOps is the vocabulary of EffectRemote Operations that MUTATE
 // the remote (as opposed to a future read-only operation, not yet needed by
 // any schema). It is what TransformDryRun consults to know which remote
@@ -19,7 +21,7 @@ package cmddesc
 // judges a DryRun-marked "mutation" as if it were a "read" — nothing actually
 // changes the cluster, the same dry-run-needs-only-read-permission reasoning
 // slice 3w established for git push.
-var remoteMutationOps = map[string]bool{"push": true, "force-push": true, "delete-ref": true, "mutation": true}
+var remoteMutationOps = map[string]bool{"push": true, "push-lease": true, "force-push": true, "delete-ref": true, "mutation": true}
 
 // applyTransform rewrites effects under t by effect shape alone. It reports
 // false for a Kind it does not know so the caller fails closed instead of
@@ -84,9 +86,19 @@ func applyTransform(t EffectTransform, effects []Effect) ([]Effect, bool) {
 	case TransformAppend:
 		return retarget(effects, AccessTruncate, AccessModify), true
 	case TransformForce:
-		return retargetRemote(effects, "push", "force-push"), true
+		return retargetRemote(retargetRemote(effects, "push", "force-push"), "push-lease", "force-push"), true
 	case TransformDeleteRef:
-		return retargetRemote(effects, "push", "delete-ref"), true
+		return retargetRemote(retargetRemote(effects, "push", "delete-ref"), "push-lease", "delete-ref"), true
+	case TransformForceWithLease:
+		return retargetRemote(effects, "push", "push-lease"), true
+	case TransformRetargetRemote:
+		if t.From == "" || t.To == "" {
+			return effects, false
+		}
+		for _, from := range strings.Split(t.From, ",") {
+			effects = retargetRemote(effects, from, t.To)
+		}
+		return effects, true
 	default:
 		return effects, false
 	}

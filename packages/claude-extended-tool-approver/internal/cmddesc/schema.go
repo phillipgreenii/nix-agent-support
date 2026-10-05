@@ -111,6 +111,25 @@ const (
 	// either approving or rejecting — the conservative middle ground until
 	// a future slice reviews it deliberately.
 	KindKeyMaterial
+	// KindCommandDir is an operand naming the directory ONE COMMAND runs in
+	// (git/bd's `-C <dir>`, "Run as if started in <dir>"). Unlike KindChdir
+	// (cd) it does NOT move the SHELL: later commands in the same list keep
+	// their working directory. It emits a metadata PathRead of the directory
+	// and re-bases every RELATIVE path effect of the SAME command against
+	// it (interpreter.go's commandDir/rebaseUnderCommandDir), so `git -C
+	// /repo add flake.lock` is judged as a write to /repo/flake.lock, not to
+	// <cwd>/flake.lock. A runtime-expanded directory makes every relative
+	// path effect of the command Dynamic (fail closed). Several `-C` on one
+	// command compose left to right, exactly like git's own handling.
+	KindCommandDir
+	// KindAllowedLiteral is an operand that is inert ONLY when it is one of a
+	// CLOSED, named set of exact strings (OperandRole.Set; see
+	// allowedLiteralSets). Any other value — or a runtime expansion — makes
+	// the interpretation insufficient. It exists for git's `-c key=value`,
+	// where a handful of provably inert pairs are safe and every other pair
+	// (alias.*, core.pager, core.fsmonitor=<program>, ...) can run code: the
+	// closedness of the set is the control, not any denylist (P3).
+	KindAllowedLiteral
 )
 
 // String returns the deterministic role name used in labels and reasons.
@@ -146,6 +165,10 @@ func (k RoleKind) String() string {
 		return "exec"
 	case KindKeyMaterial:
 		return "key-material"
+	case KindCommandDir:
+		return "command-dir"
+	case KindAllowedLiteral:
+		return "allowed-literal"
 	default:
 		return "role-invalid"
 	}
@@ -160,6 +183,9 @@ type OperandRole struct {
 	Kind      RoleKind
 	Dialect   string
 	Operation string
+	// Set names the closed literal set a KindAllowedLiteral role is checked
+	// against (a key of allowedLiteralSets). Empty for every other kind.
+	Set string
 }
 
 // Schema-author shorthands for the common roles. Program(dialect) builds the
@@ -178,7 +204,16 @@ var (
 	Chdir        = OperandRole{Kind: KindChdir}
 	Exec         = OperandRole{Kind: KindExec}
 	KeyMaterial  = OperandRole{Kind: KindKeyMaterial}
+	// CommandDir is the per-command working-directory role (`git -C`,
+	// `bd -C`); see KindCommandDir.
+	CommandDir = OperandRole{Kind: KindCommandDir}
 )
+
+// AllowedLiteral returns the operand role for a literal that must be a member
+// of the named closed set (see KindAllowedLiteral and allowedLiteralSets).
+func AllowedLiteral(set string) OperandRole {
+	return OperandRole{Kind: KindAllowedLiteral, Set: set}
+}
 
 // Program returns the operand role for program text in the named dialect.
 func Program(dialect string) OperandRole {
@@ -247,6 +282,22 @@ const (
 	// TransformDeleteRef rewrites every EffectRemote whose Operation is "push"
 	// to "delete-ref", generically by effect shape (git push -d/--delete).
 	TransformDeleteRef
+	// TransformForceWithLease rewrites every EffectRemote whose Operation is
+	// "push" to "push-lease" (git push --force-with-lease). Only a plain
+	// "push" is lease-qualified: a push already retargeted by -f/--force
+	// (force-push) or -d/--delete (delete-ref) stays that, so a lease flag can
+	// never soften an unconditional force that appears on the same command
+	// line in either order (TransformForce/TransformDeleteRef rewrite
+	// "push-lease" too — see transform.go).
+	TransformForceWithLease
+	// TransformRetargetRemote rewrites every EffectRemote whose Operation is
+	// EffectTransform.From to EffectTransform.To — a generic, data-expressed
+	// operation upgrade for a flag that changes WHAT the remote operation is
+	// (gh pr create --draft: "pr-create" -> "pr-create-draft"). From and To are
+	// plain Operation spellings (From MAY be a comma-separated list of
+	// spellings to rewrite); an empty From or To makes the interpretation
+	// insufficient (fail closed).
+	TransformRetargetRemote
 )
 
 // String returns the deterministic kind name.
@@ -266,6 +317,10 @@ func (k TransformKind) String() string {
 		return "force"
 	case TransformDeleteRef:
 		return "delete-ref"
+	case TransformForceWithLease:
+		return "force-with-lease"
+	case TransformRetargetRemote:
+		return "retarget-remote"
 	default:
 		return "transform-invalid"
 	}
@@ -282,6 +337,10 @@ func (k TransformKind) String() string {
 // insufficient rather than silently passing effects through.
 type EffectTransform struct {
 	Kind TransformKind
+	// From/To are the Operation spellings a TransformRetargetRemote rewrites
+	// between; empty for every other Kind.
+	From string
+	To   string
 }
 
 // Arity says how many values a flag takes and how they may be spelled.

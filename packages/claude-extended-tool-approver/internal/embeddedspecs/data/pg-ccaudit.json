@@ -1,0 +1,1789 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "pg-ccaudit",
+  "command": {
+    "name": "pg-ccaudit",
+    "provenance": "pg-ccaudit --help ('index Claude Code transcripts into SQLite and query them'), this host 2026-10-05",
+    "citations": {
+      "provenance": {
+        "source": "pg-ccaudit --help: \"pg-ccaudit — index Claude Code transcripts into SQLite and query them\""
+      },
+      "stdin": {
+        "source": "pg-ccaudit --help: \"USAGE pg-ccaudit \u003ccommand\u003e [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+      },
+      "stdout": {
+        "source": "pg-ccaudit --help: \"USAGE pg-ccaudit \u003ccommand\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
+      },
+      "unknownFlag": {
+        "source": "pg-ccaudit --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "pg-ccaudit --help: \"USAGE pg-ccaudit \u003ccommand\u003e [flags]\""
+      }
+    },
+    "stdin": "never",
+    "stdout": "none",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true,
+    "subcommands": {
+      "candidates": {
+        "name": "candidates",
+        "provenance": "pg-ccaudit candidates -h, this host 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "pg-ccaudit candidates --help: \"pg-ccaudit candidates — Tier 1: structural mistake candidates (read-only, no model calls)\""
+          },
+          "stdin": {
+            "source": "pg-ccaudit candidates --help: \"pg-ccaudit candidates — Tier 1: structural mistake candidates (read-only, no model calls)\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "pg-ccaudit candidates --help: \"pg-ccaudit candidates — Tier 1: structural mistake candidates (read-only, no model calls)\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "pg-ccaudit candidates --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--batch": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit candidates --help: \"-batch int\""
+            }
+          },
+          "--churn-min": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit candidates --help: \"-churn-min pg-ccaudit queries --verbose file-churn\""
+            }
+          },
+          "--classifier": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit candidates --help: \"-classifier string\""
+            }
+          },
+          "--format": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit candidates --help: \"-format string\""
+            }
+          },
+          "--max": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit candidates --help: \"-max int\""
+            }
+          },
+          "--retry-gap": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit candidates --help: \"-retry-gap int\""
+            }
+          },
+          "--signals": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit candidates --help: \"-signals string\""
+            }
+          },
+          "--since": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit candidates --help: \"-since string\""
+            }
+          },
+          "--until": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit candidates --help: \"-until string\""
+            }
+          },
+          "-batch": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit candidates --help: \"-batch int\""
+            }
+          },
+          "-churn-min": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit candidates --help: \"-churn-min pg-ccaudit queries --verbose file-churn\""
+            }
+          },
+          "-classifier": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit candidates --help: \"-classifier string\""
+            }
+          },
+          "-format": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit candidates --help: \"-format string\""
+            }
+          },
+          "-max": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit candidates --help: \"-max int\""
+            }
+          },
+          "-retry-gap": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit candidates --help: \"-retry-gap int\""
+            }
+          },
+          "-signals": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit candidates --help: \"-signals string\""
+            }
+          },
+          "-since": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit candidates --help: \"-since string\""
+            }
+          },
+          "-until": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit candidates --help: \"-until string\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-ccaudit candidates --help: \"pg-ccaudit candidates — Tier 1: structural mistake candidates (read-only, no model calls)\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "classify": {
+        "name": "classify",
+        "provenance": "pg-ccaudit classify -h, this host 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "pg-ccaudit classify --help: \"pg-ccaudit classify [status] — Tier 2: decide which candidates are real, and why\""
+          },
+          "stdin": {
+            "source": "pg-ccaudit classify --help: \"pg-ccaudit classify [status] — Tier 2: decide which candidates are real, and why\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "pg-ccaudit classify --help: \"pg-ccaudit classify [status] — Tier 2: decide which candidates are real, and why\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "pg-ccaudit classify --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--batch": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit classify --help: \"-batch int\""
+            }
+          },
+          "--churn-min": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit classify --help: \"-churn-min pg-ccaudit queries --verbose file-churn\""
+            }
+          },
+          "--classifier": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit classify --help: \"--classifier baseline the rule the semantic classifier must BEAT:\""
+            }
+          },
+          "--format": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit classify --help: \"-format string\""
+            }
+          },
+          "--max": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit classify --help: \"-max int\""
+            }
+          },
+          "--retry-gap": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit classify --help: \"-retry-gap int\""
+            }
+          },
+          "--signals": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit classify --help: \"-signals string\""
+            }
+          },
+          "--since": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit classify --help: \"classify status --since … --until …\""
+            }
+          },
+          "--until": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit classify --help: \"classify status --since … --until …\""
+            }
+          },
+          "-batch": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit classify --help: \"-batch int\""
+            }
+          },
+          "-churn-min": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit classify --help: \"-churn-min pg-ccaudit queries --verbose file-churn\""
+            }
+          },
+          "-classifier": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit classify --help: \"-classifier string\""
+            }
+          },
+          "-format": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit classify --help: \"-format string\""
+            }
+          },
+          "-max": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit classify --help: \"-max int\""
+            }
+          },
+          "-retry-gap": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit classify --help: \"-retry-gap int\""
+            }
+          },
+          "-signals": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit classify --help: \"-signals string\""
+            }
+          },
+          "-since": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit classify --help: \"-since string\""
+            }
+          },
+          "-until": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit classify --help: \"-until string\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-ccaudit classify --help: \"pg-ccaudit classify [status] — Tier 2: decide which candidates are real, and why\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "cost": {
+        "name": "cost",
+        "provenance": "pg-ccaudit cost -h, this host 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "pg-ccaudit cost --help: \"pg-ccaudit cost — the persisted classifier cost ledger\""
+          },
+          "stdin": {
+            "source": "pg-ccaudit cost --help: \"pg-ccaudit cost — the persisted classifier cost ledger\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "pg-ccaudit cost --help: \"pg-ccaudit cost — the persisted classifier cost ledger\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "pg-ccaudit cost --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--json": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit cost --help: \"-json\""
+            }
+          },
+          "--since": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit cost --help: \"-since string\""
+            }
+          },
+          "--until": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit cost --help: \"-until string\""
+            }
+          },
+          "-json": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit cost --help: \"-json\""
+            }
+          },
+          "-since": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit cost --help: \"-since string\""
+            }
+          },
+          "-until": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit cost --help: \"-until string\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-ccaudit cost --help: \"pg-ccaudit cost — the persisted classifier cost ledger\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "evaluate": {
+        "name": "evaluate",
+        "provenance": "pg-ccaudit evaluate -h, this host 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "pg-ccaudit evaluate --help: \"pg-ccaudit evaluate — score a classifier against the gold set, against the baseline\""
+          },
+          "stdin": {
+            "source": "pg-ccaudit evaluate --help: \"pg-ccaudit evaluate — score a classifier against the gold set, against the baseline\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "pg-ccaudit evaluate --help: \"pg-ccaudit evaluate — score a classifier against the gold set, against the baseline\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "pg-ccaudit evaluate --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--batch": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit evaluate --help: \"-batch int\""
+            }
+          },
+          "--churn-min": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit evaluate --help: \"-churn-min pg-ccaudit queries --verbose file-churn\""
+            }
+          },
+          "--classifier": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit evaluate --help: \"-classifier string\""
+            }
+          },
+          "--format": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit evaluate --help: \"-format string\""
+            }
+          },
+          "--max": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit evaluate --help: \"-max int\""
+            }
+          },
+          "--retry-gap": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit evaluate --help: \"-retry-gap int\""
+            }
+          },
+          "--signals": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit evaluate --help: \"-signals string\""
+            }
+          },
+          "--since": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit evaluate --help: \"-since string\""
+            }
+          },
+          "--until": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit evaluate --help: \"-until string\""
+            }
+          },
+          "-batch": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit evaluate --help: \"-batch int\""
+            }
+          },
+          "-churn-min": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit evaluate --help: \"-churn-min pg-ccaudit queries --verbose file-churn\""
+            }
+          },
+          "-classifier": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit evaluate --help: \"-classifier string\""
+            }
+          },
+          "-format": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit evaluate --help: \"-format string\""
+            }
+          },
+          "-max": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit evaluate --help: \"-max int\""
+            }
+          },
+          "-retry-gap": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit evaluate --help: \"-retry-gap int\""
+            }
+          },
+          "-signals": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit evaluate --help: \"-signals string\""
+            }
+          },
+          "-since": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit evaluate --help: \"-since string\""
+            }
+          },
+          "-until": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit evaluate --help: \"-until string\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-ccaudit evaluate --help: \"pg-ccaudit evaluate — score a classifier against the gold set, against the baseline\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "gold": {
+        "name": "gold",
+        "provenance": "pg-ccaudit gold -h, this host 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "pg-ccaudit gold --help: \"pg-ccaudit gold \u003cseed|sample|status\u003e — maintain the Tier 2 evaluation set\""
+          },
+          "stdin": {
+            "source": "pg-ccaudit gold --help: \"pg-ccaudit gold \u003cseed|sample|status\u003e — maintain the Tier 2 evaluation set\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "pg-ccaudit gold --help: \"pg-ccaudit gold \u003cseed|sample|status\u003e — maintain the Tier 2 evaluation set\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "pg-ccaudit gold --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--batch": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit gold --help: \"-batch int\""
+            }
+          },
+          "--churn-min": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit gold --help: \"-churn-min pg-ccaudit queries --verbose file-churn\""
+            }
+          },
+          "--classifier": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit gold --help: \"-classifier string\""
+            }
+          },
+          "--format": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit gold --help: \"-format string\""
+            }
+          },
+          "--max": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit gold --help: \"-max int\""
+            }
+          },
+          "--retry-gap": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit gold --help: \"-retry-gap int\""
+            }
+          },
+          "--sample": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit gold --help: \"-sample int\""
+            }
+          },
+          "--signals": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit gold --help: \"-signals string\""
+            }
+          },
+          "--since": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit gold --help: \"-since string\""
+            }
+          },
+          "--until": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit gold --help: \"-until string\""
+            }
+          },
+          "-batch": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit gold --help: \"-batch int\""
+            }
+          },
+          "-churn-min": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit gold --help: \"-churn-min pg-ccaudit queries --verbose file-churn\""
+            }
+          },
+          "-classifier": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit gold --help: \"-classifier string\""
+            }
+          },
+          "-format": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit gold --help: \"-format string\""
+            }
+          },
+          "-max": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit gold --help: \"-max int\""
+            }
+          },
+          "-retry-gap": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit gold --help: \"-retry-gap int\""
+            }
+          },
+          "-sample": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit gold --help: \"-sample int\""
+            }
+          },
+          "-signals": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit gold --help: \"-signals string\""
+            }
+          },
+          "-since": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit gold --help: \"-since string\""
+            }
+          },
+          "-until": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit gold --help: \"-until string\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-ccaudit gold --help: \"pg-ccaudit gold \u003cseed|sample|status\u003e — maintain the Tier 2 evaluation set\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "queries": {
+        "name": "queries",
+        "provenance": "pg-ccaudit queries -h, this host 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "pg-ccaudit queries --help: \"Usage of queries:\""
+          },
+          "stdin": {
+            "source": "pg-ccaudit queries --help: \"Usage of queries: -verbose also print each query's interpretation notes and SQL\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "pg-ccaudit queries --help: \"Usage of queries: -verbose also print each query's interpretation notes and SQL\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "pg-ccaudit queries --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--verbose": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit queries --help: \"-verbose\""
+            }
+          },
+          "-verbose": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit queries --help: \"-verbose\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-ccaudit queries --help: \"Usage of queries: -verbose also print each query's interpretation notes and SQL\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "metadata",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "query": {
+        "name": "query",
+        "provenance": "pg-ccaudit query -h, this host 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "pg-ccaudit query --help: \"pg-ccaudit query \u003cname\u003e [args…] — run a named, versioned canned query\""
+          },
+          "stdin": {
+            "source": "pg-ccaudit query --help: \"pg-ccaudit query \u003cname\u003e [args…] — run a named, versioned canned query\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "pg-ccaudit query --help: \"pg-ccaudit query \u003cname\u003e [args…] — run a named, versioned canned query\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "pg-ccaudit query --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--format": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit query --help: \"-format string\""
+            }
+          },
+          "--no-staleness": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit query --help: \"-no-staleness\""
+            }
+          },
+          "--since": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit query --help: \"-since string\""
+            }
+          },
+          "--until": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit query --help: \"-until string\""
+            }
+          },
+          "-format": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit query --help: \"-format string\""
+            }
+          },
+          "-no-staleness": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit query --help: \"-no-staleness\""
+            }
+          },
+          "-since": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit query --help: \"-since string\""
+            }
+          },
+          "-until": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit query --help: \"-until string\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-ccaudit query --help: \"pg-ccaudit query \u003cname\u003e [args…] — run a named, versioned canned query\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "report": {
+        "name": "report",
+        "provenance": "pg-ccaudit report -h, this host 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "pg-ccaudit report --help: \"pg-ccaudit report — Tier 3: ONE ranked report, mistakes and command failures together\""
+          },
+          "stdin": {
+            "source": "pg-ccaudit report --help: \"pg-ccaudit report — Tier 3: ONE ranked report, mistakes and command failures together\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "pg-ccaudit report --help: \"pg-ccaudit report — Tier 3: ONE ranked report, mistakes and command failures together\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "pg-ccaudit report --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--batch": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit report --help: \"-batch int\""
+            }
+          },
+          "--churn-min": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit report --help: \"-churn-min pg-ccaudit queries --verbose file-churn\""
+            }
+          },
+          "--classifier": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit report --help: \"-classifier string\""
+            }
+          },
+          "--format": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit report --help: \"-format string\""
+            }
+          },
+          "--max": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit report --help: \"-max int\""
+            }
+          },
+          "--no-evaluation": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit report --help: \"-no-evaluation\""
+            }
+          },
+          "--retry-gap": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit report --help: \"-retry-gap int\""
+            }
+          },
+          "--signals": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit report --help: \"-signals string\""
+            }
+          },
+          "--since": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit report --help: \"-since string\""
+            }
+          },
+          "--until": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit report --help: \"-until string\""
+            }
+          },
+          "-batch": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit report --help: \"-batch int\""
+            }
+          },
+          "-churn-min": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit report --help: \"-churn-min pg-ccaudit queries --verbose file-churn\""
+            }
+          },
+          "-classifier": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit report --help: \"-classifier string\""
+            }
+          },
+          "-format": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit report --help: \"-format string\""
+            }
+          },
+          "-max": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit report --help: \"-max int\""
+            }
+          },
+          "-no-evaluation": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit report --help: \"-no-evaluation\""
+            }
+          },
+          "-retry-gap": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit report --help: \"-retry-gap int\""
+            }
+          },
+          "-signals": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit report --help: \"-signals string\""
+            }
+          },
+          "-since": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit report --help: \"-since string\""
+            }
+          },
+          "-until": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit report --help: \"-until string\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-ccaudit report --help: \"pg-ccaudit report — Tier 3: ONE ranked report, mistakes and command failures together\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "schema": {
+        "name": "schema",
+        "provenance": "pg-ccaudit schema -h, this host 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "pg-ccaudit schema --help: \"Usage of schema:\""
+          },
+          "stdin": {
+            "source": "pg-ccaudit schema --help: \"Usage of schema: -thinking also print the optional thinking table (T-16)\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "pg-ccaudit schema --help: \"Usage of schema: -thinking also print the optional thinking table (T-16)\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "pg-ccaudit schema --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-ccaudit schema --help: \"Usage of schema: -thinking also print the optional thinking table (T-16)\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "metadata",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "status": {
+        "name": "status",
+        "provenance": "pg-ccaudit status -h, this host 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "pg-ccaudit status --help: \"pg-ccaudit status — report index coverage and staleness\""
+          },
+          "stdin": {
+            "source": "pg-ccaudit status --help: \"pg-ccaudit status — report index coverage and staleness\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "pg-ccaudit status --help: \"pg-ccaudit status — report index coverage and staleness\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "pg-ccaudit status --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--json": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit status --help: \"-json\""
+            }
+          },
+          "-json": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-ccaudit status --help: \"-json\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-ccaudit status --help: \"pg-ccaudit status — report index coverage and staleness\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "metadata",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "version": {
+        "name": "version",
+        "provenance": "pg-ccaudit version -h, this host 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "pg-ccaudit version --help: \"pg-ccaudit 0.0.0-a73e905d\""
+          },
+          "stdin": {
+            "source": "pg-ccaudit version --help: \"pg-ccaudit 0.0.0-a73e905d\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "pg-ccaudit version --help: \"pg-ccaudit 0.0.0-a73e905d\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "pg-ccaudit version --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-ccaudit version --help: \"pg-ccaudit 0.0.0-a73e905d\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "metadata",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      }
+    }
+  }
+}

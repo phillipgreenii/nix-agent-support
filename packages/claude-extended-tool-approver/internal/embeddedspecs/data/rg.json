@@ -1,0 +1,1099 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "rg",
+  "command": {
+    "name": "rg",
+    "provenance": "rg --help (ripgrep), this host 2026-10-05",
+    "citations": {
+      "provenance": {
+        "source": "rg --help: \"ripgrep 15.1.0\""
+      },
+      "stdin": {
+        "source": "rg --help: \"USAGE: rg [OPTIONS] PATTERN [PATH ...] rg [OPTIONS] -e PATTERN ... [PATH ...]\" (no explicit stdin wording in the reviewed text; classified \"when-no-path-operands\" from the documented operand/argument shape in this same synopsis)"
+      },
+      "stdout": {
+        "source": "rg --help: \"USAGE: rg [OPTIONS] PATTERN [PATH ...] rg [OPTIONS] -e PATTERN ... [PATH ...]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+      },
+      "unknownFlag": {
+        "source": "rg --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "flags": {
+      "--after-context": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"When combined with -A/--after-context or -C/--context, it's possible\""
+        }
+      },
+      "--before-context": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"-B NUM, --before-context=NUM\""
+        }
+      },
+      "--case-sensitive": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"-s, --case-sensitive\""
+        }
+      },
+      "--color": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"--color=WHEN\""
+        }
+      },
+      "--column": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"--column\""
+        }
+      },
+      "--context": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"When combined with -A/--after-context or -C/--context, it's possible\""
+        }
+      },
+      "--count": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"When used with -c/--count or --count-matches, this causes ripgrep to\""
+        }
+      },
+      "--count-matches": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"When used with -c/--count or --count-matches, this causes ripgrep to\""
+        }
+      },
+      "--files": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"rg [OPTIONS] --files [PATH ...]\""
+        }
+      },
+      "--files-with-matches": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"combining this flag with -l/--files-with-matches will emit files that\""
+        }
+      },
+      "--files-without-match": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"same as, for example, --files-without-match, which will emit files that\""
+        }
+      },
+      "--fixed-strings": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"-F, --fixed-strings\""
+        }
+      },
+      "--follow": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"-L, --follow\""
+        }
+      },
+      "--glob": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"-g GLOB, --glob=GLOB\""
+        }
+      },
+      "--heading": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"--heading\""
+        }
+      },
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"Use -h for short descriptions and --help for more details.\""
+        }
+      },
+      "--hidden": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"-., --hidden\""
+        }
+      },
+      "--iglob": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"insensitively. This effectively treats -g/--glob as --iglob.\""
+        }
+      },
+      "--ignore-case": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"This flag overrides the -i/--ignore-case and -S/--smart-case flags.\""
+        }
+      },
+      "--invert-match": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"-v, --invert-match\""
+        }
+      },
+      "--json": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"--vimgrep and --json.\""
+        }
+      },
+      "--line-number": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"One byte is equal to one column. This implies -n/--line-number.\""
+        }
+      },
+      "--line-regexp": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"-x, --line-regexp\""
+        }
+      },
+      "--max-count": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"-m NUM, --max-count=NUM\""
+        }
+      },
+      "--max-depth": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"-d NUM, --max-depth=NUM\""
+        }
+      },
+      "--multiline": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"When -U/--multiline is used, a single match that spans multiple lines\""
+        }
+      },
+      "--no-config": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"--no-config\""
+        }
+      },
+      "--no-filename": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"This flag overrides -I/--no-filename.\""
+        }
+      },
+      "--no-heading": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"This flag can be disabled with --no-heading.\""
+        }
+      },
+      "--no-ignore": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"--no-ignore\""
+        }
+      },
+      "--no-line-number": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"--no-line-number was given), then it is automatically replaced with the\""
+        }
+      },
+      "--no-messages": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"messages, use the --no-messages flag.\""
+        }
+      },
+      "--null": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"emitted when using ripgrep's -0/--null flag or find's --print0 flag.\""
+        }
+      },
+      "--only-matching": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"output. If -o/--only-matching is specified, print the offset of the\""
+        }
+      },
+      "--pcre2": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"This overrides previous uses of the -P/--pcre2 and --auto-hybrid-regex\""
+        }
+      },
+      "--pretty": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"-p, --pretty\""
+        }
+      },
+      "--quiet": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"-q, --quiet\""
+        }
+      },
+      "--regexp": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"with a dash, use the -e/--regexp flag.\""
+        }
+      },
+      "--replace": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"-r REPLACEMENT, --replace=REPLACEMENT\""
+        }
+      },
+      "--smart-case": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"This flag overrides the -i/--ignore-case and -S/--smart-case flags.\""
+        }
+      },
+      "--sort": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"--sort=SORTBY\""
+        }
+      },
+      "--sortr": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"To sort results in reverse or descending order, use the --sortr flag.\""
+        }
+      },
+      "--stats": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"always implicitly and unconditionally enable --stats.\""
+        }
+      },
+      "--text": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"Using this flag implies -a/--text. It also overrides --crlf.\""
+        }
+      },
+      "--trim": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"--trim\""
+        }
+      },
+      "--type": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"-t TYPE, --type=TYPE\""
+        }
+      },
+      "--type-not": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"-T TYPE, --type-not=TYPE\""
+        }
+      },
+      "--unrestricted": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"When the -u/--unrestricted flag is provided for a third time, then this\""
+        }
+      },
+      "--version": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"rg [OPTIONS] --version\""
+        }
+      },
+      "--vimgrep": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"--vimgrep and --json.\""
+        }
+      },
+      "--with-filename": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"hyperlink, use the -H/--with-filename flag.\""
+        }
+      },
+      "--word-regexp": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"This overrides the -w/--word-regexp flag.\""
+        }
+      },
+      "-0": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"emitted when using ripgrep's -0/--null flag or find's --print0 flag.\""
+        }
+      },
+      "-A": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"When combined with -A/--after-context or -C/--context, it's possible\""
+        }
+      },
+      "-B": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"-B NUM, --before-context=NUM\""
+        }
+      },
+      "-C": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"When combined with -A/--after-context or -C/--context, it's possible\""
+        }
+      },
+      "-F": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"-F, --fixed-strings\""
+        }
+      },
+      "-H": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"hyperlink, use the -H/--with-filename flag.\""
+        }
+      },
+      "-I": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"This flag overrides -I/--no-filename.\""
+        }
+      },
+      "-L": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"-L, --follow\""
+        }
+      },
+      "-N": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"This flag can be disabled by -N/--no-line-number.\""
+        }
+      },
+      "-P": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"This overrides previous uses of the -P/--pcre2 and --auto-hybrid-regex\""
+        }
+      },
+      "-S": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"This flag overrides the -i/--ignore-case and -S/--smart-case flags.\""
+        }
+      },
+      "-T": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"-T TYPE, --type-not=TYPE\""
+        }
+      },
+      "-U": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"When -U/--multiline is used, a single match that spans multiple lines\""
+        }
+      },
+      "-V": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"-V, --version\""
+        }
+      },
+      "-a": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"Using this flag implies -a/--text. It also overrides --crlf.\""
+        }
+      },
+      "-c": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"When used with -c/--count or --count-matches, this causes ripgrep to\""
+        }
+      },
+      "-d": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"-d NUM, --max-depth=NUM\""
+        }
+      },
+      "-e": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"rg [OPTIONS] -e PATTERN ... [PATH ...]\""
+        }
+      },
+      "-g": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"-g GLOB, --glob=GLOB\""
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"Use -h for short descriptions and --help for more details.\""
+        }
+      },
+      "-i": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"This flag overrides the -i/--ignore-case and -S/--smart-case flags.\""
+        }
+      },
+      "-l": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"combining this flag with -l/--files-with-matches will emit files that\""
+        }
+      },
+      "-m": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"-m NUM, --max-count=NUM\""
+        }
+      },
+      "-n": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"One byte is equal to one column. This implies -n/--line-number.\""
+        }
+      },
+      "-o": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"output. If -o/--only-matching is specified, print the offset of the\""
+        }
+      },
+      "-p": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"-p, --pretty\""
+        }
+      },
+      "-q": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"-q, --quiet\""
+        }
+      },
+      "-r": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"-r REPLACEMENT, --replace=REPLACEMENT\""
+        }
+      },
+      "-s": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"-s, --case-sensitive\""
+        }
+      },
+      "-t": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"-t TYPE, --type=TYPE\""
+        }
+      },
+      "-u": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"When the -u/--unrestricted flag is provided for a third time, then this\""
+        }
+      },
+      "-v": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"-v, --invert-match\""
+        }
+      },
+      "-w": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"This overrides the -w/--word-regexp flag.\""
+        }
+      },
+      "-x": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rg --help: \"-x, --line-regexp\""
+        }
+      }
+    },
+    "positionals": {
+      "leading": [
+        {
+          "kind": "literal"
+        }
+      ],
+      "leadingSkippedByFlags": [
+        "-e",
+        "--regexp",
+        "--files",
+        "-h",
+        "--help",
+        "-V",
+        "--version"
+      ],
+      "rest": {
+        "kind": "path-read"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "rg --help: \"USAGE: rg [OPTIONS] PATTERN [PATH ...] rg [OPTIONS] -e PATTERN ... [PATH ...]\""
+      }
+    },
+    "implicitEffects": [
+      {
+        "role": {
+          "kind": "path-read"
+        },
+        "target": ".",
+        "citation": {
+          "source": "rg --help: \"USAGE: rg [OPTIONS] PATTERN [PATH ...] rg [OPTIONS] -e PATTERN ... [PATH ...]\" -- documents the command whose implicit effect (target \".\", role \"path-read\") is derived from this synopsis"
+        }
+      }
+    ],
+    "stdin": "when-no-path-operands",
+    "stdout": "content",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

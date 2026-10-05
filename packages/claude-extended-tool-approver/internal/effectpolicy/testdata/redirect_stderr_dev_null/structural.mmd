@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: git symbolic-ref --short refs/remotes/origin/HEAD 2#gt;/dev/null"]
+    n1[/"file: /dev/null"/]
+    n0 -->|"redirect-out: 2#gt;"| n1

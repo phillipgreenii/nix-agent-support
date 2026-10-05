@@ -1,0 +1,469 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "claude-extended-tool-approver",
+  "command": {
+    "name": "claude-extended-tool-approver",
+    "provenance": "claude-extended-tool-approver --help, this host 2026-10-05",
+    "citations": {
+      "provenance": {
+        "source": "claude-extended-tool-approver --help: \"claude-extended-tool-approver is a Claude Code PreToolUse hook that\""
+      },
+      "stdin": {
+        "source": "claude-extended-tool-approver --help: \"Usage: claude-extended-tool-approver [command]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+      },
+      "stdout": {
+        "source": "claude-extended-tool-approver --help: \"Usage: claude-extended-tool-approver [command]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
+      },
+      "unknownFlag": {
+        "source": "claude-extended-tool-approver --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "flags": {
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "claude-extended-tool-approver --help: \"spec-drift-check Diff each embedded command spec's flag set against the pinned binary's captured --help (P13/P14)\""
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "claude-extended-tool-approver --help: \"-h, --help help for claude-extended-tool-approver\""
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "claude-extended-tool-approver --help: \"Usage: claude-extended-tool-approver [command]\""
+      }
+    },
+    "stdin": "never",
+    "stdout": "none",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true,
+    "subcommands": {
+      "evaluate": {
+        "name": "evaluate",
+        "provenance": "claude-extended-tool-approver evaluate --help, this host 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "claude-extended-tool-approver evaluate --help: \"Replay every logged decision through the current rule engine and\""
+          },
+          "stdin": {
+            "source": "claude-extended-tool-approver evaluate --help: \"Usage: claude-extended-tool-approver evaluate [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "claude-extended-tool-approver evaluate --help: \"Usage: claude-extended-tool-approver evaluate [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "claude-extended-tool-approver evaluate --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--approval-source": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "claude-extended-tool-approver evaluate --help: \"Use --approval-source to restrict evaluation to a single approval-mechanism\""
+            }
+          },
+          "--corpus": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "claude-extended-tool-approver evaluate --help: \"--corpus \u003cpath\u003e switches evaluate to an entirely different grading source: the\""
+            }
+          },
+          "--days": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "claude-extended-tool-approver evaluate --help: \"claude-extended-tool-approver evaluate --days 3 --format json |\""
+            }
+          },
+          "--format": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "claude-extended-tool-approver evaluate --help: \"--format json also emits replay_module and replay_reason: the rule that PRODUCED\""
+            }
+          },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "claude-extended-tool-approver evaluate --help: \"-h, --help help for evaluate\""
+            }
+          },
+          "--misses-only": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "claude-extended-tool-approver evaluate --help: \"--misses-only/--settings) is refused rather than silently diffed. The default\""
+            }
+          },
+          "--settings": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "claude-extended-tool-approver evaluate --help: \"Use --settings to additionally evaluate each decision against a\""
+            }
+          },
+          "--since": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "claude-extended-tool-approver evaluate --help: \"A baseline captured under different filters (--days/--since/--approval-source/\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "claude-extended-tool-approver evaluate --help: \"-h, --help help for evaluate\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "unmodeled"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "claude-extended-tool-approver evaluate --help: \"Usage: claude-extended-tool-approver evaluate [flags]\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "lint": {
+        "name": "lint",
+        "provenance": "claude-extended-tool-approver lint --help, this host 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "claude-extended-tool-approver lint --help: \"lint runs the checks internal/speclint implements (P13/P14) over one or\""
+          },
+          "stdin": {
+            "source": "claude-extended-tool-approver lint --help: \"Usage: claude-extended-tool-approver lint [PATH...] [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "claude-extended-tool-approver lint --help: \"Usage: claude-extended-tool-approver lint [PATH...] [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "claude-extended-tool-approver lint --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--embedded": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "claude-extended-tool-approver lint --help: \"--embedded lints packet 1.2's 45 generated embedded built-in specs\""
+            }
+          },
+          "--format": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "claude-extended-tool-approver lint --help: \"--format string Output format: text|json (default \"text\")\""
+            }
+          },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "claude-extended-tool-approver lint --help: \"-h, --help help for lint\""
+            }
+          },
+          "--repo-dir": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "claude-extended-tool-approver lint --help: \"--user-dir/--repo-dir additionally load specfmt's user-level/repo-level\""
+            }
+          },
+          "--user-dir": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "claude-extended-tool-approver lint --help: \"--user-dir/--repo-dir additionally load specfmt's user-level/repo-level\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "claude-extended-tool-approver lint --help: \"-h, --help help for lint\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "path-read"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "claude-extended-tool-approver lint --help: \"Usage: claude-extended-tool-approver lint [PATH...] [flags]\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "show": {
+        "name": "show",
+        "provenance": "claude-extended-tool-approver show --help, this host 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "claude-extended-tool-approver show --help: \"Display the full details of one or more logged decision rows,\""
+          },
+          "stdin": {
+            "source": "claude-extended-tool-approver show --help: \"Usage: claude-extended-tool-approver show ID [ID ...] [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "claude-extended-tool-approver show --help: \"Usage: claude-extended-tool-approver show ID [ID ...] [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "claude-extended-tool-approver show --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--format": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "claude-extended-tool-approver show --help: \"Use --format=json for machine-readable output or --format=table\""
+            }
+          },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "claude-extended-tool-approver show --help: \"-h, --help help for show\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "claude-extended-tool-approver show --help: \"-h, --help help for show\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "minRest": 1,
+          "citation": {
+            "source": "claude-extended-tool-approver show --help: \"Usage: claude-extended-tool-approver show ID [ID ...] [flags]\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "spec-drift-check": {
+        "name": "spec-drift-check",
+        "provenance": "claude-extended-tool-approver spec-drift-check --help, this host 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "claude-extended-tool-approver spec-drift-check --help: \"spec-drift-check is the \"--help drift check\" (Phase 3 item 2; P13/P14):\""
+          },
+          "stdin": {
+            "source": "claude-extended-tool-approver spec-drift-check --help: \"Usage: claude-extended-tool-approver spec-drift-check --embedded [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "claude-extended-tool-approver spec-drift-check --help: \"Usage: claude-extended-tool-approver spec-drift-check --embedded [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "claude-extended-tool-approver spec-drift-check --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--embedded": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "claude-extended-tool-approver spec-drift-check --help: \"claude-extended-tool-approver spec-drift-check --embedded [flags]\""
+            }
+          },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "claude-extended-tool-approver spec-drift-check --help: \"spec-drift-check is the \"--help drift check\" (Phase 3 item 2; P13/P14):\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "claude-extended-tool-approver spec-drift-check --help: \"-h, --help help for spec-drift-check\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "unmodeled"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "claude-extended-tool-approver spec-drift-check --help: \"Usage: claude-extended-tool-approver spec-drift-check --embedded [flags]\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      }
+    }
+  }
+}

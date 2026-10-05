@@ -1,0 +1,186 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "create-packet.sh",
+  "command": {
+    "name": "create-packet.sh",
+    "provenance": "create-packet.sh --help / header comment (creates one plan-decompose work-packet bead via bd create + bd defer), this repo 2026-10-05",
+    "citations": {
+      "provenance": {
+        "source": "create-packet.sh --help: \"create-packet.sh\""
+      },
+      "stdin": {
+        "source": "create-packet.sh --help: \"Usage: create-packet.sh --parent \u003cdocket-id\u003e --title \u003ctitle\u003e --body-file \u003cfile\u003e (--acceptance \u003ctext\u003e | --acceptance-file \u003cfile\u003e)\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+      },
+      "stdout": {
+        "source": "create-packet.sh --help: \"Usage: create-packet.sh --parent \u003cdocket-id\u003e --title \u003ctitle\u003e --body-file \u003cfile\u003e (--acceptance \u003ctext\u003e | --acceptance-file \u003cfile\u003e)\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+      },
+      "unknownFlag": {
+        "source": "create-packet.sh --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "flags": {
+      "--acceptance": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "create-packet.sh --help: \"(--acceptance \u003ctext\u003e | --acceptance-file \u003cfile\u003e)\""
+        }
+      },
+      "--acceptance-file": {
+        "arity": "one",
+        "operand": {
+          "kind": "path-read"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "create-packet.sh --help: \"(--acceptance \u003ctext\u003e | --acceptance-file \u003cfile\u003e)\""
+        }
+      },
+      "--actor": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "create-packet.sh --help: \"[--allow-inherit-labels] [--actor \u003cid\u003e]\""
+        }
+      },
+      "--allow-inherit-labels": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "create-packet.sh --help: \"[--allow-inherit-labels] [--actor \u003cid\u003e]\""
+        }
+      },
+      "--body-file": {
+        "arity": "one",
+        "operand": {
+          "kind": "path-read"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "create-packet.sh --help: \"create-packet.sh --parent \u003cdocket-id\u003e --title \u003ctitle\u003e --body-file \u003cfile\u003e\""
+        }
+      },
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "create-packet.sh --help: \"-h, --help Show this help message\""
+        }
+      },
+      "--label": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "create-packet.sh --help: \"[--metadata \u003cjson\u003e] [--label \u003clabels\u003e]\""
+        }
+      },
+      "--metadata": {
+        "arity": "one",
+        "operand": {
+          "kind": "data-or-at-file"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "create-packet.sh --help: \"[--metadata \u003cjson\u003e] [--label \u003clabels\u003e]\""
+        }
+      },
+      "--parent": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "create-packet.sh --help: \"Creates one work-packet bead under --parent, defers it immediately\""
+        }
+      },
+      "--title": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "create-packet.sh --help: \"create-packet.sh --parent \u003cdocket-id\u003e --title \u003ctitle\u003e --body-file \u003cfile\u003e\""
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "create-packet.sh --help: \"-h, --help Show this help message\""
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "unmodeled"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "create-packet.sh --help: \"Usage: create-packet.sh --parent \u003cdocket-id\u003e --title \u003ctitle\u003e --body-file \u003cfile\u003e (--acceptance \u003ctext\u003e | --acceptance-file \u003cfile\u003e)\""
+      }
+    },
+    "implicitEffects": [
+      {
+        "role": {
+          "kind": "remote",
+          "operation": "tracker-write"
+        },
+        "target": "beads",
+        "citation": {
+          "source": "create-packet.sh --help: \"Usage: create-packet.sh --parent \u003cdocket-id\u003e --title \u003ctitle\u003e --body-file \u003cfile\u003e (--acceptance \u003ctext\u003e | --acceptance-file \u003cfile\u003e)\" -- documents the command whose implicit effect (target \"beads\", role \"remote:tracker-write\") is derived from this synopsis"
+        }
+      }
+    ],
+    "stdin": "never",
+    "stdout": "metadata",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

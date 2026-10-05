@@ -1,0 +1,1543 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "gh",
+  "command": {
+    "name": "gh",
+    "provenance": "gh --help (GitHub CLI), this host 2026-10-05",
+    "citations": {
+      "provenance": {
+        "source": "gh --help: \"Work seamlessly with GitHub from the command line.\""
+      },
+      "stdin": {
+        "source": "gh --help: \"USAGE gh \u003ccommand\u003e \u003csubcommand\u003e [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+      },
+      "stdout": {
+        "source": "gh --help: \"USAGE gh \u003ccommand\u003e \u003csubcommand\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
+      },
+      "unknownFlag": {
+        "source": "gh --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "gh --help: \"USAGE gh \u003ccommand\u003e \u003csubcommand\u003e [flags]\""
+      }
+    },
+    "stdin": "never",
+    "stdout": "none",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true,
+    "subcommands": {
+      "pr": {
+        "name": "pr",
+        "provenance": "gh pr --help, this host 2026-10-05",
+        "citations": {
+          "provenance": {
+            "source": "gh pr --help: \"Work with GitHub pull requests.\""
+          },
+          "stdin": {
+            "source": "gh pr --help: \"USAGE gh pr \u003ccommand\u003e [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "stdout": {
+            "source": "gh pr --help: \"USAGE gh pr \u003ccommand\u003e [flags]\" (no explicit stdout wording in the reviewed text; classified \"none\" from the documented operand/argument shape in this same synopsis)"
+          },
+          "unknownFlag": {
+            "source": "gh pr --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "gh pr --help: \"--help Show help for command\""
+            }
+          },
+          "--repo": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "gh pr --help: \"-R, --repo [HOST/]OWNER/REPO Select another repository using the [HOST/]OWNER/REPO format\""
+            }
+          },
+          "-R": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "gh pr --help: \"-R, --repo [HOST/]OWNER/REPO Select another repository using the [HOST/]OWNER/REPO format\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "gh pr --help: \"USAGE gh pr \u003ccommand\u003e [flags]\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "none",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true,
+        "subcommands": {
+          "checks": {
+            "name": "checks",
+            "provenance": "gh pr checks --help, this host 2026-10-05",
+            "citations": {
+              "provenance": {
+                "source": "gh pr checks --help: \"Show CI status for a single pull request.\""
+              },
+              "stdin": {
+                "source": "gh pr checks --help: \"USAGE gh pr checks [\u003cnumber\u003e | \u003curl\u003e | \u003cbranch\u003e] [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+              },
+              "stdout": {
+                "source": "gh pr checks --help: \"USAGE gh pr checks [\u003cnumber\u003e | \u003curl\u003e | \u003cbranch\u003e] [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+              },
+              "unknownFlag": {
+                "source": "gh pr checks --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr checks --help: \"--help Show help for command\""
+                }
+              },
+              "--jq": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr checks --help: \"-q, --jq expression Filter JSON output using a jq expression\""
+                }
+              },
+              "--json": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr checks --help: \"When the `--json` flag is used, it includes a `bucket` field, which categorizes\""
+                }
+              },
+              "--repo": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr checks --help: \"-R, --repo [HOST/]OWNER/REPO Select another repository using the [HOST/]OWNER/REPO format\""
+                }
+              },
+              "--required": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr checks --help: \"--required Only show checks that are required\""
+                }
+              },
+              "--template": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr checks --help: \"-t, --template string Format JSON output using a Go template; see \"gh help formatting\"\""
+                }
+              },
+              "-R": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr checks --help: \"-R, --repo [HOST/]OWNER/REPO Select another repository using the [HOST/]OWNER/REPO format\""
+                }
+              },
+              "-q": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr checks --help: \"-q, --jq expression Filter JSON output using a jq expression\""
+                }
+              },
+              "-t": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr checks --help: \"-t, --template string Format JSON output using a Go template; see \"gh help formatting\"\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "gh pr checks --help: \"USAGE gh pr checks [\u003cnumber\u003e | \u003curl\u003e | \u003cbranch\u003e] [flags]\""
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "read"
+                },
+                "target": "github",
+                "citation": {
+                  "source": "gh pr checks --help: \"USAGE gh pr checks [\u003cnumber\u003e | \u003curl\u003e | \u003cbranch\u003e] [flags]\" -- documents the command whose implicit effect (target \"github\", role \"remote:read\") is derived from this synopsis"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "content",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "create": {
+            "name": "create",
+            "provenance": "gh pr create --help, this host 2026-10-05",
+            "citations": {
+              "provenance": {
+                "source": "gh pr create --help: \"Create a pull request on GitHub.\""
+              },
+              "stdin": {
+                "source": "gh pr create --help: \"USAGE gh pr create [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+              },
+              "stdout": {
+                "source": "gh pr create --help: \"USAGE gh pr create [flags]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+              },
+              "unknownFlag": {
+                "source": "gh pr create --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--assignee": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr create --help: \"-a, --assignee login Assign people by their login. Use \"@me\" to self-assign.\""
+                }
+              },
+              "--base": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr create --help: \"The base branch for the created PR can be specified using the `--base` flag. If not provided,\""
+                }
+              },
+              "--body": {
+                "arity": "one",
+                "operand": {
+                  "kind": "message"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr create --help: \"`--body` to skip this, or use `--fill` to autofill these values from git commits.\""
+                }
+              },
+              "--body-file": {
+                "arity": "one",
+                "operand": {
+                  "kind": "path-read"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr create --help: \"-F, --body-file file Read body text from file (use \"-\" to read from standard input)\""
+                }
+              },
+              "--draft": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "retarget-remote",
+                  "from": "pr-create",
+                  "to": "pr-create-draft"
+                },
+                "citation": {
+                  "source": "gh pr create --help: \"-d, --draft Mark pull request as a draft\""
+                }
+              },
+              "--fill": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr create --help: \"`--body` to skip this, or use `--fill` to autofill these values from git commits.\""
+                }
+              },
+              "--fill-first": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr create --help: \"--fill-first Use first commit info for title and body\""
+                }
+              },
+              "--fill-verbose": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr create --help: \"--fill-verbose Use commits msg+body for description\""
+                }
+              },
+              "--head": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr create --help: \"way will only have the default branch of the upstream repository. Use `--head` to\""
+                }
+              },
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr create --help: \"--help Show help for command\""
+                }
+              },
+              "--label": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr create --help: \"-l, --label name Add labels by name\""
+                }
+              },
+              "--milestone": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr create --help: \"-m, --milestone name Add the pull request to a milestone by name\""
+                }
+              },
+              "--no-maintainer-edit": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr create --help: \"head branch of the pull request. Disable this with `--no-maintainer-edit`.\""
+                }
+              },
+              "--project": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr create --help: \"-p, --project title Add the pull request to projects by title\""
+                }
+              },
+              "--repo": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr create --help: \"-R, --repo [HOST/]OWNER/REPO Select another repository using the [HOST/]OWNER/REPO format\""
+                }
+              },
+              "--reviewer": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr create --help: \"-r, --reviewer handle Request reviews from people or teams by their handle\""
+                }
+              },
+              "--title": {
+                "arity": "one",
+                "operand": {
+                  "kind": "message"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr create --help: \"A prompt will also ask for the title and the body of the pull request. Use `--title` and\""
+                }
+              },
+              "-B": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr create --help: \"-B, --base branch The branch into which you want your code merged\""
+                }
+              },
+              "-F": {
+                "arity": "one",
+                "operand": {
+                  "kind": "path-read"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr create --help: \"-F, --body-file file Read body text from file (use \"-\" to read from standard input)\""
+                }
+              },
+              "-H": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr create --help: \"-H, --head branch The branch that contains commits for your pull request (default [current branch])\""
+                }
+              },
+              "-R": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr create --help: \"-R, --repo [HOST/]OWNER/REPO Select another repository using the [HOST/]OWNER/REPO format\""
+                }
+              },
+              "-a": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr create --help: \"-a, --assignee login Assign people by their login. Use \"@me\" to self-assign.\""
+                }
+              },
+              "-b": {
+                "arity": "one",
+                "operand": {
+                  "kind": "message"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr create --help: \"-b, --body string Body for the pull request\""
+                }
+              },
+              "-d": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "retarget-remote",
+                  "from": "pr-create",
+                  "to": "pr-create-draft"
+                },
+                "citation": {
+                  "source": "gh pr create --help: \"-d, --draft Mark pull request as a draft\""
+                }
+              },
+              "-f": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr create --help: \"-f, --fill Use commit info for title and body\""
+                }
+              },
+              "-l": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr create --help: \"-l, --label name Add labels by name\""
+                }
+              },
+              "-m": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr create --help: \"-m, --milestone name Add the pull request to a milestone by name\""
+                }
+              },
+              "-p": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr create --help: \"-p, --project title Add the pull request to projects by title\""
+                }
+              },
+              "-r": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr create --help: \"-r, --reviewer handle Request reviews from people or teams by their handle\""
+                }
+              },
+              "-t": {
+                "arity": "one",
+                "operand": {
+                  "kind": "message"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr create --help: \"-t, --title string Title for the pull request\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "unmodeled"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "gh pr create --help: \"USAGE gh pr create [flags]\""
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "pr-create"
+                },
+                "target": "github",
+                "citation": {
+                  "source": "gh pr create --help: \"USAGE gh pr create [flags]\" -- documents the command whose implicit effect (target \"github\", role \"remote:pr-create\") is derived from this synopsis"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "diff": {
+            "name": "diff",
+            "provenance": "gh pr diff --help, this host 2026-10-05",
+            "citations": {
+              "provenance": {
+                "source": "gh pr diff --help: \"View changes in a pull request.\""
+              },
+              "stdin": {
+                "source": "gh pr diff --help: \"USAGE gh pr diff [\u003cnumber\u003e | \u003curl\u003e | \u003cbranch\u003e] [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+              },
+              "stdout": {
+                "source": "gh pr diff --help: \"USAGE gh pr diff [\u003cnumber\u003e | \u003curl\u003e | \u003cbranch\u003e] [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+              },
+              "unknownFlag": {
+                "source": "gh pr diff --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--color": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr diff --help: \"--color string Use color in diff output: {always|never|auto} (default \"auto\")\""
+                }
+              },
+              "--exclude": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr diff --help: \"Use `--exclude` to filter out files matching a glob pattern. The pattern\""
+                }
+              },
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr diff --help: \"--help Show help for command\""
+                }
+              },
+              "--name-only": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr diff --help: \"--name-only Display only names of changed files\""
+                }
+              },
+              "--patch": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr diff --help: \"--patch Display diff in patch format\""
+                }
+              },
+              "--repo": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr diff --help: \"-R, --repo [HOST/]OWNER/REPO Select another repository using the [HOST/]OWNER/REPO format\""
+                }
+              },
+              "-R": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr diff --help: \"-R, --repo [HOST/]OWNER/REPO Select another repository using the [HOST/]OWNER/REPO format\""
+                }
+              },
+              "-e": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr diff --help: \"-e, --exclude patterns Exclude files matching glob patterns from the diff\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "gh pr diff --help: \"USAGE gh pr diff [\u003cnumber\u003e | \u003curl\u003e | \u003cbranch\u003e] [flags]\""
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "read"
+                },
+                "target": "github",
+                "citation": {
+                  "source": "gh pr diff --help: \"USAGE gh pr diff [\u003cnumber\u003e | \u003curl\u003e | \u003cbranch\u003e] [flags]\" -- documents the command whose implicit effect (target \"github\", role \"remote:read\") is derived from this synopsis"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "content",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "list": {
+            "name": "list",
+            "provenance": "gh pr list --help, this host 2026-10-05",
+            "citations": {
+              "provenance": {
+                "source": "gh pr list --help: \"List pull requests in a GitHub repository. By default, this only lists open PRs.\""
+              },
+              "stdin": {
+                "source": "gh pr list --help: \"USAGE gh pr list [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+              },
+              "stdout": {
+                "source": "gh pr list --help: \"USAGE gh pr list [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+              },
+              "unknownFlag": {
+                "source": "gh pr list --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--app": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr list --help: \"--app string Filter by GitHub App author\""
+                }
+              },
+              "--assignee": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr list --help: \"-a, --assignee string Filter by assignee\""
+                }
+              },
+              "--author": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr list --help: \"-A, --author string Filter by author (use --app to filter by a GitHub App)\""
+                }
+              },
+              "--base": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr list --help: \"-B, --base string Filter by base branch\""
+                }
+              },
+              "--draft": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr list --help: \"-d, --draft Filter by draft state\""
+                }
+              },
+              "--head": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr list --help: \"-H, --head string Filter by head branch (\"\u003cowner\u003e:\u003cbranch\u003e\" syntax not supported)\""
+                }
+              },
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr list --help: \"--help Show help for command\""
+                }
+              },
+              "--jq": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr list --help: \"-q, --jq expression Filter JSON output using a jq expression\""
+                }
+              },
+              "--json": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr list --help: \"--json fields Output JSON with the specified fields\""
+                }
+              },
+              "--label": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr list --help: \"-l, --label strings Filter by label\""
+                }
+              },
+              "--limit": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr list --help: \"-L, --limit int Maximum number of items to fetch (default 30)\""
+                }
+              },
+              "--repo": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr list --help: \"-R, --repo [HOST/]OWNER/REPO Select another repository using the [HOST/]OWNER/REPO format\""
+                }
+              },
+              "--search": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr list --help: \"`--search` query. For more information about advanced issue search, see:\""
+                }
+              },
+              "--state": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr list --help: \"-s, --state string Filter by state: {open|closed|merged|all} (default \"open\")\""
+                }
+              },
+              "--template": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr list --help: \"-t, --template string Format JSON output using a Go template; see \"gh help formatting\"\""
+                }
+              },
+              "-A": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr list --help: \"-A, --author string Filter by author (use --app to filter by a GitHub App)\""
+                }
+              },
+              "-B": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr list --help: \"-B, --base string Filter by base branch\""
+                }
+              },
+              "-H": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr list --help: \"-H, --head string Filter by head branch (\"\u003cowner\u003e:\u003cbranch\u003e\" syntax not supported)\""
+                }
+              },
+              "-L": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr list --help: \"-L, --limit int Maximum number of items to fetch (default 30)\""
+                }
+              },
+              "-R": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr list --help: \"-R, --repo [HOST/]OWNER/REPO Select another repository using the [HOST/]OWNER/REPO format\""
+                }
+              },
+              "-S": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr list --help: \"-S, --search query Search pull requests with query\""
+                }
+              },
+              "-a": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr list --help: \"-a, --assignee string Filter by assignee\""
+                }
+              },
+              "-d": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr list --help: \"-d, --draft Filter by draft state\""
+                }
+              },
+              "-l": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr list --help: \"-l, --label strings Filter by label\""
+                }
+              },
+              "-q": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr list --help: \"-q, --jq expression Filter JSON output using a jq expression\""
+                }
+              },
+              "-s": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr list --help: \"-s, --state string Filter by state: {open|closed|merged|all} (default \"open\")\""
+                }
+              },
+              "-t": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr list --help: \"-t, --template string Format JSON output using a Go template; see \"gh help formatting\"\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "gh pr list --help: \"USAGE gh pr list [flags]\""
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "read"
+                },
+                "target": "github",
+                "citation": {
+                  "source": "gh pr list --help: \"USAGE gh pr list [flags]\" -- documents the command whose implicit effect (target \"github\", role \"remote:read\") is derived from this synopsis"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "content",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "status": {
+            "name": "status",
+            "provenance": "gh pr status --help, this host 2026-10-05",
+            "citations": {
+              "provenance": {
+                "source": "gh pr status --help: \"Show status of relevant pull requests.\""
+              },
+              "stdin": {
+                "source": "gh pr status --help: \"USAGE gh pr status [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+              },
+              "stdout": {
+                "source": "gh pr status --help: \"USAGE gh pr status [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+              },
+              "unknownFlag": {
+                "source": "gh pr status --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--conflict-status": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr status --help: \"-c, --conflict-status Display the merge conflict status of each pull request\""
+                }
+              },
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr status --help: \"--help Show help for command\""
+                }
+              },
+              "--jq": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr status --help: \"-q, --jq expression Filter JSON output using a jq expression\""
+                }
+              },
+              "--json": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr status --help: \"--json fields Output JSON with the specified fields\""
+                }
+              },
+              "--repo": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr status --help: \"-R, --repo [HOST/]OWNER/REPO Select another repository using the [HOST/]OWNER/REPO format\""
+                }
+              },
+              "--template": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr status --help: \"-t, --template string Format JSON output using a Go template; see \"gh help formatting\"\""
+                }
+              },
+              "-R": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr status --help: \"-R, --repo [HOST/]OWNER/REPO Select another repository using the [HOST/]OWNER/REPO format\""
+                }
+              },
+              "-c": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr status --help: \"-c, --conflict-status Display the merge conflict status of each pull request\""
+                }
+              },
+              "-q": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr status --help: \"-q, --jq expression Filter JSON output using a jq expression\""
+                }
+              },
+              "-t": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr status --help: \"-t, --template string Format JSON output using a Go template; see \"gh help formatting\"\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "gh pr status --help: \"USAGE gh pr status [flags]\""
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "read"
+                },
+                "target": "github",
+                "citation": {
+                  "source": "gh pr status --help: \"USAGE gh pr status [flags]\" -- documents the command whose implicit effect (target \"github\", role \"remote:read\") is derived from this synopsis"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "content",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "view": {
+            "name": "view",
+            "provenance": "gh pr view --help, this host 2026-10-05",
+            "citations": {
+              "provenance": {
+                "source": "gh pr view --help: \"Display the title, body, and other information about a pull request.\""
+              },
+              "stdin": {
+                "source": "gh pr view --help: \"USAGE gh pr view [\u003cnumber\u003e | \u003curl\u003e | \u003cbranch\u003e] [flags]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+              },
+              "stdout": {
+                "source": "gh pr view --help: \"USAGE gh pr view [\u003cnumber\u003e | \u003curl\u003e | \u003cbranch\u003e] [flags]\" (no explicit stdout wording in the reviewed text; classified \"content\" from the documented operand/argument shape in this same synopsis)"
+              },
+              "unknownFlag": {
+                "source": "gh pr view --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--comments": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr view --help: \"-c, --comments View pull request comments\""
+                }
+              },
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr view --help: \"--help Show help for command\""
+                }
+              },
+              "--jq": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr view --help: \"-q, --jq expression Filter JSON output using a jq expression\""
+                }
+              },
+              "--json": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr view --help: \"--json fields Output JSON with the specified fields\""
+                }
+              },
+              "--repo": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr view --help: \"-R, --repo [HOST/]OWNER/REPO Select another repository using the [HOST/]OWNER/REPO format\""
+                }
+              },
+              "--template": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr view --help: \"-t, --template string Format JSON output using a Go template; see \"gh help formatting\"\""
+                }
+              },
+              "-R": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr view --help: \"-R, --repo [HOST/]OWNER/REPO Select another repository using the [HOST/]OWNER/REPO format\""
+                }
+              },
+              "-c": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr view --help: \"-c, --comments View pull request comments\""
+                }
+              },
+              "-q": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr view --help: \"-q, --jq expression Filter JSON output using a jq expression\""
+                }
+              },
+              "-t": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr view --help: \"-t, --template string Format JSON output using a Go template; see \"gh help formatting\"\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "gh pr view --help: \"USAGE gh pr view [\u003cnumber\u003e | \u003curl\u003e | \u003cbranch\u003e] [flags]\""
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "read"
+                },
+                "target": "github",
+                "citation": {
+                  "source": "gh pr view --help: \"USAGE gh pr view [\u003cnumber\u003e | \u003curl\u003e | \u003cbranch\u003e] [flags]\" -- documents the command whose implicit effect (target \"github\", role \"remote:read\") is derived from this synopsis"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "content",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          }
+        }
+      }
+    }
+  }
+}

