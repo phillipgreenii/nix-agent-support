@@ -89,7 +89,7 @@ Stop as soon as you can write criteria; don't research exhaustively. Per-bead, w
 2. **Local project context** — `CLAUDE.md`, `AGENTS.md`, `README`, `docs/`, ADRs. These define
    conventions, constraints, and vocabulary you should mirror.
 3. **Related beads** — `bd search "<key terms>"`, the parent/children, and already-groomed
-   beads (they're your style template). `bd dep show <id>` for what blocks/relates.
+   beads (they're your style template). `bd dep list <id>` for what it depends on (its blockers).
 4. **The codebase** — if the bead names files, functions, or errors, look at them.
 5. **External sources, when a specific fact is needed** — Notion (PRDs/specs), Slack (where a
    decision was made), web search (library docs, an error string). Reach here only when a

@@ -59,7 +59,7 @@ var pluginForms = []pluginForm{
 	{"bead-grooming", "bd list --status open --exclude-label human,has-acceptance-criteria --limit 0", evalcontract.Approve, ""},
 	{"bead-grooming", "bd show pg2-abc12", evalcontract.Approve, ""},
 	{"bead-grooming", "bd search \"key terms\"", evalcontract.Approve, ""},
-	{"bead-grooming", "bd dep show pg2-abc12", evalcontract.Abstain, "not a bd subcommand (skill defect; bd dep list is the real verb)"},
+	{"bead-grooming", "bd dep list pg2-abc12", evalcontract.Approve, ""},
 	{"bead-grooming", "bd update pg2-abc12 --acceptance \"- [ ] statement one\"", evalcontract.Approve, ""},
 	{"bead-grooming", "bd update pg2-abc12 --add-label has-acceptance-criteria", evalcontract.Approve, ""},
 	{"bead-grooming", "bd update pg2-abc12 --append-notes \"Open questions\"", evalcontract.Approve, ""},
