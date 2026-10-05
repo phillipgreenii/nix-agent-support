@@ -466,6 +466,12 @@ func (b *Backend) Update(ctx context.Context, id string, fields issue.IssueUpdat
 		// with --status it is one atomic reopen-and-unclaim (pg2-1pt7r).
 		args = append(args, "--assignee=")
 	}
+	if fields.ClearDefer {
+		// "--defer=" (single token) is bd's clear-the-deferral spelling
+		// ("empty to clear"); a reopen otherwise keeps the old defer_until and
+		// the issue stays out of `bd ready` (pg2-vhs3e, verified on bd 1.2.2).
+		args = append(args, "--defer=")
+	}
 	args = append(args, "--json", "--", id)
 	data, err := b.run(ctx, args...)
 	if err != nil {

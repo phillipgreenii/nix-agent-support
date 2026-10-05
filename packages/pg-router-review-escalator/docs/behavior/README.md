@@ -92,6 +92,12 @@ flowchart TD
 8. A submit output with an error envelope, no status, an unknown status, or a `blocked_human_pending`
    without a reason is NOT an outcome: it exits `1`, and the submit output is still forwarded.
 
+Consumer of the bead metadata (bead `pg2-vhs3e`): `pg-router-source-pg-connector list
+--exclude-escalated-query` reads `review_escalation_key`, `review_escalation_head` and
+`review_escalation_prs` from the open escalation beads and stops listing the PR's `review-pr` bead
+for dispatch while its escalation covers the current head. Renaming or reshaping those keys is
+therefore a change to that adapter too.
+
 ## Configuration
 
 Everything deployment-specific is a flag. This public repo names no push channel, tracker or

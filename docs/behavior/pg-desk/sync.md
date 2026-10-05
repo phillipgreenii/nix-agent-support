@@ -78,7 +78,7 @@ prompts that read these shapes, in the same change:
   head advances past the ledger's last-reviewed SHA, a completed bead is reopened and its
   metadata refreshed in ONE `issue update <id> --status open --clear-assignee ...` call (the
   previous reviewer's claim MUST NOT survive the reopen, or no worker can claim the re-review;
-  `pg2-1pt7r`). No gate.
+  `pg2-1pt7r`; the same call also clears the bead's deferral, below). No gate.
 - **Review-request lifecycle** (`pg2-kftf9.8`) — the `review-pr` bead is per PR, not per review,
   and its terminal state is reached by the worker, not by sync:
   - Exactly one `review-pr` bead exists per `(repo, number)`. A head advance REOPENS that bead
@@ -97,6 +97,14 @@ prompts that read these shapes, in the same change:
     detection failure) the status is `blocked_human_pending`: nothing is changed, the tool raises
     the single deduplicated `human` + `human-focus-required` escalation for the PR, and the worker
     records a comment and releases the bead ONCE (deferred, so it is not redispatched at once).
+  - The reopen on head advance MUST clear that deferral in the same `issue update`
+    (`--clear-defer`; `pg2-vhs3e`). The deferral was set for the OLD head, and the tracker keeps
+    `defer_until` across a reopen (verified on bd 1.2.2), so a reopen that left it in place would
+    hide the NEW head from every ready query for up to the deferral (12 hours).
+  - While an open pending-review escalation covers the PR's current head the review request is
+    not dispatched at all. That is decided where review items are listed for dispatch
+    (`pg-router-source-pg-connector list --exclude-escalated-query`, see its behavior doc), not in
+    sync: sync keeps the single bead and only refreshes it.
   - When the PR is confirmed `merged` or `closed` (or gone), the closure cascade above closes the
     open `review-pr` bead with its anchor, so no `review-pr` bead stays open for a finished PR.
   - Delivery (operator ruling, Phillip, 2026-09-29, recorded on `pg2-kftf9.8`: no new

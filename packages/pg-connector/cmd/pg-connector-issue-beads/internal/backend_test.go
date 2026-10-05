@@ -982,9 +982,36 @@ func TestBackend_Update_ReopenClearsAssigneeInOneCall(t *testing.T) {
 	}
 }
 
+// TestBackend_Update_ClearDeferInSameCall pins pg2-vhs3e: ClearDefer is bd's
+// single-token --defer= (empty clears the deferral) in the SAME update as the
+// reopen, never a second call, since a reopen that keeps defer_until stays
+// hidden from `bd ready` until the old deferral expires.
+func TestBackend_Update_ClearDeferInSameCall(t *testing.T) {
+	calls := 0
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		calls++
+		if !containsArg(args, "--defer=") {
+			t.Fatalf("args = %v, missing the single-token --defer=", args)
+		}
+		if !containsArg(args, "--assignee=") || !containsArg(args, "--status") {
+			t.Fatalf("args = %v, want the reopen (--status, --assignee=) in the same call", args)
+		}
+		return `{"data":[{"id":"tp-1","title":"t","status":"open","priority":2}],"schema_version":1}`, nil
+	}}
+	b := New(fr)
+	if _, err := b.Update(context.Background(), "tp-1", issue.IssueUpdateFields{
+		Status: "open", ClearAssignee: true, ClearDefer: true,
+	}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("bd invoked %d times, want exactly 1", calls)
+	}
+}
+
 func TestBackend_Update_OmitsUnsetFields(t *testing.T) {
 	fr := &fakeRunner{handle: func(args []string) (string, error) {
-		for _, flag := range []string{"--set-metadata", "--add-label", "--remove-label", "--priority", "--title", "--description", "--status", "--assignee="} {
+		for _, flag := range []string{"--set-metadata", "--add-label", "--remove-label", "--priority", "--title", "--description", "--status", "--assignee=", "--defer="} {
 			if containsArg(args, flag) {
 				t.Fatalf("did not expect %s in args when unset, got %v", flag, args)
 			}

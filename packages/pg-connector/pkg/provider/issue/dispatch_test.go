@@ -389,6 +389,16 @@ func TestNewDispatchTable_Update(t *testing.T) {
 	if gotFields.Status != "open" || !gotFields.ClearAssignee {
 		t.Fatalf("reopen fields = %#v, want Status=open ClearAssignee=true", gotFields)
 	}
+	if gotFields.ClearDefer {
+		t.Fatalf("clear_defer must default to unset, got %#v", gotFields)
+	}
+	// pg2-vhs3e: clear_defer rides the same update op.
+	if _, err := entry.Handle(context.Background(), json.RawMessage(`{"id":"issue-1","fields":{"status":"open","clear_assignee":true,"clear_defer":true}}`)); err != nil {
+		t.Fatalf("Handle reopen+clear_defer: %v", err)
+	}
+	if !gotFields.ClearDefer {
+		t.Fatalf("fields = %#v, want ClearDefer=true", gotFields)
+	}
 	got, ok := result.(*schema.Issue)
 	if !ok || got.ID != "issue-1" {
 		t.Fatalf("result = %#v", result)

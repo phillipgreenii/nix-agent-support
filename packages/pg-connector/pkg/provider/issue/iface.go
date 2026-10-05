@@ -67,6 +67,11 @@ type IssueUpdateFields struct {
 	// call (pg2-1pt7r). A distinct bool rather than an empty-string
 	// Assignee field because "" already means "field not supplied" here.
 	ClearAssignee bool `json:"clear_assignee,omitempty"`
+	// ClearDefer, when true, clears the issue's deferral (its "hidden until"
+	// time) in the same call (pg2-vhs3e). A reopen that should be workable
+	// at once MUST set it: a plain status change keeps the old deferral, so
+	// the reopened issue stays out of every ready query until it expires.
+	ClearDefer bool `json:"clear_defer,omitempty"`
 }
 
 // Provider is the issue capability's provider interface. A concrete

@@ -168,3 +168,62 @@ func cleanBDEnv() []string {
 	}
 	return withBDJSONEnvelope(out)
 }
+
+// TestBackend_Update_ReopenClearDefer_RealBD pins pg2-vhs3e against a REAL bd
+// (v1.2.2): a reopen that does not clear the deferral keeps the issue out of
+// `bd ready`, and Update with ClearDefer ("--defer=") makes it ready again in
+// the same call. This is the evidence behind pg-desk's review-request reopen.
+func TestBackend_Update_ReopenClearDefer_RealBD(t *testing.T) {
+	if _, err := exec.LookPath("bd"); err != nil {
+		t.Skip("bd not on PATH")
+	}
+	dir := t.TempDir()
+	env := cleanBDEnv()
+	prefix := "tp" + fmt.Sprintf("%x", time.Now().UnixNano())[:10]
+
+	bd := func(args ...string) string {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), runDeadline)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "bd", args...)
+		cmd.Dir = dir
+		cmd.Env = env
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("bd %v: %v\n%s", args, err, out)
+		}
+		return string(out)
+	}
+	bd("init", "--prefix", prefix, "--non-interactive", "-q", "--skip-agents", "--skip-hooks")
+
+	b := New(&CLIRunner{Dir: dir, Env: env})
+	ctx, cancel := context.WithTimeout(context.Background(), runDeadline)
+	defer cancel()
+	created, err := b.Create(ctx, issue.IssueInput{Title: "defer probe", IssueType: "task"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	ready := func() bool {
+		return strings.Contains(bd("ready", "--json"), created.ID)
+	}
+
+	// The review worker's release: open, unclaimed, deferred.
+	bd("update", "--status=open", "--assignee=", "--defer=+12h", "--json", "--", created.ID)
+	if ready() {
+		t.Fatal("a deferred issue must not be ready")
+	}
+	// A reopen WITHOUT ClearDefer keeps the deferral: still not ready.
+	if _, err := b.Update(ctx, created.ID, issue.IssueUpdateFields{Status: "open", ClearAssignee: true}); err != nil {
+		t.Fatalf("Update (no ClearDefer): %v", err)
+	}
+	if ready() {
+		t.Fatal("reopen without ClearDefer unexpectedly cleared the deferral; the pg2-vhs3e premise no longer holds")
+	}
+	// A reopen WITH ClearDefer makes it ready in the same call.
+	if _, err := b.Update(ctx, created.ID, issue.IssueUpdateFields{Status: "open", ClearAssignee: true, ClearDefer: true}); err != nil {
+		t.Fatalf("Update (ClearDefer): %v", err)
+	}
+	if !ready() {
+		t.Fatal("reopen with ClearDefer must leave the issue ready")
+	}
+}

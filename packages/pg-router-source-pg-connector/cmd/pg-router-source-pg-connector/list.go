@@ -2,7 +2,8 @@
 // `pg-connector <type> list --query <query> --backend <binary> --output
 // json` (a FULL, non---ids-only fetch), applies the two post-filters
 // (--title-prefix, --issue-type) exactly reproducing today's jq
-// pipelines, and prints one pg-router rawItem per surviving entity
+// pipelines, optionally drops items covered by an open pending-review
+// escalation (--exclude-escalated-query, escalation.go), and prints one pg-router rawItem per surviving entity
 // [design: section 6.1].
 package main
 
@@ -39,7 +40,7 @@ type listEntity struct {
 }
 
 func newListCmd() *cobra.Command {
-	var backend, beadsDir, titlePrefix, issueType string
+	var backend, beadsDir, titlePrefix, issueType, excludeEscalated string
 	cmd := &cobra.Command{
 		Use:   "list <type> <query>",
 		Short: "List entities matching a named query, as pg-router rawItems",
@@ -49,6 +50,7 @@ func newListCmd() *cobra.Command {
 	cmd.Flags().StringVar(&beadsDir, "beads-dir", "", "sets PG_CONNECTOR_ISSUE_BEADS_DIR in the pg-connector child's environment")
 	cmd.Flags().StringVar(&titlePrefix, "title-prefix", "", "keep only entities whose title field starts with this prefix (case-sensitive, exact prefix match)")
 	cmd.Flags().StringVar(&issueType, "issue-type", "", "keep only entities whose own issue-type field equals this exactly")
+	cmd.Flags().StringVar(&excludeEscalated, "exclude-escalated-query", "", "name of a query listing every open pending-review escalation; drop a review-request item (metadata repo, pr_number, head_sha) while one covers its PR — a per-PR escalation until the item's head differs from the head it was raised for, a roll-up escalation until it closes (a failing query warns on stderr and lists unfiltered)")
 	_ = cmd.MarkFlagRequired("backend")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		entityType, query := args[0], args[1]
@@ -65,6 +67,13 @@ func newListCmd() *cobra.Command {
 			return errFailed
 		}
 
+		var escalated escalationIndex
+		filterEscalated := false
+		if excludeEscalated != "" {
+			escalated, filterEscalated = loadEscalationIndex(cmd.Context(), cmd.ErrOrStderr(),
+				entityType, excludeEscalated, backend, beadsDirEnv(beadsDir))
+		}
+
 		items := make([]rawItem, 0, len(wire.Entities))
 		for _, raw := range wire.Entities {
 			var e listEntity
@@ -79,6 +88,9 @@ func newListCmd() *cobra.Command {
 				continue
 			}
 			if issueType != "" && e.IssueType != issueType {
+				continue
+			}
+			if filterEscalated && escalated.suppresses(e.Metadata) {
 				continue
 			}
 			title := e.Title

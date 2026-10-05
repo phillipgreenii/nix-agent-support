@@ -39,11 +39,32 @@ flowchart LR
   id with `title` equal to the id and `metadata` exactly `{"change": "sweep"}`. It never runs a
   second, full fetch to backfill title/other fields — its purpose is a cheap reconciliation
   signal by id, not a content refresh.
-- **`list <type> <query> --backend <binary> [--beads-dir <path>] [--title-prefix <p>] [--issue-type <t>]`**
+- **`list <type> <query> --backend <binary> [--beads-dir <path>] [--title-prefix <p>] [--issue-type <t>] [--exclude-escalated-query <q>]`**
   — runs `pg-connector <type> list --query <query> --backend <binary> --output json` (a full,
   non-`--ids-only` fetch), applies the two post-filters (case-sensitive exact title prefix; exact
   issue-type equality; ANDed when both given), and prints one rawItem per surviving entity, with
   `metadata` copied from the entity's own metadata map as-is.
+
+  `--exclude-escalated-query <q>` (bead `pg2-vhs3e`) is for a review-request listing. It names a
+  second query on the same backend and beads dir that lists every OPEN pending-review escalation
+  (all non-closed states, human-labeled ones included), and drops each listed item whose PR
+  (`metadata.repo` + `#` + `metadata.pr_number`) an escalation covers, so a PR whose stale pending
+  review needs a person is not dispatched to a review session at all. The adapter is the layer that
+  owns this decision: pg-router dispatches exactly the items a stanza lists, and a ready query
+  cannot join one bead to another. The escalation metadata contract is owned by
+  `pg-router-review-escalator` (`review_escalation_key`, `review_escalation_head`,
+  `review_escalation_prs`):
+  - A per-PR escalation (`pr:<repo>#<n>`) covers the item while the item's `metadata.head_sha`
+    equals the head the escalation was raised for. A different head means the head advanced and the
+    new head is unreviewed, so the item is listed again at once. An escalation that recorded no head,
+    or an item that carries none, counts as covering.
+  - A roll-up escalation (`rollup:<reason>`) covers every PR in its `review_escalation_prs` whatever
+    the head: roll-ups are raised only for systemic reasons (credentials, permissions, the host),
+    which a newer head does not cure.
+  - Either way the item is listed again as soon as the escalation closes (it leaves the query).
+  - A failing or unreadable escalation query is not fatal: a warning goes to stderr and the review
+    items are listed unfiltered, because failing the listing would stop all review dispatch. That
+    is only the status quo, one extra session per deferral window for a blocked PR.
 
 ## Exit codes
 

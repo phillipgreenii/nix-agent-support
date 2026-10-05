@@ -177,6 +177,47 @@ func helperMain() {
 		// fallback [design: section 6.1].
 		_, _ = fmt.Fprint(os.Stdout, `{"entities":[{"id":"i9","title":"","issue_type":"task","metadata":{}}],"present_ids":["i9"],"sources":[]}`)
 		os.Exit(0)
+	case "list_review_escalations", "list_review_escalations_query_fails", "list_review_escalations_bad_json":
+		// bead pg2-vhs3e: answers the review query and the escalation query
+		// differently, by --query. Synthetic PRs only.
+		if flagValue(childArgs, "--query") == "pending-review-escalations" {
+			switch behavior {
+			case "list_review_escalations_query_fails":
+				_, _ = fmt.Fprintln(os.Stderr, "pg-connector: tracker unavailable")
+				os.Exit(1)
+			case "list_review_escalations_bad_json":
+				_, _ = fmt.Fprint(os.Stdout, `not json`)
+				os.Exit(0)
+			}
+			_, _ = fmt.Fprint(os.Stdout, `{"entities":[`+
+				// per-PR, same head as r1: covers r1.
+				`{"id":"e1","title":"esc 1","issue_type":"task","metadata":{"review_escalation_key":"pr:acme/widgets#1","review_escalation_head":"h1"}},`+
+				// per-PR, raised for an OLDER head than r2 now has: no longer covers r2.
+				`{"id":"e2","title":"esc 2","issue_type":"task","metadata":{"review_escalation_key":"pr:acme/widgets#2","review_escalation_head":"h2old"}},`+
+				// roll-up naming PR 3 and PR 99.
+				`{"id":"e3","title":"rollup","issue_type":"task","metadata":{"review_escalation_key":"rollup:detection_failed","review_escalation_prs":"acme/widgets#3;acme/widgets#99"}},`+
+				// per-PR that recorded no head: covers r5 whatever its head.
+				`{"id":"e5","title":"esc 5","issue_type":"task","metadata":{"review_escalation_key":"pr:acme/widgets#5"}},`+
+				// per-PR for another repo with the same number: must not cover r6.
+				`{"id":"e6","title":"esc 6","issue_type":"task","metadata":{"review_escalation_key":"pr:acme/other#6","review_escalation_head":"h6"}},`+
+				// per-PR whose item carries a numeric pr_number.
+				`{"id":"e7","title":"esc 7","issue_type":"task","metadata":{"review_escalation_key":"pr:acme/widgets#7","review_escalation_head":"h7"}},`+
+				// no key at all: ignored.
+				`{"id":"e8","title":"stray","issue_type":"task","metadata":{}}`+
+				`],"present_ids":[],"sources":[]}`)
+			os.Exit(0)
+		}
+		_, _ = fmt.Fprint(os.Stdout, `{"entities":[`+
+			`{"id":"r1","title":"review-pr: acme/widgets#1","issue_type":"task","metadata":{"repo":"acme/widgets","pr_number":"1","head_sha":"h1"}},`+
+			`{"id":"r2","title":"review-pr: acme/widgets#2","issue_type":"task","metadata":{"repo":"acme/widgets","pr_number":"2","head_sha":"h2new"}},`+
+			`{"id":"r3","title":"review-pr: acme/widgets#3","issue_type":"task","metadata":{"repo":"acme/widgets","pr_number":"3","head_sha":"h3new"}},`+
+			`{"id":"r4","title":"review-pr: acme/widgets#4","issue_type":"task","metadata":{"repo":"acme/widgets","pr_number":"4","head_sha":"h4"}},`+
+			`{"id":"r5","title":"review-pr: acme/widgets#5","issue_type":"task","metadata":{"repo":"acme/widgets","pr_number":"5","head_sha":"h5"}},`+
+			`{"id":"r6","title":"review-pr: acme/widgets#6","issue_type":"task","metadata":{"repo":"acme/widgets","pr_number":"6","head_sha":"h6"}},`+
+			`{"id":"r7","title":"review-pr: acme/widgets#7","issue_type":"task","metadata":{"repo":"acme/widgets","pr_number":7,"head_sha":"h7"}},`+
+			`{"id":"r8","title":"review-pr: no metadata","issue_type":"task","metadata":{}}`+
+			`],"present_ids":[],"sources":[]}`)
+		os.Exit(0)
 	default:
 		_, _ = fmt.Fprintln(os.Stderr, "unknown GO_HELPER_BEHAVIOR: "+behavior)
 		os.Exit(99)

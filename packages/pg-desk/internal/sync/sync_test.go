@@ -783,6 +783,10 @@ func TestSync_ReviewRequest_ReopensOnHeadAdvance(t *testing.T) {
 		t.Fatalf("Sync: %v", err)
 	}
 
+	// pg2-vhs3e: the reopen also clears the deferral (--clear-defer), which
+	// the review worker set when it released a blocked review for the OLD
+	// head; bd keeps defer_until across a reopen, so without it the new head
+	// stays hidden from `bd ready` for up to the deferral (12h).
 	// pg2-1pt7r: the reopen is ONE `issue update` that sets status open AND
 	// clears the assignee AND refreshes head_sha — never a separate
 	// `issue transition` (which cannot clear the assignee and would strand
@@ -797,6 +801,7 @@ func TestSync_ReviewRequest_ReopensOnHeadAdvance(t *testing.T) {
 		if r.verb() == "issue update" && strings.Contains(joined, "bd-review-existing") &&
 			strings.Contains(joined, "--status open") &&
 			strings.Contains(joined, "--clear-assignee") &&
+			strings.Contains(joined, "--clear-defer") &&
 			strings.Contains(joined, "head_sha=new-sha") {
 			reopenedAndRefreshed = true
 		}

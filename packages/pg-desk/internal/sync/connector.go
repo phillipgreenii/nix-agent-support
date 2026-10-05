@@ -108,6 +108,12 @@ type updateInput struct {
 	// MUST set it together with Status, or the previous claimant stays on the
 	// reopened issue and no worker can claim it (pg2-1pt7r).
 	ClearAssignee bool
+	// ClearDefer clears the issue's deferral in the same call. A review
+	// request reopened on head advance MUST set it: the review worker releases
+	// a blocked review with a deferral (so it is not redispatched at once), and
+	// a reopen that keeps the old defer_until hides the NEW head from every
+	// ready query until that deferral expires (pg2-vhs3e).
+	ClearDefer bool
 }
 
 // Update execs `pg-connector issue update <id> ...`.
@@ -128,6 +134,9 @@ func (c *issueClient) Update(ctx context.Context, id string, in updateInput) err
 	}
 	if in.ClearAssignee {
 		args = append(args, "--clear-assignee")
+	}
+	if in.ClearDefer {
+		args = append(args, "--clear-defer")
 	}
 	args = append(args, c.backendFlag()...)
 

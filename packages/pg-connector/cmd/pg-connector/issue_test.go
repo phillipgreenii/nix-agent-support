@@ -204,6 +204,44 @@ func TestRun_IssueUpdate_StatusAndClearAssigneeReachWire(t *testing.T) {
 	}
 }
 
+// TestRun_IssueUpdate_ClearDeferReachesWire pins pg2-vhs3e: --clear-defer is
+// forwarded as fields.clear_defer, and is false when the flag is absent.
+func TestRun_IssueUpdate_ClearDeferReachesWire(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"set", []string{"issue", "update", "issue-1", "--status", "open", "--clear-defer"}, `"clear_defer":true`},
+		{"unset", []string{"issue", "update", "issue-1", "--status", "open"}, `"clear_defer":false`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			argvLog := filepath.Join(t.TempDir(), "argv.log")
+			dir := t.TempDir()
+			script := "#!/bin/sh\ncat >> " + argvLog + "\necho >> " + argvLog + "\n" +
+				`echo '{"protocolVersion":1,"schemaVersion":1,"result":{"id":"issue-1","state":"open"}}'` + "\n"
+			path := filepath.Join(dir, "backend-issue-defer")
+			if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+			writeIssueConfigFor(t, "backend-issue-defer")
+
+			_, _, code := executePr(t, tc.args)
+			if code != 0 {
+				t.Fatalf("exit code = %d, want 0", code)
+			}
+			b, err := os.ReadFile(argvLog)
+			if err != nil {
+				t.Fatalf("read request log: %v", err)
+			}
+			if !strings.Contains(string(b), tc.want) {
+				t.Fatalf("backend request missing %s; got %s", tc.want, b)
+			}
+		})
+	}
+}
+
 func TestRun_IssueUpdate_NotFound_Exit4(t *testing.T) {
 	writeOpAwareFakeBackend(t, "backend-issue-update-notfound", map[string]string{
 		"update": `{"protocolVersion":1,"schemaVersion":1,"error":{"code":"not_found","message":"issue issue-404 not found"}}`,

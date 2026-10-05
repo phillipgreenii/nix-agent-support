@@ -423,14 +423,20 @@ func (rc *runContext) ensureReviewRequest(ctx context.Context) error {
 		return nil // head has not advanced — nothing to do
 	}
 	if rc.mode == ModeApply {
-		// ONE update: status open + assignee cleared + metadata refreshed
-		// (pg2-1pt7r). A bare Transition("open") cannot clear the assignee, so
-		// the previous reviewer's claim would survive the reopen and no worker
-		// could claim the re-review (beads-lifecycle B-4: anything that
-		// re-opens a closed bead MUST clear the assignee in that same update).
+		// ONE update: status open + assignee cleared + deferral cleared +
+		// metadata refreshed (pg2-1pt7r). A bare Transition("open") cannot
+		// clear the assignee, so the previous reviewer's claim would survive
+		// the reopen and no worker could claim the re-review (beads-lifecycle
+		// B-4: anything that re-opens a closed bead MUST clear the assignee in
+		// that same update). The deferral is cleared for the same reason
+		// (pg2-vhs3e): the review worker releases a blocked review deferred,
+		// and that deferral belongs to the OLD head. Verified on bd 1.2.2: a
+		// reopen that leaves defer_until in place keeps the bead out of `bd
+		// ready` until it expires, delaying review of the new head.
 		if err := rc.syncer.client.Update(ctx, rc.reviewID, updateInput{
 			Status:        "open",
 			ClearAssignee: true,
+			ClearDefer:    true,
 			Metadata:      metadata,
 		}); err != nil {
 			return fmt.Errorf("sync: reopen review request %s: %w", rc.reviewID, err)
