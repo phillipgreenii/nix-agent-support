@@ -1,0 +1,6 @@
+pg-decider audit
+rule: review.head-advanced
+op: create
+facts: {"head_sha":"abc123","pr":"acme/widgets#42","round":2,"unresolved":["c1","c2"]}
+seq: 42
+at: 2026-10-05T12:00:00Z

@@ -42,6 +42,20 @@ func recordWrites(t *testing.T, actions []action.Action, stdout string, exit str
 
 func str(s string) *string { return &s }
 
+// withoutComments drops the audit hook's timestamped comment execs, which have
+// their own tests.
+func withoutComments(in []execRec) []execRec {
+	var out []execRec
+	for _, r := range in {
+		if !strings.HasPrefix(r.args, "issue comment ") {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+func last(in []execRec) execRec { return in[len(in)-1] }
+
 func TestApplyAppliesTheDecidersActionsAndExits0(t *testing.T) {
 	withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("pr_view_minimal.json"))
 	recs := recordWrites(t, []action.Action{{Op: action.OpClose, Rule: "r.close", Target: str("wb-1")}}, `{"result":{}}`, "0")
@@ -54,7 +68,7 @@ func TestApplyAppliesTheDecidersActionsAndExits0(t *testing.T) {
 		{"pg-connector", "issue close wb-1 --reason r.close: close work item"},
 		{"pg-desk", "issue refresh wb-1"},
 	}
-	if !reflect.DeepEqual(*recs, want) {
+	if !reflect.DeepEqual(withoutComments(*recs), want) {
 		t.Fatalf("execs: %+v", *recs)
 	}
 }
@@ -124,7 +138,27 @@ func TestApplyUsesTheConfigBackendAndBeadsDir(t *testing.T) {
 	if _, errOut, code := runCLI(t, "apply", "pr", "x"); code != 0 {
 		t.Fatalf("code %d err %q", code, errOut)
 	}
-	if (*recs)[0].args != "issue close wb-1 --reason r: done --backend trk" {
+	if (*recs)[0].args != "issue close wb-1 --reason r: done --backend trk" || !strings.HasSuffix(last(*recs).args, " --backend trk") || !strings.HasPrefix(last(*recs).args, "issue comment wb-1 --body ") {
 		t.Fatalf("execs: %+v", *recs)
+	}
+}
+
+func TestApplyInstallsTheAuditHookAndCommentsOncePerAppliedExternalAction(t *testing.T) {
+	withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("pr_view_minimal.json"))
+	recs := recordWrites(t, []action.Action{
+		{Op: action.OpClose, Rule: "r.close", Target: str("wb-1")},
+		{Op: action.OpAnnotate, Rule: "r.note", Target: str("k"), Fields: action.Fields{Value: str("v")}},
+	}, `{"result":{}}`, "0")
+	if _, errOut, code := runCLI(t, "apply", "pr", "acme/widgets#42", "--from-item", fixture("routed_item.json")); code != 0 {
+		t.Fatalf("code %d err %q", code, errOut)
+	}
+	var comments []execRec
+	for _, r := range *recs {
+		if strings.HasPrefix(r.args, "issue comment ") {
+			comments = append(comments, r)
+		}
+	}
+	if len(comments) != 1 || comments[0].name != "pg-connector" || !strings.HasPrefix(comments[0].args, "issue comment wb-1 --body ") || !strings.Contains(comments[0].args, "rule: r.close") {
+		t.Fatalf("comments: %+v (all %+v)", comments, *recs)
 	}
 }

@@ -12,6 +12,7 @@ import (
 
 	"github.com/phillipgreenii/pg-decider/internal/action"
 	"github.com/phillipgreenii/pg-decider/internal/apply"
+	"github.com/phillipgreenii/pg-decider/internal/audit"
 	"github.com/phillipgreenii/pg-decider/internal/config"
 	"github.com/phillipgreenii/pg-decider/internal/decide"
 	"github.com/phillipgreenii/pg-decider/internal/exitcode"
@@ -29,8 +30,8 @@ var decideFn = func(v *view.View, entityType string) action.PlanResult {
 var applyCommand apply.CmdFactory = exec.CommandContext
 
 // applyHooks returns the per-action hooks of an apply run. The audit and
-// failure packets register theirs here.
-var applyHooks = func() []apply.Hook { return nil }
+// failure packets register theirs here; the audit hook is installed.
+var applyHooks = func() []apply.Hook { return []apply.Hook{audit.New()} }
 
 // applyFn is the implementation of `apply` behavior. It runs only after the
 // view was freshly read (retrieve it with viewFromContext); it is nil
