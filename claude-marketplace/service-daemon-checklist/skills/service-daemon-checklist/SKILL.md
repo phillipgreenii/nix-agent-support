@@ -44,9 +44,10 @@ update the canonical doc, not this skill's body.
    responsible-identity resolution for a personal-information consent prompt (Calendar/Contacts/
    etc.) keys on that first image, not on whatever the script later `exec`s. If this service will
    ever request such a permission, set `execPath = "${pkg}/bin/<name>";` instead of `script`
-   (`phillipgreenii-nix-personal` ADR 0054) — mutually exclusive with `script`, and incompatible
-   with `manageLogs.enable = true` (rotation needs a shell preamble a bare symlink can't
-   provide).
+   (`phillipgreenii-nix-personal` ADR 0054) — mutually exclusive with `script`. An `execPath` USER
+   AGENT may still set `manageLogs.enable = true` (hourly rotation only, no startup rotation;
+   personal ADR 0056); an `execPath` DAEMON MUST set `manageLogs.enable = false` (it gets neither
+   rotation path, so enabling it is an evaluation error).
 
 2. **Will its logs be collected by otel?** Declare a
    `phillipgreenii.observability.logSources.<name>` entry (`phillipgreenii-nix-support-apps` ADR
@@ -59,7 +60,8 @@ update the canonical doc, not this skill's body.
 3. **Do its logs rotate?** Set `manageLogs.enable = true;` on the `launchdServices` entry
    (default `false`). Bounds `StandardOutPath`/`StandardErrorPath` at a size threshold with a
    retained archive count, both at startup and — for user agents — via an hourly shared rotator.
-   Requires the log path to be STATIC at nix eval time. **This is the mechanism the 2026-09-24
+   `execPath` user agents and Home-Manager-scoped agents (primary user) get the hourly pass only,
+   with no startup rotation (personal ADR 0056). Requires the log path to be STATIC at nix eval time. **This is the mechanism the 2026-09-24
    disk-full incident (`pg2-jw8ji`) existed to close** — a service that skips this and logs
    continuously WILL eventually fill the disk.
 
