@@ -94,5 +94,33 @@
       ]
     }
   ],
-  "links_as_of": "2026-09-29T14:01:02Z"
+  "links_as_of": "2026-09-29T14:01:02Z",
+  "ci": {
+    "runs": [
+      {
+        "id": "900",
+        "attempt": 2,
+        "name": "build",
+        "status": "completed",
+        "conclusion": "failure",
+        "url": "https://ci.example/runs/900"
+      },
+      {
+        "id": "900",
+        "attempt": 1,
+        "name": "build",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://ci.example/runs/900"
+      },
+      {
+        "id": "901",
+        "attempt": 0,
+        "name": "lint",
+        "status": "in_progress",
+        "conclusion": "",
+        "url": "https://ci.example/runs/901"
+      }
+    ]
+  }
 }

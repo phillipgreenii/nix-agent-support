@@ -24,7 +24,7 @@ type viewFixture struct {
 }
 
 const (
-	viewPRFacts     = `{"pr_show":{"id":"o/r#5","repo":"o/r","number":5,"title":"Add retry to client","state":"open","url":"https://code.example/o/r/pull/5","draft":false,"head_sha":"9f3c1e2aaaa","node_id":"N5","labels":["bug"]},"ci":{"runs":[{"status":"completed","conclusion":"failure"}]},"head_sha":"9f3c1e2aaaa"}`
+	viewPRFacts     = `{"pr_show":{"id":"o/r#5","repo":"o/r","number":5,"title":"Add retry to client","state":"open","url":"https://code.example/o/r/pull/5","draft":false,"head_sha":"9f3c1e2aaaa","node_id":"N5","labels":["bug"]},"ci":{"runs":[{"id":"900","name":"build","status":"completed","conclusion":"failure","url":"https://ci.example/runs/900","head_sha":"9f3c1e2aaaa","attempt":2},{"id":"900","name":"build","status":"completed","conclusion":"success","url":"https://ci.example/runs/900","head_sha":"9f3c1e2aaaa","attempt":1},{"id":"901","name":"lint","status":"in_progress","conclusion":"","url":"https://ci.example/runs/901"},{"id":"800","name":"build","status":"completed","conclusion":"failure","url":"https://ci.example/runs/800","head_sha":"0ldhead0000","attempt":1}]},"head_sha":"9f3c1e2aaaa"}`
 	viewIssueFacts  = `{"issue_show":{"id":"bd-1","title":"process feedback","state":"open","url":"https://tracker.example/bd-1","labels":["mine","fbsum:ab12"],"metadata":{"dedup_key":"pr:o/r#5:process-feedback:ab12"}}}`
 	viewThreadFacts = `{"thread_show":{"id":"C1/1.5","permalink":"https://chat.example/archives/C1/p15","text":"look at this"}}`
 )
@@ -397,5 +397,120 @@ func TestTypedShowRefreshDegradedExitsTwoWithStaleView(t *testing.T) {
 	}
 	if !strings.Contains(out, `"stale": true`) {
 		t.Errorf("view not marked stale:\n%s", out)
+	}
+}
+
+// ---- ci section (additive to pg-desk.view/v1) ----
+
+// ciSection decodes the view's ci member, distinguishing absent from null.
+type ciSection struct {
+	CI *struct {
+		Runs *[]map[string]any `json:"runs"`
+	} `json:"ci"`
+}
+
+func showCI(t *testing.T, typ, id string) (ciSection, []string) {
+	t.Helper()
+	out, _, err := runTypedShowCmd(t, typ, id, "--json")
+	if err != nil {
+		t.Fatalf("show %s %s: %v", typ, id, err)
+	}
+	var c ciSection
+	if err := json.Unmarshal([]byte(out), &c); err != nil {
+		t.Fatal(err)
+	}
+	// Top-level member order, to pin that ci comes after the existing members.
+	dec := json.NewDecoder(strings.NewReader(out))
+	if _, err := dec.Token(); err != nil {
+		t.Fatal(err)
+	}
+	var keys []string
+	for dec.More() {
+		k, err := dec.Token()
+		if err != nil {
+			t.Fatal(err)
+		}
+		keys = append(keys, k.(string))
+		var skip json.RawMessage
+		if err := dec.Decode(&skip); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return c, keys
+}
+
+func TestTypedShowPRCarriesHeadCommitCIRunsAfterExistingMembers(t *testing.T) {
+	newViewFixture(t)
+	c, keys := showCI(t, "pr", "5")
+	if c.CI == nil || c.CI.Runs == nil {
+		t.Fatalf("ci = %+v, want an object with a runs array", c.CI)
+	}
+	want := []map[string]any{
+		{"id": "900", "attempt": float64(2), "name": "build", "status": "completed", "conclusion": "failure", "url": "https://ci.example/runs/900"},
+		{"id": "900", "attempt": float64(1), "name": "build", "status": "completed", "conclusion": "success", "url": "https://ci.example/runs/900"},
+		// No recorded attempt: 0. No recorded head_sha: included.
+		{"id": "901", "attempt": float64(0), "name": "lint", "status": "in_progress", "conclusion": "", "url": "https://ci.example/runs/901"},
+	}
+	if !reflect.DeepEqual(*c.CI.Runs, want) {
+		t.Errorf("ci.runs = %v\nwant     %v", *c.CI.Runs, want)
+	}
+	if last := keys[len(keys)-1]; last != "ci" || keys[len(keys)-2] != "links_as_of" {
+		t.Errorf("top-level members = %v, want ci after links_as_of", keys)
+	}
+}
+
+func TestTypedShowPRWithoutCIFactsHasEmptyRunsArray(t *testing.T) {
+	f := newViewFixture(t)
+	f.entity("pr", "o/r#6", `{"pr_show":{"id":"o/r#6","repo":"o/r","number":6,"title":"No ci","state":"open","head_sha":"abc1234"}}`, "2026-09-29T14:03:10Z", "abc1234")
+	f.entity("pr", "o/r#7", `{"pr_show":{"id":"o/r#7","repo":"o/r","number":7,"title":"Null runs","state":"open","head_sha":"abc1234"},"ci":{"runs":null}}`, "2026-09-29T14:03:10Z", "abc1234")
+	for _, id := range []string{"6", "7"} {
+		out, _, err := runTypedShowCmd(t, "pr", id, "--json")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out, `"ci": {
+    "runs": []
+  }`) {
+			t.Errorf("pr %s: ci is not present with an empty runs array:\n%s", id, out)
+		}
+	}
+}
+
+func TestTypedShowCIExcludesRunsOfAnotherHead(t *testing.T) {
+	f := newViewFixture(t)
+	f.entity("pr", "o/r#8", `{"pr_show":{"id":"o/r#8","repo":"o/r","number":8,"title":"Moved on","state":"open","head_sha":"newhead"},"ci":{"runs":[{"id":"1","name":"a","status":"completed","conclusion":"failure","url":"u1","head_sha":"oldhead","attempt":1},{"id":"2","name":"b","status":"completed","conclusion":"failure","url":"u2","head_sha":"newhead","attempt":1},{"id":"3","name":"c","status":"completed","conclusion":"success","url":"u3"}]}}`, "2026-09-29T14:03:10Z", "newhead")
+	c, _ := showCI(t, "pr", "8")
+	if c.CI == nil || c.CI.Runs == nil || len(*c.CI.Runs) != 2 || (*c.CI.Runs)[0]["id"] != "2" || (*c.CI.Runs)[1]["id"] != "3" {
+		t.Errorf("ci.runs = %+v, want only runs 2 (head matches) and 3 (no head_sha)", c.CI)
+	}
+}
+
+func TestTypedShowIssueAndThreadCarryNoCI(t *testing.T) {
+	newViewFixture(t)
+	for _, tc := range [][2]string{{"issue", "bd-1"}, {"thread", "C1/1.5"}} {
+		out, _, err := runTypedShowCmd(t, tc[0], tc[1], "--json")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(out), &m); err != nil {
+			t.Fatal(err)
+		}
+		if _, has := m["ci"]; has {
+			t.Errorf("%s view carries a ci member", tc[0])
+		}
+	}
+}
+
+func TestTypedShowCIHasNoPrecomputedVerdict(t *testing.T) {
+	newViewFixture(t)
+	out, _, err := runTypedShowCmd(t, "pr", "5", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, banned := range []string{"failing_builds", "failing"} {
+		if strings.Contains(out, banned) {
+			t.Errorf("view carries %q:\n%s", banned, out)
+		}
 	}
 }

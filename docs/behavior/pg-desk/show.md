@@ -32,6 +32,7 @@ order:
 | `review`      | A PR's pending agent review and its escalation, see below. Present for `pr` only, absent for `issue` and `thread`.        |
 | `links[]`     | Every link of the entity, see below.                                                                                      |
 | `links_as_of` | The newest time any of the entity's links was last confirmed; `null` when it has none.                                    |
+| `ci`          | A PR's CI runs for its head commit, see below. Present for `pr` only, last member; absent for `issue` and `thread`.       |
 
 `decorations` come from the stored interpretation and are empty (`""`, `[]`) for an entity that has
 none. A disposition's `override` is the `disposition.<comment_id>` annotation, or `null`.
@@ -57,6 +58,34 @@ the contract.
 
 `show` and the read-only `pg-desk links` verb share the one linked-entity read; `pg-desk links`
 keeps its own output unchanged.
+
+### CI runs (`pr` only)
+
+`ci` is an additive member of `pg-desk.view/v1`: it is the last top-level member and no existing
+member changes. It lists the CI runs stored for the PR, so a decider that reads only the view can
+tell which builds failed on the head commit. A build id is a run's `id` plus its `attempt`.
+
+```json
+"ci": {"runs": [{"id": "900", "attempt": 2, "name": "build", "status": "completed",
+                 "conclusion": "failure", "url": "https://ci.example/runs/900"}]}
+```
+
+| Field        | Meaning                                                                                                           |
+| ------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `id`         | The run id, a string.                                                                                             |
+| `attempt`    | The run's attempt number, an integer; `0` when the backend reported none. A re-run keeps `id`.                    |
+| `name`       | The check name.                                                                                                   |
+| `status`     | The run's lifecycle state (for example `completed`, `in_progress`), so a finished run is told from a pending one. |
+| `conclusion` | The run's outcome, `""` until it completes.                                                                       |
+| `url`        | The run's web URL.                                                                                                |
+
+The names are those of pg-connector's `schema.CIRun`; pg-desk reads them from the PR's stored
+`ci` facts without importing pg-connector. Runs are those of the PR's head commit: a run whose
+recorded `head_sha` differs from the entity's current head is left out, and a run with no recorded
+`head_sha` is kept (the stored listing is already the head commit's). Two attempts of one run
+appear as two entries. When the PR has no stored CI data, `ci` is still present with `runs` as an
+empty array, never `null` and never absent, so "no CI data" is told from a binary that predates the
+section. The section carries the raw ingredients only; it computes no verdict (no "failing" list).
 
 ### Pending review (`pr` only)
 
@@ -142,6 +171,11 @@ If the entity's own hydration fails or degrades, the stored view is still printe
   review" or "no escalation": it MUST be `unknown`. Displaying it MUST NOT post, delete or submit
   a review, create, update, comment on or close a bead, or send a notification; it is read from
   stored facts, and `--refresh` hydrates through the same read-only lookups.
+
+- **INV-SHOW-6.** The `ci` section MUST be read-only stored data: it MUST NOT carry a computed
+  verdict (such as a list of failing builds), and building it MUST NOT call the network or write to
+  the store. For a PR it is always present (`runs` empty when there is no CI data); for `issue` and
+  `thread` it is absent.
 
 ## Telemetry and logs
 

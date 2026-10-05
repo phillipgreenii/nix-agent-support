@@ -77,6 +77,28 @@ type viewJSON struct {
 	// LinksAsOf is the newest time any of the entity's links was last
 	// confirmed; null when it has no links.
 	LinksAsOf *string `json:"links_as_of"`
+	// CI is a PR's CI runs for its head commit (pr only; omitted for the
+	// other types). It is the last member: an additive extension of
+	// pg-desk.view/v1.
+	CI *viewCI `json:"ci,omitempty"`
+}
+
+// viewCI is the ci section: raw stored CI run data with no computed verdict.
+// A build id is a run's id plus its attempt.
+type viewCI struct {
+	Runs []viewCIRun `json:"runs"`
+}
+
+// viewCIRun is one run, named after pg-connector's schema.CIRun fields
+// (which pg-desk does not import). Attempt is 0 when the backend reported
+// none.
+type viewCIRun struct {
+	ID         string `json:"id"`
+	Attempt    int    `json:"attempt"`
+	Name       string `json:"name"`
+	Status     string `json:"status"`
+	Conclusion string `json:"conclusion"`
+	URL        string `json:"url"`
 }
 
 type viewDecorations struct {
@@ -196,6 +218,7 @@ func buildView(cfg *config.Config, st *store.Store, repo, entityType, id string,
 
 	if entityType == entityTypePR {
 		v.Review = buildReview(ent.Facts)
+		v.CI = buildCI(ent, v.Snapshot)
 	}
 
 	anns, err := st.ListKVAnnotations(repo, entityType, id)
@@ -291,6 +314,50 @@ func buildView(cfg *config.Config, st *store.Store, repo, entityType, id string,
 		v.LinksAsOf = &a
 	}
 	return viewData{view: v, entity: ent, hidden: hidden}, nil
+}
+
+// buildCI reads the PR's stored CI facts into the ci section: the runs for
+// the entity's current head. A run whose recorded head_sha differs from the
+// head is excluded; one with no head_sha is kept (the stored listing is
+// already the head commit's). With no CI data the runs array is empty, never
+// null.
+func buildCI(ent store.Entity, snapshot json.RawMessage) *viewCI {
+	out := &viewCI{Runs: []viewCIRun{}}
+	var facts struct {
+		CI struct {
+			Runs []struct {
+				ID         string `json:"id"`
+				Name       string `json:"name"`
+				Status     string `json:"status"`
+				Conclusion string `json:"conclusion"`
+				URL        string `json:"url"`
+				HeadSHA    string `json:"head_sha"`
+				Attempt    int    `json:"attempt"`
+			} `json:"runs"`
+		} `json:"ci"`
+		HeadSHA string `json:"head_sha"`
+	}
+	if json.Unmarshal([]byte(ent.Facts), &facts) != nil {
+		return out
+	}
+	var snap struct {
+		HeadSHA string `json:"head_sha"`
+	}
+	_ = json.Unmarshal(snapshot, &snap)
+	head := snap.HeadSHA
+	if head == "" {
+		head = facts.HeadSHA
+	}
+	if head == "" {
+		head = ent.HeadSHA
+	}
+	for _, r := range facts.CI.Runs {
+		if r.HeadSHA != "" && head != "" && r.HeadSHA != head {
+			continue
+		}
+		out.Runs = append(out.Runs, viewCIRun{ID: r.ID, Attempt: r.Attempt, Name: r.Name, Status: r.Status, Conclusion: r.Conclusion, URL: r.URL})
+	}
+	return out
 }
 
 // ---- command ----
