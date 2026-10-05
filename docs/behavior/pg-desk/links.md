@@ -88,6 +88,36 @@ verb MUST NOT fail: it degrades to the legacy PR-to-issue ticket-key links, answ
 relation `jira`, and reports `"degraded": true` at the top level. Every other link kind is absent
 until the store is migrated.
 
+## External links: `link add` and `link remove`
+
+`pg-desk <type> link add <id> <type>:<id> [--relation R] [--reason TEXT] [--actor A]` and
+`pg-desk <type> link remove <id> <type>:<id> [--actor A]` (for `<type>` one of `pr`, `issue`,
+`thread`) let an operator record and retract a link the extractors do not derive (entity-change-flow
+design 6.3). Unlike the read-only `links` verb above, these write the store, and they refuse an
+old-schema store with the store's error (run `pg-desk migrate --cutover`), exit `1`.
+
+Every link records whether it is internal (derived) or external: the stored origin is
+`derived:<extractor>` or `external:<actor>`, one row per link, relation and origin.
+
+- **`link add`** records an external claim: origin `external:<actor>` with when and the optional
+  reason. `--relation` defaults to `references`. The actor is the configured actor unless `--actor`
+  is given; with neither, the verb fails. Both ends are resolved like the typed verbs resolve an
+  id; the second argument's id may itself contain colons (only the first colon separates the type
+  from the id). Adding a link that is already derived still records the external claim, so the link
+  survives if the source entity later changes. Adding the same claim again refreshes its reason and
+  time and records no further change.
+- **`link remove`** removes the acting actor's external claims on the pair, in either direction
+  and across all relations. It never removes a derived claim or another actor's external claim. On
+  a pair whose only claims are derived it fails with `derived from <extractor>; change the source
+entity`; when nothing of the actor's exists (and nothing is derived) it fails saying so.
+- **External never overrides internal.** An external claim is its own row next to any derived
+  one; it never replaces or removes a derived link. Suppressing a derived link is not offered.
+- **Change records.** Every add or remove that changes the set of claims appends a change record,
+  origin `pg-desk`, for both entities: `link_changed`, except that a `pr` whose other end is one of
+  its own work items (recognized from work-item metadata and parent links only) gets `work_changed`.
+  An end with no stored entity row (for example an issue key never hydrated) is skipped; the other
+  end still gets its record.
+
 ## Out of scope
 
 Refreshing stale data, listing links for a type the store does not hold, and any link not derived

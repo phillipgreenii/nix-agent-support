@@ -25,7 +25,8 @@ In scope: `store` and its schema, `gather`, `interpret`, `sync` (all three modes
 10, docket pg2-2j5ac.34), the `run` pipeline, `sweep` (bead `pg2-gznpe`'s bulk backfill over every
 stored entity), `serve` (behind the soak option only), `open`, `hide`/`unhide`/`wip`,
 `feedback list`/`feedback set`, `show`, `links` (a read-only batch lookup of cross-reference
-links, see [`links.md`](links.md)), `status`, `doctor`, `heartbeat`/`heartbeat-item`, and
+links, see [`links.md`](links.md), which also holds the `<type> link add|remove` external-link
+verbs), `<type> consumer list|forget` (see [`consumer.md`](consumer.md)), `status`, `doctor`, `heartbeat`/`heartbeat-item`, and
 `import-pg-pr-annotations`.
 
 **Out of scope for the whole set, named once here so no individual doc needs to repeat it as a
@@ -50,23 +51,24 @@ back here — not the full list.
 
 ## The docs
 
-| Doc                                                          | Covers                                                                                                 |
-| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
-| [`store-schema.md`](store-schema.md)                         | The SQLite store, its version ladder, schema cutover and tables                                        |
-| [`gather.md`](gather.md)                                     | Pipeline stage 1 — facts, only through `pg-connector`                                                  |
-| [`interpret.md`](interpret.md)                               | Pipeline stage 2 — pure, deterministic derivation                                                      |
-| [`sync.md`](sync.md)                                         | Pipeline stage 3 — agent-visible bead writes (all modes)                                               |
-| [`pipeline-run.md`](pipeline-run.md)                         | `pg-desk run` and the three-stage pipeline shape                                                       |
-| [`run-issue.md`](run-issue.md)                               | `pg-desk run issue` — the beads-backend bead -> PR resolution and interpret-only re-run                |
-| [`run-thread.md`](run-thread.md)                             | `pg-desk run thread` — the Slack half: permalink/ticket-key cross-references and interpret-only re-run |
-| [`serve.md`](serve.md)                                       | `pg-desk serve`, soak-port only this phase                                                             |
-| [`open.md`](open.md)                                         | `pg-desk open`                                                                                         |
-| [`hide-unhide-wip.md`](hide-unhide-wip.md)                   | `pg-desk hide`/`unhide`/`wip`                                                                          |
-| [`feedback.md`](feedback.md)                                 | `pg-desk feedback list`/`feedback set`                                                                 |
-| [`history.md`](history.md)                                   | `pg-desk pr`/`issue`/`thread` groups and `<type> history`                                              |
-| [`links.md`](links.md)                                       | `pg-desk links` — read-only batch lookup of PR/issue/thread/build cross-reference links                |
-| [`operator-commands.md`](operator-commands.md)               | `show`, `status`, `sweep`, `doctor`, `heartbeat`, `heartbeat-item`                                     |
-| [`import-pg-pr-annotations.md`](import-pg-pr-annotations.md) | The one-shot pg-pr cutover tool                                                                        |
+| Doc                                                          | Covers                                                                                                                             |
+| ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| [`store-schema.md`](store-schema.md)                         | The SQLite store, its version ladder, schema cutover and tables                                                                    |
+| [`gather.md`](gather.md)                                     | Pipeline stage 1 — facts, only through `pg-connector`                                                                              |
+| [`interpret.md`](interpret.md)                               | Pipeline stage 2 — pure, deterministic derivation                                                                                  |
+| [`sync.md`](sync.md)                                         | Pipeline stage 3 — agent-visible bead writes (all modes)                                                                           |
+| [`pipeline-run.md`](pipeline-run.md)                         | `pg-desk run` and the three-stage pipeline shape                                                                                   |
+| [`run-issue.md`](run-issue.md)                               | `pg-desk run issue` — the beads-backend bead -> PR resolution and interpret-only re-run                                            |
+| [`run-thread.md`](run-thread.md)                             | `pg-desk run thread` — the Slack half: permalink/ticket-key cross-references and interpret-only re-run                             |
+| [`serve.md`](serve.md)                                       | `pg-desk serve`, soak-port only this phase                                                                                         |
+| [`open.md`](open.md)                                         | `pg-desk open`                                                                                                                     |
+| [`hide-unhide-wip.md`](hide-unhide-wip.md)                   | `pg-desk hide`/`unhide`/`wip`                                                                                                      |
+| [`feedback.md`](feedback.md)                                 | `pg-desk feedback list`/`feedback set`                                                                                             |
+| [`history.md`](history.md)                                   | `pg-desk pr`/`issue`/`thread` groups and `<type> history`                                                                          |
+| [`links.md`](links.md)                                       | `pg-desk links` — read-only batch lookup of PR/issue/thread/build cross-reference links; `<type> link add`/`remove` external links |
+| [`consumer.md`](consumer.md)                                 | `pg-desk <type> consumer list`/`forget` — change-log consumer lifecycle                                                            |
+| [`operator-commands.md`](operator-commands.md)               | `show`, `status`, `sweep`, `doctor`, `heartbeat`, `heartbeat-item`                                                                 |
+| [`import-pg-pr-annotations.md`](import-pg-pr-annotations.md) | The one-shot pg-pr cutover tool                                                                                                    |
 
 ## Telemetry declaration (D24)
 
