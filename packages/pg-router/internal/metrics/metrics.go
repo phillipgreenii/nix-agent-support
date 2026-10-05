@@ -165,6 +165,23 @@ const (
 	MetricDeduped = "pg_router_deduped"
 )
 
+// The per-source liveness gauges (bead pg2-tv11a, DEC-OBS-4). They are NOT part
+// of the ten-member INV-OBS-1 catalog's count; they are the two gauges
+// INTF-MON lists after it, registered only when New is given WithPullSources.
+// Both are Float64 gauges in unit "s", so the Prometheus exposition appends
+// "_seconds": pg_router_source_last_success_timestamp_seconds{source} and
+// pg_router_source_expected_interval_seconds{source}.
+const (
+	// MetricSourceLastSuccess is the Unix time (seconds) of the source's last
+	// successful pass — or of the last deliberate pause (gate / halted
+	// emitters), which is not a failure — initialised to process start. A
+	// failed pass never advances it.
+	MetricSourceLastSuccess = "pg_router_source_last_success_timestamp"
+	// MetricSourceExpectedInterval is the source's configured period in
+	// seconds, the unit the persistent-failure alert scales its threshold by.
+	MetricSourceExpectedInterval = "pg_router_source_expected_interval"
+)
+
 // The Gate Registry's metrics (bead pg2-h63eu; internal/eventqueue/gate.go).
 // They are NOT part of the ten-member INV-OBS-1 catalog above: they observe a
 // separate mechanism and are registered alongside it by the same Emitter, which
@@ -302,6 +319,12 @@ type Emitter struct {
 
 	now func() time.Time
 
+	// srcMu guards srcLastSuccess. The key set is fixed at construction
+	// (WithPullSources); OnSourceSucceeded / OnSourcePaused for any other
+	// name are ignored, which bounds the gauge's cardinality.
+	srcMu          sync.Mutex
+	srcLastSuccess map[string]time.Time
+
 	// mu guards pending/order — the eventID->{type, enqueue-time} correlation
 	// map OnAccept needs to feed RecordThroughput/RecordDispatchLatency (see
 	// their own docs for why: OnAccept's signature carries no event type or
@@ -347,6 +370,7 @@ type options struct {
 	now           func() time.Time
 	poolDir       string
 	poolTTL       time.Duration
+	pullSources   map[string]time.Duration
 }
 
 // WithClock injects a clock seam (default time.Now) for deterministic tests
@@ -354,6 +378,18 @@ type options struct {
 // elapsed time since an event's OnEnqueue — mirrors eventqueue.WithClock.
 func WithClock(now func() time.Time) Option {
 	return func(o *options) { o.now = now }
+}
+
+// WithPullSources registers the per-source liveness gauges
+// (MetricSourceLastSuccess and MetricSourceExpectedInterval) for exactly the
+// named sources, each mapped to its expected interval. The caller passes only
+// enabled, non-excluded PULL sources that have a period (bead pg2-tv11a);
+// an entry with a non-positive interval is skipped. Every registered source's
+// last-success time starts at the Emitter's clock at construction (process
+// start), NOT zero, so a restart resets the clock. Without this option the
+// gauges are not registered.
+func WithPullSources(sources map[string]time.Duration) Option {
+	return func(o *options) { o.pullSources = sources }
 }
 
 // WithQueueLogSize registers MetricQueueLogBytes, an ObservableGauge reading fn
@@ -494,6 +530,11 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 		return nil, err
 	}
 	e := &Emitter{gateSeen: map[string]struct{}{}}
+	if len(cfg.pullSources) > 0 {
+		if err := e.registerSourceGauges(m, cfg.pullSources, cfg.now()); err != nil {
+			return nil, err
+		}
+	}
 	if cfg.queueLogBytes != nil {
 		if _, err := m.Int64ObservableGauge(
 			MetricQueueLogBytes,
@@ -946,6 +987,68 @@ func ClassifySourceFailure(err error) string {
 		return SourceFailureInterrupted
 	}
 	return SourceFailureError
+}
+
+// registerSourceGauges seeds srcLastSuccess with start for every source whose
+// interval is positive and registers the two observable gauges reading it.
+func (e *Emitter) registerSourceGauges(m metric.Meter, sources map[string]time.Duration, start time.Time) error {
+	intervals := make(map[string]time.Duration, len(sources))
+	e.srcLastSuccess = make(map[string]time.Time, len(sources))
+	for name, iv := range sources {
+		if iv <= 0 {
+			continue
+		}
+		intervals[name] = iv
+		e.srcLastSuccess[name] = start
+	}
+	if _, err := m.Float64ObservableGauge(
+		MetricSourceLastSuccess,
+		metric.WithUnit("s"),
+		metric.WithDescription("Unix time of each pull source's last successful pass (a gate- or halt-paused pass also advances it; a failed pass does not); starts at process start (DEC-OBS-4)"),
+		metric.WithFloat64Callback(func(_ context.Context, o metric.Float64Observer) error {
+			e.srcMu.Lock()
+			defer e.srcMu.Unlock()
+			for name, at := range e.srcLastSuccess {
+				o.Observe(float64(at.UnixNano())/1e9, metric.WithAttributes(attribute.String("source", name)))
+			}
+			return nil
+		}),
+	); err != nil {
+		return err
+	}
+	_, err := m.Float64ObservableGauge(
+		MetricSourceExpectedInterval,
+		metric.WithUnit("s"),
+		metric.WithDescription("each pull source's configured period in seconds, the base of the persistent-failure alert threshold (DEC-OBS-4)"),
+		metric.WithFloat64Callback(func(_ context.Context, o metric.Float64Observer) error {
+			for name, iv := range intervals {
+				o.Observe(iv.Seconds(), metric.WithAttributes(attribute.String("source", name)))
+			}
+			return nil
+		}),
+	)
+	return err
+}
+
+// OnSourceSucceeded implements discover.SourceFailureObserver: it advances the
+// source's last-success gauge to now. A source not registered via
+// WithPullSources is ignored.
+func (e *Emitter) OnSourceSucceeded(source string) { e.advanceSource(source) }
+
+// OnSourcePaused implements discover.SourceFailureObserver: a pass skipped
+// because a gate blocks the source or the log-size limit halted the emitters is
+// a deliberate pause, not a failure, so it advances the gauge exactly like a
+// success (DEC-OBS-4). Without this, a 60-minute pause would make every pull
+// source look as if it had stopped succeeding.
+func (e *Emitter) OnSourcePaused(source string) { e.advanceSource(source) }
+
+func (e *Emitter) advanceSource(source string) {
+	e.srcMu.Lock()
+	defer e.srcMu.Unlock()
+	if _, ok := e.srcLastSuccess[source]; !ok {
+		return
+	}
+	e.srcLastSuccess[source] = e.now()
 }
 
 // OnSourceFailure implements discover.SourceFailureObserver (the interface is

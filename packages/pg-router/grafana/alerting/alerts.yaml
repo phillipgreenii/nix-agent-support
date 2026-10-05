@@ -643,6 +643,65 @@ groups:
               expression: B
               conditions: [{ evaluator: { type: gt, params: [0] } }]
 
+      # Persistent source failure (bead pg2-tv11a, DEC-OBS-4; operator approval
+      # Phillip, 2026-10-05). pg-router-source-failure-rate above fires on ANY
+      # failure for 10m and had 19 Alerting transitions on 2026-10-05 alone, all
+      # transient upstream 502/504 storms where a success always intervened
+      # (worst 30m window: ~11 failures in ~30 ticks), so it stays a
+      # desktop-only early signal and is deliberately NOT registered with
+      # pg-router-probe. THIS rule is the escalation-grade one: it fires only
+      # when a source has gone silent for max(3 x its period, 30m), which no
+      # transient storm reaches but the real outages do (2026-09-28 bd outage;
+      # the 2026-10-01/02 GraphQL rate-limit-reserve episode; thread-me's
+      # 2026-10-01 ~4h run of six consecutive failed 30m ticks).
+      #
+      # Series: pg_router_source_last_success_timestamp_seconds{source} and
+      # pg_router_source_expected_interval_seconds{source} (internal/metrics,
+      # exported for enabled, non-excluded PULL sources that have a period).
+      # last-success advances on a successful pass AND on a pass skipped by a
+      # deliberate pause (an active gate or log-limit-halted emitters), so a
+      # pg-router pause does not fire this for every source; a failed pass never
+      # advances it. It starts at PROCESS START, so a restart resets the clock:
+      # a source that keeps failing across restarts re-alerts only after
+      # threshold + `for` following each restart.
+      #
+      # noDataState: OK is deliberate: both series exist from daemon start, so
+      # absence means the daemon (or /metrics) is down, which is
+      # pg-router-liveness-down's job (noDataState: Alerting). The annotation
+      # interpolates only the source label and the age value -- static-safe, no
+      # error text or URLs. Replay evidence:
+      # internal/alertrules/source_persistent_failure_test.go.
+      - uid: pg-router-source-persistent-failure
+        title: pg-router event source has not succeeded recently (by source)
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-router source {{ $labels.source }} has not succeeded for {{ humanizeDuration $values.B.Value }}"
+          description: 'pg-router source {{ $labels.source }} last succeeded {{ humanizeDuration $values.B.Value }} ago, longer than max(3 x its expected interval, 30m) -- it is persistently failing, not a transient blip. Inspect it with: pg-router status --json | jq ''.sources[]|select(.name=="{{ $labels.source }}")|.failure'' and, in Prometheus, sum by (reason)(increase(pg_router_source_failures_total{source="{{ $labels.source }}"}[1h])). A pg-router pause or log-limit halt does NOT trigger this rule (paused passes count as not-a-failure); a restart resets the clock, so a still-failing source re-alerts only after the threshold plus 5m following each restart.'
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: time() - pg_router_source_last_success_timestamp_seconds > on(source) clamp_min(3 * pg_router_source_expected_interval_seconds, 1800)
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [{ evaluator: { type: gt, params: [0] } }]
+
       # Event-log size limit (pg2-5d3ui). pg-router caps queue.jsonl (max_log_bytes,
       # default 64MiB): past 90% of it the daemon halts its POLLED command-source
       # emitters (an in-memory flag, NOT a gate -- pg_router_gates_active does not

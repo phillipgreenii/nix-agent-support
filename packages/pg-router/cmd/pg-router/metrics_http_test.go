@@ -72,7 +72,7 @@ func TestStartMetricsServer_ServesCatalogMemberOverHTTP(t *testing.T) {
 // preserve or escape, regardless of which scheme the scraper offers. This
 // test proves that by sending exactly that Accept header at a real HTTP
 // scrape of the real catalog and asserting every one of the ten members
-// (Task 3.3) is present, dot-free, and suffixed the way Prometheus's own
+// (Task 3.3) plus the two per-source liveness gauges is present, dot-free, and suffixed the way Prometheus's own
 // counter/histogram conventions expect (_total, _bucket/_sum/_count).
 func TestStartMetricsServer_CatalogSurvivesUTF8EscapingNegotiation(t *testing.T) {
 	var ln net.Listener
@@ -88,12 +88,14 @@ func TestStartMetricsServer_CatalogSurvivesUTF8EscapingNegotiation(t *testing.T)
 
 	emitter, err := metrics.New(mp, func() map[string]int {
 		return map[string]int{"review-requested": 4}
-	}, metrics.WithLiveness(func() bool { return true }))
+	}, metrics.WithLiveness(func() bool { return true }),
+		metrics.WithPullSources(map[string]time.Duration{"srcA": time.Minute}))
 	if err != nil {
 		t.Fatalf("metrics.New: %v", err)
 	}
 	emitter.RecordFailure(metrics.FailureClassDeclined)
 	emitter.OnSourceFailure("srcA", errors.New("boom"))
+	emitter.OnSourceSucceeded("srcA")
 	emitter.OnDeduped("review-requested")
 	emitter.RecordThroughput("review-requested")
 	emitter.RecordDispatchLatency(12.5, "accepted")
@@ -140,6 +142,11 @@ func TestStartMetricsServer_CatalogSurvivesUTF8EscapingNegotiation(t *testing.T)
 		metrics.MetricSourceFailures + "_total",
 		metrics.MetricDeduped + "_total",
 		metrics.MetricDispatchLatency + "_milliseconds_bucket",
+		// The per-source liveness gauges (bead pg2-tv11a): unit "s" makes the
+		// bridge append _seconds, and the pg-router-source-persistent-failure
+		// alert queries exactly these exported names.
+		"pg_router_source_last_success_timestamp_seconds",
+		"pg_router_source_expected_interval_seconds",
 	}
 	for _, w := range want {
 		if !strings.Contains(text, w) {

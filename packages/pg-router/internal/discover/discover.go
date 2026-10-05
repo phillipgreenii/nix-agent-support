@@ -124,6 +124,21 @@ type SourceFailureObserver interface {
 	// the failure (e.g. rate-limited vs unavailable vs interrupted) without
 	// this package knowing the taxonomy (bead pg2-hsla6).
 	OnSourceFailure(source string, err error)
+	// OnSourceSucceeded fires once per pass in which source's query succeeded
+	// (on the first attempt or after retrying) — the same point
+	// SourceActivityObserver.OnSourceProduced fires. It is the success half of
+	// the per-source last-success gauge (bead pg2-tv11a, DEC-OBS-4): a failed
+	// pass never calls it. The two observers are separate seams because
+	// SourceActivityObserver's single orchestrator slot belongs to the
+	// activity ring; the metrics emitter only needs this one signal.
+	OnSourceSucceeded(source string)
+	// OnSourcePaused fires once for every pass in which source was due to run
+	// but a deliberate pause stopped it from being polled: an active gate
+	// blocking it (Gate Registry) or the log-size limit's halted emitters. A
+	// pause is NOT a failure, so the last-success gauge advances on it
+	// (DEC-OBS-4) — a pg-router pause or log-limit halt must not make every
+	// pull source look like it has stopped succeeding.
+	OnSourcePaused(source string)
 }
 
 // SourceActivityObserver is notified of a pull source's own per-pass
@@ -436,6 +451,9 @@ func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eve
 			continue
 		}
 		if gateBlocked(s) || emittersHalted(s) {
+			if obs != nil {
+				obs.OnSourcePaused(s.Name)
+			}
 			continue
 		}
 		if err := runAndEnqueue(ctx, env, s, q, declared, sleep, obs, activityObs, &rpt, now); err != nil {
@@ -465,6 +483,9 @@ func produce(ctx context.Context, env query.Env, sources query.SourceSet, q *eve
 			}
 			if depth >= tt.Count {
 				if gateBlocked(s) || emittersHalted(s) {
+					if obs != nil {
+						obs.OnSourcePaused(s.Name)
+					}
 					continue
 				}
 				if err := runAndEnqueue(ctx, env, s, q, declared, sleep, obs, activityObs, &rpt, now); err != nil {
@@ -610,6 +631,12 @@ func runAndEnqueue(ctx context.Context, env query.Env, s query.Source, q *eventq
 	}
 	if activityObs != nil {
 		activityObs.OnSourceProduced(s.Name, rpt.Emitted[s.Name], rpt.Rejected[s.Name])
+	}
+	// The query itself succeeded (an Enqueue refusal above is a log-limit
+	// condition, not a source failure): feed the last-success gauge (bead
+	// pg2-tv11a). A failed pass returned before reaching here.
+	if obs != nil {
+		obs.OnSourceSucceeded(s.Name)
 	}
 	return nil
 }

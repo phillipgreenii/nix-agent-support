@@ -96,3 +96,46 @@ fired it. The residual rule now excludes `triager-failure`; a separate rule
 Same bounds as above: the reason is a fixed constant and `role` stays config-bounded. This is a
 classification of an error the core already receives, not a status stream, so `INV-FAIL-1`'s
 other clauses are unchanged.
+
+### `DEC-OBS-4` — a source is persistently failing when it has not succeeded for max(3 x its period, 30m); a pause is not a failure <!-- uuid: 91571075-a2d2-4e39-8e31-4ce6e7f020c9 -->
+
+**Decided** (operator approval, Phillip, 2026-10-05; bead `pg2-tv11a`). The core exports two gauges per
+pull source, `source_last_success_timestamp` and `source_expected_interval` (`interfaces.md`,
+`INTF-MON`'s catalog), and the `pg-router-source-persistent-failure` alert
+(`grafana/alerting/alerts.yaml`) fires when `time() - last_success` exceeds
+`clamp_min(3 x expected_interval, 1800s)` for 5 minutes.
+
+**Why.** `source_failures` is a counter, so the only rule it supports
+(`pg-router-source-failure-rate`: any failure for 10m) cannot tell a source that is down from one that
+hit a transient upstream 502/504 storm with a success always intervening: it had 19 Alerting
+transitions on 2026-10-05 alone, every one a transient `pr-team` storm (worst 30m window about 11
+failures in about 30 ticks), too noisy to escalate. Real outages (the 2026-09-28 bd outage; the
+2026-10-01/02 GraphQL rate-limit-reserve episode; `thread-me`'s 2026-10-01 run of six consecutive
+failed 30m ticks) leave a source silent far longer than 3 periods. That earlier rule stays as the
+desktop-only early signal and is not escalated.
+
+**Threshold.** `max(3 x period, 30m)`: three missed periods, with a 30-minute floor so a fast source
+(10s to 1m) needs a genuine half-hour outage. The comparison is strict, and `for: 5m` is added on top.
+Known boundary: for a 30-minute source (threshold 90m) whose observed tick spacing is about 35m, two
+consecutive failed ticks followed by a success put the last success about 99m old, so that case does
+reach Alerting briefly; the approved factor is kept and this is recorded rather than tuned away.
+
+**A pause is not a failure.** While a gate blocks a source or the log-size limit halts the polled
+emitters, the pass is skipped and **advances** the last-success time like a success. Without this, a
+60-minute pg-router pause or log-limit halt would fire the rule for every pull source at once. A
+**failed** pass never advances it. Which sources are exported: enabled, non-excluded **pull**
+sources that have a period (a threshold or manual source with no explicit `expected_interval` has no
+cadence to alert against); none for disabled, excluded or push sources.
+
+**Restart semantics.** The timestamp starts at **process start**, not zero, so a restart resets the
+clock: a source that keeps failing across a restart re-alerts only after the threshold plus `for`
+following that restart. This is accepted because the failure counter also resets on restart and a
+restart is itself a strong recovery attempt.
+
+**No-data.** The series exist from daemon start, so the rule keeps `noDataState: OK`: absence means
+the daemon (or its metrics endpoint) is down, which `pg-router-liveness-down` covers.
+
+**Evidence.** The rule is modelled and replayed in `internal/alertrules/source_persistent_failure_test.go`
+against per-tick outcomes extracted from the daemon's stderr log (`testdata/source_ticks.txt`; the
+log records only failed ticks, so successes are inferred, and the header there states the rule). Registration of
+this rule with `pg-router-probe` is a separate, deployment-side change.

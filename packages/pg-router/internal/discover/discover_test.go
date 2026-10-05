@@ -470,8 +470,18 @@ func equalStrings(a, b []string) bool {
 // recordingSourceFailureObserver is a SourceFailureObserver test double: it
 // records every source name OnSourceFailure was called with, in call order.
 type recordingSourceFailureObserver struct {
-	sources []string
-	errs    []error
+	sources   []string
+	errs      []error
+	succeeded []string
+	paused    []string
+}
+
+func (r *recordingSourceFailureObserver) OnSourceSucceeded(source string) {
+	r.succeeded = append(r.succeeded, source)
+}
+
+func (r *recordingSourceFailureObserver) OnSourcePaused(source string) {
+	r.paused = append(r.paused, source)
 }
 
 func (r *recordingSourceFailureObserver) OnSourceFailure(source string, err error) {

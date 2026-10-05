@@ -289,6 +289,10 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	// Log-size limit gauges (bead pg2-5d3ui): limit, percent, emitters halted, and
 	// which reason (if any) the log is rejecting events for.
 	metricsOpts = append(metricsOpts, metrics.WithLogLimitStatus(func() eventqueue.LimitStatus { return q.LimitStatus() }))
+	// Per-source last-success / expected-interval gauges (bead pg2-tv11a,
+	// DEC-OBS-4): one series per enabled, non-excluded PULL source with a
+	// period, last-success initialised to now (process start).
+	metricsOpts = append(metricsOpts, metrics.WithPullSources(pullSourceIntervals(cfg)))
 	emitter, err := metrics.New(mp, func() map[string]int { return q.DepthByType() }, metricsOpts...)
 	if err != nil {
 		_ = store.Close()
@@ -460,6 +464,33 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 		}
 	}
 	return svc, q, mp, store.Close, nil
+}
+
+// pullSourceIntervals returns, per configured pull source, the expected
+// interval the persistent-failure alert scales its threshold by (bead
+// pg2-tv11a, DEC-OBS-4). cfg is the POST-selector config, so a selector-excluded
+// source is already absent and is never exported; every configured query is a
+// pull source (there is no config-level enable flag for one, and no push query
+// type). A source with no period — a manual or threshold trigger with no
+// explicit expected_interval — has no cadence to alert against and is omitted.
+// A period trigger whose own Every is zero fires on cfg.PollInterval (the same
+// fallback discover's cadence uses), so that is its interval.
+func pullSourceIntervals(cfg config.Config) map[string]time.Duration {
+	out := make(map[string]time.Duration, len(cfg.Queries))
+	for _, src := range cfg.Queries {
+		ms := config.ExpectedIntervalMsFor(src, cfg.ExpectedIntervalOverrides)
+		if ms <= 0 {
+			t := src.Query.Trigger()
+			if _, threshold := query.Threshold(t); threshold || query.IsManual(t) {
+				continue
+			}
+			ms = cfg.PollInterval.Milliseconds()
+		}
+		if ms > 0 {
+			out[src.Name] = time.Duration(ms) * time.Millisecond
+		}
+	}
+	return out
 }
 
 // postStartupAll dispatches handler.postStartup once to every ENABLED

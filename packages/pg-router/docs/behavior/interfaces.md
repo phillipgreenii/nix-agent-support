@@ -480,8 +480,20 @@ sequenceDiagram
     carries no field distinguishing them ("The manager→core callback" below) — this catalog member
     is where that distinction becomes visible, without changing what `ingest-event`'s reply itself
     carries;
+  - **source_last_success_timestamp** — gauge, per source: the time of a **pull source's** most
+    recent **successful pass** (`INV-FAIL-3`), in seconds. Exported only for a source that is enabled,
+    not excluded from this run, and has a period; a push source, a disabled source and an excluded
+    source have no series. A **failed** pass never advances it, but a pass the core **deliberately
+    skipped** — an active gate blocking the source, or the log-size limit halting the polled emitters
+    (`INV-EVT-1`) — advances it exactly like a success, because a pause is not a failure. It starts at
+    **process start**, never at zero, so a restart resets it (`DEC-OBS-4`);
+  - **source_expected_interval** — gauge, per source (same set as above): the source's configured
+    period, in seconds — the base a watcher scales its "this source has gone quiet" threshold by.
+    The two together let an observer tell a source that is **persistently** failing (no success for
+    far longer than its period) from one that merely hit transient failures with a success always
+    intervening, which `source_failures` alone cannot (`DEC-OBS-4`);
 
-  and, alongside those six, the **throughput**, **backlog**, **liveness** and **dispatch-latency**
+  and, alongside those eight, the **throughput**, **backlog**, **liveness** and **dispatch-latency**
   metrics an observer watches to tell a busy system from a stalled one (`STORY-OBS-1`).
 
 - **Emission.** Observability covers **metrics and logs** (traces are a later concern). Both the
@@ -768,7 +780,7 @@ Inspection's **MUST** set has widened to also offer:
   `tui` subcommand) **MUST** say plainly what is **halted** (polled command-source emitters; and,
   at `log_full` / `log_unwritable`, every new event), what **still runs** (listener dispatch and the
   drain; the timer emitter and pushed events until the maximum), why, and the operator's remedies.
-  This reading adds a metric for the state but no member to `INTF-MON`'s ten-member catalog, and is
+  This reading adds a metric for the state but no member to `INTF-MON`'s catalog (then ten members; the per-source liveness gauges of `DEC-OBS-4` later made it twelve), and is
   itself an additive schema change discovered **after** the widening above, carrying the explicit
   operator note this section's own rule requires: **operator-approved** as part of
   `phillipgreenii-nix-agent-support` bead `pg2-5d3ui` (2026-10-02).
