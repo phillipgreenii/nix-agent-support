@@ -263,6 +263,96 @@ func TestForceReviewNeedsAKnownHead(t *testing.T) {
 	}
 }
 
+// seedForceReviewEntity seeds o/r#1 with a recorded head SHA.
+func seedForceReviewEntity(t *testing.T, seed *store.Store, head string) {
+	t.Helper()
+	if err := seed.UpsertEntity(store.Entity{
+		Repo: "o/r", EntityType: "pr", EntityID: "o/r#1", Facts: `{}`, AsOf: "2026-09-29T00:00:00Z", HeadSHA: head,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestForceReviewClearRemovesTheFlagWithOneRecord(t *testing.T) {
+	open, seed := newStoreAt(t, "new")
+	seedForceReviewEntity(t, seed, "deadbeef")
+	withOpenSeams(t, linkTestConfig(), open)
+
+	if _, err := runGroupCmd(t, forceReviewCmd, "pr", "1"); err != nil {
+		t.Fatalf("force-review: %v", err)
+	}
+	out, err := runGroupCmd(t, forceReviewCmd, "pr", "1", "--clear", "--origin", "pr-decider", "--actor", "bot")
+	if err != nil {
+		t.Fatalf("force-review --clear: %v", err)
+	}
+	if !strings.Contains(out, "cleared") {
+		t.Errorf("output = %q, want it to say the flag was cleared", out)
+	}
+	if _, found, _ := seed.GetKVAnnotation("o/r", "pr", "o/r#1", "force_review"); found {
+		t.Error("force_review still present after --clear")
+	}
+	// set + clear: exactly one more annotation_changed record, from --origin.
+	if got, want := kindsOf(t, seed, "pr", "o/r#1"), []string{"annotation_changed@pg-desk", "annotation_changed@pr-decider"}; !equalStrings(got, want) {
+		t.Errorf("history = %v, want %v", got, want)
+	}
+}
+
+func TestForceReviewClearDefaultsToTheDeskOrigin(t *testing.T) {
+	open, seed := newStoreAt(t, "new")
+	seedForceReviewEntity(t, seed, "deadbeef")
+	withOpenSeams(t, linkTestConfig(), open)
+	if _, err := runGroupCmd(t, forceReviewCmd, "pr", "1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runGroupCmd(t, forceReviewCmd, "pr", "1", "--clear"); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := kindsOf(t, seed, "pr", "o/r#1"), []string{"annotation_changed@pg-desk", "annotation_changed@pg-desk"}; !equalStrings(got, want) {
+		t.Errorf("history = %v, want %v", got, want)
+	}
+}
+
+func TestForceReviewClearWithNoFlagIsANoOp(t *testing.T) {
+	open, seed := newStoreAt(t, "new") // o/r#1 has no head and no flag
+	withOpenSeams(t, linkTestConfig(), open)
+	out, err := runGroupCmd(t, forceReviewCmd, "pr", "1", "--clear", "--origin", "pr-decider")
+	if err != nil || !strings.Contains(out, "nothing to do") {
+		t.Errorf("clear with no flag: out=%q err=%v, want exit 0 and nothing to do", out, err)
+	}
+	if got := kindsOf(t, seed, "pr", "o/r#1"); len(got) != 0 {
+		t.Errorf("history = %v, want no record", got)
+	}
+}
+
+func TestForceReviewClearNeedsAnActorAndAResolvableEntity(t *testing.T) {
+	open, _ := newStoreAt(t, "new")
+	cfg := linkTestConfig()
+	cfg.Actor = ""
+	withOpenSeams(t, cfg, open)
+	if _, err := runGroupCmd(t, forceReviewCmd, "pr", "1", "--clear"); err == nil || !strings.Contains(err.Error(), "no actor") {
+		t.Errorf("error = %v, want a no-actor error", err)
+	}
+	withOpenSeams(t, linkTestConfig(), open)
+	if _, err := runGroupCmd(t, forceReviewCmd, "pr", "99", "--clear"); err == nil || !strings.Contains(err.Error(), "does not resolve") {
+		t.Errorf("error = %v, want a does-not-resolve error", err)
+	}
+}
+
+func TestForceReviewSetRejectsOriginFlag(t *testing.T) {
+	open, _ := newStoreAt(t, "new")
+	withOpenSeams(t, linkTestConfig(), open)
+	if _, err := runGroupCmd(t, forceReviewCmd, "pr", "1", "--origin", "x"); err == nil || !strings.Contains(err.Error(), "--clear") {
+		t.Errorf("error = %v, want --origin refused without --clear", err)
+	}
+}
+
+func TestForceReviewClearRefusesOldSchemaStore(t *testing.T) {
+	open, _ := newStoreAt(t, "old")
+	withOpenSeams(t, linkTestConfig(), open)
+	_, err := runGroupCmd(t, forceReviewCmd, "pr", "1", "--clear")
+	wantOldSchemaRefusal(t, err)
+}
+
 // The verbs with no old-schema counterpart each refuse an old-schema store,
 // each with its own test.
 

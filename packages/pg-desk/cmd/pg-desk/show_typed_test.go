@@ -514,3 +514,58 @@ func TestTypedShowCIHasNoPrecomputedVerdict(t *testing.T) {
 		}
 	}
 }
+
+// annotationsOf runs `show --json` and returns the raw annotations object.
+func annotationsOf(t *testing.T, typ, id string) map[string]any {
+	t.Helper()
+	out, _, err := runTypedShowCmd(t, typ, id, "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw struct {
+		Contract    string         `json:"contract"`
+		Annotations map[string]any `json:"annotations"`
+	}
+	if err := json.Unmarshal([]byte(out), &raw); err != nil {
+		t.Fatal(err)
+	}
+	if raw.Contract != "pg-desk.view/v1" {
+		t.Errorf("contract = %q, want pg-desk.view/v1", raw.Contract)
+	}
+	return raw.Annotations
+}
+
+func TestTypedShowForceReviewSHAUnsetIsNull(t *testing.T) {
+	newViewFixture(t)
+	a := annotationsOf(t, "pr", "5")
+	if got, has := a["force_review"]; !has || got != false {
+		t.Errorf("force_review = %v (present %v), want false", got, has)
+	}
+	if got, has := a["force_review_sha"]; !has || got != nil {
+		t.Errorf("force_review_sha = %v (present %v), want an explicit null", got, has)
+	}
+}
+
+func TestTypedShowForceReviewSHAReportsTheRequestedHead(t *testing.T) {
+	f := newViewFixture(t)
+	f.annotate("pr", "o/r#5", "force_review", "9f3c1e2aaaa")
+	a := annotationsOf(t, "pr", "5")
+	if a["force_review"] != true || a["force_review_sha"] != "9f3c1e2aaaa" {
+		t.Errorf("annotations = force_review %v, force_review_sha %v; want true, 9f3c1e2aaaa", a["force_review"], a["force_review_sha"])
+	}
+}
+
+func TestTypedShowForceReviewSetClearSetShowsTheNewSHA(t *testing.T) {
+	f := newViewFixture(t)
+	f.annotate("pr", "o/r#5", "force_review", "9f3c1e2aaaa")
+	if _, err := f.seed.DeleteAnnotation("o/r", "pr", "o/r#5", "force_review", "pr-decider", "2026-09-29T15:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	if a := annotationsOf(t, "pr", "5"); a["force_review"] != false || a["force_review_sha"] != nil {
+		t.Errorf("after clear: force_review %v, force_review_sha %v; want false, null", a["force_review"], a["force_review_sha"])
+	}
+	f.annotate("pr", "o/r#5", "force_review", "bbbb2222")
+	if a := annotationsOf(t, "pr", "5"); a["force_review"] != true || a["force_review_sha"] != "bbbb2222" {
+		t.Errorf("after re-set: force_review %v, force_review_sha %v; want true, bbbb2222", a["force_review"], a["force_review_sha"])
+	}
+}

@@ -24,8 +24,13 @@ flowchart LR
   removes `suppress.K`; unsuppressing a kind that is not suppressed prints that there was nothing
   to do, appends no record and exits `0`.
 - `pg-desk pr force-review <id>` sets `force_review` to the head SHA the PR is at now. It fails
-  when the PR has no recorded head commit. It only sets the flag: honoring it once and clearing it
-  belong to the deciders.
+  when the PR has no recorded head commit. Setting never consumes or clears the flag.
+- `pg-desk pr force-review <id> --clear [--origin O] [--actor A]` removes `force_review`. `--origin`
+  names the writer and defaults to `pg-desk`; it is stored on the change record, and `--origin` is
+  accepted only together with `--clear`. When the flag was set it appends one `annotation_changed`
+  record; when it was not set it prints that there was nothing to do, appends no record and exits
+  `0`. It is the only verb that consumes the flag. Whether and when to clear is the decider's
+  choice; this verb is the mechanism.
 - `<id>` is resolved as for the other typed verbs: a PR by number, `OWNER/REPO#N` or URL; an
   issue or thread id verbatim. An id with no stored entity fails and writes nothing.
 - `set_by` is `--actor`, defaulting to the configured actor; these verbs fail when neither is
@@ -53,19 +58,36 @@ fourth disposition the feedback verbs accept) as `disposition.<comment>` too.
   `annotation_changed` record in the same transaction as the row change; a failed write MUST leave
   neither.
 - **INV-ANNOTATE-2.** A reserved key MUST be written only in its documented shape.
-- **INV-ANNOTATE-3.** `force-review` MUST NOT consume or clear a flag; it only sets it.
+- **INV-ANNOTATE-3.** The set path of `force-review` MUST NOT consume or clear a flag; the clear
+  path (`force-review --clear`) is the only consumer of `force_review`.
 
 ## Old-schema refusal
 
-`annotate`, `suppress`, `unsuppress` and `pr force-review` have no old-schema counterpart. On an
-old-schema store each refuses with the store's error, which says to run
+`annotate`, `suppress`, `unsuppress` and `pr force-review` (set and `--clear`) have no old-schema
+counterpart. On an old-schema store each refuses with the store's error, which says to run
 `pg-desk migrate --cutover`, and exits `1`.
 
 ## Exit codes
 
-`0` on success (including unsuppressing a kind that was not suppressed); `1` on any error.
+`0` on success (including unsuppressing a kind that was not suppressed and clearing a
+`force_review` that was not set); `1` on any error.
+
+## Consumption record convention
+
+pg-desk records no consumption itself. A decider that consumes a force-review request clears the
+flag with `force-review --clear` and records what it consumed with `annotate`, under the
+`decider.<name>.<k>` namespace (`<name>` is the decider, here `pr-decider`):
+
+```text
+decider.pr-decider.force_review_consumed=<sha>
+```
+
+`<sha>` is the head SHA the consumed request was made at (the earlier `force_review_sha` of the
+view). A request later set at that same head is then distinguishable from the consumed one by
+comparing `force_review_sha` with this record; a request at a newer head is fresh. Which head counts
+as fresh is the decider's rule, not pg-desk's.
 
 ## Out of scope
 
-Consuming and clearing `force_review`, and every rule that reads annotations (deciders); showing
-annotations (`show`).
+Every rule that reads annotations, including when a decider clears `force_review` and which head a
+re-request counts as fresh against (deciders); showing annotations (`show`).

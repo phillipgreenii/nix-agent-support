@@ -28,7 +28,7 @@ order:
 | `stale`       | True when the stored snapshot is flagged stale, or when `--refresh` of this entity failed or degraded.                    |
 | `snapshot`    | The type's pg-connector schema value (`schema.PR`, `schema.Issue`, `schema.Thread`), as stored; `null` if none is stored. |
 | `decorations` | `relationship`, `dispositions[]` of `{comment_id, computed, override}`, `urgency` (the level) and `category`.             |
-| `annotations` | `hidden` as `{value, reason}`, `wip`, `suppress[]`, `force_review` and the `decider` map of maps.                         |
+| `annotations` | `hidden` as `{value, reason}`, `wip`, `suppress[]`, `force_review`, `force_review_sha` and the `decider` map of maps.     |
 | `review`      | A PR's pending agent review and its escalation, see below. Present for `pr` only, absent for `issue` and `thread`.        |
 | `links[]`     | Every link of the entity, see below.                                                                                      |
 | `links_as_of` | The newest time any of the entity's links was last confirmed; `null` when it has none.                                    |
@@ -36,7 +36,10 @@ order:
 
 `decorations` come from the stored interpretation and are empty (`""`, `[]`) for an entity that has
 none. A disposition's `override` is the `disposition.<comment_id>` annotation, or `null`.
-`force_review` is true when the annotation is set.
+`force_review` is true when the annotation is set. `annotations.force_review_sha` is the head SHA the
+flag was requested at, a string, or `null` when no flag is set; it sits beside `force_review`, which
+is unchanged. Clearing the flag (`pr force-review --clear`) makes it `null` again, and setting it
+again at a new head shows the new SHA.
 
 ### Links
 

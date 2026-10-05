@@ -42,6 +42,7 @@
     "wip": false,
     "suppress": ["fix-ci"],
     "force_review": false,
+    "force_review_sha": null,
     "decider": {
       "pr-decider": {
         "fail.review.head-advanced": "1"

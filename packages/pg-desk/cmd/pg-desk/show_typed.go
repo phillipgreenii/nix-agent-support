@@ -122,11 +122,14 @@ type viewHidden struct {
 }
 
 type viewAnnotations struct {
-	Hidden      viewHidden                   `json:"hidden"`
-	WIP         bool                         `json:"wip"`
-	Suppress    []string                     `json:"suppress"`
-	ForceReview bool                         `json:"force_review"`
-	Decider     map[string]map[string]string `json:"decider"`
+	Hidden      viewHidden `json:"hidden"`
+	WIP         bool       `json:"wip"`
+	Suppress    []string   `json:"suppress"`
+	ForceReview bool       `json:"force_review"`
+	// ForceReviewSHA is the head SHA the force_review flag was requested at,
+	// or null when no flag is set.
+	ForceReviewSHA *string                      `json:"force_review_sha"`
+	Decider        map[string]map[string]string `json:"decider"`
 }
 
 // viewLink is one links[] entry. State, Labels, Metadata and Assignee are
@@ -256,7 +259,10 @@ func buildView(cfg *config.Config, st *store.Store, repo, entityType, id string,
 		v.Annotations.Hidden.Reason = &r
 	}
 	v.Annotations.WIP = byKey[store.AnnotationWIP] == "true"
-	_, v.Annotations.ForceReview = byKey[store.AnnotationForceReview]
+	if sha, has := byKey[store.AnnotationForceReview]; has {
+		v.Annotations.ForceReview = true
+		v.Annotations.ForceReviewSHA = &sha
+	}
 
 	v.Decorations = viewDecorations{Dispositions: []viewDisposition{}}
 	interp, ifound, err := st.GetInterpretation(repo, entityType, id)
