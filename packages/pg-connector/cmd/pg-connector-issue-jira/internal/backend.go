@@ -172,6 +172,12 @@ type pjiraIssue struct {
 	// corrected below. A pointer (like pjiraUser's own fields) since an
 	// issue with no due date omits the key entirely.
 	Duedate *string `json:"duedate,omitempty"`
+	// Updated is the issue's last-updated time as pjira reports it (Jira's
+	// own timestamp text, e.g. "2026-10-05T10:11:12.000+0000"; pjira's
+	// model.go Issue.Updated). It is read ONLY by the ranged-list filter
+	// (listrange.go) and is deliberately not mapped onto schema.Issue, so an
+	// unranged list's output is unchanged.
+	Updated string `json:"updated,omitempty"`
 }
 
 // pjiraUser is pjira's own nested user shape (model.go's User), used here
@@ -615,8 +621,9 @@ func boundedJQL(jql, updatedSince string) string {
 //     to what actually changed since the caller's previous call; an
 //     absent/first cursor runs jql unmodified, exactly today's full-fetch
 //     behavior.
-//   - A second, ids-only search against jql UNMODIFIED (no bound, ever)
-//     feeds PresentIDs — the query's CURRENT full match set, independent
+//   - A second, ids-only search against jql (never narrowed by the
+//     CURSOR's bound; a ranged call's list_since/list_before DO narrow it, so
+//     present_ids is the bounded match set) feeds PresentIDs — the query's CURRENT full match set, independent
 //     of whatever bound the first search just applied (design: "run a
 //     second, ids-only pjira search (no updated >= bound) to populate
 //     PresentIDs with the query's CURRENT full match set" — the
@@ -637,12 +644,22 @@ func boundedJQL(jql, updatedSince string) string {
 // answers Cursor: null once List actually runs.
 func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool, cursor json.RawMessage) (*schema.IssueListResult, error) {
 	prevCursor := decodeJiraCursor(cursor)
+	// Ranged list (bead pg2-ttk9t, WT-D18): list_since/list_before widen both
+	// searches by whole days in JQL, then cut precisely by each issue's own
+	// updated time (listrange.go). A malformed bound is invalid_argument.
+	rng, rngErr := scriptout.ListRangeFromContext(ctx)
+	if rngErr != nil {
+		return nil, rngErr
+	}
 
 	seenEntities := make(map[string]bool)
 	entities := make([]schema.Issue, 0)
 	seenIDs := make(map[string]bool)
 	presentIDs := make([]string, 0)
 	truncated := false
+	// imprecise: a ranged call met an issue whose updated time could not be
+	// judged, so Truncated is set rather than claiming an exact bound.
+	imprecise := false
 
 	for _, jql := range query {
 		jql = strings.TrimSpace(jql)
@@ -650,7 +667,7 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 			continue
 		}
 
-		primaryJQL := boundedJQL(jql, prevCursor.UpdatedSince)
+		primaryJQL := rangedJQL(boundedJQL(jql, prevCursor.UpdatedSince), rng)
 		out, runErr := b.runner.Run(ctx, "search", "--jql", primaryJQL, "--all")
 		if runErr != nil {
 			return nil, classifyPJIRAErrorMessage(runErr.Error())
@@ -668,15 +685,21 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 			if item.Key == "" || seenEntities[item.Key] {
 				continue
 			}
+			keep, imp := issueInRange(item.Updated, rng)
+			imprecise = imprecise || imp
+			if !keep {
+				continue
+			}
 			seenEntities[item.Key] = true
 			entities = append(entities, *toSchemaIssue(&item, asOf))
 		}
 
-		// The unconditional, unbounded present-ids search (this method's
-		// own doc comment above) — always jql itself, never
-		// boundedJQL's output, so a caller's own configured query-name
-		// value round-trips through the fake Runner unchanged.
-		idsOut, idsErr := b.runner.Run(ctx, "search", "--jql", jql, "--all")
+		// The unconditional present-ids search (this method's own doc
+		// comment above) — jql itself, never boundedJQL's (cursor) output,
+		// so a caller's own configured query-name value round-trips through
+		// the fake Runner unchanged. rangedJQL is the identity for an
+		// unbounded call; a ranged call narrows it (WT-D18).
+		idsOut, idsErr := b.runner.Run(ctx, "search", "--jql", rangedJQL(jql, rng), "--all")
 		if idsErr != nil {
 			return nil, classifyPJIRAErrorMessage(idsErr.Error())
 		}
@@ -692,6 +715,11 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 			if key == "" || seenIDs[key] {
 				continue
 			}
+			keep, imp := issueInRange(idsResult.Items[i].Updated, rng)
+			imprecise = imprecise || imp
+			if !keep {
+				continue
+			}
 			seenIDs[key] = true
 			presentIDs = append(presentIDs, key)
 		}
@@ -701,7 +729,7 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 		Entities:   entities,
 		PresentIDs: presentIDs,
 		Cursor:     newJiraCursor(time.Now().UTC()),
-		Truncated:  truncated,
+		Truncated:  truncated || imprecise,
 	}
 	if idsOnly {
 		res.Entities = nil

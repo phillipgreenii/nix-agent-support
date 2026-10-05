@@ -231,9 +231,20 @@ func newChangesCmd(entityType string) *cobra.Command {
 	cmd.Flags().StringVar(&consumer, "consumer", "", "consumer id whose cursor this call reads and advances (required)")
 	cmd.Flags().BoolVar(&cached, "cached", false, "skip the backend refresh entirely; return only what the ledger already knows past the cursor")
 	cmd.Flags().BoolVar(&reset, "reset", false, "reset this consumer's cursor to zero before computing changes, so the next call replays every live entity as added")
+	// Hidden refusal flags (bead pg2-ttk9t, WT-D18): changes NEVER passes a
+	// range, so --since/--before are rejected as invalid_argument rather than
+	// falling through to cobra's generic unknown-flag error. See
+	// rejectChangesTimeBounds.
+	cmd.Flags().String(sinceFlagName, "", "not supported: changes never takes a time bound (use list --since)")
+	cmd.Flags().String(beforeFlagName, "", "not supported: changes never takes a time bound (use list --before)")
+	_ = cmd.Flags().MarkHidden(sinceFlagName)
+	_ = cmd.Flags().MarkHidden(beforeFlagName)
 	_ = cmd.MarkFlagRequired("query")
 	_ = cmd.MarkFlagRequired("consumer")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		if err := rejectChangesTimeBounds(cmd); err != nil {
+			return writeTargetedResult(cmd, nil, err, func(json.RawMessage) (string, error) { return "", nil })
+		}
 		reg, err := LoadRegistry()
 		if err != nil {
 			return err

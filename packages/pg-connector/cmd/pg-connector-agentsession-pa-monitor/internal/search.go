@@ -8,6 +8,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/search"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
 var _ search.Provider = (*Backend)(nil)
@@ -27,14 +28,18 @@ type searchJSONDoc struct {
 // Search ignores fields — pa-monitor's search subcommand has no
 // attribute-selection concept; a well-behaved Provider silently ignores an
 // unsupported requested attribute (pkg/provider/search.Provider's own
-// documented freedom boundary). It cannot pass a time bound through to
-// `pa-monitor search` here: pkg/provider/search.Provider's own signature
-// (query, fields — shared by every search backend, not just this one) has
-// no time-bound parameter at all, so this call is always unbounded
-// regardless of pa-monitor's own --since/--before support. Extending the
-// shared interface is tracked separately as bead pg2-emmut.
+// documented freedom boundary). The time bound rides the request config, not
+// the shared Provider signature (the 2026-09-18 search time-bound design,
+// bead pg2-ttk9t): the umbrella merges search_since/search_before (RFC3339)
+// onto this backend's config for a bounded call, and they are forwarded to
+// `pa-monitor search --since/--before`. Absent keys leave the call
+// unbounded; a malformed value is invalid_argument.
 func (b *Backend) Search(ctx context.Context, query string, _ []string) ([]schema.SearchResult, error) {
-	raw, err := b.runner.Search(ctx, query, "")
+	rng, rngErr := scriptout.SearchRangeFromContext(ctx)
+	if rngErr != nil {
+		return nil, rngErr
+	}
+	raw, err := b.runner.Search(ctx, query, "", rng)
 	if err != nil {
 		return nil, classifyPaMonitorError(err)
 	}

@@ -290,19 +290,34 @@ func (b *Backend) checkRateReserve(ctx context.Context) error {
 // cleanup (bead pg2-c0vs3) once nothing outside them still referenced the
 // codec.
 func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool, cursor json.RawMessage) (*schema.PRListResult, error) {
+	// Ranged list (bead pg2-ttk9t, WT-D18): list_since/list_before narrow
+	// each search and then cut precisely by updatedAt (listrange.go). A
+	// malformed bound is answered invalid_argument before any GitHub call.
+	rng, rngErr := scriptout.ListRangeFromContext(ctx)
+	if rngErr != nil {
+		return nil, rngErr
+	}
 	if err := b.checkRateReserve(ctx); err != nil {
 		return nil, err
 	}
+	// imprecise: some PR's updatedAt could not be judged against the bound,
+	// so the result is flagged truncated rather than claimed exact.
+	imprecise := false
 
 	if idsOnly {
 		seen := make(map[string]bool)
 		ids := make([]string, 0)
 		for _, q := range query {
-			prs, err := b.gh.SearchPRs(ctx, q)
+			prs, err := b.gh.SearchPRs(ctx, withUpdatedQualifier(q, rng))
 			if err != nil {
 				return nil, classifyGHError(err)
 			}
 			for i := range prs {
+				keep, imp := prInRange(prs[i].UpdatedAt, rng)
+				imprecise = imprecise || imp
+				if !keep {
+					continue
+				}
 				id := formatPRID(prs[i].Repo, prs[i].Number)
 				if seen[id] {
 					continue
@@ -311,18 +326,23 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 				ids = append(ids, id)
 			}
 		}
-		return &schema.PRListResult{PresentIDs: ids, Cursor: nil, Truncated: false}, nil
+		return &schema.PRListResult{PresentIDs: ids, Cursor: nil, Truncated: imprecise}, nil
 	}
 
 	seen := make(map[string]bool)
 	matched := make([]api.PR, 0)
 	for _, q := range query {
-		prs, err := b.gh.SearchPRsEnriched(ctx, q)
+		prs, err := b.gh.SearchPRsEnriched(ctx, withUpdatedQualifier(q, rng))
 		if err != nil {
 			return nil, classifyGHError(err)
 		}
 		for i := range prs {
 			ghPR := prs[i]
+			keep, imp := prInRange(ghPR.UpdatedAt, rng)
+			imprecise = imprecise || imp
+			if !keep {
+				continue
+			}
 			id := formatPRID(ghPR.Repo, ghPR.Number)
 			if seen[id] {
 				continue
@@ -342,7 +362,7 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 		entities = append(entities, *toSchemaPR(id, &ghPR, nil, nil, asOf))
 	}
 
-	return &schema.PRListResult{Entities: entities, PresentIDs: ids, Cursor: nil, Truncated: false}, nil
+	return &schema.PRListResult{Entities: entities, PresentIDs: ids, Cursor: nil, Truncated: imprecise}, nil
 }
 
 // Search implements the search capability's search.Provider via the same

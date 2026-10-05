@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
 // writeSearchConfigFor writes a top-level search.sources registry listing
@@ -102,7 +103,7 @@ func TestGroupSearchResults_EmptyWhenNoSourcesSucceeded(t *testing.T) {
 
 func TestFanOutSearch_Succeeded(t *testing.T) {
 	writeFakeBackend(t, "backend-ok", `{"protocolVersion":1,"schemaVersion":1,"result":[{"type":"pr","id":"1","title":"t1","url":"http://x/1","source":"backend-ok"}]}`)
-	perSource, out := fanOutSearch(context.Background(), []string{"backend-ok"}, "query", nil)
+	perSource, out := fanOutSearch(context.Background(), nil, []string{"backend-ok"}, "query", nil, scriptout.TimeRange{})
 	if len(out.Sources) != 1 || out.Sources[0].Status != SourceSucceeded || out.Sources[0].Count != 1 {
 		t.Fatalf("sources = %+v", out.Sources)
 	}
@@ -113,7 +114,7 @@ func TestFanOutSearch_Succeeded(t *testing.T) {
 
 func TestFanOutSearch_Degraded(t *testing.T) {
 	writeFakeBackend(t, "backend-broken", `{"protocolVersion":1,"error":{"code":"unavailable","message":"boom"}}`)
-	_, out := fanOutSearch(context.Background(), []string{"backend-broken"}, "query", nil)
+	_, out := fanOutSearch(context.Background(), nil, []string{"backend-broken"}, "query", nil, scriptout.TimeRange{})
 	if len(out.Sources) != 1 || out.Sources[0].Status != SourceDegraded {
 		t.Fatalf("sources = %+v", out.Sources)
 	}
@@ -121,7 +122,7 @@ func TestFanOutSearch_Degraded(t *testing.T) {
 
 func TestFanOutSearch_DisabledNotApplicable(t *testing.T) {
 	writeFakeBackend(t, "backend-nosearch", `{"protocolVersion":1,"error":{"code":"unknown_op","message":"unknown op \"search\""}}`)
-	_, out := fanOutSearch(context.Background(), []string{"backend-nosearch"}, "query", nil)
+	_, out := fanOutSearch(context.Background(), nil, []string{"backend-nosearch"}, "query", nil, scriptout.TimeRange{})
 	if len(out.Sources) != 1 {
 		t.Fatalf("sources = %+v", out.Sources)
 	}
@@ -133,7 +134,7 @@ func TestFanOutSearch_DisabledNotApplicable(t *testing.T) {
 
 func TestFanOutSearch_CountIsRawResultLengthNeverZeroPlaceholder(t *testing.T) {
 	writeFakeBackend(t, "backend-ok", `{"protocolVersion":1,"schemaVersion":1,"result":[{"type":"pr","id":"1","title":"t1","url":"http://x/1","source":"backend-ok"},{"type":"pr","id":"2","title":"t2","url":"http://x/2","source":"backend-ok"}]}`)
-	_, out := fanOutSearch(context.Background(), []string{"backend-ok"}, "query", nil)
+	_, out := fanOutSearch(context.Background(), nil, []string{"backend-ok"}, "query", nil, scriptout.TimeRange{})
 	if len(out.Sources) != 1 || out.Sources[0].Count != 2 {
 		t.Fatalf("sources = %+v, want Count=2 (this source's own raw result count)", out.Sources)
 	}

@@ -30,6 +30,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
@@ -199,7 +200,7 @@ type prListOutcome struct {
 // Puts every returned entity into that backend's own cache
 // (putLiveEntity) so the cache stays current for the next unavailable
 // window.
-func fanOutPRList(ctx context.Context, reg *Registry, backends []string, query string, idsOnly bool) prListOutcome {
+func fanOutPRList(ctx context.Context, reg *Registry, backends []string, query string, idsOnly bool, bounds scriptout.TimeRange) prListOutcome {
 	// Entities and Sources both start as non-nil empty slices so a
 	// zero-backend (misconfigured host) result, or a backend that
 	// answers with zero matches, still marshals entities[]/sources[] as
@@ -210,14 +211,17 @@ func fanOutPRList(ctx context.Context, reg *Registry, backends []string, query s
 		Sources:    make([]SourceResult, 0, len(backends)),
 	}
 	for _, b := range backends {
-		config, err := reg.BackendConfig(b)
+		config, err := listBackendConfig(reg, b, bounds)
 		if err != nil {
 			out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDegraded, Reason: err.Error()})
 			continue
 		}
 		resp, err := scriptout.Invoke(ctx, b, "list", map[string]any{"query": query, "cursor": nil, "ids_only": idsOnly}, config)
 		if err != nil {
-			if errors.Is(err, scriptout.ErrUnavailable) {
+			// A bounded call never serves the cache fallback: the cache
+			// holds every live entry for the backend regardless of age, so
+			// serving it would return entities outside the requested window.
+			if errors.Is(err, scriptout.ErrUnavailable) && bounds.IsZero() {
 				if entries, ids, ok := cacheFallbackEntities(ctx, reg, "pr", b); ok {
 					for _, raw := range entries {
 						var pr schema.PR
@@ -263,8 +267,14 @@ func newPrListCmd() *cobra.Command {
 	backendFlag := addBackendFlag(cmd, "pin the fan-out to exactly this backend instead of every registered pr backend")
 	cmd.Flags().StringVar(&query, "query", "", "named query to run, resolved against each backend's own config.queries (required)")
 	cmd.Flags().BoolVar(&idsOnly, "ids-only", false, "return only each matched PR's id, omitting full entity detail")
+	bounds := addTimeBoundFlags(cmd, "PRs last updated", listTimeBoundAsymmetryHelp)
 	_ = cmd.MarkFlagRequired("query")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		noOp := func(json.RawMessage) (string, error) { return "", nil }
+		rng, err := bounds.resolveInvalidArgument(time.Now())
+		if err != nil {
+			return reportPrTargetedOutcome(cmd, nil, err, noOp)
+		}
 		reg, err := LoadRegistry()
 		if err != nil {
 			return err
@@ -273,7 +283,7 @@ func newPrListCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		outcome := fanOutPRList(cmd.Context(), reg, backends, query, idsOnly)
+		outcome := fanOutPRList(cmd.Context(), reg, backends, query, idsOnly, rng)
 		if allQueryNotRecognized(outcome.Sources) {
 			// design: every registered backend answered
 			// query_not_recognized -> the umbrella fails the whole call

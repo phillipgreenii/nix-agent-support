@@ -44,6 +44,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
@@ -326,21 +327,23 @@ type issueListOutcome struct {
 // cache-fallback/cache-write behavior on scriptout.ErrUnavailable/live
 // success respectively (see fanOutPRList's own doc comment for the full
 // description; this docket's design of record section 5.6).
-func fanOutIssueList(ctx context.Context, reg *Registry, backends []string, query string, idsOnly bool) issueListOutcome {
+func fanOutIssueList(ctx context.Context, reg *Registry, backends []string, query string, idsOnly bool, bounds scriptout.TimeRange) issueListOutcome {
 	out := issueListOutcome{
 		Entities:   make([]schema.Issue, 0),
 		PresentIDs: make([]string, 0),
 		Sources:    make([]SourceResult, 0, len(backends)),
 	}
 	for _, b := range backends {
-		config, err := reg.BackendConfig(b)
+		config, err := listBackendConfig(reg, b, bounds)
 		if err != nil {
 			out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDegraded, Reason: err.Error()})
 			continue
 		}
 		resp, err := scriptout.Invoke(ctx, b, "list", map[string]any{"query": query, "cursor": nil, "ids_only": idsOnly}, config)
 		if err != nil {
-			if errors.Is(err, scriptout.ErrUnavailable) {
+			// A bounded call never serves the cache fallback (see
+			// fanOutPRList): cached entries are not window-filtered.
+			if errors.Is(err, scriptout.ErrUnavailable) && bounds.IsZero() {
 				if entries, ids, ok := cacheFallbackEntities(ctx, reg, "issue", b); ok {
 					for _, raw := range entries {
 						var issue schema.Issue
@@ -386,8 +389,13 @@ func newIssueListCmd() *cobra.Command {
 	backendFlag := addBackendFlag(cmd, "pin the fan-out to exactly this backend instead of every registered issue backend")
 	cmd.Flags().StringVar(&query, "query", "", "named query to run, resolved against each backend's own config.queries (required)")
 	cmd.Flags().BoolVar(&idsOnly, "ids-only", false, "return only each matched issue's id, omitting full entity detail")
+	bounds := addTimeBoundFlags(cmd, "issues last updated", listTimeBoundAsymmetryHelp)
 	_ = cmd.MarkFlagRequired("query")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		rng, err := bounds.resolveInvalidArgument(time.Now())
+		if err != nil {
+			return reportIssueTargetedOutcome(cmd, nil, err, func(json.RawMessage) (string, error) { return "", nil })
+		}
 		reg, err := LoadRegistry()
 		if err != nil {
 			return err
@@ -396,7 +404,7 @@ func newIssueListCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		outcome := fanOutIssueList(cmd.Context(), reg, backends, query, idsOnly)
+		outcome := fanOutIssueList(cmd.Context(), reg, backends, query, idsOnly, rng)
 		if allQueryNotRecognized(outcome.Sources) {
 			return reportIssueTargetedOutcome(cmd, nil, listQueryNotRecognizedErr("issue", query), func(json.RawMessage) (string, error) { return "", nil })
 		}

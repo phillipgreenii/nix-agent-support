@@ -374,9 +374,10 @@ func (b *Backend) Transition(ctx context.Context, id, targetState string) error 
 // 0 itself, NEVER trusted from the config value, so a config author
 // cannot smuggle in a different --limit/--json flag. Every expression's
 // matches are unioned, deduplicated by id (design's "run each, union
-// results deduplicated by id" rule) — Truncated always false: bd's own
+// results deduplicated by id" rule) — Truncated false: bd's own
 // --limit 0 means unlimited, so this backend never truncates its own
-// result set.
+// result set (except a ranged call that met an issue whose updated_at it
+// could not judge, which sets it true).
 //
 // cursor is accepted-and-ignored (the 2026-09-18 operator decision
 // widening issue.Provider.List to a 4th cursor param, mirroring PR's own
@@ -386,6 +387,14 @@ func (b *Backend) Transition(ctx context.Context, id, targetState string) error 
 // concept this method could apply a cursor to — no behavior change from
 // this addition.
 func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool, cursor json.RawMessage) (*schema.IssueListResult, error) {
+	// Ranged list (bead pg2-ttk9t, WT-D18): list_since/list_before are applied
+	// client-side to each issue's updated_at (listrange.go). A malformed
+	// bound is invalid_argument, before any bd call.
+	rng, rngErr := scriptout.ListRangeFromContext(ctx)
+	if rngErr != nil {
+		return nil, rngErr
+	}
+	imprecise := false
 	tracker := b.tracker()
 	seen := make(map[string]bool)
 	entities := make([]schema.Issue, 0)
@@ -413,6 +422,11 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 			if seen[iss.ID] {
 				continue
 			}
+			keep, imp := issueInRange(iss.UpdatedAt, rng)
+			imprecise = imprecise || imp
+			if !keep {
+				continue
+			}
 			seen[iss.ID] = true
 			entities = append(entities, *toSchemaIssue(&iss, tracker, asOf))
 		}
@@ -421,7 +435,7 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 	for _, e := range entities {
 		ids = append(ids, e.ID)
 	}
-	result := &schema.IssueListResult{Entities: entities, PresentIDs: ids, Cursor: nil, Truncated: false}
+	result := &schema.IssueListResult{Entities: entities, PresentIDs: ids, Cursor: nil, Truncated: imprecise}
 	if idsOnly {
 		result.Entities = nil
 	}

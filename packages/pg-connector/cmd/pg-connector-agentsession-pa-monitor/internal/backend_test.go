@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
 type fakeRunner struct {
@@ -27,7 +29,7 @@ func (f *fakeRunner) Info(_ context.Context, selector string) ([]byte, error) {
 	return []byte(j), nil
 }
 
-func (f *fakeRunner) Search(_ context.Context, _ string, _ string) ([]byte, error) {
+func (f *fakeRunner) Search(_ context.Context, _ string, _ string, _ scriptout.TimeRange) ([]byte, error) {
 	return nil, errors.New("not used by this test")
 }
 

@@ -20,9 +20,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
@@ -67,17 +69,29 @@ type searchOpArgs struct {
 // wire-level unknown_op sentinel) is reported disabled/"not applicable"
 // rather than a failure, mirroring fanOutAttentionList's/authStatusOne's
 // own handling exactly.
-func fanOutSearch(ctx context.Context, backends []string, query string, fields []string) (map[string][]schema.SearchResult, FanOutOutcome) {
+//
+// reg supplies each backend's static backends.<name> config block (nil is
+// allowed: no static block); bounds, when non-zero, is merged onto it as
+// search_since/search_before (RFC3339), so the keys are absent from the
+// request config whenever no flag was given.
+func fanOutSearch(ctx context.Context, reg *Registry, backends []string, query string, fields []string, bounds scriptout.TimeRange) (map[string][]schema.SearchResult, FanOutOutcome) {
 	perSource := make(map[string][]schema.SearchResult, len(backends))
 	// Sources starts as a non-nil empty slice so a zero-backend
 	// (misconfigured host) result still marshals its sources[] field as
 	// [] rather than null [bug A15].
 	out := FanOutOutcome{Sources: make([]SourceResult, 0, len(backends))}
 	for _, b := range backends {
-		// nil config: search is outside this packet's own Files scope
-		// (bead pg2-2j5ac.28.1 wires backends.<binary> config attachment
-		// into pr/issue/ci/scm's own Tier-1 verbs only).
-		resp, err := scriptout.Invoke(ctx, b, "search", searchOpArgs{Query: query, Fields: fields}, nil)
+		// Per-call config (bead pg2-ttk9t, following the 2026-09-18 search
+		// time-bound design): the backend's static block with the optional
+		// search_since/search_before merged on. Provider.Search's Go
+		// signature is unchanged; a backend that wants the bound reads it
+		// from scriptout.SearchRangeFromContext.
+		config, cfgErr := searchBackendConfig(reg, b, bounds)
+		if cfgErr != nil {
+			out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDegraded, Reason: cfgErr.Error()})
+			continue
+		}
+		resp, err := scriptout.Invoke(ctx, b, "search", searchOpArgs{Query: query, Fields: fields}, config)
 		if err != nil {
 			if errors.Is(err, scriptout.ErrUnknownOp) {
 				out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDisabled, Reason: "not applicable"})
@@ -232,6 +246,7 @@ func validateSearchFields(ctx context.Context, backends []string, fields []strin
 const searchFieldsFlagName = "fields"
 
 func newSearchCmd() *cobra.Command {
+	var bounds *timeBoundFlags
 	cmd := &cobra.Command{
 		Use:   "search <query>",
 		Short: "Fan search out across every registered search.sources backend, grouped by source",
@@ -249,7 +264,11 @@ func newSearchCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			perSource, fanOut := fanOutSearch(cmd.Context(), backends, args[0], fields)
+			rng, err := bounds.resolveInvalidArgument(time.Now())
+			if err != nil {
+				return writeTargetedResult(cmd, nil, err, func(json.RawMessage) (string, error) { return "", nil })
+			}
+			perSource, fanOut := fanOutSearch(cmd.Context(), reg, backends, args[0], fields, rng)
 			outcome := SearchOutcome{
 				FanOutOutcome: fanOut,
 				Groups:        groupSearchResults(perSource, backends),
@@ -260,6 +279,7 @@ func newSearchCmd() *cobra.Command {
 			})
 		},
 	}
+	bounds = addTimeBoundFlags(cmd, "matches updated", searchTimeBoundAsymmetryHelp)
 	cmd.Flags().StringSlice(searchFieldsFlagName, nil, "request specific result attributes by name; an unrecognized one produces a warning, never an error")
 	return cmd
 }

@@ -173,6 +173,32 @@ degraded-outcome accounting) unless EVERY registered backend of the type answers
 the umbrella fails the whole call as its own `invalid_argument` CLI-level failure (`INV-ERR-3`).
 `changes` (below) reuses this exact classification unchanged.
 
+### Ranged `list` and `search` — per-call time bounds on the `config` channel
+
+`pr list` and `issue list` accept optional `--since <bound>` / `--before <bound>`; `search` accepts
+the same two flags. A bound is an RFC3339 timestamp, a Go duration (`168h`), or whole days (`7d`),
+the latter two meaning "this long ago"; one umbrella parser (`parseTimeBound`) serves every
+consumer, and a malformed bound, a negative duration, or `--since` not earlier than `--before` is an
+`invalid_argument` raised before any backend runs. The umbrella parses the bound once and merges
+RFC3339 instants onto the backend's static `backends.<name>` block for that call: `list_since` /
+`list_before` for `list`, `search_since` / `search_before` for `search`. A key is present ONLY when
+its flag was given, and a backend never sees a raw `7d`. `list`'s op args and the Go `Provider`
+signatures do not change.
+
+For `list` the bound applies to each entity's last-updated time and `present_ids` is the bounded
+match set. A backend MUST widen any day-granular qualifier and filter precisely by the entity's own
+timestamp, and MUST NOT apply a bound it cannot honor precisely without setting `truncated: true`.
+The PR (GitHub `updated:` qualifier), Jira (JQL `updated`) and beads (`updated_at`) backends honor
+it; a backend that does not read the keys (Slack threads, calendar) returns its unbounded result,
+which `--help` states. A bounded `list` never serves the umbrella entity-cache fallback, since
+cached entries are not window-filtered. For `search` only the agent-session backend reads the keys
+(forwarding them to `pa-monitor search --since/--before`); the PR and Jira backends already take a
+native qualifier inside the query text.
+
+`changes` NEVER passes a range: the ledger derives removals from `present_ids`, so a bounded
+`present_ids` would tombstone every entity merely older than the window. `changes --since` and
+`changes --before` are rejected as `invalid_argument`.
+
 ### `calendar`'s `list`/`list_events` — a duration-based `list`, and a dedicated time-range primary op
 
 `calendar` gets the same `list` op name as `pr`/`issue`, resolved the same centrally-dispatched
