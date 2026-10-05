@@ -1,0 +1,65 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "command",
+  "command": {
+    "name": "command",
+    "provenance": "bash builtin, bash -c 'help command'",
+    "citations": {
+      "provenance": {
+        "source": "bash help command: \"command: command [-pVv] command [arg ...]\""
+      },
+      "stdin": {
+        "source": "bash help command: \"command [-pVv] command [arg ...]\" (-v/-V look a name up and print; no stdin wording, classified \"never\")"
+      },
+      "stdout": {
+        "source": "bash help command: \"-v print a single word indicating the command or filename that invokes COMMAND; -V print a more verbose description of each COMMAND\" (a description of how a name resolves: metadata)"
+      },
+      "unknownFlag": {
+        "source": "bash help command: full option listing reviewed; an unmodeled or unrecognized flag has no documented-safe model here, so this repo's fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "flags": {
+      "-V": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "bash help command: \"-V  print a more verbose description of each COMMAND\""
+        }
+      },
+      "-v": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "bash help command: \"-v  print a single word indicating the command or filename that\""
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "unmodeled"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "bash help command: \"command [-pVv] command [arg ...] ... Runs COMMAND with ARGS\" (the positional form RUNS the command, so it is unmodeled; the lookup name is consumed as the operand of -v/-V instead)"
+      }
+    },
+    "stdin": "never",
+    "stdout": "metadata",
+    "unknownFlag": "insufficient"
+  }
+}

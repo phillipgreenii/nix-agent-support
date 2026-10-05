@@ -1,0 +1,258 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "date",
+  "command": {
+    "name": "date",
+    "provenance": "date (GNU coreutils) 9.11, date --help",
+    "citations": {
+      "provenance": {
+        "source": "date --help: \"date [OPTION]... [+FORMAT]\""
+      },
+      "stdin": {
+        "source": "date --help: \"Usage: date [OPTION]... [+FORMAT]\" and \"-f, --file=DATEFILE ... if DATEFILE is -, read names from standard input\" (stdin is reachable only through the modeled -f operand, a path-read flag; classified \"never\" for the bare form)"
+      },
+      "stdout": {
+        "source": "date --help: \"Display date and time in the given FORMAT.\" (the time, not file content: metadata)"
+      },
+      "unknownFlag": {
+        "source": "date --help: full option listing reviewed; an unmodeled or unrecognized flag has no documented-safe model here, so this repo's fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "flags": {
+      "--date": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "date --help: \"-d, --date=STRING\""
+        }
+      },
+      "--debug": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "date --help: \"--debug\""
+        }
+      },
+      "--file": {
+        "arity": "one",
+        "operand": {
+          "kind": "path-read"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "date --help: \"-f, --file=DATEFILE\""
+        }
+      },
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "date --help: \"--help\""
+        }
+      },
+      "--iso-8601": {
+        "arity": "optional-glued",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "date --help: \"-I[FMT], --iso-8601[=FMT]\""
+        }
+      },
+      "--reference": {
+        "arity": "one",
+        "operand": {
+          "kind": "path-read"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "date --help: \"-r, --reference=FILE\""
+        }
+      },
+      "--resolution": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "date --help: \"--resolution\""
+        }
+      },
+      "--rfc-3339": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "date --help: \"--rfc-3339=FMT\""
+        }
+      },
+      "--rfc-email": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "date --help: \"-R, --rfc-email\""
+        }
+      },
+      "--universal": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "date --help: \"-u, --utc, --universal\""
+        }
+      },
+      "--utc": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "date --help: \"-u, --utc, --universal\""
+        }
+      },
+      "--version": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "date --help: \"--version\""
+        }
+      },
+      "-I": {
+        "arity": "optional-glued",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "date --help: \"-I[FMT], --iso-8601[=FMT]\""
+        }
+      },
+      "-R": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "date --help: \"-R, --rfc-email\""
+        }
+      },
+      "-d": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "date --help: \"-d, --date=STRING\""
+        }
+      },
+      "-f": {
+        "arity": "one",
+        "operand": {
+          "kind": "path-read"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "date --help: \"-f, --file=DATEFILE\""
+        }
+      },
+      "-r": {
+        "arity": "one",
+        "operand": {
+          "kind": "path-read"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "date --help: \"-r, --reference=FILE\""
+        }
+      },
+      "-u": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "date --help: \"-u, --utc, --universal\""
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "date --help: \"Usage: date [OPTION]... [+FORMAT]  or:  date [OPTION]... MMDDhhmm[[CC]YY][.ss]\" (+FORMAT is an inert literal; the MMDDhhmm positional sets the clock and cannot be told apart from +FORMAT by this schema model, see registry_plugin_probes.go dateSchema)"
+      }
+    },
+    "stdin": "never",
+    "stdout": "metadata",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

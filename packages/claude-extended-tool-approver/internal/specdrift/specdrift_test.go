@@ -207,6 +207,14 @@ func TestIsExemptByPlatform(t *testing.T) {
 		{"darwin", "impl-traces.sh", true},
 		{"linux", "launchctl", true},
 		{"darwin", "man", true},
+		// pg2-slsc0: `command` is a shell builtin (exempt everywhere); readlink/date
+		// (coreutils) and diff (diffutils) are real binaries hashed on every platform.
+		{"linux", "command", true},
+		{"darwin", "command", true},
+		{"linux", "readlink", false},
+		{"darwin", "readlink", false},
+		{"darwin", "date", false},
+		{"darwin", "diff", false},
 		{"linux", "rg", false},
 		// pg2-cjfpy.4: binaries shipped by a flake this one has no input on
 		// are exempt on every platform; the one this flake does ship (gh,

@@ -43,6 +43,9 @@ var Exempt = map[string]bool{
 	// the same reason ps/pgrep are exempt per-platform below, here universal.
 	"launchctl": true,
 	"man":       true,
+	// pg2-slsc0: `command` is a bash builtin with no on-PATH binary (like cd/export),
+	// so it has no --help to hash; its spec cites bash `help command`.
+	"command": true,
 }
 
 // ScriptSuffix marks a spec whose command is a plugin HELPER SCRIPT resolved

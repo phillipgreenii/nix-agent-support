@@ -65,9 +65,9 @@ type pluginForm struct {
 //     array subscript (same hazard). None is approved.
 //   - A persistent assignment of a shell-behaviour variable (IFS, CDPATH, ...)
 //     or of GIT_DIR/GIT_INDEX_FILE changes every later command's meaning.
-//   - `date`, `tr` have no schema, so a `$(date +%F)` substitution abstains
-//     until they get one (adding a schema also needs its --help hash recorded in
-//     the pinned nix sandbox, which cannot be done from a dev shell).
+//   - `tr` has no schema, so a `$(tr ...)` substitution abstains until it gets
+//     one (adding a schema also needs its --help hash recorded for the
+//     spec-drift check). `date` got its schema in pg2-slsc0, so `$(date +%F)` approves.
 //   - Builtins not listed (break, continue, return, set, trap, local, wait, ...)
 //     have no schema and abstain; the four the skills use are modeled.
 var pluginForms = []pluginForm{
@@ -382,7 +382,7 @@ var pluginForms = []pluginForm{
 	// An assignment never launders an inner command that does not approve.
 	{"integrate-branch", `X=$(rm -rf <ROOT>/.worktrees/wt)`, evalcontract.Abstain, "inner command is graded like a top-level one: rm of a writable path needs consent"},
 	{"integrate-branch", `X=$(rm -rf <ROOT>/.worktrees/wt) echo hi`, evalcontract.Abstain, "a prefix assignment's substitution is graded too (it used to ride on echo's verdict)"},
-	{"integrate-branch", `D="$(date +%F)"`, evalcontract.Abstain, "date has no schema (needs a recorded --help hash from the nix sandbox)"},
+	{"integrate-branch", `D="$(date +%F)"`, evalcontract.Approve, ""},
 	{"integrate-branch", `T=$(echo x | tr a b)`, evalcontract.Abstain, "tr has no schema (needs a recorded --help hash from the nix sandbox)"},
 	{"integrate-branch", `REPO=$(pg-connector scm branch detect | jq -r '.result.repo')`, evalcontract.Abstain, "pg-connector scm is an unmodeled subcommand (ZR plugin schema, separate bead)"},
 	{"integrate-branch", `CC="$(cd "$(git rev-parse --git-common-dir)/.." && pwd)"`, evalcontract.Abstain, "cd to a runtime path: the directory is not statically known"},
@@ -417,6 +417,15 @@ var pluginForms = []pluginForm{
 	{"bash-scripting", `read PATH`, evalcontract.Abstain, "read assigns the variable it names; PATH is a guarded name"},
 	{"bash-scripting", `read -u 3 line`, evalcontract.Abstain, "-u reads from a descriptor this model cannot see"},
 	{"bash-scripting", `while read -r l; do echo "$l"; done < ~/.ssh/id_rsa`, evalcontract.Reject, "the compound's input redirection reads a secret path"},
+
+	// pg2-slsc0: the read-only probes pb's staleness check and timestamps use.
+	{"pb", `readlink -f <ROOT>/a.md`, evalcontract.Approve, ""},
+	{"pb", `diff <ROOT>/a.md <ROOT>/b.md`, evalcontract.Approve, ""},
+	{"pb", `date -u +%Y-%m-%dT%H:%M:%SZ`, evalcontract.Approve, ""},
+	{"pb", `date +%F`, evalcontract.Approve, ""},
+	{"pb", `command -v pb`, evalcontract.Approve, ""},
+	{"pb", `date -s 2026-10-05`, evalcontract.Abstain, "-s sets the system clock and is deliberately unmodeled"},
+	{"pb", `command -v a b`, evalcontract.Abstain, "only the single-name lookup is modeled"},
 
 	// Quoted-variable path forms stay non-approvable; the literal-path form
 	// approves (see the SHELL STATEMENT FORMS note above).

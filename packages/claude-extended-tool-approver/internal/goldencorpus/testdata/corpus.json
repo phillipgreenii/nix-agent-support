@@ -9420,5 +9420,366 @@
     "rules_config": {},
     "expected_verdict": "not-approve",
     "notes": "pg2-maars: instructed by the zr-refactor plugin but held (NOT approve) until its caller-supplied gate command needs a child-command interpreter; pinned so the R4 cutover replay cannot approve it by accident."
+  },
+  {
+    "case": "slsc0_readlink_f_installed_drain_beads",
+    "tags": ["plugin", "pb-plugin", "pg2-slsc0", "readlink"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "readlink -f ~/.local/share/pgii-marketplaces/phillipgreenii-nix-agent-support-marketplace-local/pb/commands/drain-beads.md"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-slsc0 (operator ruling 2026-10-04/05 on pg2-cjfpy; read-only schema fact, no new effectpolicy judgment): pb /drain-beads Step 0b store-served staleness check: resolve the installed copy of the command."
+  },
+  {
+    "case": "slsc0_readlink_f_installed_unblock",
+    "tags": ["plugin", "pb-plugin", "pg2-slsc0", "readlink"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "readlink -f ~/.local/share/pgii-marketplaces/phillipgreenii-nix-agent-support-marketplace-local/pb/commands/unblock-human-beads.md"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-slsc0 (operator ruling 2026-10-04/05 on pg2-cjfpy; read-only schema fact, no new effectpolicy judgment): pb /unblock-human-beads staleness check (same readlink -f form)."
+  },
+  {
+    "case": "slsc0_readlink_plain",
+    "tags": ["plugin", "pb-plugin", "pg2-slsc0", "readlink"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "readlink -f /repo/claude-marketplace/pb/commands/drain-beads.md"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-slsc0 (operator ruling 2026-10-04/05 on pg2-cjfpy; read-only schema fact, no new effectpolicy judgment): readlink -f of a project path: a PathRead with metadata stdout."
+  },
+  {
+    "case": "slsc0_diff_installed_vs_source",
+    "tags": ["plugin", "pb-plugin", "pg2-slsc0", "diff"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "diff /nix/store/0abc-hm-files/pb/commands/drain-beads.md /repo/claude-marketplace/pb/commands/drain-beads.md"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-slsc0 (operator ruling 2026-10-04/05 on pg2-cjfpy; read-only schema fact, no new effectpolicy judgment): pb /drain-beads staleness check: diff the resolved installed path against the repo source (two path reads, content stdout)."
+  },
+  {
+    "case": "slsc0_diff_installed_vs_worktree",
+    "tags": ["plugin", "pb-plugin", "pg2-slsc0", "diff"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "diff /nix/store/0abc-hm-files/pb/commands/drain-beads.md /repo/.worktrees/wt/claude-marketplace/pb/commands/drain-beads.md"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-slsc0 (operator ruling 2026-10-04/05 on pg2-cjfpy; read-only schema fact, no new effectpolicy judgment): Same staleness check against a worktree copy."
+  },
+  {
+    "case": "slsc0_diff_unified",
+    "tags": ["plugin", "pb-plugin", "pg2-slsc0", "diff"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "diff -u /repo/a.md /repo/b.md"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-slsc0 (operator ruling 2026-10-04/05 on pg2-cjfpy; read-only schema fact, no new effectpolicy judgment): diff with a modeled output-format flag; still two path reads."
+  },
+  {
+    "case": "slsc0_date_utc_iso",
+    "tags": ["plugin", "pb-plugin", "pg2-slsc0", "date"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "date -u +%Y-%m-%dT%H:%M:%SZ"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-slsc0 (operator ruling 2026-10-04/05 on pg2-cjfpy; read-only schema fact, no new effectpolicy judgment): pb /unstick-beads and unstick-batch-worker marker timestamp."
+  },
+  {
+    "case": "slsc0_date_ymd",
+    "tags": ["plugin", "pb-plugin", "pg2-slsc0", "date"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "date +%F"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-slsc0 (operator ruling 2026-10-04/05 on pg2-cjfpy; read-only schema fact, no new effectpolicy judgment): pb /unblock-human-beads, beads-lifecycle and drain-stuck note timestamps."
+  },
+  {
+    "case": "slsc0_date_in_substitution",
+    "tags": ["plugin", "pb-plugin", "pg2-slsc0", "date"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc12 --append-notes \"worktree-review $(date +%F) note\" --actor sess-1"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-slsc0 (operator ruling 2026-10-04/05 on pg2-cjfpy; read-only schema fact, no new effectpolicy judgment): The instructed $(date +%F) command substitution inside a bd update note; both nodes approve. The skills write the note as [worktree-review $(date +%F)] ...; a note value that OPENS with [ currently abstains under pg2-5ctay's live-expansion rule, so this row uses the letter-first spelling."
+  },
+  {
+    "case": "slsc0_pwd",
+    "tags": ["plugin", "pb-plugin", "pg2-slsc0", "pwd"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pwd"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-slsc0 (operator ruling 2026-10-04/05 on pg2-cjfpy; read-only schema fact, no new effectpolicy judgment): pb /drain-beads worktree check."
+  },
+  {
+    "case": "slsc0_pwd_physical",
+    "tags": ["plugin", "pb-plugin", "pg2-slsc0", "pwd"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pwd -P"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-slsc0 (operator ruling 2026-10-04/05 on pg2-cjfpy; read-only schema fact, no new effectpolicy judgment): pwd with a modeled flag."
+  },
+  {
+    "case": "slsc0_command_v_pb",
+    "tags": ["plugin", "pb-plugin", "pg2-slsc0", "command"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "command -v pb"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-slsc0 (operator ruling 2026-10-04/05 on pg2-cjfpy; read-only schema fact, no new effectpolicy judgment): pb-gate-lifecycle: is pb on PATH."
+  },
+  {
+    "case": "slsc0_command_V_pb",
+    "tags": ["plugin", "pb-plugin", "pg2-slsc0", "command"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "command -V pb"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-slsc0 (operator ruling 2026-10-04/05 on pg2-cjfpy; read-only schema fact, no new effectpolicy judgment): The verbose lookup spelling of the same read-only PATH probe."
+  },
+  {
+    "case": "slsc0_readlink_credential_rejected",
+    "tags": ["plugin", "pb-plugin", "pg2-slsc0", "readlink"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "readlink -f ~/.ssh/id_rsa"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "reject",
+    "notes": "pg2-slsc0 (operator ruling 2026-10-04/05 on pg2-cjfpy; read-only schema fact, no new effectpolicy judgment): Guard: the operand is a PathRead, so the credential-store zone rule still rejects it."
+  },
+  {
+    "case": "slsc0_diff_credential_rejected",
+    "tags": ["plugin", "pb-plugin", "pg2-slsc0", "diff"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "diff ~/.aws/credentials /repo/x"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "reject",
+    "notes": "pg2-slsc0 (operator ruling 2026-10-04/05 on pg2-cjfpy; read-only schema fact, no new effectpolicy judgment): Guard: diff reads both operands, so the credential-store zone rule still rejects a credential file."
+  },
+  {
+    "case": "slsc0_date_set_not_approved",
+    "tags": ["plugin", "pb-plugin", "pg2-slsc0", "date"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "date -s 2026-10-05"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-slsc0 (operator ruling 2026-10-04/05 on pg2-cjfpy; read-only schema fact, no new effectpolicy judgment): Held: -s/--set sets the system clock and is deliberately unmodeled."
+  },
+  {
+    "case": "slsc0_date_set_long_not_approved",
+    "tags": ["plugin", "pb-plugin", "pg2-slsc0", "date"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "date --set=2026-10-05"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-slsc0 (operator ruling 2026-10-04/05 on pg2-cjfpy; read-only schema fact, no new effectpolicy judgment): Held: --set sets the system clock and is deliberately unmodeled."
+  },
+  {
+    "case": "slsc0_command_v_two_operands_not_approved",
+    "tags": ["plugin", "pb-plugin", "pg2-slsc0", "command"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "command -v a b"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-slsc0 (operator ruling 2026-10-04/05 on pg2-cjfpy; read-only schema fact, no new effectpolicy judgment): Held: only the single-name lookup is modeled; a stray operand is unmodeled."
+  },
+  {
+    "case": "slsc0_diff_paginate_not_approved",
+    "tags": ["plugin", "pb-plugin", "pg2-slsc0", "diff"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "diff --paginate /repo/a /repo/b"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-slsc0 (operator ruling 2026-10-04/05 on pg2-cjfpy; read-only schema fact, no new effectpolicy judgment): Held: -l/--paginate pipes the output through pr (an executed child) and is deliberately unmodeled."
   }
 ]

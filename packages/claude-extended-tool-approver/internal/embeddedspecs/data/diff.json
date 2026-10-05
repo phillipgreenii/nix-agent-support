@@ -1,0 +1,919 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "diff",
+  "command": {
+    "name": "diff",
+    "provenance": "diff (GNU diffutils) 3.12, diff --help",
+    "citations": {
+      "provenance": {
+        "source": "diff --help: \"diff [OPTION]... FILES\""
+      },
+      "stdin": {
+        "source": "diff --help: \"FILES are 'FILE1 FILE2' or 'DIR1 DIR2' or 'DIR FILE' or 'FILE DIR'. ... If a FILE is '-', read standard input.\" (stdin is read only via the explicit - operand, handled by the positional stdinToken, so the base stdin is never)"
+      },
+      "stdout": {
+        "source": "diff --help: \"Compare FILES line by line.\" (the differences, derived from file content, go to stdout)"
+      },
+      "unknownFlag": {
+        "source": "diff --help: full option listing reviewed; an unmodeled or unrecognized flag has no documented-safe model here, so this repo's fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "flags": {
+      "--brief": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-q, --brief  report only when files differ\""
+        }
+      },
+      "--color": {
+        "arity": "optional-glued",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"--color[=WHEN]  color output; WHEN is 'never', 'always', or 'auto';\""
+        }
+      },
+      "--context": {
+        "arity": "optional-glued",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-c, -C NUM, --context[=NUM]  output NUM (default 3) lines of copied context\""
+        }
+      },
+      "--ed": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-e, --ed  output an ed script\""
+        }
+      },
+      "--exclude": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-x, --exclude=PAT  exclude files that match PAT\""
+        }
+      },
+      "--exclude-from": {
+        "arity": "one",
+        "operand": {
+          "kind": "path-read"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-X, --exclude-from=FILE  exclude files that match any pattern in FILE\""
+        }
+      },
+      "--expand-tabs": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-t, --expand-tabs  expand tabs to spaces in output\""
+        }
+      },
+      "--from-file": {
+        "arity": "one",
+        "operand": {
+          "kind": "path-read"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"--from-file=FILE1  compare FILE1 to all operands;\""
+        }
+      },
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"--help  display this help and exit\""
+        }
+      },
+      "--horizon-lines": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"--horizon-lines=NUM  keep NUM lines of the common prefix and suffix\""
+        }
+      },
+      "--ignore-all-space": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-w, --ignore-all-space  ignore all white space\""
+        }
+      },
+      "--ignore-blank-lines": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-B, --ignore-blank-lines  ignore changes where lines are all blank\""
+        }
+      },
+      "--ignore-case": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-i, --ignore-case  ignore case differences in file contents\""
+        }
+      },
+      "--ignore-file-name-case": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"--ignore-file-name-case  ignore case when comparing file names\""
+        }
+      },
+      "--ignore-matching-lines": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-I, --ignore-matching-lines=RE  ignore changes where all lines match RE\""
+        }
+      },
+      "--ignore-space-change": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-b, --ignore-space-change  ignore changes in the amount of white space\""
+        }
+      },
+      "--ignore-tab-expansion": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-E, --ignore-tab-expansion  ignore changes due to tab expansion\""
+        }
+      },
+      "--ignore-trailing-space": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-Z, --ignore-trailing-space  ignore white space at line end\""
+        }
+      },
+      "--initial-tab": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-T, --initial-tab  make tabs line up by prepending a tab\""
+        }
+      },
+      "--label": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"--label LABEL  use LABEL instead of file name and timestamp\""
+        }
+      },
+      "--left-column": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"--left-column  output only the left column of common lines\""
+        }
+      },
+      "--minimal": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-d, --minimal  try hard to find a smaller set of changes\""
+        }
+      },
+      "--new-file": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-N, --new-file  treat absent files as empty\""
+        }
+      },
+      "--no-dereference": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"--no-dereference  don't follow symbolic links\""
+        }
+      },
+      "--no-ignore-file-name-case": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"--no-ignore-file-name-case  consider case when comparing file names\""
+        }
+      },
+      "--normal": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"--normal  output a normal diff (the default)\""
+        }
+      },
+      "--rcs": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-n, --rcs  output an RCS format diff\""
+        }
+      },
+      "--recursive": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-r, --recursive  recursively compare any subdirectories found\""
+        }
+      },
+      "--report-identical-files": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-s, --report-identical-files  report when two files are the same\""
+        }
+      },
+      "--show-c-function": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-p, --show-c-function  show which C function each change is in\""
+        }
+      },
+      "--show-function-line": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-F, --show-function-line=RE  show the most recent line matching RE\""
+        }
+      },
+      "--side-by-side": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-y, --side-by-side  output in two columns\""
+        }
+      },
+      "--speed-large-files": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"--speed-large-files  assume large files and many scattered small changes\""
+        }
+      },
+      "--starting-file": {
+        "arity": "one",
+        "operand": {
+          "kind": "path-read"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-S, --starting-file=FILE  start with FILE when comparing directories\""
+        }
+      },
+      "--strip-trailing-cr": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"--strip-trailing-cr  strip trailing carriage return on input\""
+        }
+      },
+      "--suppress-blank-empty": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"--suppress-blank-empty  suppress space or tab before empty output lines\""
+        }
+      },
+      "--suppress-common-lines": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"--suppress-common-lines  do not output common lines\""
+        }
+      },
+      "--tabsize": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"--tabsize=NUM  tab stops every NUM (default 8) print columns\""
+        }
+      },
+      "--text": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-a, --text  treat all files as text\""
+        }
+      },
+      "--to-file": {
+        "arity": "one",
+        "operand": {
+          "kind": "path-read"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"--to-file=FILE2  compare all operands to FILE2;\""
+        }
+      },
+      "--unidirectional-new-file": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"--unidirectional-new-file  treat absent first files as empty\""
+        }
+      },
+      "--unified": {
+        "arity": "optional-glued",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-u, -U NUM, --unified[=NUM]  output NUM (default 3) lines of unified context\""
+        }
+      },
+      "--version": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-v, --version  output version information and exit\""
+        }
+      },
+      "--width": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-W, --width=NUM  output at most NUM (default 130) print columns\""
+        }
+      },
+      "-B": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-B, --ignore-blank-lines  ignore changes where lines are all blank\""
+        }
+      },
+      "-C": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-c, -C NUM, --context[=NUM]  output NUM (default 3) lines of copied context\""
+        }
+      },
+      "-E": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-E, --ignore-tab-expansion  ignore changes due to tab expansion\""
+        }
+      },
+      "-F": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-F, --show-function-line=RE  show the most recent line matching RE\""
+        }
+      },
+      "-I": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-I, --ignore-matching-lines=RE  ignore changes where all lines match RE\""
+        }
+      },
+      "-N": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-N, --new-file  treat absent files as empty\""
+        }
+      },
+      "-S": {
+        "arity": "one",
+        "operand": {
+          "kind": "path-read"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-S, --starting-file=FILE  start with FILE when comparing directories\""
+        }
+      },
+      "-T": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-T, --initial-tab  make tabs line up by prepending a tab\""
+        }
+      },
+      "-U": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-u, -U NUM, --unified[=NUM]  output NUM (default 3) lines of unified context\""
+        }
+      },
+      "-W": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-W, --width=NUM  output at most NUM (default 130) print columns\""
+        }
+      },
+      "-X": {
+        "arity": "one",
+        "operand": {
+          "kind": "path-read"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-X, --exclude-from=FILE  exclude files that match any pattern in FILE\""
+        }
+      },
+      "-Z": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-Z, --ignore-trailing-space  ignore white space at line end\""
+        }
+      },
+      "-a": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-a, --text  treat all files as text\""
+        }
+      },
+      "-b": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-b, --ignore-space-change  ignore changes in the amount of white space\""
+        }
+      },
+      "-c": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-c, -C NUM, --context[=NUM]  output NUM (default 3) lines of copied context\""
+        }
+      },
+      "-d": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-d, --minimal  try hard to find a smaller set of changes\""
+        }
+      },
+      "-e": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-e, --ed  output an ed script\""
+        }
+      },
+      "-i": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-i, --ignore-case  ignore case differences in file contents\""
+        }
+      },
+      "-n": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-n, --rcs  output an RCS format diff\""
+        }
+      },
+      "-p": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-p, --show-c-function  show which C function each change is in\""
+        }
+      },
+      "-q": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-q, --brief  report only when files differ\""
+        }
+      },
+      "-r": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-r, --recursive  recursively compare any subdirectories found\""
+        }
+      },
+      "-s": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-s, --report-identical-files  report when two files are the same\""
+        }
+      },
+      "-t": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-t, --expand-tabs  expand tabs to spaces in output\""
+        }
+      },
+      "-u": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-u, -U NUM, --unified[=NUM]  output NUM (default 3) lines of unified context\""
+        }
+      },
+      "-v": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-v, --version  output version information and exit\""
+        }
+      },
+      "-w": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-w, --ignore-all-space  ignore all white space\""
+        }
+      },
+      "-x": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-x, --exclude=PAT  exclude files that match PAT\""
+        }
+      },
+      "-y": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "diff --help: \"-y, --side-by-side  output in two columns\""
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "path-read"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "stdinToken": "-",
+      "citation": {
+        "source": "diff --help: \"Usage: diff [OPTION]... FILES\" and \"FILES are 'FILE1 FILE2' or 'DIR1 DIR2' ...\"; \"If a FILE is '-', read standard input.\" (operands are paths read; - is stdin)"
+      }
+    },
+    "stdin": "never",
+    "stdout": "content",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

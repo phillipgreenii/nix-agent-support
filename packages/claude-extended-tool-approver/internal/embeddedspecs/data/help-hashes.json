@@ -102,5 +102,9 @@
   "pwd": null,
   "read": null,
   "shift": null,
-  "exit": null
+  "exit": null,
+  "readlink": "27f5b21bcf83c4378d39bd7dd19d6a3f958190dabdbf6a7946d7b277a3c0db45",
+  "date": "967b28b6bff64efeca599b70ea9e6d444c0b99855554cebf6035baa00246ae39",
+  "diff": "e21811284fd4f831df800a4627e715dcebefc462fdf51e2b9e7476c49f3ca04d",
+  "command": null
 }

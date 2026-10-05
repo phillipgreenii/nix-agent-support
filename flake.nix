@@ -2818,6 +2818,7 @@
                     nativeBuildInputs = [
                       pkgs.coreutils # cat/cp/echo/false/head/ls/mkdir/printf/rm/sleep/sort/tail/tee/true/wc/test/[
                       pkgs.findutils # find/xargs
+                      pkgs.diffutils # diff (pg2-slsc0); readlink/date come from coreutils above
                       pkgs.gnused # sed
                       pkgs.gawk # awk/gawk
                       pkgs.procps # ps/pgrep

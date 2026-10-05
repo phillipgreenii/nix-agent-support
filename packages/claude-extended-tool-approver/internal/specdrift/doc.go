@@ -38,6 +38,14 @@
 // command names missing from PATH is the genuine "binary not on PATH"
 // environment-gap failure case (see Check's own doc comment).
 //
+// pg2-slsc0 adds `command` (the bash builtin behind `command -v NAME`) to the
+// same exemption. Its sibling probes readlink and date (GNU coreutils)
+// and diff (GNU diffutils) are real binaries and are hashed in the SHARED
+// baseline: the nix check puts pkgs.coreutils / pkgs.diffutils on PATH on every
+// platform, and the darwin build of coreutils 9.11 prints byte-identical --help
+// to the recorded linux baseline (verified for cat and sleep, whose recorded
+// hashes it reproduces), so no darwin overlay or ExemptOn entry is needed.
+//
 // # Plugin-instructed tools (pg2-cjfpy.2)
 //
 // The embedded set also carries the CLIs the agent-support marketplace plugins

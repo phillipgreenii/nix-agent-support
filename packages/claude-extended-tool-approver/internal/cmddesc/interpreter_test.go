@@ -290,6 +290,9 @@ func TestRegistryNames(t *testing.T) {
 	)
 	// pg2-dbrsg: the shell builtins skills' control-flow statements use.
 	want = append(want, "exit", "pwd", "read", "shift")
+	// pg2-slsc0: the read-only probes the pb plugin instructs
+	// (registry_plugin_probes.go; pwd is pg2-dbrsg's builtin schema).
+	want = append(want, "command", "date", "diff", "readlink")
 	sort.Strings(want)
 	if got := DefaultRegistry().Names(); !reflect.DeepEqual(got, want) {
 		t.Errorf("names = %v, want %v", got, want)
