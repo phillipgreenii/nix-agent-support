@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/phillipgreenii/pb/internal/run"
 )
@@ -25,6 +26,10 @@ var ErrConflict = errors.New("conflicting isolation state")
 type Params struct {
 	RepoPath string // absolute canonical clone path
 	BeadID   string
+	// GitTimeout bounds EACH git call (0 = DefaultGitTimeout). On expiry the
+	// call's whole process group is killed and Isolate returns ErrGitTimeout
+	// (after removing only what this call created, when it was `worktree add`).
+	GitTimeout time.Duration
 }
 
 type Result struct {
@@ -43,7 +48,15 @@ type Result struct {
 	Warning string `json:"warning,omitempty"`
 }
 
-func Isolate(ctx context.Context, r run.Runner, p Params) (Result, error) {
+func Isolate(ctx context.Context, inner run.Runner, p Params) (Result, error) {
+	// Every git call runs with fsmonitor off (per-call env, no config change) and
+	// a bounded lifetime: a wedged fsmonitor IPC otherwise hangs `git worktree
+	// add` for ever (pg2-luvwe: 72 min, no output).
+	timeout := p.GitTimeout
+	if timeout <= 0 {
+		timeout = DefaultGitTimeout
+	}
+	r := gitBound{inner: inner, timeout: timeout}
 	// Resolve the repo root ourselves from the CALLER-supplied path rather
 	// than trust `git -C p.RepoPath rev-parse --show-toplevel`'s stdout for
 	// it. That command reads core.worktree off .git/config, and when the
@@ -108,17 +121,23 @@ func Isolate(ctx context.Context, r run.Runner, p Params) (Result, error) {
 					ErrConflict, branch, path)
 			}
 		}
-		if branchExists(ctx, r, repo, ref) {
-			if _, err := r.Run(ctx, "git", []string{"-C", repo, "worktree", "add", wt, branch}, run.Options{}); err != nil {
-				return Result{}, err
-			}
-			res.Reused = "branch"
-		} else {
-			primary := primaryBranch(ctx, r, repo)
-			if _, err := r.Run(ctx, "git", []string{"-C", repo, "worktree", "add", wt, "-b", branch, primary}, run.Options{}); err != nil {
-				return Result{}, err
-			}
+		createBranch := !branchExists(ctx, r, repo, ref)
+		addArgs := []string{"-C", repo, "worktree", "add", wt, branch}
+		res.Reused = "branch"
+		if createBranch {
+			addArgs = []string{"-C", repo, "worktree", "add", wt, "-b", branch, primaryBranch(ctx, r, repo)}
 			res.Reused = "none"
+		}
+		if _, err := r.Run(ctx, "git", addArgs, run.Options{}); err != nil {
+			if errors.Is(err, ErrGitTimeout) {
+				// We verified above that neither the worktree path nor (when createBranch)
+				// the branch existed, so whatever is there now was made by THIS call.
+				// Pre-existing isolation (other beads' worktrees, a parked branch we were
+				// only checking out) is never touched.
+				return Result{}, fmt.Errorf("%w; %s", err,
+					cleanupCreated(ctx, inner, timeout, repo, wt, branch, createBranch))
+			}
+			return Result{}, err
 		}
 	}
 

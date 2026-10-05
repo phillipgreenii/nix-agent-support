@@ -155,7 +155,7 @@ bundle's hooks from the shared common dir. An absent `pg-hooks` or an unrecogniz
 recreated.
 
 ```
-pb drain isolate --bead <id> --repo <abs-path> [--json]
+pb drain isolate --bead <id> --repo <abs-path> [--json] [--git-timeout <duration>]
 ```
 
 - `--bead` and `--repo` are required. `--repo` MUST be an absolute path to the canonical
@@ -170,6 +170,16 @@ pb drain isolate --bead <id> --repo <abs-path> [--json]
   (the PRECOMMIT vocabulary of `integrate-branch-support --facts`; nothing is written to the
   worktree).
   `--json` emits the same fields as a JSON object instead.
+- Bounded git (`pg2-luvwe`): a wedged `fsmonitor` IPC (leaked `git fsmonitor--daemon` processes,
+  `fseventsd` at high CPU) once hung `git worktree add` for 72 minutes with no output. So every
+  git call isolate makes (1) runs with `core.fsmonitor` forced **off for that call only** — the
+  per-call environment `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=false`
+  (an inherited `GIT_CONFIG_COUNT` is extended, not clobbered); no git config is changed, fsmonitor
+  stays on in the repos — and (2) is killed, **whole process group**, if it exceeds `--git-timeout`
+  (default `5m0s`). On expiry isolate removes **only** the worktree (and the `drain/<bead>` branch,
+  only when this same call created it with `-b`) that the timed-out call left half-created, leaves any
+  pre-existing isolation (other beads' worktrees, a parked branch) alone, prints an error naming
+  fsmonitor/fseventsd contention, and exits `1`. Exit codes `0`/`3` and the output line are unchanged.
 - Read-only canonical-clone diagnosis: when the canonical clone's `.git/config` carries a stray
   `core.worktree` (or `git rev-parse --show-toplevel` disagrees with `--repo`), isolate still
   succeeds (exit `0`) but prints `pb: warning: core.worktree set in canonical config ...` to
@@ -180,7 +190,7 @@ pb drain isolate --bead <id> --repo <abs-path> [--json]
 | Exit | Meaning                                                                                                                                                  |
 | ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `0`  | Isolated (worktree created, or an existing worktree/branch reused).                                                                                      |
-| `1`  | Generic failure (bad flags, git unreachable, etc).                                                                                                       |
+| `1`  | Generic failure (bad flags, git unreachable, a git call timed out after `--git-timeout`, etc).                                                           |
 | `3`  | Conflicting isolation state — the worktree path holds another branch, or `drain/<bead>` is checked out elsewhere. Never forced; route the bead to STUCK. |
 
 ```bash

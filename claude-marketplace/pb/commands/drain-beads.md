@@ -449,7 +449,11 @@ proceeding on currently loaded text (direct interactive invocation).`)
      it report hooks as passed. Exit 0 → proceed
      (the output line names the worktree). Exit 3 → conflicting isolation state
      (someone else's checkout) — do NOT force anything; route to STUCK. Any
-     other failure → transient-vs-genuine per the Rules. A
+     other failure → transient-vs-genuine per the Rules. A git timeout
+     (exit 1, message naming fsmonitor/fseventsd contention; pb already removed
+     only the worktree/branch that call created) is machine-level contention,
+     i.e. transient: retry per the Rules once the load clears — do NOT kill
+     processes by pattern or change any git config. A
      `pb: warning: core.worktree set in canonical config …` line on stderr
      (exit still 0) means the canonical clone's `.git/config` carries a stray
      `core.worktree`: git will report a phantom dirty tree there and the lander

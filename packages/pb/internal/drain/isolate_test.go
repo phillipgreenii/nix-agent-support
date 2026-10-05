@@ -50,6 +50,9 @@ func TestMain(m *testing.M) {
 	for _, v := range gitEnvVars {
 		_ = os.Unsetenv(v)
 	}
+	// A hook (this repo's own pre-commit run) may export GIT_CONFIG_COUNT; the
+	// per-call fsmonitor-off tests assert exact index 0, so start from none.
+	_ = os.Unsetenv("GIT_CONFIG_COUNT")
 	// Shadow any real pg-hooks with a stub for the whole run, so no test depends
 	// on whether the machine has applied (pg-hooks on PATH) or on the real
 	// clone's bundle. Default = "not installed" (exit 127), i.e. today's

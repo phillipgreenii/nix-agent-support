@@ -42,3 +42,16 @@ func TestDrainIsolateCmd_rejectsPathShapedBeadID(t *testing.T) {
 		}
 	}
 }
+
+func TestDrainIsolateCmd_rejectsNonPositiveGitTimeout(t *testing.T) {
+	for _, bad := range []string{"0", "0s", "-5s"} {
+		cmd := newDrainIsolateCmd()
+		var out bytes.Buffer
+		cmd.SetOut(&out)
+		cmd.SetErr(&out)
+		cmd.SetArgs([]string{"--bead", "pg2-x", "--repo", "/abs/repo", "--git-timeout", bad})
+		if err := cmd.Execute(); err == nil {
+			t.Errorf("--git-timeout %q: expected rejection", bad)
+		}
+	}
+}
