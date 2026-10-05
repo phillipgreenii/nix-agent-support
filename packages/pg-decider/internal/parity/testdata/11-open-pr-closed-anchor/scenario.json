@@ -1,0 +1,41 @@
+{
+  "name": "11-open-pr-closed-anchor",
+  "description": "My open PR whose anchor and review request were closed (by a person, say): the anchor always mirrors the PR, so it must be reopened.",
+  "entities": ["acme/api#111"],
+  "prs": [
+    {
+      "number": 111,
+      "title": "Rename the config keys",
+      "author": "phillipgreenii"
+    }
+  ],
+  "beads": [
+    {
+      "id": "bd-111a",
+      "title": "acme/api#111: Rename the config keys",
+      "state": "closed",
+      "metadata": {
+        "repo": "acme/api",
+        "pr_number": "111",
+        "state": "open",
+        "branch": "feature-111",
+        "base": "main",
+        "author": "phillipgreenii",
+        "draft": "false"
+      }
+    },
+    {
+      "id": "bd-111r",
+      "title": "review-pr: acme/api#111",
+      "state": "closed",
+      "parent": "bd-111a",
+      "metadata": {
+        "repo": "acme/api",
+        "pr_number": "111",
+        "branch": "feature-111",
+        "head_sha": "head0111",
+        "ownership": "mine"
+      }
+    }
+  ]
+}

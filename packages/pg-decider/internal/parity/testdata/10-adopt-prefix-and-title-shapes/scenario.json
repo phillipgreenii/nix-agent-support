@@ -1,0 +1,58 @@
+{
+  "name": "10-adopt-prefix-and-title-shapes",
+  "description": "Pre-cutover bead shapes with no dedup_key for my open PR: an anchor matched by its repo-and-number title prefix, a review request matched by its exact title, a feedback cycle matched by its exact title and fbsum label. All carry repo and pr_number metadata, as the old sync wrote it.",
+  "entities": ["acme/api#110"],
+  "prs": [
+    {
+      "number": 110,
+      "title": "Cache the schema lookups",
+      "author": "phillipgreenii",
+      "comments": [
+        {
+          "id": "c1",
+          "author": "teammate",
+          "body": "Can this use the shared cache?"
+        }
+      ]
+    }
+  ],
+  "beads": [
+    {
+      "id": "bd-110a",
+      "title": "acme/api#110: Cache the schema lookups",
+      "metadata": {
+        "repo": "acme/api",
+        "pr_number": "110",
+        "state": "open",
+        "branch": "feature-110",
+        "base": "main",
+        "author": "phillipgreenii",
+        "draft": "false"
+      }
+    },
+    {
+      "id": "bd-110r",
+      "title": "review-pr: acme/api#110",
+      "parent": "bd-110a",
+      "metadata": {
+        "repo": "acme/api",
+        "pr_number": "110",
+        "branch": "feature-110",
+        "head_sha": "head0110",
+        "ownership": "mine"
+      }
+    },
+    {
+      "id": "bd-110f",
+      "title": "process-feedback: acme/api#110",
+      "parent": "bd-110a",
+      "labels": ["mine"],
+      "fbsum": ["c1"],
+      "metadata": {
+        "repo": "acme/api",
+        "pr_number": "110",
+        "branch": "feature-110"
+      }
+    }
+  ]
+}

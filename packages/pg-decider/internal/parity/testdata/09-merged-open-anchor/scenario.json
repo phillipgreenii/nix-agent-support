@@ -1,0 +1,53 @@
+{
+  "name": "09-merged-open-anchor",
+  "description": "A merged PR whose anchor and both children are still open: the anchor mirrors the PR, so all three must close.",
+  "entities": ["acme/api#109"],
+  "prs": [
+    {
+      "number": 109,
+      "title": "Add the export command",
+      "author": "phillipgreenii",
+      "state": "closed",
+      "merged": true
+    }
+  ],
+  "beads": [
+    {
+      "id": "bd-109a",
+      "title": "acme/api#109: Add the export command",
+      "metadata": {
+        "repo": "acme/api",
+        "pr_number": "109",
+        "state": "open",
+        "branch": "feature-109",
+        "base": "main",
+        "author": "phillipgreenii",
+        "draft": "false"
+      }
+    },
+    {
+      "id": "bd-109r",
+      "title": "review-pr: acme/api#109",
+      "parent": "bd-109a",
+      "metadata": {
+        "repo": "acme/api",
+        "pr_number": "109",
+        "branch": "feature-109",
+        "head_sha": "head0109",
+        "ownership": "mine"
+      }
+    },
+    {
+      "id": "bd-109f",
+      "title": "process-feedback: acme/api#109",
+      "parent": "bd-109a",
+      "labels": ["mine"],
+      "fbsum": ["c1"],
+      "metadata": {
+        "repo": "acme/api",
+        "pr_number": "109",
+        "branch": "feature-109"
+      }
+    }
+  ]
+}

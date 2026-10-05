@@ -1,0 +1,18 @@
+{
+  "name": "08-mine-green-approved",
+  "description": "My open, non-draft PR that is approved with every CI run green: ready to land on the new side.",
+  "entities": ["acme/api#108"],
+  "prs": [
+    {
+      "number": 108,
+      "title": "Fix the off-by-one in paging",
+      "author": "phillipgreenii",
+      "review_decision": "APPROVED",
+      "checks_rollup": "success",
+      "ci": [
+        { "id": "911", "name": "build", "conclusion": "success" },
+        { "id": "912", "name": "lint", "conclusion": "success" }
+      ]
+    }
+  ]
+}

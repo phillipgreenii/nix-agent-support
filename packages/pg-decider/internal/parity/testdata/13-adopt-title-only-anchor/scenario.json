@@ -1,0 +1,45 @@
+{
+  "name": "13-adopt-title-only-anchor",
+  "description": "A legacy anchor matched by its title prefix alone (no repo or pr_number metadata, as the old sync adopted it) beside metadata-linked children. The old side adopts the anchor by title; on the new side nothing links the PR to it, because a work item links to its PR only through its repo and pr_number metadata.",
+  "entities": ["acme/api#113"],
+  "prs": [
+    {
+      "number": 113,
+      "title": "Prune the stale branches",
+      "author": "phillipgreenii",
+      "comments": [
+        { "id": "c1", "author": "teammate", "body": "Nit: rename this helper." }
+      ]
+    }
+  ],
+  "beads": [
+    {
+      "id": "bd-113a",
+      "title": "acme/api#113: Prune the stale branches"
+    },
+    {
+      "id": "bd-113r",
+      "title": "review-pr: acme/api#113",
+      "parent": "bd-113a",
+      "metadata": {
+        "repo": "acme/api",
+        "pr_number": "113",
+        "branch": "feature-113",
+        "head_sha": "head0113",
+        "ownership": "mine"
+      }
+    },
+    {
+      "id": "bd-113f",
+      "title": "process-feedback: acme/api#113",
+      "parent": "bd-113a",
+      "labels": ["mine"],
+      "fbsum": ["c1"],
+      "metadata": {
+        "repo": "acme/api",
+        "pr_number": "113",
+        "branch": "feature-113"
+      }
+    }
+  ]
+}

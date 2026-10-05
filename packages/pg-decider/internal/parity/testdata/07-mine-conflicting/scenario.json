@@ -1,0 +1,14 @@
+{
+  "name": "07-mine-conflicting",
+  "description": "My open PR that conflicts with its base: a resolve-conflict item is due on the new side, and the old side nudges the anchor's priority.",
+  "entities": ["acme/api#107"],
+  "prs": [
+    {
+      "number": 107,
+      "title": "Move the retry helpers",
+      "author": "phillipgreenii",
+      "mergeable": "CONFLICTING",
+      "merge_state_status": "DIRTY"
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "name": "03-team-unaddressed-comments",
+  "description": "A non-draft team PR with unaddressed comments: a review request is due, a feedback cycle is not (that is only for my own and co-owned PRs).",
+  "entities": ["acme/api#103"],
+  "prs": [
+    {
+      "number": 103,
+      "title": "Rework the scheduler",
+      "author": "teammate",
+      "comments": [
+        {
+          "id": "c1",
+          "author": "review-bot",
+          "body": "This loop never terminates on an empty queue."
+        },
+        {
+          "id": "c2",
+          "author": "review-bot",
+          "body": "Missing a test for the retry path."
+        }
+      ]
+    }
+  ]
+}

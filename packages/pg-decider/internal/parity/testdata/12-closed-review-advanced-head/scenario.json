@@ -1,0 +1,41 @@
+{
+  "name": "12-closed-review-advanced-head",
+  "description": "My open PR whose head advanced past the head its closed review request was raised for: the review request must be reopened and refreshed.",
+  "entities": ["acme/api#112"],
+  "prs": [
+    {
+      "number": 112,
+      "title": "Batch the writes",
+      "author": "phillipgreenii",
+      "head_sha": "head0112b"
+    }
+  ],
+  "beads": [
+    {
+      "id": "bd-112a",
+      "title": "acme/api#112: Batch the writes",
+      "metadata": {
+        "repo": "acme/api",
+        "pr_number": "112",
+        "state": "open",
+        "branch": "feature-112",
+        "base": "main",
+        "author": "phillipgreenii",
+        "draft": "false"
+      }
+    },
+    {
+      "id": "bd-112r",
+      "title": "review-pr: acme/api#112",
+      "state": "closed",
+      "parent": "bd-112a",
+      "metadata": {
+        "repo": "acme/api",
+        "pr_number": "112",
+        "branch": "feature-112",
+        "head_sha": "head0112a",
+        "ownership": "mine"
+      }
+    }
+  ]
+}

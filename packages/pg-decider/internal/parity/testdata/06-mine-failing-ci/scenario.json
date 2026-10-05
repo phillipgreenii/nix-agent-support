@@ -1,0 +1,17 @@
+{
+  "name": "06-mine-failing-ci",
+  "description": "My open PR with one failing and one passing CI run on its head: a fix-ci item is due on the new side.",
+  "entities": ["acme/api#106"],
+  "prs": [
+    {
+      "number": 106,
+      "title": "Tighten the lint config",
+      "author": "phillipgreenii",
+      "checks_rollup": "failure",
+      "ci": [
+        { "id": "901", "name": "build", "conclusion": "failure" },
+        { "id": "902", "name": "lint", "conclusion": "success" }
+      ]
+    }
+  ]
+}

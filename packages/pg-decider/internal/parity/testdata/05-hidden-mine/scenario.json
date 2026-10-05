@@ -1,0 +1,20 @@
+{
+  "name": "05-hidden-mine",
+  "description": "My open PR with an unaddressed comment, hidden before the cutover on both sides: the new decider must plan nothing for it.",
+  "entities": ["acme/api#105"],
+  "hidden": ["acme/api#105"],
+  "prs": [
+    {
+      "number": 105,
+      "title": "Experiment with batching",
+      "author": "phillipgreenii",
+      "comments": [
+        {
+          "id": "c1",
+          "author": "teammate",
+          "body": "Is the batch size configurable?"
+        }
+      ]
+    }
+  ]
+}

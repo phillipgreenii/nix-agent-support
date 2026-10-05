@@ -1,0 +1,13 @@
+{
+  "name": "02-co-owned",
+  "description": "A teammate's PR with a commit of mine on its branch: co-owned, so it is treated like my own for review requests.",
+  "entities": ["acme/api#102"],
+  "prs": [
+    {
+      "number": 102,
+      "title": "Shared cache invalidation",
+      "author": "teammate",
+      "commit_authors": ["teammate", "phillipgreenii"]
+    }
+  ]
+}

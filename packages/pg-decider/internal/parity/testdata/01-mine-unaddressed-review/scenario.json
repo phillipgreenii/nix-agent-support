@@ -1,0 +1,19 @@
+{
+  "name": "01-mine-unaddressed-review",
+  "description": "My open PR with one unaddressed review comment and no work beads yet: a feedback cycle, a review request and their anchor are all due.",
+  "entities": ["acme/api#101"],
+  "prs": [
+    {
+      "number": 101,
+      "title": "Add retry to client",
+      "author": "phillipgreenii",
+      "comments": [
+        {
+          "id": "c1",
+          "author": "teammate",
+          "body": "Please handle the timeout case."
+        }
+      ]
+    }
+  ]
+}

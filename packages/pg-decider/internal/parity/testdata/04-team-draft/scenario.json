@@ -1,0 +1,16 @@
+{
+  "name": "04-team-draft",
+  "description": "A team PR still in draft: no review request is due, and nothing else is.",
+  "entities": ["acme/api#104"],
+  "prs": [
+    {
+      "number": 104,
+      "title": "WIP: new config loader",
+      "author": "teammate",
+      "draft": true,
+      "comments": [
+        { "id": "c1", "author": "review-bot", "body": "Early note on naming." }
+      ]
+    }
+  ]
+}
