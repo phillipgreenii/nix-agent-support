@@ -536,6 +536,13 @@ both live, not just a clean flake check.
   ranking tier), §9/§10 (the rank test suites), and the unblocks source for PRs.
 - **The rest of the document is not yet reviewed by the operator.** Only section 6 and D-F11 are
   ruled; approval of the whole document, recorded in this header, is still required before landing.
+- **Public-repo scrub before landing (blocker for the landing step).** This repository is public
+  and must not name the employer's private repos or tickets. The draft still names the private
+  monorepo and a PR number in decision D-F2 and in the section 7.2 example, and names the private
+  machine flake in the header, section 1 and section 9. Genericize every such reference (for
+  example "the monorepo", "the private machine flake") and re-scan the whole file for
+  org-specific identifiers (case-insensitive: the employer name, its abbreviation, private repo
+  names, PR and ticket numbers) before it lands.
 - Whether `week`/`sprint` period types are worth building now or genuinely deferred (the schema
   is ready either way; no verb currently implements them).
 
