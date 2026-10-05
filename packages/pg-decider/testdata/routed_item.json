@@ -1,0 +1,14 @@
+{
+  "id": "item-1",
+  "type": "pr.changed",
+  "title": "acme/widgets#42 changed",
+  "metadata": {
+    "entity_type": "pr",
+    "entity_id": "acme/widgets#42",
+    "kind": "changed",
+    "seq": 17,
+    "version": 7,
+    "origin": "derived:poll",
+    "degraded_sources": ["checks"]
+  }
+}

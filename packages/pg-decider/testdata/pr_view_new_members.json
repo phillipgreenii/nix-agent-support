@@ -1,0 +1,43 @@
+{
+  "contract": "pg-desk.view/v1",
+  "type": "pr",
+  "id": "acme/widgets#43",
+  "version": 2,
+  "as_of": "2026-10-02T09:00:00Z",
+  "stale": true,
+  "snapshot": {
+    "id": "acme/widgets#43",
+    "repo": "acme/widgets",
+    "number": 43,
+    "title": "Tidy docs",
+    "state": "open",
+    "author": "teammate"
+  },
+  "decorations": {
+    "relationship": "co-owned",
+    "dispositions": [],
+    "urgency": "",
+    "category": ""
+  },
+  "annotations": {
+    "hidden": { "value": true, "reason": "duplicate" },
+    "wip": true,
+    "suppress": [],
+    "force_review": true,
+    "force_review_sha": "abcdef0",
+    "ready_to_land": true,
+    "decider": {}
+  },
+  "ci": { "state": "failure", "failed_checks": ["unit"] },
+  "links": [
+    {
+      "type": "issue",
+      "id": "bd-9",
+      "relation": "work",
+      "title": "Fix the docs build",
+      "metadata": { "seq": 3, "flag": true, "kind": "docs" },
+      "origins": [{ "origin": "derived:branch-name" }]
+    }
+  ],
+  "links_as_of": null
+}

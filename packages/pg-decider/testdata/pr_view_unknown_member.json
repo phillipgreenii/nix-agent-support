@@ -1,0 +1,35 @@
+{
+  "contract": "pg-desk.view/v1",
+  "type": "pr",
+  "id": "acme/widgets#44",
+  "version": 1,
+  "as_of": "2026-10-03T09:00:00Z",
+  "stale": false,
+  "snapshot": {
+    "id": "acme/widgets#44",
+    "repo": "acme/widgets",
+    "number": 44,
+    "title": "Rename module",
+    "state": "open",
+    "author": "teammate",
+    "future_snapshot_field": { "nested": [1, 2, 3] }
+  },
+  "decorations": {
+    "relationship": "team",
+    "dispositions": [],
+    "urgency": "",
+    "category": "",
+    "future_decoration": "x"
+  },
+  "annotations": {
+    "hidden": { "value": false, "reason": null, "future": 1 },
+    "wip": false,
+    "suppress": [],
+    "force_review": false,
+    "decider": {},
+    "future_annotation": ["a"]
+  },
+  "future_top_level": { "anything": true },
+  "links": [],
+  "links_as_of": null
+}
