@@ -1,0 +1,42 @@
+# HELP beads_created_last_24h Beads created in the last 24 hours, counted by the throughput pass.
+# TYPE beads_created_last_24h gauge
+beads_created_last_24h{db="alpha"} 1
+# HELP beads_closed_last_24h Beads closed in the last 24 hours, counted by the throughput pass.
+# TYPE beads_closed_last_24h gauge
+beads_closed_last_24h{db="alpha"} 0
+# HELP beads_exporter_up 1 if the last main collection cycle for this database succeeded, 0 if it failed.
+# TYPE beads_exporter_up gauge
+beads_exporter_up{db="alpha"} 0
+beads_exporter_up{db="beta"} 0
+# HELP beads_exporter_pass_last_success_timestamp_seconds Time of the last successful run of each collection pass (main, throughput or stranded), in Unix seconds. Omitted until the pass has succeeded once.
+# TYPE beads_exporter_pass_last_success_timestamp_seconds gauge
+beads_exporter_pass_last_success_timestamp_seconds{db="alpha",pass="main"} 1780315200.6
+beads_exporter_pass_last_success_timestamp_seconds{db="alpha",pass="throughput"} 1780315261.6
+# HELP beads_exporter_collect_errors_total Collection failures by pass and closed-enum reason (stale_issues_jsonl, timeout, bd_error, schema_skew, parse_error or transcript_error).
+# TYPE beads_exporter_collect_errors_total counter
+beads_exporter_collect_errors_total{db="alpha",pass="main",reason="bd_error"} 0
+beads_exporter_collect_errors_total{db="alpha",pass="main",reason="parse_error"} 0
+beads_exporter_collect_errors_total{db="alpha",pass="main",reason="schema_skew"} 0
+beads_exporter_collect_errors_total{db="alpha",pass="main",reason="stale_issues_jsonl"} 0
+beads_exporter_collect_errors_total{db="alpha",pass="main",reason="timeout"} 1
+beads_exporter_collect_errors_total{db="alpha",pass="throughput",reason="bd_error"} 0
+beads_exporter_collect_errors_total{db="alpha",pass="throughput",reason="parse_error"} 0
+beads_exporter_collect_errors_total{db="alpha",pass="throughput",reason="schema_skew"} 0
+beads_exporter_collect_errors_total{db="alpha",pass="throughput",reason="stale_issues_jsonl"} 0
+beads_exporter_collect_errors_total{db="alpha",pass="throughput",reason="timeout"} 0
+beads_exporter_collect_errors_total{db="beta",pass="main",reason="bd_error"} 0
+beads_exporter_collect_errors_total{db="beta",pass="main",reason="parse_error"} 0
+beads_exporter_collect_errors_total{db="beta",pass="main",reason="schema_skew"} 0
+beads_exporter_collect_errors_total{db="beta",pass="main",reason="stale_issues_jsonl"} 2
+beads_exporter_collect_errors_total{db="beta",pass="main",reason="timeout"} 0
+beads_exporter_collect_errors_total{db="beta",pass="throughput",reason="bd_error"} 0
+beads_exporter_collect_errors_total{db="beta",pass="throughput",reason="parse_error"} 0
+beads_exporter_collect_errors_total{db="beta",pass="throughput",reason="schema_skew"} 2
+beads_exporter_collect_errors_total{db="beta",pass="throughput",reason="stale_issues_jsonl"} 0
+beads_exporter_collect_errors_total{db="beta",pass="throughput",reason="timeout"} 0
+# HELP beads_exporter_collect_duration_seconds Duration of the last run of each collection pass, in seconds.
+# TYPE beads_exporter_collect_duration_seconds gauge
+beads_exporter_collect_duration_seconds{db="alpha",pass="main"} 0.3
+beads_exporter_collect_duration_seconds{db="alpha",pass="throughput"} 0.2
+beads_exporter_collect_duration_seconds{db="beta",pass="main"} 0.1
+beads_exporter_collect_duration_seconds{db="beta",pass="throughput"} 0.1

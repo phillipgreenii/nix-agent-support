@@ -1,0 +1,16 @@
+{
+  "data": [
+    {
+      "id": "alpha-blk",
+      "title": "title alpha-blk",
+      "status": "open",
+      "priority": 2,
+      "issue_type": "task",
+      "created_at": "2026-01-02T03:04:05Z",
+      "updated_at": "2026-01-02T03:04:05Z",
+      "blocked_by_count": 1,
+      "blocked_by": ["alpha-r1"]
+    }
+  ],
+  "schema_version": 1
+}

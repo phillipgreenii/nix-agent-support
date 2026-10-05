@@ -1,0 +1,121 @@
+# HELP beads_issues Beads that are not closed, by derived state (in_progress, deferred, blocked, ready, tracking or other). Each bead is in exactly one state, so the sum over state is the not-closed total.
+# TYPE beads_issues gauge
+beads_issues{db="alpha",state="blocked"} 1
+beads_issues{db="alpha",state="deferred"} 1
+beads_issues{db="alpha",state="in_progress"} 1
+beads_issues{db="alpha",state="other"} 2
+beads_issues{db="alpha",state="ready"} 3
+beads_issues{db="alpha",state="tracking"} 1
+beads_issues{db="beta",state="blocked"} 0
+beads_issues{db="beta",state="deferred"} 0
+beads_issues{db="beta",state="in_progress"} 0
+beads_issues{db="beta",state="other"} 0
+beads_issues{db="beta",state="ready"} 0
+beads_issues{db="beta",state="tracking"} 0
+# HELP beads_issues_stored Beads by stored status. Non-closed statuses come from the default list view; closed comes from the status count and includes closed gates. Zero-filled over every status bd knows.
+# TYPE beads_issues_stored gauge
+beads_issues_stored{db="alpha",status="archived"} 0
+beads_issues_stored{db="alpha",status="blocked"} 0
+beads_issues_stored{db="alpha",status="closed"} 7
+beads_issues_stored{db="alpha",status="deferred"} 0
+beads_issues_stored{db="alpha",status="hooked"} 0
+beads_issues_stored{db="alpha",status="in_progress"} 1
+beads_issues_stored{db="alpha",status="open"} 6
+beads_issues_stored{db="alpha",status="pinned"} 1
+beads_issues_stored{db="alpha",status="review"} 1
+beads_issues_stored{db="beta",status="blocked"} 0
+beads_issues_stored{db="beta",status="closed"} 0
+beads_issues_stored{db="beta",status="deferred"} 0
+beads_issues_stored{db="beta",status="hooked"} 0
+beads_issues_stored{db="beta",status="in_progress"} 0
+beads_issues_stored{db="beta",status="open"} 0
+beads_issues_stored{db="beta",status="pinned"} 0
+# HELP beads_queue_candidates Beads currently claimable through each configured queue.
+# TYPE beads_queue_candidates gauge
+beads_queue_candidates{db="alpha",queue="by-priority"} 1
+beads_queue_candidates{db="alpha",queue="drain-claim"} 1
+beads_queue_candidates{db="alpha",queue="unblock-human"} 1
+beads_queue_candidates{db="beta",queue="by-priority"} 0
+beads_queue_candidates{db="beta",queue="drain-claim"} 0
+beads_queue_candidates{db="beta",queue="unblock-human"} 0
+# HELP beads_queue_oldest_timestamp_seconds Creation time of the oldest candidate in each queue, in Unix seconds. Omitted when the queue is empty.
+# TYPE beads_queue_oldest_timestamp_seconds gauge
+beads_queue_oldest_timestamp_seconds{db="alpha",queue="by-priority"} 1780128000
+beads_queue_oldest_timestamp_seconds{db="alpha",queue="drain-claim"} 1780218000
+beads_queue_oldest_timestamp_seconds{db="alpha",queue="unblock-human"} 1780128000
+# HELP beads_not_closed_by_type Not-closed beads by issue type.
+# TYPE beads_not_closed_by_type gauge
+beads_not_closed_by_type{db="alpha",type="bug"} 1
+beads_not_closed_by_type{db="alpha",type="epic"} 2
+beads_not_closed_by_type{db="alpha",type="merge-request"} 1
+beads_not_closed_by_type{db="alpha",type="task"} 5
+# HELP beads_not_closed_by_priority Not-closed beads by priority.
+# TYPE beads_not_closed_by_priority gauge
+beads_not_closed_by_priority{db="alpha",priority="0"} 1
+beads_not_closed_by_priority{db="alpha",priority="1"} 1
+beads_not_closed_by_priority{db="alpha",priority="2"} 5
+beads_not_closed_by_priority{db="alpha",priority="3"} 2
+# HELP beads_not_closed_by_bead_label Not-closed beads carrying each label, for the labelCap most common labels; beads carrying any other label are counted once under bead_label="__other__". Labels overlap, so the sum over bead_label is NOT the not-closed total.
+# TYPE beads_not_closed_by_bead_label gauge
+beads_not_closed_by_bead_label{db="alpha",bead_label="__other__"} 1
+beads_not_closed_by_bead_label{db="alpha",bead_label="area-a"} 2
+beads_not_closed_by_bead_label{db="alpha",bead_label="bad�byte"} 1
+beads_not_closed_by_bead_label{db="alpha",bead_label="café"} 1
+beads_not_closed_by_bead_label{db="alpha",bead_label="human"} 1
+beads_not_closed_by_bead_label{db="alpha",bead_label="human-focus-required"} 1
+beads_not_closed_by_bead_label{db="alpha",bead_label="multi\nline"} 1
+beads_not_closed_by_bead_label{db="alpha",bead_label="odd\"label\\path"} 1
+# HELP beads_oldest_timestamp_seconds Creation time of the oldest not-closed bead in each derived state, in Unix seconds (start time for in_progress). Omitted when the state is empty.
+# TYPE beads_oldest_timestamp_seconds gauge
+beads_oldest_timestamp_seconds{db="alpha",state="blocked"} 1780041600
+beads_oldest_timestamp_seconds{db="alpha",state="deferred"} 1779955200
+beads_oldest_timestamp_seconds{db="alpha",state="in_progress"} 1779703200
+beads_oldest_timestamp_seconds{db="alpha",state="other"} 1772352000
+beads_oldest_timestamp_seconds{db="alpha",state="ready"} 1780128000
+beads_oldest_timestamp_seconds{db="alpha",state="tracking"} 1778400000
+# HELP beads_created_last_24h Beads created in the last 24 hours, counted by the throughput pass.
+# TYPE beads_created_last_24h gauge
+beads_created_last_24h{db="alpha"} 4
+beads_created_last_24h{db="beta"} 0
+# HELP beads_closed_last_24h Beads closed in the last 24 hours, counted by the throughput pass.
+# TYPE beads_closed_last_24h gauge
+beads_closed_last_24h{db="alpha"} 2
+beads_closed_last_24h{db="beta"} 0
+# HELP beads_exporter_up 1 if the last main collection cycle for this database succeeded, 0 if it failed.
+# TYPE beads_exporter_up gauge
+beads_exporter_up{db="alpha"} 1
+beads_exporter_up{db="beta"} 1
+# HELP beads_exporter_pass_last_success_timestamp_seconds Time of the last successful run of each collection pass (main, throughput or stranded), in Unix seconds. Omitted until the pass has succeeded once.
+# TYPE beads_exporter_pass_last_success_timestamp_seconds gauge
+beads_exporter_pass_last_success_timestamp_seconds{db="alpha",pass="main"} 1780315200.7
+beads_exporter_pass_last_success_timestamp_seconds{db="alpha",pass="throughput"} 1780315201.4
+beads_exporter_pass_last_success_timestamp_seconds{db="beta",pass="main"} 1780315201.2
+beads_exporter_pass_last_success_timestamp_seconds{db="beta",pass="throughput"} 1780315201.6
+# HELP beads_exporter_collect_errors_total Collection failures by pass and closed-enum reason (stale_issues_jsonl, timeout, bd_error, schema_skew, parse_error or transcript_error).
+# TYPE beads_exporter_collect_errors_total counter
+beads_exporter_collect_errors_total{db="alpha",pass="main",reason="bd_error"} 0
+beads_exporter_collect_errors_total{db="alpha",pass="main",reason="parse_error"} 0
+beads_exporter_collect_errors_total{db="alpha",pass="main",reason="schema_skew"} 0
+beads_exporter_collect_errors_total{db="alpha",pass="main",reason="stale_issues_jsonl"} 0
+beads_exporter_collect_errors_total{db="alpha",pass="main",reason="timeout"} 0
+beads_exporter_collect_errors_total{db="alpha",pass="throughput",reason="bd_error"} 0
+beads_exporter_collect_errors_total{db="alpha",pass="throughput",reason="parse_error"} 0
+beads_exporter_collect_errors_total{db="alpha",pass="throughput",reason="schema_skew"} 0
+beads_exporter_collect_errors_total{db="alpha",pass="throughput",reason="stale_issues_jsonl"} 0
+beads_exporter_collect_errors_total{db="alpha",pass="throughput",reason="timeout"} 0
+beads_exporter_collect_errors_total{db="beta",pass="main",reason="bd_error"} 0
+beads_exporter_collect_errors_total{db="beta",pass="main",reason="parse_error"} 0
+beads_exporter_collect_errors_total{db="beta",pass="main",reason="schema_skew"} 0
+beads_exporter_collect_errors_total{db="beta",pass="main",reason="stale_issues_jsonl"} 0
+beads_exporter_collect_errors_total{db="beta",pass="main",reason="timeout"} 0
+beads_exporter_collect_errors_total{db="beta",pass="throughput",reason="bd_error"} 0
+beads_exporter_collect_errors_total{db="beta",pass="throughput",reason="parse_error"} 0
+beads_exporter_collect_errors_total{db="beta",pass="throughput",reason="schema_skew"} 0
+beads_exporter_collect_errors_total{db="beta",pass="throughput",reason="stale_issues_jsonl"} 0
+beads_exporter_collect_errors_total{db="beta",pass="throughput",reason="timeout"} 0
+# HELP beads_exporter_collect_duration_seconds Duration of the last run of each collection pass, in seconds.
+# TYPE beads_exporter_collect_duration_seconds gauge
+beads_exporter_collect_duration_seconds{db="alpha",pass="main"} 0.5
+beads_exporter_collect_duration_seconds{db="alpha",pass="throughput"} 0.2
+beads_exporter_collect_duration_seconds{db="beta",pass="main"} 0.5
+beads_exporter_collect_duration_seconds{db="beta",pass="throughput"} 0.2

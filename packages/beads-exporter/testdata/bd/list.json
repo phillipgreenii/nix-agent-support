@@ -1,0 +1,106 @@
+{
+  "data": [
+    {
+      "id": "alpha-r2",
+      "title": "title alpha-r2",
+      "status": "in_progress",
+      "priority": 0,
+      "issue_type": "bug",
+      "assignee": "fixture-actor",
+      "created_at": "2026-01-02T03:04:05Z",
+      "updated_at": "2026-10-05T14:47:20Z",
+      "started_at": "2026-10-05T14:47:20Z",
+      "lease_expires_at": "2026-10-05T14:52:20Z",
+      "heartbeat_at": "2026-10-05T14:47:20Z",
+      "labels": ["area-a"],
+      "dependency_count": 0,
+      "dependent_count": 0,
+      "comment_count": 0
+    },
+    {
+      "id": "alpha-r1",
+      "title": "title alpha-r1",
+      "status": "open",
+      "priority": 1,
+      "issue_type": "task",
+      "created_at": "2026-01-02T03:04:05Z",
+      "updated_at": "2026-01-02T03:04:05Z",
+      "labels": ["area-a", "human"],
+      "dependency_count": 0,
+      "dependent_count": 1,
+      "comment_count": 0
+    },
+    {
+      "id": "alpha-blk",
+      "title": "title alpha-blk",
+      "status": "open",
+      "priority": 2,
+      "issue_type": "task",
+      "created_at": "2026-01-02T03:04:05Z",
+      "updated_at": "2026-01-02T03:04:05Z",
+      "dependencies": [
+        {
+          "issue_id": "alpha-blk",
+          "depends_on_id": "alpha-r1",
+          "type": "blocks",
+          "created_at": "2026-10-05T14:47:21Z",
+          "created_by": "fixture-actor",
+          "metadata": "{}"
+        }
+      ],
+      "dependency_count": 1,
+      "dependent_count": 0,
+      "comment_count": 0
+    },
+    {
+      "id": "alpha-dep",
+      "title": "title alpha-dep",
+      "status": "deferred",
+      "priority": 2,
+      "issue_type": "task",
+      "created_at": "2026-01-02T03:04:05Z",
+      "updated_at": "2026-10-05T14:47:21Z",
+      "defer_until": "2099-01-01T05:00:00Z",
+      "dependency_count": 0,
+      "dependent_count": 0,
+      "comment_count": 0
+    },
+    {
+      "id": "alpha-mr",
+      "title": "title alpha-mr",
+      "status": "open",
+      "priority": 2,
+      "issue_type": "merge-request",
+      "created_at": "2026-01-02T03:04:05Z",
+      "updated_at": "2026-01-02T03:04:05Z",
+      "dependency_count": 0,
+      "dependent_count": 0,
+      "comment_count": 0
+    },
+    {
+      "id": "alpha-r3",
+      "title": "title alpha-r3",
+      "status": "open",
+      "priority": 2,
+      "issue_type": "epic",
+      "created_at": "2026-01-02T03:04:05Z",
+      "updated_at": "2026-01-02T03:04:05Z",
+      "dependency_count": 0,
+      "dependent_count": 0,
+      "comment_count": 0
+    },
+    {
+      "id": "alpha-rv",
+      "title": "title alpha-rv",
+      "status": "review",
+      "priority": 2,
+      "issue_type": "task",
+      "created_at": "2026-01-02T03:04:05Z",
+      "updated_at": "2026-01-02T03:04:05Z",
+      "dependency_count": 0,
+      "dependent_count": 0,
+      "comment_count": 0
+    }
+  ],
+  "schema_version": 1
+}

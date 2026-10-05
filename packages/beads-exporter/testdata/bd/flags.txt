@@ -1,0 +1,23 @@
+# Every bd flag the exporter can pass, one "<subcommand> <flag>" pair per line.
+# "*" means a flag passed to every subcommand (global flags appear in each
+# subcommand's help). Unit tests keep this list equal to what the argv builders
+# and the queue allowlist can emit; the bd flag check proves each flag exists in
+# a given bd package.
+* --json
+* --readonly
+* --sandbox
+list -n
+list --all
+list --created-after
+list --closed-after
+ready -n
+ready --label
+ready --exclude-label
+ready --exclude-type
+ready --priority
+ready --parent
+ready --type
+ready --assignee
+ready --unassigned
+ready --label-any
+count --by-status

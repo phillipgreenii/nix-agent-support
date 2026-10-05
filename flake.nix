@@ -326,6 +326,16 @@
           pg-router-review-escalator = final.callPackage ./packages/pg-router-review-escalator {
             inherit (goBuilders) mkGoApp;
           };
+          # beads-exporter: Pattern A (ADR 0008), a zero-dependency module that
+          # execs a pinned, read-only bd (by the absolute path its config file
+          # names) and serves hand-rolled Prometheus text. No local
+          # `replace`/modRoot. beads-exporter-contract is the bd contract suite
+          # compiled as a runnable (`--bd <path>`), because the machine-wiring
+          # verification runs it against the machine's own bd package.
+          beads-exporter = final.callPackage ./packages/beads-exporter {
+            inherit (goBuilders) mkGoApp;
+          };
+          beads-exporter-contract = final.callPackage ./packages/beads-exporter/contract.nix { };
           # pg-rescue: Pattern A (ADR 0008), a Go module that wraps a command and,
           # on failure, walks a named chain of failure handlers (bead pg2-wgpem
           # is the first implementation bead: skeleton, CLI, config, check and
@@ -1101,6 +1111,7 @@
                 "pg-router-review-escalator"
                 "ccpool-probe"
                 "pg-rescue"
+                "beads-exporter"
               ];
 
               # Subset of simpleGoLintModules with build-tagged test files
@@ -1111,6 +1122,8 @@
                 "claude-extended-tool-approver"
                 # pg2-04jgw: internal/integration is `integration`-tagged.
                 "pg-rescue"
+                # internal/contract is `contract`-tagged (the bd contract suite).
+                "beads-exporter"
               ];
 
               # Pattern B (local `replace => ../sibling`): root the fileset at
@@ -3202,6 +3215,46 @@
                 gomod2nixToml = ./packages/pg-router-disk-watchdog/gomod2nix.toml;
               };
 
+              # beads-exporter - whole-module unit suite (adapter, categoriser, queues,
+              # label cap, stale guard, collector, renderer goldens, scheduler) with
+              # -race. The queue tests read the REAL claude-marketplace/pb/queues.json,
+              # so the source is the repo root narrowed to this package plus that one
+              # file (Pattern-B shaped: modRoot below the fileset root). No testDeps:
+              # the suite execs only `sh`/`env`/`sleep` from the build environment and
+              # never a real bd; the build-tagged contract suite is NOT part of it.
+              beads-exporter-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "beads-exporter-go-tests";
+                src = lib.fileset.toSource {
+                  root = ./.;
+                  fileset = lib.fileset.unions [
+                    ./packages/beads-exporter
+                    ./claude-marketplace/pb/queues.json
+                  ];
+                };
+                modRoot = "packages/beads-exporter";
+                gomod2nixToml = ./packages/beads-exporter/gomod2nix.toml;
+              };
+
+              # beads-exporter: the bd flag/version pin, run against THIS repo's bd.
+              # The same builder (lib.mkBeadsExporterBdFlagsCheck) is what a downstream
+              # flake runs against its own bd package.
+              test-beads-exporter-bd-flags = pkgs.callPackage ./packages/beads-exporter/bd-flags-check.nix { } {
+                bd = pkgs.llm-agentsPkgs.beads or llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.beads;
+                name = "test-beads-exporter-bd-flags";
+              };
+
+              # beads-exporter: the committed golden expositions must pass promtool's
+              # metric linter (naming, HELP/TYPE, counter suffix, units).
+              beads-exporter-promtool-metrics =
+                pkgs.runCommand "beads-exporter-promtool-metrics" { nativeBuildInputs = [ pkgs.prometheus.cli ]; }
+                  ''
+                    for f in ${./packages/beads-exporter/testdata}/*.prom; do
+                      echo "promtool check metrics: $f"
+                      promtool check metrics < "$f"
+                    done
+                    touch "$out"
+                  '';
+
               # pg-router-review-escalator (bead pg2-kftf9.15) - table-driven suite over
               # the escalation policy (dedupe, re-notify interval with a fake clock,
               # auto-close, loud failure on each delivery path, systemic roll-up) with a
@@ -3919,6 +3972,21 @@
                   "0.0.0-"????????) touch "$out" ;;
                   *)
                     echo "pg-router version not stamped (got: '$v', want '0.0.0-<8hex>')" >&2
+                    exit 1
+                    ;;
+                esac
+              '';
+
+              # Regression guard that the beads-exporter binary's version string is
+              # stamped by the build-time ldflag (mkGoApp's default versionPath
+              # main.Version): `0.0.0-<srcdigest8>`, bare, per phillipg-nix-repo-base
+              # ADR 0006 (same shape as test-pg-router-version-stamped above).
+              test-beads-exporter-version-stamped = pkgs.runCommand "beads-exporter-version-stamped" { } ''
+                v=$(${pkgs.beads-exporter}/bin/beads-exporter -version)
+                case "$v" in
+                  "0.0.0-"????????) touch "$out" ;;
+                  *)
+                    echo "beads-exporter version not stamped (got: '$v', want '0.0.0-<8hex>')" >&2
                     exit 1
                     ;;
                 esac
@@ -8574,6 +8642,8 @@
               pg-router-probe
               pg-router-disk-watchdog
               pg-router-review-escalator
+              beads-exporter
+              beads-exporter-contract
               ccpool-probe
               pg-rescue
               integrate-branch-support
@@ -8830,6 +8900,16 @@
         };
 
       flake = {
+        # Reusable builders for downstream flakes. mkBeadsExporterBdFlagsCheck
+        # checks ANY bd package against the beads-exporter's recorded bd version
+        # pin and flag list (the machine wiring runs it over its own bdPackage).
+        lib.mkBeadsExporterBdFlagsCheck =
+          {
+            pkgs,
+            bd,
+            name ? "beads-exporter-bd-flags",
+          }:
+          pkgs.callPackage ./packages/beads-exporter/bd-flags-check.nix { } { inherit bd name; };
         darwinModules.default = ./darwin;
         nixosModules.default = ./nixos;
         homeModules = {

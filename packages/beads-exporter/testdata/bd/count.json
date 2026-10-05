@@ -1,0 +1,28 @@
+{
+  "data": {
+    "total": 9,
+    "groups": [
+      {
+        "group": "closed",
+        "count": 1
+      },
+      {
+        "group": "deferred",
+        "count": 1
+      },
+      {
+        "group": "in_progress",
+        "count": 1
+      },
+      {
+        "group": "open",
+        "count": 5
+      },
+      {
+        "group": "review",
+        "count": 1
+      }
+    ]
+  },
+  "schema_version": 1
+}
