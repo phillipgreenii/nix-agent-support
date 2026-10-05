@@ -199,6 +199,7 @@ var pluginForms = []pluginForm{
 	{"integrate-branch", "integrate-branch-support --prek-branch-diff", evalcontract.Approve, ""},
 	{"integrate-branch", "integrate-branch-support --bundle-refresh abc1234", evalcontract.Approve, ""},
 	{"integrate-branch", "git config --get pgii-integrate-branch.primaryBranch", evalcontract.Approve, ""},
+	{"integrate-branch", "git config pgii-integrate-branch.primaryBranch", evalcontract.Approve, ""},
 	{"integrate-branch", "git config pgii-integrate-branch.strategy ff-merge-to-main", evalcontract.Abstain, "git config writes are judged per key (P16, a later phase)"},
 	{"integrate-branch", "git rev-parse --abbrev-ref HEAD", evalcontract.Approve, ""},
 	{"integrate-branch", "git rev-parse --git-common-dir", evalcontract.Approve, ""},

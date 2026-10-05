@@ -1264,6 +1264,13 @@
           }
         },
         "positionals": {
+          "leading": [
+            {
+              "kind": "literal"
+            }
+          ],
+          "leadingSkippedByFlags": ["--get", "--get-all", "--get-regexp"],
+          "leadingOptional": true,
           "rest": {
             "kind": "unmodeled"
           },

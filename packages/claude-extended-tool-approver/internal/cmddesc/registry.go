@@ -1061,12 +1061,15 @@ var gitWorktreeSchema = CommandSchema{
 // Literal when any of --get/--get-all/--get-regexp appeared, so `git config
 // --get user.name '^foo'` is Sufficient. The bare-NAME single-positional read
 // form (`git config user.name`, the deprecated-but-supported equivalent of
-// `git config get user.name`) is a SEPARATE, still-open gap: it needs a
-// positional-COUNT distinguisher (exactly one Rest positional with no
-// --get*-family flag is a read; two or more is a write), which is not a flag
-// presence/absence and RestOverride does not express it — left unmodeled
-// here rather than folded into this fix. Flags verified against this host's
-// `git config -h` / `git help config`.
+// `git config get user.name`) is told apart from the write by positional
+// COUNT (pg2-0rqxd), with no new schema mechanism: the FIRST positional is a
+// Leading Literal (the key — an inert name), so exactly one operand resolves
+// Sufficient, while a SECOND operand falls to Rest: Unmodeled and abstains
+// (`git config <name> <value>` is the write form). Leading is skipped when a
+// --get*-family flag appeared (the key is then the flag's value and the
+// RestOverride above owns every positional), and LeadingOptional keeps the
+// zero-positional forms (`git config --list`) satisfied. Flags verified
+// against this host's `git config -h` / `git help config`.
 var gitConfigSchema = CommandSchema{
 	Name:       "config",
 	Provenance: "git version 2.54.0, git config -h",
@@ -1076,8 +1079,11 @@ var gitConfigSchema = CommandSchema{
 		"--show-origin": inert,
 	},
 	Positionals: PositionalSpec{
-		Rest:         Unmodeled,
-		RestOverride: RestOverride{Flags: []string{"--get", "--get-all", "--get-regexp"}, Role: Literal},
+		Leading:               []OperandRole{Literal},
+		LeadingSkippedByFlags: []string{"--get", "--get-all", "--get-regexp"},
+		LeadingOptional:       true,
+		Rest:                  Unmodeled,
+		RestOverride:          RestOverride{Flags: []string{"--get", "--get-all", "--get-regexp"}, Role: Literal},
 	},
 	Stdin:        StdinNever,
 	Stdout:       StdoutMetadata,

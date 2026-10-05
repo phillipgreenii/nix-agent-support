@@ -8624,5 +8624,117 @@
     "rules_config": {},
     "expected_verdict": "approve",
     "notes": "Instructed by claude-marketplace/pb (unstick-beads.md)."
+  },
+  {
+    "case": "git_config_bare_key_read_approve",
+    "tags": ["git-config", "pg2-0rqxd"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git config user.name"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-0rqxd: exactly one positional operand and no write flag is the deprecated spelling of git config get <name>: a read."
+  },
+  {
+    "case": "git_config_bare_key_read_pgii_primary_branch_approve",
+    "tags": ["git-config", "pg2-0rqxd"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git config pgii-integrate-branch.primaryBranch"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-0rqxd: the bare form pb:drain-beads LAND instructs to resolve the primary branch."
+  },
+  {
+    "case": "git_config_bare_key_value_write_not_approve",
+    "tags": ["git-config", "pg2-0rqxd"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git config user.name foo"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-0rqxd: two operands (name value) is the write form; must not approve."
+  },
+  {
+    "case": "git_config_bare_key_value_pgii_write_not_approve",
+    "tags": ["git-config", "pg2-0rqxd"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git config pgii-integrate-branch.primaryBranch main"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-0rqxd: two operands is a write of the primary-branch key; must not approve."
+  },
+  {
+    "case": "git_config_bare_three_operands_not_approve",
+    "tags": ["git-config", "pg2-0rqxd"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git config user.name foo bar"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-0rqxd: name value value-pattern is the write form; must not approve."
+  },
+  {
+    "case": "git_config_unset_not_approve",
+    "tags": ["git-config", "pg2-0rqxd"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git config --unset user.name"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-0rqxd: --unset is an unmodeled write flag; must not approve."
+  },
+  {
+    "case": "git_config_global_write_not_approve",
+    "tags": ["git-config", "pg2-0rqxd"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git config --global user.name foo"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-0rqxd: scope flag plus value is a write to the global config; must not approve."
   }
 ]

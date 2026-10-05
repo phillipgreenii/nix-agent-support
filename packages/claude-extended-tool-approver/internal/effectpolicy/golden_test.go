@@ -1020,6 +1020,18 @@ var goldenCases = []goldenCase{
 	{"git_config_get_user_name", "git config --get user.name", evalcontract.Approve, nil},
 	{"git_config_user_name_x", "git config user.name x", evalcontract.Abstain, nil},
 	{"git_config_get_value_pattern", "git config --get user.name foo", evalcontract.Approve, nil},
+	// pg2-0rqxd: the bare one-operand read `git config <key>` (the
+	// deprecated spelling of `git config get <key>`) is a read; two or more
+	// operands (or any write/edit flag) stay a write/unmodeled -> Abstain.
+	{"git_config_bare_key_read", "git config user.name", evalcontract.Approve, nil},
+	{"git_config_bare_key_read_pgii", "git config pgii-integrate-branch.primaryBranch", evalcontract.Approve, nil},
+	{"git_config_bare_key_value_pattern_write", "git config user.name foo bar", evalcontract.Abstain, nil},
+	{"git_config_list", "git config --list", evalcontract.Approve, nil},
+	{"git_config_unset_key", "git config --unset user.name", evalcontract.Abstain, nil},
+	{"git_config_add_key_value", "git config --add user.name x", evalcontract.Abstain, nil},
+	{"git_config_global_key", "git config --global user.name", evalcontract.Abstain, nil},
+	{"git_config_edit", "git config --edit", evalcontract.Abstain, nil},
+	{"git_config_no_operand", "git config", evalcontract.Approve, nil},
 
 	// git add: pathspecs are PathRead; implicit PathModify of ".git" always
 	// fires (staging always writes the index).
