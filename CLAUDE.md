@@ -74,7 +74,10 @@ consumer; `darwin/modules/pa-monitor` keeps only the system-scope Grafana wiring
   not import personal's home module. Gate the ENTRY on `daemon.enable` with `mkIf`.
 - `execPath` is unsupported in the HM scope (asserted by the option). `manageLogs.enable` IS supported there,
   hourly-only (`phillipgreenii-nix-personal` ADR 0056): the shared rotator covers the PRIMARY user's
-  HM entries; there is no startup-rotation preamble in an HM wrapper.
+  HM entries; there is no startup-rotation preamble in an HM wrapper. `manageLogs.enable` now DEFAULTS
+  to `true` for every launchd registration (pg2-27nja): a module opts out with
+  `manageLogs.enable = false` plus a one-line justification only when the tool cannot tolerate
+  copy-truncate rotation. None in this repo does (audit: personal ADR 0056 section 5).
 - OTel settings come from `osConfig.phillipgreenii.observability` read null-safely (`osConfig ? null`),
   not from `home-manager.sharedModules`.
 

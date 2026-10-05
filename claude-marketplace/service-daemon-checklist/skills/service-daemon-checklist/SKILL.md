@@ -46,8 +46,8 @@ update the canonical doc, not this skill's body.
    ever request such a permission, set `execPath = "${pkg}/bin/<name>";` instead of `script`
    (`phillipgreenii-nix-personal` ADR 0054) — mutually exclusive with `script`. An `execPath` USER
    AGENT may still set `manageLogs.enable = true` (hourly rotation only, no startup rotation;
-   personal ADR 0056); an `execPath` DAEMON MUST set `manageLogs.enable = false` (it gets neither
-   rotation path, so enabling it is an evaluation error).
+   personal ADR 0056); an `execPath` DAEMON that has log files MUST set `manageLogs.enable = false` (it gets
+   neither rotation path, so the now-default-on option is an evaluation error).
 
 2. **Will its logs be collected by otel?** Declare a
    `phillipgreenii.observability.logSources.<name>` entry (`phillipgreenii-nix-support-apps` ADR
@@ -57,9 +57,14 @@ update the canonical doc, not this skill's body.
    nothing worth shipping (e.g. a shared log-rotator daemon) can skip this, but make that a
    deliberate decision, not an oversight.
 
-3. **Do its logs rotate?** Set `manageLogs.enable = true;` on the `launchdServices` entry
-   (default `false`). Bounds `StandardOutPath`/`StandardErrorPath` at a size threshold with a
+3. **Do its logs rotate?** Automatic: `manageLogs.enable` defaults to `true` on every
+   `launchdServices` entry (personal ADR 0056, pg2-27nja), so do nothing unless the tool cannot
+   tolerate copy-truncate rotation. Bounds `StandardOutPath`/`StandardErrorPath` at a size threshold with a
    retained archive count, both at startup and — for user agents — via an hourly shared rotator.
+   A service with no log files is a no-op. Opt out with `manageLogs.enable = false;` plus a one-line
+   justification in the service's own module only when the tool truncates its own log with
+   `exec >file`, tails it by byte offset, or a `logSources` glob would match the `<file>.<n>`
+   archives.
    `execPath` user agents and Home-Manager-scoped agents (primary user) get the hourly pass only,
    with no startup rotation (personal ADR 0056). Requires the log path to be STATIC at nix eval time. **This is the mechanism the 2026-09-24
    disk-full incident (`pg2-jw8ji`) existed to close** — a service that skips this and logs
