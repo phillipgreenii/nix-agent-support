@@ -104,6 +104,9 @@ func runSpecDriftCheck(cmd *cobra.Command) error {
 	for _, d := range drifts {
 		fmt.Fprintf(cmd.OutOrStdout(), "spec-drift-check: %s: %s\n", d.Name, d.Reason)
 	}
+	if hint := specdrift.RecordHint(drifts); hint != "" {
+		fmt.Fprintln(cmd.OutOrStdout(), hint)
+	}
 	os.Exit(1)
 	return nil
 }

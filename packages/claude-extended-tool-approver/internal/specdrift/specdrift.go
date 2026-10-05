@@ -372,3 +372,31 @@ func Check(fsys fs.FS, dataDir, goos string, recorded map[string]*string, captur
 	sort.Slice(drifts, func(i, j int) bool { return drifts[i].Name < drifts[j].Name })
 	return drifts, nil
 }
+
+// helpDriftReasonPrefix starts the Reason of a Drift that is a hash mismatch
+// (as opposed to a missing entry, a null mismatch or an unreachable binary).
+const helpDriftReasonPrefix = "--help drift:"
+
+// RecordHint returns the follow-up note a failing check prints after its
+// per-command Drift lines, or "" when none of drifts is a --help hash
+// mismatch (the other failure modes are not fixed by re-recording).
+//
+// It exists because some tools' top-level --help changes whenever the tool
+// grows: a cobra root lists every subcommand with its one-line description
+// (pg-desk is under active development), so adding, renaming or re-describing
+// one verb legitimately changes the hash. That is deliberately NOT worked
+// around with a per-tool partial hash: the verb list is exactly what
+// determines which subcommands the embedded spec must model, so hashing less
+// would hide a real spec-relevant change. The fix is the documented
+// two-step: re-check the spec against the new help, then re-record.
+func RecordHint(drifts []Drift) string {
+	for _, d := range drifts {
+		if strings.HasPrefix(d.Reason, helpDriftReasonPrefix) {
+			return "spec-drift-check: a --help drift means the tool's help text changed since " + HelpHashesFile + ` was recorded.
+spec-drift-check: 1. Review the tool's new --help against its embedded spec (a new, renamed or removed subcommand or flag may need a spec change).
+spec-drift-check: 2. Then re-record: replace the tool's entry in internal/embeddedspecs/data/` + HelpHashesFile + ` with the "live" hash printed above (the shared baseline; a one-line change), or run spec-drift-check --embedded --record in the same pinned environment this check runs in.
+spec-drift-check: See the ceta-spec-gen skill's references/gates-checklist.md, "--help drift check clean".`
+		}
+	}
+	return ""
+}

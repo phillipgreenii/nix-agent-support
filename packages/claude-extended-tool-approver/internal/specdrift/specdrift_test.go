@@ -312,3 +312,35 @@ func TestLoadPlatformHashesAndOverlay(t *testing.T) {
 		t.Errorf("Overlay = %v, want only jq=cc and bash=ee", ov)
 	}
 }
+
+// TestRecordHint pins when the failing check tells the reader how to
+// re-record: only for a --help hash mismatch, which is the one failure that
+// re-recording fixes (pg2-w9xja: a growing tool such as pg-desk drifts on
+// every new verb).
+func TestRecordHint(t *testing.T) {
+	if got := RecordHint(nil); got != "" {
+		t.Errorf("RecordHint(nil) = %q, want empty", got)
+	}
+	notRecordable := []Drift{
+		{Name: "a", Reason: "missing from help-hashes.json"},
+		{Name: "b", Reason: "binary not on PATH: boom"},
+		{Name: "c", Reason: "recorded as exempt (null) in help-hashes.json but is not in the exemption list"},
+	}
+	if got := RecordHint(notRecordable); got != "" {
+		t.Errorf("RecordHint(non-hash drifts) = %q, want empty", got)
+	}
+
+	// Run through Check so the hint keys off the Reason Check really emits.
+	recorded := map[string]*string{"cd": nil, "export": nil, "jq": strPtr(Hash("usage: jq"))}
+	stub := func(string) (string, error) { return "usage: jq (a new subcommand)", nil }
+	drifts, err := Check(fixtureFS(), "data", "linux", recorded, stub)
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	got := RecordHint(drifts)
+	for _, want := range []string{"--record", "Review the tool's new --help"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("RecordHint(hash drift) = %q, missing %q", got, want)
+		}
+	}
+}

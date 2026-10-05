@@ -68,6 +68,26 @@ ships from another flake; `specdrift.ExemptOn` — per-GOOS, `ps`/`pgrep` on dar
 `nativeBuildInputs`. Regenerating the embedded JSON (`go run ./cmd/genspecs`) never rewrites
 `help-hashes*.json`, so recorded hashes survive it.
 
+**A growing tool re-drifts on every change (pg-desk).** The hash covers the whole top-level
+`--help`, and a cobra-style root lists every subcommand with its description, so adding,
+renaming, removing or re-describing a verb of an actively developed tool (the canonical case is
+`pg-desk`) MUST be followed by re-recording that tool's `help-hashes.json` entry in the same
+change; otherwise the `claude-extended-tool-approver-spec-help-drift` check fails with
+`--help drift: recorded <old>, live <new>`. The step is:
+
+1. compare the tool's new `--help` with its embedded spec and update the spec (and its citations)
+   if a subcommand or flag it models was added, renamed or removed;
+2. replace that tool's entry in `internal/embeddedspecs/data/help-hashes.json` with the `live`
+   hash from the failure line (a one-line change; the hash is platform-independent for a tool
+   whose help does not vary by OS), or run `spec-drift-check --embedded --record` in the pinned
+   environment. On a non-linux host `--record` writes only a `help-hashes.<goos>.json` overlay,
+   never the shared baseline.
+
+The check MUST NOT be weakened to hash only part of a tool's help (for example only `Usage:` and
+`Flags:`): the subcommand list is what determines which subcommands the spec must model, so
+excluding it would hide exactly the drift the check exists to catch. The check's failure output
+repeats these steps (`specdrift.RecordHint`).
+
 ## 4. Goldens pass
 
 **Tool/runner**: **no goldens-sidecar runner is wired** (the practical stand-in is below).

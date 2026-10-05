@@ -295,7 +295,9 @@ plugin instructs, the route is therefore:
 4. record the tool's `--help` hash (`spec-drift-check --embedded --record` in the same pinned
    environment the `claude-extended-tool-approver-spec-help-drift` check uses; a tool with no
    on-PATH binary is added to `specdrift.Exempt` / the `.sh` helper-script rule instead) and add
-   the package to that check's `nativeBuildInputs` in `flake.nix`;
+   the package to that check's `nativeBuildInputs` in `flake.nix`. A later subcommand or flag
+   change to a recorded tool MUST re-record its entry the same way (`references/gates-checklist.md`,
+   gate 3);
 5. add `approve` rows (and guardrail `not-approve`/`reject` rows) to
    `internal/goldencorpus/testdata/corpus.json` and grade them with `evaluate --corpus` (see
    "Validation": it reports misses but exits 0), and add the shapes to the executable inventory
