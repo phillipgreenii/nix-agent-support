@@ -63,6 +63,7 @@ back here — not the full list.
 | [`open.md`](open.md)                                         | `pg-desk open`                                                                                         |
 | [`hide-unhide-wip.md`](hide-unhide-wip.md)                   | `pg-desk hide`/`unhide`/`wip`                                                                          |
 | [`feedback.md`](feedback.md)                                 | `pg-desk feedback list`/`feedback set`                                                                 |
+| [`history.md`](history.md)                                   | `pg-desk pr`/`issue`/`thread` groups and `<type> history`                                              |
 | [`links.md`](links.md)                                       | `pg-desk links` — read-only batch lookup of PR/issue/thread/build cross-reference links                |
 | [`operator-commands.md`](operator-commands.md)               | `show`, `status`, `sweep`, `doctor`, `heartbeat`, `heartbeat-item`                                     |
 | [`import-pg-pr-annotations.md`](import-pg-pr-annotations.md) | The one-shot pg-pr cutover tool                                                                        |

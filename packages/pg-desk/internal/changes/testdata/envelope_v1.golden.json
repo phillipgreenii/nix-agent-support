@@ -1,0 +1,32 @@
+{
+  "contract": "pg-desk.changes/v1",
+  "type": "pr",
+  "consumer": "pg-router",
+  "cursor": {
+    "from": 18400,
+    "to": 18422
+  },
+  "sources": [
+    {
+      "query": "mine",
+      "status": "ok"
+    },
+    {
+      "query": "team",
+      "status": "degraded",
+      "reason": "rate_limited"
+    }
+  ],
+  "records": [
+    {
+      "seq": 18422,
+      "type": "pr",
+      "id": "acme/api#123",
+      "title": "Add retry to client",
+      "version": 37,
+      "kinds": ["head_changed", "feedback_changed"],
+      "origin": "pg-connector",
+      "at": "2026-09-29T14:03:11Z"
+    }
+  ]
+}
