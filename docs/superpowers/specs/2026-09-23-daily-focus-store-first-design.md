@@ -1,7 +1,9 @@
 # Daily focus, store-first: phase 15 of the pg-desk/connector program
 
 - **Date**: 2026-09-23
-- **Status**: Draft — pending operator review
+- **Status**: Draft — the ranking model, candidate set, epic slot rule and rank placement (section 6,
+  D-F11) were ruled by the operator on 2026-10-05; the rest of the document is pending operator
+  review and is NOT approved
 - **Bead**: `pg2-2j5ac.27` (this design's own tracking bead; phase 15's decompose-trigger is
   `blocked-by` it)
 - **Depends on**: `pg2-2j5ac.46` (a new, external prerequisite design session — widening
@@ -33,7 +35,8 @@ unrelated per the v2 doc's own §0 cross-reference) or any PR-side pg-desk behav
 
 ## 2. Decisions ledger
 
-Operator rulings from the 2026-09-23 design session that produced this document. D-F7 was made
+Operator rulings from the 2026-09-23 design session that produced this document, plus D-F11 from
+the 2026-10-05 ranking session (which supersedes D-F7). D-F7 was made
 in the operator's absence (a 10-minute `AskUserQuestion` timeout) on the session's best judgment,
 per precedent already set twice earlier in the same session — it is flagged for revisit in §11,
 not silently assumed settled.
@@ -46,10 +49,11 @@ not silently assumed settled.
 | D-F4  | The per-day "focus bead" (one bead with wired blocking deps) retires. "Today's focus" becomes a `pg-desk` view/query (`focus_selection`/`focus_period`, §5), generalizing to week/sprint via a `period_type` column rather than a new bead type per level (not built this phase — schema-ready only). Beads stay reserved for actual agent-workable signals (D8), never for human plan-tracking.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | D-F5  | Gate replies and pull selections reference candidates by their own `(entity_type, entity_id)` — the same key already exists for a PR/Jira/bead item — never a derived positional handle. `focus show`/`focus select`/`focus pull` always recompute live from current `entity`/`interpretation` rows; nothing is cached or frozen between a `show` and the `select --apply`/`pull` that follows it, so a priority or due-date change is never hidden from the operator.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | D-F6  | `focus_selection` and `focus_period` (§5) use an internal surrogate primary key (`id INTEGER PRIMARY KEY AUTOINCREMENT`) with a `UNIQUE` constraint carrying the natural key, diverging deliberately from every existing pg-desk table (`entity`/`interpretation`/`xref`/`annotation`/`ledger`), which all use a composite natural-column primary key with no surrogate. `focus_selection` references `focus_period` by its surrogate `id` (a real foreign key, not a repeated `period_type`/`period_key` pair) and references `entity` by its own composite key (`repo, entity_type, entity_id`) — `entity` already is the table that establishes an `(entity_type, entity_id)` pair is valid, so `focus_selection` gets that validation from a real foreign key rather than untyped text columns.                                                                                                                                                                                                                                                                                                                                                                                                               |
-| D-F7  | Epic candidacy narrows to "owned by me AND has an open/in_progress child" — the "OR a recently-closed child" half of today's rule is dropped as a recorded loss, because expressing it would need a per-epic follow-up query the static named-query model (§4) cannot do. **Made in the operator's absence; flagged for revisit, §11.**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| D-F7  | **SUPERSEDED 2026-10-05 by D-F11 (candidate set and epic slot rule).** Original text, kept for provenance: epic candidacy narrows to "owned by me AND has an open/in_progress child" — the "OR a recently-closed child" half of today's rule is dropped as a recorded loss, because expressing it would need a per-epic follow-up query the static named-query model (§4) cannot do. **Made in the operator's absence; flagged for revisit, §11.**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | D-F8  | `schema.Issue` gains an `Owner` field (bd's `owner` key — the responsible human), mapped in `pg-connector-issue-beads`'s backend the same way `Assignee`/`Parent` were added by `pg2-akfw5`. `Owner` is distinct from the existing `Assignee` field, which carries bd's claim/actor identity, not ownership — verified live against this workspace's own `bd show`/`bd list --json` output, which return both `owner` and `assignee` as separate keys.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | D-F9  | There is no separate `focus split` verb. `pg-desk focus show` resolves each already-selected row's associated bead and current status unconditionally, folded into its existing per-item output. This is not a new PER-CALL live-lookup cost once `pg2-2j5ac.46` lands (D-F1): an epic's status sits in its own gathered `entity` row (the entity id already is the bead id); a PR anchor's closure is already inferred by pg-desk's own sync step from the PR's own entity state (this half was already true, unaffected by D-F1); a Jira-sourced item's minted/correlated bd task rides along in the `issue-beads-bulk` feed. None of this is true TODAY, before that prerequisite bead lands — D-F9 depends on D-F1's prerequisite, not on anything pre-existing. `close.md`'s survey step becomes a `focus show` call, not a dedicated verb.                                                                                                                                                                                                                                                                                                                                                                  |
 | D-F10 | `focus close`'s per-bead progress note is appended via `pg-connector issue comment` (→ `bd comment`), not today's `bd update --append-notes` (→ bd's separate NOTES field) — a deliberate, named change, not an accidental substitution. Verified both `pg-connector-issue-beads` and `pg-connector-issue-jira` implement `Comment` today (real, tested code on both backends, not a stub), so this needs no new pg-connector capability. Comments are also the better mechanism for this content: bd captures `created_at`/`author` on each comment natively, where NOTES is one unstructured, unbounded-growth text field the caller must manually date-tag (exactly what `df-close-focus.sh`'s `[daily-focus <date>] <progress>` prefix exists to work around). Relatedly: the `[daily-focus <date>]` tag's own PURPOSE splits in two — recording that a bead was part of a day's focus (now redundant; `focus_selection` already durably and queryably records this) vs. carrying forward what actually happened for whoever reads the bead next (not redundant; pg-desk's store holds no narrative text). Only the first purpose retires; the comment's actual content is not a tracking artifact and stays. |
+| D-F11 | **Ranking model, ruled by the operator 2026-10-05** (focused ranking session; supersedes D-F7 and the v2 ranking ported unchanged). Candidate set: everything non-done ASSIGNED to the operator (authored or assigned PRs, assigned Jira issues, beads assigned to or owned by the operator), with no started/ownership filter that hides an item. Slot rule: an epic and its children never use more than one slot; a child takes the slot and the epic is listed only when it is incomplete with no open child. Started: bead in_progress, Jira In Progress category, any open assigned PR. Rank: strict lexicographic tiers, no weights: overdue first (started first, then most overdue), then started, then not started; inside the started and not-started tiers the keys are a due date inside the 7-day horizon, then unblocks, then priority, then age. Placement: the rank is a read-time pure computation inside pg-desk, recomputed on every `focus show/select/pull`; the router-triggered idempotent decider only mints beads for the selected items (this replaces the provisional 2026-10-02 answer that a decider computes the rank). The head-to-head evidence is in section 6.                 |
 
 ## 3. Architecture overview
 
@@ -230,36 +234,69 @@ computation over facts, unchanged in kind from the rest of pg-desk's interpret l
 reads depends entirely on `pg2-2j5ac.46` (§4.1): issue-type `entity` rows only exist once that
 prerequisite lands.
 
-**Candidate set** = current `entity` rows where:
+**Placement (ruled 2026-10-05, D-F11).** The rank is a read-time, side-effect-free computation inside
+pg-desk. The router-triggered idempotent decider does NOT compute it; the decider only mints beads
+for the items the operator actually selects. This replaces the provisional 2026-10-02 answer that a
+focus decider computes the rank: the rank depends on time (overdue, the 7-day horizon) and on
+cross-entity facts (the epic slot rule), and a rank written on an entity change goes stale for both,
+the same reason the attention evaluator is read-time (pg2-m482k, 2026-10-05).
 
-- `entity_type = 'pr'` and the row was surfaced by the `pr-mine` or `pr-team` query, **or**
-- `entity_type = 'issue'`, `Tracker` is the Jira backend, and the row was surfaced by
-  `issue-jira-mine`, **or**
-- `entity_type = 'issue'`, `IssueType = 'epic'`, `Owner` equals the configured operator identity,
-  **and** an `entity` row of type `issue` exists with `Parent` equal to this epic's id and
-  `State = 'in_progress'` (joined in-process against the `issue-beads-bulk` rows — no query).
+**Candidate set** (D-F11): every non-done item ASSIGNED to the operator, with no "started" or
+ownership filter that hides an assigned item:
 
-**Rank**: the exact §4.4 lexicographic tuple from the v2 design, ported unchanged, including its
-two load-bearing details that are easy to drop by paraphrase and are called out explicitly here so
-this document remains the correct standalone reference once the v2 doc retires:
+- PRs the operator authored or was assigned (surfaced by `pr-mine` or `pr-team`),
+- Jira issues assigned to the operator (surfaced by `issue-jira-mine`), and
+- beads whose `Assignee` or `Owner` resolves to the configured operator identity (D-F8).
 
-1. Due-date urgency: only a due date within a **7-day horizon from `--date`** (including overdue)
-   sorts ahead of one without; a due date outside the horizon is deliberately equivalent to no due
-   date for this key (v2 doc §4.4). Source: Jira `duedate` or bd's due date, correlated items
-   inherit the earliest across the group.
-2. Priority: bead P0-P4 directly, Jira priority via the same data-driven mapping table (unmapped
+**Slot rule** (D-F11): an epic and its children MUST NOT consume more than one slot between them.
+A child item takes the slot; the epic is NOT listed separately while it has any open child. An epic
+that is incomplete and has NO open child work is a candidate in its own right, because the operator
+must move it along (create children, split it, and so on). The rule is applied BEFORE the cap line
+is counted. The old D-F7 narrowing ("has an open child") is superseded; the closed-child signal is
+no longer needed, so the sketched `pg-connector-issue-beads` capability is not required.
+
+**Started** (D-F11): a bead with state `in_progress`; a Jira issue in the In Progress status
+category; any open PR assigned to the operator, whether authored or review-assigned. Consequence to
+keep visible: every open assigned PR is started, so PRs rank above non-overdue unstarted beads and
+Jira issues.
+
+**Rank** (D-F11): strict lexicographic tiers, no weights, no arithmetic. The tiers, in order:
+
+1. **Overdue** (due date before `--date`). Within it: started items first, then the most overdue,
+   then unblocks (descending), then priority, then age.
+2. **Started** (not overdue).
+3. **Not started** (not overdue).
+
+Inside tiers 2 and 3 the keys, in order, are:
+
+1. Due date within a **7-day horizon from `--date`**: a nearer date sorts ahead of a farther one,
+   and any date inside the horizon sorts ahead of none. A due date outside the horizon is
+   deliberately equivalent to no due date for this key. Source: Jira `duedate` or bd's due date;
+   correlated items inherit the earliest across the group.
+2. Unblocks (descending): the count of open items this one blocks (bd dependency edges; PR-to-PR
+   once pg-desk has a dependency source, pg2-m482k prerequisite).
+3. Priority: bead P0-P4 directly, Jira priority via the same data-driven mapping table (unmapped
    values, including `Needs Priority`, sort after P4). **A PR with no priority of its own inherits
-   the highest priority among its correlated items, else P2** (v2 doc §4.4) — this inheritance
-   rule is part of the port, not an incidental detail.
-3. Unblocks (descending), then age (descending), then kind+key tiebreak.
+   the highest priority among its correlated items, else P2** (v2 doc section 4.4); this
+   inheritance rule is part of the port, not an incidental detail.
+4. Age (descending), then kind+key tiebreak.
 
-No arithmetic, no weights — this logic is pure computation over facts the store already has, so
-it ports unchanged; the risk this section guards against is a _description_ of the port silently
-dropping the horizon/inheritance clauses, not the logic itself changing.
+Evidence (the operator's head-to-head rulings, 2026-10-05; each pair decided the key order above):
 
-**Cap line**: first `cap` (default 6, `--cap N` override) ranked items are `in_plan: true` for
-_display_ only. Nothing is written by `focus rank` itself — `focus_selection` is written only by
-`select`/`pull` (§7).
+| Pair (first listed wins)                                                | Fixes                                    |
+| ----------------------------------------------------------------------- | ---------------------------------------- |
+| started P2 over unstarted P1, same deadline                             | started outranks priority                |
+| started, blocks nothing over unstarted unblocker                        | started outranks unblocking              |
+| started P1 with no deadline over unstarted P3 due tomorrow              | started outranks a non-overdue deadline  |
+| overdue unstarted P1 over started P3 with no deadline                   | overdue outranks started                 |
+| unstarted P3 due in 3 days over unstarted P1 with no deadline           | deadline outranks priority               |
+| started P3 due tomorrow over started P1 with no deadline                | deadline outranks priority, when started |
+| unstarted P2 unblocking 3 over unstarted P1 blocking none               | unblocking outranks priority             |
+| unstarted, due in 3 days over unstarted, no deadline, unblocks 3 others | deadline outranks unblocking             |
+
+**Cap line**: after the slot rule, the first `cap` (default 6, `--cap N` override) ranked items are
+`in_plan: true` for _display_ only. Nothing is written by `focus rank` itself; `focus_selection` is
+written only by `select`/`pull` (section 7).
 
 ## 7. The `focus` verb family
 
@@ -471,8 +508,8 @@ both live, not just a clean flake check.
   interpret issue-type entities, backend-agnostically, without regressing PR-side behavior. This
   precedes everything below; none of it is meaningful until this prerequisite lands.
 - `pg-desk focus show --date <today>` produces the same candidate set `df-survey` would have,
-  modulo the two recorded narrowings (D-F2's PR repo scope, D-F7's dropped closed-child epic
-  signal).
+  modulo the recorded narrowing of D-F2's PR repo scope, and the deliberate widening of D-F11's
+  candidate set (everything assigned to the operator, with the epic slot rule) over `df-survey`'s.
 - `epics-mine` and `issue-beads-bulk` are each run live at least once (`pg-router run-query` or
   equivalent) with a confirmed non-trivial outcome — real `entity` rows landing for an epic and a
   plain bd task, not just a clean `nix flake check`.
@@ -490,11 +527,15 @@ both live, not just a clean flake check.
 - **`pg2-2j5ac.46`** (§4.1) is a hard, `blocked-by`-wired dependency: phase 15's own decomposition
   cannot start until it closes. Its own design session decides the exact mechanism this document
   deliberately leaves unspecified.
-- **D-F7** (epic candidacy drops the closed-child signal) was decided in the operator's absence.
-  If the operator wants the closed-child half preserved, §4/§6 need revisiting — the
-  new-pg-connector-capability alternative sketched during design (a purpose-built
-  `pg-connector-issue-beads` verb doing the owner+children-including-closed lookup in one call,
-  rather than the generic named-query model) is the fallback if so.
+- **D-F7 is closed:** superseded by D-F11 (2026-10-05). Reconcile in the revision pass, because
+  D-F11 widens the candidate set to everything assigned to the operator and §4.2 (the feeds:
+  `pr-mine`/`pr-team`, `issue-jira-mine`, `epics-mine`, `issue-beads-bulk`) and §4.1 still describe
+  the narrower D-F7 candidate set: the feeds must surface every assigned PR, Jira issue and bead
+  (assignee OR owner), and `epics-mine`'s purpose (landing child `parent` fields for the open-child
+  join) now serves the slot rule instead. Also reconcile §7 (the `focus show` table shows the
+  ranking tier), §9/§10 (the rank test suites), and the unblocks source for PRs.
+- **The rest of the document is not yet reviewed by the operator.** Only section 6 and D-F11 are
+  ruled; approval of the whole document, recorded in this header, is still required before landing.
 - Whether `week`/`sprint` period types are worth building now or genuinely deferred (the schema
   is ready either way; no verb currently implements them).
 
@@ -511,9 +552,9 @@ both live, not just a clean flake check.
   table — rejected for `focus_selection`/`focus_period` specifically, per operator preference
   (D-F6).
 - **A dedicated `pg-connector-issue-beads` capability for exact epic candidacy** (owner +
-  active-or-recently-closed-child, in one call) — not rejected outright, deferred: the simpler
-  recorded-narrowing path (D-F7) ships without new backend code; this is the documented fallback
-  if D-F7 doesn't hold up on review (§12).
+  active-or-recently-closed-child, in one call) — no longer needed: D-F7's narrowing was superseded
+  by D-F11 (2026-10-05), whose slot rule ("an epic is listed only when it has no open child")
+  needs no closed-child signal, so no new backend code is required for epic candidacy.
 - **A separate `focus split` verb** (an earlier draft of this design, matching `df-split-blockers`
   1:1) — rejected; the bead-resolution it performed is real and needed, but bucketing it into
   `closed`/`carried-over` was a shape carried over from the retiring script rather than something
