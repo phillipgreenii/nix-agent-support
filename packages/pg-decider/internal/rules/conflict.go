@@ -35,6 +35,9 @@ func (conflictRule) Evaluate(in decide.Input) decide.Result {
 	if v == nil || (v.Decorations.Relationship != "mine" && v.Decorations.Relationship != "co-owned") {
 		return conflictNotMatched(nil)
 	}
+	if skip, terminal := anchorTerminalSkip(v); terminal {
+		return skip
+	}
 	snap := v.Snapshot
 	switch {
 	case strings.EqualFold(snap.Mergeable, "CONFLICTING"):

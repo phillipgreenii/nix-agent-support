@@ -28,6 +28,9 @@ func (fixciRule) Evaluate(in decide.Input) decide.Result {
 	if v == nil || (v.Decorations.Relationship != "mine" && v.Decorations.Relationship != "co-owned") {
 		return fixciNotMatched(nil)
 	}
+	if skip, terminal := anchorTerminalSkip(v); terminal {
+		return skip
+	}
 	head := v.Snapshot.HeadSHA
 	if head == "" {
 		return fixciNotMatched(nil)

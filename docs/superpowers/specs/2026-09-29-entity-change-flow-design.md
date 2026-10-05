@@ -668,6 +668,15 @@ delivery.
    still evaluates normally.
 3. **rule** — otherwise the row below applies.
 
+**Terminal PRs**: PR state is not a precedence step; each rule owns its condition. A merged or
+closed PR is dead, so every rule that creates, reopens or updates work (`review.head-advanced`,
+`feedback.digest-changed`, `fixci.failing-on-head`, `conflict.present`) and `land.ready` MUST skip
+it (`not matched`, fact `pr_state`), exactly as `anchor.priority` does; otherwise a dead PR with no
+anchor gets work created that `all.closed` closes on the next run. The anchor group
+(`all.closed`, `all.reopened`, `anchor.*`, `adoption`) keeps evaluating a terminal PR. A new rule
+that acts on a live PR MUST apply the same guard (`anchorTerminalSkip` in
+`packages/pg-decider/internal/rules/anchor.go`).
+
 No precedence step and no rule depends on who closed a work item (S26); no closer is recorded or
 read. A closed anchor on an open PR is reopened by `all.reopened` however it was closed (S24);
 `hide` is how to stop work on a PR.

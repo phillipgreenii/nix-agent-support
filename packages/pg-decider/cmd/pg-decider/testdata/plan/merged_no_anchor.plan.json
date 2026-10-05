@@ -1,31 +1,14 @@
 {
-  "actions": [
+  "actions": [],
+  "skipped": [
     {
-      "op": "close",
-      "kind": "review-pr",
-      "target": "bd-2",
-      "fields": {
-        "description": "PR merged"
-      },
       "rule": "all.closed",
+      "reason": "not matched",
       "facts": {
+        "anchor": false,
         "pr_state": "merged"
       }
     },
-    {
-      "op": "close",
-      "kind": "anchor",
-      "target": "bd-1",
-      "fields": {
-        "description": "PR merged"
-      },
-      "rule": "all.closed",
-      "facts": {
-        "pr_state": "merged"
-      }
-    }
-  ],
-  "skipped": [
     {
       "rule": "all.reopened",
       "reason": "not matched",
@@ -39,9 +22,9 @@
     },
     {
       "rule": "anchor.backfill",
-      "reason": "already handled",
+      "reason": "not matched",
       "facts": {
-        "anchor": "bd-1"
+        "anchor": false
       }
     },
     {

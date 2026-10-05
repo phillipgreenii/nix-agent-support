@@ -1,0 +1,18 @@
+pr acme/widgets#42  mine  closed  ready  head=9f3c1e2  ci=FAILURE  conflict=yes
+linked work: none
+
+actions:
+
+skipped:
+  all.closed               not matched  anchor=false pr_state=closed
+  all.reopened             not matched  pr_state=closed
+  anchor.lazy              not matched
+  anchor.backfill          not matched  anchor=false
+  anchor.priority          not matched  pr_state=closed
+  adoption                 not matched
+  adoption.node-id         not matched
+  review.head-advanced     not matched  pr_state=closed
+  feedback.digest-changed  not matched  pr_state=closed
+  fixci.failing-on-head    not matched  pr_state=closed
+  conflict.present         not matched  pr_state=closed
+  land.ready               not matched  pr_state=closed

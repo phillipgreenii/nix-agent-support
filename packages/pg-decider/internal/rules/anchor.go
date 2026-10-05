@@ -64,6 +64,25 @@ func anchorPRState(s view.PRSnapshot) string {
 	return ""
 }
 
+// anchorTerminalSkip is the liveness gate every work-creating rule and
+// land.ready applies before anything else: a merged or closed PR is dead, so
+// those rules skip it (not matched, carrying the pr_state fact) rather than
+// create, reopen or update work that all.closed would close on the next run.
+// It reports false for an open PR and for a snapshot that reports no state.
+// Only the anchor group (all.closed, all.reopened, anchor.*, adoption) keeps
+// evaluating a terminal PR, because mirroring and closing the anchor is their
+// job. The design (7.3) gates by hidden and suppressed kind centrally and
+// leaves every other condition to the rule, so this is a shared per-rule
+// guard rather than a new precedence step; anchor.priority already gates the
+// same way.
+func anchorTerminalSkip(v *view.View) (decide.Result, bool) {
+	st := anchorPRState(v.Snapshot)
+	if st != anchorPRStateClosed && st != anchorPRStateMerged {
+		return decide.Result{}, false
+	}
+	return anchorSkip(action.ReasonNotMatched, map[string]any{"pr_state": st}), true
+}
+
 func anchorSkip(reason string, facts map[string]any) decide.Result {
 	return decide.Result{Skip: &action.Skip{Reason: reason, Facts: facts}}
 }

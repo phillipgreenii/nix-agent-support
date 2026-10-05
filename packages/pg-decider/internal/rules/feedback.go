@@ -33,6 +33,9 @@ func (feedbackDigestChanged) Kind() workitem.Kind { return workitem.KindProcessF
 
 func (feedbackDigestChanged) Evaluate(in decide.Input) decide.Result {
 	v := in.View
+	if skip, terminal := anchorTerminalSkip(v); terminal {
+		return skip
+	}
 	rel := v.Decorations.Relationship
 	if rel != "mine" && rel != "co-owned" {
 		return feedbackSkip(action.ReasonNotMatched, map[string]any{"relationship": rel})

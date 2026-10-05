@@ -32,6 +32,9 @@ func (landReadyRule) Evaluate(in decide.Input) decide.Result {
 	if v == nil || (v.Decorations.Relationship != "mine" && v.Decorations.Relationship != "co-owned") {
 		return landReadyNotMatched(nil)
 	}
+	if skip, terminal := anchorTerminalSkip(v); terminal {
+		return skip
+	}
 	ready := landReadyIs(in)
 	current := v.Annotations.ReadyToLand
 	switch {

@@ -48,6 +48,10 @@ var goldenScenarios = []struct{ name, fixture string }{
 	{"anchor_drift", "pr_anchor_drift"},
 	// A merged PR: the open children and the anchor close.
 	{"merged_open_anchor", "pr_merged_open_anchor"},
+	// A merged or closed PR with no anchor and no work items: every rule
+	// skips, so nothing is created for a dead PR.
+	{"merged_no_anchor", "pr_merged_no_anchor"},
+	{"closed_no_anchor", "pr_closed_no_anchor"},
 	// An open PR whose anchor was closed: the anchor reopens.
 	{"reopened_anchor", "pr_reopened_anchor_closed"},
 }

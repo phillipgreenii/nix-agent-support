@@ -241,6 +241,62 @@ func TestHiddenEntityYieldsZeroActions(t *testing.T) {
 	}
 }
 
+// suiteTerminal returns a mutator that makes the snapshot a merged or closed
+// PR, the two terminal states.
+func suiteTerminal(state string) func(m map[string]any) {
+	return func(m map[string]any) {
+		snap := m["snapshot"].(map[string]any)
+		snap["state"] = "closed"
+		snap["merged"] = state == "merged"
+	}
+}
+
+// A merged or closed PR is dead: no creating rule may open work for it. With
+// no anchor and no work items every rule must skip, so nothing is created
+// only for all.closed to close again on the next run (pg2-pjpwe).
+func TestTerminalPRWithNoAnchorYieldsZeroActions(t *testing.T) {
+	// Precondition: the same view, open, makes the creating rules act, so the
+	// zero below is not vacuous.
+	open := suiteDecide(suiteLoad(t, "pr_new_everything"))
+	for _, rule := range []string{"review.head-advanced", "feedback.digest-changed", "fixci.failing-on-head", "conflict.present", "anchor.lazy"} {
+		if len(suiteActionsOfRule(open, rule)) == 0 {
+			t.Fatalf("open pr_new_everything: rule %s produced no action; the terminal check would be vacuous", rule)
+		}
+	}
+
+	for _, state := range []string{"merged", "closed"} {
+		t.Run(state, func(t *testing.T) {
+			res := suiteDecide(suitePatch(t, "pr_new_everything", suiteTerminal(state)))
+			if len(res.Actions) != 0 {
+				t.Fatalf("%s PR with no anchor produced actions: %+v", state, res.Actions)
+			}
+			if got, want := len(res.Skipped), len(suiteRegisteredIDs()); got != want {
+				t.Errorf("skipped %d rules, registry has %d", got, want)
+			}
+		})
+	}
+}
+
+// A terminal PR gets no ready_to_land annotation either, and no work item
+// rule reopens or updates an existing item for it (only the anchor group
+// writes: the all.closed cascade and anchor.backfill's mirror).
+func TestTerminalPRNeverGainsReadinessOrReopensWork(t *testing.T) {
+	for _, state := range []string{"merged", "closed"} {
+		t.Run(state, func(t *testing.T) {
+			res := suiteDecide(suitePatch(t, "pr_land_ready", suiteTerminal(state)))
+			for _, a := range res.Actions {
+				// The anchor group keeps mirroring and closing; nothing else acts.
+				if a.Rule != "all.closed" && a.Rule != "anchor.backfill" {
+					t.Errorf("%s PR: rule %s acted: %s", state, a.Rule, suiteShape(a))
+				}
+			}
+			if r, ok := suiteSkipReason(res, "land.ready"); !ok || r != action.ReasonNotMatched {
+				t.Errorf("land.ready = %q (listed %v), want %q", r, ok, action.ReasonNotMatched)
+			}
+		})
+	}
+}
+
 func TestSuppressKindSkipsOnlyThatKind(t *testing.T) {
 	ruleOfKind := map[workitem.Kind]string{}
 	for _, r := range decide.RulesFor(decide.EntityTypePR) {

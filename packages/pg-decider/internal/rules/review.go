@@ -40,6 +40,9 @@ func (reviewHeadAdvanced) Kind() workitem.Kind { return workitem.KindReviewPR }
 
 func (reviewHeadAdvanced) Evaluate(in decide.Input) decide.Result {
 	v := in.View
+	if skip, terminal := anchorTerminalSkip(v); terminal {
+		return skip
+	}
 	rel := v.Decorations.Relationship
 	if !reviewQualifies(rel, v.Snapshot.Draft) {
 		return reviewSkip(action.ReasonNotMatched, map[string]any{"relationship": rel, "draft": v.Snapshot.Draft})

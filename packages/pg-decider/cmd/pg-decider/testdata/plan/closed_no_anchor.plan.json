@@ -1,36 +1,19 @@
 {
-  "actions": [
+  "actions": [],
+  "skipped": [
     {
-      "op": "close",
-      "kind": "review-pr",
-      "target": "bd-2",
-      "fields": {
-        "description": "PR merged"
-      },
       "rule": "all.closed",
+      "reason": "not matched",
       "facts": {
-        "pr_state": "merged"
+        "anchor": false,
+        "pr_state": "closed"
       }
     },
-    {
-      "op": "close",
-      "kind": "anchor",
-      "target": "bd-1",
-      "fields": {
-        "description": "PR merged"
-      },
-      "rule": "all.closed",
-      "facts": {
-        "pr_state": "merged"
-      }
-    }
-  ],
-  "skipped": [
     {
       "rule": "all.reopened",
       "reason": "not matched",
       "facts": {
-        "pr_state": "merged"
+        "pr_state": "closed"
       }
     },
     {
@@ -39,16 +22,16 @@
     },
     {
       "rule": "anchor.backfill",
-      "reason": "already handled",
+      "reason": "not matched",
       "facts": {
-        "anchor": "bd-1"
+        "anchor": false
       }
     },
     {
       "rule": "anchor.priority",
       "reason": "not matched",
       "facts": {
-        "pr_state": "merged"
+        "pr_state": "closed"
       }
     },
     {
@@ -63,35 +46,35 @@
       "rule": "review.head-advanced",
       "reason": "not matched",
       "facts": {
-        "pr_state": "merged"
+        "pr_state": "closed"
       }
     },
     {
       "rule": "feedback.digest-changed",
       "reason": "not matched",
       "facts": {
-        "pr_state": "merged"
+        "pr_state": "closed"
       }
     },
     {
       "rule": "fixci.failing-on-head",
       "reason": "not matched",
       "facts": {
-        "pr_state": "merged"
+        "pr_state": "closed"
       }
     },
     {
       "rule": "conflict.present",
       "reason": "not matched",
       "facts": {
-        "pr_state": "merged"
+        "pr_state": "closed"
       }
     },
     {
       "rule": "land.ready",
       "reason": "not matched",
       "facts": {
-        "pr_state": "merged"
+        "pr_state": "closed"
       }
     }
   ]
