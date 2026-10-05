@@ -8736,5 +8736,689 @@
     "rules_config": {},
     "expected_verdict": "not-approve",
     "notes": "pg2-0rqxd: scope flag plus value is a write to the global config; must not approve."
+  },
+  {
+    "case": "zr_plugin_d_gs_push",
+    "tags": ["zr-plugin", "pg2-maars", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack push"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-maars (class D, operator ruling 2026-10-04/05 on pg2-cjfpy and pg2-maars): instructed by the gh-stack plugin; graded APPROVE with EXISTING effectpolicy operations only (push-lease on the default remote, SKILL.md 'Push branches to remote')."
+  },
+  {
+    "case": "zr_plugin_d_gs_push_remote",
+    "tags": ["zr-plugin", "pg2-maars", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack push --remote origin"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-maars (class D, operator ruling 2026-10-04/05 on pg2-cjfpy and pg2-maars): instructed by the gh-stack plugin; graded APPROVE with EXISTING effectpolicy operations only (push-lease on a plain remote name)."
+  },
+  {
+    "case": "zr_plugin_d_gs_submit_auto",
+    "tags": ["zr-plugin", "pg2-maars", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack submit --auto"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-maars (class D, operator ruling 2026-10-04/05 on pg2-cjfpy and pg2-maars): instructed by the gh-stack plugin; graded APPROVE with EXISTING effectpolicy operations only (push-lease plus draft-first PR creation: --auto is what makes new PRs drafts per gh stack submit --help)."
+  },
+  {
+    "case": "zr_plugin_d_gs_submit_auto_remote",
+    "tags": ["zr-plugin", "pg2-maars", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack submit --auto --remote origin"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-maars (class D, operator ruling 2026-10-04/05 on pg2-cjfpy and pg2-maars): instructed by the gh-stack plugin; graded APPROVE with EXISTING effectpolicy operations only (push-lease on a plain remote name plus draft-first PR creation)."
+  },
+  {
+    "case": "zr_plugin_d_gs_sync",
+    "tags": ["zr-plugin", "pg2-maars", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack sync"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-maars (class D, operator ruling 2026-10-04/05 on pg2-cjfpy and pg2-maars): instructed by the gh-stack plugin; graded APPROVE with EXISTING effectpolicy operations only (push-lease on the default remote plus a local rebase of the checkout)."
+  },
+  {
+    "case": "zr_plugin_d_gs_sync_prune",
+    "tags": ["zr-plugin", "pg2-maars", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack sync --prune"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-maars (class D, operator ruling 2026-10-04/05 on pg2-cjfpy and pg2-maars): instructed by the gh-stack plugin; graded APPROVE with EXISTING effectpolicy operations only (push-lease plus pruning merged local branches)."
+  },
+  {
+    "case": "zr_plugin_d_gs_sync_remote",
+    "tags": ["zr-plugin", "pg2-maars", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack sync --remote origin"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-maars (class D, operator ruling 2026-10-04/05 on pg2-cjfpy and pg2-maars): instructed by the gh-stack plugin; graded APPROVE with EXISTING effectpolicy operations only (push-lease on a plain remote name)."
+  },
+  {
+    "case": "zr_plugin_d_gs_unstack_local",
+    "tags": ["zr-plugin", "pg2-maars", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack unstack --local"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-maars (class D, operator ruling 2026-10-04/05 on pg2-cjfpy and pg2-maars): instructed by the gh-stack plugin; graded APPROVE with EXISTING effectpolicy operations only (local stack metadata only; --local drops the remote mutation)."
+  },
+  {
+    "case": "zr_plugin_d_df_close_focus",
+    "tags": ["zr-plugin", "pg2-maars", "daily-focus", "tracker-write"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "df-close-focus pg2-abc 2026-10-04 --notes-file notes.jsonl --summary-file summary.txt --reason 'day done' --actor sess-1"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-maars (class D, operator ruling 2026-10-04/05 on pg2-cjfpy and pg2-maars): instructed by the daily-focus plugin; graded APPROVE with EXISTING effectpolicy operations only (tracker-write on beads)."
+  },
+  {
+    "case": "zr_plugin_d_df_wire_manifest",
+    "tags": ["zr-plugin", "pg2-maars", "daily-focus", "tracker-write"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "df-wire pg2-abc --manifest deep.json --actor sess-1"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-maars (class D, operator ruling 2026-10-04/05 on pg2-cjfpy and pg2-maars): instructed by the daily-focus plugin; graded APPROVE with EXISTING effectpolicy operations only (tracker-write on beads)."
+  },
+  {
+    "case": "zr_plugin_d_df_wire_flags",
+    "tags": ["zr-plugin", "pg2-maars", "daily-focus", "tracker-write"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "df-wire pg2-abc --manifest deep.json --drop p1,j2 --merge p3=p4 --dry-run --actor sess-1"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-maars (class D, operator ruling 2026-10-04/05 on pg2-cjfpy and pg2-maars): instructed by the daily-focus plugin; graded APPROVE with EXISTING effectpolicy operations only (tracker-write on beads)."
+  },
+  {
+    "case": "zr_plugin_d_df_wire_records_stdin",
+    "tags": ["zr-plugin", "pg2-maars", "daily-focus", "tracker-write"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "echo '[]' | df-wire pg2-abc --records - --actor sess-1"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-maars (class D, operator ruling 2026-10-04/05 on pg2-cjfpy and pg2-maars): instructed by the daily-focus plugin; graded APPROVE with EXISTING effectpolicy operations only (tracker-write on beads, records on stdin)."
+  },
+  {
+    "case": "zr_plugin_d_df_deferred_write",
+    "tags": ["zr-plugin", "pg2-maars", "daily-focus", "tracker-write"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "df-deferred write pg2-abc --manifest items.json --actor sess-1"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-maars (class D, operator ruling 2026-10-04/05 on pg2-cjfpy and pg2-maars): instructed by the daily-focus plugin; graded APPROVE with EXISTING effectpolicy operations only (tracker-write on beads)."
+  },
+  {
+    "case": "zr_plugin_d_df_deferred_write_dry",
+    "tags": ["zr-plugin", "pg2-maars", "daily-focus", "tracker-write"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "df-deferred write pg2-abc --manifest items.json --dry-run --actor sess-1"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-maars (class D, operator ruling 2026-10-04/05 on pg2-cjfpy and pg2-maars): instructed by the daily-focus plugin; graded APPROVE with EXISTING effectpolicy operations only (tracker-write on beads)."
+  },
+  {
+    "case": "zr_plugin_d_df_deferred_read",
+    "tags": ["zr-plugin", "pg2-maars", "daily-focus"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "df-deferred read pg2-abc"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-maars (class D, operator ruling 2026-10-04/05 on pg2-cjfpy and pg2-maars): instructed by the daily-focus plugin; graded APPROVE with EXISTING effectpolicy operations only (read of beads)."
+  },
+  {
+    "case": "zr_plugin_d_df_pull",
+    "tags": ["zr-plugin", "pg2-maars", "daily-focus", "tracker-write"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "df-pull --actor sess-1"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-maars (class D, operator ruling 2026-10-04/05 on pg2-cjfpy and pg2-maars): instructed by the daily-focus plugin; graded APPROVE with EXISTING effectpolicy operations only (tracker-write on beads plus reads of GitHub and Jira)."
+  },
+  {
+    "case": "zr_plugin_d_df_pull_k",
+    "tags": ["zr-plugin", "pg2-maars", "daily-focus", "tracker-write"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "df-pull 2 --actor sess-1"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-maars (class D, operator ruling 2026-10-04/05 on pg2-cjfpy and pg2-maars): instructed by the daily-focus plugin; graded APPROVE with EXISTING effectpolicy operations only (tracker-write on beads plus reads of GitHub and Jira)."
+  },
+  {
+    "case": "zr_plugin_d_df_pull_handles",
+    "tags": ["zr-plugin", "pg2-maars", "daily-focus", "tracker-write"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "df-pull p3 j2 --dry-run --actor sess-1"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-maars (class D, operator ruling 2026-10-04/05 on pg2-cjfpy and pg2-maars): instructed by the daily-focus plugin; graded APPROVE with EXISTING effectpolicy operations only (tracker-write on beads plus reads of GitHub and Jira)."
+  },
+  {
+    "case": "zr_plugin_d_lat_wire_file",
+    "tags": ["zr-plugin", "pg2-maars", "local-alert-triage", "tracker-write"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "lat-wire --decisions d.json --actor sess-1"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-maars (class D, operator ruling 2026-10-04/05 on pg2-cjfpy and pg2-maars): instructed by the local-alert-triage plugin; graded APPROVE with EXISTING effectpolicy operations only (tracker-write on beads)."
+  },
+  {
+    "case": "zr_plugin_d_lat_wire_stdin",
+    "tags": ["zr-plugin", "pg2-maars", "local-alert-triage", "tracker-write"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "echo '{}' | lat-wire --decisions - --actor sess-1"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-maars (class D, operator ruling 2026-10-04/05 on pg2-cjfpy and pg2-maars): instructed by the local-alert-triage plugin; graded APPROVE with EXISTING effectpolicy operations only (tracker-write on beads, decisions on stdin)."
+  },
+  {
+    "case": "zr_plugin_d_rc_claim",
+    "tags": ["zr-plugin", "pg2-maars", "zr-refactor", "tracker-write"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "rc-claim rc:foo rc-fix --actor sess-1-rc"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-maars (class D, operator ruling 2026-10-04/05 on pg2-cjfpy and pg2-maars): instructed by the zr-refactor plugin; graded APPROVE with EXISTING effectpolicy operations only (tracker-write on beads)."
+  },
+  {
+    "case": "zr_plugin_d_rc_claim_app",
+    "tags": ["zr-plugin", "pg2-maars", "zr-refactor", "tracker-write"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "rc-claim rc:foo rc-scan --app rc-app:x --exclude-app rc-app:y --actor sess-1-rc"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-maars (class D, operator ruling 2026-10-04/05 on pg2-cjfpy and pg2-maars): instructed by the zr-refactor plugin; graded APPROVE with EXISTING effectpolicy operations only (tracker-write on beads)."
+  },
+  {
+    "case": "zr_plugin_d_rc_park",
+    "tags": ["zr-plugin", "pg2-maars", "zr-refactor", "tracker-write"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "rc-park pg2-abc 'stuck on a merge conflict' --fingerprint a.kt:x --actor sess-1-rc"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-maars (class D, operator ruling 2026-10-04/05 on pg2-cjfpy and pg2-maars): instructed by the zr-refactor plugin; graded APPROVE with EXISTING effectpolicy operations only (tracker-write on beads)."
+  },
+  {
+    "case": "zr_plugin_d_rc_park_unpushed",
+    "tags": ["zr-plugin", "pg2-maars", "zr-refactor", "tracker-write"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "rc-park pg2-abc 'unpushed work' --fingerprint a.kt:x --unpushed --isolation 'wt feature/x' --actor sess-1-rc"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-maars (class D, operator ruling 2026-10-04/05 on pg2-cjfpy and pg2-maars): instructed by the zr-refactor plugin; graded APPROVE with EXISTING effectpolicy operations only (tracker-write on beads)."
+  },
+  {
+    "case": "zr_plugin_d_rc_fp",
+    "tags": ["zr-plugin", "pg2-maars", "zr-refactor", "tracker-write"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "rc-fp pg2-app a.kt:x 'fixed in abc123' --actor sess-1-rc"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-maars (class D, operator ruling 2026-10-04/05 on pg2-cjfpy and pg2-maars): instructed by the zr-refactor plugin; graded APPROVE with EXISTING effectpolicy operations only (tracker-write on beads)."
+  },
+  {
+    "case": "zr_plugin_d_held_gs_submit_bare",
+    "tags": ["zr-plugin", "pg2-maars", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack submit"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-maars: instructed by the gh-stack plugin but held (NOT approve) until the --auto draft default is absent (the verb prompts and defaults new PRs to ready); pinned so the R4 cutover replay cannot approve it by accident."
+  },
+  {
+    "case": "zr_plugin_d_held_gs_link",
+    "tags": ["zr-plugin", "pg2-maars", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack link branch-a branch-b"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-maars: instructed by the gh-stack plugin but held (NOT approve) until the draft default of the PRs it creates is documented nowhere and it edits existing PR bases (needs a PR-write judgment); pinned so the R4 cutover replay cannot approve it by accident."
+  },
+  {
+    "case": "zr_plugin_d_held_gs_unstack",
+    "tags": ["zr-plugin", "pg2-maars", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack unstack"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-maars: instructed by the gh-stack plugin but held (NOT approve) until remote stack deletion needs a new policy judgment (gate 5, tc-o14i5.3.10); pinned so the R4 cutover replay cannot approve it by accident."
+  },
+  {
+    "case": "zr_plugin_d_held_gs_unstack_n",
+    "tags": ["zr-plugin", "pg2-maars", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack unstack 7"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-maars: instructed by the gh-stack plugin but held (NOT approve) until remote stack deletion needs a new policy judgment (gate 5, tc-o14i5.3.10); pinned so the R4 cutover replay cannot approve it by accident."
+  },
+  {
+    "case": "zr_plugin_d_held_gs_push_url",
+    "tags": ["zr-plugin", "pg2-maars", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack push --remote https://example.com/x.git"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-maars: instructed by the gh-stack plugin but held (NOT approve) until a URL remote is not a plain configured remote name (R6); pinned so the R4 cutover replay cannot approve it by accident."
+  },
+  {
+    "case": "zr_plugin_d_held_gh_pr_edit",
+    "tags": ["zr-plugin", "pg2-maars", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh pr edit 12 --add-assignee @me"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-maars: instructed by the zr-refactor plugin but held (NOT approve) until a PR metadata write needs a new policy judgment (gate 5, tc-o14i5.3.10); pinned so the R4 cutover replay cannot approve it by accident."
+  },
+  {
+    "case": "zr_plugin_d_held_pjira_comment",
+    "tags": ["zr-plugin", "pg2-maars", "pjira"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pjira comment FINDEV-123 hi"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-maars: instructed by the daily-focus plugin but held (NOT approve) until a Jira write needs a new policy judgment (gate 5, tc-o14i5.3.10); pinned so the R4 cutover replay cannot approve it by accident."
+  },
+  {
+    "case": "zr_plugin_d_held_pjira_create",
+    "tags": ["zr-plugin", "pg2-maars", "pjira"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pjira create --project FINDEV"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-maars: instructed by the daily-focus plugin but held (NOT approve) until a Jira write needs a new policy judgment (gate 5, tc-o14i5.3.10); pinned so the R4 cutover replay cannot approve it by accident."
+  },
+  {
+    "case": "zr_plugin_d_held_pjira_transition",
+    "tags": ["zr-plugin", "pg2-maars", "pjira"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pjira transition FINDEV-123 Done"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-maars: instructed by the daily-focus plugin but held (NOT approve) until a Jira write needs a new policy judgment (gate 5, tc-o14i5.3.10); pinned so the R4 cutover replay cannot approve it by accident."
+  },
+  {
+    "case": "zr_plugin_d_held_rc_publish",
+    "tags": ["zr-plugin", "pg2-maars", "zr-refactor"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "rc-publish /wt feature/foo 'title' /abs/body.md"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-maars: instructed by the zr-refactor plugin but held (NOT approve) until its PR assignee edit is a PR metadata write needing a new policy judgment (gate 5, tc-o14i5.3.10); pinned so the R4 cutover replay cannot approve it by accident."
+  },
+  {
+    "case": "zr_plugin_d_held_rc_validate",
+    "tags": ["zr-plugin", "pg2-maars", "zr-refactor"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "rc-validate /wt proj --lock-wait 600 --run-timeout 1800 -- ./gradlew test"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-maars: instructed by the zr-refactor plugin but held (NOT approve) until its caller-supplied gate command needs a child-command interpreter; pinned so the R4 cutover replay cannot approve it by accident."
   }
 ]

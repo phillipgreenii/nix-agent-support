@@ -79,6 +79,15 @@ var ExternalFlake = map[string]bool{
 	"rc-preflight":      true,
 	"rc-probe":          true,
 	"rc-sentinel":       true,
+	// pg2-maars: the bd-writing class D scripts of the same three plugins.
+	"df-close-focus": true,
+	"df-deferred":    true,
+	"df-pull":        true,
+	"df-wire":        true,
+	"lat-wire":       true,
+	"rc-claim":       true,
+	"rc-fp":          true,
+	"rc-park":        true,
 }
 
 // IsExempt reports whether name is exempt from capture/compare on goos:

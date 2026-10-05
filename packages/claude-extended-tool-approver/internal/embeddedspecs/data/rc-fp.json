@@ -1,0 +1,101 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "rc-fp",
+  "command": {
+    "name": "rc-fp",
+    "provenance": "rc-fp --help (Register an instance fingerprint as resolved on an app bead, this host 2026-10-05)",
+    "citations": {
+      "provenance": {
+        "source": "rc-fp --help: \"rc-fp: Register an instance fingerprint as resolved on an app bead.\""
+      },
+      "stdin": {
+        "source": "rc-fp --help: \"Usage: rc-fp <app-bead> <fp> <reason> --actor <id>\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+      },
+      "stdout": {
+        "source": "rc-fp --help: \"rc-fp: Register an instance fingerprint as resolved on an app bead.\" (stdout classification taken from this description of what the command prints)"
+      },
+      "unknownFlag": {
+        "source": "rc-fp --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "flags": {
+      "--actor": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rc-fp --help: \"--actor <id> bd actor (required)\""
+        }
+      },
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rc-fp --help: \"-h, --help Show this help message\""
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rc-fp --help: \"-h, --help Show this help message\""
+        }
+      }
+    },
+    "positionals": {
+      "leading": [
+        {
+          "kind": "literal"
+        },
+        {
+          "kind": "literal"
+        },
+        {
+          "kind": "message"
+        }
+      ],
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "rc-fp --help: \"Usage: rc-fp <app-bead> <fp> <reason> --actor <id>\""
+      }
+    },
+    "implicitEffects": [
+      {
+        "role": {
+          "kind": "remote",
+          "operation": "tracker-write"
+        },
+        "target": "beads",
+        "citation": {
+          "source": "rc-fp --help: \"rc-fp: Register an instance fingerprint as resolved on an app bead.\" (the effect declared here is what this command does, per this description)"
+        }
+      }
+    ],
+    "stdin": "never",
+    "stdout": "metadata",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

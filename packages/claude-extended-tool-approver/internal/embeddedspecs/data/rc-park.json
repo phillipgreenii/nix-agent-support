@@ -1,0 +1,134 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "rc-park",
+  "command": {
+    "name": "rc-park",
+    "provenance": "rc-park --help (Park a zr-refactor bead as human-blocked in one bd call, this host 2026-10-05)",
+    "citations": {
+      "provenance": {
+        "source": "rc-park --help: \"rc-park: Park a zr-refactor bead as human-blocked in one bd call.\""
+      },
+      "stdin": {
+        "source": "rc-park --help: \"Usage: rc-park <bead> <reason> --fingerprint <fp> [OPTIONS] --actor <id>\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+      },
+      "stdout": {
+        "source": "rc-park --help: \"rc-park: Park a zr-refactor bead as human-blocked in one bd call.\" (stdout classification taken from this description of what the command prints)"
+      },
+      "unknownFlag": {
+        "source": "rc-park --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "flags": {
+      "--actor": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rc-park --help: \"--actor <id> bd actor (required)\""
+        }
+      },
+      "--fingerprint": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rc-park --help: \"--fingerprint <fp> Instance fingerprint (required; drives P-5 escalation)\""
+        }
+      },
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rc-park --help: \"-h, --help Show this help message\""
+        }
+      },
+      "--isolation": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rc-park --help: \"--isolation <where> Required with --unpushed: names the isolation\""
+        }
+      },
+      "--unpushed": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rc-park --help: \"--unpushed Unpushed commits / dirty isolation exists (adds worktree-review, W-1/W-2)\""
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rc-park --help: \"-h, --help Show this help message\""
+        }
+      }
+    },
+    "positionals": {
+      "leading": [
+        {
+          "kind": "literal"
+        },
+        {
+          "kind": "message"
+        }
+      ],
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "rc-park --help: \"Usage: rc-park <bead> <reason> --fingerprint <fp> [OPTIONS] --actor <id>\""
+      }
+    },
+    "implicitEffects": [
+      {
+        "role": {
+          "kind": "remote",
+          "operation": "tracker-write"
+        },
+        "target": "beads",
+        "citation": {
+          "source": "rc-park --help: \"rc-park: Park a zr-refactor bead as human-blocked in one bd call.\" (the effect declared here is what this command does, per this description)"
+        }
+      }
+    ],
+    "stdin": "never",
+    "stdout": "metadata",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

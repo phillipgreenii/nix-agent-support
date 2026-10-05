@@ -2352,6 +2352,93 @@
             "unknownFlag": "insufficient",
             "endOfOptions": true
           },
+          "push": {
+            "name": "push",
+            "provenance": "gh stack push --help (gh 2.101.0 + github/gh-stack extension, this host 2026-10-05)",
+            "citations": {
+              "provenance": {
+                "source": "gh stack push --help: \"Push active branches in the current stack to the remote.\""
+              },
+              "stdin": {
+                "source": "gh stack push --help: \"Usage: gh stack push [flags]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+              },
+              "stdout": {
+                "source": "gh stack push --help: \"Push active branches in the current stack to the remote.\" (stdout classification taken from this description of what the command prints)"
+              },
+              "unknownFlag": {
+                "source": "gh stack push --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack push --help: \"-h, --help help for push\""
+                }
+              },
+              "--remote": {
+                "arity": "one",
+                "operand": {
+                  "kind": "remote",
+                  "operation": "push-lease"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack push --help: \"--remote string Remote to push to (defaults to auto-detected remote)\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack push --help: \"-h, --help help for push\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "gh stack push --help: \"Usage: gh stack push [flags]\""
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "push-lease"
+                },
+                "target": "<default-remote>",
+                "dynamic": true,
+                "citation": {
+                  "source": "gh stack push --help: \"Uses explicit per-branch --force-with-lease checks.\" (the effect declared here is what this command does, per this description)"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
           "rebase": {
             "name": "rebase",
             "provenance": "gh stack rebase --help (gh 2.101.0 + github/gh-stack extension, this host 2026-10-05)",
@@ -2539,6 +2626,244 @@
             "unknownFlag": "insufficient",
             "endOfOptions": true
           },
+          "submit": {
+            "name": "submit",
+            "provenance": "gh stack submit --help (gh 2.101.0 + github/gh-stack extension, this host 2026-10-05)",
+            "citations": {
+              "provenance": {
+                "source": "gh stack submit --help: \"Push all branches and create or update a stack of PRs on GitHub.\""
+              },
+              "stdin": {
+                "source": "gh stack submit --help: \"Usage: gh stack submit [flags]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+              },
+              "stdout": {
+                "source": "gh stack submit --help: \"Push all branches and create or update a stack of PRs on GitHub.\" (stdout classification taken from this description of what the command prints)"
+              },
+              "unknownFlag": {
+                "source": "gh stack submit --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--auto": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "retarget-remote",
+                  "from": "mutate",
+                  "to": "pr-create-draft"
+                },
+                "citation": {
+                  "source": "gh stack submit --help: \"--auto Use auto-generated PR titles without prompting\""
+                }
+              },
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack submit --help: \"-h, --help help for submit\""
+                }
+              },
+              "--remote": {
+                "arity": "one",
+                "operand": {
+                  "kind": "remote",
+                  "operation": "push-lease"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack submit --help: \"--remote string Remote to push to (defaults to auto-detected remote)\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack submit --help: \"-h, --help help for submit\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "gh stack submit --help: \"Usage: gh stack submit [flags]\""
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "push-lease"
+                },
+                "target": "<default-remote>",
+                "dynamic": true,
+                "citation": {
+                  "source": "gh stack submit --help: \"1. Pushes all branches to the remote\" (the effect declared here is what this command does, per this description)"
+                }
+              },
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "mutate"
+                },
+                "target": "github",
+                "citation": {
+                  "source": "gh stack submit --help: \"With --auto, new PRs are created as drafts unless you pass --open.\" (the effect declared here is what this command does, per this description)"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "sync": {
+            "name": "sync",
+            "provenance": "gh stack sync --help (gh 2.101.0 + github/gh-stack extension, this host 2026-10-05)",
+            "citations": {
+              "provenance": {
+                "source": "gh stack sync --help: \"Fetch, rebase, push, and sync PR state for the current stack.\""
+              },
+              "stdin": {
+                "source": "gh stack sync --help: \"Usage: gh stack sync [flags]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+              },
+              "stdout": {
+                "source": "gh stack sync --help: \"Fetch, rebase, push, and sync PR state for the current stack.\" (stdout classification taken from this description of what the command prints)"
+              },
+              "unknownFlag": {
+                "source": "gh stack sync --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack sync --help: \"-h, --help help for sync\""
+                }
+              },
+              "--prune": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack sync --help: \"--prune Delete local branches for merged PRs\""
+                }
+              },
+              "--remote": {
+                "arity": "one",
+                "operand": {
+                  "kind": "remote",
+                  "operation": "push-lease"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack sync --help: \"--remote string Remote to fetch from and push to (defaults to auto-detected remote)\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack sync --help: \"-h, --help help for sync\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "gh stack sync --help: \"Usage: gh stack sync [flags]\""
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "push-lease"
+                },
+                "target": "<default-remote>",
+                "dynamic": true,
+                "citation": {
+                  "source": "gh stack sync --help: \"5. Pushes all branches atomically (using --force-with-lease --atomic)\" (the effect declared here is what this command does, per this description)"
+                }
+              },
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "read"
+                },
+                "target": "github",
+                "citation": {
+                  "source": "gh stack sync --help: \"6. Syncs PR state from GitHub\" (the effect declared here is what this command does, per this description)"
+                }
+              },
+              {
+                "role": {
+                  "kind": "path-modify"
+                },
+                "target": ".",
+                "citation": {
+                  "source": "gh stack sync --help: \"4. Cascade-rebases stack branches onto their updated parents\" (the effect declared here is what this command does, per this description)"
+                }
+              },
+              {
+                "role": {
+                  "kind": "path-modify"
+                },
+                "target": ".git",
+                "citation": {
+                  "source": "gh stack sync --help: \"4. Cascade-rebases stack branches onto their updated parents\" (the effect declared here is what this command does, per this description)"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
           "top": {
             "name": "top",
             "provenance": "gh stack top --help (gh 2.101.0 + github/gh-stack extension, this host 2026-10-05)",
@@ -2693,6 +3018,102 @@
                 "target": ".git",
                 "citation": {
                   "source": "gh stack trunk --help: \"Check out the trunk branch of the current stack.\" (the effect declared here is what this command does, per this description)"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "unstack": {
+            "name": "unstack",
+            "provenance": "gh stack unstack --help (gh 2.101.0 + github/gh-stack extension, this host 2026-10-05)",
+            "citations": {
+              "provenance": {
+                "source": "gh stack unstack --help: \"Remove a stack from local tracking and unstack it on GitHub.\""
+              },
+              "stdin": {
+                "source": "gh stack unstack --help: \"Usage: gh stack unstack [<stack-number>] [flags]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+              },
+              "stdout": {
+                "source": "gh stack unstack --help: \"Remove a stack from local tracking and unstack it on GitHub.\" (stdout classification taken from this description of what the command prints)"
+              },
+              "unknownFlag": {
+                "source": "gh stack unstack --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack unstack --help: \"-h, --help help for unstack\""
+                }
+              },
+              "--local": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "retarget-remote",
+                  "from": "mutate",
+                  "to": "read"
+                },
+                "citation": {
+                  "source": "gh stack unstack --help: \"--local Only delete the stack locally\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack unstack --help: \"-h, --help help for unstack\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "gh stack unstack --help: \"Usage: gh stack unstack [<stack-number>] [flags]\""
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "path-modify"
+                },
+                "target": ".git",
+                "citation": {
+                  "source": "gh stack unstack --help: \"Remove a stack from local tracking\" (the effect declared here is what this command does, per this description)"
+                }
+              },
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "mutate"
+                },
+                "target": "github",
+                "citation": {
+                  "source": "gh stack unstack --help: \"Use --local to only remove local tracking without touching remote (GitHub).\" (the effect declared here is what this command does, per this description)"
                 }
               }
             ],

@@ -1,0 +1,134 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "df-close-focus",
+  "command": {
+    "name": "df-close-focus",
+    "provenance": "df-close-focus --help (Sequence a focus bead's mechanical close-out, this host 2026-10-05)",
+    "citations": {
+      "provenance": {
+        "source": "df-close-focus --help: \"df-close-focus: Sequence a focus bead's mechanical close-out.\""
+      },
+      "stdin": {
+        "source": "df-close-focus --help: \"Usage: df-close-focus <focus-id> <date> --notes-file <path> --summary-file <path> --reason <text> [--actor <id>]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+      },
+      "stdout": {
+        "source": "df-close-focus --help: \"df-close-focus: Sequence a focus bead's mechanical close-out.\" (stdout classification taken from this description of what the command prints)"
+      },
+      "unknownFlag": {
+        "source": "df-close-focus --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "flags": {
+      "--actor": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df-close-focus --help: \"--actor <id> Optional bd actor applied to every mutation this script runs.\""
+        }
+      },
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df-close-focus --help: \"df-close-focus: Sequence a focus bead's mechanical close-out.\" (this help text is what the -h/--help flag prints; the flag itself is not listed in the reviewed text)"
+        }
+      },
+      "--notes-file": {
+        "arity": "one",
+        "operand": {
+          "kind": "path-read"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df-close-focus --help: \"--notes-file <path> JSONL: one line per touched bead,\""
+        }
+      },
+      "--reason": {
+        "arity": "one",
+        "operand": {
+          "kind": "message"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df-close-focus --help: \"--reason <text> Passed to `bd close <focus-id> --force --reason <text>`, run last,\""
+        }
+      },
+      "--summary-file": {
+        "arity": "one",
+        "operand": {
+          "kind": "path-read"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df-close-focus --help: \"--summary-file <path> Plain-text day summary.\""
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df-close-focus --help: \"df-close-focus: Sequence a focus bead's mechanical close-out.\" (this help text is what the -h/--help flag prints; the flag itself is not listed in the reviewed text)"
+        }
+      }
+    },
+    "positionals": {
+      "leading": [
+        {
+          "kind": "literal"
+        },
+        {
+          "kind": "literal"
+        }
+      ],
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "df-close-focus --help: \"Usage: df-close-focus <focus-id> <date> --notes-file <path> --summary-file <path> --reason <text> [--actor <id>]\""
+      }
+    },
+    "implicitEffects": [
+      {
+        "role": {
+          "kind": "remote",
+          "operation": "tracker-write"
+        },
+        "target": "beads",
+        "citation": {
+          "source": "df-close-focus --help: \"appends a \"[daily-focus <date>] <note>\" entry to that bead's notes via `bd update --append-notes`\" (the effect declared here is what this command does, per this description)"
+        }
+      }
+    ],
+    "stdin": "never",
+    "stdout": "metadata",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

@@ -1,0 +1,122 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "rc-claim",
+  "command": {
+    "name": "rc-claim",
+    "provenance": "rc-claim --help (Atomically claim one zr-refactor campaign bead and print a projected JSON row, this host 2026-10-05)",
+    "citations": {
+      "provenance": {
+        "source": "rc-claim --help: \"rc-claim: Atomically claim one zr-refactor campaign bead and print a projected JSON row.\""
+      },
+      "stdin": {
+        "source": "rc-claim --help: \"Usage: rc-claim <scope-label> <rc-fix|rc-scan> [OPTIONS] --actor <id>\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+      },
+      "stdout": {
+        "source": "rc-claim --help: \"rc-claim: Atomically claim one zr-refactor campaign bead and print a projected JSON row.\" (stdout classification taken from this description of what the command prints)"
+      },
+      "unknownFlag": {
+        "source": "rc-claim --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "flags": {
+      "--actor": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rc-claim --help: \"--actor <id> Claim actor (required)\""
+        }
+      },
+      "--app": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rc-claim --help: \"--app <label> Narrow to one rc-app label (batching)\""
+        }
+      },
+      "--exclude-app": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rc-claim --help: \"--exclude-app <label> Exclude an rc-app label (repeatable; mutex-race exclusions)\""
+        }
+      },
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rc-claim --help: \"-h, --help Show this help message\""
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rc-claim --help: \"-h, --help Show this help message\""
+        }
+      }
+    },
+    "positionals": {
+      "leading": [
+        {
+          "kind": "literal"
+        },
+        {
+          "kind": "literal"
+        }
+      ],
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "rc-claim --help: \"Usage: rc-claim <scope-label> <rc-fix|rc-scan> [OPTIONS] --actor <id>\""
+      }
+    },
+    "implicitEffects": [
+      {
+        "role": {
+          "kind": "remote",
+          "operation": "tracker-write"
+        },
+        "target": "beads",
+        "citation": {
+          "source": "rc-claim --help: \"rc-claim: Atomically claim one zr-refactor campaign bead and print a projected JSON row.\" (the effect declared here is what this command does, per this description)"
+        }
+      }
+    ],
+    "stdin": "never",
+    "stdout": "content",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

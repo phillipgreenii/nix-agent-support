@@ -283,6 +283,11 @@ func TestRegistryNames(t *testing.T) {
 		"cut", "df", "df-jira-refs", "df-resolve-focus", "df-split-blockers", "df-survey", "lat-survey",
 		"pg-connector", "pg-desk", "pjira", "rc-branch", "rc-preflight", "rc-probe", "rc-sentinel",
 	)
+	// pg2-maars: the bd-writing class D scripts of the same plugins.
+	want = append(
+		want,
+		"df-close-focus", "df-deferred", "df-pull", "df-wire", "lat-wire", "rc-claim", "rc-fp", "rc-park",
+	)
 	sort.Strings(want)
 	if got := DefaultRegistry().Names(); !reflect.DeepEqual(got, want) {
 		t.Errorf("names = %v, want %v", got, want)

@@ -73,6 +73,33 @@ func TestZiprecruiterPluginCommands(t *testing.T) {
 		"pjira issue FINDEV-123",
 		"pjira search --jql 'assignee = currentUser()' --limit 20",
 		"pjira auth-status",
+		// pg2-maars class D: existing operations only (push-lease, draft PR
+		// creation, tracker-write on beads).
+		"gh stack push",
+		"gh stack push --remote origin",
+		"gh stack submit --auto",
+		"gh stack submit --auto --remote origin",
+		"gh stack sync",
+		"gh stack sync --prune",
+		"gh stack sync --remote origin",
+		"gh stack unstack --local",
+		"df-close-focus pg2-abc 2026-10-04 --notes-file notes.jsonl --summary-file summary.txt --reason 'day done' --actor sess-1",
+		"df-wire pg2-abc --manifest deep.json --actor sess-1",
+		"df-wire pg2-abc --manifest deep.json --drop p1,j2 --merge p3=p4 --dry-run --actor sess-1",
+		`echo '[]' | df-wire pg2-abc --records - --actor sess-1`,
+		"df-deferred write pg2-abc --manifest items.json --actor sess-1",
+		"df-deferred write pg2-abc --manifest items.json --dry-run --actor sess-1",
+		"df-deferred read pg2-abc",
+		"df-pull --actor sess-1",
+		"df-pull 2 --actor sess-1",
+		"df-pull p3 j2 --dry-run --actor sess-1",
+		"lat-wire --decisions d.json --actor sess-1",
+		`echo '{}' | lat-wire --decisions - --actor sess-1`,
+		"rc-claim rc:foo rc-fix --actor sess-1-rc",
+		"rc-claim rc:foo rc-scan --app rc-app:x --exclude-app rc-app:y --actor sess-1-rc",
+		"rc-park pg2-abc 'stuck on a merge conflict' --fingerprint a.kt:x --actor sess-1-rc",
+		"rc-park pg2-abc 'unpushed work' --fingerprint a.kt:x --unpushed --isolation 'wt feature/x' --actor sess-1-rc",
+		"rc-fp pg2-app a.kt:x 'fixed in abc123' --actor sess-1-rc",
 	}
 	for _, cmd := range approve {
 		t.Run("approve/"+cmd, func(t *testing.T) {
@@ -96,21 +123,23 @@ func TestZiprecruiterPluginCommands(t *testing.T) {
 	})
 
 	abstain := []string{
-		// Need a NEW effectpolicy judgment (push / PR or stack creation /
-		// tracker write / Jira write): held for the parent epic's gate-5 ruling.
-		"gh stack push",
-		"gh stack submit --auto",
-		"gh stack sync",
+		// Still need a NEW effectpolicy judgment (Jira write, PR metadata
+		// write, stack-object delete), an undocumented draft default, or a
+		// child-command interpreter: held for the gate-5 ruling (pg2-maars).
 		"gh stack link branch-a branch-b",
 		"gh stack unstack",
-		"gh stack unstack --local",
+		"gh stack unstack 7",
+		"gh stack submit",
+		"gh stack push --remote https://example.com/x.git",
+		"gh pr edit 12 --add-assignee @me",
 		"pjira comment FINDEV-123 hi",
-		"df-wire pg2-abc --manifest deep.json --actor sess-1",
-		"df-close-focus pg2-abc 2026-10-04 --actor sess-1",
-		"lat-wire --decisions d.json --actor sess-1",
-		"rc-claim rc:foo rc-fix --actor sess-1-rc",
+		"pjira create --project FINDEV",
+		"pjira transition FINDEV-123 Done",
 		"rc-publish . feature/foo title body.md",
 		"rc-validate . proj --lock-wait 600 --run-timeout 1800 -- ./gradlew test",
+		// Class D shapes the scripts do not instruct.
+		"df-wire pg2-abc --force",
+		"rc-claim rc:foo rc-fix --bogus --actor sess-1-rc",
 		// Collide with an explicit REJECT/ABSTAIN ruling: listed, not overridden.
 		"gh stack merge --yes",
 		"gh stack merge 7 --yes --squash",

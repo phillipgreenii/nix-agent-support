@@ -90,5 +90,13 @@
   "rc-branch": null,
   "rc-preflight": null,
   "rc-probe": null,
-  "rc-sentinel": null
+  "rc-sentinel": null,
+  "df-close-focus": null,
+  "df-deferred": null,
+  "df-pull": null,
+  "df-wire": null,
+  "lat-wire": null,
+  "rc-claim": null,
+  "rc-fp": null,
+  "rc-park": null
 }

@@ -1,0 +1,122 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "df-pull",
+  "command": {
+    "name": "df-pull",
+    "provenance": "df-pull --help (Top up today's focus bead from its Deferred today section, this host 2026-10-05)",
+    "citations": {
+      "provenance": {
+        "source": "df-pull --help: \"df-pull: Top up today's focus bead from its \"Deferred today\" section.\""
+      },
+      "stdin": {
+        "source": "df-pull --help: \"Usage: df-pull [--dry-run] [--actor <id>] [<k> | <handle>...]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+      },
+      "stdout": {
+        "source": "df-pull --help: \"df-pull: Top up today's focus bead from its \"Deferred today\" section.\" (stdout classification taken from this description of what the command prints)"
+      },
+      "unknownFlag": {
+        "source": "df-pull --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "flags": {
+      "--actor": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df-pull --help: \"--actor <id> The caller's own bd actor identity (its session id).\""
+        }
+      },
+      "--dry-run": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df-pull --help: \"--dry-run Steps 1-4 (resolve/read/deep-survey) always run for real --\""
+        }
+      },
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df-pull --help: \"df-pull: Top up today's focus bead from its \"Deferred today\" section.\" (this help text is what the -h/--help flag prints; the flag itself is not listed in the reviewed text)"
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df-pull --help: \"df-pull: Top up today's focus bead from its \"Deferred today\" section.\" (this help text is what the -h/--help flag prints; the flag itself is not listed in the reviewed text)"
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "df-pull --help: \"Usage: df-pull [--dry-run] [--actor <id>] [<k> | <handle>...]\""
+      }
+    },
+    "implicitEffects": [
+      {
+        "role": {
+          "kind": "remote",
+          "operation": "tracker-write"
+        },
+        "target": "beads",
+        "citation": {
+          "source": "df-pull --help: \"wires the rest (df-wire --records -), and rewrites the deferred section (df-deferred write --records -)\" (the effect declared here is what this command does, per this description)"
+        }
+      },
+      {
+        "role": {
+          "kind": "remote",
+          "operation": "read"
+        },
+        "target": "github",
+        "citation": {
+          "source": "df-pull --help: \"deep-enriches the selection (df-survey --deep --records -)\" (the effect declared here is what this command does, per this description)"
+        }
+      },
+      {
+        "role": {
+          "kind": "remote",
+          "operation": "read"
+        },
+        "target": "jira",
+        "citation": {
+          "source": "df-pull --help: \"deep-enriches the selection (df-survey --deep --records -)\" (the effect declared here is what this command does, per this description)"
+        }
+      }
+    ],
+    "stdin": "never",
+    "stdout": "content",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

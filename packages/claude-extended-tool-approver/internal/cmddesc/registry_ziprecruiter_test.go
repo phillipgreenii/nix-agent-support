@@ -34,24 +34,29 @@ func TestZiprecruiterSchemasAreFailClosedData(t *testing.T) {
 	}
 }
 
-// TestZiprecruiterUnlandedVerbsAreAbsent pins the verbs that need a NEW
-// effectpolicy judgment or collide with an explicit REJECT/ABSTAIN ruling:
-// they MUST stay unmodeled (so they abstain) until a human rules on the
-// parent epic's gate-5 question. Adding one is a policy change, not a
-// schema fact.
+// TestZiprecruiterUnlandedVerbsAreAbsent pins the verbs that still need a NEW
+// effectpolicy judgment, a child-command interpreter, or collide with an
+// explicit REJECT/ABSTAIN ruling: they MUST stay unmodeled (so they abstain)
+// until the operator rules (gate 5: the P15 approve-reachability tooling,
+// tc-o14i5.3.10). Adding one is a policy change, not a schema fact. pg2-maars
+// landed the class D forms that reach APPROVE with the existing operations
+// (see TestZiprecruiterClassDLandedForms).
 func TestZiprecruiterUnlandedVerbsAreAbsent(t *testing.T) {
 	gh, _ := DefaultRegistry().Lookup("gh")
 	stack, ok := gh.Subcommands["stack"]
 	if !ok {
 		t.Fatal("gh stack not registered")
 	}
-	for _, verb := range []string{"push", "submit", "sync", "link", "unstack", "merge", "modify"} {
+	for _, verb := range []string{"link", "merge", "modify"} {
 		if _, present := stack.Subcommands[verb]; present {
-			t.Errorf("gh stack %s must stay unmodeled (policy change / ruling collision)", verb)
+			t.Errorf("gh stack %s must stay unmodeled (policy change / ruling collision / undocumented draft default)", verb)
 		}
 	}
 	if _, present := gh.Subcommands["extension"].Subcommands["install"]; present {
 		t.Error("gh extension install must stay unmodeled (installs third-party code)")
+	}
+	if _, present := gh.Subcommands["pr"].Subcommands["edit"]; present {
+		t.Error("gh pr edit is a PR metadata write needing a new policy judgment and must stay unmodeled")
 	}
 	pjira, _ := DefaultRegistry().Lookup("pjira")
 	for _, verb := range []string{"comment", "create", "transition"} {
@@ -59,9 +64,73 @@ func TestZiprecruiterUnlandedVerbsAreAbsent(t *testing.T) {
 			t.Errorf("pjira %s is a Jira write and must stay unmodeled", verb)
 		}
 	}
-	for _, name := range []string{"df-close-focus", "df-wire", "df-deferred", "df-pull", "lat-wire", "rc-claim", "rc-park", "rc-fp", "rc-publish", "rc-validate"} {
+	for _, name := range []string{"rc-publish", "rc-validate"} {
 		if _, registered := DefaultRegistry().Lookup(name); registered {
-			t.Errorf("%s writes beads/remotes or runs a caller-supplied command and must stay unmodeled", name)
+			t.Errorf("%s needs a new policy judgment / child-command interpreter and must stay unmodeled", name)
+		}
+	}
+}
+
+// TestZiprecruiterClassDLandedForms pins the shape of the pg2-maars class D
+// schemas: each beads-writing script declares the tracker-write effect on the
+// beads resource (so it can never silently become a pure read), and the
+// `gh stack` write verbs keep their load-bearing pieces: --remote is a
+// push-lease operand, `submit`'s --auto retargets mutate to the draft-first
+// PR creation, `unstack`'s --local drops the remote mutation, and --open is
+// not modeled anywhere.
+func TestZiprecruiterClassDLandedForms(t *testing.T) {
+	reg := DefaultRegistry()
+	hasEffect := func(s CommandSchema, op, target string) bool {
+		for _, ie := range s.ImplicitEffects {
+			if ie.Role.Kind == KindRemote && ie.Role.Operation == op && ie.Target == target {
+				return true
+			}
+		}
+		return false
+	}
+	for _, name := range []string{"df-close-focus", "df-wire", "df-pull", "lat-wire", "rc-claim", "rc-park", "rc-fp"} {
+		s, ok := reg.Lookup(name)
+		if !ok {
+			t.Errorf("%s: not registered", name)
+			continue
+		}
+		if !hasEffect(s, "tracker-write", "beads") {
+			t.Errorf("%s: no tracker-write effect on beads", name)
+		}
+	}
+	deferred, _ := reg.Lookup("df-deferred")
+	if !hasEffect(deferred.Subcommands["write"], "tracker-write", "beads") {
+		t.Error("df-deferred write: no tracker-write effect on beads")
+	}
+	if hasEffect(deferred.Subcommands["read"], "tracker-write", "beads") || !hasEffect(deferred.Subcommands["read"], "read", "beads") {
+		t.Error("df-deferred read must be a beads READ only")
+	}
+	gh, _ := reg.Lookup("gh")
+	stack := gh.Subcommands["stack"]
+	for _, verb := range []string{"push", "submit", "sync"} {
+		sub, ok := stack.Subcommands[verb]
+		if !ok {
+			t.Errorf("gh stack %s not registered", verb)
+			continue
+		}
+		if !hasEffect(sub, "push-lease", "<default-remote>") {
+			t.Errorf("gh stack %s: no default-remote push-lease effect", verb)
+		}
+		if spec, ok := sub.Flags["--remote"]; !ok || spec.Operand.Kind != KindRemote || spec.Operand.Operation != "push-lease" {
+			t.Errorf("gh stack %s: --remote must be a push-lease remote operand", verb)
+		}
+	}
+	submit := stack.Subcommands["submit"]
+	if !hasEffect(submit, "mutate", "github") || submit.Flags["--auto"].Transform.To != "pr-create-draft" {
+		t.Error("gh stack submit: --auto must be what retargets the github mutate effect to pr-create-draft")
+	}
+	unstack := stack.Subcommands["unstack"]
+	if !hasEffect(unstack, "mutate", "github") || unstack.Flags["--local"].Transform.Kind != TransformRetargetRemote {
+		t.Error("gh stack unstack: --local must be what retargets the github mutate effect away")
+	}
+	for _, verb := range []string{"submit", "sync", "push", "unstack"} {
+		if _, ok := stack.Subcommands[verb].Flags["--open"]; ok {
+			t.Errorf("gh stack %s: --open (marks PRs ready, pg2-psiqh Abstain) must stay unmodeled", verb)
 		}
 	}
 }
@@ -94,7 +163,7 @@ func TestGhSchemaIsSingleAndFoldsBothSiblings(t *testing.T) {
 		"pr":        {"view", "list", "status", "diff", "checks", "create"},
 		"auth":      {"status"},
 		"extension": {"list"},
-		"stack":     {"view", "up", "down", "top", "bottom", "trunk", "init", "add", "rebase", "checkout"},
+		"stack":     {"view", "up", "down", "top", "bottom", "trunk", "init", "add", "rebase", "checkout", "push", "submit", "sync", "unstack"},
 	} {
 		parent, ok := gh.Subcommands[path]
 		if !ok {

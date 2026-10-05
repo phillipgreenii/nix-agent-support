@@ -15,19 +15,29 @@ package cmddesc
 // UnknownFlagInsufficient everywhere, and a subcommand/mode the plugins do not
 // instruct is simply absent (unmodeled -> abstain).
 //
-// # What is deliberately NOT here (listed in the pg2-cjfpy.4 close report)
+// # What is deliberately NOT here
 //
-// Forms that need a NEW effectpolicy judgment (tracker-write, PR/stack create,
-// push, Jira write) are not landed: the parent epic's open gate-5 question
-// (attach the P15 approve-reachability report, tooling tc-o14i5.3.10, not
-// landed) means a change that ALTERS what gets approved waits for a human
-// ruling. They are: `gh stack push|submit|sync|link|unstack`, every
-// bd-mutating script (df-close-focus, df-wire, df-deferred write, df-pull,
-// lat-wire, rc-claim, rc-park, rc-fp), `rc-publish` (push + draft PR),
-// `pjira comment|create|transition` (Jira writes). Forms that collide with an
-// explicit REJECT/ABSTAIN ruling are not overridden: `gh stack merge`
-// (mirrors `gh pr merge`, Reject), `gh stack submit|link --open` (marks PRs
-// ready, the `gh pr ready` Abstain ruling pg2-psiqh).
+// pg2-cjfpy.4 held every write form for the parent epic's gate-5 question; the
+// operator ruled it (2026-10-05: class D forms are APPROVE under the
+// 2026-10-04 ruling; a form needing a NEW effectpolicy judgment waits for
+// tc-o14i5.3.10, the P15 approve-reachability tooling) and pg2-maars landed the
+// class D forms that reach APPROVE with the EXISTING effectpolicy operations
+// (push-lease, pr-create-draft, tracker-write on beads): `gh stack push`,
+// `gh stack submit --auto`, `gh stack sync`, `gh stack unstack --local`,
+// df-close-focus, df-wire, df-deferred write|read, df-pull, lat-wire,
+// rc-claim, rc-park and rc-fp. Still held, because honest modeling needs a
+// NEW remote operation (a policy judgment, not a schema fact), is listed in
+// TestZiprecruiterUnlandedVerbsAreAbsent: `gh pr edit` and `rc-publish` (a PR
+// metadata write), `pjira comment|create|transition` (a Jira write; the
+// tracker-write verdict is scoped to the beads resource by DATA),
+// `gh stack unstack` without --local (deletes the stack object on GitHub),
+// `gh stack link` (the draft-default of the PRs it creates is not documented)
+// and `rc-validate` (its caller-supplied gate command needs a child-command
+// interpreter that rebases the child's working directory onto <wt>).
+// Forms that collide with an explicit REJECT/ABSTAIN ruling are not
+// overridden: `gh stack merge` (mirrors `gh pr merge`, Reject),
+// `gh stack submit|link --open` (marks PRs ready, the `gh pr ready` Abstain
+// ruling pg2-psiqh).
 //
 // # Effect model
 //
@@ -37,6 +47,22 @@ package cmddesc
 //     rewrite the CURRENT checkout's branches and working tree: PathModify of
 //     "." and ".git", exactly gitRebaseSchema's (registry_git_ext.go in
 //     pg2-cjfpy.2) and gitCommitSchema's access class.
+//   - A bookkeeping write to the beads database (the bd-writing daily-focus /
+//     local-alert-triage / zr-refactor scripts) is Remote("tracker-write") on
+//     "beads", the SAME operation `bd create|update|close|comment` carries;
+//     effectpolicy.RemoteMutation Permits it by data (operator ruling
+//     2026-10-04, pg2-cjfpy).
+//   - `gh stack push|submit|sync` push every active branch of the stack with a
+//     per-branch --force-with-lease: Remote("push-lease") on the default
+//     remote (the same implicit "<default-remote>" `git push` uses) or on the
+//     --remote operand, which RemoteMutation Permits for a plain remote NAME
+//     (ADR 0075 R6). The stack is the tracked set of branches, never an
+//     --all/--tags/--mirror bulk push. `submit` also creates PRs: only
+//     `--auto` makes them drafts (the verb's own --help), so --auto is what
+//     retargets the effect to "pr-create-draft"; without it the effect stays
+//     "mutate" and abstains. The stack object GitHub keeps for those PRs, and
+//     the base-branch fix-ups on them, are the PR flow's own bookkeeping, not
+//     a separate write kind.
 //   - A first-party script that writes only its OWN state (rc-sentinel's
 //     $RC_STATE_DIR sentinels, df-survey's manifest under $TMPDIR, pg-desk's
 //     triage-board annotation) declares no path effect for it, the same
@@ -56,7 +82,11 @@ func zrRemoteRead(resource string) ImplicitEffect {
 }
 
 var (
-	zrReadsBeads  = zrRemoteRead("beads")
+	zrReadsBeads = zrRemoteRead("beads")
+	// zrWritesBeads is a bookkeeping write to the beads database: the same
+	// Remote("tracker-write") on "beads" every `bd create|update|close|...`
+	// carries (writesBeads in registry_plugin_tools.go).
+	zrWritesBeads = ImplicitEffect{Role: Remote("tracker-write"), Target: "beads"}
 	zrReadsGitHub = zrRemoteRead("github")
 	zrReadsJira   = zrRemoteRead("jira")
 )
@@ -66,6 +96,20 @@ var (
 var zrCheckoutMutation = []ImplicitEffect{
 	{Role: PathModify, Target: "."},
 	{Role: PathModify, Target: ".git"},
+}
+
+// zrPushDefaultRemote is the implicit per-branch --force-with-lease push of a
+// `gh stack` verb to the default remote, the same implicit effect `git push`
+// uses (its remote is a git-config fact, not argv; see
+// effectpolicy.RemoteMutation's defaultRemotePush).
+var zrPushDefaultRemote = ImplicitEffect{Role: Remote("push-lease"), Target: "<default-remote>", Dynamic: true}
+
+// zrStackRemoteFlag is the `--remote <name>` flag of the remote `gh stack`
+// verbs. Its operand is a push-lease remote, so a URL or path remote is not
+// a plain remote name and abstains; the default-remote effect is still
+// emitted alongside (an over-report, in the fail-closed direction).
+var zrStackRemoteFlag = map[string]FlagSpec{
+	"--remote": {Arity: ArityOne, Operand: Remote("push-lease")},
 }
 
 // zrFlags merges flag tables (later wins), so a persistent flag can be shared
@@ -87,6 +131,8 @@ func ziprecruiterToolSchemas() []CommandSchema {
 		zrDfResolveFocusSchema, zrDfSplitBlockersSchema, zrDfJiraRefsSchema, zrDfSurveySchema,
 		zrLatSurveySchema,
 		zrRcProbeSchema, zrRcSentinelSchema, zrRcPreflightSchema, zrRcBranchSchema,
+		zrDfCloseFocusSchema, zrDfWireSchema, zrDfDeferredSchema, zrDfPullSchema, zrLatWireSchema,
+		zrRcClaimSchema, zrRcParkSchema, zrRcFpSchema,
 		zrDfSchema, zrCutSchema,
 	}
 }
@@ -126,8 +172,10 @@ func zrGhStackLeaf(verb string, flags map[string]FlagSpec, pos PositionalSpec, s
 //     may also fetch from GitHub, a read). `view` without --json opens an
 //     interactive TUI (the skill forbids it); that is a hang, not an effect,
 //     so it is not modeled. `add` takes -m/-A/-u for the stage-and-commit
-//     shortcut, the same access class as `git add` + `git commit`. ABSENT
-//     (abstain): push, submit, sync, link, unstack, merge, modify.
+//     shortcut, the same access class as `git add` + `git commit`. `push`, `submit --auto`, `sync` and
+//     `unstack --local` (pg2-maars) follow the effect model above. ABSENT
+//     (abstain): link, merge, modify, `submit` without --auto, `--open`, and
+//     `unstack` without --local.
 var zrGhSubcommands = map[string]CommandSchema{
 	"auth": {
 		Name:         "auth",
@@ -209,6 +257,39 @@ var zrGhSubcommands = map[string]CommandSchema{
 			"checkout": zrGhStackLeaf("checkout", nil,
 				PositionalSpec{Rest: Literal}, StdoutMetadata,
 				append([]ImplicitEffect{zrReadsGitHub}, zrCheckoutMutation...)...),
+			// pg2-maars: `gh stack push [--remote R]` -- "Push active branches
+			// in the current stack to the remote ... explicit per-branch
+			// --force-with-lease checks".
+			"push": zrGhStackLeaf("push", zrStackRemoteFlag,
+				PositionalSpec{}, StdoutMetadata, zrPushDefaultRemote),
+			// `gh stack submit --auto [--remote R]`: "Push all branches and
+			// create or update a stack of PRs"; "With --auto, new PRs are
+			// created as drafts unless you pass --open". --open is unmodeled
+			// (marks PRs ready: the gh pr ready Abstain ruling, pg2-psiqh).
+			"submit": zrGhStackLeaf("submit",
+				zrFlags(zrStackRemoteFlag, map[string]FlagSpec{
+					"--auto": {Transform: EffectTransform{Kind: TransformRetargetRemote, From: "mutate", To: "pr-create-draft"}},
+				}),
+				PositionalSpec{}, StdoutMetadata,
+				zrPushDefaultRemote, ImplicitEffect{Role: Remote("mutate"), Target: "github"}),
+			// `gh stack sync [--prune] [--remote R]`: "Fetch, rebase, push, and
+			// sync PR state for the current stack"; "Sync never opens pull
+			// requests". The fetch comes from the same remote it pushes to,
+			// so the push effect subsumes it.
+			"sync": zrGhStackLeaf("sync",
+				zrFlags(zrStackRemoteFlag, map[string]FlagSpec{"--prune": inert}),
+				PositionalSpec{}, StdoutMetadata,
+				append([]ImplicitEffect{zrPushDefaultRemote, zrReadsGitHub}, zrCheckoutMutation...)...),
+			// `gh stack unstack --local [<n>]`: "Only remove local tracking
+			// without touching remote". Without --local the verb deletes the
+			// stack object on GitHub: the implicit "mutate" stays and abstains.
+			"unstack": zrGhStackLeaf("unstack",
+				map[string]FlagSpec{
+					"--local": {Transform: EffectTransform{Kind: TransformRetargetRemote, From: "mutate", To: "read"}},
+				},
+				PositionalSpec{Rest: Literal}, StdoutMetadata,
+				ImplicitEffect{Role: PathModify, Target: ".git"},
+				ImplicitEffect{Role: Remote("mutate"), Target: "github"}),
 		},
 	},
 }
@@ -404,6 +485,92 @@ var zrDfSurveySchema = zrScript("df-survey",
 	PositionalSpec{}, StdinAlways, StdoutContent,
 	zrReadsGitHub, zrReadsJira, zrReadsBeads)
 
+// ---- bd-writing daily-focus / local-alert-triage scripts (pg2-maars) --------
+
+// df-close-focus <focus-id> <date> --notes-file P --summary-file P --reason T
+// [--actor ID]: per touched bead `bd update --append-notes`, then `bd close
+// <focus-id> --force --reason T`. Beads bookkeeping writes; the two files are
+// path reads.
+var zrDfCloseFocusSchema = zrScript("df-close-focus",
+	"Sequence a focus bead's mechanical close-out",
+	map[string]FlagSpec{
+		"--notes-file":   {Arity: ArityOne, Operand: PathRead},
+		"--summary-file": {Arity: ArityOne, Operand: PathRead},
+		"--reason":       {Arity: ArityOne, Operand: Message},
+		"--actor":        literal1,
+	},
+	PositionalSpec{Leading: []OperandRole{Literal, Literal}}, StdinNever, StdoutMetadata,
+	zrWritesBeads)
+
+// df-wire <focus-id> (--records - | --manifest F) [--drop H,..] [--merge K=A,..]
+// [--dry-run] [--actor ID]: "Mint + duplicate-free bulk wiring + verify" --
+// only `bd create`, `bd dep add`, `bd list`, `bd config get` and the
+// df-verify-wiring read-back. --records - arrives on stdin.
+var zrDfWireSchema = zrScript("df-wire",
+	"Mint + duplicate-free bulk wiring + verify, for one focus bead",
+	map[string]FlagSpec{
+		"--records":  literal1,
+		"--manifest": {Arity: ArityOne, Operand: PathRead},
+		"--drop":     literal1, "--merge": literal1,
+		"--dry-run": inert,
+		"--actor":   literal1,
+	},
+	PositionalSpec{Leading: []OperandRole{Literal}}, StdinAlways, StdoutContent,
+	zrWritesBeads)
+
+// df-deferred write <focus-id> (--manifest F | --records F|-) [--dry-run]
+// [--actor ID] splices the "Deferred today" section into the focus bead's
+// description (one `bd update`); df-deferred read <focus-id> parses it back
+// (`bd show`). Only the verbs the daily-focus commands run are modeled.
+var zrDfDeferredSchema = CommandSchema{
+	Name:         "df-deferred",
+	Provenance:   "df-deferred --help (Read/write the focus bead's \"Deferred today\" description section, this host 2026-10-05)",
+	Flags:        map[string]FlagSpec{"-h": inert, "--help": inert},
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+	Subcommands: map[string]CommandSchema{
+		"write": zrScript("write",
+			"df-deferred write: replace the Deferred today section",
+			map[string]FlagSpec{
+				"--manifest": {Arity: ArityOne, Operand: PathRead},
+				"--records":  literal1,
+				"--dry-run":  inert,
+				"--actor":    literal1,
+			},
+			PositionalSpec{Leading: []OperandRole{Literal}}, StdinAlways, StdoutMetadata,
+			zrWritesBeads),
+		"read": zrScript("read",
+			"df-deferred read: print the Deferred today records",
+			nil,
+			PositionalSpec{Leading: []OperandRole{Literal}}, StdinNever, StdoutContent,
+			zrReadsBeads),
+	},
+}
+
+// df-pull [--dry-run] [--actor ID] [<k> | <handle>...]: tops up today's focus
+// bead from its deferred section by running df-resolve-focus, df-deferred
+// read, df-survey --deep (reads of GitHub, Jira and beads), df-wire and
+// df-deferred write (beads bookkeeping writes). The deep survey's records
+// arrive on its internal pipe, not df-pull's own stdin.
+var zrDfPullSchema = zrScript("df-pull",
+	"Top up today's focus bead from its Deferred today section",
+	map[string]FlagSpec{"--dry-run": inert, "--actor": literal1},
+	PositionalSpec{Rest: Literal}, StdinNever, StdoutContent,
+	zrWritesBeads, zrReadsGitHub, zrReadsJira)
+
+// lat-wire --decisions <file|-> [--actor ID]: "local-alert-triage's mutating
+// bd-wiring step" -- bd create / update / comment / reopen / close / dep add
+// (all beads bookkeeping). The decision-list JSON is read from the file, or
+// from stdin for "-" (hence StdinAlways, as df-survey --records -).
+var zrLatWireSchema = zrScript("lat-wire",
+	"local-alert-triage's mutating bd-wiring step",
+	map[string]FlagSpec{
+		"--decisions": {Arity: ArityOne, Operand: PathRead},
+		"--actor":     literal1,
+	},
+	PositionalSpec{}, StdinAlways, StdoutContent,
+	zrWritesBeads)
+
 // lat-survey [--grafana-base URL] [--history-days N] [--out FILE]: "read-only
 // alert survey (via pg-connector) + bd cross-reference ... Never mutates `bd`
 // state." Reads the alert backend (Grafana, through pg-connector) and beads;
@@ -476,6 +643,36 @@ var zrRcPreflightSchema = zrScript("rc-preflight",
 		"--release": inert,
 	},
 	PositionalSpec{Rest: Literal}, StdinNever, StdoutMetadata)
+
+// rc-claim <scope-label> <rc-fix|rc-scan> [--app L] [--exclude-app L]...
+// --actor ID: "Atomically claim one zr-refactor campaign bead" (`bd ready
+// --claim`) and print a projected JSON row. A beads bookkeeping write.
+var zrRcClaimSchema = zrScript("rc-claim",
+	"Atomically claim one zr-refactor campaign bead and print a projected JSON row",
+	map[string]FlagSpec{"--app": literal1, "--exclude-app": literal1, "--actor": literal1},
+	PositionalSpec{Leading: []OperandRole{Literal, Literal}}, StdinNever, StdoutContent,
+	zrWritesBeads)
+
+// rc-park <bead> <reason> --fingerprint FP [--unpushed --isolation WHERE]
+// --actor ID: "Park a zr-refactor bead as human-blocked in one bd call"
+// (`bd update`, after a `bd show` read). A beads bookkeeping write.
+var zrRcParkSchema = zrScript("rc-park",
+	"Park a zr-refactor bead as human-blocked in one bd call",
+	map[string]FlagSpec{
+		"--fingerprint": literal1, "--unpushed": inert, "--isolation": literal1,
+		"--actor": literal1,
+	},
+	PositionalSpec{Leading: []OperandRole{Literal, Message}}, StdinNever, StdoutMetadata,
+	zrWritesBeads)
+
+// rc-fp <app-bead> <fp> <reason> --actor ID: "Register an instance
+// fingerprint as resolved on an app bead" (`bd show` + `bd update`). A beads
+// bookkeeping write.
+var zrRcFpSchema = zrScript("rc-fp",
+	"Register an instance fingerprint as resolved on an app bead",
+	map[string]FlagSpec{"--actor": literal1},
+	PositionalSpec{Leading: []OperandRole{Literal, Literal, Message}}, StdinNever, StdoutMetadata,
+	zrWritesBeads)
 
 // ---- df ---------------------------------------------------------------------
 

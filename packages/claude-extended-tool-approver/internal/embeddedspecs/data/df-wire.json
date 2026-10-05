@@ -1,0 +1,155 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "df-wire",
+  "command": {
+    "name": "df-wire",
+    "provenance": "df-wire --help (Mint + duplicate-free bulk wiring + verify, for one focus bead, this host 2026-10-05)",
+    "citations": {
+      "provenance": {
+        "source": "df-wire --help: \"df-wire: Mint + duplicate-free bulk wiring + verify, for one focus bead.\""
+      },
+      "stdin": {
+        "source": "df-wire --help: \"--records - Deep-enriched records (JSON array) on stdin.\""
+      },
+      "stdout": {
+        "source": "df-wire --help: \"df-wire: Mint + duplicate-free bulk wiring + verify, for one focus bead.\" (stdout classification taken from this description of what the command prints)"
+      },
+      "unknownFlag": {
+        "source": "df-wire --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "flags": {
+      "--actor": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df-wire --help: \"--actor <id> The caller's own bd actor identity (its session id).\""
+        }
+      },
+      "--drop": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df-wire --help: \"--drop <handles> Comma-separated handles to remove from the --manifest\""
+        }
+      },
+      "--dry-run": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df-wire --help: \"--dry-run Print the `bd` commands instead of running them;\""
+        }
+      },
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df-wire --help: \"df-wire: Mint + duplicate-free bulk wiring + verify, for one focus bead.\" (this help text is what the -h/--help flag prints; the flag itself is not listed in the reviewed text)"
+        }
+      },
+      "--manifest": {
+        "arity": "one",
+        "operand": {
+          "kind": "path-read"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df-wire --help: \"--manifest <file> A df-survey manifest (deep-enriched: items carry\""
+        }
+      },
+      "--merge": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df-wire --help: \"--merge <k>=<a>,... Comma-separated `<keep-handle>=<absorbed-handle>` pairs:\""
+        }
+      },
+      "--records": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df-wire --help: \"--records - Deep-enriched records (JSON array) on stdin.\""
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df-wire --help: \"df-wire: Mint + duplicate-free bulk wiring + verify, for one focus bead.\" (this help text is what the -h/--help flag prints; the flag itself is not listed in the reviewed text)"
+        }
+      }
+    },
+    "positionals": {
+      "leading": [
+        {
+          "kind": "literal"
+        }
+      ],
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "df-wire --help: \"Usage: df-wire <focus-id> --records - [--dry-run]\""
+      }
+    },
+    "implicitEffects": [
+      {
+        "role": {
+          "kind": "remote",
+          "operation": "tracker-write"
+        },
+        "target": "beads",
+        "citation": {
+          "source": "df-wire --help: \"1. Mint where needs_mint:\" (the effect declared here is what this command does, per this description)"
+        }
+      }
+    ],
+    "stdin": "always",
+    "stdout": "content",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}
