@@ -6,7 +6,9 @@ section 13, and the "proposed" ledger rows are thereby adopted). Written 2026-09
 and the findings of one independent review round. Supersedes the uncommitted draft
 `2026-09-23-work-report-connector-integration-design.md` (revisions 1-3, same day); Appendix A
 records what that draft's content became here.
-**Date**: 2026-09-23
+**Date**: 2026-09-23 (revision 2, approved 2026-10-05). Text corrections from the post-approval
+review were applied 2026-10-05 under bead `pg2-zc9s0` (findings recorded on decomposition bead
+`pg2-319a2`, program epic `pg2-vfmp7`); they change no section 13 ruling.
 **Deciders**: Phillip Green II (operator), in conversation with Claude
 **Beads**: `pg2-6pn7g` (this plan), `pg2-lelc0` (work-report's tracking bead, which this plan
 refines), `pg2-2j5ac` (the connector program epic, cited for context, not a dependency)
@@ -64,6 +66,11 @@ time-accounting or agent-session auditing. Two consequences drive the design:
   (`pa-monitor status --json`); no op enumerates ended sessions. The 2026-09-18 agentsession design
   ruled that all Claude session and transcript knowledge flows through `pa-monitor`'s CLI, never a
   second transcript parser.
+- The `scm` capability and its Tier-2 backend `pg-connector-scm-git` already exist on main
+  (`packages/pg-connector/cmd/pg-connector-scm-git`): local git worktrees and cwd-to-branch
+  resolution (`worktree_add`, `worktree_remove`, `worktree_list`, `branch_detect`), with no remote
+  sync concept. `scm` does not cover commit history, so there is still no existing source of
+  commits.
 - `attention` and `search` are the house pattern for a cross-cutting capability: a schema file,
   a one-method provider interface, a dispatch table, a top-level `<capability>.sources`
   registration independent of `connector.<type>`, an umbrella fan-out verb, and a nix option
@@ -109,7 +116,7 @@ review".
 | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
 | WT-D1  | Ingestion goes through ONE new cross-cutting `pg-connector` capability, `activity`, whose single op `list_activity` is **range-shaped** — `{since, before}` — not cursor-shaped. Backfill requires it; work-report's landed `INV-RANGE-1` already says it; no behavior-doc amendment is needed for the pull shape.                                                                                                                                                                                                                                                                                                                                                                                             | ruled 2026-10-05 (section 13, item 1) — reverses the 2026-09-23 revision-3 direction "cursor-based query op"                                                                                                                                                                            | The `activity` capability                                  |
 | WT-D2  | `activity` is defined alongside, not as one of, the entity types, mirroring `attention`/`search` exactly: schema, provider interface, dispatch table, `activity.sources` registration, umbrella verb `pg-connector activity list`, nix option. Any backend MAY implement it its own way.                                                                                                                                                                                                                                                                                                                                                                                                                       | adopted (revision 3's WR-D1, operator 2026-09-23)                                                                                                                                                                                                                                       | The `activity` capability                                  |
-| WT-D3  | Git commit activity ships as a **capability-only Tier-2 backend**, `pg-connector-activity-git`, registered under `activity.sources` only. No `scmlog` entity type is introduced now; one MAY be added later if a consumer needs `list`/`show`/`changes` over commits, the same reasoning D23 used to re-add `Thread` once `pg-desk` needed it. Variant rejected 2026-10-05: a `scmlog` type with backend `pg-connector-scmlog-git`.                                                                                                                                                                                                                                                                            | ruled 2026-10-05 (section 13, item 2) — narrows the revision-3 `scmlog` type; the `scmlog` variant was rejected                                                                                                                                                                         | Git commit activity                                        |
+| WT-D3  | Git commit activity ships as a **capability-only Tier-2 backend**, `pg-connector-activity-git`, registered under `activity.sources` only. No `scmlog` entity type is introduced now; one MAY be added later if a consumer needs `list`/`show`/`changes` over commits, the same reasoning the pg-desk design used to re-add `Thread` once `pg-desk` needed it (its sections "Jira, Slack, and git activity" and "Schema growth"; its D23 is the separate Slack-via-`claude -p` ruling). Variant rejected 2026-10-05: a `scmlog` type with backend `pg-connector-scmlog-git`.                                                                                                                                    | ruled 2026-10-05 (section 13, item 2) — narrows the revision-3 `scmlog` type; the `scmlog` variant was rejected                                                                                                                                                                         | Git commit activity                                        |
 | WT-D4  | work-report owns the history store: SQLite, append-only entries, latest-wins resolution, outside `pg-connector` (the design of record's shared-store prohibition is untouched).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | adopted (behavior docs + pg-desk design D11)                                                                                                                                                                                                                                            | work-report — Store                                        |
 | WT-D5  | work-report lives in THIS repo as `packages/work-report`, a sibling Go module shaped like `pg-desk`; its behavior docs move here from `phillipgreenii-nix-support-apps` in the same change. This repo is public: work-report MUST carry no organization identifiers; all of those stay in the private machine flake's configuration.                                                                                                                                                                                                                                                                                                                                                                           | **operator ruling, 2026-09-23** — moves the tool out of `phillipgreenii-nix-support-apps` (private)                                                                                                                                                                                     | work-report — Placement                                    |
 | WT-D6  | Ingestion is scheduled by **pg-router**: a `[[query]]` of type `command` on a one-hour period trigger runs `work-report pull --range last-48h --output pg-router`, which emits an item only for a degraded source and exits non-zero only when the pull could not run at all. pg-router's `status`/TUI and event log are the scheduler's observability. A plain timer is the recorded variant for a host without pg-router.                                                                                                                                                                                                                                                                                    | **operator ruling, 2026-09-23** — restores revision-3's "hourly via pg-router" (WR-D3) over this document's first-draft timer; the bound consumer is the deployment's existing `escalation-triager` role (operator: "the triage role is ok with me, but there is already one in place") | work-report — Scheduling and operability; pg-router's role |
@@ -271,7 +278,11 @@ type Provider interface {
 and adds `auth_status` only when `p` also satisfies `provider.AuthChecker`, byte-for-byte the shape
 of `pkg/provider/attention/dispatch.go`. Argument decoding (`ActivityListArgs`: `before`
 required, `since` optional and, when present, earlier than `before`) happens in the dispatch
-handler; a malformed or reversed range is `ErrInvalidArgument`. The range travels in the op's **args**, not the `config` channel: unlike a
+handler; a malformed or reversed range is `ErrInvalidArgument`. **Phase 0 delivers every bound as
+an RFC3339 instant with offset, after the umbrella's `parseTimeBound` has resolved any duration or
+`<N>d` form against "now"**: no backend and no `ActivityListArgs` consumer ever parses a duration
+or a day suffix, and the same holds for the `list_since`/`list_before` and `search_since`/
+`search_before` keys. The range travels in the op's **args**, not the `config` channel: unlike a
 time bound on `search` (an optional filter on an existing op, which the landed `pg2-emmut` design
 routes through `config` to avoid widening a shared interface), the range is the whole meaning of
 this new op and is required on every call.
@@ -313,7 +324,11 @@ pg-connector activity list --since <bound> --before <bound> [--backend <b>] [--o
 - A fan-out op over `ActivitySources()` (INV-OUT-1), with the standard `sources[]` rows:
   `succeeded` with the raw item count, `degraded` with a reason, `disabled: not applicable` on
   `unknown_op`. `--backend` pins one source (the pin `issue list` already has), so a consumer can
-  re-pull one source after a degraded outcome.
+  re-pull one source after a degraded outcome. The `sources[]` rows are the `list`-shaped
+  `SourceResult` rows (`source`, `status`, `count`, `reason`) that `issue list` and `search` emit.
+  `pg-connector <type> changes` is NOT the model: it has no `--backend` flag (only `--query`,
+  `--consumer`, `--cached`, `--reset`), and its `sources[]` rows use `backend`, not `source`
+  (`cmd/pg-connector/changes.go`'s `changesSourceRow`).
 - Items are concatenated in config order, each row carrying `source` (the backend name). No
   merge, no dedup, no cap. Per-source `truncated` is surfaced on that source's row
   as `truncated: true`, never folded into the exit code (a truncated result is a warning, the
@@ -404,6 +419,10 @@ distinct happenings MUST never share one and one happening MUST always produce t
   in `fields.attribution: "assignee"`. Comments are not emitted in v1 (`bd comments` is one call
   per issue; the cost is unjustified until a report needs it). Labels: `workspace:<name>`,
   `tracker:beads`, plus each bead's own labels as `bead-label:<l>`. Entity id: the bead id.
+  Implied work (Phase 3): the backend's `bdIssue` struct
+  (`packages/pg-connector/cmd/pg-connector-issue-beads/internal/bd.go`) decodes only
+  `updated_at` today and MUST gain `created_at`, `started_at`, `closed_at`, and `created_by`
+  before it can date and attribute these three kinds.
 - **`pg-connector-agentsession-pa-monitor`** — see the section "Claude Code sessions".
 - **`pg-connector-activity-git`** — see the section "Git commit activity".
 
@@ -526,14 +545,18 @@ A commit is a happening, not a standing entity: it is immutable, it has no state
 `changes` feed over commits would only ever say `added`. Revision 3 proposed a full `scmlog` entity
 type for it and then had to invent bounds for an unbounded `list`. This design instead ships git
 commit history as a **capability-only Tier-2 backend** (WT-D3): a binary that talks to local git
-directly, implements only `list_activity`, and is registered only under `activity.sources`.
+directly, implements only `list_activity`, and is registered only under `activity.sources`. It is a
+sibling of the existing `pg-connector-scm-git` (worktrees and branches), not an extension of it:
+`scm` has no commit-history op and no range-shaped op, and the two serve different consumers.
 
 This needs one amendment to the design of record's section "Cross-cutting capabilities: attention
 and search". That section authorizes two implementer kinds — an entity-type backend that also
 implements a capability, and a standalone plugin that composes `pg-connector` verbs — and requires
 the standalone kind to never talk to a system directly. A git-history backend is a third kind: it
-is the sole client of a system `pg-connector` has no entity type for, so composing verbs is
-impossible and direct access is its normal Tier-2 posture. The amendment: **a capability-only
+is the sole client of a system (local git commit history) that no `pg-connector` entity type or
+capability covers (the existing `scm` capability and `pg-connector-scm-git` backend expose
+worktrees and branches only, not commits), so composing verbs is impossible and direct access is
+its normal Tier-2 posture. The amendment: **a capability-only
 backend MAY talk directly to a system for which no `connector.<type>` backend exists; it is a
 Tier-2 backend under section "Tier 2 — backend implementation binaries", named
 `pg-connector-<capability>-<flavor>`, and it is bound by every Tier-2 rule (backend isolation, no
@@ -669,16 +692,16 @@ the private machine flake's configuration, exactly as for `pg-connector` and `pg
 Nix option `phillipgreenii.programs.work-report` (home-manager), rendered to
 `$XDG_CONFIG_HOME/work-report/config.yaml`:
 
-| Option                           | Meaning                                                                                                                                                                                                                                              |
-| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `enable`, `package`              | as every module here                                                                                                                                                                                                                                 |
-| `timezone`                       | IANA name; day boundaries for `today`/`yesterday`/dates are computed in it (default: the system zone)                                                                                                                                                |
-| `sources.<backend>.enable`       | default true for every backend `pg-connector activity list` reports; false → that source is reported `disabled` and never pulled (`--backend` pin per remaining source)                                                                              |
-| `sources.<backend>.labels`       | extra labels attached to every entry from that source (e.g. `workspace:work`), how the operator separates identities across systems                                                                                                                  |
-| `kinds.narrative.model`          | the `claude -p --model` value; `kinds.narrative.systemPromptFile` overrides the built-in prompt                                                                                                                                                      |
-| `schedule.interval`, `.window`   | the pg-router period trigger and the overlapping window each scheduled pull covers; default `1h` and `48h`                                                                                                                                           |
-| `pgRouterConfigText` (read-only) | the rendered pg-router `[[query]]` stanza computed from `schedule.*`, for the deployment to append to pg-router's `configText`; the deployment also binds `work-report.degraded` on its existing triager role (section "Scheduling and operability") |
-| `store.path`                     | default `$XDG_STATE_HOME/work-report/store.db`                                                                                                                                                                                                       |
+| Option                           | Meaning                                                                                                                                                                                                                                                                              |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `enable`, `package`              | as every module here                                                                                                                                                                                                                                                                 |
+| `timezone`                       | IANA name; day boundaries for `today`/`yesterday`/dates are computed in it (default: the system zone)                                                                                                                                                                                |
+| `sources.<backend>.enable`       | default true for every backend `pg-connector activity list` reports; false → that source is reported `disabled` and never pulled (`--backend` pin per remaining source)                                                                                                              |
+| `sources.<backend>.labels`       | extra labels attached to every entry from that source (e.g. `workspace:work`), how the operator separates identities across systems                                                                                                                                                  |
+| `kinds.narrative.model`          | (Phase 6) the `claude -p --model` value; `kinds.narrative.systemPromptFile` overrides the built-in prompt                                                                                                                                                                            |
+| `schedule.interval`, `.window`   | the pg-router period trigger and the overlapping window each scheduled pull covers; default `1h` and `48h`                                                                                                                                                                           |
+| `pgRouterConfigText` (read-only) | the rendered pg-router `[[query]]` stanza computed from `schedule.*`, for the deployment to append to pg-router's `configText`; the stanza emits `escalated.pg2`, which the deployment's existing `pg2-escalation-triager` role already binds (section "Scheduling and operability") |
+| `store.path`                     | default `$XDG_STATE_HOME/work-report/store.db`                                                                                                                                                                                                                                       |
 
 Which backends exist is `pg-connector`'s `activity.sources`; work-report configures only what to
 do with them. `work-report config validate` confirms `pg-connector` is on PATH and runs
@@ -800,7 +823,7 @@ work-report report [--range <spec>] [--kind baseline|narrative] [--label <l>]...
   ```toml
   [[query]]
   name = "work-report-pull"
-  emits = ["work-report.degraded"]
+  emits = ["escalated.pg2"]
   type = "command"
   [query.command]
   argv = ["work-report", "pull", "--range", "last-48h", "--output", "pg-router"]
@@ -809,8 +832,9 @@ work-report report [--range <spec>] [--kind baseline|narrative] [--label <l>]...
   kind = "period"
   every = "1h"
 
-  # plus, on the deployment's EXISTING escalation-triager role, one more binding:
-  #   binds = ["escalated-work", "work-report.degraded"]
+  # no new binding: the deployment's EXISTING role
+  #   { name = "pg2-escalation-triager"; binds = ["escalated.pg2"]; }
+  # already binds this event type, so the config is valid as written.
   ```
 
   **pg-router has no consumer-less query.** Its config validation rejects a query whose declared
@@ -818,26 +842,54 @@ work-report report [--range <spec>] [--kind baseline|narrative] [--label <l>]...
   and its discover loop rejects, before enqueueing, any event whose type no configured role binds
   (`internal/discover/discover.go`). A pure "cron with no consumer" is therefore not expressible;
   choosing pg-router as the scheduler (WT-D6) means giving the query a bound consumer. **The
-  consumer already exists.** The deployment runs an `escalation-triager` role bound to
-  `escalated-work` (a beads query for beads labeled `escalated`), whose handler prompt is
-  bead-driven: investigate bead `{{.BeadID}}`, then handle, triage, or escalate to a human
-  (the deployment's escalation-triager handler prompt). work-report
-  fits that shape without a new role or prompt: on a degraded source, `pull` ensures — through
-  `pg-connector issue`, the same composition rule `pg-desk`'s sync follows — one open bead in the
-  personal tracker, title-keyed on the source (`work-report: <source> degraded`), labeled
-  `escalated` and `work-report`, whose body carries the reason, the range, the exact re-pull
-  command, and `pg-connector config validate`'s row for that backend; a later pull appends the
-  new outcome to the same bead rather than opening another, and closes it with a reason when the
-  source succeeds again. The triager then investigates it exactly as it investigates a probe's
-  escalated bead. The operator's question "does this need to be different?" is answered: no.
+  consumer already exists.** The deployment runs the role `pg2-escalation-triager`
+  (type `ccpool`; defined in the 2026-09-22 pg-router ccpool escalation design) bound to the event
+  type `escalated.pg2`. That event type is emitted by the deployment's beads-side
+  `pg2-escalated-work` query, which runs the named beads query `escalated-work` (note the two
+  names: `escalated-work` is only the beads-side named query, NOT an event type) over beads labeled
+  `escalated`. The role's handler prompt is bead-driven: investigate bead `{{.BeadID}}`, then
+  handle, triage, or escalate to a human. work-report fits that shape without a new role or
+  prompt: on a degraded source, `pull` ensures — through `pg-connector issue`, the same
+  composition rule `pg-desk`'s sync follows — one open bead in the personal tracker, title-keyed
+  on the source (`work-report: <source> degraded`), labeled `escalated` and `work-report`, whose
+  body carries the reason, the range, the exact re-pull command, and `pg-connector config
+validate`'s row for that backend; a later pull appends the new outcome to the same bead rather
+  than opening another, and closes it with a reason when the source succeeds again. The triager
+  then investigates it exactly as it investigates a probe's escalated bead. The operator's
+  question "does this need to be different?" is answered: no.
+
+  **Finding the existing bead (dedupe query).** Named queries are static, so `pull` MUST find an
+  existing degraded-source bead through a dedicated pre-configured `pg-connector-issue-beads`
+  query that returns EVERY non-closed `escalated` bead (open, in_progress, blocked, deferred,
+  and human-labeled), named `escalated-all`, run as `pg-connector issue list --query
+escalated-all --backend pg-connector-issue-beads --output json` and matched on the title key.
+  It MUST NOT use the triager's dispatch query `escalated-work`: that is a ready-queue view
+  (`ready --label escalated --exclude-label human`), so it drops a bead the moment it is claimed,
+  deferred, blocked, or human-labeled, and a pull would then file a duplicate bead. This is the
+  same hazard and the same remedy `packages/ccpool-probe/cmd/ccpool-probe/connector.go` records
+  (`defaultDedupQuery = "escalated-all"`); the deployment defines `escalated-all` in the backend's
+  `queries` block, and `work-report config validate` SHOULD report it when it is missing.
+
+  **Double-dispatch guard.** pg-router derives an event's id as `FingerprintID(type, itemID)`
+  (`packages/pg-router/internal/event/event.go`), so events of DIFFERENT types for the same bead
+  are different events and the same bead could be dispatched twice. The pull query therefore
+  emits the SAME event type the beads-side query emits, `escalated.pg2`, with the bead id as the
+  item id: its event id (`escalated.pg2:<bead id>`) then coincides with the beads-side query's
+  event for that bead, and the event queue's retention set drops whichever arrives second as a
+  duplicate. Fallback, accepted if a deployment instead emits a distinct type such as
+  `work-report.degraded` and binds it on the triager: at most one extra dispatch per degraded
+  source per day (the pull's own item expiry bounds it, below), with the triager's ccpool claim on
+  the bead as the backstop against two concurrent sessions working it.
 
   `--output pg-router` makes `pull` print a JSON array of pg-router items: one per source whose
   outcome is `degraded` and nothing for a healthy pull. Each item is `id` = the escalated bead's
-  id, `type` = `issue`, `title` = the bead's title, `expiresAt` = the end of the local day plus
-  six hours, `metadata` = the outcome row — so the existing triager sees `{{.BeadID}}` as it
-  expects. The bead id is stable while the source stays degraded, so re-emission dedupes against
-  the retained event and a persistently degraded source costs at most one dispatch per day; the
-  beads-side `escalated-work` query converges on the same bead if the direct event is ever missed.
+  id (the item id MUST be the bare bead id so the event id coincides with the beads-side query's),
+  `type` = `issue`, `title` = the bead's title, `expiresAt` = the end of the local day plus six
+  hours, `metadata` = the outcome row — so the existing triager sees `{{.BeadID}}` as it expects.
+  The bead id is stable while the source stays degraded, so re-emission dedupes against the
+  retained event and a persistently degraded source costs at most one dispatch per day; the
+  beads-side `pg2-escalated-work` query converges on the same bead (and the same event id) if the
+  direct event is ever missed.
   In this output mode the process exits non-zero only when the pull could not run at
   all (no `pg-connector` on PATH, unreadable config, a store that stays locked); per-source
   degradation is data, not a query failure, so pg-router's failure backoff
@@ -850,8 +902,9 @@ work-report report [--range <spec>] [--kind baseline|narrative] [--label <l>]...
   `work-report` installed by the home-manager module resolves for the daemon and for pg-router's
   config-validation `LookPath` check. The module's read-only `pgRouterConfigText` option renders
   the query stanza above from `schedule.*` (also printed by `work-report config pg-router-query`),
-  so the deployment appends one block to pg-router's `configText` and adds the one binding to its
-  existing triager role; the bead tracker work-report files into is the `issue` backend the
+  so the deployment appends one block to pg-router's `configText` (the existing
+  `pg2-escalation-triager` role already binds `escalated.pg2`, so no role edit is needed) and
+  defines the `escalated-all` dedupe query in the issue backend's `queries` block; the bead tracker work-report files into is the `issue` backend the
   deployment pins (`PG_CONNECTOR_ISSUE_BEADS_DIR`, the same knob the triager prompt bakes in). A
   48-hour window pulled hourly makes
   every happening observed many times, which is harmless (identical re-observations are not
@@ -872,7 +925,7 @@ work-report report [--range <spec>] [--kind baseline|narrative] [--label <l>]...
   `before`, `status`, `count`, `unchanged`, `rejected`, `truncated`, `duration_ms`, `reason`) and
   one per report to `report.jsonl`; the same facts are queryable through `status`. It emits no
   OpenTelemetry or Prometheus metrics in v1; the scheduled query's fire history, failures, and
-  any `work-report.degraded` events are visible in pg-router's `status`, TUI, and JSONL event
+  any `escalated.pg2` events the pull query emits are visible in pg-router's `status`, TUI, and JSONL event
   log, which the observability stack already ingests. A metrics textfile is a later addition
   and is declared deferred here, not omitted.
 - **Failure handling**: `pg-connector` absent or non-zero with no JSON → every source `degraded`
@@ -899,9 +952,10 @@ pull could not run; `report`/`query` exit 0 on a report or an empty result and 1
   `pg-connector-thread-slack` tests use) returning fixtures with a degraded row, a truncated row,
   a `not applicable` row, and one schema-invalid item; assert outcome rows, exit code, and that
   valid items from the same source were stored (WT-D9).
-- Report: golden-file tests for baseline over a fixture store (multi-day, narrowed, empty range);
-  narrative with a fake `claude` on PATH asserting the argv (`--allowed-tools ""`, prompt out of
-  band), the fenced stdin, and the outcome path on failure.
+- Report: golden-file tests for baseline over a fixture store (multi-day, narrowed, empty range),
+  and the generator-registry seam (an unregistered kind is an outcome) in Phase 2; narrative with
+  a fake `claude` on PATH asserting the argv (`--allowed-tools ""`, prompt out of band), the
+  fenced stdin, and the outcome path on failure belongs to Phase 6, with the narrative kind.
 - CLI: range-spec parsing table; every subcommand's `--output json` shape.
 - Behavior docs: after the amendments land, run the behavior-docs intra-conformance pass
   (`behavior-docs-conformance:behavior-docs-intra-conformance`) once, per `pg2-lelc0`'s item 2.
@@ -909,18 +963,32 @@ pull could not run; `report`/`query` exit 0 on a report or an empty result and 1
 **Acceptance criteria**
 
 - `nix build .#work-report` and `nix build .#checks.<system>.work-report-go-tests` pass; the
-  package versions from its own source digest.
+  package versions from its own source digest. The wiring they name exists: the home-manager module
+  `home/programs/work-report/default.nix` (the `phillipgreenii.programs.work-report` options of the
+  section "Configuration"), and in `flake.nix` the overlay entry that builds the package from
+  `./packages/work-report` (so `packages.work-report` exists, as `packages.pg-desk` does) plus
+  `checks.<system>.work-report-go-tests` built with `mkGoTest` over the module root.
 - `work-report pull --range yesterday` against a live host writes entries for every succeeding
   source, one `pull` row per source, and exits 0/2/3 per the fan-out scheme; a second identical
   pull appends nothing and reports every item `unchanged`.
 - `work-report query --range yesterday --output json` returns exactly one entry per `id` and
   honors AND-across/OR-within narrowing.
-- `work-report report --range yesterday` renders the baseline kind with no generator on PATH;
-  `--kind narrative` with `claude` absent returns an outcome naming the reason and exits 1.
+- `work-report report --range yesterday` renders the baseline kind with no generator on PATH. The
+  generator registry (the seam behind `INV-GEN-PLUGIN-1`) ships in Phase 2, so a kind with no
+  registered generator returns an outcome naming the unknown kind and exits 1.
+- (Phase 6) `--kind narrative` with `claude` absent returns an outcome naming the reason and
+  exits 1.
 - The pg-router query fires hourly and its pulls appear in `status` and `pull.jsonl`; a backfill of one
   month completes with per-source outcomes and no duplicate entries.
-- No organization identifier appears in `packages/work-report`; the identifier-allowlist guard
-  (`packages/pg-pr/cmd/pg-pr/identifier_allowlist_test.go`) is widened to cover its `testdata/`.
+- No organization identifier appears in `packages/work-report`, enforced by a guard test LOCAL to
+  that module (for example `packages/work-report/internal/.../identifier_allowlist_test.go`,
+  running inside `checks.<system>.work-report-go-tests`). It follows the allowlist-inversion
+  design of the repo `CLAUDE.md`'s "Mechanical guard": a small committed ALLOWLIST of known-safe
+  identifiers, flagging any other username, login, or handle-shaped token in a structured
+  identity field of the module's `testdata/` and fixtures, and it MUST NOT commit a denylist of
+  forbidden tokens. `packages/pg-pr`'s own guard is NOT widened or otherwise edited: pg-pr is
+  frozen (operator ruling, 2026-10-03), and this module's guard is a separate, independent
+  test.
 - The behavior docs live at `packages/work-report/docs/behavior/` in this repo with the three
   amendments applied and the realization-gap register carrying the rows in section "Realization
   gaps this design accepts", updated as phases land.
@@ -956,6 +1024,12 @@ docs move here and closed as the build catches up:
 | `INV-ENTITY-1` | entity-typed entries resolve like any other entry                                  | no phase produces entity entries; section "Ranged `list` queries" specifies how `entity_queries` would, as an optional later phase. Activity entries do not depend on it.                                                                                                         |
 
 ## 9. Amendments to the design of record and the pg-desk design
+
+Owners (each amendment lands in the same change as the phase that owns it): Phase 1 owns the
+design-of-record retitle, the naming-token amendment, the Appendix B closure, and the
+agentsession-design sentence; Phase 5 additionally lands the capability-only-backend rule (section
+"Git commit activity"); Phase 2 owns the pg-desk D11 refinement and the D24 telemetry
+cross-reference.
 
 - **Design of record, section "Cross-cutting capabilities: attention and search"**: retitle to
   "attention, search, and activity"; add the `activity` capability's shape by reference to this
@@ -994,8 +1068,8 @@ the router daemon's health, the same coupling the pg-desk design's D2 states for
 regardless of who fired it. Mechanically: a command query returning an empty array is accepted
 and yields no events (`packages/pg-router/internal/query/command.go`), and freshness keys on the
 query's fire, not on items — but pg-router has no consumer-less query (its validation rejects an
-orphan producer and its discover loop rejects unbound events), so the query's event type is bound
-by the deployment's existing `escalation-triager` role, and a degraded source becomes an
+orphan producer and its discover loop rejects unbound events), so the query emits the event type
+`escalated.pg2`, already bound by the deployment's existing `pg2-escalation-triager` role, and a degraded source becomes an
 `escalated` bead that role already knows how to investigate — at most one dispatch per degraded
 source per day (section "Scheduling and operability"). No new role, no new prompt; if even that
 proves unwanted, the timer variant costs nothing to switch to. The `pg-router-source-pg-connector`
@@ -1049,11 +1123,11 @@ telemetry declaration.
 | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 0     | Ranged `list` (WT-D18): `--since`/`--before` on `<type> list`, the shared bound parser, native-range helpers in pr-github, issue-jira, issue-beads; plus `search --since/--before` (the folded-in `pg2-emmut` follow-through). Its own bead, created in the decomposition pass; Phase 1 depends on it by the operator's framing | `pg-connector pr list --query mine --since 7d` returns only PRs updated in the window; `issue list` likewise; `changes` output is unchanged                                             |
 | 1     | `activity` capability core: schema, provider, dispatch, registry, umbrella verb, nix option, conformance case; `pg-connector-pr-github` implements it (opened, merged, closed, reviewed); design-of-record amendments to its sections "Cross-cutting capabilities" and "Naming convention"                                      | `pg-connector activity list --since 7d` on the live host returns the operator's PR happenings with per-source rows; `config validate` shows the `activity` schema version               |
-| 2     | work-report core: module, store, `pull` (with `--output pg-router`), `query`, baseline `report`, `status`, `config` (with `pg-router-query`), nix module, the pg-router query stanza wired on the live host; behavior docs moved and amended                                                                                    | The pg-router query fires hourly for one working day and reads fresh in `pg-router status`; `work-report report --range yesterday` shows Phase 1's items; a second pull appends nothing |
+| 2     | work-report core: module, store, `pull` (with `--output pg-router`), `query`, baseline `report` on the generator-registry seam, `status`, `config` (with `pg-router-query`), nix module, the pg-router query stanza wired on the live host; behavior docs moved and amended                                                     | The pg-router query fires hourly for one working day and reads fresh in `pg-router status`; `work-report report --range yesterday` shows Phase 1's items; a second pull appends nothing |
 | 3     | `pg-connector-issue-jira` and `pg-connector-issue-beads` implement `list_activity`                                                                                                                                                                                                                                              | Yesterday's baseline shows Jira transitions and bead closures attributed to the operator only                                                                                           |
 | 4     | `pa-monitor sessions` (claude-transcript rollup primitive) and `pg-connector-agentsession-pa-monitor` `list_activity`                                                                                                                                                                                                           | Yesterday's baseline shows the sessions the operator started, including ones already ended                                                                                              |
 | 5     | `pg-connector-activity-git`; the design-of-record amendment adding the capability-only-backend rule                                                                                                                                                                                                                             | Commits across the configured repos appear; a one-month backfill completes with per-source outcomes and no duplicates                                                                   |
-| 6     | narrative kind                                                                                                                                                                                                                                                                                                                  | The operator reads a week of daily narratives and one weekly narrative narrowed to a label and accepts their quality                                                                    |
+| 6     | narrative kind: the generator, its `kinds.narrative.*` options, its test, and its acceptance bullet (Phase 2 ships only the generator-registry seam)                                                                                                                                                                            | The operator reads a week of daily narratives and one weekly narrative narrowed to a label and accepts their quality                                                                    |
 | 7     | Private machine-flake configuration wiring; retirement of `activity-collector` and `work-activity-tracker` (WT-D15); `pg2-lelc0` closed                                                                                                                                                                                         | Both packages and their home-manager modules are gone from `phillipgreenii-nix-support-apps`; `work-activity-tracker` is no longer on the work machine's PATH                           |
 
 Decomposition: this document is one program with seven phases (1-7); it SHOULD go through
@@ -1075,7 +1149,7 @@ parser with the `<N>d` suffix. Phase 6 depends on Phase 2. Phase 7 depends on al
 Operator-run checkpoints and private wiring: the checkpoints above run on the operator's live
 host and need configuration that lives in the private machine flake (the `activity.sources`
 registration, `author_emails`, `activity_actors`, repo lists, the pg-router `configText` stanza,
-the triager role binding, and `PG_CONNECTOR_ISSUE_BEADS_DIR`). This public repo cannot carry
+the `escalated-all` dedupe query, and `PG_CONNECTOR_ISSUE_BEADS_DIR`). This public repo cannot carry
 that configuration, so a drain agent cannot complete a checkpoint. Each phase's decomposition
 therefore files one `human`-labelled "wire and run the checkpoint" bead in the private flake's
 tracker, depending on the phase's implementation beads; the phase is closed by it. Phase 7's
