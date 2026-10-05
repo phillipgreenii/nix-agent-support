@@ -1,0 +1,51 @@
+{
+  "contract": "pg-desk.view/v1",
+  "type": "pr",
+  "id": "acme/widgets#42",
+  "version": 7,
+  "as_of": "2026-10-01T12:00:00Z",
+  "stale": false,
+  "snapshot": {
+    "id": "acme/widgets#42",
+    "repo": "acme/widgets",
+    "number": 42,
+    "title": "Add retry to client",
+    "state": "open",
+    "branch": "feature/retry",
+    "base": "main",
+    "author": "teammate",
+    "head_sha": "9f3c1e2",
+    "base_sha": "b45e000",
+    "node_id": "PR_node_42",
+    "draft": true
+  },
+  "decorations": {
+    "relationship": "co-owned",
+    "dispositions": [],
+    "urgency": "",
+    "category": ""
+  },
+  "annotations": {
+    "hidden": {
+      "value": false,
+      "reason": null
+    },
+    "wip": false,
+    "suppress": [],
+    "force_review": false,
+    "force_review_sha": null,
+    "decider": {}
+  },
+  "links": [
+    {
+      "type": "issue",
+      "id": "bd-1",
+      "state": "open",
+      "title": "acme/widgets#42: Add retry to client",
+      "labels": ["co-owned"],
+      "metadata": {
+        "dedup_key": "pr:acme/widgets#42:anchor"
+      }
+    }
+  ]
+}
