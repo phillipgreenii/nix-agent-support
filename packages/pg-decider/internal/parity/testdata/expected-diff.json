@@ -1,0 +1,282 @@
+{
+  "scenarios": {
+    "03-team-unaddressed-comments": [
+      {
+        "id": "S16",
+        "entity": "acme/api#103",
+        "kind": "process-feedback",
+        "op": "create",
+        "side": "old-only",
+        "reason": "Team PRs get only an operator-pending review; process-feedback cycles are gated to mine/co-owned PRs (S16, spec 7.3 feedback.digest-changed). Today's needsCycle has no ownership gate."
+      }
+    ],
+    "04-team-draft": [
+      {
+        "id": "S16",
+        "entity": "acme/api#104",
+        "kind": "process-feedback",
+        "op": "create",
+        "side": "old-only",
+        "reason": "Team PRs get only an operator-pending review; process-feedback cycles are gated to mine/co-owned PRs (S16, spec 7.3 feedback.digest-changed). Today's needsCycle has no ownership gate."
+      },
+      {
+        "id": "S16",
+        "entity": "acme/api#104",
+        "kind": "anchor",
+        "op": "create",
+        "side": "old-only",
+        "reason": "The old anchor existed only to parent the feedback cycle (anchors are created lazily, D8); with no cycle for a team PR and no review request (draft) nothing needs it (S16)."
+      }
+    ],
+    "05-hidden-mine": [
+      {
+        "id": "S15",
+        "entity": "acme/api#105",
+        "kind": "anchor",
+        "op": "create",
+        "side": "old-only",
+        "reason": "hide stops every decider rule (S15, spec 7.3 precedence step 1); today hide has no effect on writes, so the old side still plans this row."
+      },
+      {
+        "id": "S15",
+        "entity": "acme/api#105",
+        "kind": "process-feedback",
+        "op": "create",
+        "side": "old-only",
+        "reason": "hide stops every decider rule (S15, spec 7.3 precedence step 1); today hide has no effect on writes, so the old side still plans this row."
+      },
+      {
+        "id": "S15",
+        "entity": "acme/api#105",
+        "kind": "review-pr",
+        "op": "create",
+        "side": "old-only",
+        "reason": "hide stops every decider rule (S15, spec 7.3 precedence step 1); today hide has no effect on writes, so the old side still plans this row."
+      }
+    ],
+    "06-mine-failing-ci": [
+      {
+        "id": "S13",
+        "entity": "acme/api#106",
+        "kind": "fix-ci",
+        "op": "create",
+        "side": "new-only",
+        "reason": "New rule fixci.failing-on-head (S13): own PRs with failing CI get a worker-ready fix-ci item; no such rule exists today."
+      }
+    ],
+    "07-mine-conflicting": [
+      {
+        "id": "S13",
+        "entity": "acme/api#107",
+        "kind": "resolve-conflict",
+        "op": "create",
+        "side": "new-only",
+        "reason": "New rule conflict.present (S13): own PRs that conflict with their base get a worker-ready resolve-conflict item; no such rule exists today."
+      }
+    ],
+    "08-mine-green-approved": [
+      {
+        "id": "S14",
+        "entity": "acme/api#108",
+        "kind": "annotation:ready_to_land",
+        "op": "annotate",
+        "side": "new-only",
+        "reason": "New rule land.ready (S14): a green, approved, non-draft own PR is annotated ready_to_land; annotation only, no old counterpart."
+      }
+    ],
+    "09-merged-open-anchor": [
+      {
+        "id": "UNOBS",
+        "entity": "acme/api#109",
+        "kind": "anchor",
+        "op": "close",
+        "side": "new-only",
+        "reason": "all.closed is same as current (spec 7.3): a merged PR closes its anchor and every open child. The old side makes this write against an existing bead, which pg-desk show --json does not list (planned_sync_rows lists only rows without a bead id), so it is pinned here instead of observed."
+      },
+      {
+        "id": "UNOBS",
+        "entity": "acme/api#109",
+        "kind": "process-feedback",
+        "op": "close",
+        "side": "new-only",
+        "reason": "all.closed is same as current (spec 7.3): a merged PR closes its anchor and every open child. The old side makes this write against an existing bead, which pg-desk show --json does not list (planned_sync_rows lists only rows without a bead id), so it is pinned here instead of observed."
+      },
+      {
+        "id": "UNOBS",
+        "entity": "acme/api#109",
+        "kind": "review-pr",
+        "op": "close",
+        "side": "new-only",
+        "reason": "all.closed is same as current (spec 7.3): a merged PR closes its anchor and every open child. The old side makes this write against an existing bead, which pg-desk show --json does not list (planned_sync_rows lists only rows without a bead id), so it is pinned here instead of observed."
+      },
+      {
+        "id": "UNOBS",
+        "entity": "acme/api#109",
+        "kind": "anchor",
+        "op": "update",
+        "side": "new-only",
+        "reason": "anchor.backfill is same as current (spec 7.3): the anchor's drifted fields are refreshed with one update. The old side makes this write against an existing bead, which pg-desk show --json does not list (planned_sync_rows lists only rows without a bead id), so it is pinned here instead of observed."
+      },
+      {
+        "id": "S19",
+        "entity": "acme/api#109",
+        "kind": "anchor",
+        "op": "key-write",
+        "side": "new-only",
+        "reason": "Adoption writes the stable dedup_key onto the adopted bead (S19, spec 7.3 Adoption); the old adoption only links the bead and writes no dedup_key."
+      },
+      {
+        "id": "S19",
+        "entity": "acme/api#109",
+        "kind": "process-feedback",
+        "op": "key-write",
+        "side": "new-only",
+        "reason": "Adoption writes the stable dedup_key onto the adopted bead (S19, spec 7.3 Adoption); the old adoption only links the bead and writes no dedup_key."
+      },
+      {
+        "id": "S19",
+        "entity": "acme/api#109",
+        "kind": "review-pr",
+        "op": "key-write",
+        "side": "new-only",
+        "reason": "Adoption writes the stable dedup_key onto the adopted bead (S19, spec 7.3 Adoption); the old adoption only links the bead and writes no dedup_key."
+      }
+    ],
+    "10-adopt-prefix-and-title-shapes": [
+      {
+        "id": "UNOBS",
+        "entity": "acme/api#110",
+        "kind": "anchor",
+        "op": "update",
+        "side": "new-only",
+        "reason": "anchor.backfill is same as current (spec 7.3): the anchor's drifted fields are refreshed with one update. The old side makes this write against an existing bead, which pg-desk show --json does not list (planned_sync_rows lists only rows without a bead id), so it is pinned here instead of observed."
+      },
+      {
+        "id": "S19",
+        "entity": "acme/api#110",
+        "kind": "anchor",
+        "op": "key-write",
+        "side": "new-only",
+        "reason": "Adoption writes the stable dedup_key onto the adopted bead (S19, spec 7.3 Adoption); the old adoption only links the bead and writes no dedup_key."
+      },
+      {
+        "id": "S19",
+        "entity": "acme/api#110",
+        "kind": "process-feedback",
+        "op": "key-write",
+        "side": "new-only",
+        "reason": "Adoption writes the stable dedup_key onto the adopted bead (S19, spec 7.3 Adoption); the old adoption only links the bead and writes no dedup_key."
+      },
+      {
+        "id": "S19",
+        "entity": "acme/api#110",
+        "kind": "review-pr",
+        "op": "key-write",
+        "side": "new-only",
+        "reason": "Adoption writes the stable dedup_key onto the adopted bead (S19, spec 7.3 Adoption); the old adoption only links the bead and writes no dedup_key."
+      }
+    ],
+    "11-open-pr-closed-anchor": [
+      {
+        "id": "S24",
+        "entity": "acme/api#111",
+        "kind": "anchor",
+        "op": "reopen",
+        "side": "new-only",
+        "reason": "all.reopened (S24): an open PR whose anchor is closed gets the anchor reopened, however it was closed; today the anchor is never reopened."
+      },
+      {
+        "id": "UNOBS",
+        "entity": "acme/api#111",
+        "kind": "anchor",
+        "op": "update",
+        "side": "new-only",
+        "reason": "anchor.backfill is same as current (spec 7.3): the anchor's drifted fields are refreshed with one update. The old side makes this write against an existing bead, which pg-desk show --json does not list (planned_sync_rows lists only rows without a bead id), so it is pinned here instead of observed."
+      },
+      {
+        "id": "S19",
+        "entity": "acme/api#111",
+        "kind": "anchor",
+        "op": "key-write",
+        "side": "new-only",
+        "reason": "Adoption writes the stable dedup_key onto the adopted bead (S19, spec 7.3 Adoption); the old adoption only links the bead and writes no dedup_key."
+      },
+      {
+        "id": "S19",
+        "entity": "acme/api#111",
+        "kind": "review-pr",
+        "op": "key-write",
+        "side": "new-only",
+        "reason": "Adoption writes the stable dedup_key onto the adopted bead (S19, spec 7.3 Adoption); the old adoption only links the bead and writes no dedup_key."
+      }
+    ],
+    "12-closed-review-advanced-head": [
+      {
+        "id": "UNOBS",
+        "entity": "acme/api#112",
+        "kind": "anchor",
+        "op": "update",
+        "side": "new-only",
+        "reason": "anchor.backfill is same as current (spec 7.3): the anchor's drifted fields are refreshed with one update. The old side makes this write against an existing bead, which pg-desk show --json does not list (planned_sync_rows lists only rows without a bead id), so it is pinned here instead of observed."
+      },
+      {
+        "id": "UNOBS",
+        "entity": "acme/api#112",
+        "kind": "review-pr",
+        "op": "reopen",
+        "side": "new-only",
+        "reason": "review.head-advanced is same as current (spec 7.3): the head advanced past the reviewed head, so the closed review request is reopened and its head_sha refreshed. The old side makes this write against an existing bead, which pg-desk show --json does not list (planned_sync_rows lists only rows without a bead id), so it is pinned here instead of observed."
+      },
+      {
+        "id": "UNOBS",
+        "entity": "acme/api#112",
+        "kind": "review-pr",
+        "op": "update",
+        "side": "new-only",
+        "reason": "review.head-advanced is same as current (spec 7.3): the head advanced past the reviewed head, so the closed review request is reopened and its head_sha refreshed. The old side makes this write against an existing bead, which pg-desk show --json does not list (planned_sync_rows lists only rows without a bead id), so it is pinned here instead of observed."
+      },
+      {
+        "id": "S19",
+        "entity": "acme/api#112",
+        "kind": "anchor",
+        "op": "key-write",
+        "side": "new-only",
+        "reason": "Adoption writes the stable dedup_key onto the adopted bead (S19, spec 7.3 Adoption); the old adoption only links the bead and writes no dedup_key."
+      },
+      {
+        "id": "S19",
+        "entity": "acme/api#112",
+        "kind": "review-pr",
+        "op": "key-write",
+        "side": "new-only",
+        "reason": "Adoption writes the stable dedup_key onto the adopted bead (S19, spec 7.3 Adoption); the old adoption only links the bead and writes no dedup_key."
+      }
+    ],
+    "13-adopt-title-only-anchor": [
+      {
+        "id": "S19",
+        "entity": "acme/api#113",
+        "kind": "process-feedback",
+        "op": "key-write",
+        "side": "new-only",
+        "reason": "Adoption writes the stable dedup_key onto the adopted bead (S19, spec 7.3 Adoption); the old adoption only links the bead and writes no dedup_key."
+      },
+      {
+        "id": "S19",
+        "entity": "acme/api#113",
+        "kind": "review-pr",
+        "op": "key-write",
+        "side": "new-only",
+        "reason": "Adoption writes the stable dedup_key onto the adopted bead (S19, spec 7.3 Adoption); the old adoption only links the bead and writes no dedup_key."
+      },
+      {
+        "id": "pg2-nbkps",
+        "entity": "acme/api#113",
+        "kind": "anchor",
+        "op": "adopt",
+        "side": "old-only",
+        "reason": "Operator ruling pg2-nbkps (Phillip, 2026-10-05), option (b) out of scope plus explained exception: the old sync adopts a legacy anchor by its <repo>#<n>: title prefix alone, and the new pipeline deliberately does not carry title-prefix adoption, because a work item links to its PR only through repo and pr_number metadata. Evidence: 0 of 1,401 live merge-request beads in the tracker lack repo/pr_number metadata (read-only scan 2026-10-05), and the legacy creator writes title and metadata in one call."
+      }
+    ]
+  }
+}
