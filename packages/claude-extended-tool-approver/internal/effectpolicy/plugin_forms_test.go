@@ -55,7 +55,9 @@ type pluginForm struct {
 //     option the schema never modeled (X=--output=/tmp/pwn), so it abstains
 //     even where the same command with a literal argument approves. The
 //     exceptions are positionals after `--`, words that open with a literal
-//     character (`main..$X`), commands whose options are all inert (echo,
+//     character (`main..$X`, or the skills' quoted note marker `"[worktree-review
+//     $(date +%F)] ..."` whose first byte is a quoted literal `[`; pg2-i4lbg),
+//     commands whose options are all inert (echo,
 //     true, false), and `test`/`[` operands beside a literal operator. This
 //     is the same remedy as the quoted-variable path forms above: type the
 //     literal value.
@@ -426,6 +428,16 @@ var pluginForms = []pluginForm{
 	{"pb", `command -v pb`, evalcontract.Approve, ""},
 	{"pb", `date -s 2026-10-05`, evalcontract.Abstain, "-s sets the system clock and is deliberately unmodeled"},
 	{"pb", `command -v a b`, evalcontract.Abstain, "only the single-name lookup is modeled"},
+
+	// pg2-i4lbg: the bead-note spellings the skills instruct. The note word opens
+	// with a QUOTED literal `[`, so the `$(date +%F)` inside it cannot become an
+	// option and the form approves.
+	{"pb", `bd update pg2-abc12 --append-notes "[worktree-review $(date +%F)] note" --actor sess-1`, evalcontract.Approve, ""},
+	{"pb", `bd update pg2-abc12 --remove-label worktree-review --priority 2 --append-notes "[worktree-review-resolved $(date +%F)] verdict. Restored P0->P2." --actor sess-1`, evalcontract.Approve, ""},
+	{"pb", `bd update pg2-abc12 --append-notes "[container note $(date +%F)] Do NOT claim this container bead -- D-9 container-parent." --actor sess-1`, evalcontract.Approve, ""},
+	{"pb", `bd create "worktree-review: reconcile leftover isolation for pg2-abc12" --labels human,worktree-review --defer +7d --deps "discovered-from:pg2-abc12" --notes "[worktree-review $(date +%F)] Leftover isolation. No promotion (priority left at P2)." --actor sess-1`, evalcontract.Approve, ""},
+	{"pb", `bd update pg2-abc12 --append-notes "$(date +%F) [worktree-review] note" --actor sess-1`, evalcontract.Abstain, "the note value opens with a runtime expansion, which could expand to an option"},
+	{"pb", `bd update pg2-abc12 [worktree-review$X] --actor sess-1`, evalcontract.Abstain, "an unquoted [ can open a glob bracket expression that a runtime value completes"},
 
 	// Quoted-variable path forms stay non-approvable; the literal-path form
 	// approves (see the SHELL STATEMENT FORMS note above).

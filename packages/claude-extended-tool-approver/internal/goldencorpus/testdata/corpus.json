@@ -9579,7 +9579,7 @@
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "bd update pg2-abc12 --append-notes \"worktree-review $(date +%F) note\" --actor sess-1"
+        "command": "bd update pg2-abc12 --append-notes \"[worktree-review $(date +%F)] note\" --actor sess-1"
       }
     },
     "cwd_path_state": {
@@ -9590,7 +9590,235 @@
     "settings": {},
     "rules_config": {},
     "expected_verdict": "approve",
-    "notes": "pg2-slsc0 (operator ruling 2026-10-04/05 on pg2-cjfpy; read-only schema fact, no new effectpolicy judgment): The instructed $(date +%F) command substitution inside a bd update note; both nodes approve. The skills write the note as [worktree-review $(date +%F)] ...; a note value that OPENS with [ currently abstains under pg2-5ctay's live-expansion rule, so this row uses the letter-first spelling."
+    "notes": "pg2-slsc0 + pg2-i4lbg (operator ruling 2026-10-04/05 on pg2-cjfpy; read-only schema fact plus the interpreter's literal-bracket word test, no new effectpolicy judgment): The skills write the note as [worktree-review $(date +%F)] ...; the word opens with a QUOTED literal [ so it cannot expand to an option, and both nodes approve. This row used a letter-first workaround spelling until pg2-i4lbg."
+  },
+  {
+    "case": "i4lbg_lifecycle_w2_promote_note",
+    "tags": ["plugin", "pb-plugin", "pg2-i4lbg", "date"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc12 --add-label human,worktree-review --priority 0 --append-notes \"[worktree-review $(date +%F)] Leftover isolation at /repo/.worktrees/x; a person must decide keep vs discard. Promoted P2->P0.\" --actor \"sess-1\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-i4lbg (skill-instructed spelling, epic pg2-cjfpy ruling 2026-10-04; engine fix is cmddesc-only, no new effectpolicy judgment): beads-lifecycle W-2 verbatim shape."
+  },
+  {
+    "case": "i4lbg_lifecycle_w5_release_note",
+    "tags": ["plugin", "pb-plugin", "pg2-i4lbg", "date"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc12 --remove-label human,worktree-review --priority 2 --status open --assignee \"\" --append-notes \"[worktree-review-resolved $(date +%F)] kept. Restored P0->P2.\" --actor \"sess-1\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-i4lbg (skill-instructed spelling, epic pg2-cjfpy ruling 2026-10-04; engine fix is cmddesc-only, no new effectpolicy judgment): beads-lifecycle W-5 / unblock-human-beads release shape."
+  },
+  {
+    "case": "i4lbg_lifecycle_w6_cleanup_note",
+    "tags": ["plugin", "pb-plugin", "pg2-i4lbg", "date"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc12 --remove-label worktree-review --priority 2 --append-notes \"[worktree-review-resolved $(date +%F)] discarded. Restored P0->P2.\" --actor \"sess-1\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-i4lbg (skill-instructed spelling, epic pg2-cjfpy ruling 2026-10-04; engine fix is cmddesc-only, no new effectpolicy judgment): beads-lifecycle W-6 cleanup-before-close shape."
+  },
+  {
+    "case": "i4lbg_unblock_focus_required_release_note",
+    "tags": ["plugin", "pb-plugin", "pg2-i4lbg", "date"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc12 --remove-label human,human-focus-required,worktree-review --priority 2 --status open --assignee \"\" --append-notes \"[worktree-review-resolved $(date +%F)] kept. Restored P0->P2.\" --actor \"sess-1-unblock\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-i4lbg (skill-instructed spelling, epic pg2-cjfpy ruling 2026-10-04; engine fix is cmddesc-only, no new effectpolicy judgment): unblock-human-beads release with the human-focus-required label."
+  },
+  {
+    "case": "i4lbg_unblock_container_note",
+    "tags": ["plugin", "pb-plugin", "pg2-i4lbg", "date"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc12 --append-notes \"[container note $(date +%F)] Do NOT claim this container bead for direct work in /drain-beads or /unblock-human-beads -- D-9 container-parent, no independent decision of its own; real work/decisions are on its children.\" --actor \"sess-1-unblock\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-i4lbg (skill-instructed spelling, epic pg2-cjfpy ruling 2026-10-04; engine fix is cmddesc-only, no new effectpolicy judgment): unblock-human-beads container-note marker (note body holds -- and ; inside the quotes)."
+  },
+  {
+    "case": "i4lbg_unblock_teardown_note",
+    "tags": ["plugin", "pb-plugin", "pg2-i4lbg", "date"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc12 --remove-label worktree-review --priority 2 --append-notes \"[worktree-review-resolved $(date +%F)] tear-down: PROVABLY LOSSLESS, no operator prompt. Removed /repo/.worktrees/x and branch drain/pg2-abc12 in /repo. Nothing remains. Restored P0->P2.\" --actor \"sess-1-unblock\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-i4lbg (skill-instructed spelling, epic pg2-cjfpy ruling 2026-10-04; engine fix is cmddesc-only, no new effectpolicy judgment): unblock-human-beads lossless tear-down note."
+  },
+  {
+    "case": "i4lbg_unblock_create_leftover_notes",
+    "tags": ["plugin", "pb-plugin", "pg2-i4lbg", "date"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd create \"worktree-review: reconcile leftover isolation for pg2-abc12\" --labels human,worktree-review --defer +7d --deps \"discovered-from:pg2-abc12\" --notes \"[worktree-review $(date +%F)] Leftover isolation from pg2-abc12 at /repo/.worktrees/x (branch drain/pg2-abc12). A person must rule on keep vs discard. No promotion (priority left at P2).\" --actor \"sess-1-unblock\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-i4lbg (skill-instructed spelling, epic pg2-cjfpy ruling 2026-10-04; engine fix is cmddesc-only, no new effectpolicy judgment): unblock-human-beads bd create --notes shape."
+  },
+  {
+    "case": "i4lbg_drain_stuck_close_as_moot_notes",
+    "tags": ["plugin", "pb-plugin", "pg2-i4lbg", "date"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd create \"worktree-review: reconcile leftover isolation for pg2-abc12 (closed as moot)\" --labels human,worktree-review --defer +7d --deps \"discovered-from:pg2-abc12\" --notes \"[worktree-review $(date +%F)] Leftover isolation from pg2-abc12: worktree /repo/.worktrees/x, branch drain/pg2-abc12 in /repo. Unlanded: + abc123 subject. Dirty: M a.go. A person must rule on keep vs discard. No promotion (priority left at P2).\" --actor \"sess-1-drain\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-i4lbg (skill-instructed spelling, epic pg2-cjfpy ruling 2026-10-04; engine fix is cmddesc-only, no new effectpolicy judgment): drain-stuck CLOSE-AS-MOOT step 4 shape."
+  },
+  {
+    "case": "i4lbg_pin_note_opens_with_expansion",
+    "tags": ["plugin", "pb-plugin", "pg2-i4lbg", "date"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc12 --append-notes \"$(date +%F) [worktree-review] note\" --actor \"sess-1\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-i4lbg not-approve pin (option injection stays held): the note value OPENS with a runtime expansion, which could expand to an option."
+  },
+  {
+    "case": "i4lbg_pin_unquoted_bracket_glob",
+    "tags": ["plugin", "pb-plugin", "pg2-i4lbg", "option-injection"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc12 [worktree-review$X] --actor \"sess-1\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-i4lbg not-approve pin (option injection stays held): an unquoted [ can open a glob bracket expression that a runtime value completes into an option-named file, so only a QUOTED bracket word is trusted."
+  },
+  {
+    "case": "i4lbg_pin_unquoted_bracket_quoted_space",
+    "tags": ["plugin", "pb-plugin", "pg2-i4lbg", "option-injection"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc12 [a\" \"$X --actor \"sess-1\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-i4lbg not-approve pin (option injection stays held): the [ is unquoted (only the space is quoted), so it is still a glob opener."
+  },
+  {
+    "case": "i4lbg_pin_bracket_then_expansion",
+    "tags": ["plugin", "pb-plugin", "pg2-i4lbg", "date"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc12 --append-notes \"[$(date +%F)] note\" --actor \"sess-1\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-i4lbg not-approve pin (option injection stays held): no literal text between [ and the expansion, so the quotedness evidence (whitespace in the literal prefix) is absent; conservative, and no skill spells it this way."
   },
   {
     "case": "slsc0_pwd",

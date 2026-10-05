@@ -354,7 +354,7 @@ func (st *interpState) liveOptionRisk(op pendingOp, live bool) bool {
 	if optionsAllInert(st.schema) {
 		return false
 	}
-	if !startsWithExpansion(op.tok) {
+	if !startsWithExpansion(op.tok, st.leaf.Raw) {
 		return false
 	}
 	if st.schema.Positionals.LiveOperandNextToOperator && st.nextToOperator(op.idx) {
@@ -397,7 +397,7 @@ func optionsAllInert(s CommandSchema) bool {
 // the expansion later in the word produces; everything else (`$X`, `${X}`,
 // `$(cmd)`, a backtick, a quote left in the text, `<(...)`, an empty word)
 // is treated as possibly expanding to a leading `-`.
-func startsWithExpansion(tok string) bool {
+func startsWithExpansion(tok, raw string) bool {
 	if tok == "" {
 		return true
 	}
@@ -407,8 +407,37 @@ func startsWithExpansion(tok string) bool {
 		return false
 	case c == '/' || c == '.' || c == '_' || c == '~' || c == ':' || c == ',':
 		return false
+	case c == '[':
+		return !quotedBracketPrefix(tok, raw)
 	}
 	return true
+}
+
+// quotedBracketPrefix reports whether tok opens with a QUOTED literal `[`
+// followed by text containing whitespace before the first runtime expansion —
+// the note-marker spelling the plugin skills instruct (`"[worktree-review
+// $(date +%F)] ..."`, pg2-i4lbg). The word's first byte is then a fixed `[`,
+// whatever the expansion later produces, so it can never expand to an option.
+//
+// An unquoted `[` is NOT accepted: it can open a glob bracket expression that
+// a runtime value completes (`[$X]` with X=`!a]*[a`), matching a file named
+// like an option. Quoting is not recorded per argument, so it is checked two
+// ways, both required: the leaf's verbatim source text (raw) holds the word
+// immediately after a double quote (`"[worktree-review $(date +%F)] ...`, which
+// rules out `[a" "$X`, whose `[` is unquoted), and the literal prefix before
+// the first `$`/backtick holds whitespace with no backslash (an unquoted space
+// would have split the word). A word that fails either check stays on the
+// conservative abstain path.
+func quotedBracketPrefix(tok, raw string) bool {
+	if !strings.Contains(raw, "\""+tok) {
+		return false
+	}
+	end := strings.IndexAny(tok, "$`")
+	if end < 0 {
+		end = len(tok)
+	}
+	prefix := tok[:end]
+	return strings.ContainsAny(prefix, " \t\n") && !strings.Contains(prefix, "\\")
 }
 
 // nextToOperator reports whether the argument at idx is adjacent to a LITERAL

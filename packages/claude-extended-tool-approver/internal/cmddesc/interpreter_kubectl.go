@@ -83,7 +83,7 @@ func (kubectlInterpreter) Interpret(leaf cmdparse.ParsedCommand, schema CommandS
 	for i := range childArgs {
 		childLive[i] = leaf.ArgIsLiveExpansion(start + i)
 	}
-	childLeaf := cmdparse.ParsedCommand{Executable: name, Args: childArgs, ArgLiveExpansion: childLive}
+	childLeaf := cmdparse.ParsedCommand{Executable: name, Args: childArgs, ArgLiveExpansion: childLive, Raw: leaf.Raw}
 	sub := subIn.Interpret(childLeaf, subSchema, ctx)
 
 	effects := append(append([]Effect(nil), st.effects...), sub.Effects...)

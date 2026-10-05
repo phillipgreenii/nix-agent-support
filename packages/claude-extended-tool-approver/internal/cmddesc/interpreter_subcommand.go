@@ -67,6 +67,9 @@ func interpretSubcommand(leaf cmdparse.ParsedCommand, schema CommandSchema, ctx 
 		Executable:       name,
 		Args:             childArgs,
 		ArgLiveExpansion: childLive,
+		// Raw is the parent statement's verbatim source: startsWithExpansion reads
+		// it to confirm a `[`-opening word was quoted (pg2-i4lbg).
+		Raw: leaf.Raw,
 	}
 	sub := subIn.Interpret(childLeaf, subSchema, ctx)
 

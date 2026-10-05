@@ -319,6 +319,16 @@ func TestLiveOperandOptionInjection(t *testing.T) {
 		{"test two adjacent expansions", testSchema, `frob "$a" "$b"`, false},
 		{"test lone expansion", testSchema, `frob "$a"`, false},
 		{"test expansion beside live operator", testSchema, `frob "$a" "$op" 1`, false},
+		// pg2-i4lbg: the skills' note marker `"[worktree-review $(date +%F)] ..."`
+		// opens with a QUOTED literal `[`, so it can never expand to an option.
+		{"quoted bracket note marker", inertSchema, `frob "[worktree-review $(date +%F)] note"`, true},
+		{"quoted bracket note marker, variable", logSchema, `frob "[worktree-review-resolved $D] note"`, true},
+		{"quoted bracket, expansion right after the bracket", logSchema, `frob "[$(date +%F)] note"`, false},
+		{"unquoted bracket glob completed by a variable", logSchema, `frob [note$X]`, false},
+		{"unquoted bracket before a quoted space", logSchema, `frob [a" "$X`, false},
+		{"bracket quote closes before the expansion", logSchema, `frob "[a b"$X`, false},
+		{"backslash in the bracket prefix", logSchema, `frob "[a\ b $X]"`, false},
+		{"expansion first, bracket later", logSchema, `frob "$X [note]"`, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
