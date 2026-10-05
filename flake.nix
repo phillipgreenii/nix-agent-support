@@ -282,6 +282,15 @@
           pg-router-source-pg-connector = final.callPackage ./packages/pg-router-source-pg-connector {
             inherit (goBuilders) mkGoApp;
           };
+          # pg-router-source-pg-desk: Pattern A (ADR 0008), same shape as
+          # pg-router-source-pg-connector above — the adapter binary exposing
+          # pg-desk's changes envelope as pg-router command-query items. It
+          # has no compile-time dependency on packages/pg-desk (it execs
+          # pg-desk as a subprocess), so no local `replace`/modRoot; the built
+          # wrapper carries pg-desk on PATH (docket pg2-2j5ac.52.16).
+          pg-router-source-pg-desk = final.callPackage ./packages/pg-router-source-pg-desk {
+            inherit (goBuilders) mkGoApp;
+          };
           # pg-router-probe: Pattern A (ADR 0008), same shape as
           # pg-router-source-pg-connector above — a standalone deterministic
           # health probe over pg-router's own operational health (docket
@@ -1002,6 +1011,10 @@
               # reentrant test-helper-process shape for its own
               # pg-connector wire double, verified via
               # `grep -rln '^//go:build' packages/pg-router-probe`;
+              # `pg-router-source-pg-desk` added docket pg2-2j5ac.52.16 — same
+              # reentrant test-helper-process shape for its own pg-desk wire
+              # double, verified via
+              # `grep -rln '^//go:build' packages/pg-router-source-pg-desk`;
               # `ccpool-probe` added docket pg2-93e5s packet 2 — same
               # reentrant test-helper-process shape, this time doubling
               # for BOTH its ccpool and pg-connector subprocess wire
@@ -1063,6 +1076,7 @@
                 "pg-ccaudit"
                 "pg-connector"
                 "pg-router-source-pg-connector"
+                "pg-router-source-pg-desk"
                 "pg-router-probe"
                 "pg-router-disk-watchdog"
                 "pg-router-review-escalator"
@@ -3098,6 +3112,15 @@
                 pname = "pg-router-source-pg-connector-go-tests";
                 src = lib.cleanSource ./packages/pg-router-source-pg-connector; # matches default.nix
                 gomod2nixToml = ./packages/pg-router-source-pg-connector/gomod2nix.toml;
+              };
+
+              # pg-router-source-pg-desk (docket pg2-2j5ac.52.16) — whole-module
+              # Go test gate for the adapter binary. Pattern A: flat src at the
+              # module dir, no local replace.
+              pg-router-source-pg-desk-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-router-source-pg-desk-go-tests";
+                src = lib.cleanSource ./packages/pg-router-source-pg-desk; # matches default.nix
+                gomod2nixToml = ./packages/pg-router-source-pg-desk/gomod2nix.toml;
               };
 
               # pg-router-probe (docket pg2-93e5s, packet 1) — fixture-driven
@@ -8485,6 +8508,7 @@
               pg-connector-alert-grafana
               pg-ccaudit
               pg-router-source-pg-connector
+              pg-router-source-pg-desk
               pg-router-probe
               pg-router-disk-watchdog
               pg-router-review-escalator
