@@ -761,8 +761,8 @@
         # delivery mechanism needed, just a new hook in this same
         # `extraHooks` attrset alongside `run-unit-tests`, which the
         # existing `nix run .#install-pre-commit-hooks` / devShell-entry
-        # flow (and its `correctRelativeHooksPath`/`absolutizeHookConfigPath`
-        # hardening in phillipg-nix-repo-base's pre-commit.nix, which scans
+        # flow (and the worktree-safe hook delivery in
+        # phillipg-nix-repo-base's pre-commit.nix, which scans
         # every stage's shim generically) already installs and keeps
         # worktree-safe.
         #
@@ -818,7 +818,13 @@
       # pre-rebase `prevent-main-rebase` hook above needs no special handling.
       # No stampPaths: every hook is defined in flake.nix, which the staleness
       # stamp already covers.
-      phillipgreenii.pre-commit.bundle.enable = true;
+      phillipgreenii.pre-commit = {
+        bundle.enable = true;
+        driftGuard = {
+          enable = true;
+          allowlist = import ./nix/hook-drift-allowlist.nix;
+        };
+      };
 
       perSystem =
         {
