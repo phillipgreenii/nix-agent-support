@@ -3255,6 +3255,311 @@
                     touch "$out"
                   '';
 
+              # beads-exporter: the Beads Grafana dashboard against the exporter's metric
+              # catalog (metrics.txt): every beads_* token catalogued, every family used,
+              # counters only inside rate/increase, the db variable, the db filter on every
+              # query, the aggregation lint and the queue tiles' sum by (db). Mutant
+              # self-tests inside the script prove each rule can fail.
+              test-beads-exporter-dashboard =
+                pkgs.runCommand "test-beads-exporter-dashboard"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bash
+                      pkgs.jq
+                      pkgs.gnugrep
+                      pkgs.gnused
+                      pkgs.coreutils
+                    ];
+                  }
+                  ''
+                    bash ${./packages/beads-exporter/check-dashboard.sh} \
+                      ${./packages/beads-exporter/grafana/beads.json} \
+                      ${./packages/beads-exporter/metrics.txt}
+                    touch "$out"
+                  '';
+
+              # beads-exporter: the alert rules. A jq wrapper over the static alerts YAML
+              # (Grafana-only fields read with yq) plus `promtool test rules` over refId A
+              # wrapped as a Prometheus alert. The stranded-claim rule's cases and panels
+              # are added to this check and to the dashboard check by its own work.
+              test-beads-exporter-alert-rules =
+                pkgs.runCommand "test-beads-exporter-alert-rules"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bash
+                      pkgs.jq
+                      pkgs.yq-go
+                      pkgs.prometheus.cli
+                      pkgs.coreutils
+                    ];
+                  }
+                  ''
+                    bash ${./packages/beads-exporter/check-alert-rules.sh} \
+                      ${./packages/beads-exporter/grafana/alerting/alerts.yaml} \
+                      ${./packages/beads-exporter/grafana/beads.json} \
+                      ${./packages/beads-exporter/grafana/alerting/rule-tests}
+                    touch "$out"
+                  '';
+
+              # darwin/modules/beads-exporter: evaluated standalone against stubs of the
+              # launchd and observability surfaces (declared in other flakes), with
+              # synthetic databases alpha and beta. Proves the gate (observability off,
+              # no databases or the module disabled gives nothing), the launchd agent and
+              # registrations, and that the rendered configuration file carries exactly
+              # the committed queue definitions and the bash+coreutils child PATH, passes
+              # the exporter's own -check-config and is rejected when it has an unknown
+              # field.
+              test-beads-exporter-darwin-module =
+                let
+                  userAgentSubmodule = lib.types.submodule {
+                    options = {
+                      label = lib.mkOption {
+                        type = lib.types.str;
+                        default = "";
+                      };
+                      script = lib.mkOption {
+                        type = lib.types.lines;
+                        default = "";
+                      };
+                      runAtLoad = lib.mkOption {
+                        type = lib.types.bool;
+                        default = true;
+                      };
+                      keepAlive = lib.mkOption {
+                        type = lib.types.either lib.types.bool (lib.types.attrsOf lib.types.bool);
+                        default = true;
+                      };
+                      serviceConfig = lib.mkOption {
+                        type = lib.types.attrs;
+                        default = { };
+                      };
+                      manageLogs = lib.mkOption {
+                        type = lib.types.submodule {
+                          options = {
+                            enable = lib.mkOption {
+                              type = lib.types.bool;
+                              default = false;
+                            };
+                            files = lib.mkOption {
+                              type = lib.types.listOf lib.types.str;
+                              default = [ ];
+                            };
+                          };
+                        };
+                        default = { };
+                      };
+                    };
+                  };
+
+                  metricsTargetSubmodule = lib.types.submodule {
+                    options = {
+                      port = lib.mkOption { type = lib.types.port; };
+                      scrapeInterval = lib.mkOption {
+                        type = lib.types.nullOr lib.types.str;
+                        default = null;
+                      };
+                    };
+                  };
+
+                  # Stands in for the machine's wrapped bd; the exporter only needs the
+                  # path at configuration time.
+                  fakeBd = pkgs.writeShellScriptBin "bd" "exit 0";
+
+                  evalModule =
+                    obsEnable: beadsCfg:
+                    (lib.evalModules {
+                      specialArgs = { inherit pkgs lib; };
+                      modules = [
+                        ./darwin/modules/beads-exporter/default.nix
+                        (
+                          { lib, ... }:
+                          {
+                            options = {
+                              phillipgreenii = {
+                                system.launchdServices.userAgents = lib.mkOption {
+                                  type = lib.types.attrsOf userAgentSubmodule;
+                                  default = { };
+                                };
+                                observability = {
+                                  enable = lib.mkOption {
+                                    type = lib.types.bool;
+                                    default = false;
+                                  };
+                                  metricsTargets = lib.mkOption {
+                                    type = lib.types.attrsOf metricsTargetSubmodule;
+                                    default = { };
+                                  };
+                                  logSources = lib.mkOption {
+                                    type = lib.types.attrsOf lib.types.anything;
+                                    default = { };
+                                  };
+                                  dashboardProviders = lib.mkOption {
+                                    type = lib.types.attrsOf lib.types.anything;
+                                    default = { };
+                                  };
+                                  alertRuleFiles = lib.mkOption {
+                                    type = lib.types.listOf lib.types.path;
+                                    default = [ ];
+                                  };
+                                };
+                              };
+                              system.primaryUser = lib.mkOption {
+                                type = lib.types.nullOr lib.types.str;
+                                default = "tester";
+                              };
+                            };
+                            config.phillipgreenii.observability.enable = obsEnable;
+                          }
+                        )
+                        { phillipgreenii.services.beads-exporter = beadsCfg; }
+                      ];
+                    }).config;
+
+                  machineValues = {
+                    bdPackage = fakeBd;
+                    claudeDir = "/srv/claude";
+                    operatorNames = [ "operator" ];
+                    dbs = {
+                      alpha.beadsDir = "/srv/alpha/.beads";
+                      beta.beadsDir = "/srv/beta/.beads";
+                    };
+                  };
+
+                  enabled = evalModule true ({ enable = true; } // machineValues);
+                  # Gate: each of the three conditions off on its own. The machine values
+                  # that have no default (bdPackage, claudeDir) are deliberately left out
+                  # of these, because an inert module must not read them.
+                  obsOff = evalModule false {
+                    enable = true;
+                    inherit (machineValues) dbs;
+                  };
+                  moduleOff = evalModule true { inherit (machineValues) dbs; };
+                  noDbs = evalModule true { enable = true; };
+
+                  inertOk =
+                    c:
+                    c.phillipgreenii.system.launchdServices.userAgents == { }
+                    && c.phillipgreenii.observability.metricsTargets == { }
+                    && c.phillipgreenii.observability.logSources == { }
+                    && c.phillipgreenii.observability.dashboardProviders == { }
+                    && c.phillipgreenii.observability.alertRuleFiles == [ ];
+
+                  ua = enabled.phillipgreenii.system.launchdServices.userAgents.beads-exporter;
+                  obs = enabled.phillipgreenii.observability;
+                  bx = enabled.phillipgreenii.services.beads-exporter;
+
+                  expectedChildPath = lib.makeBinPath [
+                    pkgs.bash
+                    pkgs.coreutils
+                  ];
+
+                  # Store-path string context must not reach lib.hasInfix's regex.
+                  hasInfixNoCtx =
+                    needle: hay:
+                    lib.hasInfix (builtins.unsafeDiscardStringContext needle) (builtins.unsafeDiscardStringContext hay);
+
+                  # Options with a default, read from a module that sets only the
+                  # required machine values.
+                  defaulted = enabled.phillipgreenii.services.beads-exporter;
+                in
+                assert inertOk obsOff;
+                assert inertOk moduleOff;
+                assert inertOk noDbs;
+                assert ua.label == "com.phillipg.beads-exporter";
+                assert ua.manageLogs.enable;
+                assert ua.serviceConfig.ProcessType == "Background";
+                assert ua.keepAlive == true;
+                assert ua.runAtLoad;
+                assert
+                  ua.serviceConfig.StandardOutPath
+                  == "/Users/tester/.local/state/beads-exporter/beads-exporter.jsonl";
+                assert
+                  ua.serviceConfig.StandardErrorPath
+                  == "/Users/tester/.local/state/beads-exporter/launchd-stderr.log";
+                assert
+                  ua.manageLogs.files == [
+                    ua.serviceConfig.StandardOutPath
+                    ua.serviceConfig.StandardErrorPath
+                  ];
+                # The wrapper references the rendered file, so a config-only change restarts
+                # the agent.
+                assert hasInfixNoCtx "-config ${bx.internal.configFile}" ua.script;
+                assert lib.hasInfix "export BD_JSON_ENVELOPE=1" ua.script;
+                assert lib.hasInfix "export BEADS_DOLT_AUTO_START=0" ua.script;
+                assert lib.hasInfix "export BD_BACKUP_ENABLED=0" ua.script;
+                assert lib.hasInfix "export HOME=" ua.script;
+                assert hasInfixNoCtx "export PATH=${lib.escapeShellArg expectedChildPath}" ua.script;
+                assert obs.metricsTargets.beads-exporter.port == 9146;
+                assert obs.metricsTargets.beads-exporter.scrapeInterval == "60s";
+                assert obs.logSources.beads-exporter.format == "jsonl";
+                assert obs.dashboardProviders.beads-exporter.folder == "Claude Agents";
+                assert
+                  obs.dashboardProviders.beads-exporter.dashboards
+                  == [ ./packages/beads-exporter/grafana/beads.json ];
+                assert obs.alertRuleFiles == [ ./packages/beads-exporter/grafana/alerting/alerts.yaml ];
+                # Defaults of the option table.
+                assert defaulted.port == 9146;
+                assert defaulted.pollIntervalSeconds == 120;
+                assert defaulted.strandedIntervalSeconds == 600;
+                assert defaulted.staleClaimHours == 6;
+                assert defaulted.commandTimeoutSeconds == 30;
+                assert defaulted.labelCap == 500;
+                pkgs.runCommand "test-beads-exporter-darwin-module-ok"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.beads-exporter
+                      pkgs.jq
+                    ];
+                    configFile = bx.internal.configFile;
+                    queuesMirror = ./claude-marketplace/pb/queues.json;
+                    inherit expectedChildPath;
+                  }
+                  ''
+                    fail() { echo "FAIL: $*" >&2; exit 1; }
+
+                    # The rendered file (already validated at build time) carries exactly the
+                    # committed queue entries and the child PATH value.
+                    [ "$(jq -S -c '.queues' "$configFile")" = "$(jq -S -c '.' "$queuesMirror")" ] \
+                      || fail "rendered queues differ from the committed mirror"
+                    [ "$(jq -r '.queues | length' "$configFile")" = 4 ] || fail "want exactly four queues"
+                    [ "$(jq -r '.childPath' "$configFile")" = "$expectedChildPath" ] \
+                      || fail "rendered childPath is not the bash+coreutils PATH"
+                    jq -e '.childPath | split(":") | length == 2 and all(test("/bin$"))' "$configFile" >/dev/null \
+                      || fail "childPath must hold exactly the bash and coreutils bin directories"
+                    jq -e '.beadsDirs == { alpha: "/srv/alpha/.beads", beta: "/srv/beta/.beads" }
+                           and .claudeDir == "/srv/claude" and .operatorNames == ["operator"]
+                           and .port == 9146' "$configFile" >/dev/null \
+                      || fail "rendered machine values are wrong"
+
+                    # The exporter accepts the rendered file and a fixture of the same shape.
+                    beads-exporter -check-config "$configFile"
+                    cat > fixture.json <<'EOF'
+                    {
+                      "bdPath": "/opt/example/bd/bin/bd",
+                      "childPath": "/opt/example/bash/bin:/opt/example/coreutils/bin",
+                      "beadsDirs": { "alpha": "/srv/alpha/.beads", "beta": "/srv/beta/.beads" },
+                      "claudeDir": "/srv/claude",
+                      "operatorNames": ["operator"],
+                      "port": 9100,
+                      "pollIntervalSeconds": 60,
+                      "strandedIntervalSeconds": 300,
+                      "staleClaimHours": 4,
+                      "commandTimeoutSeconds": 30,
+                      "labelCap": 20,
+                      "queues": [{ "name": "drain-claim", "args": ["--exclude-label", "human"] }]
+                    }
+                    EOF
+                    beads-exporter -check-config fixture.json
+
+                    # An unknown field is rejected with the configuration-invalid exit code.
+                    jq '. + { unknownField: 1 }' fixture.json > bad.json
+                    status=0
+                    beads-exporter -check-config bad.json || status=$?
+                    [ "$status" = 3 ] || fail "unknown field: want exit 3, got $status"
+
+                    touch "$out"
+                  '';
+
               # pg-router-review-escalator (bead pg2-kftf9.15) - table-driven suite over
               # the escalation policy (dedupe, re-notify interval with a fake clock,
               # auto-close, loud failure on each delivery path, systemic roll-up) with a

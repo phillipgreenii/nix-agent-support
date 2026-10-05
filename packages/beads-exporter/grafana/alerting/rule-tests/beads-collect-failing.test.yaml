@@ -1,0 +1,126 @@
+# promtool unit tests for the beads-collect-failing alert. Run by the flake check
+# test-beads-exporter-alert-rules, which generates rules.yml next to this file: the
+# Grafana rule's refId A wrapped as `alert: <uid>` with `expr: (<A>) <op> <threshold>`,
+# the rule's `for` and labels, plus a recording rule `wrapped:<uid with _>` over the
+# same expression (so a case can count instances).
+#
+# Time model: promtool's clock starts at 0 and every series has a 1m interval. The
+# synthetic database reports up=1 for the first 11 samples (the last good sample is at
+# t=600s) and up=0 afterwards. max_over_time(...[10m]) keeps reading 1 until the last
+# good sample leaves the window; the condition then needs `for: 5m` to elapse, so the
+# alert fires about 15 minutes after the last good sample: not at 14m (t=1440s), yes at
+# 16m (t=1560s).
+#
+# The probe series use the label set the real database probe exports (target, db, mode,
+# plus the scrape job and instance): `read` is per database, `connect` carries an empty
+# db label because it is a server-wide fault.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: collection failing and no probe series, not firing at 14m and firing at 16m
+    interval: 1m
+    input_series:
+      - series: beads_exporter_up{db="alpha"}
+        values: "1x10 0x70"
+    alert_rule_test:
+      - eval_time: 1440s
+        alertname: beads-collect-failing
+        exp_alerts: []
+      - eval_time: 1560s
+        alertname: beads-collect-failing
+        exp_alerts:
+          - exp_labels:
+              db: alpha
+              severity: warning
+
+  - name: another database failing its read probe does not suppress
+    interval: 1m
+    input_series:
+      - series: beads_exporter_up{db="alpha"}
+        values: "1x10 0x70"
+      - series: beads_exporter_up{db="beta"}
+        values: "1x80"
+      - series: mysql_probe_success{target="beads-dolt",db="alpha",mode="read",job="mysql-probe",instance="127.0.0.1:9000"}
+        values: "1x80"
+      - series: mysql_probe_success{target="beads-dolt",db="beta",mode="read",job="mysql-probe",instance="127.0.0.1:9000"}
+        values: "0x80"
+      - series: mysql_probe_success{target="beads-dolt",db="",mode="connect",job="mysql-probe",instance="127.0.0.1:9000"}
+        values: "1x80"
+    alert_rule_test:
+      - eval_time: 1560s
+        alertname: beads-collect-failing
+        exp_alerts:
+          - exp_labels:
+              db: alpha
+              severity: warning
+
+  - name: this database failing its read probe suppresses
+    interval: 1m
+    input_series:
+      - series: beads_exporter_up{db="alpha"}
+        values: "1x10 0x70"
+      - series: mysql_probe_success{target="beads-dolt",db="alpha",mode="read",job="mysql-probe",instance="127.0.0.1:9000"}
+        values: "0x80"
+      - series: mysql_probe_success{target="beads-dolt",db="",mode="connect",job="mysql-probe",instance="127.0.0.1:9000"}
+        values: "1x80"
+    alert_rule_test:
+      - eval_time: 1560s
+        alertname: beads-collect-failing
+        exp_alerts: []
+
+  - name: the connect probe failing suppresses every database
+    interval: 1m
+    input_series:
+      - series: beads_exporter_up{db="alpha"}
+        values: "1x10 0x70"
+      - series: beads_exporter_up{db="beta"}
+        values: "1x10 0x70"
+      - series: mysql_probe_success{target="beads-dolt",db="alpha",mode="read",job="mysql-probe",instance="127.0.0.1:9000"}
+        values: "1x80"
+      - series: mysql_probe_success{target="beads-dolt",db="",mode="connect",job="mysql-probe",instance="127.0.0.1:9000"}
+        values: "0x80"
+    alert_rule_test:
+      - eval_time: 1560s
+        alertname: beads-collect-failing
+        exp_alerts: []
+
+  - name: a probe for a different target does not suppress
+    interval: 1m
+    input_series:
+      - series: beads_exporter_up{db="alpha"}
+        values: "1x10 0x70"
+      - series: mysql_probe_success{target="other-server",db="alpha",mode="read",job="mysql-probe",instance="127.0.0.1:9000"}
+        values: "0x80"
+      - series: mysql_probe_success{target="other-server",db="",mode="connect",job="mysql-probe",instance="127.0.0.1:9000"}
+        values: "0x80"
+    alert_rule_test:
+      - eval_time: 1560s
+        alertname: beads-collect-failing
+        exp_alerts:
+          - exp_labels:
+              db: alpha
+              severity: warning
+
+  - name: one failing database yields exactly one instance and a healthy database never fires
+    interval: 1m
+    input_series:
+      - series: beads_exporter_up{db="alpha"}
+        values: "1x10 0x70"
+      - series: beads_exporter_up{db="beta"}
+        values: "1x80"
+    promql_expr_test:
+      - expr: count(wrapped:beads_collect_failing)
+        eval_time: 1560s
+        exp_samples:
+          - labels: "{}"
+            value: 1
+    alert_rule_test:
+      - eval_time: 1560s
+        alertname: beads-collect-failing
+        exp_alerts:
+          - exp_labels:
+              db: alpha
+              severity: warning

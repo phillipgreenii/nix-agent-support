@@ -1,0 +1,74 @@
+# beads-exporter unified-alerting rules.
+#
+#   beads-collect-failing   a database's bead metrics have not been collected for 15+ min
+#
+# Registered via phillipgreenii.observability.alertRuleFiles from
+# darwin/modules/beads-exporter/default.nix. The folder "Claude Agents" converges by
+# TITLE with the folder the Beads dashboard is provisioned into (never pin a folderUid:
+# a rule that names one is rejected by Grafana, grafana/grafana#125079).
+#
+# refId A is plain PromQL (any `unless` stays inside A) and refId C is a single
+# threshold stage, so the flake check test-beads-exporter-alert-rules can wrap A with
+# C's evaluator and run `promtool test rules` over it
+# (rule-tests/beads-collect-failing.test.yaml). Grafana-only behaviour (noDataState,
+# execErrState, annotations) is checked there with yq.
+#
+# max_over_time(...[10m]) rides out a failed collection shorter than 10 minutes and
+# `for: 5m` then makes the rule fire about 15 minutes after the last good collection.
+#
+# Deliberately not covered here, because other rules already page for them: the
+# exporter process being down (the launchd health rules) and the database server being
+# unreachable (the mysql-probe rule for the beads-dolt target). The expression is
+# suppressed for a database while the probe reports the server, or that database, down.
+# Suppression is per database for the read probe and global for the connect probe,
+# because a connect failure is a server-wide fault.
+#
+# Delivery is Grafana's notification policy; this file adds none.
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: beads-exporter
+    folder: Claude Agents
+    interval: 1m
+    rules:
+      - uid: beads-collect-failing
+        title: Beads metrics not collected
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          __dashboardUid__: beads
+          __panelId__: "1"
+          summary: "Beads metrics for {{ $labels.db }} not collected for 15+ min"
+          description: "Dashboard numbers for this db are missing. Find the reason in Beads → Collection health (errors by reason). stale_issues_jsonl: run mv $BEADS_DIR/issues.jsonl $BEADS_DIR/issues.jsonl.disabled-$(date +%s) (bd would auto-import it and clobber rows), then wait one poll. Otherwise run BEADS_DIR=<dir> bd --readonly --sandbox list -n 0 --json to see the bd error. Suppressed while the dolt probe reports the server or this db down."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: max_over_time(beads_exporter_up[10m]) unless on(db) (mysql_probe_success{target="beads-dolt",mode="read"} < 1) unless on() (mysql_probe_success{target="beads-dolt",mode="connect"} < 1)
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [1]

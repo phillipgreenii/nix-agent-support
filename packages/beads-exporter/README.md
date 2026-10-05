@@ -263,6 +263,45 @@ This repo runs it against its own bd as `checks.<system>.test-beads-exporter-bd-
 tests keep `flags.txt` exactly equal to the flags the argv builders and the queue allowlist can
 emit.
 
+## The darwin module
+
+`darwin/modules/beads-exporter` (option path `phillipgreenii.services.beads-exporter`) runs the
+exporter as a launchd user agent and registers its scrape target, log source, dashboard and alert
+rule file with the observability stack. It is active only when `enable` is set, the observability
+stack is enabled and `dbs` is not empty; otherwise it defines nothing.
+
+| Option                                                                                                   | Default                        |
+| -------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| `enable`                                                                                                 | `false`                        |
+| `package`                                                                                                | `pkgs.beads-exporter`          |
+| `bdPackage`                                                                                              | none: the machine's `bd`       |
+| `dbs` (`<name>.beadsDir`, an absolute path)                                                              | `{}`                           |
+| `claudeDir`                                                                                              | none: required                 |
+| `operatorNames`                                                                                          | `[]`                           |
+| `port`                                                                                                   | `9146`                         |
+| `pollIntervalSeconds`, `strandedIntervalSeconds`, `staleClaimHours`, `commandTimeoutSeconds`, `labelCap` | `120`, `600`, `6`, `30`, `500` |
+| `internal.configFile` (read-only)                                                                        | the rendered config file       |
+
+The configuration file is rendered with the queue list read at evaluation time from
+`claude-marketplace/pb/queues.json` and a `childPath` of the bash and coreutils store paths (no
+`git`). It is validated with `-check-config` when it is built, and the agent's wrapper script
+references it, so a configuration-only change restarts the agent. The wrapper sets `HOME`,
+`BD_JSON_ENVELOPE=1`, `BEADS_DOLT_AUTO_START=0`, `BD_BACKUP_ENABLED=0` and an explicit `PATH`.
+Standard output (JSON lines) goes to `$XDG_STATE_HOME/beads-exporter/beads-exporter.jsonl`, which
+the log source picks up; both log files are rotated by the launchd log manager.
+
+## Dashboard and alert rule
+
+- `grafana/beads.json`: the "Beads / Queues & backlog" dashboard (uid `beads`, folder "Claude
+  Agents"). Queue tiles are per database and never summed across databases.
+- `grafana/alerting/alerts.yaml`: the `beads-collect-failing` rule. It fires about 15 minutes after
+  a database's last successful collection and is suppressed while the database probe reports the
+  server, or that database, down.
+- Checks: `test-beads-exporter-dashboard` (a `jq` lint against `metrics.txt` plus mutant
+  self-tests, `check-dashboard.sh`), `test-beads-exporter-alert-rules` (Grafana-only fields plus
+  `promtool test rules`, cases in `grafana/alerting/rule-tests/`, `check-alert-rules.sh`) and
+  `test-beads-exporter-darwin-module`.
+
 ## Development
 
 ```text
@@ -272,5 +311,6 @@ go test ./internal/collect -update        # rewrite goldens and metrics.txt
 ```
 
 Nix checks: `beads-exporter-go-tests`, `beads-exporter-golangci`, `beads-exporter-golangci-tagged`,
-`beads-exporter-promtool-metrics`, `test-beads-exporter-bd-flags`,
+`beads-exporter-promtool-metrics`, `test-beads-exporter-bd-flags`, `test-beads-exporter-dashboard`,
+`test-beads-exporter-alert-rules`, `test-beads-exporter-darwin-module`,
 `test-beads-exporter-version-stamped` and `go-deps-wired`.
