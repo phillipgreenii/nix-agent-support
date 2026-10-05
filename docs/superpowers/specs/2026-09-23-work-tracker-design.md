@@ -1,6 +1,7 @@
 # A unified work-tracker on pg-connector: the `activity` capability, `work-report`, and the retirement of activity-collector and work-activity-tracker
 
-**Status**: Draft, revision 2 — pending the operator's spec review. Written 2026-09-23 under bead
+**Status**: Approved 2026-10-05 (revision 2; the operator's spec-review rulings are recorded in
+section 13, and the "proposed" ledger rows are thereby adopted). Written 2026-09-23 under bead
 `pg2-6pn7g`; revision 2 applies the operator's rulings of that day (WT-D5, WT-D6, WT-D18's filing)
 and the findings of one independent review round. Supersedes the uncommitted draft
 `2026-09-23-work-report-connector-integration-design.md` (revisions 1-3, same day); Appendix A
@@ -108,7 +109,7 @@ review".
 | WT-D2  | `activity` is defined alongside, not as one of, the entity types, mirroring `attention`/`search` exactly: schema, provider interface, dispatch table, `activity.sources` registration, umbrella verb `pg-connector activity list`, nix option. Any backend MAY implement it its own way.                                                                                                                                                                                                                                                                                                                                                                                                                       | adopted (revision 3's WR-D1, operator 2026-09-23)                                                                                                                                                                                                                                       | The `activity` capability                                  |
 | WT-D3  | Git commit activity ships as a **capability-only Tier-2 backend**, `pg-connector-activity-git`, registered under `activity.sources` only. No `scmlog` entity type is introduced now; one MAY be added later if a consumer needs `list`/`show`/`changes` over commits, the same reasoning D23 used to re-add `Thread` once `pg-desk` needed it. Variant kept open: a `scmlog` type with backend `pg-connector-scmlog-git`.                                                                                                                                                                                                                                                                                      | proposed — narrows the revision-3 `scmlog` type; keeps the operator's naming as the variant                                                                                                                                                                                             | Git commit activity                                        |
 | WT-D4  | work-report owns the history store: SQLite, append-only entries, latest-wins resolution, outside `pg-connector` (the design of record's shared-store prohibition is untouched).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | adopted (behavior docs + pg-desk design D11)                                                                                                                                                                                                                                            | work-report — Store                                        |
-| WT-D5  | work-report lives in THIS repo as `packages/work-report`, a sibling Go module shaped like `pg-desk`; its behavior docs move here from `phillipgreenii-nix-support-apps` in the same change. This repo is public: work-report MUST carry no organization identifiers; all of those stay in the ZR machine flake's configuration.                                                                                                                                                                                                                                                                                                                                                                                | **operator ruling, 2026-09-23** — moves the tool out of `phillipgreenii-nix-support-apps` (private)                                                                                                                                                                                     | work-report — Placement                                    |
+| WT-D5  | work-report lives in THIS repo as `packages/work-report`, a sibling Go module shaped like `pg-desk`; its behavior docs move here from `phillipgreenii-nix-support-apps` in the same change. This repo is public: work-report MUST carry no organization identifiers; all of those stay in the private machine flake's configuration.                                                                                                                                                                                                                                                                                                                                                                           | **operator ruling, 2026-09-23** — moves the tool out of `phillipgreenii-nix-support-apps` (private)                                                                                                                                                                                     | work-report — Placement                                    |
 | WT-D6  | Ingestion is scheduled by **pg-router**: a `[[query]]` of type `command` on a one-hour period trigger runs `work-report pull --range last-48h --output pg-router`, which emits an item only for a degraded source and exits non-zero only when the pull could not run at all. pg-router's `status`/TUI and event log are the scheduler's observability. A plain timer is the recorded variant for a host without pg-router.                                                                                                                                                                                                                                                                                    | **operator ruling, 2026-09-23** — restores revision-3's "hourly via pg-router" (WR-D3) over this document's first-draft timer; the bound consumer is the deployment's existing `escalation-triager` role (operator: "the triage role is ok with me, but there is already one in place") | work-report — Scheduling and operability; pg-router's role |
 | WT-D7  | Claude Code session history reaches `pg-connector` only through a new `pa-monitor sessions` subcommand; `pg-connector-agentsession-pa-monitor` implements `list_activity` over it and reads no transcript itself.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | adopted (2026-09-18 agentsession design's operator decision), extended                                                                                                                                                                                                                  | Claude Code sessions                                       |
 | WT-D8  | Attribution is actor-scoped: every backend's `list_activity` returns only items where the operator is the author, actor, assignee, or reviewer, using that backend's own configured identity. This resolves `OQ-ING-2`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | **operator ruling, 2026-09-23** (confirmed in a `/unblock-human-beads` session, recorded on `pg2-lelc0`)                                                                                                                                                                                | The `activity` capability — Attribution                    |
@@ -644,7 +645,7 @@ conformance case at build time; the connector program's other consumer, `pg-desk
 and this repo already carries the nix module patterns a pg-connector consumer needs. The cost is
 that this repo is public: work-report is generic and config-driven, and every organization
 identifier (repos, project keys, actor names, workspace paths) lives in
-`phillipg-nix-ziprecruiter`'s machine configuration, exactly as for `pg-connector` and `pg-desk`.
+the private machine flake's configuration, exactly as for `pg-connector` and `pg-desk`.
 
 ### 7.2 Configuration
 
@@ -656,7 +657,7 @@ Nix option `phillipgreenii.programs.work-report` (home-manager), rendered to
 | `enable`, `package`              | as every module here                                                                                                                                                                                                                                 |
 | `timezone`                       | IANA name; day boundaries for `today`/`yesterday`/dates are computed in it (default: the system zone)                                                                                                                                                |
 | `sources.<backend>.enable`       | default true for every backend `pg-connector activity list` reports; false → that source is reported `disabled` and never pulled (`--backend` pin per remaining source)                                                                              |
-| `sources.<backend>.labels`       | extra labels attached to every entry from that source (e.g. `workspace:zr`), how the operator separates identities across systems                                                                                                                    |
+| `sources.<backend>.labels`       | extra labels attached to every entry from that source (e.g. `workspace:work`), how the operator separates identities across systems                                                                                                                  |
 | `kinds.narrative.model`          | the `claude -p --model` value; `kinds.narrative.systemPromptFile` overrides the built-in prompt                                                                                                                                                      |
 | `schedule.interval`, `.window`   | the pg-router period trigger and the overlapping window each scheduled pull covers; default `1h` and `48h`                                                                                                                                           |
 | `pgRouterConfigText` (read-only) | the rendered pg-router `[[query]]` stanza computed from `schedule.*`, for the deployment to append to pg-router's `configText`; the deployment also binds `work-report.degraded` on its existing triager role (section "Scheduling and operability") |
@@ -803,7 +804,7 @@ work-report report [--range <spec>] [--kind baseline|narrative] [--label <l>]...
   consumer already exists.** The deployment runs an `escalation-triager` role bound to
   `escalated-work` (a beads query for beads labeled `escalated`), whose handler prompt is
   bead-driven: investigate bead `{{.BeadID}}`, then handle, triage, or escalate to a human
-  (`phillipg-nix-ziprecruiter/modules/zm/pg-router/escalation-triager-pg2-prompt.txt`). work-report
+  (the deployment's escalation-triager handler prompt). work-report
   fits that shape without a new role or prompt: on a degraded source, `pull` ensures — through
   `pg-connector issue`, the same composition rule `pg-desk`'s sync follows — one open bead in the
   personal tracker, title-keyed on the source (`work-report: <source> degraded`), labeled
@@ -1036,7 +1037,7 @@ telemetry declaration.
 | 4     | `pa-monitor sessions` (claude-transcript rollup primitive) and `pg-connector-agentsession-pa-monitor` `list_activity`                                                                                                                                                                      | Yesterday's baseline shows the sessions the operator started, including ones already ended                                                                                              |
 | 5     | `pg-connector-activity-git`; the design-of-record amendment adding the capability-only-backend rule                                                                                                                                                                                        | Commits across the configured repos appear; a one-month backfill completes with per-source outcomes and no duplicates                                                                   |
 | 6     | narrative kind                                                                                                                                                                                                                                                                             | The operator reads a week of daily narratives and one weekly narrative narrowed to a label and accepts their quality                                                                    |
-| 7     | ZR configuration wiring; retirement of `activity-collector` and `work-activity-tracker` (WT-D15); `pg2-lelc0` closed                                                                                                                                                                       | Both packages and their home-manager modules are gone from `phillipgreenii-nix-support-apps`; `work-activity-tracker` is no longer on the work machine's PATH                           |
+| 7     | Private machine-flake configuration wiring; retirement of `activity-collector` and `work-activity-tracker` (WT-D15); `pg2-lelc0` closed                                                                                                                                                    | Both packages and their home-manager modules are gone from `phillipgreenii-nix-support-apps`; `work-activity-tracker` is no longer on the work machine's PATH                           |
 
 Decomposition: this document is one program with seven phases; it SHOULD go through
 `epic-decompose` as its own program epic (label `agent-support`, project labels `pg-connector`
@@ -1048,9 +1049,10 @@ bead, never onto the epic (a container edge would hide the whole subtree from `b
 
 ## 13. Open items for operator review
 
-1. **WT-D1** range instead of cursor — confirm the reversal of the 2026-09-23 direction.
+1. **WT-D1** range instead of cursor — confirm the reversal of the 2026-09-23 direction. **Ruled
+   2026-10-05: range (as drafted).**
 2. **WT-D3** capability-only `pg-connector-activity-git` versus a `scmlog` type with
-   `pg-connector-scmlog-git`.
+   `pg-connector-scmlog-git`. **Ruled 2026-10-05: capability-only `pg-connector-activity-git`.**
 3. **WT-D5** move work-report (and its behavior docs) into this repo — **ruled 2026-09-23:
    agent-support.**
 4. **WT-D6** timer versus pg-router command query for ingestion — **ruled 2026-09-23:
@@ -1059,23 +1061,27 @@ bead, never onto the epic (a container edge would hide the whole subtree from `b
    the operator confirmed all four recommended defaults in a `/unblock-human-beads` session, and
    that session recorded them verbatim in `pg2-lelc0`'s description; the operator then confirmed
    here that tracked answers count as approved.
-6. **WT-D12** `claude -p` as the narrative generator versus a pg-router/ccpool role.
+6. **WT-D12** `claude -p` as the narrative generator versus a pg-router/ccpool role. **Ruled
+   2026-10-05: `claude -p` in work-report.**
 7. **WT-D14** the three behavior-doc amendments, and sign-off of the behavior docs themselves
-   (`pg2-lelc0` item 1), which this design treats as the floor.
-8. **WT-D16** keep the name `work-report`.
+   (`pg2-lelc0` item 1), which this design treats as the floor. **Ruled 2026-10-05: the three
+   amendments are approved, and the behavior docs are signed off.**
+8. **WT-D16** keep the name `work-report`. **Ruled 2026-10-05: keep.**
 9. **pa-monitor scope**: accept `pa-monitor sessions` as new rollup logic in pa-monitor and
-   `claude-transcript`.
+   `claude-transcript`. **Ruled 2026-10-05: accepted.**
 10. **Worktree-review verdict** on `pg2-6pn7g`: discard the superseded revision-3 draft (this
     document carries its surviving content; Appendix A records what was dropped and why).
 11. **WT-D18** file the ranged-`list` bead and wire it as Phase 1's dependency — **ruled
     2026-09-23: not yet**; file it when this design is approved and decomposed, not before.
 12. **`pg2-emmut` follow-through**: its `search --since/--before` recommendation was never
     implemented and has no bead; decide whether to file one (it would share Phase 0's parser) or
-    let it lapse.
+    let it lapse. **Ruled 2026-10-05: fold it into Phase 0 at decomposition** (shared time-bound
+    parser); no standalone bead.
 13. **WT-D6's consumer**: pg-router cannot run a query with no bound role. The operator (2026-09-23)
     accepted a triage role and asked whether the existing one suffices; this revision answers
     yes: the deployment's `escalation-triager` role gains one binding and work-report files
-    `escalated` beads it already investigates. Confirm on review, or switch to the timer variant.
+    `escalated` beads it already investigates. Confirm on review, or switch to the timer variant. **Ruled 2026-10-05: the existing
+    `escalation-triager` handles a degraded source (pg-router schedule kept).**
 
 ## Appendix A: what the superseded revision-3 draft became
 
