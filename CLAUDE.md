@@ -271,6 +271,37 @@ Verified against Claude Code 2.1.186:
   The established pattern instead (bead `pg2-sikj3`): the plugin's skill/hook invokes a BARE
   command, and the binary rides `home.packages` co-gated on `claude.enable` (precedents: pg-pr,
   claude-extended-tool-approver). No workspace plugin uses `bin/`.
+- **Default-Enabled Plugin ⇒ Default-Enabled Binary invariant** (observed broken 2026-10-05,
+  `claude-activity`): a plugin's `defaultEnabled: true` in its `.claude-plugin/plugin.json`
+  registers it — via `homeModules.default`'s unconditional `marketplaces.nixProvided` plus
+  `home/programs/claude-marketplaces/default.nix`'s `enabledPlugins` resolution — on EVERY
+  consumer that enables `phillipgreenii.programs.claude-code`, independent of the binary-installing
+  program module's OWN `enable` option, which defaults to `false` (`lib.mkEnableOption`'s own
+  default). Plugin registration and `home.packages` binary installation are therefore TWO
+  SEPARATE axes that can drift silently: the plugin's hooks fire on every `claude-code` consumer,
+  but the bare command they invoke is only on PATH where a human remembered to ALSO flip the
+  matching program's `enable` flag. `claude-activity` is the confirmed-broken case (its `Stop`
+  hook fired with the binary absent, producing a silent per-turn "command not found" error on a
+  machine that never set this flag); `claude-extended-tool-approver` is exposed by the identical
+  mechanism but happened not to break only because its consuming machine's config explicitly set
+  the flag — see the next bullet for that pattern.
+- **The required fix shape is per-consumer, not per-module.** This repo's own binary-install
+  gating (`home.packages` co-gated on `claude-code.enable && cfg.enable`, previous bullet) is
+  already correct and is NOT what drifts — the gap is always in the CONSUMING machine/account
+  config, which MUST explicitly enable the matching program wherever it enables `claude-code`.
+  The precedent for doing this correctly is the `cetaCutover` block in `homelab`'s
+  `infrastructure/machines/monorepod/home-module.nix` (the `claude-extended-tool-approver`
+  cutover): one named, commented `let`-bound module — `enable = true;` plus any required config —
+  imported into every consuming account, with a rollback note. A machine/account enabling
+  `claude-code` for a plugin with `defaultEnabled: true` whose hooks/skills invoke a bare PATH
+  command MUST add (or verify it already has) an equivalent named cutover block for that plugin's
+  program, not a bare, uncommented `phillipgreenii.programs.<x>.enable = true`.
+- **No mechanical check enforces this today** (confirmed by reading `flake.nix`'s full `checks.*`
+  set and every `home/programs/**` `assertions` block): `defaultEnabled` in `plugin.json` and a
+  program module's `enable` default are two independent, uncross-checked values. Until a check
+  exists, adding a new default-enabled plugin with a bare-command hook, or onboarding a machine to
+  an existing one, MUST be followed by `which <bare-command>` on that machine after
+  `pn workspace apply` — a clean build does not prove the command resolves.
 
 ---
 
