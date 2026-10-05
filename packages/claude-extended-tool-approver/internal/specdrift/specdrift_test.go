@@ -154,8 +154,8 @@ func TestSpecDriftCommandNamesCoversRealEmbeddedSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CommandNames(embeddedspecs.FS): %v", err)
 	}
-	if len(names) != 46 {
-		t.Fatalf("CommandNames(embeddedspecs.FS) = %d names, want 46: %v", len(names), names)
+	if len(names) != 48 {
+		t.Fatalf("CommandNames(embeddedspecs.FS) = %d names, want 48: %v", len(names), names)
 	}
 	want := map[string]bool{"bash": false, "sh": false, "[": false, "cd": false, "export": false}
 	for _, n := range names {

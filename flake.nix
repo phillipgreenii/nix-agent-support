@@ -2820,6 +2820,16 @@
                       pkgs.yq-go # yq (mikefarah) -- see internal/embeddedspecs/data/yq.json's own provenance
                       pkgs.bash # bash, sh
                       pkgs.nix
+                    ]
+                    # pn / pnwf (pg2-cjfpy.3): built in repo-base, which publishes
+                    # them for x86_64-linux + aarch64-darwin only, so they are
+                    # added where present (this check is expected to fail on a
+                    # system repo-base does not publish: "binary not on PATH").
+                    ++ pkgs.lib.optional (
+                      (phillipgreenii-nix-base.packages.${pkgs.stdenv.hostPlatform.system} or { }) ? pn
+                    ) phillipgreenii-nix-base.packages.${pkgs.stdenv.hostPlatform.system}.pn
+                    ++ pkgs.lib.optional (pkgs ? pnwf) pkgs.pnwf
+                    ++ [
                       # No top-level bd/rtk overlay attr in THIS standalone flake --
                       # resolve them the same way pb-contract (above) already does.
                       (pkgs.llm-agentsPkgs.beads or llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.beads)

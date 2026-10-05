@@ -1,0 +1,2505 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "pn",
+  "command": {
+    "name": "pn",
+    "provenance": "pn --help (pn 0.0.0-3367c0e5, this host 2026-10-05)",
+    "citations": {
+      "provenance": {
+        "source": "pn --help: \"pn-workspace multi-repo Nix workflow tool.\""
+      },
+      "stdin": {
+        "source": "pn --help: usage \"pn [command]\" documents no stdin consumption; classified \"never\""
+      },
+      "stdout": {
+        "source": "pn --help: usage \"pn [command]\" and description \"pn-workspace multi-repo Nix workflow tool.\" describe terminal output only; classified by the schema's stdout kind"
+      },
+      "unknownFlag": {
+        "source": "pn --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "flags": {
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pn --help: \"-h, --help help for pn\""
+        }
+      },
+      "--no-telemetry": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pn --help: \"--no-telemetry disable OpenTelemetry export for this run (also: PG_NIX_LOG_DISABLE=1, OTEL_SDK_DISABLED=true)\""
+        }
+      },
+      "--verbose": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pn --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pn --help: \"-h, --help help for pn\""
+        }
+      },
+      "-v": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pn --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "pn --help: usage \"pn [command]\""
+      }
+    },
+    "stdin": "never",
+    "stdout": "none",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true,
+    "subcommands": {
+      "workspace": {
+        "name": "workspace",
+        "provenance": "pn workspace --help (pn 0.0.0-3367c0e5, this host 2026-10-05)",
+        "citations": {
+          "provenance": {
+            "source": "pn workspace --help: \"Operate on the pn workspace.\""
+          },
+          "stdin": {
+            "source": "pn workspace --help: usage \"pn workspace [command]\" documents no stdin consumption; classified \"never\""
+          },
+          "stdout": {
+            "source": "pn workspace --help: usage \"pn workspace [command]\" and description \"Operate on the pn workspace.\" describe terminal output only; classified by the schema's stdout kind"
+          },
+          "unknownFlag": {
+            "source": "pn workspace --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pn workspace --help: \"-h, --help help for workspace\""
+            }
+          },
+          "--no-telemetry": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pn workspace --help: \"--no-telemetry disable OpenTelemetry export for this run (also: PG_NIX_LOG_DISABLE=1, OTEL_SDK_DISABLED=true)\""
+            }
+          },
+          "--terminal": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pn workspace --help: \"--terminal string override the terminal repo (the flake build/apply targets)\""
+            }
+          },
+          "--verbose": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pn workspace --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pn workspace --help: \"-h, --help help for workspace\""
+            }
+          },
+          "-v": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pn workspace --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pn workspace --help: usage \"pn workspace [command]\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "none",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true,
+        "subcommands": {
+          "apply": {
+            "name": "apply",
+            "provenance": "pn workspace apply --help (pn 0.0.0-3367c0e5, this host 2026-10-05)",
+            "citations": {
+              "provenance": {
+                "source": "pn workspace apply --help: \"Apply nix configurations across workspace repos\""
+              },
+              "stdin": {
+                "source": "pn workspace apply --help: usage \"pn workspace apply [flags]\" documents no stdin consumption; classified \"never\""
+              },
+              "stdout": {
+                "source": "pn workspace apply --help: usage \"pn workspace apply [flags]\" and description \"Apply nix configurations across workspace repos\" describe terminal output only; classified by the schema's stdout kind"
+              },
+              "unknownFlag": {
+                "source": "pn workspace apply --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--force": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace apply --help: \"--force always rebuild, bypassing the skip-when-unchanged gate\""
+                }
+              },
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace apply --help: \"-h, --help help for apply\""
+                }
+              },
+              "--no-telemetry": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace apply --help: \"--no-telemetry disable OpenTelemetry export for this run (also: PG_NIX_LOG_DISABLE=1, OTEL_SDK_DISABLED=true)\""
+                }
+              },
+              "--terminal": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace apply --help: \"--terminal string override the terminal repo (the flake build/apply targets)\""
+                }
+              },
+              "--verbose": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace apply --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace apply --help: \"-h, --help help for apply\""
+                }
+              },
+              "-v": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace apply --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "pn workspace apply --help: usage \"pn workspace apply [flags]\""
+              }
+            },
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "build": {
+            "name": "build",
+            "provenance": "pn workspace build --help (pn 0.0.0-3367c0e5, this host 2026-10-05)",
+            "citations": {
+              "provenance": {
+                "source": "pn workspace build --help: \"Build all workspace repos\""
+              },
+              "stdin": {
+                "source": "pn workspace build --help: usage \"pn workspace build [flags]\" documents no stdin consumption; classified \"never\""
+              },
+              "stdout": {
+                "source": "pn workspace build --help: usage \"pn workspace build [flags]\" and description \"Build all workspace repos\" describe terminal output only; classified by the schema's stdout kind"
+              },
+              "unknownFlag": {
+                "source": "pn workspace build --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace build --help: \"-h, --help help for build\""
+                }
+              },
+              "--no-telemetry": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace build --help: \"--no-telemetry disable OpenTelemetry export for this run (also: PG_NIX_LOG_DISABLE=1, OTEL_SDK_DISABLED=true)\""
+                }
+              },
+              "--terminal": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace build --help: \"--terminal string override the terminal repo (the flake build/apply targets)\""
+                }
+              },
+              "--verbose": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace build --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace build --help: \"-h, --help help for build\""
+                }
+              },
+              "-v": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace build --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "pn workspace build --help: usage \"pn workspace build [flags]\""
+              }
+            },
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "clone": {
+            "name": "clone",
+            "provenance": "pn workspace clone --help (pn 0.0.0-3367c0e5, this host 2026-10-05)",
+            "citations": {
+              "provenance": {
+                "source": "pn workspace clone --help: \"Clone repos listed in pn-workspace.toml that are missing on disk\""
+              },
+              "stdin": {
+                "source": "pn workspace clone --help: usage \"pn workspace clone [flags]\" documents no stdin consumption; classified \"never\""
+              },
+              "stdout": {
+                "source": "pn workspace clone --help: usage \"pn workspace clone [flags]\" and description \"Clone repos listed in pn-workspace.toml that are missing on disk\" describe terminal output only; classified by the schema's stdout kind"
+              },
+              "unknownFlag": {
+                "source": "pn workspace clone --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace clone --help: \"-h, --help help for clone\""
+                }
+              },
+              "--no-telemetry": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace clone --help: \"--no-telemetry disable OpenTelemetry export for this run (also: PG_NIX_LOG_DISABLE=1, OTEL_SDK_DISABLED=true)\""
+                }
+              },
+              "--terminal": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace clone --help: \"--terminal string override the terminal repo (the flake build/apply targets)\""
+                }
+              },
+              "--verbose": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace clone --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace clone --help: \"-h, --help help for clone\""
+                }
+              },
+              "-v": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace clone --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "pn workspace clone --help: usage \"pn workspace clone [flags]\""
+              }
+            },
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "discover": {
+            "name": "discover",
+            "provenance": "pn workspace discover --help (pn 0.0.0-3367c0e5, this host 2026-10-05)",
+            "citations": {
+              "provenance": {
+                "source": "pn workspace discover --help: \"List workspace repos\""
+              },
+              "stdin": {
+                "source": "pn workspace discover --help: usage \"pn workspace discover [flags]\" documents no stdin consumption; classified \"never\""
+              },
+              "stdout": {
+                "source": "pn workspace discover --help: usage \"pn workspace discover [flags]\" and description \"List workspace repos\" describe terminal output only; classified by the schema's stdout kind"
+              },
+              "unknownFlag": {
+                "source": "pn workspace discover --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace discover --help: \"-h, --help help for discover\""
+                }
+              },
+              "--no-telemetry": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace discover --help: \"--no-telemetry disable OpenTelemetry export for this run (also: PG_NIX_LOG_DISABLE=1, OTEL_SDK_DISABLED=true)\""
+                }
+              },
+              "--terminal": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace discover --help: \"--terminal string override the terminal repo (the flake build/apply targets)\""
+                }
+              },
+              "--verbose": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace discover --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace discover --help: \"-h, --help help for discover\""
+                }
+              },
+              "-v": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace discover --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "pn workspace discover --help: usage \"pn workspace discover [flags]\""
+              }
+            },
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "doctor": {
+            "name": "doctor",
+            "provenance": "pn workspace doctor --help (pn 0.0.0-3367c0e5, this host 2026-10-05)",
+            "citations": {
+              "provenance": {
+                "source": "pn workspace doctor --help: \"Audit (and optionally repair) workspace drift\""
+              },
+              "stdin": {
+                "source": "pn workspace doctor --help: usage \"pn workspace doctor [flags]\" documents no stdin consumption; classified \"never\""
+              },
+              "stdout": {
+                "source": "pn workspace doctor --help: usage \"pn workspace doctor [flags]\" and description \"Audit (and optionally repair) workspace drift\" describe terminal output only; classified by the schema's stdout kind"
+              },
+              "unknownFlag": {
+                "source": "pn workspace doctor --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace doctor --help: \"-h, --help help for doctor\""
+                }
+              },
+              "--json": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace doctor --help: \"--json emit findings as JSON\""
+                }
+              },
+              "--no-telemetry": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace doctor --help: \"--no-telemetry disable OpenTelemetry export for this run (also: PG_NIX_LOG_DISABLE=1, OTEL_SDK_DISABLED=true)\""
+                }
+              },
+              "--offline": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace doctor --help: \"--offline skip remote-dependent checks\""
+                }
+              },
+              "--strict": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace doctor --help: \"--strict treat warnings as errors for the exit code\""
+                }
+              },
+              "--terminal": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace doctor --help: \"--terminal string override the terminal repo (the flake build/apply targets)\""
+                }
+              },
+              "--verbose": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace doctor --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace doctor --help: \"-h, --help help for doctor\""
+                }
+              },
+              "-v": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace doctor --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "pn workspace doctor --help: usage \"pn workspace doctor [flags]\""
+              }
+            },
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "flake-check": {
+            "name": "flake-check",
+            "provenance": "pn workspace flake-check --help (pn 0.0.0-3367c0e5, this host 2026-10-05)",
+            "citations": {
+              "provenance": {
+                "source": "pn workspace flake-check --help: \"Run nix flake check on each workspace repo\""
+              },
+              "stdin": {
+                "source": "pn workspace flake-check --help: usage \"pn workspace flake-check [flags]\" documents no stdin consumption; classified \"never\""
+              },
+              "stdout": {
+                "source": "pn workspace flake-check --help: usage \"pn workspace flake-check [flags]\" and description \"Run nix flake check on each workspace repo\" describe terminal output only; classified by the schema's stdout kind"
+              },
+              "unknownFlag": {
+                "source": "pn workspace flake-check --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace flake-check --help: \"-h, --help help for flake-check\""
+                }
+              },
+              "--no-telemetry": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace flake-check --help: \"--no-telemetry disable OpenTelemetry export for this run (also: PG_NIX_LOG_DISABLE=1, OTEL_SDK_DISABLED=true)\""
+                }
+              },
+              "--terminal": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace flake-check --help: \"--terminal string override the terminal repo (the flake build/apply targets)\""
+                }
+              },
+              "--verbose": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace flake-check --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace flake-check --help: \"-h, --help help for flake-check\""
+                }
+              },
+              "-v": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace flake-check --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "pn workspace flake-check --help: usage \"pn workspace flake-check [flags]\""
+              }
+            },
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "format": {
+            "name": "format",
+            "provenance": "pn workspace format --help (pn 0.0.0-3367c0e5, this host 2026-10-05)",
+            "citations": {
+              "provenance": {
+                "source": "pn workspace format --help: \"Run `nix fmt` in each workspace repo\""
+              },
+              "stdin": {
+                "source": "pn workspace format --help: usage \"pn workspace format [flags]\" documents no stdin consumption; classified \"never\""
+              },
+              "stdout": {
+                "source": "pn workspace format --help: usage \"pn workspace format [flags]\" and description \"Run `nix fmt` in each workspace repo\" describe terminal output only; classified by the schema's stdout kind"
+              },
+              "unknownFlag": {
+                "source": "pn workspace format --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace format --help: \"-h, --help help for format\""
+                }
+              },
+              "--no-telemetry": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace format --help: \"--no-telemetry disable OpenTelemetry export for this run (also: PG_NIX_LOG_DISABLE=1, OTEL_SDK_DISABLED=true)\""
+                }
+              },
+              "--terminal": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace format --help: \"--terminal string override the terminal repo (the flake build/apply targets)\""
+                }
+              },
+              "--verbose": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace format --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace format --help: \"-h, --help help for format\""
+                }
+              },
+              "-v": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace format --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "pn workspace format --help: usage \"pn workspace format [flags]\""
+              }
+            },
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "info": {
+            "name": "info",
+            "provenance": "pn workspace info --help (pn 0.0.0-3367c0e5, this host 2026-10-05)",
+            "citations": {
+              "provenance": {
+                "source": "pn workspace info --help: \"Show the workspace identity and per-repo applied state\""
+              },
+              "stdin": {
+                "source": "pn workspace info --help: usage \"pn workspace info [flags]\" documents no stdin consumption; classified \"never\""
+              },
+              "stdout": {
+                "source": "pn workspace info --help: usage \"pn workspace info [flags]\" and description \"Show the workspace identity and per-repo applied state\" describe terminal output only; classified by the schema's stdout kind"
+              },
+              "unknownFlag": {
+                "source": "pn workspace info --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace info --help: \"-h, --help help for info\""
+                }
+              },
+              "--json": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace info --help: \"--json JSON output\""
+                }
+              },
+              "--no-telemetry": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace info --help: \"--no-telemetry disable OpenTelemetry export for this run (also: PG_NIX_LOG_DISABLE=1, OTEL_SDK_DISABLED=true)\""
+                }
+              },
+              "--terminal": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace info --help: \"--terminal string override the terminal repo (the flake build/apply targets)\""
+                }
+              },
+              "--verbose": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace info --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace info --help: \"-h, --help help for info\""
+                }
+              },
+              "-v": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace info --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "pn workspace info --help: usage \"pn workspace info [flags]\""
+              }
+            },
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "lock": {
+            "name": "lock",
+            "provenance": "pn workspace lock --help (pn 0.0.0-3367c0e5, this host 2026-10-05)",
+            "citations": {
+              "provenance": {
+                "source": "pn workspace lock --help: \"Evaluate flake inputs, build edges, resolve terminal, and write pn-workspace.lock.json atomically. Exits non-zero and preserves any existing lock file if validation errors are found.\""
+              },
+              "stdin": {
+                "source": "pn workspace lock --help: usage \"pn workspace lock [flags]\" documents no stdin consumption; classified \"never\""
+              },
+              "stdout": {
+                "source": "pn workspace lock --help: usage \"pn workspace lock [flags]\" and description \"Evaluate flake inputs, build edges, resolve terminal, and write pn-workspace.lock.json atomically. Exits non-zero and pr\" describe terminal output only; classified by the schema's stdout kind"
+              },
+              "unknownFlag": {
+                "source": "pn workspace lock --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--allow-missing-edges": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace lock --help: \"--allow-missing-edges write the lock even if a repo's flake inputs fail to evaluate (edges for that repo are omitted; risks a build resolving that sibling from its published locked input)\""
+                }
+              },
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace lock --help: \"-h, --help help for lock\""
+                }
+              },
+              "--no-telemetry": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace lock --help: \"--no-telemetry disable OpenTelemetry export for this run (also: PG_NIX_LOG_DISABLE=1, OTEL_SDK_DISABLED=true)\""
+                }
+              },
+              "--terminal": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace lock --help: \"--terminal string override the terminal repo (the flake build/apply targets)\""
+                }
+              },
+              "--verbose": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace lock --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace lock --help: \"-h, --help help for lock\""
+                }
+              },
+              "-v": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace lock --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "pn workspace lock --help: usage \"pn workspace lock [flags]\""
+              }
+            },
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "pre-commit-check": {
+            "name": "pre-commit-check",
+            "provenance": "pn workspace pre-commit-check --help (pn 0.0.0-3367c0e5, this host 2026-10-05)",
+            "citations": {
+              "provenance": {
+                "source": "pn workspace pre-commit-check --help: \"Run pre-commit checks on each workspace repo\""
+              },
+              "stdin": {
+                "source": "pn workspace pre-commit-check --help: usage \"pn workspace pre-commit-check [flags]\" documents no stdin consumption; classified \"never\""
+              },
+              "stdout": {
+                "source": "pn workspace pre-commit-check --help: usage \"pn workspace pre-commit-check [flags]\" and description \"Run pre-commit checks on each workspace repo\" describe terminal output only; classified by the schema's stdout kind"
+              },
+              "unknownFlag": {
+                "source": "pn workspace pre-commit-check --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace pre-commit-check --help: \"-h, --help help for pre-commit-check\""
+                }
+              },
+              "--no-telemetry": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace pre-commit-check --help: \"--no-telemetry disable OpenTelemetry export for this run (also: PG_NIX_LOG_DISABLE=1, OTEL_SDK_DISABLED=true)\""
+                }
+              },
+              "--terminal": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace pre-commit-check --help: \"--terminal string override the terminal repo (the flake build/apply targets)\""
+                }
+              },
+              "--verbose": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace pre-commit-check --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace pre-commit-check --help: \"-h, --help help for pre-commit-check\""
+                }
+              },
+              "-v": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace pre-commit-check --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "pn workspace pre-commit-check --help: usage \"pn workspace pre-commit-check [flags]\""
+              }
+            },
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "push": {
+            "name": "push",
+            "provenance": "pn workspace push --help (pn 0.0.0-3367c0e5, this host 2026-10-05)",
+            "citations": {
+              "provenance": {
+                "source": "pn workspace push --help: \"Publish each workspace repo.\""
+              },
+              "stdin": {
+                "source": "pn workspace push --help: usage \"pn workspace push [flags]\" documents no stdin consumption; classified \"never\""
+              },
+              "stdout": {
+                "source": "pn workspace push --help: usage \"pn workspace push [flags]\" and description \"Publish each workspace repo.\" describe terminal output only; classified by the schema's stdout kind"
+              },
+              "unknownFlag": {
+                "source": "pn workspace push --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace push --help: \"-h, --help help for push\""
+                }
+              },
+              "--no-siblings": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace push --help: \"--no-siblings push only: skip the workspace-sibling relock, publishing without propagating flake locks\""
+                }
+              },
+              "--no-telemetry": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace push --help: \"--no-telemetry disable OpenTelemetry export for this run (also: PG_NIX_LOG_DISABLE=1, OTEL_SDK_DISABLED=true)\""
+                }
+              },
+              "--remote": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace push --help: \"--remote string override remote name for all repos when --set-upstream is set (skip repo if remote absent)\""
+                }
+              },
+              "--set-upstream": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace push --help: \"-u, --set-upstream push with -u <remote> <branch> for repos that have no upstream yet; remote is resolved via convention chain\""
+                }
+              },
+              "--terminal": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace push --help: \"--terminal string override the terminal repo (the flake build/apply targets)\""
+                }
+              },
+              "--verbose": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace push --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace push --help: \"-h, --help help for push\""
+                }
+              },
+              "-u": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace push --help: \"-u, --set-upstream push with -u <remote> <branch> for repos that have no upstream yet; remote is resolved via convention chain\""
+                }
+              },
+              "-v": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace push --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "pn workspace push --help: usage \"pn workspace push [flags]\""
+              }
+            },
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "rebase": {
+            "name": "rebase",
+            "provenance": "pn workspace rebase --help (pn 0.0.0-3367c0e5, this host 2026-10-05)",
+            "citations": {
+              "provenance": {
+                "source": "pn workspace rebase --help: \"Git rebase each workspace repo.\""
+              },
+              "stdin": {
+                "source": "pn workspace rebase --help: usage \"pn workspace rebase [branch] [flags]\" documents no stdin consumption; classified \"never\""
+              },
+              "stdout": {
+                "source": "pn workspace rebase --help: usage \"pn workspace rebase [branch] [flags]\" and description \"Git rebase each workspace repo.\" describe terminal output only; classified by the schema's stdout kind"
+              },
+              "unknownFlag": {
+                "source": "pn workspace rebase --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace rebase --help: \"-h, --help help for rebase\""
+                }
+              },
+              "--no-telemetry": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace rebase --help: \"--no-telemetry disable OpenTelemetry export for this run (also: PG_NIX_LOG_DISABLE=1, OTEL_SDK_DISABLED=true)\""
+                }
+              },
+              "--terminal": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace rebase --help: \"--terminal string override the terminal repo (the flake build/apply targets)\""
+                }
+              },
+              "--verbose": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace rebase --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace rebase --help: \"-h, --help help for rebase\""
+                }
+              },
+              "-v": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace rebase --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "pn workspace rebase --help: usage \"pn workspace rebase [branch] [flags]\""
+              }
+            },
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "status": {
+            "name": "status",
+            "provenance": "pn workspace status --help (pn 0.0.0-3367c0e5, this host 2026-10-05)",
+            "citations": {
+              "provenance": {
+                "source": "pn workspace status --help: \"Print git status across all workspace repos\""
+              },
+              "stdin": {
+                "source": "pn workspace status --help: usage \"pn workspace status [flags]\" documents no stdin consumption; classified \"never\""
+              },
+              "stdout": {
+                "source": "pn workspace status --help: usage \"pn workspace status [flags]\" and description \"Print git status across all workspace repos\" describe terminal output only; classified by the schema's stdout kind"
+              },
+              "unknownFlag": {
+                "source": "pn workspace status --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace status --help: \"-h, --help help for status\""
+                }
+              },
+              "--no-telemetry": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace status --help: \"--no-telemetry disable OpenTelemetry export for this run (also: PG_NIX_LOG_DISABLE=1, OTEL_SDK_DISABLED=true)\""
+                }
+              },
+              "--terminal": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace status --help: \"--terminal string override the terminal repo (the flake build/apply targets)\""
+                }
+              },
+              "--verbose": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace status --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace status --help: \"-h, --help help for status\""
+                }
+              },
+              "-v": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace status --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "pn workspace status --help: usage \"pn workspace status [flags]\""
+              }
+            },
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "tree": {
+            "name": "tree",
+            "provenance": "pn workspace tree --help (pn 0.0.0-3367c0e5, this host 2026-10-05)",
+            "citations": {
+              "provenance": {
+                "source": "pn workspace tree --help: \"Print the workspace repo tree\""
+              },
+              "stdin": {
+                "source": "pn workspace tree --help: usage \"pn workspace tree [flags]\" documents no stdin consumption; classified \"never\""
+              },
+              "stdout": {
+                "source": "pn workspace tree --help: usage \"pn workspace tree [flags]\" and description \"Print the workspace repo tree\" describe terminal output only; classified by the schema's stdout kind"
+              },
+              "unknownFlag": {
+                "source": "pn workspace tree --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace tree --help: \"-h, --help help for tree\""
+                }
+              },
+              "--no-telemetry": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace tree --help: \"--no-telemetry disable OpenTelemetry export for this run (also: PG_NIX_LOG_DISABLE=1, OTEL_SDK_DISABLED=true)\""
+                }
+              },
+              "--terminal": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace tree --help: \"--terminal string override the terminal repo (the flake build/apply targets)\""
+                }
+              },
+              "--verbose": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace tree --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace tree --help: \"-h, --help help for tree\""
+                }
+              },
+              "-v": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace tree --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "pn workspace tree --help: usage \"pn workspace tree [flags]\""
+              }
+            },
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "update": {
+            "name": "update",
+            "provenance": "pn workspace update --help (pn 0.0.0-3367c0e5, this host 2026-10-05)",
+            "citations": {
+              "provenance": {
+                "source": "pn workspace update --help: \"Relock each workspace repo, local-only \u2014 never pushes (worktree-isolated; --in-place for direct-on-main, --siblings-only to relock just sibling inputs)\""
+              },
+              "stdin": {
+                "source": "pn workspace update --help: usage \"pn workspace update [flags]\" documents no stdin consumption; classified \"never\""
+              },
+              "stdout": {
+                "source": "pn workspace update --help: usage \"pn workspace update [flags]\" and description \"Relock each workspace repo, local-only \u2014 never pushes (worktree-isolated; --in-place for direct-on-main, --siblings-only\" describe terminal output only; classified by the schema's stdout kind"
+              },
+              "unknownFlag": {
+                "source": "pn workspace update --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace update --help: \"-h, --help help for update\""
+                }
+              },
+              "--in-place": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace update --help: \"--in-place update each repo directly on its primary main instead of in an isolated worktree\""
+                }
+              },
+              "--no-telemetry": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace update --help: \"--no-telemetry disable OpenTelemetry export for this run (also: PG_NIX_LOG_DISABLE=1, OTEL_SDK_DISABLED=true)\""
+                }
+              },
+              "--siblings-only": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace update --help: \"--siblings-only relock only the workspace-sibling flake inputs, from their remotes (skip update-locks.sh; leaves nixpkgs and other third-party inputs untouched); local-only, like plain update\""
+                }
+              },
+              "--terminal": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace update --help: \"--terminal string override the terminal repo (the flake build/apply targets)\""
+                }
+              },
+              "--verbose": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace update --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace update --help: \"-h, --help help for update\""
+                }
+              },
+              "-v": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace update --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "pn workspace update --help: usage \"pn workspace update [flags]\""
+              }
+            },
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "workforest": {
+            "name": "workforest",
+            "provenance": "pn workspace workforest --help (pn 0.0.0-3367c0e5, this host 2026-10-05)",
+            "citations": {
+              "provenance": {
+                "source": "pn workspace workforest --help: \"Manage coordinated workforest sets\""
+              },
+              "stdin": {
+                "source": "pn workspace workforest --help: usage \"pn workspace workforest [command]\" documents no stdin consumption; classified \"never\""
+              },
+              "stdout": {
+                "source": "pn workspace workforest --help: usage \"pn workspace workforest [command]\" and description \"Manage coordinated workforest sets\" describe terminal output only; classified by the schema's stdout kind"
+              },
+              "unknownFlag": {
+                "source": "pn workspace workforest --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace workforest --help: \"-h, --help help for workforest\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pn workspace workforest --help: \"-h, --help help for workforest\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "pn workspace workforest --help: usage \"pn workspace workforest [command]\""
+              }
+            },
+            "stdin": "never",
+            "stdout": "none",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true,
+            "subcommands": {
+              "add": {
+                "name": "add",
+                "provenance": "pn workspace add --help (pn 0.0.0-3367c0e5, this host 2026-10-05)",
+                "citations": {
+                  "provenance": {
+                    "source": "pn workspace workforest add --help: \"Create a coordinated workforest set on <branch>.\""
+                  },
+                  "stdin": {
+                    "source": "pn workspace workforest add --help: usage \"pn workspace workforest add <branch> [<commit-ish>] [flags]\" documents no stdin consumption; classified \"never\""
+                  },
+                  "stdout": {
+                    "source": "pn workspace workforest add --help: usage \"pn workspace workforest add <branch> [<commit-ish>] [flags]\" and description \"Create a coordinated workforest set on <branch>.\" describe terminal output only; classified by the schema's stdout kind"
+                  },
+                  "unknownFlag": {
+                    "source": "pn workspace workforest add --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+                  }
+                },
+                "flags": {
+                  "--help": {
+                    "arity": "none",
+                    "operand": {
+                      "kind": "literal"
+                    },
+                    "transform": {
+                      "kind": "none"
+                    },
+                    "citation": {
+                      "source": "pn workspace workforest add --help: \"-h, --help help for add\""
+                    }
+                  },
+                  "--no-telemetry": {
+                    "arity": "none",
+                    "operand": {
+                      "kind": "literal"
+                    },
+                    "transform": {
+                      "kind": "none"
+                    },
+                    "citation": {
+                      "source": "pn workspace workforest add --help: \"--no-telemetry disable OpenTelemetry export for this run (also: PG_NIX_LOG_DISABLE=1, OTEL_SDK_DISABLED=true)\""
+                    }
+                  },
+                  "--repos": {
+                    "arity": "one",
+                    "operand": {
+                      "kind": "literal"
+                    },
+                    "transform": {
+                      "kind": "none"
+                    },
+                    "citation": {
+                      "source": "pn workspace workforest add --help: \"--repos strings subset of repo keys to include (comma-separated or repeated); default: all repos\""
+                    }
+                  },
+                  "--terminal": {
+                    "arity": "one",
+                    "operand": {
+                      "kind": "literal"
+                    },
+                    "transform": {
+                      "kind": "none"
+                    },
+                    "citation": {
+                      "source": "pn workspace workforest add --help: \"--terminal string override the terminal repo (the flake build/apply targets)\""
+                    }
+                  },
+                  "--verbose": {
+                    "arity": "none",
+                    "operand": {
+                      "kind": "literal"
+                    },
+                    "transform": {
+                      "kind": "none"
+                    },
+                    "citation": {
+                      "source": "pn workspace workforest add --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+                    }
+                  },
+                  "-h": {
+                    "arity": "none",
+                    "operand": {
+                      "kind": "literal"
+                    },
+                    "transform": {
+                      "kind": "none"
+                    },
+                    "citation": {
+                      "source": "pn workspace workforest add --help: \"-h, --help help for add\""
+                    }
+                  },
+                  "-v": {
+                    "arity": "none",
+                    "operand": {
+                      "kind": "literal"
+                    },
+                    "transform": {
+                      "kind": "none"
+                    },
+                    "citation": {
+                      "source": "pn workspace workforest add --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+                    }
+                  }
+                },
+                "positionals": {
+                  "rest": {
+                    "kind": "literal"
+                  },
+                  "restOverride": {
+                    "role": {
+                      "kind": "literal"
+                    }
+                  },
+                  "citation": {
+                    "source": "pn workspace workforest add --help: usage \"pn workspace workforest add <branch> [<commit-ish>] [flags]\""
+                  }
+                },
+                "stdin": "never",
+                "stdout": "metadata",
+                "unknownFlag": "insufficient",
+                "endOfOptions": true
+              },
+              "add-repo": {
+                "name": "add-repo",
+                "provenance": "pn workspace add-repo --help (pn 0.0.0-3367c0e5, this host 2026-10-05)",
+                "citations": {
+                  "provenance": {
+                    "source": "pn workspace workforest add-repo --help: \"Add a single repo to an existing coordinated workforest set\""
+                  },
+                  "stdin": {
+                    "source": "pn workspace workforest add-repo --help: usage \"pn workspace workforest add-repo <branch> <repo> [flags]\" documents no stdin consumption; classified \"never\""
+                  },
+                  "stdout": {
+                    "source": "pn workspace workforest add-repo --help: usage \"pn workspace workforest add-repo <branch> <repo> [flags]\" and description \"Add a single repo to an existing coordinated workforest set\" describe terminal output only; classified by the schema's stdout kind"
+                  },
+                  "unknownFlag": {
+                    "source": "pn workspace workforest add-repo --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+                  }
+                },
+                "flags": {
+                  "--help": {
+                    "arity": "none",
+                    "operand": {
+                      "kind": "literal"
+                    },
+                    "transform": {
+                      "kind": "none"
+                    },
+                    "citation": {
+                      "source": "pn workspace workforest add-repo --help: \"-h, --help help for add-repo\""
+                    }
+                  },
+                  "--no-telemetry": {
+                    "arity": "none",
+                    "operand": {
+                      "kind": "literal"
+                    },
+                    "transform": {
+                      "kind": "none"
+                    },
+                    "citation": {
+                      "source": "pn workspace workforest add-repo --help: \"--no-telemetry disable OpenTelemetry export for this run (also: PG_NIX_LOG_DISABLE=1, OTEL_SDK_DISABLED=true)\""
+                    }
+                  },
+                  "--terminal": {
+                    "arity": "one",
+                    "operand": {
+                      "kind": "literal"
+                    },
+                    "transform": {
+                      "kind": "none"
+                    },
+                    "citation": {
+                      "source": "pn workspace workforest add-repo --help: \"--terminal string override the terminal repo (the flake build/apply targets)\""
+                    }
+                  },
+                  "--verbose": {
+                    "arity": "none",
+                    "operand": {
+                      "kind": "literal"
+                    },
+                    "transform": {
+                      "kind": "none"
+                    },
+                    "citation": {
+                      "source": "pn workspace workforest add-repo --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+                    }
+                  },
+                  "-h": {
+                    "arity": "none",
+                    "operand": {
+                      "kind": "literal"
+                    },
+                    "transform": {
+                      "kind": "none"
+                    },
+                    "citation": {
+                      "source": "pn workspace workforest add-repo --help: \"-h, --help help for add-repo\""
+                    }
+                  },
+                  "-v": {
+                    "arity": "none",
+                    "operand": {
+                      "kind": "literal"
+                    },
+                    "transform": {
+                      "kind": "none"
+                    },
+                    "citation": {
+                      "source": "pn workspace workforest add-repo --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+                    }
+                  }
+                },
+                "positionals": {
+                  "rest": {
+                    "kind": "literal"
+                  },
+                  "restOverride": {
+                    "role": {
+                      "kind": "literal"
+                    }
+                  },
+                  "citation": {
+                    "source": "pn workspace workforest add-repo --help: usage \"pn workspace workforest add-repo <branch> <repo> [flags]\""
+                  }
+                },
+                "stdin": "never",
+                "stdout": "metadata",
+                "unknownFlag": "insufficient",
+                "endOfOptions": true
+              },
+              "list": {
+                "name": "list",
+                "provenance": "pn workspace list --help (pn 0.0.0-3367c0e5, this host 2026-10-05)",
+                "citations": {
+                  "provenance": {
+                    "source": "pn workspace workforest list --help: \"List coordinated workforest sets\""
+                  },
+                  "stdin": {
+                    "source": "pn workspace workforest list --help: usage \"pn workspace workforest list [flags]\" documents no stdin consumption; classified \"never\""
+                  },
+                  "stdout": {
+                    "source": "pn workspace workforest list --help: usage \"pn workspace workforest list [flags]\" and description \"List coordinated workforest sets\" describe terminal output only; classified by the schema's stdout kind"
+                  },
+                  "unknownFlag": {
+                    "source": "pn workspace workforest list --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+                  }
+                },
+                "flags": {
+                  "--help": {
+                    "arity": "none",
+                    "operand": {
+                      "kind": "literal"
+                    },
+                    "transform": {
+                      "kind": "none"
+                    },
+                    "citation": {
+                      "source": "pn workspace workforest list --help: \"-h, --help help for list\""
+                    }
+                  },
+                  "--no-telemetry": {
+                    "arity": "none",
+                    "operand": {
+                      "kind": "literal"
+                    },
+                    "transform": {
+                      "kind": "none"
+                    },
+                    "citation": {
+                      "source": "pn workspace workforest list --help: \"--no-telemetry disable OpenTelemetry export for this run (also: PG_NIX_LOG_DISABLE=1, OTEL_SDK_DISABLED=true)\""
+                    }
+                  },
+                  "--terminal": {
+                    "arity": "one",
+                    "operand": {
+                      "kind": "literal"
+                    },
+                    "transform": {
+                      "kind": "none"
+                    },
+                    "citation": {
+                      "source": "pn workspace workforest list --help: \"--terminal string override the terminal repo (the flake build/apply targets)\""
+                    }
+                  },
+                  "--verbose": {
+                    "arity": "none",
+                    "operand": {
+                      "kind": "literal"
+                    },
+                    "transform": {
+                      "kind": "none"
+                    },
+                    "citation": {
+                      "source": "pn workspace workforest list --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+                    }
+                  },
+                  "-h": {
+                    "arity": "none",
+                    "operand": {
+                      "kind": "literal"
+                    },
+                    "transform": {
+                      "kind": "none"
+                    },
+                    "citation": {
+                      "source": "pn workspace workforest list --help: \"-h, --help help for list\""
+                    }
+                  },
+                  "-v": {
+                    "arity": "none",
+                    "operand": {
+                      "kind": "literal"
+                    },
+                    "transform": {
+                      "kind": "none"
+                    },
+                    "citation": {
+                      "source": "pn workspace workforest list --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+                    }
+                  }
+                },
+                "positionals": {
+                  "rest": {
+                    "kind": "literal"
+                  },
+                  "restOverride": {
+                    "role": {
+                      "kind": "literal"
+                    }
+                  },
+                  "citation": {
+                    "source": "pn workspace workforest list --help: usage \"pn workspace workforest list [flags]\""
+                  }
+                },
+                "stdin": "never",
+                "stdout": "metadata",
+                "unknownFlag": "insufficient",
+                "endOfOptions": true
+              },
+              "prune": {
+                "name": "prune",
+                "provenance": "pn workspace prune --help (pn 0.0.0-3367c0e5, this host 2026-10-05)",
+                "citations": {
+                  "provenance": {
+                    "source": "pn workspace workforest prune --help: \"Run git worktree prune in each canonical repo (clear stale admin entries)\""
+                  },
+                  "stdin": {
+                    "source": "pn workspace workforest prune --help: usage \"pn workspace workforest prune [flags]\" documents no stdin consumption; classified \"never\""
+                  },
+                  "stdout": {
+                    "source": "pn workspace workforest prune --help: usage \"pn workspace workforest prune [flags]\" and description \"Run git worktree prune in each canonical repo (clear stale admin entries)\" describe terminal output only; classified by the schema's stdout kind"
+                  },
+                  "unknownFlag": {
+                    "source": "pn workspace workforest prune --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+                  }
+                },
+                "flags": {
+                  "--help": {
+                    "arity": "none",
+                    "operand": {
+                      "kind": "literal"
+                    },
+                    "transform": {
+                      "kind": "none"
+                    },
+                    "citation": {
+                      "source": "pn workspace workforest prune --help: \"-h, --help help for prune\""
+                    }
+                  },
+                  "--no-telemetry": {
+                    "arity": "none",
+                    "operand": {
+                      "kind": "literal"
+                    },
+                    "transform": {
+                      "kind": "none"
+                    },
+                    "citation": {
+                      "source": "pn workspace workforest prune --help: \"--no-telemetry disable OpenTelemetry export for this run (also: PG_NIX_LOG_DISABLE=1, OTEL_SDK_DISABLED=true)\""
+                    }
+                  },
+                  "--terminal": {
+                    "arity": "one",
+                    "operand": {
+                      "kind": "literal"
+                    },
+                    "transform": {
+                      "kind": "none"
+                    },
+                    "citation": {
+                      "source": "pn workspace workforest prune --help: \"--terminal string override the terminal repo (the flake build/apply targets)\""
+                    }
+                  },
+                  "--verbose": {
+                    "arity": "none",
+                    "operand": {
+                      "kind": "literal"
+                    },
+                    "transform": {
+                      "kind": "none"
+                    },
+                    "citation": {
+                      "source": "pn workspace workforest prune --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+                    }
+                  },
+                  "-h": {
+                    "arity": "none",
+                    "operand": {
+                      "kind": "literal"
+                    },
+                    "transform": {
+                      "kind": "none"
+                    },
+                    "citation": {
+                      "source": "pn workspace workforest prune --help: \"-h, --help help for prune\""
+                    }
+                  },
+                  "-v": {
+                    "arity": "none",
+                    "operand": {
+                      "kind": "literal"
+                    },
+                    "transform": {
+                      "kind": "none"
+                    },
+                    "citation": {
+                      "source": "pn workspace workforest prune --help: \"-v, --verbose verbose diagnostics: print the trace id hint and telemetry reachability notes on stderr\""
+                    }
+                  }
+                },
+                "positionals": {
+                  "rest": {
+                    "kind": "literal"
+                  },
+                  "restOverride": {
+                    "role": {
+                      "kind": "literal"
+                    }
+                  },
+                  "citation": {
+                    "source": "pn workspace workforest prune --help: usage \"pn workspace workforest prune [flags]\""
+                  }
+                },
+                "stdin": "never",
+                "stdout": "metadata",
+                "unknownFlag": "insufficient",
+                "endOfOptions": true
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

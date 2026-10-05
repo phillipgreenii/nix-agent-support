@@ -37,7 +37,7 @@ func (r Registry) Names() []string {
 // tee are the proof that another command is ONLY a registry entry; sh is the
 // proof that a second NAME for the same semantics is only a second key.
 func DefaultRegistry() Registry {
-	return NewRegistry(
+	return NewRegistry(append([]CommandSchema{
 		catSchema, headSchema, sedSchema, rmSchema, cpSchema, teeSchema,
 		bashSchema, renamed(bashSchema, "sh"),
 		xargsSchema, curlSchema,
@@ -82,7 +82,7 @@ func DefaultRegistry() Registry {
 		// passthrough registration — see registry_breadth.go's rtkSchema
 		// doc comment.
 		rtkSchema,
-	)
+	}, repoBaseToolSchemas()...)...)
 }
 
 // renamed returns a copy of s registered under another basename. The Flags

@@ -1,0 +1,806 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "pnwf",
+  "command": {
+    "name": "pnwf",
+    "provenance": "pnwf --help (pnwf, phillipg-nix-repo-base modules/pnwf, this host 2026-10-05)",
+    "citations": {
+      "provenance": {
+        "source": "pnwf --help: \"pnwf: deterministic helper for the workforest work-cycle\""
+      },
+      "stdin": {
+        "source": "pnwf --help: usage \"Usage: pnwf <subcommand> [OPTIONS]\" documents no stdin consumption; classified \"never\""
+      },
+      "stdout": {
+        "source": "pnwf --help: usage \"Usage: pnwf <subcommand> [OPTIONS]\" and description \"pnwf: deterministic helper for the workforest work-cycle\" describe terminal output only; classified by the schema's stdout kind"
+      },
+      "unknownFlag": {
+        "source": "pnwf --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "flags": {
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pnwf --help: \"-h, --help Show this help message\""
+        }
+      },
+      "--version": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pnwf --help: \"-v, --version Show version information\""
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pnwf --help: \"-h, --help Show this help message\""
+        }
+      },
+      "-v": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pnwf --help: \"-v, --version Show version information\""
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "pnwf --help: usage \"Usage: pnwf <subcommand> [OPTIONS]\""
+      }
+    },
+    "stdin": "never",
+    "stdout": "none",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true,
+    "subcommands": {
+      "cleanup": {
+        "name": "cleanup",
+        "provenance": "pnwf --help (pnwf, phillipg-nix-repo-base modules/pnwf, this host 2026-10-05)",
+        "citations": {
+          "provenance": {
+            "source": "pnwf cleanup --help: \"Usage: pnwf cleanup <branch> [--force-dirty-worktree-removal] [--force-unlanded-branch-removal]\""
+          },
+          "stdin": {
+            "source": "pnwf cleanup --help: usage \"Usage: pnwf cleanup <branch> [--force-dirty-worktree-removal] [--force-unlanded-branch-removal]\" documents no stdin consumption; classified \"never\""
+          },
+          "stdout": {
+            "source": "pnwf cleanup --help: usage \"Usage: pnwf cleanup <branch> [--force-dirty-worktree-removal] [--force-unlanded-branch-removal]\" and description \"Usage: pnwf cleanup <branch> [--force-dirty-worktree-removal] [--force-unlanded-branch-removal]\" describe terminal output only; classified by the schema's stdout kind"
+          },
+          "unknownFlag": {
+            "source": "pnwf cleanup --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pnwf cleanup --help: \"-h, --help Show this help message\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pnwf cleanup --help: \"-h, --help Show this help message\""
+            }
+          }
+        },
+        "positionals": {
+          "leading": [
+            {
+              "kind": "literal"
+            }
+          ],
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pnwf cleanup --help: usage \"Usage: pnwf cleanup <branch> [--force-dirty-worktree-removal] [--force-unlanded-branch-removal]\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "fork-preflight": {
+        "name": "fork-preflight",
+        "provenance": "pnwf --help (pnwf, phillipg-nix-repo-base modules/pnwf, this host 2026-10-05)",
+        "citations": {
+          "provenance": {
+            "source": "pnwf fork-preflight --help: \"Usage: pnwf fork-preflight <branch> [--repos a,b]\""
+          },
+          "stdin": {
+            "source": "pnwf fork-preflight --help: usage \"Usage: pnwf fork-preflight <branch> [--repos a,b]\" documents no stdin consumption; classified \"never\""
+          },
+          "stdout": {
+            "source": "pnwf fork-preflight --help: usage \"Usage: pnwf fork-preflight <branch> [--repos a,b]\" and description \"Usage: pnwf fork-preflight <branch> [--repos a,b]\" describe terminal output only; classified by the schema's stdout kind"
+          },
+          "unknownFlag": {
+            "source": "pnwf fork-preflight --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pnwf fork-preflight --help: \"-h, --help Show this help message\""
+            }
+          },
+          "--repos": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pnwf fork-preflight --help: \"--repos a,b: restrict checks 2/3/4 to this comma-separated subset of the\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pnwf fork-preflight --help: \"-h, --help Show this help message\""
+            }
+          }
+        },
+        "positionals": {
+          "leading": [
+            {
+              "kind": "literal"
+            }
+          ],
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pnwf fork-preflight --help: usage \"Usage: pnwf fork-preflight <branch> [--repos a,b]\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "land-plan": {
+        "name": "land-plan",
+        "provenance": "pnwf --help (pnwf, phillipg-nix-repo-base modules/pnwf, this host 2026-10-05)",
+        "citations": {
+          "provenance": {
+            "source": "pnwf land-plan --help: \"Usage: pnwf land-plan <branch>\""
+          },
+          "stdin": {
+            "source": "pnwf land-plan --help: usage \"Usage: pnwf land-plan <branch>\" documents no stdin consumption; classified \"never\""
+          },
+          "stdout": {
+            "source": "pnwf land-plan --help: usage \"Usage: pnwf land-plan <branch>\" and description \"Usage: pnwf land-plan <branch>\" describe terminal output only; classified by the schema's stdout kind"
+          },
+          "unknownFlag": {
+            "source": "pnwf land-plan --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pnwf land-plan --help: \"-h, --help Show this help message\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pnwf land-plan --help: \"-h, --help Show this help message\""
+            }
+          }
+        },
+        "positionals": {
+          "leading": [
+            {
+              "kind": "literal"
+            }
+          ],
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pnwf land-plan --help: usage \"Usage: pnwf land-plan <branch>\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "repos": {
+        "name": "repos",
+        "provenance": "pnwf --help (pnwf, phillipg-nix-repo-base modules/pnwf, this host 2026-10-05)",
+        "citations": {
+          "provenance": {
+            "source": "pnwf repos --help: \"Usage: pnwf repos [--set]\""
+          },
+          "stdin": {
+            "source": "pnwf repos --help: usage \"Usage: pnwf repos [--set]\" documents no stdin consumption; classified \"never\""
+          },
+          "stdout": {
+            "source": "pnwf repos --help: usage \"Usage: pnwf repos [--set]\" and description \"Usage: pnwf repos [--set]\" describe terminal output only; classified by the schema's stdout kind"
+          },
+          "unknownFlag": {
+            "source": "pnwf repos --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pnwf repos --help: \"-h, --help Show this help message\""
+            }
+          },
+          "--set": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pnwf repos --help: \"--set (on resolve/repos/stage/sync-fetch/update-relock): guard \u2014 exit\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pnwf repos --help: \"-h, --help Show this help message\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pnwf repos --help: usage \"Usage: pnwf repos [--set]\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "residue": {
+        "name": "residue",
+        "provenance": "pnwf --help (pnwf, phillipg-nix-repo-base modules/pnwf, this host 2026-10-05)",
+        "citations": {
+          "provenance": {
+            "source": "pnwf residue --help: \"Usage: pnwf residue [--set]\""
+          },
+          "stdin": {
+            "source": "pnwf residue --help: usage \"Usage: pnwf residue [--set]\" documents no stdin consumption; classified \"never\""
+          },
+          "stdout": {
+            "source": "pnwf residue --help: usage \"Usage: pnwf residue [--set]\" and description \"Usage: pnwf residue [--set]\" describe terminal output only; classified by the schema's stdout kind"
+          },
+          "unknownFlag": {
+            "source": "pnwf residue --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pnwf residue --help: \"-h, --help Show this help message\""
+            }
+          },
+          "--set": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pnwf residue --help: \"--set (on resolve/repos/stage/sync-fetch/update-relock): guard \u2014 exit\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pnwf residue --help: \"-h, --help Show this help message\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pnwf residue --help: usage \"Usage: pnwf residue [--set]\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "resolve": {
+        "name": "resolve",
+        "provenance": "pnwf --help (pnwf, phillipg-nix-repo-base modules/pnwf, this host 2026-10-05)",
+        "citations": {
+          "provenance": {
+            "source": "pnwf resolve --help: \"Usage: pnwf resolve [--set]\""
+          },
+          "stdin": {
+            "source": "pnwf resolve --help: usage \"Usage: pnwf resolve [--set]\" documents no stdin consumption; classified \"never\""
+          },
+          "stdout": {
+            "source": "pnwf resolve --help: usage \"Usage: pnwf resolve [--set]\" and description \"Usage: pnwf resolve [--set]\" describe terminal output only; classified by the schema's stdout kind"
+          },
+          "unknownFlag": {
+            "source": "pnwf resolve --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pnwf resolve --help: \"-h, --help Show this help message\""
+            }
+          },
+          "--set": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pnwf resolve --help: \"--set (on resolve/repos/stage/sync-fetch/update-relock): guard \u2014 exit\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pnwf resolve --help: \"-h, --help Show this help message\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pnwf resolve --help: usage \"Usage: pnwf resolve [--set]\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "stage": {
+        "name": "stage",
+        "provenance": "pnwf --help (pnwf, phillipg-nix-repo-base modules/pnwf, this host 2026-10-05)",
+        "citations": {
+          "provenance": {
+            "source": "pnwf stage --help: \"Usage: pnwf stage [--set]\""
+          },
+          "stdin": {
+            "source": "pnwf stage --help: usage \"Usage: pnwf stage [--set]\" documents no stdin consumption; classified \"never\""
+          },
+          "stdout": {
+            "source": "pnwf stage --help: usage \"Usage: pnwf stage [--set]\" and description \"Usage: pnwf stage [--set]\" describe terminal output only; classified by the schema's stdout kind"
+          },
+          "unknownFlag": {
+            "source": "pnwf stage --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pnwf stage --help: \"-h, --help Show this help message\""
+            }
+          },
+          "--set": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pnwf stage --help: \"--set (on resolve/repos/stage/sync-fetch/update-relock): guard \u2014 exit\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pnwf stage --help: \"-h, --help Show this help message\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pnwf stage --help: usage \"Usage: pnwf stage [--set]\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "status": {
+        "name": "status",
+        "provenance": "pnwf --help (pnwf, phillipg-nix-repo-base modules/pnwf, this host 2026-10-05)",
+        "citations": {
+          "provenance": {
+            "source": "pnwf status --help: \"Usage: pnwf status <branch>\""
+          },
+          "stdin": {
+            "source": "pnwf status --help: usage \"Usage: pnwf status <branch>\" documents no stdin consumption; classified \"never\""
+          },
+          "stdout": {
+            "source": "pnwf status --help: usage \"Usage: pnwf status <branch>\" and description \"Usage: pnwf status <branch>\" describe terminal output only; classified by the schema's stdout kind"
+          },
+          "unknownFlag": {
+            "source": "pnwf status --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pnwf status --help: \"-h, --help Show this help message\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pnwf status --help: \"-h, --help Show this help message\""
+            }
+          }
+        },
+        "positionals": {
+          "leading": [
+            {
+              "kind": "literal"
+            }
+          ],
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pnwf status --help: usage \"Usage: pnwf status <branch>\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "sync-fetch": {
+        "name": "sync-fetch",
+        "provenance": "pnwf --help (pnwf, phillipg-nix-repo-base modules/pnwf, this host 2026-10-05)",
+        "citations": {
+          "provenance": {
+            "source": "pnwf sync-fetch --help: \"Usage: pnwf sync-fetch [--set]\""
+          },
+          "stdin": {
+            "source": "pnwf sync-fetch --help: usage \"Usage: pnwf sync-fetch [--set]\" documents no stdin consumption; classified \"never\""
+          },
+          "stdout": {
+            "source": "pnwf sync-fetch --help: usage \"Usage: pnwf sync-fetch [--set]\" and description \"Usage: pnwf sync-fetch [--set]\" describe terminal output only; classified by the schema's stdout kind"
+          },
+          "unknownFlag": {
+            "source": "pnwf sync-fetch --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pnwf sync-fetch --help: \"-h, --help Show this help message\""
+            }
+          },
+          "--set": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pnwf sync-fetch --help: \"--set (on resolve/repos/stage/sync-fetch/update-relock): guard \u2014 exit\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pnwf sync-fetch --help: \"-h, --help Show this help message\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pnwf sync-fetch --help: usage \"Usage: pnwf sync-fetch [--set]\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "update-relock": {
+        "name": "update-relock",
+        "provenance": "pnwf --help (pnwf, phillipg-nix-repo-base modules/pnwf, this host 2026-10-05)",
+        "citations": {
+          "provenance": {
+            "source": "pnwf update-relock --help: \"Usage: pnwf update-relock [--set]\""
+          },
+          "stdin": {
+            "source": "pnwf update-relock --help: usage \"Usage: pnwf update-relock [--set]\" documents no stdin consumption; classified \"never\""
+          },
+          "stdout": {
+            "source": "pnwf update-relock --help: usage \"Usage: pnwf update-relock [--set]\" and description \"Usage: pnwf update-relock [--set]\" describe terminal output only; classified by the schema's stdout kind"
+          },
+          "unknownFlag": {
+            "source": "pnwf update-relock --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pnwf update-relock --help: \"-h, --help Show this help message\""
+            }
+          },
+          "--set": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pnwf update-relock --help: \"--set (on resolve/repos/stage/sync-fetch/update-relock): guard \u2014 exit\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pnwf update-relock --help: \"-h, --help Show this help message\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pnwf update-relock --help: usage \"Usage: pnwf update-relock [--set]\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      }
+    }
+  }
+}

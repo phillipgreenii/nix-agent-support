@@ -1089,5 +1089,999 @@
     "rules_config": { "remote_lifecycle": { "dolt": "reject" } },
     "expected_verdict": "reject",
     "notes": "Operator configuration MAY reject a Dolt server lifecycle change outright (tc-vn5z); this row's rules_config carries that configuration explicitly."
+  },
+  {
+    "case": "repo_base_cm1_grep_foo_bar_src_module_nix",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "grep 'foo.bar' src/module.nix" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (capability-model/SKILL.md:170)."
+  },
+  {
+    "case": "repo_base_pw1_pn_workspace_apply",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pn workspace apply" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (pn-workspace-rules/SKILL.md:196 (cheat-sheet; USER ONLY))."
+  },
+  {
+    "case": "repo_base_pw3_pn_workspace_push_no_siblings",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pn workspace push --no-siblings" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (SKILL.md cheat-sheet)."
+  },
+  {
+    "case": "repo_base_pw4_pn_workspace_push_set_upstream",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pn workspace push --set-upstream" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (SKILL.md:388)."
+  },
+  {
+    "case": "repo_base_pw5_pn_workspace_push_u",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pn workspace push -u" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (SKILL.md cheat-sheet)."
+  },
+  {
+    "case": "repo_base_pw6_pn_workspace_push_u_remote_origin",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pn workspace push -u --remote origin" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (SKILL.md cheat-sheet)."
+  },
+  {
+    "case": "repo_base_pw8_pn_workspace_update_in_place",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pn workspace update --in-place" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (SKILL.md:389)."
+  },
+  {
+    "case": "repo_base_pw9_pn_workspace_update_siblings_only",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pn workspace update --siblings-only" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (SKILL.md:202)."
+  },
+  {
+    "case": "repo_base_pw10_pn_workspace_build",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pn workspace build" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (SKILL.md:87)."
+  },
+  {
+    "case": "repo_base_pw11_pn_workspace_flake_check",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pn workspace flake-check" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (SKILL.md:86)."
+  },
+  {
+    "case": "repo_base_pw12_pn_workspace_format",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pn workspace format" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (SKILL.md:87)."
+  },
+  {
+    "case": "repo_base_pw13_pn_workspace_pre_commit_check",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pn workspace pre-commit-check" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (SKILL.md:197)."
+  },
+  {
+    "case": "repo_base_pw14_pn_workspace_doctor",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pn workspace doctor" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (SKILL.md:96)."
+  },
+  {
+    "case": "repo_base_pw15_pn_workspace_doctor_json",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pn workspace doctor --json" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (validate SKILL.md:86)."
+  },
+  {
+    "case": "repo_base_pw16_pn_workspace_status",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pn workspace status" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (SKILL.md:385)."
+  },
+  {
+    "case": "repo_base_pw17_pn_workspace_tree",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pn workspace tree" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (SKILL.md:214)."
+  },
+  {
+    "case": "repo_base_pw18_pn_workspace_discover",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pn workspace discover" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (audit-worktrees SKILL.md:19)."
+  },
+  {
+    "case": "repo_base_pw19_pn_workspace_info_json",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pn workspace info --json" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (validate SKILL.md:139)."
+  },
+  {
+    "case": "repo_base_pw20_pn_workspace_rebase_main",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pn workspace rebase main" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (SKILL.md:387)."
+  },
+  {
+    "case": "repo_base_pw21_pn_workspace_rebase",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pn workspace rebase" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (SKILL.md:205)."
+  },
+  {
+    "case": "repo_base_pw22_pn_workspace_lock",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pn workspace lock" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (SKILL.md:194)."
+  },
+  {
+    "case": "repo_base_pw23_pn_workspace_init",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pn workspace init" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (SKILL.md:192). Deliberately NOT approved: pn workspace init rewrites the user-only pn-workspace.toml (pg2-4zyqf scope exclusion); unmodeled, abstains."
+  },
+  {
+    "case": "repo_base_pw24_pn_workspace_clone",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pn workspace clone" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (SKILL.md:193)."
+  },
+  {
+    "case": "repo_base_pw25_pn_workspace_nix_build_foo",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pn workspace nix -- build .#foo" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (SKILL.md:215). Deliberately NOT approved: pn workspace nix -- <args> runs arbitrary nix; unmodeled, abstains."
+  },
+  {
+    "case": "repo_base_pw26_pn_workspace_workforest_add_my_feature",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pn workspace workforest add my-feature" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (SKILL.md:217)."
+  },
+  {
+    "case": "repo_base_pw27_pn_workspace_workforest_add_my_feature_repos",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pn workspace workforest add my-feature --repos a,b"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (SKILL.md:219)."
+  },
+  {
+    "case": "repo_base_pw28_pn_workspace_workforest_add_my_feature_abc12",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pn workspace workforest add my-feature abc1234"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (SKILL.md:218)."
+  },
+  {
+    "case": "repo_base_pw29_pn_workspace_workforest_add_repo_my_feature",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pn workspace workforest add-repo my-feature repo-a"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (SKILL.md:220)."
+  },
+  {
+    "case": "repo_base_pw30_pn_workspace_workforest_remove_repo_my_featu",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pn workspace workforest remove-repo my-feature repo-a"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (SKILL.md:221). Deliberately NOT approved: workforest remove-repo is a destructive removal like workforest remove, outside the 2026-09-17 operator relief (pg2-4zyqf); unmodeled, abstains."
+  },
+  {
+    "case": "repo_base_pw31_pn_workspace_workforest_list",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pn workspace workforest list" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (SKILL.md:222)."
+  },
+  {
+    "case": "repo_base_pw32_pn_workspace_workforest_remove_my_feature",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pn workspace workforest remove my-feature" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (fork-workforest SKILL.md:71 / cheat-sheet). Deliberately NOT approved: workforest remove is explicitly excluded from the 2026-09-17 operator relief (pg2-4zyqf) and guarded by pathspec pnKind; unmodeled, abstains."
+  },
+  {
+    "case": "repo_base_pw33_pn_workspace_workforest_prune",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pn workspace workforest prune" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (SKILL.md:296)."
+  },
+  {
+    "case": "repo_base_pw34_pn_workspace_upgrade",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pn workspace upgrade" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (SKILL.md:203 (USER ONLY)). Deliberately NOT approved: pn workspace upgrade = update + apply, documented USER ONLY; not an agent-instructed form; unmodeled, abstains."
+  },
+  {
+    "case": "repo_base_pw35_pn_workspace_allow",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pn workspace allow" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (SKILL.md:130). Deliberately NOT approved: pn workspace allow grants hook trust (ADR-0019); unmodeled, abstains."
+  },
+  {
+    "case": "repo_base_pw36_pn_workspace_build_terminal_repo_a",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pn workspace build --terminal repo-a" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (SKILL.md (--terminal))."
+  },
+  {
+    "case": "repo_base_pw39_cd_tmp_set_export_pn_workspace_root_pwd_pn_w",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cd /tmp/set && export PN_WORKSPACE_ROOT=\"$PWD\" && pn workspace build"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (runner agents:180 chained)."
+  },
+  {
+    "case": "repo_base_pw40_cd_tmp_set_export_pn_workspace_root_pwd_pn_w",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cd /tmp/set && export PN_WORKSPACE_ROOT=\"$PWD\" && pn workspace doctor"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (runner agents:429 chained)."
+  },
+  {
+    "case": "repo_base_pw41_cd_tmp_set_export_pn_workspace_root_pwd_pn_w",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cd /tmp/set && export PN_WORKSPACE_ROOT=\"$PWD\" && pn workspace rebase main"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (sync cmd:423 chained)."
+  },
+  {
+    "case": "repo_base_pw42_cd_tmp_ws_export_pn_workspace_root_pwd_pn_wo",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cd /tmp/ws && export PN_WORKSPACE_ROOT=\"$PWD\" && pn workspace doctor --json | jq -r '.findings[] | select(.check == \"branch-synced\") | \"\\(.repo)\\t\\(.message)\"'"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (sync cmd:352 chained)."
+  },
+  {
+    "case": "repo_base_pw45_pn_workspace_doctor_json_jq_r_arg_landing_la",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pn workspace doctor --json | jq -r --arg landing \"$landing\" '.findings[] | .repo'"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (validate SKILL.md:86)."
+  },
+  {
+    "case": "repo_base_pw50_export_pn_workspace_root_pwd",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "export PN_WORKSPACE_ROOT=\"$PWD\"" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (SKILL.md:382)."
+  },
+  {
+    "case": "repo_base_pw51_cd_workforests_my_feature",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "cd .workforests/my-feature" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (SKILL.md:378)."
+  },
+  {
+    "case": "repo_base_pf1_pnwf_resolve",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pnwf resolve" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (runners:226 / fork SKILL)."
+  },
+  {
+    "case": "repo_base_pf2_pnwf_resolve_set",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pnwf resolve --set" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (runners:226)."
+  },
+  {
+    "case": "repo_base_pf3_pnwf_repos",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pnwf repos" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (validate SKILL.md:140)."
+  },
+  {
+    "case": "repo_base_pf4_pnwf_repos_set",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pnwf repos --set" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (cheat)."
+  },
+  {
+    "case": "repo_base_pf5_pnwf_stage_set",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pnwf stage --set" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (pnwf --help)."
+  },
+  {
+    "case": "repo_base_pf6_pnwf_fork_preflight_my_branch",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pnwf fork-preflight my-branch" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (fork SKILL:46)."
+  },
+  {
+    "case": "repo_base_pf7_pnwf_fork_preflight_my_branch_repos_a_b",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pnwf fork-preflight my-branch --repos a,b" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (fork SKILL:46)."
+  },
+  {
+    "case": "repo_base_pf8_pnwf_land_plan_my_branch",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pnwf land-plan my-branch" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (land SKILL:86)."
+  },
+  {
+    "case": "repo_base_pf9_pnwf_status_my_branch",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pnwf status my-branch" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (runners:399)."
+  },
+  {
+    "case": "repo_base_pf10_pnwf_residue_set",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pnwf residue --set" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (runners:76)."
+  },
+  {
+    "case": "repo_base_pf11_pnwf_sync_fetch_set",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pnwf sync-fetch --set" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (runners:243)."
+  },
+  {
+    "case": "repo_base_pf12_pnwf_sync_fetch_help",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pnwf sync-fetch --help" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (runner:249)."
+  },
+  {
+    "case": "repo_base_pf13_pnwf_update_relock_set",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pnwf update-relock --set" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (update-runner:223)."
+  },
+  {
+    "case": "repo_base_pf14_pnwf_cleanup_my_branch",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pnwf cleanup my-branch" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (land SKILL:139)."
+  },
+  {
+    "case": "repo_base_pf15_pnwf_cleanup_my_branch_force_dirty_worktree",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pnwf cleanup my-branch --force-dirty-worktree-removal"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (cleanup SKILL:48 (force flags, operator-only)). Deliberately NOT approved: pnwf cleanup --force-dirty-worktree-removal bypasses the dirty-worktree guard; the old engine ASKed; operator-only per cleanup-workforest; unmodeled flag, abstains."
+  },
+  {
+    "case": "repo_base_pf16_pnwf_cleanup_my_branch_force_unlanded_branch",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pnwf cleanup my-branch --force-unlanded-branch-removal"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (cleanup SKILL:48 (force flags, operator-only)). Deliberately NOT approved: pnwf cleanup --force-unlanded-branch-removal discards unlanded commits; the old engine ASKed; operator-only per cleanup-workforest; unmodeled flag, abstains."
+  },
+  {
+    "case": "repo_base_pf17_cd_tmp_set_pnwf_residue_set",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "cd /tmp/set && pnwf residue --set" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (runner chained)."
+  },
+  {
+    "case": "repo_base_pf18_cd_tmp_canon_pnwf_fork_preflight_pn_workspac",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cd /tmp/canon && pnwf fork-preflight pn-workspace-sync"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (runner chained)."
+  },
+  {
+    "case": "repo_base_pf19_echo_claude_code_subagent_model_unset",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "echo \"${CLAUDE_CODE_SUBAGENT_MODEL:-unset}\""
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (runner:579)."
+  },
+  {
+    "case": "repo_base_ot17_bd_show_pg2_abc_json",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd show pg2-abc --json" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (audit:172)."
+  },
+  {
+    "case": "repo_base_ot18_bd_search_branch_name",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd search branch-name" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (audit:168)."
+  },
+  {
+    "case": "repo_base_ot19_bd_list_label_base",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd list --label base" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (audit:67)."
+  },
+  {
+    "case": "repo_base_gt15_git_worktree_remove_force_tmp_ws_workforests",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git worktree remove --force /tmp/ws/.workforests/.pn-update/repo-1"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (SKILL.md:293)."
+  },
+  {
+    "case": "repo_base_gt19_git_worktree_list_porcelain",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git worktree list --porcelain" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (audit:85)."
+  },
+  {
+    "case": "repo_base_gt22_git_log_main_feat",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git log main..feat" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (audit:174)."
+  },
+  {
+    "case": "repo_base_gt23_git_branch_list_feat",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git branch --list feat" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (audit:157)."
+  },
+  {
+    "case": "repo_base_gt24_git_worktree_add_tmp_wt_feat",
+    "tags": ["repo-base-plugins", "pg2-cjfpy.3"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git worktree add /tmp/wt feat" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by phillipg-nix-repo-base plugins (audit:195)."
   }
 ]
