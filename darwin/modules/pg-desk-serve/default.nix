@@ -33,6 +33,11 @@ let
   stateHome =
     if primaryUser != null then "/Users/${primaryUser}/.local/state" else "/tmp/pg-desk-serve";
 
+  # launchd's own stdout/stderr capture paths, hoisted so serviceConfig and
+  # manageLogs.files below share one spelling (pg2-jujm3: never retype a path).
+  launchdStdoutLog = "${stateHome}/pg-desk/launchd-stdout.log";
+  launchdStderrLog = "${stateHome}/pg-desk/launchd-stderr.log";
+
   # Cross-module reach into home-manager scope (mirrors darwin/modules/
   # pg-router-ccpool-handler's own hmUsers pattern): pg-desk's config.yaml is
   # rendered by phillipgreenii.programs.pg-desk (home-manager scope,
@@ -147,8 +152,23 @@ in
             // lib.optionalAttrs (pgDeskConfigSource != null) {
               PG_DESK_CONFIG = toString pgDeskConfigSource;
             };
-          StandardOutPath = "${stateHome}/pg-desk/launchd-stdout.log";
-          StandardErrorPath = "${stateHome}/pg-desk/launchd-stderr.log";
+          StandardOutPath = launchdStdoutLog;
+          StandardErrorPath = launchdStderrLog;
+        };
+        # pg2-jujm3: rotate the launchd capture logs AND serve's self-written
+        # log (pgDeskServeLogPath, which honors the HM serve.log override).
+        # Setting `files` REPLACES the option's default list (the two launchd
+        # paths), so all three are listed. serve.go opens its log with
+        # O_APPEND, so the wrapper's copy-then-truncate rotation is safe; the
+        # logSources raw filelog target below is an exact path, so the
+        # pg-desk-serve.log.1 archive is not matched.
+        manageLogs = {
+          enable = true;
+          files = [
+            launchdStdoutLog
+            launchdStderrLog
+            pgDeskServeLogPath
+          ];
         };
       };
 

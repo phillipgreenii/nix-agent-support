@@ -5877,11 +5877,42 @@
                         type = lib.types.attrs;
                         default = { };
                       };
+                      # pg2-jujm3: darwin/modules/pg-desk-serve/default.nix now sets
+                      # manageLogs -- same "stub needs the real option's shape or
+                      # evalDarwin fails" reasoning as logSources below. Mirrors
+                      # phillipgreenii-nix-personal's lib/launchd-service-submodule.nix.
+                      manageLogs = lib.mkOption {
+                        type = lib.types.submodule {
+                          options = {
+                            enable = lib.mkOption {
+                              type = lib.types.bool;
+                              default = false;
+                            };
+                            files = lib.mkOption {
+                              type = lib.types.listOf lib.types.str;
+                              default = [ ];
+                            };
+                            thresholdBytes = lib.mkOption {
+                              type = lib.types.ints.positive;
+                              default = 20 * 1024 * 1024;
+                            };
+                            archiveCount = lib.mkOption {
+                              type = lib.types.ints.unsigned;
+                              default = 1;
+                            };
+                          };
+                        };
+                        default = { };
+                      };
                     };
                   };
 
-                  evalDarwin =
-                    servesCfg:
+                  evalDarwin = servesCfg: evalDarwinWith { } servesCfg;
+
+                  # hmUsersCfg stubs `home-manager.users` (the module's cross-module
+                  # reach into HM scope); { } leaves it unset, so pgDeskUsers == [ ].
+                  evalDarwinWith =
+                    hmUsersCfg: servesCfg:
                     (lib.evalModules {
                       specialArgs = { inherit pkgs lib; };
                       modules = [
@@ -5926,6 +5957,16 @@
                           }
                         )
                         { phillipgreenii.services.pg-desk-serve = servesCfg; }
+                        (
+                          { lib, ... }:
+                          {
+                            options.home-manager.users = lib.mkOption {
+                              type = lib.types.attrsOf lib.types.anything;
+                              default = { };
+                            };
+                            config.home-manager.users = hmUsersCfg;
+                          }
+                        )
                       ];
                     }).config;
 
@@ -5963,6 +6004,18 @@
                       port = 9819;
                     };
                   };
+
+                  # pg2-jujm3 override case: an enabled HM user carrying a serve.log
+                  # override, exactly the shape the module reads (pgDeskServeLogOverride).
+                  darwinEnabledLogOverride = evalDarwinWith {
+                    tester = {
+                      phillipgreenii.programs.pg-desk = {
+                        enable = true;
+                        serve.log = "/var/tmp/custom/pg-desk-serve.log";
+                      };
+                      xdg.configFile."pg-desk/config.yaml".source = "/tmp/pg-desk-config.yaml";
+                    };
+                  } { enable = true; };
 
                   hmDisabled = evalHM { enable = false; };
                   hmEnabled = evalHM {
@@ -6005,6 +6058,30 @@
                   darwinEnabledNoSoak.phillipgreenii.observability.logSources.pg-desk-serve.path
                   == "/Users/tester/Library/Logs/pg-desk-serve.log";
                 assert darwinEnabledNoSoak.phillipgreenii.observability.logSources.pg-desk-serve.format == "raw";
+                # manageLogs (pg2-jujm3): the launchd capture logs AND serve's
+                # self-written log are rotated. `files` REPLACES the default
+                # (two launchd paths), so the exact three-path list is asserted.
+                assert
+                  darwinEnabledNoSoak.phillipgreenii.system.launchdServices.userAgents.pg-desk-serve.manageLogs.enable;
+                assert
+                  darwinEnabledNoSoak.phillipgreenii.system.launchdServices.userAgents.pg-desk-serve.manageLogs.files
+                  == [
+                    "/Users/tester/.local/state/pg-desk/launchd-stdout.log"
+                    "/Users/tester/.local/state/pg-desk/launchd-stderr.log"
+                    "/Users/tester/Library/Logs/pg-desk-serve.log"
+                  ];
+                # Override case: the HM serve.log override replaces ONLY the third
+                # path, in both manageLogs.files and the logSources path.
+                assert
+                  darwinEnabledLogOverride.phillipgreenii.system.launchdServices.userAgents.pg-desk-serve.manageLogs.files
+                  == [
+                    "/Users/tester/.local/state/pg-desk/launchd-stdout.log"
+                    "/Users/tester/.local/state/pg-desk/launchd-stderr.log"
+                    "/var/tmp/custom/pg-desk-serve.log"
+                  ];
+                assert
+                  darwinEnabledLogOverride.phillipgreenii.observability.logSources.pg-desk-serve.path
+                  == "/var/tmp/custom/pg-desk-serve.log";
                 # Home module: no consumer input required to evaluate
                 # (default enable = false, nothing installed/rendered).
                 assert hmDisabled.home.packages == [ ];
