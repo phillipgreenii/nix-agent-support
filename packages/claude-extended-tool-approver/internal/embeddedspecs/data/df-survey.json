@@ -1,0 +1,230 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "df-survey",
+  "command": {
+    "name": "df-survey",
+    "provenance": "df-survey --help (daily-focus survey (shallow), gate-reply application and deep enrichment, this host 2026-10-05)",
+    "citations": {
+      "provenance": {
+        "source": "df-survey --help: \"df-survey: Phase-1 daily-focus survey (shallow) and gate-reply application.\""
+      },
+      "stdin": {
+        "source": "df-survey --help: \"Usage: df-survey [--date YYYY-MM-DD] [--cap N] [--jql JQL] [--allow-existing]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+      },
+      "stdout": {
+        "source": "df-survey --help: \"df-survey: Phase-1 daily-focus survey (shallow) and gate-reply application.\" (stdout classification taken from this description of what the command prints)"
+      },
+      "unknownFlag": {
+        "source": "df-survey --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "flags": {
+      "--allow-existing": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df-survey --help: \"--allow-existing is given, in which case the survey proceeds anyway: every\""
+        }
+      },
+      "--apply-gate": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df-survey --help: \"df-survey --apply-gate --manifest FILE [--out FILE]\""
+        }
+      },
+      "--cap": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df-survey --help: \"--cap <N> Flat cap on in-plan items. Default: 6.\""
+        }
+      },
+      "--date": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df-survey --help: \"--date <YYYY-MM-DD> Target date; also the ranking reference clock.\""
+        }
+      },
+      "--deep": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df-survey --help: \"df-survey --deep --manifest FILE (--items h1,h2,... | --in-plan)\""
+        }
+      },
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df-survey --help: \"df-survey: Phase-1 daily-focus survey (shallow) and gate-reply application.\" (this help text is what the -h/--help flag prints; the flag itself is not listed in the reviewed text)"
+        }
+      },
+      "--in-plan": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df-survey --help: \"--in-plan Select --manifest's in_plan:true items\""
+        }
+      },
+      "--items": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df-survey --help: \"--items <h1,h2,...> Select exactly these handles from --manifest\""
+        }
+      },
+      "--jql": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df-survey --help: \"--jql <JQL> Override the default Jira JQL.\""
+        }
+      },
+      "--manifest": {
+        "arity": "one",
+        "operand": {
+          "kind": "path-read"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df-survey --help: \"--manifest <FILE> Required. The shallow (or a prior gated) manifest.\""
+        }
+      },
+      "--out": {
+        "arity": "one",
+        "operand": {
+          "kind": "path-truncate"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df-survey --help: \"--out <FILE> Manifest output path. Default:\""
+        }
+      },
+      "--records": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df-survey --help: \"--records - Minimal (handle,kind,key,title) or full records\""
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df-survey --help: \"df-survey: Phase-1 daily-focus survey (shallow) and gate-reply application.\" (this help text is what the -h/--help flag prints; the flag itself is not listed in the reviewed text)"
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "df-survey --help: \"Usage: df-survey [--date YYYY-MM-DD] [--cap N] [--jql JQL] [--allow-existing]\""
+      }
+    },
+    "implicitEffects": [
+      {
+        "role": {
+          "kind": "remote",
+          "operation": "read"
+        },
+        "target": "github",
+        "citation": {
+          "source": "df-survey --help: \"df-survey: Phase-1 daily-focus survey (shallow) and gate-reply application.\" (the effect declared here is what this command does, per this description)"
+        }
+      },
+      {
+        "role": {
+          "kind": "remote",
+          "operation": "read"
+        },
+        "target": "jira",
+        "citation": {
+          "source": "df-survey --help: \"df-survey: Phase-1 daily-focus survey (shallow) and gate-reply application.\" (the effect declared here is what this command does, per this description)"
+        }
+      },
+      {
+        "role": {
+          "kind": "remote",
+          "operation": "read"
+        },
+        "target": "beads",
+        "citation": {
+          "source": "df-survey --help: \"df-survey: Phase-1 daily-focus survey (shallow) and gate-reply application.\" (the effect declared here is what this command does, per this description)"
+        }
+      }
+    ],
+    "stdin": "always",
+    "stdout": "content",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

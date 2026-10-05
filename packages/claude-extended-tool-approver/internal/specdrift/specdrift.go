@@ -58,10 +58,34 @@ var ExemptOn = map[string]map[string]bool{
 	},
 }
 
+// ExternalFlake names the embedded commands whose binary is delivered by a
+// flake OTHER than this one (pg2-cjfpy.4): the ZR-only daily-focus /
+// local-alert-triage / zr-refactor helper scripts (phillipg-nix-ziprecruiter)
+// and `pjira` (phillipg-nix-repo-base). This flake takes no input on either,
+// so the nix check sandbox can never put them on PATH, and a recorded hash
+// would turn the "binary not on PATH" failure mode into a permanent red
+// `claude-extended-tool-approver-spec-help-drift` check. Like Exempt they are
+// recorded/expected as JSON null, trading --help drift detection for those
+// names (a documented loss, not a tolerance for any other missing binary) for
+// a check that stays runnable.
+var ExternalFlake = map[string]bool{
+	"pjira":             true,
+	"df-jira-refs":      true,
+	"df-resolve-focus":  true,
+	"df-split-blockers": true,
+	"df-survey":         true,
+	"lat-survey":        true,
+	"rc-branch":         true,
+	"rc-preflight":      true,
+	"rc-probe":          true,
+	"rc-sentinel":       true,
+}
+
 // IsExempt reports whether name is exempt from capture/compare on goos:
-// either universally (Exempt) or for that platform only (ExemptOn).
+// universally (Exempt), because its binary ships from another flake
+// (ExternalFlake), or for that platform only (ExemptOn).
 func IsExempt(goos, name string) bool {
-	return Exempt[name] || ExemptOn[goos][name] || strings.HasSuffix(name, ScriptSuffix)
+	return Exempt[name] || ExternalFlake[name] || ExemptOn[goos][name] || strings.HasSuffix(name, ScriptSuffix)
 }
 
 // PlatformHashesFile returns the name of the per-GOOS overlay file

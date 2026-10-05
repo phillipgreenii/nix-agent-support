@@ -553,7 +553,10 @@ var ghPrCreateSchema = CommandSchema{
 	EndOfOptions:    true,
 }
 
-// ghSchema: only `gh pr view|list|status|diff|checks|create`. `gh pr ready`
+// ghSchema is the ONE registered `gh` schema. It holds pg2-cjfpy.2's `gh pr
+// view|list|status|diff|checks|create` and, folded in from
+// registry_ziprecruiter.go (pg2-cjfpy.4), `gh auth status`, `gh extension
+// list` and the local `gh stack` verbs (zrGhSubcommands). `gh pr ready`
 // (Abstain, pg2-psiqh) and `gh pr merge` (human-only; the integrate-branch
 // handler MUST NOT run it) are deliberately absent: ruled human steps, so a
 // ruling collision this schema does not override.
@@ -584,6 +587,9 @@ var ghSchema = CommandSchema{
 				"create": ghPrCreateSchema,
 			},
 		},
+		"auth":      zrGhSubcommands["auth"],
+		"extension": zrGhSubcommands["extension"],
+		"stack":     zrGhSubcommands["stack"],
 	},
 }
 

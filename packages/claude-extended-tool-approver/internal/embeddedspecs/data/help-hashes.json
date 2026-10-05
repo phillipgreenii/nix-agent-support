@@ -75,5 +75,19 @@
   "relocation-check.sh": null,
   "resolve-imports.sh": null,
   "self-checks.sh": null,
-  "trace-extract.sh": null
+  "trace-extract.sh": null,
+  "cut": "7c853412cef5f556dd667b78f74a2d2470b97604ed29666c60d249b06fc26935",
+  "df": "643b3ae6476bfd59d9844532dcb9b632b36601ee609056525c398c931f1ee911",
+  "df-jira-refs": null,
+  "df-resolve-focus": null,
+  "df-split-blockers": null,
+  "df-survey": null,
+  "lat-survey": null,
+  "pg-connector": "78899cf061533c8c4be43d3c3a9308fb8663f45ca273c140c8e523efbbc214cf",
+  "pg-desk": "d01e2919c583b945544381ce8b6e557d668d2c0b3ad3043ebca53ce7bff70c62",
+  "pjira": null,
+  "rc-branch": null,
+  "rc-preflight": null,
+  "rc-probe": null,
+  "rc-sentinel": null
 }

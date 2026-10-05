@@ -2857,6 +2857,15 @@
                     ) phillipgreenii-nix-base.packages.${pkgs.stdenv.hostPlatform.system}.pg-go-mutate
                     ++ pkgs.lib.optional (pkgs ? pnwf) pkgs.pnwf
                     ++ [
+                      # pg2-cjfpy.4: gh (the gh-stack plugin's auth/extension/stack
+                      # verbs) and this flake's own pg-connector/pg-desk. coreutils
+                      # above already supplies the new cut and df. The ZR-only
+                      # helper scripts and pjira ship from flakes this one has no
+                      # input on, so specdrift.ExternalFlake exempts them (null
+                      # in help-hashes.json) instead of failing "not on PATH".
+                      pkgs.gh
+                      pkgs.pg-connector
+                      pkgs.pg-desk
                       # No top-level bd/rtk overlay attr in THIS standalone flake --
                       # resolve them the same way pb-contract (above) already does.
                       (pkgs.llm-agentsPkgs.beads or llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.beads)

@@ -1,0 +1,102 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "rc-preflight",
+  "command": {
+    "name": "rc-preflight",
+    "provenance": "rc-preflight --help (zr-refactor worktree-pool lifecycle, this host 2026-10-05)",
+    "citations": {
+      "provenance": {
+        "source": "rc-preflight --help: \"rc-preflight: zr-refactor worktree-pool lifecycle.\""
+      },
+      "stdin": {
+        "source": "rc-preflight --help: \"Usage: rc-preflight <actor>                 # acquire (idempotent for own actor); prints member path\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+      },
+      "stdout": {
+        "source": "rc-preflight --help: \"rc-preflight: zr-refactor worktree-pool lifecycle.\" (stdout classification taken from this description of what the command prints)"
+      },
+      "unknownFlag": {
+        "source": "rc-preflight --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "flags": {
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rc-preflight --help: \"rc-preflight: zr-refactor worktree-pool lifecycle.\" (this help text is what the -h/--help flag prints; the flag itself is not listed in the reviewed text)"
+        }
+      },
+      "--list": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rc-preflight --help: \"rc-preflight --list # members + holders, \"held since\"\""
+        }
+      },
+      "--release": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rc-preflight --help: \"rc-preflight --release <actor> # release this actor's member (always exits 0)\""
+        }
+      },
+      "--verify": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rc-preflight --help: \"rc-preflight --verify <wt> <actor> # assert toplevel + own lock + clean tree (never cleans)\""
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rc-preflight --help: \"rc-preflight: zr-refactor worktree-pool lifecycle.\" (this help text is what the -h/--help flag prints; the flag itself is not listed in the reviewed text)"
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "rc-preflight --help: \"Usage: rc-preflight <actor>                 # acquire (idempotent for own actor); prints member path\""
+      }
+    },
+    "stdin": "never",
+    "stdout": "metadata",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

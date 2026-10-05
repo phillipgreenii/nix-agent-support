@@ -1,0 +1,210 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "df",
+  "command": {
+    "name": "df",
+    "provenance": "df (GNU coreutils) 9.11, df --help",
+    "citations": {
+      "provenance": {
+        "source": "df --help: \"Usage: df [OPTION]... [FILE]...\""
+      },
+      "stdin": {
+        "source": "df --help: \"Usage: df [OPTION]... [FILE]...\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+      },
+      "stdout": {
+        "source": "df --help: \"Usage: df [OPTION]... [FILE]...\" (stdout classification taken from this description of what the command prints)"
+      },
+      "unknownFlag": {
+        "source": "df --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "flags": {
+      "--human-readable": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df --help: \"-h, --human-readable\""
+        }
+      },
+      "--inodes": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df --help: \"-i, --inodes\""
+        }
+      },
+      "--local": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df --help: \"-l, --local\""
+        }
+      },
+      "--portability": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df --help: \"-P, --portability\""
+        }
+      },
+      "--print-type": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df --help: \"-T, --print-type\""
+        }
+      },
+      "--si": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df --help: \"-H, --si\""
+        }
+      },
+      "--total": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df --help: \"--total\""
+        }
+      },
+      "-H": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df --help: \"-H, --si\""
+        }
+      },
+      "-P": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df --help: \"-P, --portability\""
+        }
+      },
+      "-T": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df --help: \"-T, --print-type\""
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df --help: \"-h, --human-readable\""
+        }
+      },
+      "-i": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df --help: \"-i, --inodes\""
+        }
+      },
+      "-k": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df --help: \"-k\""
+        }
+      },
+      "-l": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "df --help: \"-l, --local\""
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "path-read"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "df --help: \"Usage: df [OPTION]... [FILE]...\""
+      }
+    },
+    "stdin": "never",
+    "stdout": "metadata",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

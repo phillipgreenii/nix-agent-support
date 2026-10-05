@@ -37,6 +37,248 @@
     "unknownFlag": "insufficient",
     "endOfOptions": true,
     "subcommands": {
+      "auth": {
+        "name": "auth",
+        "provenance": "gh auth --help (gh 2.101.0)",
+        "citations": {
+          "provenance": {
+            "source": "gh auth --help: \"Authenticate gh and git with GitHub\""
+          },
+          "stdin": {
+            "source": "gh auth --help: \"Usage: gh auth \u003ccommand\u003e [flags]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+          },
+          "stdout": {
+            "source": "gh auth --help: \"Authenticate gh and git with GitHub\" (stdout classification taken from this description of what the command prints)"
+          },
+          "unknownFlag": {
+            "source": "gh auth --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "gh auth --help: \"Usage: gh auth \u003ccommand\u003e [flags]\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "none",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true,
+        "subcommands": {
+          "status": {
+            "name": "status",
+            "provenance": "gh auth status --help (gh 2.101.0)",
+            "citations": {
+              "provenance": {
+                "source": "gh auth status --help: \"Display active account and authentication state on each known GitHub host.\""
+              },
+              "stdin": {
+                "source": "gh auth status --help: \"Usage: gh auth status [flags]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+              },
+              "stdout": {
+                "source": "gh auth status --help: \"Display active account and authentication state on each known GitHub host.\" (stdout classification taken from this description of what the command prints)"
+              },
+              "unknownFlag": {
+                "source": "gh auth status --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--active": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh auth status --help: \"-a, --active Display the active account only\""
+                }
+              },
+              "--hostname": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh auth status --help: \"-h, --hostname string Check only a specific hostname's auth status\""
+                }
+              },
+              "--jq": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh auth status --help: \"--jq expression Filter JSON output using a jq expression\""
+                }
+              },
+              "--json": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh auth status --help: \"--json fields Output JSON with the specified fields\""
+                }
+              },
+              "--template": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh auth status --help: \"--template string Format JSON output using a Go template; see \"gh help formatting\"\""
+                }
+              },
+              "-a": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh auth status --help: \"-a, --active Display the active account only\""
+                }
+              },
+              "-h": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh auth status --help: \"-h, --hostname string Check only a specific hostname's auth status\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "gh auth status --help: \"Usage: gh auth status [flags]\""
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "read"
+                },
+                "target": "github",
+                "citation": {
+                  "source": "gh auth status --help: \"Display active account and authentication state on each known GitHub host.\" (the effect declared here is what this command does, per this description)"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          }
+        }
+      },
+      "extension": {
+        "name": "extension",
+        "provenance": "gh extension --help (gh 2.101.0)",
+        "citations": {
+          "provenance": {
+            "source": "gh extension --help: \"GitHub CLI extensions are repositories that provide additional gh commands.\""
+          },
+          "stdin": {
+            "source": "gh extension --help: \"Usage: gh extension [flags]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+          },
+          "stdout": {
+            "source": "gh extension --help: \"GitHub CLI extensions are repositories that provide additional gh commands.\" (stdout classification taken from this description of what the command prints)"
+          },
+          "unknownFlag": {
+            "source": "gh extension --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "gh extension --help: \"Usage: gh extension [flags]\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "none",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true,
+        "subcommands": {
+          "list": {
+            "name": "list",
+            "provenance": "gh extension list --help (gh 2.101.0)",
+            "citations": {
+              "provenance": {
+                "source": "gh extension list --help: \"List installed extension commands\""
+              },
+              "stdin": {
+                "source": "gh extension list --help: \"Usage: gh extension list [flags]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+              },
+              "stdout": {
+                "source": "gh extension list --help: \"List installed extension commands\" (stdout classification taken from this description of what the command prints)"
+              },
+              "unknownFlag": {
+                "source": "gh extension list --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "gh extension list --help: \"Usage: gh extension list [flags]\""
+              }
+            },
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          }
+        }
+      },
       "pr": {
         "name": "pr",
         "provenance": "gh pr --help, this host 2026-10-05",
@@ -1528,6 +1770,1095 @@
                 "target": "github",
                 "citation": {
                   "source": "gh pr view --help: \"USAGE gh pr view [\u003cnumber\u003e | \u003curl\u003e | \u003cbranch\u003e] [flags]\" -- documents the command whose implicit effect (target \"github\", role \"remote:read\") is derived from this synopsis"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "content",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          }
+        }
+      },
+      "stack": {
+        "name": "stack",
+        "provenance": "gh stack --help (gh 2.101.0 + github/gh-stack extension)",
+        "citations": {
+          "provenance": {
+            "source": "gh stack --help: \"Stacked PRs let you break a large change into a chain of pull requests\""
+          },
+          "stdin": {
+            "source": "gh stack --help: \"Usage: gh stack [command]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+          },
+          "stdout": {
+            "source": "gh stack --help: \"Stacked PRs let you break a large change into a chain of pull requests\" (stdout classification taken from this description of what the command prints)"
+          },
+          "unknownFlag": {
+            "source": "gh stack --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "gh stack --help: \"-h, --help help for stack\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "gh stack --help: \"-h, --help help for stack\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "gh stack --help: \"Usage: gh stack [command]\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "none",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true,
+        "subcommands": {
+          "add": {
+            "name": "add",
+            "provenance": "gh stack add --help (gh 2.101.0 + github/gh-stack extension, this host 2026-10-05)",
+            "citations": {
+              "provenance": {
+                "source": "gh stack add --help: \"Add a new branch on top of the current stack.\""
+              },
+              "stdin": {
+                "source": "gh stack add --help: \"Usage: gh stack add [branch] [flags]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+              },
+              "stdout": {
+                "source": "gh stack add --help: \"Add a new branch on top of the current stack.\" (stdout classification taken from this description of what the command prints)"
+              },
+              "unknownFlag": {
+                "source": "gh stack add --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--all": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack add --help: \"-A, --all Stage all changes including untracked files\""
+                }
+              },
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack add --help: \"-h, --help help for add\""
+                }
+              },
+              "--message": {
+                "arity": "one",
+                "operand": {
+                  "kind": "message"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack add --help: \"-m, --message string Create a commit with this message\""
+                }
+              },
+              "--update": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack add --help: \"-u, --update Stage changes to tracked files only\""
+                }
+              },
+              "-A": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack add --help: \"-A, --all Stage all changes including untracked files\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack add --help: \"-h, --help help for add\""
+                }
+              },
+              "-m": {
+                "arity": "one",
+                "operand": {
+                  "kind": "message"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack add --help: \"-m, --message string Create a commit with this message\""
+                }
+              },
+              "-u": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack add --help: \"-u, --update Stage changes to tracked files only\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "gh stack add --help: \"Usage: gh stack add [branch] [flags]\""
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "path-modify"
+                },
+                "target": ".",
+                "citation": {
+                  "source": "gh stack add --help: \"Add a new branch on top of the current stack.\" (the effect declared here is what this command does, per this description)"
+                }
+              },
+              {
+                "role": {
+                  "kind": "path-modify"
+                },
+                "target": ".git",
+                "citation": {
+                  "source": "gh stack add --help: \"Add a new branch on top of the current stack.\" (the effect declared here is what this command does, per this description)"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "bottom": {
+            "name": "bottom",
+            "provenance": "gh stack bottom --help (gh 2.101.0 + github/gh-stack extension, this host 2026-10-05)",
+            "citations": {
+              "provenance": {
+                "source": "gh stack bottom --help: \"Check out the bottom branch of the stack (closest to the trunk).\""
+              },
+              "stdin": {
+                "source": "gh stack bottom --help: \"Usage: gh stack bottom [flags]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+              },
+              "stdout": {
+                "source": "gh stack bottom --help: \"Check out the bottom branch of the stack (closest to the trunk).\" (stdout classification taken from this description of what the command prints)"
+              },
+              "unknownFlag": {
+                "source": "gh stack bottom --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack bottom --help: \"-h, --help help for bottom\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack bottom --help: \"-h, --help help for bottom\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "gh stack bottom --help: \"Usage: gh stack bottom [flags]\""
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "path-modify"
+                },
+                "target": ".",
+                "citation": {
+                  "source": "gh stack bottom --help: \"Check out the bottom branch of the stack (closest to the trunk).\" (the effect declared here is what this command does, per this description)"
+                }
+              },
+              {
+                "role": {
+                  "kind": "path-modify"
+                },
+                "target": ".git",
+                "citation": {
+                  "source": "gh stack bottom --help: \"Check out the bottom branch of the stack (closest to the trunk).\" (the effect declared here is what this command does, per this description)"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "checkout": {
+            "name": "checkout",
+            "provenance": "gh stack checkout --help (gh 2.101.0 + github/gh-stack extension, this host 2026-10-05)",
+            "citations": {
+              "provenance": {
+                "source": "gh stack checkout --help: \"Check out a stack by stack number, pull request number, PR URL, or branch name.\""
+              },
+              "stdin": {
+                "source": "gh stack checkout --help: \"Usage: gh stack checkout [\u003cstack-number\u003e | \u003cpr-number\u003e | \u003cpr-url\u003e | \u003cbranch\u003e] [flags]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+              },
+              "stdout": {
+                "source": "gh stack checkout --help: \"Check out a stack by stack number, pull request number, PR URL, or branch name.\" (stdout classification taken from this description of what the command prints)"
+              },
+              "unknownFlag": {
+                "source": "gh stack checkout --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack checkout --help: \"-h, --help help for checkout\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack checkout --help: \"-h, --help help for checkout\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "gh stack checkout --help: \"Usage: gh stack checkout [\u003cstack-number\u003e | \u003cpr-number\u003e | \u003cpr-url\u003e | \u003cbranch\u003e] [flags]\""
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "read"
+                },
+                "target": "github",
+                "citation": {
+                  "source": "gh stack checkout --help: \"Check out a stack by stack number, pull request number, PR URL, or branch name.\" (the effect declared here is what this command does, per this description)"
+                }
+              },
+              {
+                "role": {
+                  "kind": "path-modify"
+                },
+                "target": ".",
+                "citation": {
+                  "source": "gh stack checkout --help: \"Check out a stack by stack number, pull request number, PR URL, or branch name.\" (the effect declared here is what this command does, per this description)"
+                }
+              },
+              {
+                "role": {
+                  "kind": "path-modify"
+                },
+                "target": ".git",
+                "citation": {
+                  "source": "gh stack checkout --help: \"Check out a stack by stack number, pull request number, PR URL, or branch name.\" (the effect declared here is what this command does, per this description)"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "down": {
+            "name": "down",
+            "provenance": "gh stack down --help (gh 2.101.0 + github/gh-stack extension, this host 2026-10-05)",
+            "citations": {
+              "provenance": {
+                "source": "gh stack down --help: \"Check out a branch further down in the stack (closer to the trunk).\""
+              },
+              "stdin": {
+                "source": "gh stack down --help: \"Usage: gh stack down [n] [flags]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+              },
+              "stdout": {
+                "source": "gh stack down --help: \"Check out a branch further down in the stack (closer to the trunk).\" (stdout classification taken from this description of what the command prints)"
+              },
+              "unknownFlag": {
+                "source": "gh stack down --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack down --help: \"-h, --help help for down\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack down --help: \"-h, --help help for down\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "gh stack down --help: \"Usage: gh stack down [n] [flags]\""
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "path-modify"
+                },
+                "target": ".",
+                "citation": {
+                  "source": "gh stack down --help: \"Check out a branch further down in the stack (closer to the trunk).\" (the effect declared here is what this command does, per this description)"
+                }
+              },
+              {
+                "role": {
+                  "kind": "path-modify"
+                },
+                "target": ".git",
+                "citation": {
+                  "source": "gh stack down --help: \"Check out a branch further down in the stack (closer to the trunk).\" (the effect declared here is what this command does, per this description)"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "init": {
+            "name": "init",
+            "provenance": "gh stack init --help (gh 2.101.0 + github/gh-stack extension, this host 2026-10-05)",
+            "citations": {
+              "provenance": {
+                "source": "gh stack init --help: \"Initialize a new stack of branches in the current repository.\""
+              },
+              "stdin": {
+                "source": "gh stack init --help: \"Usage: gh stack init [branches...] [flags]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+              },
+              "stdout": {
+                "source": "gh stack init --help: \"Initialize a new stack of branches in the current repository.\" (stdout classification taken from this description of what the command prints)"
+              },
+              "unknownFlag": {
+                "source": "gh stack init --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--base": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack init --help: \"-b, --base string Trunk branch for stack (defaults to default branch)\""
+                }
+              },
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack init --help: \"-h, --help help for init\""
+                }
+              },
+              "-b": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack init --help: \"-b, --base string Trunk branch for stack (defaults to default branch)\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack init --help: \"-h, --help help for init\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "gh stack init --help: \"Usage: gh stack init [branches...] [flags]\""
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "path-modify"
+                },
+                "target": ".",
+                "citation": {
+                  "source": "gh stack init --help: \"Initialize a new stack of branches in the current repository.\" (the effect declared here is what this command does, per this description)"
+                }
+              },
+              {
+                "role": {
+                  "kind": "path-modify"
+                },
+                "target": ".git",
+                "citation": {
+                  "source": "gh stack init --help: \"Initialize a new stack of branches in the current repository.\" (the effect declared here is what this command does, per this description)"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "rebase": {
+            "name": "rebase",
+            "provenance": "gh stack rebase --help (gh 2.101.0 + github/gh-stack extension, this host 2026-10-05)",
+            "citations": {
+              "provenance": {
+                "source": "gh stack rebase --help: \"Pull from remote and do a cascading rebase across the stack.\""
+              },
+              "stdin": {
+                "source": "gh stack rebase --help: \"Usage: gh stack rebase [branch] [flags]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+              },
+              "stdout": {
+                "source": "gh stack rebase --help: \"Pull from remote and do a cascading rebase across the stack.\" (stdout classification taken from this description of what the command prints)"
+              },
+              "unknownFlag": {
+                "source": "gh stack rebase --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--abort": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack rebase --help: \"--abort Abort rebase and restore all branches\""
+                }
+              },
+              "--committer-date-is-author-date": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack rebase --help: \"--committer-date-is-author-date Set the committer date to the author date during rebase\""
+                }
+              },
+              "--continue": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack rebase --help: \"--continue Continue rebase after resolving conflicts\""
+                }
+              },
+              "--downstack": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack rebase --help: \"--downstack Only rebase branches from trunk to current branch\""
+                }
+              },
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack rebase --help: \"-h, --help help for rebase\""
+                }
+              },
+              "--no-trunk": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack rebase --help: \"--no-trunk Skip trunk — only rebase stack branches onto each other\""
+                }
+              },
+              "--preserve-dates": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack rebase --help: \"--preserve-dates Alias for --committer-date-is-author-date\""
+                }
+              },
+              "--remote": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack rebase --help: \"--remote string Remote to fetch from (defaults to auto-detected remote)\""
+                }
+              },
+              "--upstack": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack rebase --help: \"--upstack Only rebase branches from current branch to top\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack rebase --help: \"-h, --help help for rebase\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "gh stack rebase --help: \"Usage: gh stack rebase [branch] [flags]\""
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "read"
+                },
+                "target": "github",
+                "citation": {
+                  "source": "gh stack rebase --help: \"Pull from remote and do a cascading rebase across the stack.\" (the effect declared here is what this command does, per this description)"
+                }
+              },
+              {
+                "role": {
+                  "kind": "path-modify"
+                },
+                "target": ".",
+                "citation": {
+                  "source": "gh stack rebase --help: \"Pull from remote and do a cascading rebase across the stack.\" (the effect declared here is what this command does, per this description)"
+                }
+              },
+              {
+                "role": {
+                  "kind": "path-modify"
+                },
+                "target": ".git",
+                "citation": {
+                  "source": "gh stack rebase --help: \"Pull from remote and do a cascading rebase across the stack.\" (the effect declared here is what this command does, per this description)"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "top": {
+            "name": "top",
+            "provenance": "gh stack top --help (gh 2.101.0 + github/gh-stack extension, this host 2026-10-05)",
+            "citations": {
+              "provenance": {
+                "source": "gh stack top --help: \"Check out the top branch of the stack (furthest from the trunk).\""
+              },
+              "stdin": {
+                "source": "gh stack top --help: \"Usage: gh stack top [flags]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+              },
+              "stdout": {
+                "source": "gh stack top --help: \"Check out the top branch of the stack (furthest from the trunk).\" (stdout classification taken from this description of what the command prints)"
+              },
+              "unknownFlag": {
+                "source": "gh stack top --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack top --help: \"-h, --help help for top\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack top --help: \"-h, --help help for top\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "gh stack top --help: \"Usage: gh stack top [flags]\""
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "path-modify"
+                },
+                "target": ".",
+                "citation": {
+                  "source": "gh stack top --help: \"Check out the top branch of the stack (furthest from the trunk).\" (the effect declared here is what this command does, per this description)"
+                }
+              },
+              {
+                "role": {
+                  "kind": "path-modify"
+                },
+                "target": ".git",
+                "citation": {
+                  "source": "gh stack top --help: \"Check out the top branch of the stack (furthest from the trunk).\" (the effect declared here is what this command does, per this description)"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "trunk": {
+            "name": "trunk",
+            "provenance": "gh stack trunk --help (gh 2.101.0 + github/gh-stack extension, this host 2026-10-05)",
+            "citations": {
+              "provenance": {
+                "source": "gh stack trunk --help: \"Check out the trunk branch of the current stack.\""
+              },
+              "stdin": {
+                "source": "gh stack trunk --help: \"Usage: gh stack trunk [flags]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+              },
+              "stdout": {
+                "source": "gh stack trunk --help: \"Check out the trunk branch of the current stack.\" (stdout classification taken from this description of what the command prints)"
+              },
+              "unknownFlag": {
+                "source": "gh stack trunk --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack trunk --help: \"-h, --help help for trunk\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack trunk --help: \"-h, --help help for trunk\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "gh stack trunk --help: \"Usage: gh stack trunk [flags]\""
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "path-modify"
+                },
+                "target": ".",
+                "citation": {
+                  "source": "gh stack trunk --help: \"Check out the trunk branch of the current stack.\" (the effect declared here is what this command does, per this description)"
+                }
+              },
+              {
+                "role": {
+                  "kind": "path-modify"
+                },
+                "target": ".git",
+                "citation": {
+                  "source": "gh stack trunk --help: \"Check out the trunk branch of the current stack.\" (the effect declared here is what this command does, per this description)"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "up": {
+            "name": "up",
+            "provenance": "gh stack up --help (gh 2.101.0 + github/gh-stack extension, this host 2026-10-05)",
+            "citations": {
+              "provenance": {
+                "source": "gh stack up --help: \"Check out a branch further up in the stack (further from the trunk).\""
+              },
+              "stdin": {
+                "source": "gh stack up --help: \"Usage: gh stack up [n] [flags]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+              },
+              "stdout": {
+                "source": "gh stack up --help: \"Check out a branch further up in the stack (further from the trunk).\" (stdout classification taken from this description of what the command prints)"
+              },
+              "unknownFlag": {
+                "source": "gh stack up --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack up --help: \"-h, --help help for up\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack up --help: \"-h, --help help for up\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "gh stack up --help: \"Usage: gh stack up [n] [flags]\""
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "path-modify"
+                },
+                "target": ".",
+                "citation": {
+                  "source": "gh stack up --help: \"Check out a branch further up in the stack (further from the trunk).\" (the effect declared here is what this command does, per this description)"
+                }
+              },
+              {
+                "role": {
+                  "kind": "path-modify"
+                },
+                "target": ".git",
+                "citation": {
+                  "source": "gh stack up --help: \"Check out a branch further up in the stack (further from the trunk).\" (the effect declared here is what this command does, per this description)"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "view": {
+            "name": "view",
+            "provenance": "gh stack view --help (gh 2.101.0 + github/gh-stack extension, this host 2026-10-05)",
+            "citations": {
+              "provenance": {
+                "source": "gh stack view --help: \"View the current stack as a list showing branches and PR status.\""
+              },
+              "stdin": {
+                "source": "gh stack view --help: \"Usage: gh stack view [flags]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+              },
+              "stdout": {
+                "source": "gh stack view --help: \"View the current stack as a list showing branches and PR status.\" (stdout classification taken from this description of what the command prints)"
+              },
+              "unknownFlag": {
+                "source": "gh stack view --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack view --help: \"-h, --help help for view\""
+                }
+              },
+              "--json": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack view --help: \"--json Output stack data as JSON\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack view --help: \"-h, --help help for view\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "gh stack view --help: \"Usage: gh stack view [flags]\""
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "read"
+                },
+                "target": "github",
+                "citation": {
+                  "source": "gh stack view --help: \"View the current stack as a list showing branches and PR status.\" (the effect declared here is what this command does, per this description)"
                 }
               }
             ],

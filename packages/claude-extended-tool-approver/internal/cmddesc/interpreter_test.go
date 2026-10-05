@@ -275,6 +275,14 @@ func TestRegistryNames(t *testing.T) {
 		"pg-hooks", "pg-wi-flow", "prek", "relocation-check.sh", "resolve-imports.sh", "rg", "self-checks.sh",
 		"session-mode", "trace-extract.sh", "wtdone",
 	)
+	// pg2-cjfpy.4: the ZR plugin CLIs (registry_ziprecruiter.go). `gh` is NOT
+	// repeated here: it is one schema (registry_plugin_tools.go) that also
+	// carries the ZR auth/extension/stack subcommands.
+	want = append(
+		want,
+		"cut", "df", "df-jira-refs", "df-resolve-focus", "df-split-blockers", "df-survey", "lat-survey",
+		"pg-connector", "pg-desk", "pjira", "rc-branch", "rc-preflight", "rc-probe", "rc-sentinel",
+	)
 	sort.Strings(want)
 	if got := DefaultRegistry().Names(); !reflect.DeepEqual(got, want) {
 		t.Errorf("names = %v, want %v", got, want)

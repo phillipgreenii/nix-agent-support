@@ -1,0 +1,259 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "cut",
+  "command": {
+    "name": "cut",
+    "provenance": "cut (GNU coreutils) 9.11, cut --help",
+    "citations": {
+      "provenance": {
+        "source": "cut --help: \"Usage: cut OPTION... [FILE]...\""
+      },
+      "stdin": {
+        "source": "cut --help: \"Usage: cut OPTION... [FILE]...\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+      },
+      "stdout": {
+        "source": "cut --help: \"Usage: cut OPTION... [FILE]...\" (stdout classification taken from this description of what the command prints)"
+      },
+      "unknownFlag": {
+        "source": "cut --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "flags": {
+      "--bytes": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "cut --help: \"-b, --bytes=LIST\""
+        }
+      },
+      "--characters": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "cut --help: \"-c, --characters=LIST\""
+        }
+      },
+      "--complement": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "cut --help: \"--complement\""
+        }
+      },
+      "--delimiter": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "cut --help: \"-d, --delimiter=DELIM\""
+        }
+      },
+      "--fields": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "cut --help: \"-f, --fields=LIST\""
+        }
+      },
+      "--no-partial": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "cut --help: \"-n, --no-partial\""
+        }
+      },
+      "--only-delimited": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "cut --help: \"-s, --only-delimited\""
+        }
+      },
+      "--output-delimiter": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "cut --help: \"-O, --output-delimiter=STRING\""
+        }
+      },
+      "--zero-terminated": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "cut --help: \"-z, --zero-terminated\""
+        }
+      },
+      "-F": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "cut --help: \"-F LIST\""
+        }
+      },
+      "-O": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "cut --help: \"-O, --output-delimiter=STRING\""
+        }
+      },
+      "-b": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "cut --help: \"-b, --bytes=LIST\""
+        }
+      },
+      "-c": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "cut --help: \"-c, --characters=LIST\""
+        }
+      },
+      "-d": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "cut --help: \"-d, --delimiter=DELIM\""
+        }
+      },
+      "-f": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "cut --help: \"-f, --fields=LIST\""
+        }
+      },
+      "-n": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "cut --help: \"-n, --no-partial\""
+        }
+      },
+      "-s": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "cut --help: \"-s, --only-delimited\""
+        }
+      },
+      "-z": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "cut --help: \"-z, --zero-terminated\""
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "path-read"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "stdinToken": "-",
+      "citation": {
+        "source": "cut --help: \"Usage: cut OPTION... [FILE]...\""
+      }
+    },
+    "stdin": "when-no-path-operands",
+    "stdout": "content",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

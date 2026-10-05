@@ -5795,5 +5795,1318 @@
     "rules_config": {},
     "expected_verdict": "not-approve",
     "notes": "pg2-cjfpy.2 guardrail: gh pr merge is a human-only verb (integrate-branch PR-3); not modeled."
+  },
+  {
+    "case": "zr_plugin_gs_ext_list",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh extension list | cut -f1 | grep -qxF 'gh stack'"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the gh-stack plugin (SKILL.md scope gate)."
+  },
+  {
+    "case": "zr_plugin_gs_auth_status",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh auth status"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the gh-stack plugin (SKILL.md exit codes)."
+  },
+  {
+    "case": "zr_plugin_gs_view_json",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack view --json"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the gh-stack plugin (SKILL.md rule 3)."
+  },
+  {
+    "case": "zr_plugin_gs_view_jq",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "echo \"$output\" | jq -r '.branches[] | select(.isMerged == true) | .name'"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the gh-stack plugin (SKILL.md parsing)."
+  },
+  {
+    "case": "zr_plugin_gs_init_1",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack init auth"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the gh-stack plugin (SKILL.md quick ref)."
+  },
+  {
+    "case": "zr_plugin_gs_init_n",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack init auth api frontend"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the gh-stack plugin (SKILL.md quick ref)."
+  },
+  {
+    "case": "zr_plugin_gs_init_base",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack init --base develop branch-a branch-b"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the gh-stack plugin (SKILL.md quick ref)."
+  },
+  {
+    "case": "zr_plugin_gs_add",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack add api-routes"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the gh-stack plugin (SKILL.md quick ref)."
+  },
+  {
+    "case": "zr_plugin_gs_add_Am",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack add -Am \"Add API routes\" api-routes"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the gh-stack plugin (SKILL.md quick ref)."
+  },
+  {
+    "case": "zr_plugin_gs_add_um",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack add -um \"Fix auth bug\" auth-fix"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the gh-stack plugin (SKILL.md add)."
+  },
+  {
+    "case": "zr_plugin_gs_submit_open",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack submit --auto --open"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-cjfpy.4 GUARDRAIL: instructed by the gh-stack plugin (SKILL.md submit) but collides with an explicit REJECT/ABSTAIN ruling (gh pr merge Reject; gh pr ready Abstain, pg2-psiqh; ADR 0075 draft-first landing), so it is pinned not-approve, not overridden."
+  },
+  {
+    "case": "zr_plugin_gs_rebase",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack rebase"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the gh-stack plugin (SKILL.md rebase)."
+  },
+  {
+    "case": "zr_plugin_gs_rebase_up",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack rebase --upstack"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the gh-stack plugin (SKILL.md rebase)."
+  },
+  {
+    "case": "zr_plugin_gs_rebase_down",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack rebase --downstack"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the gh-stack plugin (SKILL.md rebase)."
+  },
+  {
+    "case": "zr_plugin_gs_rebase_notrunk",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack rebase --no-trunk"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the gh-stack plugin (SKILL.md rebase)."
+  },
+  {
+    "case": "zr_plugin_gs_rebase_continue",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack rebase --continue"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the gh-stack plugin (SKILL.md rebase)."
+  },
+  {
+    "case": "zr_plugin_gs_rebase_abort",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack rebase --abort"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the gh-stack plugin (SKILL.md rebase)."
+  },
+  {
+    "case": "zr_plugin_gs_up",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack up"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the gh-stack plugin (SKILL.md navigate)."
+  },
+  {
+    "case": "zr_plugin_gs_up_n",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack up 3"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the gh-stack plugin (SKILL.md navigate)."
+  },
+  {
+    "case": "zr_plugin_gs_down",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack down"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the gh-stack plugin (SKILL.md navigate)."
+  },
+  {
+    "case": "zr_plugin_gs_down_n",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack down 2"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the gh-stack plugin (SKILL.md navigate)."
+  },
+  {
+    "case": "zr_plugin_gs_top",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack top"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the gh-stack plugin (SKILL.md navigate)."
+  },
+  {
+    "case": "zr_plugin_gs_bottom",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack bottom"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the gh-stack plugin (SKILL.md navigate)."
+  },
+  {
+    "case": "zr_plugin_gs_trunk",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack trunk"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the gh-stack plugin (SKILL.md navigate)."
+  },
+  {
+    "case": "zr_plugin_gs_checkout_stack",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack checkout 7"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the gh-stack plugin (SKILL.md checkout)."
+  },
+  {
+    "case": "zr_plugin_gs_checkout_pr",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack checkout 42"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the gh-stack plugin (SKILL.md checkout)."
+  },
+  {
+    "case": "zr_plugin_gs_checkout_url",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack checkout https://github.com/owner/repo/pull/42"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the gh-stack plugin (SKILL.md checkout)."
+  },
+  {
+    "case": "zr_plugin_gs_checkout_branch",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack checkout feature-auth"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the gh-stack plugin (SKILL.md checkout)."
+  },
+  {
+    "case": "zr_plugin_gs_merge",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack merge --yes"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-cjfpy.4 GUARDRAIL: instructed by the gh-stack plugin (SKILL.md rule 10) but collides with an explicit REJECT/ABSTAIN ruling (gh pr merge Reject; gh pr ready Abstain, pg2-psiqh; ADR 0075 draft-first landing), so it is pinned not-approve, not overridden."
+  },
+  {
+    "case": "zr_plugin_gs_merge_n",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack merge 7 --yes"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-cjfpy.4 GUARDRAIL: instructed by the gh-stack plugin (SKILL.md rule 10) but collides with an explicit REJECT/ABSTAIN ruling (gh pr merge Reject; gh pr ready Abstain, pg2-psiqh; ADR 0075 draft-first landing), so it is pinned not-approve, not overridden."
+  },
+  {
+    "case": "zr_plugin_gs_merge_squash",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack merge --yes --squash"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-cjfpy.4 GUARDRAIL: instructed by the gh-stack plugin (SKILL.md rule 10) but collides with an explicit REJECT/ABSTAIN ruling (gh pr merge Reject; gh pr ready Abstain, pg2-psiqh; ADR 0075 draft-first landing), so it is pinned not-approve, not overridden."
+  },
+  {
+    "case": "zr_plugin_gs_link_open",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack link --base develop --open branch-a branch-b branch-c"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-cjfpy.4 GUARDRAIL: instructed by the gh-stack plugin (SKILL.md link) but collides with an explicit REJECT/ABSTAIN ruling (gh pr merge Reject; gh pr ready Abstain, pg2-psiqh; ADR 0075 draft-first landing), so it is pinned not-approve, not overridden."
+  },
+  {
+    "case": "zr_plugin_gs_git_add",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git add auth.go"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the gh-stack plugin (SKILL.md staging)."
+  },
+  {
+    "case": "zr_plugin_gs_git_commit",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git commit -m \"Add auth middleware\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the gh-stack plugin (SKILL.md staging)."
+  },
+  {
+    "case": "zr_plugin_df_resolve",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "daily-focus"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "df-resolve-focus 2026-10-04"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the daily-focus plugin (close.md 1)."
+  },
+  {
+    "case": "zr_plugin_df_resolve_any",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "daily-focus"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "df-resolve-focus --any --status open"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the daily-focus plugin (close.md 1)."
+  },
+  {
+    "case": "zr_plugin_df_split",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "daily-focus"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "df-split-blockers pg2-abc"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the daily-focus plugin (close.md 2)."
+  },
+  {
+    "case": "zr_plugin_df_pgc_pr_show",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "daily-focus"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-connector pr show owner/name#12"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the daily-focus plugin (close.md 3)."
+  },
+  {
+    "case": "zr_plugin_df_jira_refs",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "daily-focus"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "df-jira-refs pg2-abc pg2-def"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the daily-focus plugin (close.md 5)."
+  },
+  {
+    "case": "zr_plugin_df_survey",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "daily-focus"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "df-survey"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the daily-focus plugin (create.md 2)."
+  },
+  {
+    "case": "zr_plugin_df_survey_args",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "daily-focus"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "df-survey --date 2026-10-04 --cap 6 --jql \"assignee = currentUser()\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the daily-focus plugin (create.md 2)."
+  },
+  {
+    "case": "zr_plugin_df_survey_allow",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "daily-focus"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "df-survey --allow-existing --date 2026-10-04 --cap 6"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the daily-focus plugin (create.md 2)."
+  },
+  {
+    "case": "zr_plugin_df_survey_gate",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "daily-focus"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "echo \"ok\" | df-survey --apply-gate --manifest /tmp/m.json"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the daily-focus plugin (create.md 3)."
+  },
+  {
+    "case": "zr_plugin_df_survey_deep",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "daily-focus"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "df-survey --deep --manifest /tmp/m.json.gated.json --in-plan"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the daily-focus plugin (create.md 4)."
+  },
+  {
+    "case": "zr_plugin_df_jq_items",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "daily-focus"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "jq '.items' /tmp/m.json > /tmp/items.json"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the daily-focus plugin (create.md plumbing note)."
+  },
+  {
+    "case": "zr_plugin_lat_survey",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "local-alert-triage"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "lat-survey"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the local-alert-triage plugin (run.md 2)."
+  },
+  {
+    "case": "zr_plugin_lat_survey_out",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "local-alert-triage"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "lat-survey --out /tmp/lat.json"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the local-alert-triage plugin (run.md 2)."
+  },
+  {
+    "case": "zr_plugin_lat_bd_show",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "local-alert-triage"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd show pg2-abc"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the local-alert-triage plugin (run.md 3, lat-researcher.md)."
+  },
+  {
+    "case": "zr_plugin_lat_bd_search",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "local-alert-triage"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd search \"alert\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the local-alert-triage plugin (lat-researcher.md)."
+  },
+  {
+    "case": "zr_plugin_lat_curl",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "local-alert-triage"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "curl -s http://otel.phillipg.localhost/api/alertmanager/grafana/api/v2/alerts"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {
+      "vetted_hosts": ["otel.phillipg.localhost"]
+    },
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the local-alert-triage plugin (lat-researcher.md)."
+  },
+  {
+    "case": "zr_plugin_lat_df",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "local-alert-triage"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "df -h"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the local-alert-triage plugin (lat-researcher.md)."
+  },
+  {
+    "case": "zr_plugin_rc_probe",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "zr-refactor"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "rc-probe /repo proj --spec /tmp/spec.json --app-bead pg2-abc"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the zr-refactor plugin (work.md scan 2)."
+  },
+  {
+    "case": "zr_plugin_rc_probe_first",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "zr-refactor"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "rc-probe /repo/finance proj --spec /tmp/spec.json --first-only"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the zr-refactor plugin (define.md 2)."
+  },
+  {
+    "case": "zr_plugin_rc_sentinel_write",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "zr-refactor"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "rc-sentinel write foo"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the zr-refactor plugin (stop.md 3)."
+  },
+  {
+    "case": "zr_plugin_rc_sentinel_check",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "zr-refactor"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "rc-sentinel check foo 1759600000"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the zr-refactor plugin (work.md STARTUP 1)."
+  },
+  {
+    "case": "zr_plugin_rc_sentinel_retire",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "zr-refactor"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "rc-sentinel retire all 1759600000"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the zr-refactor plugin (work.md STARTUP 1)."
+  },
+  {
+    "case": "zr_plugin_rc_preflight_acquire",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "zr-refactor"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "rc-preflight sess-1-rc"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the zr-refactor plugin (work.md STARTUP 4)."
+  },
+  {
+    "case": "zr_plugin_rc_preflight_verify",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "zr-refactor"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "rc-preflight --verify /repo sess-1-rc"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the zr-refactor plugin (work.md fix protocol 0)."
+  },
+  {
+    "case": "zr_plugin_rc_preflight_release",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "zr-refactor"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "rc-preflight --release sess-1-rc"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the zr-refactor plugin (work.md STOP 3)."
+  },
+  {
+    "case": "zr_plugin_rc_preflight_list",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "zr-refactor"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "rc-preflight --list"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the zr-refactor plugin (stop.md 2, status.md 8)."
+  },
+  {
+    "case": "zr_plugin_rc_branch",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "zr-refactor"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "rc-branch /repo feature/foo"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the zr-refactor plugin (work.md fix protocol 2)."
+  },
+  {
+    "case": "zr_plugin_rc_pg_desk_show",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "zr-refactor"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-desk show 123 --json"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the zr-refactor plugin (status.md 4)."
+  },
+  {
+    "case": "zr_plugin_rc_pg_desk_wip_off",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "zr-refactor"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-desk wip off 123"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the zr-refactor plugin (retire.md 6, work.md LOOP 4)."
+  },
+  {
+    "case": "zr_plugin_rc_pjira_issue",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "zr-refactor"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pjira issue FINDEV-123"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the zr-refactor plugin (status.md 5)."
+  },
+  {
+    "case": "zr_plugin_rc_bd_list_parent",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "zr-refactor"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd list --parent pg2-abc --status all -n 0 --json"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the zr-refactor plugin (status.md 1, retire.md 1)."
+  },
+  {
+    "case": "zr_plugin_rc_bd_dep_list",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "zr-refactor"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd dep list pg2-abc"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the zr-refactor plugin (define.md 4, work.md LOOP 4)."
+  },
+  {
+    "case": "zr_plugin_rc_bd_list_human",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "zr-refactor"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd list --label rc:foo,human --status open -n 0"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the zr-refactor plugin (work.md STOP 5)."
+  },
+  {
+    "case": "zr_plugin_rc_bd_show_notes",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "zr-refactor"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd show pg2-abc --json | jq -r '.data[0].notes // \"\"' | grep -F \"[rc-fp] a.kt:x\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the zr-refactor plugin (work.md LOOP 4)."
+  },
+  {
+    "case": "zr_plugin_rc_jq_spec",
+    "tags": ["zr-plugin", "pg2-cjfpy.4", "zr-refactor"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "jq -n --arg pattern \"x\" --argjson exclude_globs '[\"*/generated/*\"]' '{pattern: $pattern, pathspecs: [], exclude_globs: $exclude_globs}' > /tmp/spec.json"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the zr-refactor plugin (define.md 2)."
   }
 ]

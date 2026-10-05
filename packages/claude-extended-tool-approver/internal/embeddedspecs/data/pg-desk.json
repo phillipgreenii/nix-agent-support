@@ -1,0 +1,215 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "pg-desk",
+  "command": {
+    "name": "pg-desk",
+    "provenance": "pg-desk --help (this host 2026-10-05)",
+    "citations": {
+      "provenance": {
+        "source": "pg-desk --help: \"Operator triage desk for PR/issue work surfaced through pg-connector\""
+      },
+      "stdin": {
+        "source": "pg-desk --help: \"Usage: pg-desk [command]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+      },
+      "stdout": {
+        "source": "pg-desk --help: \"Operator triage desk for PR/issue work surfaced through pg-connector\" (stdout classification taken from this description of what the command prints)"
+      },
+      "unknownFlag": {
+        "source": "pg-desk --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "flags": {
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pg-desk --help: \"-h, --help help for pg-desk\""
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pg-desk --help: \"-h, --help help for pg-desk\""
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "pg-desk --help: \"Usage: pg-desk [command]\""
+      }
+    },
+    "stdin": "never",
+    "stdout": "none",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true,
+    "subcommands": {
+      "show": {
+        "name": "show",
+        "provenance": "pg-desk show --help (this host 2026-10-05)",
+        "citations": {
+          "provenance": {
+            "source": "pg-desk show --help: \"Print a PR's stored interpretation\""
+          },
+          "stdin": {
+            "source": "pg-desk show --help: \"Usage: pg-desk show <pr> [flags]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+          },
+          "stdout": {
+            "source": "pg-desk show --help: \"Print a PR's stored interpretation\" (stdout classification taken from this description of what the command prints)"
+          },
+          "unknownFlag": {
+            "source": "pg-desk show --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-desk show --help: \"-h, --help help for show\""
+            }
+          },
+          "--json": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-desk show --help: \"--json Print a machine-readable JSON payload instead of the human table\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-desk show --help: \"-h, --help help for show\""
+            }
+          }
+        },
+        "positionals": {
+          "leading": [
+            {
+              "kind": "literal"
+            }
+          ],
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-desk show --help: \"Usage: pg-desk show <pr> [flags]\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "wip": {
+        "name": "wip",
+        "provenance": "pg-desk wip --help (this host 2026-10-05)",
+        "citations": {
+          "provenance": {
+            "source": "pg-desk wip --help: \"Mark a PR work-in-progress on the triage board\""
+          },
+          "stdin": {
+            "source": "pg-desk wip --help: \"Usage: pg-desk wip on|off <pr> [flags]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+          },
+          "stdout": {
+            "source": "pg-desk wip --help: \"Mark a PR work-in-progress on the triage board\" (stdout classification taken from this description of what the command prints)"
+          },
+          "unknownFlag": {
+            "source": "pg-desk wip --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-desk wip --help: \"-h, --help help for wip\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-desk wip --help: \"-h, --help help for wip\""
+            }
+          }
+        },
+        "positionals": {
+          "leading": [
+            {
+              "kind": "literal"
+            },
+            {
+              "kind": "literal"
+            }
+          ],
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-desk wip --help: \"Usage: pg-desk wip on|off <pr> [flags]\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "none",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      }
+    }
+  }
+}

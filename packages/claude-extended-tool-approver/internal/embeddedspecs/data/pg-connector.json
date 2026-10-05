@@ -1,0 +1,257 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "pg-connector",
+  "command": {
+    "name": "pg-connector",
+    "provenance": "pg-connector --help (this host 2026-10-05)",
+    "citations": {
+      "provenance": {
+        "source": "pg-connector --help: \"Unified pluggable connector umbrella CLI.\""
+      },
+      "stdin": {
+        "source": "pg-connector --help: \"Usage: pg-connector [command]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+      },
+      "stdout": {
+        "source": "pg-connector --help: \"Unified pluggable connector umbrella CLI.\" (stdout classification taken from this description of what the command prints)"
+      },
+      "unknownFlag": {
+        "source": "pg-connector --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "flags": {
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pg-connector --help: \"-h, --help help for pg-connector\""
+        }
+      },
+      "--output": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pg-connector --help: \"--output string output format: json (default; the stable machine-readable wire envelope scripts/automation depend on) or human (readable summaries for interactive use) (default \"json\")\""
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pg-connector --help: \"-h, --help help for pg-connector\""
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "pg-connector --help: \"Usage: pg-connector [command]\""
+      }
+    },
+    "stdin": "never",
+    "stdout": "none",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true,
+    "subcommands": {
+      "pr": {
+        "name": "pr",
+        "provenance": "pg-connector pr --help (this host 2026-10-05)",
+        "citations": {
+          "provenance": {
+            "source": "pg-connector pr --help: \"PR capability commands\""
+          },
+          "stdin": {
+            "source": "pg-connector pr --help: \"Usage: pg-connector pr [command]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+          },
+          "stdout": {
+            "source": "pg-connector pr --help: \"PR capability commands\" (stdout classification taken from this description of what the command prints)"
+          },
+          "unknownFlag": {
+            "source": "pg-connector pr --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-connector pr --help: \"-h, --help help for pr\""
+            }
+          },
+          "--output": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-connector pr --help: \"--output string output format: json (default; the stable machine-readable wire envelope scripts/automation depend on) or human (readable summaries for interactive use) (default \"json\")\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pg-connector pr --help: \"-h, --help help for pr\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pg-connector pr --help: \"Usage: pg-connector pr [command]\""
+          }
+        },
+        "stdin": "never",
+        "stdout": "none",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true,
+        "subcommands": {
+          "show": {
+            "name": "show",
+            "provenance": "pg-connector pr show --help (this host 2026-10-05)",
+            "citations": {
+              "provenance": {
+                "source": "pg-connector pr show --help: \"Show a PR's current full state, including comments/review-thread entries\""
+              },
+              "stdin": {
+                "source": "pg-connector pr show --help: \"Usage: pg-connector pr show <id> [flags]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+              },
+              "stdout": {
+                "source": "pg-connector pr show --help: \"Show a PR's current full state, including comments/review-thread entries\" (stdout classification taken from this description of what the command prints)"
+              },
+              "unknownFlag": {
+                "source": "pg-connector pr show --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--backend": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pg-connector pr show --help: \"--backend string pin to exactly this backend, skipping the multi-instance try-each resolution policy\""
+                }
+              },
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pg-connector pr show --help: \"-h, --help help for show\""
+                }
+              },
+              "--output": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pg-connector pr show --help: \"--output string output format: json (default; the stable machine-readable wire envelope scripts/automation depend on) or human (readable summaries for interactive use) (default \"json\")\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pg-connector pr show --help: \"-h, --help help for show\""
+                }
+              }
+            },
+            "positionals": {
+              "leading": [
+                {
+                  "kind": "literal"
+                }
+              ],
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "pg-connector pr show --help: \"Usage: pg-connector pr show <id> [flags]\""
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "read"
+                },
+                "target": "github",
+                "citation": {
+                  "source": "pg-connector pr show --help: \"Show a PR's current full state, including comments/review-thread entries\" (the effect declared here is what this command does, per this description)"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "content",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,122 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "rc-probe",
+  "command": {
+    "name": "rc-probe",
+    "provenance": "rc-probe --help (Emit outstanding instance fingerprints for one project, this host 2026-10-05)",
+    "citations": {
+      "provenance": {
+        "source": "rc-probe --help: \"rc-probe: Emit outstanding instance fingerprints for one project.\""
+      },
+      "stdin": {
+        "source": "rc-probe --help: \"Usage: rc-probe <wt> <project> --spec <spec.json> [--app-bead <id>] [--first-only]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+      },
+      "stdout": {
+        "source": "rc-probe --help: \"rc-probe: Emit outstanding instance fingerprints for one project.\" (stdout classification taken from this description of what the command prints)"
+      },
+      "unknownFlag": {
+        "source": "rc-probe --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "flags": {
+      "--app-bead": {
+        "arity": "one",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rc-probe --help: \"--app-bead <id> App bead whose [rc-fp]/[rc-skip] registries are subtracted\""
+        }
+      },
+      "--first-only": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rc-probe --help: \"--first-only Stop after the first fingerprint (define-time existence check)\""
+        }
+      },
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rc-probe --help: \"-h, --help Show this help message\""
+        }
+      },
+      "--spec": {
+        "arity": "one",
+        "operand": {
+          "kind": "path-read"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rc-probe --help: \"--spec <file> Probe spec JSON: {pattern, pathspecs[], exclude_globs[]}\""
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rc-probe --help: \"-h, --help Show this help message\""
+        }
+      }
+    },
+    "positionals": {
+      "leading": [
+        {
+          "kind": "path-read"
+        },
+        {
+          "kind": "literal"
+        }
+      ],
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "rc-probe --help: \"Usage: rc-probe <wt> <project> --spec <spec.json> [--app-bead <id>] [--first-only]\""
+      }
+    },
+    "implicitEffects": [
+      {
+        "role": {
+          "kind": "remote",
+          "operation": "read"
+        },
+        "target": "beads",
+        "citation": {
+          "source": "rc-probe --help: \"rc-probe: Emit outstanding instance fingerprints for one project.\" (the effect declared here is what this command does, per this description)"
+        }
+      }
+    ],
+    "stdin": "never",
+    "stdout": "content",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

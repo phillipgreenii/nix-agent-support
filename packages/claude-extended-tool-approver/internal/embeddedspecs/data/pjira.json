@@ -1,0 +1,400 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "pjira",
+  "command": {
+    "name": "pjira",
+    "provenance": "pjira --help (Generic Atlassian Jira access tool, this host 2026-10-05)",
+    "citations": {
+      "provenance": {
+        "source": "pjira --help: \"Generic Atlassian Jira access tool (issue / search / auth-status)\""
+      },
+      "stdin": {
+        "source": "pjira --help: \"Usage: pjira [command]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+      },
+      "stdout": {
+        "source": "pjira --help: \"Generic Atlassian Jira access tool (issue / search / auth-status)\" (stdout classification taken from this description of what the command prints)"
+      },
+      "unknownFlag": {
+        "source": "pjira --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "flags": {
+      "--config": {
+        "arity": "one",
+        "operand": {
+          "kind": "path-read"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pjira --help: \"--config string path to config TOML (default: $XDG_CONFIG_HOME/pjira/config.toml)\""
+        }
+      },
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pjira --help: \"-h, --help help for pjira\""
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pjira --help: \"-h, --help help for pjira\""
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "pjira --help: \"Usage: pjira [command]\""
+      }
+    },
+    "stdin": "never",
+    "stdout": "none",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true,
+    "subcommands": {
+      "auth-status": {
+        "name": "auth-status",
+        "provenance": "pjira auth-status --help (this host 2026-10-05)",
+        "citations": {
+          "provenance": {
+            "source": "pjira auth-status --help: \"Check credential validity\""
+          },
+          "stdin": {
+            "source": "pjira auth-status --help: \"Usage: pjira auth-status [flags]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+          },
+          "stdout": {
+            "source": "pjira auth-status --help: \"Check credential validity\" (stdout classification taken from this description of what the command prints)"
+          },
+          "unknownFlag": {
+            "source": "pjira auth-status --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--config": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pjira auth-status --help: \"--config string path to config TOML (default: $XDG_CONFIG_HOME/pjira/config.toml)\""
+            }
+          },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pjira auth-status --help: \"-h, --help help for auth-status\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pjira auth-status --help: \"-h, --help help for auth-status\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pjira auth-status --help: \"Usage: pjira auth-status [flags]\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "read"
+            },
+            "target": "jira",
+            "citation": {
+              "source": "pjira auth-status --help: \"Check credential validity\" (the effect declared here is what this command does, per this description)"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "metadata",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "issue": {
+        "name": "issue",
+        "provenance": "pjira issue --help (this host 2026-10-05)",
+        "citations": {
+          "provenance": {
+            "source": "pjira issue --help: \"Fetch one issue as JSON\""
+          },
+          "stdin": {
+            "source": "pjira issue --help: \"Usage: pjira issue <KEY> [flags]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+          },
+          "stdout": {
+            "source": "pjira issue --help: \"Fetch one issue as JSON\" (stdout classification taken from this description of what the command prints)"
+          },
+          "unknownFlag": {
+            "source": "pjira issue --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--config": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pjira issue --help: \"--config string path to config TOML (default: $XDG_CONFIG_HOME/pjira/config.toml)\""
+            }
+          },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pjira issue --help: \"-h, --help help for issue\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pjira issue --help: \"-h, --help help for issue\""
+            }
+          }
+        },
+        "positionals": {
+          "leading": [
+            {
+              "kind": "literal"
+            }
+          ],
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pjira issue --help: \"Usage: pjira issue <KEY> [flags]\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "read"
+            },
+            "target": "jira",
+            "citation": {
+              "source": "pjira issue --help: \"Fetch one issue as JSON\" (the effect declared here is what this command does, per this description)"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "search": {
+        "name": "search",
+        "provenance": "pjira search --help (this host 2026-10-05)",
+        "citations": {
+          "provenance": {
+            "source": "pjira search --help: \"JQL search; writes {items,truncated,next_page_token?} JSON\""
+          },
+          "stdin": {
+            "source": "pjira search --help: \"Usage: pjira search [flags]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+          },
+          "stdout": {
+            "source": "pjira search --help: \"JQL search; writes {items,truncated,next_page_token?} JSON\" (stdout classification taken from this description of what the command prints)"
+          },
+          "unknownFlag": {
+            "source": "pjira search --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--all": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pjira search --help: \"--all fetch all pages (loops nextPageToken to completeness)\""
+            }
+          },
+          "--config": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-read"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pjira search --help: \"--config string path to config TOML (default: $XDG_CONFIG_HOME/pjira/config.toml)\""
+            }
+          },
+          "--cursor": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pjira search --help: \"--cursor string fetch the single page at this nextPageToken\""
+            }
+          },
+          "--expand": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pjira search --help: \"--expand string comma-separated: changelog,comments\""
+            }
+          },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pjira search --help: \"-h, --help help for search\""
+            }
+          },
+          "--jql": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pjira search --help: \"--jql string JQL query (required)\""
+            }
+          },
+          "--limit": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pjira search --help: \"--limit int max results per page (0 = config default)\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pjira search --help: \"-h, --help help for search\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pjira search --help: \"Usage: pjira search [flags]\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "read"
+            },
+            "target": "jira",
+            "citation": {
+              "source": "pjira search --help: \"JQL search; writes {items,truncated,next_page_token?} JSON\" (the effect declared here is what this command does, per this description)"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      }
+    }
+  }
+}
