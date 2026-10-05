@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -139,6 +142,11 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 	// exactly the bug the worktree default is fixing, so we do NOT silently fall
 	// back to RepoRoot for that strategy (a role using "none" gets RepoRoot on
 	// purpose, by its own explicit config, not as a fallback).
+	//
+	// Remember whether the per-bead worktree already existed: only a worktree
+	// THIS dispatch created is reclaimed if the dispatch dies before a session
+	// takes ownership of it (reclaimAbandonedWorktree, pg2-w3usi).
+	preexisting := usesWorktreeIsolation(cc.Isolation) && r.worktreePathExists(d.Item.ID)
 	wt, wtErr := newIsolation(cc.Isolation, r.deps).Ensure(ctx, d.Item.ID)
 	if wtErr != nil {
 		if errors.Is(wtErr, ErrLowDisk) {
@@ -191,6 +199,9 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 		// external_id just errors, which this ignores exactly like every other
 		// best-effort Close call in this file.
 		r.purgeAbandonedSession(ctx, d.Item.ID)
+		// The worktree created just above has no session to own it now, so no
+		// reconcile keyed on a session row can ever find it (pg2-w3usi).
+		r.reclaimAbandonedWorktree(ctx, cc, d.Item.ID, wt, !preexisting)
 		var res report.Result
 		if r.escalateLaunchFailure(ctx, d.Item.ID) {
 			res = failureAction(report.Escalated, d.Item.ID)
@@ -216,6 +227,10 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 			// ready rows (ADR 0072's Decision item 2).
 			_ = r.deps.CC.Close(ctx, r.deps.ExternalID, false)
 			_ = beads.Unclaim(ctx, r.deps.BD, d.Item.ID)
+			// The session did nothing, so the worktree created for it is
+			// reclaimed too (pg2-w3usi); reclaimAbandonedWorktree skips it if
+			// the Close above did not actually stop the session.
+			r.reclaimAbandonedWorktree(ctx, cc, d.Item.ID, wt, !preexisting)
 			res = failureAction(report.Unclaimed, d.Item.ID)
 			return res, fmt.Errorf("send %s: prompt not ingested: %w", r.deps.ExternalID, err)
 		}
@@ -258,6 +273,62 @@ func (r *ccpoolRun) purgeAbandonedSession(ctx context.Context, beadID string) {
 		slog.Error("purge-close of abandoned session failed after retry; session may still be live and reach ready",
 			"external_id", r.deps.ExternalID, "bead", beadID, "err", err)
 	}
+}
+
+// worktreePathExists reports whether the per-bead worktree directory for
+// beadID is already on disk (worktree.Ensure keys it as WorktreeDir/<beadID>).
+// Read BEFORE Ensure to tell a worktree this dispatch creates from a reused
+// one. A stat error other than "does not exist" counts as existing: it fails
+// toward NOT reclaiming.
+func (r *ccpoolRun) worktreePathExists(beadID string) bool {
+	_, err := os.Stat(filepath.Join(r.deps.Cfg.WorktreeDir, beadID))
+	return err == nil || !errors.Is(err, fs.ErrNotExist)
+}
+
+// reclaimAbandonedWorktree removes the per-bead worktree and pg-router/<bead>
+// anchor branch that run() created via isolation.Ensure when the dispatch
+// returns early, before any session took ownership of them (pg2-w3usi):
+// CC.Ensure failed or was cancelled (ctx expiry, handler SIGTERM), or the
+// nudge was confirmed dropped. Every other cleanup keys on a session row
+// (finishWait; the dispatch-time and shutdown reconciles), and by construction
+// no row exists for such a worktree, so without this it leaked forever.
+//
+// Guards: createdHere must be true (a worktree that pre-existed this dispatch
+// may carry a previous attempt's commits and is left to finishWait or the
+// reconciles); a session row for this dispatch that is still live, or that
+// cannot be read, is never deprived of its working directory; everything
+// else is cleanupWorktree's own (needs_input, live peer, quiet window,
+// RemoveWorktree force=false so git refuses a dirty tree, branch deleted only
+// after the worktree is gone). Runs on a context detached from ctx's
+// cancellation, since the early return is often caused by ctx expiry itself
+// and every git/ccpool call on a dead ctx would fail for that reason alone.
+// Fails soft like cleanupWorktree.
+//
+// A SIGKILLed handler runs none of this; that window needs a worktree-keyed
+// sweep (not implemented here, see pg2-w3usi's follow-up).
+func (r *ccpoolRun) reclaimAbandonedWorktree(ctx context.Context, cc *roles.CCPoolConfig, beadID, wt string, createdHere bool) {
+	if wt == "" || !createdHere || !usesWorktreeIsolation(cc.Isolation) {
+		return
+	}
+	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), purgeCloseTimeout)
+	defer cancel()
+	name := r.deps.ExternalID
+	sessions, err := r.deps.CC.List(cctx)
+	if err != nil {
+		slog.Warn("dispatch: abandoned worktree left for next sweep -- session list failed",
+			"session", name, "bead", beadID, "worktree", wt, "err", err)
+		return
+	}
+	for _, s := range sessions {
+		if s.ExternalID == name && s.Live {
+			slog.Warn("dispatch: abandoned worktree kept -- its session is still live",
+				"session", name, "bead", beadID, "worktree", wt)
+			return
+		}
+	}
+	slog.Info("dispatch: reclaiming worktree of a dispatch that never reached a running session",
+		"session", name, "bead", beadID, "worktree", wt)
+	r.cleanupWorktree(cctx, cc, name, beadID, wt)
 }
 
 // waitFailureResult maps a wait-path error to the verb actually applied to the
