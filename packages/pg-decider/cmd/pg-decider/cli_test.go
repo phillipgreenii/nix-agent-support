@@ -80,13 +80,11 @@ func TestSeamExitCodeIsPropagated(t *testing.T) {
 	}
 }
 
-func TestDefaultSeamsReportNotImplemented(t *testing.T) {
+func TestDefaultApplySeamReportsNotImplemented(t *testing.T) {
 	withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("pr_view_minimal.json"))
-	for _, sub := range []string{"plan", "apply"} {
-		out, errOut, code := runCLI(t, sub, "pr", "x")
-		if code != 1 || out != "" || !strings.Contains(errOut, "not implemented") {
-			t.Fatalf("%s: code=%d out=%q err=%q", sub, code, out, errOut)
-		}
+	out, errOut, code := runCLI(t, "apply", "pr", "x")
+	if code != 1 || out != "" || !strings.Contains(errOut, "not implemented") {
+		t.Fatalf("apply: code=%d out=%q err=%q", code, out, errOut)
 	}
 }
 

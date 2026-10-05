@@ -8,15 +8,40 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/phillipgreenii/pg-decider/internal/decide"
 	"github.com/phillipgreenii/pg-decider/internal/exitcode"
+	"github.com/phillipgreenii/pg-decider/internal/plan"
 )
 
-// planFn is the replaceable seam for `plan` behavior. It runs only after the
-// view was read successfully (retrieve it with viewFromContext) and returns
-// the process exit code. A sibling packet replaces the default.
+// planFn is the replaceable seam for `plan` behavior (tests stub it). It runs
+// only after the view was read successfully (retrieve it with
+// viewFromContext) and returns the process exit code. The default evaluates
+// the registered rules over the view (decide.Decide, which writes nothing) and
+// renders the plan: exit 0 on any successful plan, listed actions or not, and
+// 1 when the entity type has no decider. An unreadable view never reaches
+// here; the command exits 3 before calling the seam.
 var planFn = func(ctx context.Context, out, errOut io.Writer, typ, id string, asJSON bool) int {
-	fmt.Fprintln(errOut, "pg-decider plan: not implemented")
-	return exitcode.Failure
+	v := viewFromContext(ctx)
+	if v == nil {
+		fmt.Fprintf(errOut, "pg-decider: no %s view of %s to plan\n", typ, id)
+		return exitcode.ViewUnreadable
+	}
+	if !decide.HasDecider(typ) {
+		fmt.Fprintf(errOut, "pg-decider: no decider is registered for entity type %q\n", typ)
+		return exitcode.Failure
+	}
+	res := decide.Decide(v, typ)
+	var err error
+	if asJSON {
+		err = plan.JSON(out, res)
+	} else {
+		err = plan.Text(out, v, res)
+	}
+	if err != nil {
+		fmt.Fprintf(errOut, "pg-decider: cannot print the plan: %v\n", err)
+		return exitcode.Failure
+	}
+	return exitcode.OK
 }
 
 func newPlanCmd() *cobra.Command {
