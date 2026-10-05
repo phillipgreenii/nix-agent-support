@@ -34,8 +34,8 @@ func seededEngine(t *testing.T) (*Engine, *store.Store) {
 	st := store.OpenNewSchemaForTest(t)
 	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
 	for _, id := range []string{"bd-1", "bd-2"} {
-		if _, err := st.WriteEntityWithLog(store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: `{}`, AsOf: "x"},
-			0, []string{"reconcile"}, "sweep", "2026-09-29T10:00:00Z"); err != nil {
+		if _, err := st.WriteEntityStateWithLog(store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: `{}`, AsOf: "x"},
+			0, "2026-10-01T11:00:00Z", true, []string{"reconcile"}, "sweep", "2026-09-29T10:00:00Z"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -84,8 +84,9 @@ func TestRunDoesNotAdvanceCursorWhenTheFlushFails(t *testing.T) {
 	}
 }
 
-// Connector `removed` entries are never hydrated and never become records in
-// this flow.
+// Connector `removed` entries are never hydrated; one for an entity the store
+// does not hold (bd-9) writes nothing. The seeded entities were hydrated
+// within sweep.max_age, so the sweep leaves them alone too.
 func TestRunIgnoresConnectorRemovedEntries(t *testing.T) {
 	e, _ := seededEngine(t)
 	h := e.Hydrator.(*fakeHydrator)
@@ -112,4 +113,62 @@ func TestSelectQueries(t *testing.T) {
 	if _, err := SelectQueries(cfg, "issue", ""); err == nil || !strings.Contains(err.Error(), "watch.issue.queries") {
 		t.Errorf("no queries: %v", err)
 	}
+}
+
+// A watched query that fails to list contributes no membership and no
+// removal: only a successful, non-degraded listing may drop an entity.
+func TestRunRemovalIgnoresAFailedQuery(t *testing.T) {
+	e, st := seededEngine(t)
+	e.Cfg.Watch.Issue.Queries = []string{"open", "mine"}
+	e.Lister = queryLister{
+		"open": {res: gather.ListChangesResult{Changes: []gather.ListedChange{{Change: gather.ChangeRemoved, EntityID: "bd-1"}}}},
+		"mine": {err: errors.New("boom")},
+	}
+	if _, err := e.Run(context.Background(), Options{EntityType: "issue", Consumer: "router"}, func(Envelope) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	// "open" listed bd-1 removed and nothing else holds it: removed.
+	ent, _, _ := st.GetEntity("o/r", "issue", "bd-1")
+	if !ent.Inactive {
+		t.Error("bd-1 should be removed: the only successful query dropped it")
+	}
+}
+
+// An entity another configured query still holds survives one query's removal.
+func TestRunRemovalNeedsEveryQueryToDropTheEntity(t *testing.T) {
+	e, st := seededEngine(t)
+	e.Cfg.Watch.Issue.Queries = []string{"open", "mine"}
+	e.Lister = queryLister{
+		"open": {res: gather.ListChangesResult{Changes: []gather.ListedChange{{Change: gather.ChangeChanged, EntityID: "bd-1"}}}},
+		"mine": {res: gather.ListChangesResult{Changes: []gather.ListedChange{{Change: gather.ChangeChanged, EntityID: "bd-1"}}}},
+	}
+	run := func() {
+		t.Helper()
+		if _, err := e.Run(context.Background(), Options{EntityType: "issue", Consumer: "router"}, func(Envelope) error { return nil }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run()
+	e.Lister = queryLister{
+		"open": {res: gather.ListChangesResult{Changes: []gather.ListedChange{{Change: gather.ChangeRemoved, EntityID: "bd-1"}}}},
+		"mine": {},
+	}
+	run()
+	if ent, _, _ := st.GetEntity("o/r", "issue", "bd-1"); ent.Inactive {
+		t.Error("bd-1 is still held by query mine")
+	}
+	e.Lister = queryLister{
+		"open": {},
+		"mine": {res: gather.ListChangesResult{Changes: []gather.ListedChange{{Change: gather.ChangeRemoved, EntityID: "bd-1"}}}},
+	}
+	run()
+	if ent, _, _ := st.GetEntity("o/r", "issue", "bd-1"); !ent.Inactive {
+		t.Error("bd-1 should be removed once both queries dropped it")
+	}
+}
+
+type queryLister map[string]fakeLister
+
+func (q queryLister) ListChanges(_ context.Context, _, query, _ string) (gather.ListChangesResult, error) {
+	return q[query].res, q[query].err
 }

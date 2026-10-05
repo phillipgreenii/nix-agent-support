@@ -21,6 +21,10 @@ import (
 
 var changesTestNow = time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 
+// freshHydratedAt stamps seeded entities as hydrated well inside sweep.max_age
+// of changesTestNow, so the rolling sweep leaves them alone.
+const freshHydratedAt = "2026-10-01T11:00:00Z"
+
 // changesFixture is a new-schema store, a config watching the named queries
 // of one entity type, and a fake pg-connector on PATH driven by files in dir:
 // <type>-changes-<query>.json (+ .exit) answers `<type> changes --query q`,
@@ -483,9 +487,9 @@ func TestChangesLimitPagesThroughTheLog(t *testing.T) {
 	f := newChangesFixture(t, "issue", "open")
 	f.listing("open", 0, okSource)
 	for i := 1; i <= 5; i++ {
-		if _, err := f.seed.WriteEntityWithLog(
+		if _, err := f.seed.WriteEntityStateWithLog(
 			store.Entity{Repo: "o/r", EntityType: "issue", EntityID: fmt.Sprintf("bd-%d", i), Facts: `{}`, AsOf: "2026-09-29T00:00:00Z"},
-			0, []string{"reconcile"}, "sweep", "2026-09-29T10:00:00Z",
+			0, freshHydratedAt, true, []string{"reconcile"}, "sweep", "2026-09-29T10:00:00Z",
 		); err != nil {
 			t.Fatal(err)
 		}
@@ -525,9 +529,9 @@ func TestChangesConcurrentCallsForOneConsumerSerialize(t *testing.T) {
 	f := newChangesFixture(t, "issue", "open")
 	f.listing("open", 0, okSource)
 	for i := 1; i <= 6; i++ {
-		if _, err := f.seed.WriteEntityWithLog(
+		if _, err := f.seed.WriteEntityStateWithLog(
 			store.Entity{Repo: "o/r", EntityType: "issue", EntityID: fmt.Sprintf("bd-%d", i), Facts: `{}`, AsOf: "2026-09-29T00:00:00Z"},
-			0, []string{"reconcile"}, "sweep", "2026-09-29T10:00:00Z",
+			0, freshHydratedAt, true, []string{"reconcile"}, "sweep", "2026-09-29T10:00:00Z",
 		); err != nil {
 			t.Fatal(err)
 		}
@@ -587,9 +591,9 @@ func TestChangesPrunesWithConfiguredRetentionAndStaleness(t *testing.T) {
 			f.cfg.ConsumerStaleAfterRaw = "1h"
 			f.listing("open", 0, okSource)
 			for i := 1; i <= 2; i++ {
-				if _, err := f.seed.WriteEntityWithLog(
+				if _, err := f.seed.WriteEntityStateWithLog(
 					store.Entity{Repo: "o/r", EntityType: "issue", EntityID: fmt.Sprintf("bd-%d", i), Facts: `{}`, AsOf: "2026-09-01T00:00:00Z"},
-					0, []string{"reconcile"}, "sweep", "2026-09-01T10:00:00Z",
+					0, freshHydratedAt, true, []string{"reconcile"}, "sweep", "2026-09-01T10:00:00Z",
 				); err != nil {
 					t.Fatal(err)
 				}
@@ -686,5 +690,356 @@ func TestChangesIssueEnvelopeGolden(t *testing.T) {
 	}
 	if a.String() != b.String() {
 		t.Errorf("issue envelope drifted from the golden:\n got: %s\nwant: %s", a.String(), b.String())
+	}
+}
+
+// --- watched-set membership, source-terminal deactivation, sweep, budget ---
+
+// showIssueState is showIssue with an explicit issue state.
+func (f *changesFixture) showIssueState(id, state string) {
+	f.t.Helper()
+	f.write("show-"+strings.NewReplacer("/", "_", "#", "_").Replace(id)+".json", fmt.Sprintf(
+		`{"protocolVersion":1,"schemaVersion":4,"result":{"id":%q,"title":"title of %s","owner":"me","assignee":"x","issue_type":"task","state":%q,"updated_at":"2026-09-30T00:00:00Z","as_of":"2026-09-30T00:00:00Z"}}`,
+		id, id, state,
+	))
+}
+
+// seedHydrated stores an issue hydrated at hydratedAt (an unobserved-by-the-
+// connector row, as the cutover leaves them) and shows it as open.
+func (f *changesFixture) seedHydrated(id, hydratedAt string) {
+	f.t.Helper()
+	if _, err := f.seed.WriteEntityStateWithLog(
+		store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: `{}`, AsOf: "2026-09-29T00:00:00Z"},
+		0, hydratedAt, true, []string{"reconcile"}, "sweep", "2026-09-29T10:00:00Z",
+	); err != nil {
+		f.t.Fatal(err)
+	}
+	f.showIssue(id, "2026-09-30T00:00:00Z")
+}
+
+func (f *changesFixture) entity(id string) store.Entity {
+	f.t.Helper()
+	e, found, err := f.seed.GetEntity("o/r", f.typ, id)
+	if err != nil || !found {
+		f.t.Fatalf("entity %s: found=%v err=%v", id, found, err)
+	}
+	return e
+}
+
+func (f *changesFixture) shows() []string {
+	var out []string
+	for _, c := range f.calls() {
+		if strings.HasPrefix(c, f.typ+" show ") {
+			out = append(out, strings.TrimPrefix(c, f.typ+" show "))
+		}
+	}
+	return out
+}
+
+func recordsOf(env changes.Envelope, id string) []changes.Record {
+	var out []changes.Record
+	for _, r := range env.Records {
+		if r.ID == id {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+func TestChangesDroppedEntityBecomesInactive(t *testing.T) {
+	f := newChangesFixture(t, "issue", "a", "b")
+	f.listing("a", 0, okSource, [2]string{"added", "bd-1"}, [2]string{"added", "bd-2"})
+	f.listing("b", 0, okSource, [2]string{"added", "bd-2"})
+	f.showIssue("bd-1", "2026-09-30T00:00:00Z")
+	f.showIssue("bd-2", "2026-09-30T00:00:00Z")
+	if _, err := f.envOf("--consumer", "router"); err != nil {
+		t.Fatal(err)
+	}
+
+	// bd-1 drops out of its only query; bd-2 drops out of "a" but "b" still
+	// returns it, so only bd-1 leaves the watched set.
+	f.listing("a", 0, okSource, [2]string{"removed", "bd-1"}, [2]string{"removed", "bd-2"})
+	f.listing("b", 0, okSource)
+	env, err := f.envOf("--consumer", "router")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := recordsOf(env, "bd-1"); len(got) != 1 || len(got[0].Kinds) != 1 || got[0].Kinds[0] != "removed" {
+		t.Errorf("bd-1 records = %+v, want exactly one removed", got)
+	}
+	if got := recordsOf(env, "bd-2"); len(got) != 0 {
+		t.Errorf("bd-2 is still returned by query b, got %+v", got)
+	}
+	if !f.entity("bd-1").Inactive || f.entity("bd-2").Inactive {
+		t.Errorf("bd-1 inactive=%v bd-2 inactive=%v, want true/false", f.entity("bd-1").Inactive, f.entity("bd-2").Inactive)
+	}
+
+	// Once the last query drops bd-2 it is removed too; a repeat is a no-op.
+	f.listing("a", 0, okSource)
+	f.listing("b", 0, okSource, [2]string{"removed", "bd-2"})
+	env, err = f.envOf("--consumer", "router")
+	if err != nil || len(recordsOf(env, "bd-2")) != 1 || !f.entity("bd-2").Inactive {
+		t.Fatalf("bd-2: env=%+v err=%v", env, err)
+	}
+	again, err := f.envOf("--consumer", "router")
+	if err != nil || len(again.Records) != 0 {
+		t.Errorf("an unchanged view must write nothing, got %+v, %v", again, err)
+	}
+	f.listing("b", 0, okSource, [2]string{"removed", "bd-2"})
+	if again, err = f.envOf("--consumer", "router"); err != nil || len(again.Records) != 0 {
+		t.Errorf("removing an already inactive entity must write nothing, got %+v, %v", again, err)
+	}
+}
+
+func TestChangesReturningEntityGetsReconcile(t *testing.T) {
+	f := newChangesFixture(t, "issue", "a")
+	f.listing("a", 0, okSource, [2]string{"added", "bd-1"})
+	f.showIssue("bd-1", "2026-09-30T00:00:00Z")
+	if _, err := f.envOf("--consumer", "router"); err != nil {
+		t.Fatal(err)
+	}
+	f.listing("a", 0, okSource, [2]string{"removed", "bd-1"})
+	if _, err := f.envOf("--consumer", "router"); err != nil {
+		t.Fatal(err)
+	}
+	if !f.entity("bd-1").Inactive {
+		t.Fatal("bd-1 should be inactive")
+	}
+
+	f.listing("a", 0, okSource, [2]string{"added", "bd-1"})
+	env, err := f.envOf("--consumer", "router")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := envKindsByID(env); len(got["bd-1"]) != 1 || got["bd-1"][0] != "reconcile" || len(env.Records) != 1 {
+		t.Errorf("a returning entity must get exactly one reconcile, got %v", got)
+	}
+	if f.entity("bd-1").Inactive {
+		t.Error("a returning entity must be active again")
+	}
+}
+
+func TestChangesDegradedSourceYieldsNoRemoved(t *testing.T) {
+	f := newChangesFixture(t, "issue", "a")
+	f.listing("a", 0, okSource, [2]string{"added", "bd-1"})
+	f.showIssue("bd-1", "2026-09-30T00:00:00Z")
+	if _, err := f.envOf("--consumer", "router"); err != nil {
+		t.Fatal(err)
+	}
+
+	f.listing("a", 2, `{"backend":"b","status":"degraded","reason":"rate_limited"}`, [2]string{"removed", "bd-1"})
+	env, err := f.envOf("--consumer", "router")
+	if exitCodeFor(err) != exitPartial {
+		t.Fatalf("err = %v, want exit %d", err, exitPartial)
+	}
+	if len(env.Records) != 0 || f.entity("bd-1").Inactive {
+		t.Errorf("a degraded source must not remove: records=%+v inactive=%v", env.Records, f.entity("bd-1").Inactive)
+	}
+}
+
+func TestChangesSourceTerminalEntityBecomesInactive(t *testing.T) {
+	f := newChangesFixture(t, "issue", "a")
+	f.listing("a", 0, okSource, [2]string{"added", "bd-1"})
+	f.showIssue("bd-1", "2026-09-30T00:00:00Z")
+	if _, err := f.envOf("--consumer", "router"); err != nil {
+		t.Fatal(err)
+	}
+	if f.entity("bd-1").Inactive {
+		t.Fatal("an open issue must stay active")
+	}
+
+	f.listing("a", 0, okSource, [2]string{"changed", "bd-1"})
+	f.showIssueState("bd-1", "closed")
+	env, err := f.envOf("--consumer", "router")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := recordsOf(env, "bd-1")
+	if len(got) != 1 {
+		t.Fatalf("records = %+v", got)
+	}
+	hasClosed := false
+	for _, k := range got[0].Kinds {
+		hasClosed = hasClosed || k == "closed"
+		if k == "removed" {
+			t.Errorf("source-terminal deactivation must not append removed: %v", got[0].Kinds)
+		}
+	}
+	if !hasClosed {
+		t.Errorf("kinds = %v, want closed from the classifier", got[0].Kinds)
+	}
+	if !f.entity("bd-1").Inactive {
+		t.Error("a closed issue must become inactive")
+	}
+
+	// The sweep leaves it alone from now on.
+	f.listing("a", 0, okSource)
+	before := len(f.shows())
+	if env, err = f.envOf("--consumer", "router"); err != nil || len(env.Records) != 0 || len(f.shows()) != before {
+		t.Errorf("an inactive entity must not be swept: env=%+v err=%v shows=%v", env, err, f.shows())
+	}
+}
+
+func TestSweepUnchangedEntityGetsExactlyOneReconcile(t *testing.T) {
+	f := newChangesFixture(t, "issue", "a")
+	f.listing("a", 0, okSource, [2]string{"added", "bd-1"})
+	f.showIssue("bd-1", "2026-09-30T00:00:00Z")
+	if _, err := f.envOf("--consumer", "router"); err != nil {
+		t.Fatal(err)
+	}
+	// Age the row past sweep.max_age without changing its facts.
+	e := f.entity("bd-1")
+	if _, err := f.seed.WriteEntityStateWithLog(e, e.Version, "2026-09-01T00:00:00Z", true, nil, "", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	f.listing("a", 0, okSource)
+	env, err := f.envOf("--consumer", "router")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(env.Records) != 1 || env.Records[0].ID != "bd-1" || len(env.Records[0].Kinds) != 1 ||
+		env.Records[0].Kinds[0] != "reconcile" || env.Records[0].Origin != "sweep" {
+		t.Errorf("records = %+v, want one reconcile with origin sweep", env.Records)
+	}
+	// Now freshly hydrated, so an immediate repeat sweeps nothing.
+	if env, err = f.envOf("--consumer", "router"); err != nil || len(env.Records) != 0 {
+		t.Errorf("repeat = %+v, %v", env, err)
+	}
+}
+
+func TestSweepSelectsOldestFirstCapN(t *testing.T) {
+	f := newChangesFixture(t, "issue", "a")
+	two := 2
+	f.cfg.Sweep.MaxPerPoll = &two
+	f.seedHydrated("bd-3", "2026-09-10T00:00:00Z")
+	f.seedHydrated("bd-1", "2026-09-30T00:00:00Z")
+	f.seedHydrated("bd-4", "2026-09-05T00:00:00Z")
+	f.seedHydrated("bd-2", "2026-09-20T00:00:00Z")
+	f.seedHydrated("bd-fresh", "2026-10-01T11:00:00Z") // inside sweep.max_age: not due
+	f.listing("a", 0, okSource)
+
+	env, err := f.envOf("--consumer", "router")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := f.shows(); len(got) != 2 || got[0] != "bd-4" || got[1] != "bd-3" {
+		t.Errorf("swept %v, want the two oldest first: bd-4, bd-3", got)
+	}
+	for _, r := range env.Records {
+		if r.Origin == "sweep" && (len(r.Kinds) != 1 || r.Kinds[0] != "reconcile") {
+			t.Errorf("a sweep must log reconcile only, got %+v", r)
+		}
+	}
+}
+
+func TestSweepExcludesInactive(t *testing.T) {
+	f := newChangesFixture(t, "issue", "a")
+	f.seedHydrated("bd-1", "2026-09-01T00:00:00Z")
+	f.seedHydrated("bd-2", "2026-09-01T00:00:00Z")
+	e := f.entity("bd-1")
+	if _, err := f.seed.WriteEntityStateWithLog(e, e.Version, e.HydratedAt, false, []string{"removed"}, "pg-connector", "2026-09-29T11:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	f.listing("a", 0, okSource)
+	if _, err := f.envOf("--consumer", "router"); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.shows(); len(got) != 1 || got[0] != "bd-2" {
+		t.Errorf("swept %v, want only the active bd-2", got)
+	}
+}
+
+func TestHydrationBudgetHydratesChangedBeforeSweepDue(t *testing.T) {
+	f := newChangesFixture(t, "issue", "a")
+	three := 3
+	f.cfg.Hydration.MaxPerPoll = &three
+	f.seedHydrated("bd-old1", "2026-09-01T00:00:00Z")
+	f.seedHydrated("bd-old2", "2026-09-02T00:00:00Z")
+	f.listing("a", 0, okSource, [2]string{"added", "bd-1"}, [2]string{"changed", "bd-2"})
+	f.showIssue("bd-1", "2026-09-30T00:00:00Z")
+	f.showIssue("bd-2", "2026-09-30T00:00:00Z")
+
+	env, err := f.envOf("--consumer", "router")
+	if exitCodeFor(err) != exitPartial {
+		t.Fatalf("err = %v, want exit %d (sweep deferred by the budget)", err, exitPartial)
+	}
+	got := f.shows()
+	if len(got) != 3 || got[0] != "bd-1" || got[1] != "bd-2" || got[2] != "bd-old1" {
+		t.Errorf("hydrated %v, want changed/added first then the oldest sweep-due one", got)
+	}
+	if len(env.Sources) != 1 || env.Sources[0].Status != changes.StatusDegraded || !strings.Contains(env.Sources[0].Reason, changes.ReasonHydrationBudget) {
+		t.Errorf("sources = %+v, want degraded with %s (sweep work was deferred)", env.Sources, changes.ReasonHydrationBudget)
+	}
+}
+
+func TestBudgetExhaustionMarksSourceDegradedAndKeepsCursor(t *testing.T) {
+	f := newChangesFixture(t, "issue", "a", "b")
+	one := 1
+	f.cfg.Hydration.MaxPerPoll = &one
+	f.listing("a", 0, okSource, [2]string{"added", "bd-1"}, [2]string{"added", "bd-2"})
+	f.listing("b", 0, okSource)
+	f.showIssue("bd-1", "2026-09-30T00:00:00Z")
+	f.showIssue("bd-2", "2026-09-30T00:00:00Z")
+
+	env, err := f.envOf("--consumer", "router")
+	if exitCodeFor(err) != exitPartial {
+		t.Fatalf("err = %v, want exit %d", err, exitPartial)
+	}
+	bySource := map[string]changes.Source{}
+	for _, s := range env.Sources {
+		bySource[s.Query] = s
+	}
+	if s := bySource["a"]; s.Status != changes.StatusDegraded || !strings.Contains(s.Reason, changes.ReasonHydrationBudget) {
+		t.Errorf("a = %+v, want degraded with %s", s, changes.ReasonHydrationBudget)
+	}
+	if bySource["b"].Status != changes.StatusOK {
+		t.Errorf("b reported nothing deferred, got %+v", bySource["b"])
+	}
+	// The delivered record advanced the cursor; the deferred entity has none.
+	if len(env.Records) != 1 || env.Records[0].ID != "bd-1" {
+		t.Fatalf("records = %+v, want only bd-1", env.Records)
+	}
+	if c, _ := f.consumer("router"); c.Cursor != env.Cursor.To || env.Cursor.To == 0 {
+		t.Errorf("cursor = %+v, envelope %+v", c, env.Cursor)
+	}
+
+	// The next poll hydrates the deferred entity even though pg-connector
+	// does not report it again.
+	f.listing("a", 0, okSource)
+	next, err := f.envOf("--consumer", "router")
+	if err != nil {
+		t.Fatalf("next poll: %v", err)
+	}
+	if len(next.Records) != 1 || next.Records[0].ID != "bd-2" || next.Cursor.From != env.Cursor.To {
+		t.Errorf("next = %+v, want bd-2's reconcile past cursor %d", next, env.Cursor.To)
+	}
+	for _, s := range next.Sources {
+		if s.Status != changes.StatusOK {
+			t.Errorf("source %+v should be ok once nothing is deferred", s)
+		}
+	}
+}
+
+func TestHydrationBudgetDoesNotCapAResetReplay(t *testing.T) {
+	f := newChangesFixture(t, "issue", "a")
+	one := 1
+	f.cfg.Hydration.MaxPerPoll = &one
+	for _, id := range []string{"bd-1", "bd-2", "bd-3"} {
+		f.seedHydrated(id, "2026-10-01T11:00:00Z")
+	}
+	f.listing("a", 0, okSource)
+	env, err := f.envOf("--consumer", "router", "--reset")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reset := 0
+	for _, r := range env.Records {
+		if r.Origin == "reset" {
+			reset++
+		}
+	}
+	if reset != 3 {
+		t.Errorf("reset records = %d, want all 3 active entities regardless of the budget", reset)
 	}
 }

@@ -120,11 +120,6 @@ func (e *Engine) Run(ctx context.Context, opts Options, emit func(Envelope) erro
 	}
 
 	// Phase A: list every watched query.
-	type queryRun struct {
-		query string
-		res   gather.ListChangesResult
-		err   error
-	}
 	runs := make([]queryRun, 0, len(queries))
 	failedQueries := 0
 	for _, q := range queries {
@@ -139,30 +134,47 @@ func (e *Engine) Run(ctx context.Context, opts Options, emit func(Envelope) erro
 	}
 	total := failedQueries == len(queries)
 
-	hydrated := map[string]error{} // entity id -> hydration failure (nil = ok)
-	var replayFailures []string
+	st := &pollState{hydrated: map[string]error{}, notes: map[string][]string{}}
 
-	// Phase B: --reset replays every active entity as reconcile.
-	if opts.Reset && !total {
-		ids, err := e.activeEntityIDs(opts.EntityType)
+	if !total {
+		// Phase A2: watched-set membership. An entity no configured query
+		// returns any more becomes removed/inactive [design 6.1].
+		st.side = append(st.side, e.applyMembership(opts.EntityType, runs)...)
+
+		// Phase B: --reset replays every active entity as reconcile. The
+		// replay is exempt from hydration.max_per_poll (see the behavior
+		// doc): it is an explicit operator request and nothing is deferred.
+		if opts.Reset {
+			ids, err := e.activeEntityIDs(opts.EntityType)
+			if err != nil {
+				return Outcome{}, err
+			}
+			for _, id := range ids {
+				if err := ctx.Err(); err != nil {
+					return Outcome{}, fmt.Errorf("changes: %w", err)
+				}
+				herr := e.hydrate(ctx, opts.EntityType, id, gather.ChangeChanged, OriginReset, true)
+				st.hydrated[id] = herr
+				if herr != nil {
+					st.side = append(st.side, fmt.Sprintf("reset %s: %s", id, firstErrLine(herr.Error())))
+				}
+			}
+		}
+
+		// Phase C: hydrate what the queries reported added/changed (plus any
+		// entity an earlier poll had to defer), then the rolling sweep, all
+		// within hydration.max_per_poll with changed/added served first
+		// [design 8.4, 8.5].
+		bud := &budget{left: e.Cfg.HydrationMaxPerPoll()}
+		queued, err := e.hydratePending(ctx, opts, runs, st, bud)
 		if err != nil {
 			return Outcome{}, err
 		}
-		for _, id := range ids {
-			if err := ctx.Err(); err != nil {
-				return Outcome{}, fmt.Errorf("changes: %w", err)
-			}
-			herr := e.hydrate(ctx, opts.EntityType, id, gather.ChangeChanged, OriginReset, true)
-			hydrated[id] = herr
-			if herr != nil {
-				replayFailures = append(replayFailures, fmt.Sprintf("reset %s: %s", id, firstErrLine(herr.Error())))
-			}
+		if err := e.sweep(ctx, opts.EntityType, st, bud, queued); err != nil {
+			return Outcome{}, err
 		}
 	}
 
-	// Phase C: hydrate what each query reported added/changed and build the
-	// per-query source rows. Connector `removed` entries are ignored here:
-	// watched-set membership is not decided in this flow.
 	sources := make([]Source, 0, len(runs))
 	for _, r := range runs {
 		if r.err != nil {
@@ -170,32 +182,18 @@ func (e *Engine) Run(ctx context.Context, opts Options, emit func(Envelope) erro
 			continue
 		}
 		reasons := degradedBackendReasons(r.res.Sources)
-		for _, c := range r.res.Changes {
-			if c.Change != gather.ChangeAdded && c.Change != gather.ChangeChanged {
-				continue
-			}
-			herr, done := hydrated[c.EntityID]
-			if !done {
-				if err := ctx.Err(); err != nil {
-					return Outcome{}, fmt.Errorf("changes: %w", err)
-				}
-				herr = e.hydrate(ctx, opts.EntityType, c.EntityID, c.Change, OriginPGConnector, false)
-				hydrated[c.EntityID] = herr
-			}
-			if herr != nil {
-				reasons = append(reasons, fmt.Sprintf("hydrate %s: %s", c.EntityID, firstErrLine(herr.Error())))
-			}
-		}
+		reasons = appendUnique(reasons, st.notes[r.query]...)
+		reasons = appendUnique(reasons, st.all...)
 		if len(reasons) > 0 {
 			sources = append(sources, Source{Query: r.query, Status: StatusDegraded, Reason: strings.Join(reasons, "; ")})
 		} else {
 			sources = append(sources, Source{Query: r.query, Status: StatusOK})
 		}
 	}
-	for _, f := range replayFailures {
+	for _, f := range st.side {
 		e.warnf("%s\n", f)
 	}
-	partial := len(replayFailures) > 0
+	partial := len(st.side) > 0
 	for _, s := range sources {
 		if s.Status != StatusOK {
 			partial = true
@@ -324,7 +322,13 @@ func (e *Engine) hydrate(ctx context.Context, entityType, id string, change gath
 		return err
 	}
 	if res.Degraded != "" {
-		return fmt.Errorf("degraded: %s", res.Degraded)
+		return fmt.Errorf("%w: %s", errDegraded, res.Degraded)
+	}
+	// Spec 6.1 (a): an entity terminal in its source system stops being
+	// active so the sweep leaves it alone. A failure here is not a hydration
+	// failure: the entity stays active and the next sweep retries.
+	if derr := e.deactivateIfTerminal(entityType, id); derr != nil {
+		e.warnf("changes: deactivate %s %s: %v\n", entityType, id, derr)
 	}
 	return nil
 }
