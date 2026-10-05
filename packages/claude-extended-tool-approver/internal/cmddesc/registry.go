@@ -37,7 +37,7 @@ func (r Registry) Names() []string {
 // tee are the proof that another command is ONLY a registry entry; sh is the
 // proof that a second NAME for the same semantics is only a second key.
 func DefaultRegistry() Registry {
-	return NewRegistry(append(append(coreSchemas(), pluginToolSchemas()...), append(repoBaseToolSchemas(), ziprecruiterToolSchemas()...)...)...)
+	return NewRegistry(append(append(coreSchemas(), pluginToolSchemas()...), append(repoBaseToolSchemas(), append(pbToolSchemas(), ziprecruiterToolSchemas()...)...)...)...)
 }
 
 // coreSchemas is the registry as it stood before pg2-cjfpy.2/.3; the plugin-

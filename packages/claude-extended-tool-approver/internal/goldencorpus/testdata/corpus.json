@@ -7108,5 +7108,1521 @@
     "rules_config": {},
     "expected_verdict": "approve",
     "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the zr-refactor plugin (define.md 2)."
+  },
+  {
+    "case": "pb_plugin_pb_drain_isolate",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pb drain isolate --bead pg2-abc12 --repo /Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-beads.md ISOLATE)."
+  },
+  {
+    "case": "pb_plugin_pb_drain_isolate_chain",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pb drain isolate --bead pg2-abc12 --repo /Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support && echo EXIT=$?"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-beads.md ISOLATE (observed log shape))."
+  },
+  {
+    "case": "pb_plugin_pb_gate_attach_verified_child",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pb gate attach-verified-child --impl pg2-abc12 --title \"verify thing works after apply (pg2-abc12): run the check\" --gate phillipgreenii-nix-agent-support=0123456789abcdef0123456789abcdef01234567 --actor \"sess-1-drain\""
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-beads.md POST-DEPLOY GATE)."
+  },
+  {
+    "case": "pb_plugin_pb_gate_attach_verified_child_2gates",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pb gate attach-verified-child --impl pg2-abc12 --title \"verify x\" --gate repo-a=0123456 --gate repo-b=89abcde --actor \"sess-1-drain\""
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-beads.md POST-DEPLOY GATE (one --gate per repo))."
+  },
+  {
+    "case": "pb_plugin_pb_gate_create",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pb gate create --blocks pg2-abc13 --repo phillipgreenii-nix-agent-support"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (pb-gate-lifecycle step 3)."
+  },
+  {
+    "case": "pb_plugin_pb_gate_check",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pb gate check" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-beads.md / pb-gate-lifecycle (apply post-hook))."
+  },
+  {
+    "case": "pb_plugin_pb_gate_check_dry_run",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pb gate check --dry-run --json" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (unstick-beads.md Stage 1)."
+  },
+  {
+    "case": "pb_plugin_bd_ready_term",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd ready --exclude-label human,human-focus-required,refactor-campaign --json -n 10"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-beads.md Goal)."
+  },
+  {
+    "case": "pb_plugin_bd_ready_claimq",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd ready --exclude-label human,human-focus-required,refactor-campaign --exclude-type epic --json"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-beads.md CLAIM)."
+  },
+  {
+    "case": "pb_plugin_bd_ready_parent",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd ready --parent pg2-abc12 --exclude-type epic --exclude-label human,human-focus-required,refactor-campaign --json"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-beads.md Epic drill-down)."
+  },
+  {
+    "case": "pb_plugin_bd_ready_human",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd ready --label human --exclude-label refactor-campaign,human-focus-required --exclude-type handoff --json"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (unblock-human-beads.md CLAIM)."
+  },
+  {
+    "case": "pb_plugin_bd_ready_focus",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd ready --label human-focus-required" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (unblock-human-beads.md)."
+  },
+  {
+    "case": "pb_plugin_bd_ready_n0",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd ready --json -n 0" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (pb-gate-lifecycle / unstick-beads.md)."
+  },
+  {
+    "case": "pb_plugin_bd_ready_help",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd ready --help" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (unblock-human-beads.md)."
+  },
+  {
+    "case": "pb_plugin_bd_list_help",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd list --help" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (unblock-human-beads.md)."
+  },
+  {
+    "case": "pb_plugin_bd_list_inprogress",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd list --status in_progress --assignee \"sess-1-drain\" --json"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-beads.md Startup)."
+  },
+  {
+    "case": "pb_plugin_bd_list_inprogress_human",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd list --status in_progress --assignee \"sess-1-unblock\" --label human --json"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (unblock-human-beads.md Startup)."
+  },
+  {
+    "case": "pb_plugin_bd_list_parent",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd list --parent pg2-abc12 --status all -n 0 --json"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-beads.md Container guard)."
+  },
+  {
+    "case": "pb_plugin_bd_list_desc",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd list --desc-contains \"some search term\" --status all -n 0 --json"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (unblock-human-beads.md class 4)."
+  },
+  {
+    "case": "pb_plugin_bd_list_desc_jq",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd list --desc-contains \"term\" --status all -n 0 --json | jq -r '.data[]? | \"\\(.id) \\(.status) \\(.title)\"'"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (unblock-human-beads.md class 4)."
+  },
+  {
+    "case": "pb_plugin_bd_comments_json",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd comments pg2-abc12 --json | jq -r '.data[]?.text'"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (unblock-human-beads.md class 4)."
+  },
+  {
+    "case": "pb_plugin_bd_show",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd show pg2-abc12" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-beads.md UNDERSTAND)."
+  },
+  {
+    "case": "pb_plugin_bd_show_json",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd show pg2-abc12 --json" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-beads.md)."
+  },
+  {
+    "case": "pb_plugin_bd_show_jq_rev",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd show pg2-abc12 --json | jq -c '.data[0].metadata.pd_curated_rev'"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-beads.md DELEGATE)."
+  },
+  {
+    "case": "pb_plugin_bd_show_jq_meta",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd show pg2-abc12 --json | jq -c '.data[0] | {parent, metadata}'"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-beads.md STAMP REFUSAL)."
+  },
+  {
+    "case": "pb_plugin_bd_show_jq_status",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd show pg2-sib1 --json | jq -r '.data[0].status'"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-stuck step 3)."
+  },
+  {
+    "case": "pb_plugin_bd_prime",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd prime" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-beads.md Startup)."
+  },
+  {
+    "case": "pb_plugin_bd_dep_list",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd dep list pg2-abc12" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-stuck CONVERT 1)."
+  },
+  {
+    "case": "pb_plugin_bd_search",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd search \"some term\"" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (unblock-human-beads.md)."
+  },
+  {
+    "case": "pb_plugin_monitor_until",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "until grep -q '^DONE' /tmp/hooks.log; do sleep 2; done; tail -c 4000 /tmp/hooks.log"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-beads.md DELEGATE Monitor example)."
+  },
+  {
+    "case": "pb_plugin_git_add",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git add a.go b.go" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-beads.md DELEGATE)."
+  },
+  {
+    "case": "pb_plugin_git_commit",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git commit -m \"feat: change\"" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (pb-gate-lifecycle step 1)."
+  },
+  {
+    "case": "pb_plugin_git_config_strategy",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git config --get pgii-integrate-branch.strategy"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-beads.md LAND)."
+  },
+  {
+    "case": "pb_plugin_git_worktree_add",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git worktree add .worktrees/pg2-abc12 -b drain/pg2-abc12"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (unblock-human-beads.md isolation)."
+  },
+  {
+    "case": "pb_plugin_pn_workspace_build",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pn workspace build" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-beads.md DELEGATE)."
+  },
+  {
+    "case": "pb_plugin_pn_workspace_info",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pn workspace info" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (pb-gate-lifecycle step 3)."
+  },
+  {
+    "case": "pb_plugin_cd_abs",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cd /Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-beads.md Self-pinned recovery)."
+  },
+  {
+    "case": "pb_plugin_ps_axo",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "ps -axo pid,comm" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (unstick-beads.md Stage 2)."
+  },
+  {
+    "case": "pb_plugin_mkdir_workdir",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "mkdir -p /tmp/bead-unstick-2026-10-05/batches /tmp/bead-unstick-2026-10-05/results /tmp/bead-unstick-2026-10-05/facts /tmp/bead-unstick-2026-10-05/probes /tmp/bead-unstick-2026-10-05/work"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (unstick-beads.md WORKDIR)."
+  },
+  {
+    "case": "pb_plugin_jq_export",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "jq -r 'select(.status == \"open\") | .id' /tmp/bead-unstick-2026-10-05/export.jsonl"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (unstick-beads.md Stage 3)."
+  },
+  {
+    "case": "pb_plugin_pin_pb_gate_check_stale_handler_close",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1", "pin"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pb gate check --stale-handler close" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Pin: a pb form no pb skill/command instructs (or one the engine cannot dispatch) stays unmodeled; must not approve."
+  },
+  {
+    "case": "pb_plugin_pin_pb_completion_zsh",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1", "pin"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pb completion zsh" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Pin: a pb form no pb skill/command instructs (or one the engine cannot dispatch) stays unmodeled; must not approve."
+  },
+  {
+    "case": "pb_plugin_pin_pb_drain_isolate_stray_operand",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1", "pin"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pb drain isolate --bead pg2-abc12 --repo /Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support extra"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "Pin: a pb form no pb skill/command instructs (or one the engine cannot dispatch) stays unmodeled; must not approve."
+  },
+  {
+    "case": "pb_plugin_bd_ready_C",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd -C /Users/phillipg/phillipg_mbp ready -n 0 --json"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (unstick-beads.md Stage 1)."
+  },
+  {
+    "case": "pb_plugin_bd_claim",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc12 --claim --actor \"sess-1-drain\" --json"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-beads.md CLAIM)."
+  },
+  {
+    "case": "pb_plugin_bd_release",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc12 --status open --assignee \"\" --actor \"sess-1-drain\""
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-beads.md Container guard / STUCK 8)."
+  },
+  {
+    "case": "pb_plugin_bd_release_order",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc12 --assignee \"\" --status open --actor \"sess-1-drain\""
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-stuck step 8)."
+  },
+  {
+    "case": "pb_plugin_bd_priority",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc12 --priority 2 --actor \"sess-1-drain\""
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-beads.md Container guard)."
+  },
+  {
+    "case": "pb_plugin_bd_defer_stamp",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc12 --status deferred --assignee \"\" --actor \"sess-1-drain\""
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-beads.md STAMP REFUSAL)."
+  },
+  {
+    "case": "pb_plugin_bd_defer_stamp_meta",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc12 --status deferred --assignee \"\" --set-metadata pd_stale=7 --actor \"sess-1-drain\""
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-beads.md STAMP REFUSAL)."
+  },
+  {
+    "case": "pb_plugin_bd_comment_text",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd comment pg2-docket \"stamp check refused pg2-abc12 (pd_curated_rev=3, pd_rev=7): reconcile owed\" --actor \"sess-1-drain\""
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-beads.md STAMP REFUSAL)."
+  },
+  {
+    "case": "pb_plugin_bd_comment_impl",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd comment pg2-abc12 \"post-deploy verification gated as pg2-def34 (pn:applied).\" --actor \"sess-1-drain\""
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-beads.md POST-DEPLOY GATE)."
+  },
+  {
+    "case": "pb_plugin_bd_comment_file",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd comment pg2-abc12 --file /tmp/unstick/work/B01-evidence.md"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (unstick-batch-worker.md)."
+  },
+  {
+    "case": "pb_plugin_bd_show_prec",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd show pg2-abc12 --json | jq -r '(.data[0].comments // [])[].text' | rg -o 'PRECONDITION-KEY: .*'"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-stuck step 5)."
+  },
+  {
+    "case": "pb_plugin_bd_show_promoted",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd show pg2-abc12 --json | jq -r '.data[0].notes // \"\"' | rg -o 'Promoted P[0-9]->P[0-9]' | tail -1"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (unblock-human-beads.md W-7)."
+  },
+  {
+    "case": "pb_plugin_bd_close",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd close pg2-abc12 --reason \"landed and verified\" --actor \"sess-1-drain\""
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-beads.md FINISH)."
+  },
+  {
+    "case": "pb_plugin_bd_create_human",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd create \"verify thing works once https://example.invalid/pr/1 is merged and deployed (pg2-abc12): checks\" --labels human --deps \"discovered-from:pg2-abc12\" --actor \"sess-1-drain\" --json"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-beads.md FALLBACK)."
+  },
+  {
+    "case": "pb_plugin_bd_create_defer",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd create \"verify thing works after apply\" --defer 2126-01-01 --json"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (pb-gate-lifecycle step 2)."
+  },
+  {
+    "case": "pb_plugin_bd_create_extract",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd create \"the prediction restated\" -d \"Extracted from pg2-abc12 while closing it as moot.\" --deps \"discovered-from:pg2-abc12\" --actor \"sess-1-drain\" --json"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-stuck CLOSE-AS-MOOT)."
+  },
+  {
+    "case": "pb_plugin_bd_create_wtreview",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd create \"worktree-review: reconcile leftover isolation for pg2-abc12 (closed as moot)\" --labels human,worktree-review --defer +7d --deps \"discovered-from:pg2-abc12\" --notes \"[worktree-review 2026-10-05] leftover isolation\" --actor \"sess-1-drain\""
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-stuck CLOSE-AS-MOOT)."
+  },
+  {
+    "case": "pb_plugin_bd_update_undefer",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd update pg2-abc13 --defer \"\"" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (pb-gate-lifecycle step 4)."
+  },
+  {
+    "case": "pb_plugin_bd_update_undefer_status",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc13 --status open --defer \"\""
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (unstick-batch-worker.md)."
+  },
+  {
+    "case": "pb_plugin_bd_update_addlabel",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc12 --add-label human --actor \"sess-1-drain\""
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-stuck 7a)."
+  },
+  {
+    "case": "pb_plugin_bd_update_addlabel2",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc12 --add-label human,stale-precondition --actor \"sess-1-drain\""
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-stuck 7b)."
+  },
+  {
+    "case": "pb_plugin_bd_update_rmlabel",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc12 --remove-label human --status open --assignee \"\" --actor \"sess-1-drain\""
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-stuck CONVERT 3)."
+  },
+  {
+    "case": "pb_plugin_bd_update_deferevent",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc12 --defer +7d --remove-label human --status open --assignee \"\" --actor \"sess-1-drain\""
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-stuck DEFER-ON-EVENT 4)."
+  },
+  {
+    "case": "pb_plugin_bd_update_rmlabels2",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc12 --remove-label human,human-focus-required --status open --assignee \"\" --actor \"sess-1-unblock\""
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (unblock-human-beads.md RELEASE)."
+  },
+  {
+    "case": "pb_plugin_bd_update_notes",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc12 --append-notes \"[container note 2026-10-05] Do NOT claim this container bead for direct work\" --actor \"sess-1-unblock\""
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (unblock-human-beads.md container note)."
+  },
+  {
+    "case": "pb_plugin_bd_update_psr",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc12 --add-label planning-session-required --defer +7d --status open --assignee \"\" --actor \"sess-1-unblock\""
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (unblock-human-beads.md class 4)."
+  },
+  {
+    "case": "pb_plugin_bd_update_wt_resolved",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc12 --remove-label human,human-focus-required,worktree-review --priority 2 --status open --assignee \"\" --append-notes \"[worktree-review-resolved 2026-10-05] verdict. Restored P0->P2.\" --actor \"sess-1-unblock\""
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (unblock-human-beads.md W-5)."
+  },
+  {
+    "case": "pb_plugin_bd_update_desc",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc12 -d \"new description\" --actor \"sess-1-unblock\""
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (unblock-human-beads.md)."
+  },
+  {
+    "case": "pb_plugin_bd_update_descfile",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd update pg2-abc12 --description-file /tmp/pg2-cjfpy1-desc.md --actor \"sess-1-unblock\""
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (unblock-human-beads.md)."
+  },
+  {
+    "case": "pb_plugin_bd_update_C_release",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd -C /Users/phillipg/phillipg_mbp update pg2-abc12 --status open --assignee \"\" --append-notes \"[unstick 2026-10-05T00:00:00Z] released: claim dormant; recheck-when: on-change\" --actor sess-unstick"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (unstick-beads.md Stage 2)."
+  },
+  {
+    "case": "pb_plugin_bd_dep_add",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bd dep add pg2-abc12 --blocked-by pg2-blk1" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-stuck CONVERT 1)."
+  },
+  {
+    "case": "pb_plugin_bd_export",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd -C /Users/phillipg/phillipg_mbp export -o /tmp/bead-unstick-2026-10-05/export.jsonl"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (unstick-beads.md Stage 1)."
+  },
+  {
+    "case": "pb_plugin_pghooks_status",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "pg-hooks status --porcelain" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-beads.md ISOLATE)."
+  },
+  {
+    "case": "pb_plugin_git_C_revparse",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C /Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support rev-parse --abbrev-ref HEAD"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-beads.md LAND)."
+  },
+  {
+    "case": "pb_plugin_git_C_revparse_wt",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C /Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support/.worktrees/pg2-abc12 rev-parse --abbrev-ref HEAD"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-beads.md LAND lander)."
+  },
+  {
+    "case": "pb_plugin_git_C_mergebase",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C /Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support merge-base --is-ancestor 0123456789abcdef main; echo $?"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-beads.md LAND VERIFY)."
+  },
+  {
+    "case": "pb_plugin_git_C_revparse_branch",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C /Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support rev-parse drain/pg2-abc12"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-beads.md LAND VERIFY)."
+  },
+  {
+    "case": "pb_plugin_git_symbolic_ref",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git symbolic-ref refs/remotes/origin/HEAD" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-beads.md LAND)."
+  },
+  {
+    "case": "pb_plugin_git_C_status_porcelain",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C /Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support/.worktrees/pg2-abc12 status --porcelain"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-stuck CLOSE-AS-MOOT)."
+  },
+  {
+    "case": "pb_plugin_git_C_cherry",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C /Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support cherry -v main drain/pg2-abc12"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-stuck CLOSE-AS-MOOT)."
+  },
+  {
+    "case": "pb_plugin_git_C_rangediff",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C /Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support range-diff main...drain/pg2-abc12"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (unblock-human-beads.md 1a)."
+  },
+  {
+    "case": "pb_plugin_git_C_log_docs",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C /Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support log --oneline --since=2026-10-01 -- docs/adr docs/behavior docs/guides"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (unblock-human-beads.md class 4)."
+  },
+  {
+    "case": "pb_plugin_git_C_grep_docs",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C /Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support grep -l -i -- 'some term' main -- docs/"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (unblock-human-beads.md class 4)."
+  },
+  {
+    "case": "pb_plugin_git_C_cherry_literal",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C /Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support cherry -v main"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (unstick-batch-worker.md)."
+  },
+  {
+    "case": "pb_plugin_git_ls_tree",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git ls-tree -r main --name-only -- modules/foo"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (unblock-human-beads.md freshness)."
+  },
+  {
+    "case": "pb_plugin_git_C_branch_d",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C /Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support branch -d drain/pg2-abc12"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (unblock-human-beads.md 1a)."
+  },
+  {
+    "case": "pb_plugin_integrate_branch_support",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "integrate-branch-support" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-beads.md LAND)."
+  },
+  {
+    "case": "pb_plugin_session_mode_start",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "session-mode start drain-beads --force --detail \"P1, db label\""
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-beads.md Startup)."
+  },
+  {
+    "case": "pb_plugin_session_mode_finished",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "session-mode set-status finished" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-beads.md CLAIM)."
+  },
+  {
+    "case": "pb_plugin_session_mode_stopping",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "session-mode set-status stopping" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (stop-draining-beads.md)."
+  },
+  {
+    "case": "pb_plugin_gh_pr_view",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh pr view 12 -R owner/repo --json state,isDraft"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-beads.md LAND VERIFY)."
+  },
+  {
+    "case": "pb_plugin_rg_lF_assignee",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "rg -l -F sess-1-drain /Users/phillipg/.claude/projects"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (unstick-beads.md Stage 2)."
+  },
+  {
+    "case": "pb_plugin_git_status_porcelain",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "git status --porcelain" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (unblock-human-beads.md 1a)."
+  },
+  {
+    "case": "pb_plugin_git_C_status_wt",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C /Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support status --porcelain"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (unblock-human-beads.md 1a)."
+  },
+  {
+    "case": "pb_plugin_bd_C_show",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "bd -C /Users/phillipg/phillipg_mbp show pg2-abc12 --json"
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (unstick-beads.md)."
   }
 ]

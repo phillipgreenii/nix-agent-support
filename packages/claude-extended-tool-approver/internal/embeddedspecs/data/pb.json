@@ -1,0 +1,666 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "pb",
+  "command": {
+    "name": "pb",
+    "provenance": "pb --help (pb 0.0.0-b674b6b9, this host 2026-10-05)",
+    "citations": {
+      "provenance": {
+        "source": "pb --help: \"phillip-beads: pn:applied gates + drain-loop helpers\""
+      },
+      "stdin": {
+        "source": "pb --help: usage \"Usage: pb [command]\" documents no stdin consumption; classified \"never\""
+      },
+      "stdout": {
+        "source": "pb --help: usage \"Usage: pb [command]\" and description \"phillip-beads: pn:applied gates + drain-loop helpers\" describe terminal output only; classified by the schema's stdout kind"
+      },
+      "unknownFlag": {
+        "source": "pb --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "flags": {
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pb --help: \"-h, --help      help for pb\""
+        }
+      },
+      "--version": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pb --help: \"-v, --version   version for pb\""
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pb --help: \"-h, --help      help for pb\""
+        }
+      },
+      "-v": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "pb --help: \"-v, --version   version for pb\""
+        }
+      }
+    },
+    "positionals": {
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "pb --help: usage \"Usage: pb [command]\" - the first positional is the subcommand key; operand layout belongs to the subcommand schemas"
+      }
+    },
+    "stdin": "never",
+    "stdout": "none",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true,
+    "subcommands": {
+      "drain": {
+        "name": "drain",
+        "provenance": "pb drain --help (pb 0.0.0-b674b6b9, this host 2026-10-05)",
+        "citations": {
+          "provenance": {
+            "source": "pb drain --help: \"Helpers for the /drain-beads work loop\""
+          },
+          "stdin": {
+            "source": "pb drain --help: usage \"Usage: pb drain [command]\" documents no stdin consumption; classified \"never\""
+          },
+          "stdout": {
+            "source": "pb drain --help: usage \"Usage: pb drain [command]\" and description \"Helpers for the /drain-beads work loop\" describe terminal output only; classified by the schema's stdout kind"
+          },
+          "unknownFlag": {
+            "source": "pb drain --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pb drain --help: \"-h, --help   help for drain\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pb drain --help: \"-h, --help   help for drain\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pb drain --help: usage \"Usage: pb drain [command]\" - the first positional is the subcommand key; operand layout belongs to the subcommand schemas"
+          }
+        },
+        "stdin": "never",
+        "stdout": "none",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true,
+        "subcommands": {
+          "isolate": {
+            "name": "isolate",
+            "provenance": "pb drain isolate --help (pb 0.0.0-b674b6b9, this host 2026-10-05)",
+            "citations": {
+              "provenance": {
+                "source": "pb drain isolate --help: \"Idempotent isolation for one bead: reuses an existing worktree or parked branch, otherwise branches off the repo's primary branch.\""
+              },
+              "stdin": {
+                "source": "pb drain isolate --help: usage \"Usage: pb drain isolate [flags]\" documents no stdin consumption; classified \"never\""
+              },
+              "stdout": {
+                "source": "pb drain isolate --help: usage \"Usage: pb drain isolate [flags]\" and description \"Idempotent isolation for one bead: reuses an existing worktree or parked branch, otherwise branches off the repo's primary branch.\" describe terminal output only; classified by the schema's stdout kind"
+              },
+              "unknownFlag": {
+                "source": "pb drain isolate --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--bead": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pb drain isolate --help: \"--bead string   bead id (required)\""
+                }
+              },
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pb drain isolate --help: \"-h, --help   help for isolate\""
+                }
+              },
+              "--json": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pb drain isolate --help: \"--json   JSON output\""
+                }
+              },
+              "--repo": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pb drain isolate --help: \"--repo string   absolute path to the canonical clone (required)\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pb drain isolate --help: \"-h, --help   help for isolate\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "unmodeled"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "pb drain isolate --help: usage \"Usage: pb drain isolate [flags]\" lists no positional operand; every operand is left unmodeled (insufficient)"
+              }
+            },
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          }
+        }
+      },
+      "gate": {
+        "name": "gate",
+        "provenance": "pb gate --help (pb 0.0.0-b674b6b9, this host 2026-10-05)",
+        "citations": {
+          "provenance": {
+            "source": "pb gate --help: \"Manage pn:applied gates\""
+          },
+          "stdin": {
+            "source": "pb gate --help: usage \"Usage: pb gate [command]\" documents no stdin consumption; classified \"never\""
+          },
+          "stdout": {
+            "source": "pb gate --help: usage \"Usage: pb gate [command]\" and description \"Manage pn:applied gates\" describe terminal output only; classified by the schema's stdout kind"
+          },
+          "unknownFlag": {
+            "source": "pb gate --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pb gate --help: \"-h, --help   help for gate\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pb gate --help: \"-h, --help   help for gate\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pb gate --help: usage \"Usage: pb gate [command]\" - the first positional is the subcommand key; operand layout belongs to the subcommand schemas"
+          }
+        },
+        "stdin": "never",
+        "stdout": "none",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true,
+        "subcommands": {
+          "attach-verified-child": {
+            "name": "attach-verified-child",
+            "provenance": "pb gate attach-verified-child --help (pb 0.0.0-b674b6b9, this host 2026-10-05)",
+            "citations": {
+              "provenance": {
+                "source": "pb gate attach-verified-child --help: \"Create a DEFERRED verification child of --impl, gate it on the landed commits, then un-defer\""
+              },
+              "stdin": {
+                "source": "pb gate attach-verified-child --help: usage \"Usage: pb gate attach-verified-child [flags]\" documents no stdin consumption; classified \"never\""
+              },
+              "stdout": {
+                "source": "pb gate attach-verified-child --help: usage \"Usage: pb gate attach-verified-child [flags]\" and description \"Create a DEFERRED verification child of --impl, gate it on the landed commits, then un-defer\" describe terminal output only; classified by the schema's stdout kind"
+              },
+              "unknownFlag": {
+                "source": "pb gate attach-verified-child --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--actor": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pb gate attach-verified-child --help: \"--actor string   bd actor id (required)\""
+                }
+              },
+              "--gate": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pb gate attach-verified-child --help: \"--gate stringArray   <repo-key>=<sha> to gate on; repeatable, one per changed repo (required)\""
+                }
+              },
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pb gate attach-verified-child --help: \"-h, --help   help for attach-verified-child\""
+                }
+              },
+              "--impl": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pb gate attach-verified-child --help: \"--impl string   implementation bead id (required)\""
+                }
+              },
+              "--json": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pb gate attach-verified-child --help: \"--json   JSON output\""
+                }
+              },
+              "--reason": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pb gate attach-verified-child --help: \"--reason string   gate reason (default \"post-deploy verify for <impl>\")\""
+                }
+              },
+              "--title": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pb gate attach-verified-child --help: \"--title string   verification child title (required)\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pb gate attach-verified-child --help: \"-h, --help   help for attach-verified-child\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "unmodeled"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "pb gate attach-verified-child --help: usage \"Usage: pb gate attach-verified-child [flags]\" lists no positional operand; every operand is left unmodeled (insufficient)"
+              }
+            },
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "check": {
+            "name": "check",
+            "provenance": "pb gate check --help (pb 0.0.0-b674b6b9, this host 2026-10-05)",
+            "citations": {
+              "provenance": {
+                "source": "pb gate check --help: \"Resolve pn:applied gates whose change has been applied (run inside a workspace)\""
+              },
+              "stdin": {
+                "source": "pb gate check --help: usage \"Usage: pb gate check [flags]\" documents no stdin consumption; classified \"never\""
+              },
+              "stdout": {
+                "source": "pb gate check --help: usage \"Usage: pb gate check [flags]\" and description \"Resolve pn:applied gates whose change has been applied (run inside a workspace)\" describe terminal output only; classified by the schema's stdout kind"
+              },
+              "unknownFlag": {
+                "source": "pb gate check --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--dry-run": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pb gate check --help: \"--dry-run   report what would resolve/convert; change nothing\""
+                }
+              },
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pb gate check --help: \"-h, --help   help for check\""
+                }
+              },
+              "--json": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pb gate check --help: \"--json   JSON output\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pb gate check --help: \"-h, --help   help for check\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "unmodeled"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "pb gate check --help: usage \"Usage: pb gate check [flags]\" lists no positional operand; every operand is left unmodeled (insufficient)"
+              }
+            },
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
+          "create": {
+            "name": "create",
+            "provenance": "pb gate create --help (pb 0.0.0-b674b6b9, this host 2026-10-05)",
+            "citations": {
+              "provenance": {
+                "source": "pb gate create --help: \"Create pn:applied gate(s) blocking a bead until a change is applied\""
+              },
+              "stdin": {
+                "source": "pb gate create --help: usage \"Usage: pb gate create [flags]\" documents no stdin consumption; classified \"never\""
+              },
+              "stdout": {
+                "source": "pb gate create --help: usage \"Usage: pb gate create [flags]\" and description \"Create pn:applied gate(s) blocking a bead until a change is applied\" describe terminal output only; classified by the schema's stdout kind"
+              },
+              "unknownFlag": {
+                "source": "pb gate create --help: full flag listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--blocks": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pb gate create --help: \"--blocks string   bead id to block (required)\""
+                }
+              },
+              "--commit": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pb gate create --help: \"--commit string   commit-ish to gate (default HEAD)\""
+                }
+              },
+              "--commits": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pb gate create --help: \"--commits string   commit range → one gate per commit (advanced)\""
+                }
+              },
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pb gate create --help: \"-h, --help   help for create\""
+                }
+              },
+              "--json": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pb gate create --help: \"--json   JSON output\""
+                }
+              },
+              "--reason": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pb gate create --help: \"--reason string   gate reason\""
+                }
+              },
+              "--repo": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pb gate create --help: \"--repo string   workspace repo key (required)\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pb gate create --help: \"-h, --help   help for create\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "unmodeled"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "pb gate create --help: usage \"Usage: pb gate create [flags]\" lists no positional operand; every operand is left unmodeled (insufficient)"
+              }
+            },
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          }
+        }
+      }
+    }
+  }
+}

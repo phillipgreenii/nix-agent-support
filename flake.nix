@@ -2856,6 +2856,8 @@
                       (phillipgreenii-nix-base.packages.${pkgs.stdenv.hostPlatform.system} or { }) ? pg-go-mutate
                     ) phillipgreenii-nix-base.packages.${pkgs.stdenv.hostPlatform.system}.pg-go-mutate
                     ++ pkgs.lib.optional (pkgs ? pnwf) pkgs.pnwf
+                    # pb (pg2-cjfpy.1): this repo's own overlay package (packages/pb).
+                    ++ [ pkgs.pb ]
                     ++ [
                       # pg2-cjfpy.4: gh (the gh-stack plugin's auth/extension/stack
                       # verbs) and this flake's own pg-connector/pg-desk. coreutils

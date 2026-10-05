@@ -264,7 +264,7 @@ func TestRegistryNames(t *testing.T) {
 	// names are the original core and which the epic added.
 	want := []string{
 		"[", "awk", "bash", "bd", "cat", "cd", "cp", "curl", "devbox", "echo", "export", "false", "find", "gawk", "git", "go", "gofmt", "grep",
-		"head", "jq", "just", "kubectl", "ls", "mkdir", "nix", "npm", "pgrep", "pn", "pnwf", "printf", "ps", "rm", "rtk", "scp", "sed", "sh", "sleep", "sort", "ssh", "tail", "tee",
+		"head", "jq", "just", "kubectl", "ls", "mkdir", "nix", "npm", "pb", "pgrep", "pn", "pnwf", "printf", "ps", "rm", "rtk", "scp", "sed", "sh", "sleep", "sort", "ssh", "tail", "tee",
 		"test", "treefmt", "true", "wc", "which", "xargs", "yq",
 	}
 	want = append(
