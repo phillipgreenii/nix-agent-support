@@ -55,8 +55,9 @@ head (the newest run per workflow, so a green re-run supersedes an earlier failu
 `check_interpreters` pattern excludes, and whose conclusion is neither a pass (`success`,
 `neutral`, `skipped`) nor undecided (still running, `pending`, `expected`). A cancelled run that is
 the newest for its workflow counts as failed. A run that fails only because of review-exempt jobs
-(`review_exempt_checks`, see [`interpret.md`](interpret.md)) still counts as failed here: the
-exemption affects whether the PR is reviewable, never what is reported as failing. The link's `label` is "`<run name> (<state>)`", its
+(`review_exempt_checks`, see [`interpret.md`](interpret.md)), and a cancelled run that no longer
+blocks a team PR from review, both still count as failed here: those rules affect whether the PR
+is reviewable, never what is reported as failing. The link's `label` is "`<run name> (<state>)`", its
 `url` is the run's URL and its `state` is the run's conclusion. A PR with no failing run — green,
 still running, or with no stored CI facts — has no `build` link. A failing run with no usable URL
 is omitted (INV-LINKS-3).

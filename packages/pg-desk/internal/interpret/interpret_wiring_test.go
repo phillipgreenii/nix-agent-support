@@ -61,6 +61,16 @@ func TestInterpret_CIScopedToPRHeadSHA(t *testing.T) {
 	with := func(head ...map[string]any) []map[string]any {
 		return append(append([]map[string]any{}, head...), oldCancelled...)
 	}
+	// Without a head SHA the rollup falls back to counting EVERY run. The
+	// fallback cases need a REAL failure on the old SHA to prove that: a
+	// cancelled run no longer blocks a reviewer (see
+	// TestInterpret_CancelledAndNoCIReviewerRules), so it cannot stand in.
+	oldFailed := []map[string]any{
+		ciRun("A", "failure", "old", "5", 1), ciRun("B", "failure", "old", "6", 1),
+	}
+	withFailed := func(head ...map[string]any) []map[string]any {
+		return append(append([]map[string]any{}, head...), oldFailed...)
+	}
 	cases := []struct {
 		name  string
 		extra map[string]any
@@ -82,20 +92,26 @@ func TestInterpret_CIScopedToPRHeadSHA(t *testing.T) {
 		{
 			"no head_sha in pr show falls back to all runs -> awaiting_owner",
 			nil,
-			with(ciRun("A", "success", "new", "10", 1), ciRun("B", "success", "new", "11", 1)),
+			withFailed(ciRun("A", "success", "new", "10", 1), ciRun("B", "success", "new", "11", 1)),
 			PanelTeamAwaitingOwner,
 		},
 		{
 			"empty head_sha string falls back to all runs -> awaiting_owner",
 			map[string]any{"head_sha": ""},
-			with(ciRun("A", "success", "new", "10", 1)),
+			withFailed(ciRun("A", "success", "new", "10", 1)),
 			PanelTeamAwaitingOwner,
 		},
 		{
 			"explicit null head_sha falls back -> awaiting_owner",
 			map[string]any{"head_sha": nil},
-			with(ciRun("A", "success", "new", "10", 1)),
+			withFailed(ciRun("A", "success", "new", "10", 1)),
 			PanelTeamAwaitingOwner,
+		},
+		{
+			"no head_sha, only cancelled runs counted -> awaiting_team (a cancellation is not a verdict)",
+			nil,
+			with(ciRun("A", "success", "new", "10", 1)),
+			PanelTeamAwaitingTeam,
 		},
 	}
 	for _, tc := range cases {

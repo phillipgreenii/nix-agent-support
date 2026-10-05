@@ -36,7 +36,10 @@ and MUST NOT use an LLM for any step below.
   PR: author in the team-members list, a review requested of self, a self review already exists,
   or the PR's labels intersect the configured watch labels.
 - **Ready-to-promote** — a stored flag (own PR, not co-owned, draft, not WIP, checks green — judged
-  by the same review-exempt rule as "blocked" below — no bot disapproval, no merge conflict). It is recorded, not acted on — see "Out of scope" below.
+  by the same review-exempt rule as the owner-side "blocked" below, and NOT softened by the
+  reviewer-only cancelled-run and no-CI-data rules, so an own draft whose only run was cancelled
+  or that has no CI data is never ready — no bot disapproval, no merge conflict). It is recorded,
+  not acted on — see "Out of scope" below.
 - **Panel placement** — five named panels (`team_awaiting_owner`, `team_awaiting_team`,
   `team_awaiting_me`, `mine_awaiting_me`, `mine_awaiting_team`), or no panel at all for a PR that
   is not open, a draft team PR, or a team PR with zero match reasons. Operator ruling, 2026-09-25
@@ -46,8 +49,12 @@ and MUST NOT use an LLM for any step below.
   A PR is **blocked** when CI is failing or absent (`failure` or `none` — `success` and
   `pending` do not block; a PR still waiting on CI falls through to the approval checks below,
   operator ruling 2026-10-01), the bot verdict is disapproved, a non-bot reviewer currently carries a
-  `CHANGES_REQUESTED` review, or there is a merge conflict. Blocked always wins over every
-  assignment/approval check below.
+  `CHANGES_REQUESTED` review, or there is a merge conflict. For an **own** PR, blocked always wins
+  over every assignment/approval check below. For a **team** PR, the blocked test differs in three
+  ways (operator ruling 2026-10-05, reversing parts of 2026-10-01): a cancelled run that masks no
+  real failure does not block; no CI data (`none`) does not block (it reads as `pending`); and a
+  bot disapproval does not block a PR the operator was asked to review. These reviewer-only
+  softenings never apply to the own-PR panels or to ready-to-promote.
   - **Review-exempt checks.** The configuration key `review_exempt_checks` (default empty) lists
     CI job names whose failure alone does not make a PR unreviewable (operator ruling 2026-10-02).
     A failed run is _exempt_ only when pg-desk can prove it: the run's per-job results were
@@ -63,6 +70,22 @@ and MUST NOT use an LLM for any step below.
     is _not provably exempt_ and keeps the PR blocked; so does a failed run that reports no failed
     job. Any other failed run, or any other blocker (bot disapproval, requested changes, merge
     conflict), still blocks. With an empty list the behavior is exactly the one described above.
+  - **Cancelled runs (team PRs only).** A run whose conclusion is `cancelled` is a cancellation,
+    not a verdict about the code: it usually comes from a concurrency supersession or someone
+    stopping the run, and the PR owner has nothing to fix. For a team PR it does not make the PR
+    unreviewable, with one guard: if the run's gathered job results show a job that really failed
+    (neither cancelled nor exempt) before the cancel, the run is a real failure and blocks. A
+    cancelled run whose jobs were not gathered is treated as harmless — the one case where absent job
+    data softens a failure, because a cancellation is a distinct category. Because only the newest
+    run of each workflow counts, a newest cancelled run also supersedes an older real failure of the
+    same workflow. When every failed run on the head commit is exempt or harmlessly cancelled, the
+    team PR is treated as `pending` when other runs are in flight and as `success` otherwise. The CI
+    rollup itself is unchanged: the CI state still reads `failure`, the `ci-failing` urgency signal
+    fires, and the `build` link ([`links.md`](links.md)) is still produced.
+  - **No CI data (team PRs only).** A rollup of `none` means pg-desk counted no run on the head
+    commit. That conflates "this PR has no CI" with "pg-desk saw no data" (the connector can return
+    nothing for a PR whose checks all pass), so it is not a failure and does not block a team PR.
+    The own-PR panels keep treating it as not green.
   - **CI green** is judged only from the PR's current head commit. Workflow runs from earlier
     pushed commits are ignored — GitHub cancels a superseded commit's in-flight runs, and those
     cancellations are not failures of the current state. Within the head commit only the newest
@@ -80,27 +103,56 @@ and MUST NOT use an LLM for any step below.
     does not look like a bot), ends in `[bot]`, or is one of a small set of known bots GitHub
     reports without that suffix on reviews (`github-actions`, `dependabot`,
     `copilot-pull-request-reviewer`). A bot's approval is carried by the bot verdict instead.
-  - **Team**, once not blocked: if the operator is a requested reviewer and has not yet approved
-    → `team_awaiting_me`; if the operator has already approved but is still a requested reviewer →
-    also `team_awaiting_me` (GitHub drops a reviewer from the requested list once they submit any
-    review, so a requested-and-already-approved operator means the PR author re-requested a look,
-    usually after new commits; a live re-request wins over the prior approval). If the operator is
-    not a requested reviewer: any existing human approval → `team_awaiting_owner`, otherwise → `team_awaiting_team`. Blocked
-    → `team_awaiting_owner` (fixing CI/conflicts/disapprovals is the PR owner's job, not the
-    reviewer's).
+  - **Team**, evaluated in this order:
+    1. **Hard-blocked** — CI failing (judged as described under the cancelled-run and no-CI-data
+       rules above), a non-bot reviewer's `CHANGES_REQUESTED`, or a merge conflict →
+       `team_awaiting_owner`, even when the operator is a requested reviewer: fixing those is the PR
+       owner's job, not the reviewer's. (A reviewer's own `CHANGES_REQUESTED` therefore still beats a
+       later re-request; that is existing behavior, not part of the 2026-10-05 ruling.)
+    2. **Requested of the operator** → `team_awaiting_me`, whether or not they already approved
+       (GitHub drops a reviewer from the requested list once they submit any review, so a
+       requested-and-already-approved operator means the PR author re-requested a look, usually after
+       new commits; a live re-request wins over the prior approval). A bot disapproval does not
+       override a live request: the review bot's own comment states that its review does not satisfy
+       code-owner requirements and human review is still required, so its verdict is advice to a
+       human reviewer, not a gate (operator ruling 2026-10-05).
+    3. **Bot disapproved** (operator not requested) → `team_awaiting_owner`.
+    4. **A human approval exists** → decided by GitHub's merge state, because an approval count says
+       nothing about whether the PR is ready (operator ruling 2026-10-05): `BLOCKED` →
+       `team_awaiting_team` (merge requirements are still unmet, normally outstanding required
+       reviews), except while any CI run is still in flight, when `BLOCKED` is plausibly just the
+       pending check and the PR stays `team_awaiting_owner`; `UNKNOWN` or absent → fall back to the
+       weaker proxy "a review request is still outstanding" → `team_awaiting_team`, otherwise
+       `team_awaiting_owner`; any other state (`CLEAN`, `HAS_HOOKS`, `UNSTABLE`, `BEHIND`) →
+       `team_awaiting_owner` (nothing is left but the owner merging or updating the branch). A
+       conflict (`DIRTY`) is already a hard blocker above.
+    5. **Otherwise** → `team_awaiting_team`.
   - **Mine**, once not blocked: any unresolved review-thread comment → `mine_awaiting_me` (no
     author qualifier — an open thread is on the operator regardless of who left it). Otherwise, an
     existing human approval → `mine_awaiting_me` (nothing left to do but merge). Otherwise →
-    `mine_awaiting_team`. Blocked → `mine_awaiting_me` (it's the operator's own PR to fix).
+    `mine_awaiting_team`. Blocked → `mine_awaiting_me` (it's the operator's own PR to fix). The
+    own-PR panels are unchanged by the 2026-10-05 team rulings: they use only the review-exempt
+    softening, never the cancelled-run or no-CI-data softening, never the merge-state rule, and a
+    bot disapproval still blocks.
 
   **Known data gap:** pg-desk has no per-review head-SHA history, so "approved" here means "a
   currently `APPROVED` review exists," not "a non-stale one" — a self- or team-approval from
   before the PR's latest push still reads as satisfied. A future gather/store change to add
   per-review staleness would change this without changing the taxonomy above.
 
-  **Known scope gap:** the taxonomy cannot distinguish "fully approved" from "partially approved"
-  (no required-approver-count signal — no CODEOWNERS/branch-protection data is gathered), so mine
-  has only two panels rather than a third "waiting on more approvals" bucket.
+  **Known scope gap:** pg-desk gathers no required-approver count or CODEOWNERS data. The team side
+  works around that with GitHub's own merge state (above); the own-PR side has no such signal, so
+  it cannot distinguish "fully approved" from "partially approved" and has only two panels rather
+  than a third "waiting on more approvals" bucket.
+
+  **Merge-state limits.** The merge state is a snapshot from the PR's last full hydration, not a
+  live read: it is not a change signal (the entity change flow deliberately ignores it), GitHub
+  computes it lazily so it can read `UNKNOWN` right after an event, and a settled value can lag by
+  up to the sweep interval. The error is benign — both `team_awaiting_owner` and
+  `team_awaiting_team` are outside the default `open` view. `BLOCKED` can also come from required
+  conversation resolution, which is the author's job; the taxonomy does not distinguish that from
+  outstanding reviews. Whether GitHub reports `BLOCKED` or `BEHIND` when a branch is both behind and
+  unreviewed is not verified; both are best-effort.
 
 **Hidden and WIP are explicitly NOT interpreted.** `serve` and `open` join the `annotation` table
 at read time, so a `hide` or `wip` call takes effect on the very next request, never waiting for

@@ -18,8 +18,7 @@ Pinned by the ported `open_test.go`/`open_json_test.go` goldens: `--mine`, `--al
   always be excluded.
 - The per-side attention default: the team side defaults to needs-attention; `--mine` defaults to
   all. On the team side, "needs attention" resolves to exactly the `team_awaiting_me` panel — a
-  PR the operator is a requested reviewer on and hasn't approved yet — not every non-blocked team
-  PR. `team_awaiting_team` and `team_awaiting_owner` rows are still selectable with `--all`, just
+  PR the operator is a requested reviewer on and hasn't approved yet — not every team PR. `team_awaiting_team` and `team_awaiting_owner` rows are still selectable with `--all`, just
   excluded from the default view.
 - The `PG_DESK_OUTPUT=json` environment variable overrides the default text rendering.
 

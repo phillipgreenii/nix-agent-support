@@ -110,3 +110,48 @@ func TestEvaluate_DecodesJobs(t *testing.T) {
 		t.Fatalf("a run without jobs must stay not-fetched (nil): %+v", got[1].Jobs)
 	}
 }
+
+// CancelledOnly is the reviewer-facing softening for a cancelled newest run
+// (operator ruling 2026-10-05). It must NOT change Outcome: a cancelled run is
+// still Failed for the display rollup, `ci-failing` urgency and `build` links.
+func TestCancelledOnly(t *testing.T) {
+	isExempt := CompileExempt([]string{"slow-nightly"})
+	job := func(name, conclusion string) Job { return Job{Name: name, Status: "completed", Conclusion: conclusion} }
+	cancelled := func(jobs ...Job) Counted {
+		return Counted{Run: Run{Status: "completed", Conclusion: "cancelled", Jobs: jobs}, Outcome: Failed}
+	}
+	cases := []struct {
+		name string
+		c    Counted
+		want bool
+	}{
+		{"cancelled, jobs not fetched (the one case absent job data softens a failure)", cancelled(), true},
+		{"cancelled, every job cancelled or passing", cancelled(job("unit", "cancelled"), job("lint", "success"), job("docs", "skipped")), true},
+		{"cancelled, a job really failed first", cancelled(job("unit", "cancelled"), job("lint", "failure")), false},
+		{"cancelled, a job timed out", cancelled(job("lint", "timed_out")), false},
+		{"cancelled, the only real failure is an exempt job", cancelled(job("slow-nightly", "failure"), job("unit", "cancelled")), true},
+		{"cancelled, exempt job failed AND a non-exempt job failed", cancelled(job("slow-nightly", "failure"), job("lint", "failure")), false},
+		{"cancelled, an in-progress job is not a failure", cancelled(Job{Name: "unit", Status: "in_progress"}), true},
+		{"failure conclusion is not a cancellation", Counted{Run: Run{Status: "completed", Conclusion: "failure"}, Outcome: Failed}, false},
+		{"timed_out conclusion is not a cancellation", Counted{Run: Run{Status: "completed", Conclusion: "timed_out"}, Outcome: Failed}, false},
+		{"cancelled conclusion but the run is not Failed (e.g. still running)", Counted{Run: Run{Status: "in_progress", Conclusion: "cancelled"}, Outcome: Pending}, false},
+		{"passed run", Counted{Run: Run{Status: "completed", Conclusion: "success"}, Outcome: Passed}, false},
+	}
+	for _, tc := range cases {
+		if got := tc.c.CancelledOnly(isExempt); got != tc.want {
+			t.Errorf("%s: got %v want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// Evaluate keeps a cancelled newest run as Failed -- CancelledOnly is the only
+// thing that softens it, and only for the reviewer.
+func TestEvaluate_CancelledStaysFailedAndIsCancelledOnly(t *testing.T) {
+	got := Evaluate(payload(t, run("EAS PR Preview", "cancelled", "h", "1", 1)), nil, "h")
+	if len(got) != 1 || got[0].Outcome != Failed {
+		t.Fatalf("got %+v; want one Failed run", got)
+	}
+	if !got[0].CancelledOnly(CompileExempt(nil)) {
+		t.Fatal("a bare cancelled run must be CancelledOnly")
+	}
+}

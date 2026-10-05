@@ -130,6 +130,29 @@ func (c Counted) OnlyExemptJobsFailed(isExempt func(name string) bool) bool {
 	return failedJobs > 0
 }
 
+// CancelledOnly reports whether this counted run is a cancelled run that does
+// not mask a real job failure: its conclusion is "cancelled" and, among its
+// fetched jobs, none failed for a reason other than cancellation or an exempt
+// name. GitHub reports a run as cancelled even when one job genuinely failed
+// before the cancel, so a non-cancelled, non-exempt failed job keeps the run
+// "real". A cancelled run whose jobs were not fetched (Jobs empty) IS soft:
+// this is the one case where absent job data softens a failure, because a
+// cancellation is a distinct category (concurrency supersession, a manual
+// stop) that says nothing about the code under review. The run stays Failed
+// in Outcome so the display rollup, `ci-failing` urgency and `build` links
+// still report it; only the reviewer-facing decision consults this.
+func (c Counted) CancelledOnly(isExempt func(name string) bool) bool {
+	if c.Outcome != Failed || c.Conclusion != "cancelled" {
+		return false
+	}
+	for _, j := range c.Jobs {
+		if ClassifyJob(j) == Failed && j.Conclusion != "cancelled" && !isExempt(j.Name) {
+			return false
+		}
+	}
+	return true
+}
+
 // newer reports whether a supersedes b (same workflow name, same SHA): higher
 // attempt wins, then higher numeric id (string compare if unparsable).
 func newer(a, b Run) bool {

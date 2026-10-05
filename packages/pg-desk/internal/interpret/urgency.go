@@ -204,23 +204,37 @@ func computeEnrichment(pr prShow, files []prFile, commits []prCommit) Enrichment
 
 type ciRollupResult struct {
 	// State is the display/rollup state: none | pending | success | failure.
-	// It is NEVER softened by review_exempt_checks -- a failing exempt job
-	// still reads "failure" here (and in every display of CI).
+	// It is NEVER softened by review_exempt_checks or by cancelled runs -- a
+	// failing exempt job or a cancelled run still reads "failure" here (and in
+	// every display of CI).
 	State string
 
-	// reviewState, when non-empty, overrides State for review-blocking
-	// decisions only (see ReviewState). It is set only when State is
+	// reviewState, when non-empty, overrides State for the MINE panels and
+	// ready-to-promote only (see ReviewState). It is set only when State is
 	// "failure" and every failed run is provably failing solely because of
 	// review-exempt jobs.
 	reviewState string
+
+	// reviewerState, when non-empty, overrides State for the TEAM panel's
+	// reviewer-facing decision only (see ReviewerState). It is set only when
+	// State is "failure" and every failed run is either provably exempt-only
+	// or a cancelled run that masks no real job failure (cirun CancelledOnly).
+	reviewerState string
+
+	// inFlight records that at least one counted run is still running,
+	// independent of State (a failure can coexist with in-flight runs).
+	inFlight bool
 }
 
-// ReviewState is the CI state the review-blocking decisions (panel
-// "blocked", ready-to-promote) consult -- the single place the
-// review_exempt_checks rule applies. It equals State unless every failed run
-// is provably failing only because of review-exempt jobs, in which case those
-// failures are set aside: "pending" if other runs are still in flight,
-// otherwise "success". Absent job data never exempts a failure.
+// ReviewState is the CI state the OWNER-side decisions (the mine panels,
+// ready-to-promote) consult -- the single place the review_exempt_checks rule
+// applies. It equals State unless every failed run is provably failing only
+// because of review-exempt jobs, in which case those failures are set aside:
+// "pending" if other runs are still in flight, otherwise "success". Absent job
+// data never exempts a failure. It is deliberately NOT softened for cancelled
+// runs or for "none": an own draft whose only run was cancelled has never
+// shown green CI, so it must not read as ready to promote, and an own PR with
+// no CI data is not green (operator ruling 2026-10-01).
 func (r ciRollupResult) ReviewState() string {
 	if r.reviewState != "" {
 		return r.reviewState
@@ -228,15 +242,37 @@ func (r ciRollupResult) ReviewState() string {
 	return r.State
 }
 
+// ReviewerState is the CI state the TEAM panel's "is this PR blocked for a
+// reviewer" decision consults (operator ruling 2026-10-05). It is ReviewState
+// plus two reviewer-only softenings: a cancelled newest run that masks no real
+// job failure does not block (a cancellation says nothing about the code, and
+// the owner has nothing to fix), and "none" -- no countable run -- reads
+// "pending" (it conflates "no CI exists" with "pg-desk saw no data", so it
+// cannot be treated as a failure). Display of CI is unaffected.
+func (r ciRollupResult) ReviewerState() string {
+	if r.reviewerState != "" {
+		return r.reviewerState
+	}
+	if r.State == "none" {
+		return "pending"
+	}
+	return r.ReviewState()
+}
+
+// RunsInFlight reports whether at least one counted run is still running.
+func (r ciRollupResult) RunsInFlight() bool {
+	return r.inFlight || r.State == "pending"
+}
+
 // computeCIRollup rolls the `pg-connector ci list` fan-out up to one state.
 // Which runs count (head-SHA only, newest per workflow name, check_interpreters
 // exclusions) is decided by internal/cirun, shared with the `links` verb so a
 // menu's build links and this rollup never disagree. reviewExempt is config
 // review_exempt_checks (exact job names); it never changes State, only the
-// result's ReviewState.
+// result's ReviewState and ReviewerState.
 func computeCIRollup(raw json.RawMessage, interpreters []config.CheckInterpreterConfig, headSHA string, reviewExempt []string) ciRollupResult {
 	isExempt := cirun.CompileExempt(reviewExempt)
-	var passed, failed, pending, exemptFailed int
+	var passed, failed, pending, exemptFailed, softFailed int
 	for _, r := range cirun.Evaluate(raw, interpreters, headSHA) {
 		switch r.Outcome {
 		case cirun.Pending:
@@ -245,25 +281,34 @@ func computeCIRollup(raw json.RawMessage, interpreters []config.CheckInterpreter
 			passed++
 		default:
 			failed++
-			if r.OnlyExemptJobsFailed(isExempt) {
+			exempt := r.OnlyExemptJobsFailed(isExempt)
+			if exempt {
 				exemptFailed++
+			}
+			if exempt || r.CancelledOnly(isExempt) {
+				softFailed++
 			}
 		}
 	}
+	settled := "success"
+	if pending > 0 {
+		settled = "pending"
+	}
 	switch {
 	case failed > 0:
-		res := ciRollupResult{State: "failure"}
+		res := ciRollupResult{State: "failure", inFlight: pending > 0}
 		if exemptFailed == failed {
 			// Every failure is exempt: review sees the rest of the rollup.
-			if pending > 0 {
-				res.reviewState = "pending"
-			} else {
-				res.reviewState = "success"
-			}
+			res.reviewState = settled
+		}
+		if softFailed == failed {
+			// Every failure is exempt or a harmless cancellation: a reviewer
+			// sees the rest of the rollup.
+			res.reviewerState = settled
 		}
 		return res
 	case pending > 0:
-		return ciRollupResult{State: "pending"}
+		return ciRollupResult{State: "pending", inFlight: true}
 	case passed > 0:
 		return ciRollupResult{State: "success"}
 	default:
