@@ -172,3 +172,20 @@ func TestSyncErrorGauges(t *testing.T) {
 		t.Fatalf("MetricOldestSyncErrorAge = %d, want 7200", got)
 	}
 }
+
+// TestOldestAnchorCheckAgeGauge covers bead pg2-u4c1s: the snapshot field is
+// exported under pg_desk_oldest_anchor_check_age_seconds.
+func TestOldestAnchorCheckAgeGauge(t *testing.T) {
+	if MetricOldestAnchorCheckAge != "pg_desk_oldest_anchor_check_age_seconds" {
+		t.Fatalf("metric name = %q", MetricOldestAnchorCheckAge)
+	}
+	h := newHarness(t)
+	h.snap = Snapshot{OldestAnchorCheckAgeSeconds: 5400}
+	if got := gaugeValue(t, findMetric(t, h.collect(t), MetricOldestAnchorCheckAge)); got != 5400 {
+		t.Fatalf("MetricOldestAnchorCheckAge = %d, want 5400", got)
+	}
+	h.snap = Snapshot{}
+	if got := gaugeValue(t, findMetric(t, h.collect(t), MetricOldestAnchorCheckAge)); got != 0 {
+		t.Fatalf("MetricOldestAnchorCheckAge (empty) = %d, want 0", got)
+	}
+}

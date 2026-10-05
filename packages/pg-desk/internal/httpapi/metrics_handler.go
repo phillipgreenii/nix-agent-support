@@ -14,6 +14,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/metrics"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/sync"
 )
 
 // newMetricsHandler replaces the earlier `pg_desk_up 1` stub (design D5)
@@ -64,6 +65,10 @@ func newMetricsHandler(st *store.Store, cfg *config.Config) (http.Handler, error
 		if err != nil {
 			return metrics.Snapshot{}, err
 		}
+		anchorCheckAge, err := sync.OldestAnchorCheckAge(st, nowUTC())
+		if err != nil {
+			return metrics.Snapshot{}, err
+		}
 		return metrics.Snapshot{
 			AgeSeconds:                payload.AgeSeconds,
 			Stale:                     payload.Stale,
@@ -72,6 +77,8 @@ func newMetricsHandler(st *store.Store, cfg *config.Config) (http.Handler, error
 			OldestSyncErrorAgeSeconds: oldestAge,
 			SyncErrorRetryingRows:     retrying,
 			SyncErrorExhaustedRows:    exhausted,
+
+			OldestAnchorCheckAgeSeconds: anchorCheckAge,
 		}, nil
 	}
 

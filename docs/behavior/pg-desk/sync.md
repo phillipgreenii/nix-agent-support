@@ -45,11 +45,11 @@ uses — one parser, not two.
 Reproduced verbatim from the design of record; any later change MUST land with the sources and
 prompts that read these shapes, in the same change:
 
-| Kind           | bd type         | Title                          | Labels                                               | Metadata                                                                                   | Parent |
-| -------------- | --------------- | ------------------------------ | ---------------------------------------------------- | ------------------------------------------------------------------------------------------ | ------ |
-| anchor         | `merge-request` | `<repo>#<n>: <pr title>`       | `co-owned` when applicable, `pbase:<n>` while nudged | `repo`, `pr_number`, `state`, `branch`, `base`, `author`, `url`, `draft`, `last_synced_at` | none   |
-| feedback cycle | `task`          | `process-feedback: <repo>#<n>` | `mine`, `fbsum:<digest>`                             | `repo`, `pr_number`, `branch`; description is the rendered summary of unaddressed items    | anchor |
-| review request | `task`          | `review-pr: <repo>#<n>`        | as today                                             | `repo`, `pr_number`, `branch`, `head_sha`, `ownership`                                     | anchor |
+| Kind           | bd type         | Title                          | Labels                                               | Metadata                                                                                                                                                                | Parent |
+| -------------- | --------------- | ------------------------------ | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| anchor         | `merge-request` | `<repo>#<n>: <pr title>`       | `co-owned` when applicable, `pbase:<n>` while nudged | `repo`, `pr_number`, `state`, `branch`, `base`, `author`, `url`, `draft`, `last_synced_at`, `last_checked_at`, `closed_at` (the last two only as described under Rules) | none   |
+| feedback cycle | `task`          | `process-feedback: <repo>#<n>` | `mine`, `fbsum:<digest>`                             | `repo`, `pr_number`, `branch`; description is the rendered summary of unaddressed items                                                                                 | anchor |
+| review request | `task`          | `review-pr: <repo>#<n>`        | as today                                             | `repo`, `pr_number`, `branch`, `head_sha`, `ownership`                                                                                                                  | anchor |
 
 ## Rules
 
@@ -58,6 +58,18 @@ prompts that read these shapes, in the same change:
   pg-pr's existing `pbase` mechanism: stash the pre-conflict priority on the first conflicting
   tick, nudge mine/co-owned toward higher priority and team toward lower, no-op on a repeated
   conflicting tick, restore the baseline once the conflict clears) is applied via `issue update`.
+  `last_synced_at` and `last_checked_at` are written together, and only by a content write (the
+  create, or an update because the anchor's fields changed). Closure additionally writes
+  `closed_at` and a final `last_checked_at`, before the close transition. An unchanged check MUST
+  NOT write the anchor bead: any anchor update changes the issue's `updated_at`, which pg-connector's
+  issue changes feed treats as a change, so a per-check stamp would echo an `issue.changed` and a
+  needless issue run for every PR on every sync (`pg2-u4c1s`). An unchanged check records its time
+  in the anchor's ledger row instead (`last_synced_at` there is the row's last-checked time, in
+  every mode), and staleness stays detectable through `serve`'s
+  `pg_desk_oldest_anchor_check_age_seconds` gauge and `status`'s
+  `oldest_anchor_check_age_seconds` line (see [`serve.md`](serve.md) and
+  [`operator-commands.md`](operator-commands.md)). This deliberately reverses the earlier rule that
+  a quiet open PR advances `last_checked_at` on the bead each sync (`pg2-kftf9.3`).
   Closed, with its open cycles — BOTH the feedback cycle and the review request, symmetrically —
   only on a CONFIRMED closure — a `--change removed` re-read (or an ordinary/sweep `pr show`)
   reporting `merged` or `closed`, or a removed re-read's own `not_found` (a closure with reason

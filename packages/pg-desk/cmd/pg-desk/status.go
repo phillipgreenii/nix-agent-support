@@ -70,7 +70,10 @@ func runStatus(cmd *cobra.Command) error {
 	var (
 		schemaVersion, lastHeartbeat, lastRun, lastSweep string
 		entityCount, syncErrors, degraded                int
-		interps                                          []store.Interpretation
+		// oldestAnchorCheckAge is the stalest anchor check in seconds
+		// (bead pg2-u4c1s); 0 when none or when the store has no ledger.
+		oldestAnchorCheckAge int
+		interps              []store.Interpretation
 		// syncRetryStates counts sync_error rows by retry state (bead
 		// pg2-xb6fs): retrying / exhausted / non-transient.
 		syncRetryStates = map[string]int{}
@@ -101,6 +104,10 @@ func runStatus(cmd *cobra.Command) error {
 				syncRetryStates[r.EffectiveState()]++
 			}
 		}
+		oldestAnchorCheckAge, err = sync.OldestAnchorCheckAge(st, time.Now().UTC())
+		if err != nil {
+			return fmt.Errorf("status: oldest anchor check age: %w", err)
+		}
 		lastHeartbeat, _, err = st.GetMeta(store.MetaKeyLastHeartbeat)
 		if err != nil {
 			return fmt.Errorf("status: read meta.last_heartbeat: %w", err)
@@ -124,6 +131,7 @@ func runStatus(cmd *cobra.Command) error {
 	fmt.Fprintf(w, "sync_errors_retrying: %d\n", syncRetryStates[store.SyncRetryRetrying])
 	fmt.Fprintf(w, "sync_errors_exhausted: %d\n", syncRetryStates[store.SyncRetryExhausted])
 	fmt.Fprintf(w, "sync_errors_non_transient: %d\n", syncRetryStates[store.SyncRetryNonTransient])
+	fmt.Fprintf(w, "oldest_anchor_check_age_seconds: %d\n", oldestAnchorCheckAge)
 	fmt.Fprintf(w, "last_heartbeat: %s\n", orDash(lastHeartbeat))
 	fmt.Fprintf(w, "last_run: %s\n", orDash(lastRun))
 	fmt.Fprintf(w, "last_sweep: %s\n", orDash(lastSweep))

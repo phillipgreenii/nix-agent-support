@@ -98,3 +98,37 @@ func TestMetricsDegradeOnAnOldSchemaStore(t *testing.T) {
 		}
 	}
 }
+
+// TestMetricsExposeOldestAnchorCheckAge covers bead pg2-u4c1s end to end:
+// on an old-schema store the gauge is the stalest open applied anchor's
+// ledger age (closed and planned rows excluded), and on a cut-over store
+// (no ledger table) the scrape still succeeds and reports 0.
+func TestMetricsExposeOldestAnchorCheckAge(t *testing.T) {
+	setClock(t, time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC))
+
+	s := store.OpenForTest(t)
+	mustUpsertInterpretation(t, s, store.Interpretation{
+		Repo: "acme/widgets", EntityType: "pull_request", EntityID: "1",
+		Panel: PanelMineAwaitingMe, AsOf: "2026-10-05T11:59:00Z",
+	})
+	for _, l := range []store.LedgerEntry{
+		{Repo: "o/r", EntityType: "pr", EntityID: "o/r#1", Kind: "anchor", BeadID: "bd-1", LastSyncedContentHash: "h", LastSyncedAt: "2026-10-05T10:00:00Z"},
+		{Repo: "o/r", EntityType: "pr", EntityID: "o/r#2", Kind: "anchor", BeadID: "bd-2", LastSyncedContentHash: "closed", LastSyncedAt: "2026-10-01T00:00:00Z"},
+		{Repo: "o/r", EntityType: "pr", EntityID: "o/r#3", Kind: "anchor", BeadID: "", LastSyncedContentHash: "h", LastSyncedAt: "2026-10-01T00:00:00Z"},
+	} {
+		if err := s.UpsertLedger(l); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if body := scrape(t, s); !strings.Contains(body, "pg_desk_oldest_anchor_check_age_seconds 7200") {
+		t.Errorf("old-schema scrape missing the 7200s anchor-check gauge:\n%s", body)
+	}
+
+	n := store.OpenNewSchemaForTest(t)
+	mustUpsertInterpretation(t, n, store.Interpretation{
+		Repo: "o/r", EntityType: "pr", EntityID: "o/r#1", Panel: PanelMineAwaitingMe, AsOf: "2026-10-05T11:59:00Z",
+	})
+	if body := scrape(t, n); !strings.Contains(body, "pg_desk_oldest_anchor_check_age_seconds 0") {
+		t.Errorf("new-schema scrape missing the zero anchor-check gauge:\n%s", body)
+	}
+}

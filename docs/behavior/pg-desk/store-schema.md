@@ -33,7 +33,9 @@ below. "Schema version 2 tables" describes what the cutover changes.
   `unhide`, `wip`, `feedback set`, or `import-pg-pr-annotations` — and MUST NEVER be written by the
   pipeline. Human and agent annotations therefore survive every pipeline run by construction: no
   pipeline stage writes this table.
-- **`ledger`** — entity-to-bead-id mapping by kind, the last-synced content hash and time, and the
+- **`ledger`** — entity-to-bead-id mapping by kind, the last-synced content hash, the row's last-checked
+  time (`last_synced_at`, advanced on every sync of the entity even when nothing changed, so an
+  unchanged anchor check is recorded here and never on the bead; see [`sync.md`](sync.md)), and the
   last-reviewed head SHA. Written by sync (Phase 10, [`sync.md`](sync.md)): a `plan`-mode row
   carries an empty `bead_id` (nothing was actually created) and a content hash of the fields the
   write WOULD set; an `apply`-mode row carries the real `bead_id` and a content hash of the fields

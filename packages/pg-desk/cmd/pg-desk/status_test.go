@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -156,6 +157,52 @@ func TestStatusPrintsPlannedSyncRowsInPlanMode(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "review-request: 0") {
 		t.Errorf("stdout counted an APPLIED (real bead_id) row as planned: %s", stdout)
+	}
+}
+
+// TestStatusPrintsOldestAnchorCheckAge covers bead pg2-u4c1s: status prints
+// oldest_anchor_check_age_seconds, 0 with no applied anchor and the stalest
+// open applied anchor's age otherwise (closed and planned rows excluded).
+func TestStatusPrintsOldestAnchorCheckAge(t *testing.T) {
+	st, openFresh := openTestStore(t)
+	withOpenSeams(t, openTestConfig("o/r"), openFresh)
+
+	origLedger := statusRunPgConnectorLedgerShow
+	t.Cleanup(func() { statusRunPgConnectorLedgerShow = origLedger })
+	statusRunPgConnectorLedgerShow = func(ctx context.Context) (string, error) { return "(empty)\n", nil }
+
+	stdout, err := runStatusCmd(t)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if !strings.Contains(stdout, "oldest_anchor_check_age_seconds: 0\n") {
+		t.Fatalf("empty store should print age 0: %s", stdout)
+	}
+
+	old := time.Now().UTC().Add(-3 * time.Hour).Format(time.RFC3339)
+	for _, l := range []store.LedgerEntry{
+		{Repo: "o/r", EntityType: entityTypePR, EntityID: "o/r#1", Kind: "anchor", BeadID: "bd-1", LastSyncedContentHash: "h", LastSyncedAt: old},
+		{Repo: "o/r", EntityType: entityTypePR, EntityID: "o/r#2", Kind: "anchor", BeadID: "bd-2", LastSyncedContentHash: "closed", LastSyncedAt: "2026-01-01T00:00:00Z"},
+		{Repo: "o/r", EntityType: entityTypePR, EntityID: "o/r#3", Kind: "anchor", BeadID: "", LastSyncedContentHash: "h", LastSyncedAt: "2026-01-01T00:00:00Z"},
+	} {
+		if err := st.UpsertLedger(l); err != nil {
+			t.Fatalf("seed ledger: %v", err)
+		}
+	}
+	stdout, err = runStatusCmd(t)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	var got int
+	for _, line := range strings.Split(stdout, "\n") {
+		if v, ok := strings.CutPrefix(line, "oldest_anchor_check_age_seconds: "); ok {
+			if _, err := fmt.Sscanf(v, "%d", &got); err != nil {
+				t.Fatalf("parse %q: %v", line, err)
+			}
+		}
+	}
+	if got < 3*3600 || got > 3*3600+300 {
+		t.Fatalf("oldest_anchor_check_age_seconds = %d, want about %d: %s", got, 3*3600, stdout)
 	}
 }
 

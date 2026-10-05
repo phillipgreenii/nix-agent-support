@@ -953,29 +953,115 @@ func TestSync_ConfirmedClosure_StampsTerminalStateBeforeClose(t *testing.T) {
 	}
 }
 
-// TestSync_Reconcile_StampsLastCheckedAtEvenWhenUnchanged guards
-// pg2-kftf9.3: last_checked_at is written on every successful check, and an
-// existing anchor is refreshed (draft drift) even when nothing currently
-// needs it.
-func TestSync_Reconcile_StampsLastCheckedAtEvenWhenUnchanged(t *testing.T) {
+// anchorCalls returns the recorded issue update/transition calls aimed at
+// beadID, in order.
+func anchorCalls(t *testing.T, recordFile, beadID string, from int) []callRecord {
+	t.Helper()
+	var out []callRecord
+	for _, r := range readCallRecords(t, recordFile)[from:] {
+		if (r.verb() == "issue update" || r.verb() == "issue transition") && len(r.Args) > 2 && r.Args[2] == beadID {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// TestSync_Reconcile_UnchangedRecordsCheckInLedgerNotBead guards bead
+// pg2-u4c1s: an unchanged-hash check MUST make no issue update/transition
+// call on the anchor (any update bumps updated_at, which the issue changes
+// feed hashes, echoing an issue.changed -> desk-issue run), and records the
+// check time in the anchor's LEDGER row instead. This intentionally reverses
+// what closed pg2-cl3ya verified ("quiet open PR advances last_checked_at
+// each sync").
+func TestSync_Reconcile_UnchangedRecordsCheckInLedgerNotBead(t *testing.T) {
 	s := newTestSyncer(t, ModeApply)
 	recordFile := withFactory(t)
 	facts := gather.Facts{PRShow: prFixture(nil), HeadSHA: fixtureHeadSHA}
 	interp := interpFor("mine", nil)
-	for i := 0; i < 2; i++ { // second run: identical content hash
-		if err := s.Sync(context.Background(), fixtureRepo, fixtureEntity, gather.ChangeAdded, facts, interp); err != nil {
-			t.Fatalf("Sync %d: %v", i, err)
-		}
+	if err := s.Sync(context.Background(), fixtureRepo, fixtureEntity, gather.ChangeAdded, facts, interp); err != nil {
+		t.Fatalf("Sync 1: %v", err)
+	}
+	anchor1, found, err := s.store.GetLedger(fixtureRepo, "pr", fixtureEntity, KindAnchor)
+	if err != nil || !found || anchor1.BeadID == "" {
+		t.Fatalf("anchor ledger after run 1: found=%v entry=%+v err=%v", found, anchor1, err)
+	}
+
+	// Run 2: same store, identical content, clock an hour later.
+	later := time.Date(2026, 9, 17, 1, 0, 0, 0, time.UTC)
+	s2 := New(testConfig(ModeApply), s.store, WithClock(interpret.FixedClock(later)))
+	before := len(readCallRecords(t, recordFile))
+	if err := s2.Sync(context.Background(), fixtureRepo, fixtureEntity, gather.ChangeAdded, facts, interp); err != nil {
+		t.Fatalf("Sync 2: %v", err)
+	}
+	if calls := anchorCalls(t, recordFile, anchor1.BeadID, before); len(calls) != 0 {
+		t.Fatalf("unchanged re-check wrote the anchor bead: %+v", calls)
+	}
+	anchor2, _, _ := s.store.GetLedger(fixtureRepo, "pr", fixtureEntity, KindAnchor)
+	if want := later.Format(time.RFC3339); anchor2.LastSyncedAt != want {
+		t.Fatalf("anchor ledger LastSyncedAt = %q, want the run-2 time %q", anchor2.LastSyncedAt, want)
+	}
+	if anchor2.LastSyncedContentHash != anchor1.LastSyncedContentHash || anchor2.BeadID != anchor1.BeadID {
+		t.Fatalf("unchanged check altered the ledger row beyond its timestamp: %+v -> %+v", anchor1, anchor2)
+	}
+}
+
+// TestSync_Reconcile_ChangedWritesBothStampsInOneUpdate guards bead
+// pg2-u4c1s: when content really changes (draft flips), exactly one anchor
+// update is written and it carries BOTH last_checked_at and last_synced_at.
+func TestSync_Reconcile_ChangedWritesBothStampsInOneUpdate(t *testing.T) {
+	s := newTestSyncer(t, ModeApply)
+	recordFile := withFactory(t)
+	interp := interpFor("mine", nil)
+	if err := s.Sync(context.Background(), fixtureRepo, fixtureEntity, gather.ChangeAdded,
+		gather.Facts{PRShow: prFixture(map[string]any{"draft": true}), HeadSHA: fixtureHeadSHA}, interp); err != nil {
+		t.Fatalf("Sync 1: %v", err)
 	}
 	anchor, _, _ := s.store.GetLedger(fixtureRepo, "pr", fixtureEntity, KindAnchor)
-	var checkedUpdates int
-	for _, r := range readCallRecords(t, recordFile) {
-		if r.verb() == "issue update" && len(r.Args) > 2 && r.Args[2] == anchor.BeadID && strings.Contains(strings.Join(r.Args, " "), "last_checked_at=") {
-			checkedUpdates++
+
+	later := time.Date(2026, 9, 17, 1, 0, 0, 0, time.UTC)
+	s2 := New(testConfig(ModeApply), s.store, WithClock(interpret.FixedClock(later)))
+	before := len(readCallRecords(t, recordFile))
+	if err := s2.Sync(context.Background(), fixtureRepo, fixtureEntity, gather.ChangeAdded,
+		gather.Facts{PRShow: prFixture(map[string]any{"draft": false}), HeadSHA: fixtureHeadSHA}, interp); err != nil {
+		t.Fatalf("Sync 2: %v", err)
+	}
+	calls := anchorCalls(t, recordFile, anchor.BeadID, before)
+	if len(calls) != 1 || calls[0].verb() != "issue update" {
+		t.Fatalf("want exactly one anchor update, got %+v", calls)
+	}
+	stamp := later.Format(time.RFC3339)
+	for _, kv := range []string{"draft=false", "last_checked_at=" + stamp, "last_synced_at=" + stamp} {
+		if !argsHave(calls[0], kv) {
+			t.Errorf("anchor update lacks --metadata %s: %v", kv, calls[0].Args)
 		}
 	}
-	if checkedUpdates < 1 {
-		t.Fatalf("unchanged re-check wrote no last_checked_at; records: %+v", readCallRecords(t, recordFile))
+}
+
+// TestSync_Reconcile_UnchangedPlanModeAdvancesLedgerOnly guards bead
+// pg2-u4c1s for plan mode: an unchanged re-run calls pg-connector not at all
+// and still advances the planned anchor row's timestamp.
+func TestSync_Reconcile_UnchangedPlanModeAdvancesLedgerOnly(t *testing.T) {
+	s := newTestSyncer(t, ModePlan)
+	recordFile := withFactory(t)
+	facts := gather.Facts{PRShow: prFixture(nil), HeadSHA: fixtureHeadSHA}
+	interp := interpFor("mine", nil)
+	if err := s.Sync(context.Background(), fixtureRepo, fixtureEntity, gather.ChangeAdded, facts, interp); err != nil {
+		t.Fatalf("Sync 1: %v", err)
+	}
+	later := time.Date(2026, 9, 17, 1, 0, 0, 0, time.UTC)
+	s2 := New(testConfig(ModePlan), s.store, WithClock(interpret.FixedClock(later)))
+	if err := s2.Sync(context.Background(), fixtureRepo, fixtureEntity, gather.ChangeAdded, facts, interp); err != nil {
+		t.Fatalf("Sync 2: %v", err)
+	}
+	if recs := readCallRecords(t, recordFile); len(recs) != 0 {
+		t.Fatalf("plan mode called pg-connector: %+v", recs)
+	}
+	anchor, found, _ := s.store.GetLedger(fixtureRepo, "pr", fixtureEntity, KindAnchor)
+	if !found || anchor.BeadID != "" {
+		t.Fatalf("want a planned (empty bead_id) anchor row, got found=%v %+v", found, anchor)
+	}
+	if want := later.Format(time.RFC3339); anchor.LastSyncedAt != want {
+		t.Fatalf("planned anchor LastSyncedAt = %q, want %q", anchor.LastSyncedAt, want)
 	}
 }
 

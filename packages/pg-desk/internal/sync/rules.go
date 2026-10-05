@@ -297,17 +297,19 @@ func (rc *runContext) ensureAnchor(ctx context.Context, coOwned, actsAsMine bool
 	}
 
 	if hash == rc.ledgerAnchor.LastSyncedContentHash {
-		// Content unchanged: skip the full write (last_synced_at keeps its
-		// "last content change" meaning) but still stamp last_checked_at so
-		// a stalled sync is detectable (pg2-kftf9.3).
-		if rc.mode == ModeApply {
-			if err := rc.syncer.client.Update(ctx, rc.anchorID, updateInput{
-				Metadata: map[string]string{"last_checked_at": rc.now},
-			}); err != nil {
-				return fmt.Errorf("sync: stamp anchor last_checked_at %s: %w", rc.anchorID, err)
-			}
-		}
-		return nil
+		// Content unchanged: make NO bead call at all (bead pg2-u4c1s). Any
+		// anchor update — even one rewriting the same values — bumps the
+		// bead's updated_at, which pg-connector's issue changes feed hashes,
+		// so a per-check stamp echoed an issue.changed -> desk-issue run on
+		// every desk-pr run. The check time is recorded in pg-desk's own
+		// store instead: the anchor's LEDGER last_synced_at ("this row's own
+		// last-touched timestamp, in every mode", sync.go), which feeds the
+		// pg_desk_oldest_anchor_check_age_seconds staleness gauge. The BEAD's
+		// metadata.last_synced_at / last_checked_at are written only by a
+		// content write or closure. This intentionally reverses what
+		// pg2-kftf9.3 / pg2-cl3ya verified ("quiet open PR advances
+		// last_checked_at each sync").
+		return rc.upsertLedger(KindAnchor, rc.anchorID, hash, "")
 	}
 	if rc.mode == ModeApply {
 		upd := updateInput{Metadata: metadata, AddLabels: addLabels, RemoveLabels: removeLabels}

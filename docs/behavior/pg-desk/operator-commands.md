@@ -19,7 +19,9 @@ omitting the planned-sync-writes section rather than failing `show` outright.
 
 `pg-desk status` prints the store path and schema version, entity and interpretation counts, the
 last heartbeat/run/sweep times, degraded rows, sync errors (with how many are retrying, exhausted,
-and non-transient — see [`sync.md`](sync.md)'s "Automatic retry"), and — when `sync.mode` is
+and non-transient — see [`sync.md`](sync.md)'s "Automatic retry"), the age of the stalest applied anchor check
+(`oldest_anchor_check_age_seconds`, the same value as `serve`'s
+`pg_desk_oldest_anchor_check_age_seconds`, `0` when none), and — when `sync.mode` is
 `plan` — planned sync rows by kind (anchor / feedback-cycle / review-request; see
 [`sync.md`](sync.md)). It also prints `pg-connector ledger show` for the configured consumer.
 

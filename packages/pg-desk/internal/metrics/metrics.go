@@ -77,6 +77,12 @@ const (
 	// retry bound was reached, or the failure was classified non-transient
 	// and was never retried. These need an operator.
 	MetricSyncErrorExhaustedRows = "pg_desk_sync_error_exhausted_rows"
+	// MetricOldestAnchorCheckAge is the age in seconds of the stalest applied
+	// anchor check (bead pg2-u4c1s): the oldest ledger last_synced_at among
+	// kind=anchor rows that have a bead and are not closed, 0 when none. An
+	// unchanged check no longer touches the anchor bead, so this is how a
+	// stalled sync stays detectable.
+	MetricOldestAnchorCheckAge = "pg_desk_oldest_anchor_check_age_seconds"
 )
 
 // Snapshot is the subset of the /api/v1/dashboard payload the metrics
@@ -96,6 +102,8 @@ type Snapshot struct {
 	// automatic-retry state (bead pg2-xb6fs); they sum to SyncErrorRows.
 	SyncErrorRetryingRows  int
 	SyncErrorExhaustedRows int
+	// OldestAnchorCheckAgeSeconds backs MetricOldestAnchorCheckAge.
+	OldestAnchorCheckAgeSeconds int
 }
 
 // SnapshotFunc supplies the current dashboard snapshot at collect time.
@@ -181,6 +189,7 @@ func New(mp metric.MeterProvider, snapshotFn SnapshotFunc) (*Emitter, error) {
 		{MetricOldestSyncErrorAge, "age in seconds of the oldest row with a non-empty sync_error, 0 when none", func(s Snapshot) int { return s.OldestSyncErrorAgeSeconds }},
 		{MetricSyncErrorRetryingRows, "count of sync_error rows still being retried automatically (transient, within the retry bound)", func(s Snapshot) int { return s.SyncErrorRetryingRows }},
 		{MetricSyncErrorExhaustedRows, "count of sync_error rows with no automatic retry left (retry bound reached, or non-transient); these need an operator", func(s Snapshot) int { return s.SyncErrorExhaustedRows }},
+		{MetricOldestAnchorCheckAge, "age in seconds of the oldest applied, non-closed anchor's last check (ledger last_synced_at), 0 when none", func(s Snapshot) int { return s.OldestAnchorCheckAgeSeconds }},
 	} {
 		g := g
 		if _, err := m.Int64ObservableGauge(
