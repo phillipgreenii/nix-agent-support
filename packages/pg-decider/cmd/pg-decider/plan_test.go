@@ -9,9 +9,9 @@ import (
 )
 
 // These tests exercise the real planFn (no seam stubs) against the pg-desk
-// test double, with whatever rules the binary registers (none yet).
+// test double, with the rules the binary registers (rules.go).
 
-func TestPlanTextForPRWithNoRulesPrintsHeaderAndEmptyBlocks(t *testing.T) {
+func TestPlanTextForPRPrintsHeaderAndBlocks(t *testing.T) {
 	withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("pr_view_minimal.json"))
 	out, errOut, code := runCLI(t, "plan", "pr", "acme/widgets#42")
 	if code != exitcode.OK || errOut != "" {
@@ -30,7 +30,7 @@ func TestPlanTextForPRWithNoRulesPrintsHeaderAndEmptyBlocks(t *testing.T) {
 	}
 }
 
-func TestPlanJSONForPRWithNoRules(t *testing.T) {
+func TestPlanJSONForPRHasExactlyActionsAndSkipped(t *testing.T) {
 	withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("pr_view_minimal.json"))
 	out, errOut, code := runCLI(t, "plan", "pr", "acme/widgets#42", "--json")
 	if code != exitcode.OK || errOut != "" {
@@ -40,9 +40,9 @@ func TestPlanJSONForPRWithNoRules(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("not JSON: %v\n%s", err, out)
 	}
-	a, aok := got["actions"].([]any)
-	s, sok := got["skipped"].([]any)
-	if len(got) != 2 || !aok || !sok || len(a) != 0 || len(s) != 0 {
+	_, aok := got["actions"].([]any)
+	_, sok := got["skipped"].([]any)
+	if len(got) != 2 || !aok || !sok {
 		t.Fatalf("got %v", got)
 	}
 }
