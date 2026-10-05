@@ -26,7 +26,7 @@ In scope: `store` and its schema, `gather`, `interpret`, `sync` (all three modes
 stored entity), `serve` (behind the soak option only), `open`, `hide`/`unhide`/`wip`,
 `feedback list`/`feedback set`, `show`, `links` (a read-only batch lookup of cross-reference
 links, see [`links.md`](links.md), which also holds the `<type> link add|remove` external-link
-verbs), `<type> consumer list|forget` (see [`consumer.md`](consumer.md)), `<type> changes` (see [`changes.md`](changes.md)), `<type> refresh` (see [`refresh.md`](refresh.md)), `status`, `doctor`, `heartbeat`/`heartbeat-item`, and
+verbs), `<type> consumer list|forget` (see [`consumer.md`](consumer.md)), `<type> changes` (see [`changes.md`](changes.md)), `<type> refresh` (see [`refresh.md`](refresh.md)), the typed `<type> show` composite view (see [`show.md`](show.md)), `status`, `doctor`, `heartbeat`/`heartbeat-item`, and
 `import-pg-pr-annotations`, and the annotation verbs `<type> annotate|suppress|unsuppress`,
 `pr force-review` and the typed `hide`/`unhide`/`wip`/`pr feedback` forms (see
 [`annotate.md`](annotate.md)).
@@ -63,7 +63,8 @@ back here — not the full list.
 | [`run-issue.md`](run-issue.md)                               | `pg-desk run issue` — the beads-backend bead -> PR resolution and interpret-only re-run                                            |
 | [`run-thread.md`](run-thread.md)                             | `pg-desk run thread` — the Slack half: permalink/ticket-key cross-references and interpret-only re-run                             |
 | [`serve.md`](serve.md)                                       | `pg-desk serve`, soak-port only this phase                                                                                         |
-| [`open.md`](open.md)                                         | `pg-desk open`                                                                                                                     |
+| [`open.md`](open.md)                                         | `pg-desk open` and the typed `pg-desk <type> open`                                                                                 |
+| [`show.md`](show.md)                                         | `pg-desk <type> show` — typed composite view (`pg-desk.view/v1`), links with origins, `--refresh`                                  |
 | [`hide-unhide-wip.md`](hide-unhide-wip.md)                   | `pg-desk hide`/`unhide`/`wip` and their typed `<type>` forms                                                                       |
 | [`feedback.md`](feedback.md)                                 | `pg-desk feedback list`/`feedback set` and `pr feedback list`/`set`                                                                |
 | [`annotate.md`](annotate.md)                                 | `pg-desk <type> annotate`/`suppress`/`unsuppress` and `pr force-review` — the key/value annotation verbs                           |

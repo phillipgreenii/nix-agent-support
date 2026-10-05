@@ -69,20 +69,34 @@ const (
 // composite view) add fields on top of Linked rather than re-reading the
 // xref table.
 func ReadLinked(st *store.Store, repo, entityType, id string) (linked []Linked, degraded bool, err error) {
+	linked, _, degraded, err = readLinkedAsOf(st, repo, entityType, id)
+	return linked, degraded, err
+}
+
+// readLinkedAsOf is ReadLinked plus linksAsOf: the newest last_confirmed among
+// the stored edge rows read ("" when there are none, or on a degraded read,
+// where the legacy rows carry no such time). It is the one linked-entity read
+// both ReadLinked and ReadDetailed use.
+func readLinkedAsOf(st *store.Store, repo, entityType, id string) (linked []Linked, linksAsOf string, degraded bool, err error) {
 	if err := st.RequireNewSchema(); err != nil {
 		if !errors.Is(err, store.ErrOldSchema) {
-			return nil, false, err
+			return nil, "", false, err
 		}
 		l, derr := readLinkedLegacy(st, repo, entityType, id)
-		return l, true, derr
+		return l, "", true, derr
 	}
 	out, err := st.ListXrefLinksFrom(repo, entityType, id)
 	if err != nil {
-		return nil, false, err
+		return nil, "", false, err
 	}
 	in, err := st.ListXrefLinksTo(repo, entityType, id)
 	if err != nil {
-		return nil, false, err
+		return nil, "", false, err
+	}
+	for _, l := range append(append([]store.XrefLink(nil), out...), in...) {
+		if l.LastConfirmed > linksAsOf {
+			linksAsOf = l.LastConfirmed
+		}
 	}
 	type key struct {
 		dir          Direction
@@ -137,7 +151,7 @@ func ReadLinked(st *store.Store, repo, entityType, id string) (linked []Linked, 
 		sort.SliceStable(e.Origins, func(i, j int) bool { return e.Origins[i].Origin < e.Origins[j].Origin })
 		linked = append(linked, *e)
 	}
-	return linked, false, nil
+	return linked, linksAsOf, false, nil
 }
 
 // readLinkedLegacy serves an unmigrated store: only the legacy pr-to-issue

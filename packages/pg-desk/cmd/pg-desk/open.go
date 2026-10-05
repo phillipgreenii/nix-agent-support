@@ -69,6 +69,11 @@ type openRow struct {
 	// flag (D15's promotion predicate) — surfaced so --promotable can filter
 	// on it without recomputing anything.
 	ReadyToPromote bool
+	// EntityID and AsOf identify the stored entity and when its snapshot was
+	// taken. Only the typed `pr open` reads them (the id form and the as_of
+	// staleness column); the old open's rendering and --json ignore them.
+	EntityID string
+	AsOf     string
 }
 
 var openCmd = &cobra.Command{
@@ -150,6 +155,13 @@ pg-desk never converts a draft to ready automatically).`,
 // joined at read time" rule [docs/behavior/pg-desk/hide-unhide-wip.md] for
 // this packet's own read path.
 func buildOpenRows(st *store.Store, cfg *config.Config) (mine, team []openRow, err error) {
+	return buildOpenRowsFor(st, cfg, false)
+}
+
+// buildOpenRowsFor is buildOpenRows with the annotation source chosen:
+// kvAnnotations reads the hidden state through the new schema's key/value
+// annotation API (the typed `pr open`).
+func buildOpenRowsFor(st *store.Store, cfg *config.Config, kvAnnotations bool) (mine, team []openRow, err error) {
 	interps, err := st.ListInterpretations()
 	if err != nil {
 		return nil, nil, fmt.Errorf("list interpretations: %w", err)
@@ -179,65 +191,90 @@ func buildOpenRows(st *store.Store, cfg *config.Config) (mine, team []openRow, e
 			actNowPanel = panelTeamAwaitingMe
 		}
 
-		entity, found, gerr := st.GetEntity(interp.Repo, interp.EntityType, interp.EntityID)
-		if gerr != nil {
-			return nil, nil, fmt.Errorf("get entity (%s,%s,%s): %w", interp.Repo, interp.EntityType, interp.EntityID, gerr)
+		row, rerr := openRowFrom(st, interp, kvAnnotations)
+		if rerr != nil {
+			return nil, nil, rerr
 		}
-		var facts struct {
-			PRShow  json.RawMessage `json:"pr_show,omitempty"`
-			PRFiles json.RawMessage `json:"pr_files,omitempty"`
-			CI      json.RawMessage `json:"ci,omitempty"`
-		}
-		if found {
-			_ = json.Unmarshal([]byte(entity.Facts), &facts)
-		}
-		pr, _ := decodeDeskPRShow(facts.PRShow)
-
-		var approvals struct {
-			HumanApprovers int `json:"human_approvers"`
-		}
-		_ = json.Unmarshal([]byte(interp.Approvals), &approvals)
-
-		var matchReasons []string
-		_ = json.Unmarshal([]byte(interp.MatchReasons), &matchReasons)
-
-		hidden := false
-		hiddenReason := ""
-		if ann, found, aerr := st.GetPRAnnotation(interp.Repo, interp.EntityType, interp.EntityID); aerr == nil && found {
-			if ann.Hidden != nil {
-				hidden = *ann.Hidden
-			}
-			hiddenReason = ann.HiddenReason
-		}
-
-		row := openRow{
-			Number:         pr.Number,
-			Title:          pr.Title,
-			URL:            pr.URL,
-			CIStatus:       deskCIStatus(facts.CI),
-			HumanApprovers: approvals.HumanApprovers,
-			FilesChanged:   deskFilesCount(facts.PRFiles),
-			LinesChanged:   pr.Additions + pr.Deletions,
-			NeedsAttention: interp.Panel == actNowPanel,
-			MatchReason:    matchReasons,
-			Hidden:         hidden,
-			HiddenReason:   hiddenReason,
-			ReadyToPromote: interp.ReadyToPromote,
-		}
-		if row.Number == 0 {
-			if n, cerr := strconv.Atoi(interp.EntityID); cerr == nil {
-				row.Number = n
-			}
-		}
+		row.NeedsAttention = interp.Panel == actNowPanel
 
 		if mineHalf {
+			row.Owner = ""
 			mine = append(mine, row)
 		} else {
-			row.Owner = pr.Author
 			team = append(team, row)
 		}
 	}
 	return mine, team, nil
+}
+
+// openRowFrom projects one PR interpretation onto an openRow, joining the
+// entity table (display facts) and the annotation table (hidden state) at
+// read time. Owner is always the PR author and NeedsAttention is left for
+// the caller, which knows which half of the review set the row belongs to.
+// kvAnnotations selects the new schema's key/value annotation API for the
+// hidden state instead of the old per-PR annotation row.
+func openRowFrom(st *store.Store, interp store.Interpretation, kvAnnotations bool) (openRow, error) {
+	entity, found, gerr := st.GetEntity(interp.Repo, interp.EntityType, interp.EntityID)
+	if gerr != nil {
+		return openRow{}, fmt.Errorf("get entity (%s,%s,%s): %w", interp.Repo, interp.EntityType, interp.EntityID, gerr)
+	}
+	var facts struct {
+		PRShow  json.RawMessage `json:"pr_show,omitempty"`
+		PRFiles json.RawMessage `json:"pr_files,omitempty"`
+		CI      json.RawMessage `json:"ci,omitempty"`
+	}
+	if found {
+		_ = json.Unmarshal([]byte(entity.Facts), &facts)
+	}
+	pr, _ := decodeDeskPRShow(facts.PRShow)
+
+	var approvals struct {
+		HumanApprovers int `json:"human_approvers"`
+	}
+	_ = json.Unmarshal([]byte(interp.Approvals), &approvals)
+
+	var matchReasons []string
+	_ = json.Unmarshal([]byte(interp.MatchReasons), &matchReasons)
+
+	hidden := false
+	hiddenReason := ""
+	if kvAnnotations {
+		if h, aerr := readHiddenAnnotation(st, interp.Repo, interp.EntityType, interp.EntityID); aerr == nil {
+			hidden, hiddenReason = h.Value, h.Reason
+		}
+	} else if ann, found, aerr := st.GetPRAnnotation(interp.Repo, interp.EntityType, interp.EntityID); aerr == nil && found {
+		if ann.Hidden != nil {
+			hidden = *ann.Hidden
+		}
+		hiddenReason = ann.HiddenReason
+	}
+
+	asOf := interp.AsOf
+	if found && entity.AsOf != "" {
+		asOf = entity.AsOf
+	}
+	row := openRow{
+		Number:         pr.Number,
+		Owner:          pr.Author,
+		Title:          pr.Title,
+		URL:            pr.URL,
+		CIStatus:       deskCIStatus(facts.CI),
+		HumanApprovers: approvals.HumanApprovers,
+		FilesChanged:   deskFilesCount(facts.PRFiles),
+		LinesChanged:   pr.Additions + pr.Deletions,
+		MatchReason:    matchReasons,
+		Hidden:         hidden,
+		HiddenReason:   hiddenReason,
+		ReadyToPromote: interp.ReadyToPromote,
+		EntityID:       interp.EntityID,
+		AsOf:           asOf,
+	}
+	if row.Number == 0 {
+		if n, cerr := strconv.Atoi(interp.EntityID); cerr == nil {
+			row.Number = n
+		}
+	}
+	return row, nil
 }
 
 // attentionOnly decides whether the needs-attention filter applies. Ported
@@ -493,33 +530,39 @@ func writeJSON(w io.Writer, rows []openJSONRow) error {
 	return err
 }
 
-func init() {
-	openCmd.Flags().BoolVar(&opFlags.all, "all", false,
+// bindOpenFlags registers the open flags on c, bound to f. The old top-level
+// open and the typed `pr open` share this one definition so their flags and
+// defaults cannot drift.
+func bindOpenFlags(c *cobra.Command, f *openFlags) {
+	c.Flags().BoolVar(&f.all, "all", false,
 		"Widen to the whole set (the default already, with --mine)")
-	openCmd.Flags().BoolVar(&opFlags.needsAttention, "needs-attention", false,
+	c.Flags().BoolVar(&f.needsAttention, "needs-attention", false,
 		"Narrow to the PRs needing attention (the default already, without --mine)")
-	openCmd.Flags().BoolVar(&opFlags.mine, "mine", false,
+	c.Flags().BoolVar(&f.mine, "mine", false,
 		"Open your own PRs instead of the team's review set; defaults to all of them")
-	openCmd.Flags().StringVar(&opFlags.reason, "reason", "",
+	c.Flags().StringVar(&f.reason, "reason", "",
 		"Keep only PRs matched for this reason; exact or prefix")
-	openCmd.Flags().StringVar(&opFlags.owner, "owner", "",
+	c.Flags().StringVar(&f.owner, "owner", "",
 		"Keep only PRs owned by this login")
-	openCmd.Flags().StringVar(&opFlags.notOwner, "not-owner", "",
+	c.Flags().StringVar(&f.notOwner, "not-owner", "",
 		"Drop PRs owned by this login")
-	openCmd.Flags().BoolVar(&opFlags.unapproved, "unapproved", false,
+	c.Flags().BoolVar(&f.unapproved, "unapproved", false,
 		"Drop PRs a human has already approved")
-	openCmd.Flags().BoolVar(&opFlags.includeHidden, "include-hidden", false,
+	c.Flags().BoolVar(&f.includeHidden, "include-hidden", false,
 		"Include PRs hidden via `pg-desk hide` (excluded by default, even with --all)")
-	openCmd.Flags().BoolVar(&opFlags.promotable, "promotable", false,
+	c.Flags().BoolVar(&f.promotable, "promotable", false,
 		"Keep only PRs the store marked ready to promote (D15)")
-	openCmd.Flags().IntVar(&opFlags.max, "max", 0,
+	c.Flags().IntVar(&f.max, "max", 0,
 		"Cap how many PRs are opened; 0 (the default) opens every match")
-	openCmd.Flags().BoolVar(&opFlags.printOnly, "print", false,
+	c.Flags().BoolVar(&f.printOnly, "print", false,
 		"List the selected PRs instead of opening a browser window")
-	openCmd.Flags().BoolVar(&opFlags.noHyperlinks, "no-hyperlinks", false,
+	c.Flags().BoolVar(&f.noHyperlinks, "no-hyperlinks", false,
 		"With --print, never emit OSC 8 terminal hyperlinks")
-	openCmd.Flags().BoolVar(&opFlags.jsonOutput, "json", false,
+	c.Flags().BoolVar(&f.jsonOutput, "json", false,
 		"Emit the selection as a bare JSON array instead of opening a browser (also selected by PG_DESK_OUTPUT=json)")
+}
 
+func init() {
+	bindOpenFlags(openCmd, &opFlags)
 	rootCmd.AddCommand(openCmd)
 }

@@ -1,0 +1,49 @@
+{
+  "contract": "pg-desk.view/v1",
+  "type": "thread",
+  "id": "C1/1.5",
+  "version": 1,
+  "as_of": "2026-09-29T13:00:00Z",
+  "stale": false,
+  "snapshot": {
+    "id": "C1/1.5",
+    "permalink": "https://chat.example/archives/C1/p15",
+    "text": "look at this"
+  },
+  "decorations": {
+    "relationship": "",
+    "dispositions": [],
+    "urgency": "",
+    "category": ""
+  },
+  "annotations": {
+    "hidden": {
+      "value": false,
+      "reason": null
+    },
+    "wip": false,
+    "suppress": [],
+    "force_review": false,
+    "decider": {}
+  },
+  "links": [
+    {
+      "type": "pr",
+      "id": "o/r#5",
+      "relation": "references",
+      "url": "https://code.example/o/r/pull/5",
+      "state": "open",
+      "labels": ["bug"],
+      "metadata": {},
+      "assignee": "",
+      "origins": [
+        {
+          "origin": "external:operator",
+          "at": "2026-09-29T13:00:00Z",
+          "reason": "same incident"
+        }
+      ]
+    }
+  ],
+  "links_as_of": "2026-09-29T13:00:00Z"
+}

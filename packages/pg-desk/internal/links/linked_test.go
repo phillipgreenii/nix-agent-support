@@ -59,3 +59,37 @@ func TestSnapshotURL(t *testing.T) {
 		}
 	}
 }
+
+// ReadDetailed adds the linked entity's url and stored state on top of
+// ReadLinked's edges and reports when the links were last confirmed.
+func TestReadDetailedJoinsStoredSnapshotAndTemplateURL(t *testing.T) {
+	st := store.OpenNewSchemaForTest(t)
+	var derived []store.XrefLink
+	for _, key := range []string{"ABC-42", "ABC-43"} {
+		derived = append(derived, store.XrefLink{
+			Repo: testRepo, FromType: "pr", FromID: testPR, ToType: "issue", ToID: key,
+			Relation: "jira", Origin: "derived:jira-key", FirstSeen: "2026-10-01T00:00:00Z", LastConfirmed: "2026-10-01T00:00:00Z",
+		})
+	}
+	if err := st.ReplaceDerivedXrefs(testRepo, "pr", testPR, derived); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertEntity(store.Entity{
+		Repo: testRepo, EntityType: "issue", EntityID: "ABC-43", AsOf: "2026-10-01T00:00:00Z",
+		Facts: `{"issue_show":{"state":"closed","labels":["x"],"metadata":{"k":"v"},"assignee":"bob","closed_by":"nobody"}}`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	d := Deps{Store: st, Repo: testRepo, Patterns: []string{`[A-Z]+-\d+`}, IssueURLTemplate: "https://tracker.example.invalid/browse/%s"}
+	got, err := ReadDetailed(d, "pr", testPR)
+	if err != nil || got.Degraded || len(got.Links) != 2 || got.LinksAsOf == "" {
+		t.Fatalf("ReadDetailed = %+v, %v", got, err)
+	}
+	unstored, stored := got.Links[0], got.Links[1]
+	if unstored.ID != "ABC-42" || unstored.Stored || unstored.State != "" || unstored.URL != "https://tracker.example.invalid/browse/ABC-42" {
+		t.Errorf("unstored link = %+v", unstored)
+	}
+	if !stored.Stored || stored.State != "closed" || stored.Assignee != "bob" || stored.Metadata["k"] != "v" || !reflect.DeepEqual(stored.Labels, []string{"x"}) {
+		t.Errorf("stored link = %+v", stored)
+	}
+}
