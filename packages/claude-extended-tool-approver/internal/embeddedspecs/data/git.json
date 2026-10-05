@@ -32,6 +32,18 @@
           "source": "git -h (full): \"--glob-pathspecs Add \\\"glob\\\" magic to all pathspec. This is equivalent to setting the\""
         }
       },
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "git --help: \"usage: git [-v | --version] [-h | --help] [-C \u003cpath\u003e] [-c \u003cname\u003e=\u003cvalue\u003e]\""
+        }
+      },
       "--icase-pathspecs": {
         "arity": "none",
         "operand": {
@@ -114,6 +126,18 @@
         },
         "citation": {
           "source": "git -h: \"[-p | --paginate | -P | --no-pager] [--no-replace-objects] [--no-lazy-fetch]\""
+        }
+      },
+      "--version": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "git --help: \"usage: git [-v | --version] [-h | --help] [-C \u003cpath\u003e] [-c \u003cname\u003e=\u003cvalue\u003e]\""
         }
       },
       "-C": {

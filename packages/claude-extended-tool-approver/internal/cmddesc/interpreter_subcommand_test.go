@@ -141,6 +141,118 @@ func TestSubcommandDispatch(t *testing.T) {
 	})
 }
 
+// TestSubcommandHelpOnly (pg2-7z71z): a subcommand group invoked with ONLY
+// help/version flags its own schema declares is sufficient, with a stdout-only
+// metadata effect; every look-alike keeps the "no subcommand given" (or other)
+// insufficiency it had before.
+func TestSubcommandHelpOnly(t *testing.T) {
+	schema := CommandSchema{
+		Name: "tool",
+		Flags: map[string]FlagSpec{
+			"-h": inert, "--help": inert, "--version": inert,
+			// -v is declared but is NOT a help/version spelling (it is --verbose
+			// for some real tools); -V is declared with a value to prove the
+			// arity check; --opt has a value; --tf carries a transform.
+			"-v": inert, "-V": literal1, "--opt": literal1,
+			"--tf": {Transform: EffectTransform{Kind: TransformDryRun}},
+		},
+		Subcommands:  map[string]CommandSchema{"go": {Positionals: PositionalSpec{Rest: PathRead}, EndOfOptions: true}},
+		UnknownFlag:  UnknownFlagInsufficient,
+		EndOfOptions: true,
+	}
+	in := GenericInterpreter{}
+	stdoutOnly := []Effect{{Kind: EffectStdio, Stream: StreamStdout, Metadata: true}}
+
+	for _, cmd := range []string{"tool --help", "tool -h", "tool --version", "tool --help --version", "tool -h -h", `tool "--help"`} {
+		got := in.Interpret(leaf(t, cmd), schema, Context{})
+		if !got.Sufficient || !reflect.DeepEqual(got.Effects, stdoutOnly) {
+			t.Errorf("%q: got %+v, want sufficient with %+v", cmd, got, stdoutOnly)
+		}
+	}
+
+	for _, cmd := range []string{
+		"tool",                   // bare group: unchanged
+		"tool -v",                // -v is not a help/version spelling
+		"tool -V x",              // -V takes a value in this schema
+		"tool --opt x --help",    // another (modeled) flag beside help
+		"tool --tf --help",       // transform-carrying flag beside help
+		"tool --help --",         // end-of-options terminator
+		"tool -hh",               // a bundle is not an exact spelling
+		"tool --help=1",          // glued value on a no-value flag
+		"tool --help --bogus",    // unknown flag
+		"tool --bogus --help",    // unknown flag first
+		`tool --help "$X"`,       // runtime expansion
+		`tool --help $(x)`,       // command substitution
+		"tool --help frobnicate", // unmodeled subcommand
+	} {
+		got := in.Interpret(leaf(t, cmd), schema, Context{})
+		if got.Sufficient {
+			t.Errorf("%q: want insufficient (existing verdict), got %+v", cmd, got)
+		}
+	}
+
+	// A help flag beside a real subcommand keeps ordinary dispatch.
+	got := in.Interpret(leaf(t, "tool --help go a"), schema, Context{})
+	want := []Effect{{Kind: EffectPath, Path: "a", Access: AccessRead, Source: "arg 0", FromPositional: true}}
+	if !got.Sufficient || !reflect.DeepEqual(got.Effects, want) {
+		t.Errorf("help flag before a real subcommand: got %+v, want %+v", got, want)
+	}
+
+	// The reason is unchanged where it still applies.
+	if got := in.Interpret(leaf(t, "tool"), schema, Context{}); !strings.Contains(got.Insufficiency, "no subcommand given") {
+		t.Errorf("bare group: got %+v", got)
+	}
+}
+
+// TestRegistryHelpOnlyGroups (pg2-7z71z): the real groups the plugins
+// instruct, through DefaultRegistry. Each approving form is sufficient with
+// nothing but a stdout effect; the look-alikes stay insufficient.
+func TestRegistryHelpOnlyGroups(t *testing.T) {
+	reg := DefaultRegistry()
+	run := func(cmd string) Interpretation {
+		l := leaf(t, cmd)
+		schema, ok := reg.Lookup(l.Executable)
+		if !ok {
+			t.Fatalf("%q: executable %q not registered", cmd, l.Executable)
+		}
+		in, ok := LookupInterpreter(schema.Interpreter)
+		if !ok {
+			t.Fatalf("%q: no interpreter", cmd)
+		}
+		return in.Interpret(l, schema, Context{})
+	}
+	stdoutOnly := []Effect{{Kind: EffectStdio, Stream: StreamStdout, Metadata: true}}
+	for _, cmd := range []string{
+		"pb --help", "pb gate --help", "pb drain --help", "pb --version",
+		"git --help", "git --version",
+		"pn --help", "pn --version", "pn workspace --help", "pn workspace workforest --help",
+		"pnwf --help", "pnwf --version",
+	} {
+		got := run(cmd)
+		if !got.Sufficient || !reflect.DeepEqual(got.Effects, stdoutOnly) {
+			t.Errorf("%q: got %+v, want sufficient with only %+v", cmd, got, stdoutOnly)
+		}
+	}
+	for _, cmd := range []string{
+		"git", "pn", "pn workspace", "pnwf", "pb gate",
+		"git -c core.pager=evil --help",
+		"git -c core.pager=evil --version",
+		"git -C /tmp --help", // a global flag with an operand: not help-only
+		"git --help -c core.pager=evil",
+		"git -h", "git -v", "git --paginate --help",
+		"git --exec-path --help", "git --help --bogus", "git --help frobnicate",
+		"git --help $(x)", `git --help "$X"`, "git --version=1",
+		"pn -v", "pn --verbose --help", "pn --otlp-endpoint x --help", "pn --help --bogus",
+		"pn workspace --version", "pn workspace --help --bogus", "pn workspace --help frobnicate",
+		"pnwf -v", "pnwf --help --bogus", "pnwf --version extra",
+		"pb gate --help $(x)", "pb gate --help extra", "pb --help --bogus",
+	} {
+		if got := run(cmd); got.Sufficient {
+			t.Errorf("%q: want insufficient (existing verdict), got sufficient with %+v", cmd, got.Effects)
+		}
+	}
+}
+
 // TestSubcommandDispatchNested: a Subcommands value that itself has
 // Subcommands recurses through the SAME code path, one level deep.
 func TestSubcommandDispatchNested(t *testing.T) {

@@ -30,6 +30,12 @@ func interpretSubcommand(leaf cmdparse.ParsedCommand, schema CommandSchema, ctx 
 	// at the first positional, so st.ops holds flag operands only.
 	st.resolve()
 	if subIdx < 0 {
+		if helpOnlyInvocation(leaf, schema) {
+			// `pb gate --help`, `git --version`: the group prints its usage or
+			// version text and exits. Nothing else is run or touched.
+			st.effects = append(st.effects, Effect{Kind: EffectStdio, Stream: StreamStdout, Metadata: true})
+			return st.result()
+		}
 		st.fail("no subcommand given")
 		return st.result()
 	}
@@ -95,6 +101,37 @@ func interpretSubcommand(leaf cmdparse.ParsedCommand, schema CommandSchema, ctx 
 		Sufficient:    st.insuff == "" && sub.Sufficient,
 		Insufficiency: insufficiency,
 	}
+}
+
+// helpVersionFlagNames are the spellings treated as a group's help/version
+// request. `-v` is deliberately absent: it is `--version` for some tools (pb,
+// pnwf) but `--verbose` for others (pn, bd), so the spelling alone cannot say.
+var helpVersionFlagNames = map[string]bool{"-h": true, "--help": true, "-V": true, "--version": true}
+
+// helpOnlyInvocation reports whether the whole argv of a subcommand group is
+// help/version requests and nothing else (pg2-7z71z): at least one argument,
+// and EVERY argument an exact, literal help/version spelling that the group's
+// own schema declares as an inert, no-value, transform-free flag. Anything
+// more — another flag (git -c core.pager=x --help), a bundle (-hV), a glued
+// value, an `--` terminator, a subcommand or any operand, a runtime expansion —
+// is not help-only, so the caller's existing "no subcommand given" (or its
+// subcommand dispatch) applies unchanged. A spelling the schema does not declare never
+// qualifies (scanGlobal already made an undeclared flag insufficient), so this
+// cannot approve an unrecognised flag.
+func helpOnlyInvocation(leaf cmdparse.ParsedCommand, schema CommandSchema) bool {
+	if len(leaf.Args) == 0 {
+		return false
+	}
+	for i, tok := range leaf.Args {
+		if !helpVersionFlagNames[tok] || leaf.ArgIsLiveExpansion(i) {
+			return false
+		}
+		spec, ok := schema.Flags[tok]
+		if !ok || spec.Arity != ArityNone || len(spec.Operands) > 0 || spec.Transform.Kind != TransformNone {
+			return false
+		}
+	}
+	return true
 }
 
 // interpretVerbDispatch implements the BUILD-TOOL VERB-DISPATCH shape

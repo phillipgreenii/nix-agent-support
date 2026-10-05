@@ -417,6 +417,11 @@ var gitSchema = CommandSchema{
 		"--noglob-pathspecs":   inert,
 		"--icase-pathspecs":    inert,
 		"--no-replace-objects": inert,
+		// pg2-7z71z: `git --help` / `git --version` (usage / version text on
+		// stdout; verified on git 2.54.0). Only the bare help-only form is
+		// special-cased (interpretSubcommand's helpOnlyInvocation); `-h` and `-v`
+		// stay unmodeled.
+		"--help": inert, "--version": inert,
 		// pg2-cjfpy.2: the two global options the integrate-branch and
 		// session-wrapup skills pass. -C is the per-command working-directory
 		// role (the command's relative paths re-base against it); -c is

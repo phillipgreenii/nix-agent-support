@@ -13,6 +13,13 @@ func TestPbInterpretation(t *testing.T) {
 		"pb drain isolate --bead pg2-abc12 --repo /ws/repo",
 		"pb drain isolate --bead pg2-abc12 --repo /ws/repo --json",
 		"pb drain isolate --help",
+		// pg2-7z71z: a group invoked with only its help/version flag.
+		"pb --help",
+		"pb -h",
+		"pb --version",
+		"pb gate --help",
+		"pb gate -h",
+		"pb drain --help",
 		"pb gate create --blocks pg2-abc12 --repo repo-a",
 		"pb gate create --blocks pg2-abc12 --repo repo-a --commit HEAD",
 		"pb gate create --blocks pg2-abc12 --repo repo-a --commits main..HEAD --reason why --json",
@@ -24,12 +31,21 @@ func TestPbInterpretation(t *testing.T) {
 		"pb gate attach-verified-child --impl pg2-abc12 --title t --gate repo-a=0123abc --actor a-drain --reason why",
 	}
 	insufficient := []string{
-		// No subcommand at all (a bare group, or only a help flag): the
-		// generic subcommand dispatcher cannot name a schema to apply.
+		// No subcommand at all (a bare group): the generic subcommand
+		// dispatcher cannot name a schema to apply.
 		"pb",
 		"pb gate",
-		"pb gate --help",
 		"pb drain",
+		// pg2-7z71z look-alikes: help beside anything but another help/version
+		// flag keeps its existing verdict.
+		"pb gate --help extra",
+		"pb gate --help --bogus",
+		"pb gate --help --",
+		"pb gate --help frobnicate",
+		"pb --help --bogus",
+		"pb --help=x",
+		"pb gate --hel",
+		"pb -v",
 		// Flags no skill or command instructs stay unmodeled.
 		"pb gate check --stale-handler close",
 		"pb gate check --stale-after 1d",

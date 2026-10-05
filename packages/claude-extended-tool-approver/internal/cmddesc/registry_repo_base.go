@@ -115,7 +115,7 @@ var pnWorkspaceWorkforest = CommandSchema{
 var repoBasePnSchema = CommandSchema{
 	Name:         "pn",
 	Provenance:   "pn --help (pn 0.0.0-3367c0e5, this host 2026-10-05)",
-	Flags:        map[string]FlagSpec{"-v": inert, "--verbose": inert, "--no-telemetry": inert, "-h": inert, "--help": inert},
+	Flags:        map[string]FlagSpec{"-v": inert, "--verbose": inert, "--no-telemetry": inert, "-h": inert, "--help": inert, "--version": inert},
 	UnknownFlag:  UnknownFlagInsufficient,
 	EndOfOptions: true,
 	Subcommands: map[string]CommandSchema{

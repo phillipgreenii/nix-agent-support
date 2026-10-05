@@ -10009,5 +10009,556 @@
     "rules_config": {},
     "expected_verdict": "not-approve",
     "notes": "pg2-slsc0 (operator ruling 2026-10-04/05 on pg2-cjfpy; read-only schema fact, no new effectpolicy judgment): Held: -l/--paginate pipes the output through pr (an executed child) and is deliberately unmodeled."
+  },
+  {
+    "case": "7z71z_pb_help",
+    "tags": ["plugin", "pg2-7z71z", "help-only"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pb --help"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-7z71z (epic pg2-cjfpy ruling 2026-10-04/05; interpreter-level plus read-only schema fact, no new effectpolicy judgment, gate 5 not triggered): A group invoked with ONLY its schema-declared help/version flag is inert, stdout only: pb root help."
+  },
+  {
+    "case": "7z71z_pb_version",
+    "tags": ["plugin", "pg2-7z71z", "help-only"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pb --version"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-7z71z (epic pg2-cjfpy ruling 2026-10-04/05; interpreter-level plus read-only schema fact, no new effectpolicy judgment, gate 5 not triggered): A group invoked with ONLY its schema-declared help/version flag is inert, stdout only: pb's own version flag."
+  },
+  {
+    "case": "7z71z_pb_gate_help",
+    "tags": ["plugin", "pg2-7z71z", "help-only"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pb gate --help"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-7z71z (epic pg2-cjfpy ruling 2026-10-04/05; interpreter-level plus read-only schema fact, no new effectpolicy judgment, gate 5 not triggered): A group invoked with ONLY its schema-declared help/version flag is inert, stdout only: pb gate group help (the 2 logged misses)."
+  },
+  {
+    "case": "7z71z_pb_drain_help",
+    "tags": ["plugin", "pg2-7z71z", "help-only"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pb drain --help"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-7z71z (epic pg2-cjfpy ruling 2026-10-04/05; interpreter-level plus read-only schema fact, no new effectpolicy judgment, gate 5 not triggered): A group invoked with ONLY its schema-declared help/version flag is inert, stdout only: pb drain group help."
+  },
+  {
+    "case": "7z71z_git_help",
+    "tags": ["plugin", "pg2-7z71z", "help-only"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git --help"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-7z71z (epic pg2-cjfpy ruling 2026-10-04/05; interpreter-level plus read-only schema fact, no new effectpolicy judgment, gate 5 not triggered): A group invoked with ONLY its schema-declared help/version flag is inert, stdout only: git's usage text."
+  },
+  {
+    "case": "7z71z_git_version",
+    "tags": ["plugin", "pg2-7z71z", "help-only"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git --version"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-7z71z (epic pg2-cjfpy ruling 2026-10-04/05; interpreter-level plus read-only schema fact, no new effectpolicy judgment, gate 5 not triggered): A group invoked with ONLY its schema-declared help/version flag is inert, stdout only: git's version text."
+  },
+  {
+    "case": "7z71z_pn_help",
+    "tags": ["plugin", "pg2-7z71z", "help-only"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pn --help"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-7z71z (epic pg2-cjfpy ruling 2026-10-04/05; interpreter-level plus read-only schema fact, no new effectpolicy judgment, gate 5 not triggered): A group invoked with ONLY its schema-declared help/version flag is inert, stdout only: pn root help."
+  },
+  {
+    "case": "7z71z_pn_version",
+    "tags": ["plugin", "pg2-7z71z", "help-only"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pn --version"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-7z71z (epic pg2-cjfpy ruling 2026-10-04/05; interpreter-level plus read-only schema fact, no new effectpolicy judgment, gate 5 not triggered): A group invoked with ONLY its schema-declared help/version flag is inert, stdout only: pn's version flag."
+  },
+  {
+    "case": "7z71z_pn_workspace_help",
+    "tags": ["plugin", "pg2-7z71z", "help-only"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pn workspace --help"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-7z71z (epic pg2-cjfpy ruling 2026-10-04/05; interpreter-level plus read-only schema fact, no new effectpolicy judgment, gate 5 not triggered): A group invoked with ONLY its schema-declared help/version flag is inert, stdout only: pn workspace group help."
+  },
+  {
+    "case": "7z71z_pnwf_help",
+    "tags": ["plugin", "pg2-7z71z", "help-only"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pnwf --help"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-7z71z (epic pg2-cjfpy ruling 2026-10-04/05; interpreter-level plus read-only schema fact, no new effectpolicy judgment, gate 5 not triggered): A group invoked with ONLY its schema-declared help/version flag is inert, stdout only: pnwf root help."
+  },
+  {
+    "case": "7z71z_pnwf_version",
+    "tags": ["plugin", "pg2-7z71z", "help-only"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pnwf --version"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-7z71z (epic pg2-cjfpy ruling 2026-10-04/05; interpreter-level plus read-only schema fact, no new effectpolicy judgment, gate 5 not triggered): A group invoked with ONLY its schema-declared help/version flag is inert, stdout only: pnwf's version flag."
+  },
+  {
+    "case": "7z71z_git_c_pager_help",
+    "tags": ["plugin", "pg2-7z71z", "help-only"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -c core.pager=evil --help"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-7z71z (epic pg2-cjfpy ruling 2026-10-04/05; interpreter-level plus read-only schema fact, no new effectpolicy judgment, gate 5 not triggered): Held: a -c override beside --help: not help-only; -c is not in the closed inert-pair set, so it abstains as before."
+  },
+  {
+    "case": "7z71z_git_c_pager_version",
+    "tags": ["plugin", "pg2-7z71z", "help-only"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -c core.pager=evil --version"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-7z71z (epic pg2-cjfpy ruling 2026-10-04/05; interpreter-level plus read-only schema fact, no new effectpolicy judgment, gate 5 not triggered): Held: a -c override beside --version: abstains as before."
+  },
+  {
+    "case": "7z71z_git_C_dir_help",
+    "tags": ["plugin", "pg2-7z71z", "help-only"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C /tmp --help"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-7z71z (epic pg2-cjfpy ruling 2026-10-04/05; interpreter-level plus read-only schema fact, no new effectpolicy judgment, gate 5 not triggered): Held: a global flag with an operand beside --help: not help-only, abstains as before."
+  },
+  {
+    "case": "7z71z_git_paginate_help",
+    "tags": ["plugin", "pg2-7z71z", "help-only"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git --paginate --help"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-7z71z (epic pg2-cjfpy ruling 2026-10-04/05; interpreter-level plus read-only schema fact, no new effectpolicy judgment, gate 5 not triggered): Held: a non-help global flag beside --help: abstains as before."
+  },
+  {
+    "case": "7z71z_git_short_h",
+    "tags": ["plugin", "pg2-7z71z", "help-only"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -h"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-7z71z (epic pg2-cjfpy ruling 2026-10-04/05; interpreter-level plus read-only schema fact, no new effectpolicy judgment, gate 5 not triggered): Held: git's -h is deliberately not modeled: abstains as before."
+  },
+  {
+    "case": "7z71z_git_help_unknown_flag",
+    "tags": ["plugin", "pg2-7z71z", "help-only"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git --help --bogus"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-7z71z (epic pg2-cjfpy ruling 2026-10-04/05; interpreter-level plus read-only schema fact, no new effectpolicy judgment, gate 5 not triggered): Held: help plus an unknown flag: abstains as before."
+  },
+  {
+    "case": "7z71z_git_help_unmodeled_sub",
+    "tags": ["plugin", "pg2-7z71z", "help-only"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git --help frobnicate"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-7z71z (epic pg2-cjfpy ruling 2026-10-04/05; interpreter-level plus read-only schema fact, no new effectpolicy judgment, gate 5 not triggered): Held: help plus an unmodeled subcommand: abstains as before."
+  },
+  {
+    "case": "7z71z_git_help_cmdsub",
+    "tags": ["plugin", "pg2-7z71z", "help-only"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git --help $(echo x)"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-7z71z (epic pg2-cjfpy ruling 2026-10-04/05; interpreter-level plus read-only schema fact, no new effectpolicy judgment, gate 5 not triggered): Held: help beside a command substitution (a runtime word): abstains as before."
+  },
+  {
+    "case": "7z71z_git_exec_path_help",
+    "tags": ["plugin", "pg2-7z71z", "help-only"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git --exec-path --help"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-7z71z (epic pg2-cjfpy ruling 2026-10-04/05; interpreter-level plus read-only schema fact, no new effectpolicy judgment, gate 5 not triggered): Held: an unmodeled global flag beside --help: abstains as before."
+  },
+  {
+    "case": "7z71z_pb_gate_help_cmdsub",
+    "tags": ["plugin", "pg2-7z71z", "help-only"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pb gate --help $(echo x)"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-7z71z (epic pg2-cjfpy ruling 2026-10-04/05; interpreter-level plus read-only schema fact, no new effectpolicy judgment, gate 5 not triggered): Held: help beside a command substitution: abstains as before."
+  },
+  {
+    "case": "7z71z_pb_gate_help_unknown_flag",
+    "tags": ["plugin", "pg2-7z71z", "help-only"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pb gate --help --bogus"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-7z71z (epic pg2-cjfpy ruling 2026-10-04/05; interpreter-level plus read-only schema fact, no new effectpolicy judgment, gate 5 not triggered): Held: help plus an unknown flag: abstains as before."
+  },
+  {
+    "case": "7z71z_pb_gate_help_operand",
+    "tags": ["plugin", "pg2-7z71z", "help-only"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pb gate --help extra"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-7z71z (epic pg2-cjfpy ruling 2026-10-04/05; interpreter-level plus read-only schema fact, no new effectpolicy judgment, gate 5 not triggered): Held: help plus a stray operand: abstains as before."
+  },
+  {
+    "case": "7z71z_pb_help_unknown_flag",
+    "tags": ["plugin", "pg2-7z71z", "help-only"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pb --help --bogus"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-7z71z (epic pg2-cjfpy ruling 2026-10-04/05; interpreter-level plus read-only schema fact, no new effectpolicy judgment, gate 5 not triggered): Held: help plus an unknown flag at the root: abstains as before."
+  },
+  {
+    "case": "7z71z_pb_gate_bare",
+    "tags": ["plugin", "pg2-7z71z", "help-only"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pb gate"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-7z71z (epic pg2-cjfpy ruling 2026-10-04/05; interpreter-level plus read-only schema fact, no new effectpolicy judgment, gate 5 not triggered): Held: a bare group with no args still has no subcommand: abstains as before."
+  },
+  {
+    "case": "7z71z_pn_help_unknown_flag",
+    "tags": ["plugin", "pg2-7z71z", "help-only"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pn --help --bogus"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-7z71z (epic pg2-cjfpy ruling 2026-10-04/05; interpreter-level plus read-only schema fact, no new effectpolicy judgment, gate 5 not triggered): Held: help plus an unknown flag: abstains as before."
+  },
+  {
+    "case": "7z71z_pn_verbose_only",
+    "tags": ["plugin", "pg2-7z71z", "help-only"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pn --verbose"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-7z71z (epic pg2-cjfpy ruling 2026-10-04/05; interpreter-level plus read-only schema fact, no new effectpolicy judgment, gate 5 not triggered): Held: pn -v/--verbose is not a help/version spelling: a bare group with only --verbose still abstains."
+  },
+  {
+    "case": "7z71z_pn_workspace_help_unmodeled_sub",
+    "tags": ["plugin", "pg2-7z71z", "help-only"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pn workspace --help frobnicate"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-7z71z (epic pg2-cjfpy ruling 2026-10-04/05; interpreter-level plus read-only schema fact, no new effectpolicy judgment, gate 5 not triggered): Held: help plus an unmodeled subcommand: abstains as before."
+  },
+  {
+    "case": "7z71z_pnwf_version_operand",
+    "tags": ["plugin", "pg2-7z71z", "help-only"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pnwf --version extra"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-7z71z (epic pg2-cjfpy ruling 2026-10-04/05; interpreter-level plus read-only schema fact, no new effectpolicy judgment, gate 5 not triggered): Held: version plus a stray operand: abstains as before."
   }
 ]
