@@ -1,0 +1,44 @@
+[
+  {
+    "id": "w-1",
+    "type": "widget.created",
+    "title": "First widget",
+    "metadata": {
+      "degraded_sources": ["stale-widgets"],
+      "entity_id": "w-1",
+      "entity_type": "widget",
+      "kind": "created",
+      "origin": "poll",
+      "seq": 11,
+      "version": 4
+    }
+  },
+  {
+    "id": "w-1",
+    "type": "widget.reconcile",
+    "title": "First widget",
+    "metadata": {
+      "degraded_sources": ["stale-widgets"],
+      "entity_id": "w-1",
+      "entity_type": "widget",
+      "kind": "reconcile",
+      "origin": "poll",
+      "seq": 11,
+      "version": 4
+    }
+  },
+  {
+    "id": "w-2",
+    "type": "widget.updated",
+    "title": "Second widget",
+    "metadata": {
+      "degraded_sources": ["stale-widgets"],
+      "entity_id": "w-2",
+      "entity_type": "widget",
+      "kind": "updated",
+      "origin": "annotate",
+      "seq": 12,
+      "version": 1
+    }
+  }
+]
