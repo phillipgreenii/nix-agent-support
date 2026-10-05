@@ -48,6 +48,15 @@ the code, and it changes none of S1 to S28. The operator's rulings it builds on 
 unremovable stale pending reviews MUST escalate quickly (2026-09-29) and "no further changes are to
 be made to pg-pr" (2026-10-03).
 
+**Proposed amendment 2026-10-05** (bead `pg2-ii38x`, not yet in force): rows S29 through S34, in
+the section "Proposed amendment 2026-10-05" before Related Decisions, would change how the
+pull-through detects a change (a pg-desk-owned baseline written with the hydrated snapshot), how
+the age sweep is tiered, which entity types get a fast check and at what cadence, and the event
+shape the adapter emits. They would amend S5, S6, S8 and S12 in place. They stay marked Proposed
+until the operator rules on the decision bead that cites the design
+`docs/superpowers/specs/2026-10-05-fast-per-type-change-check-design.md`; no earlier row is edited
+by this paragraph.
+
 **Approval and provenance.** The operator (Phillip) approved the design and its implementation plan
 on 2026-09-29 ("if good, consider it approved and continue", recorded on bead `pg2-2j5ac.51`). The
 generic entity pipeline design that this flow governs where the two overlap (bead `pg2-2j5ac.46`)
@@ -473,6 +482,95 @@ This cluster records S11.
   log or audit trail (an accepted loss).
 - New pg-desk commands refuse on an old-schema store, and an old binary refuses a newer schema, so
   an early deploy changes nothing the running system uses and a mismatched binary cannot half-run.
+
+## Proposed amendment 2026-10-05
+
+> **Status: Proposed.** Drafted by bead `pg2-ii38x` from the operator's direction of 2026-10-05
+> (session `c7a2ef42-bfb6-4c46-ad4e-540354f66bb8`): "pg-router handles the scheduling, pg-desk is
+> primarily for specific business logic, if it is doing its own retries, that would conflict with the
+> scheduling from pg-router"; "age limitations are fine, no total limit though"; "we want something
+> for any entity type for which pg-desk supports"; "5 minutes for PRs is too long ... 1m is better
+> for PRs". None of the rows below is a ruling until the operator records it on the decision bead.
+> On a ruling, each accepted row is converted to an "Operator ruling" row with its date, and S5, S6,
+> S8 and S12 are rewritten in place to match, as the earlier amendments did.
+
+### Context
+
+Measured on 2026-10-05, the live v1 pipeline already runs a cheap per-minute PR list; its problem is
+a shared serial lane (a 30 minute sweep re-emits all open PRs as a batch) and a baseline that moves
+before the work is done: pg-connector's per-consumer cursor advances after the output is flushed,
+before pg-desk hydrates or a decider runs (`changes.go` step 5 of pg-connector's `changes` verb), so
+a failed hydration is forgotten until the entity changes again. The new flow's deferral queue
+patches this for hydration only, drops after five polls, and keeps the baseline in pg-connector.
+The change-flow design routes PRs at 60 seconds but says nothing about issue or thread cadence, and
+two of its adapter and removal behaviors do not work as written (findings F-1 and F-2 of the design
+`2026-10-05-fast-per-type-change-check-design.md`).
+
+### Decision
+
+This amendment would record S29, S30, S31, S32, S33, S34.
+
+- **S29 (Proposed)** — The detection baseline is owned by pg-desk, per entity, as the list
+  fingerprint observed when the entity was last hydrated successfully, stored in the same
+  transaction as the snapshot, `hydrated_at`, `active` and the `change_log` rows. A pull-through
+  call lists each watched query (`pg-connector <type> list`, no cursor), compares fingerprints
+  against the store, and hydrates what differs. A failed hydration writes nothing, so the entity is
+  still different on the next scheduled call. The fingerprint is produced by the connector for the
+  type and MUST be compared list against list, never recomputed from a detail read. This amends S5
+  (pg-connector still detects most deltas, but through its summary fingerprint, not its ledger), S6
+  (the pulled call is `list`, not `changes`) and S12 (the cursor rule stays for consumers; the
+  detection baseline is gated on hydration success, which is an acknowledgment). Why: constraint 4
+  of the operator's direction (the baseline is pg-desk's store, the only remote call is the cheap
+  list) and per-entity success, which one monotonic consumer cursor cannot express.
+- **S30 (Proposed)** — pg-router owns every clock. pg-desk MUST NOT run a retry, backoff or timer
+  loop, and MUST NOT keep a retry counter or a deferral queue for the pull-through. Capping work per
+  poll is allowed only if the cap carries work to the next poll (no entity is dropped) and the
+  sizing bound `active_count / max_per_poll x poll_interval <= max_age` is checked and alerting. The
+  v1 `sync_error` automatic retry stays on the v1 pipeline only and is deleted with `internal/sync`
+  at cutover. Why: the operator's retry direction, and a deferral queue that gives up after a fixed
+  number of polls is a drop.
+- **S31 (Proposed)** — The age sweep (S8) has two tiers. A local reconcile tier re-emits a
+  `reconcile` record for an active entity whose latest change-log row is older than
+  `reconcile_age`, with no remote call and no hydration. A remote tier re-hydrates an entity whose
+  `hydrated_at` is older than `sweep.max_age`. Both are rolling (oldest first), capped per poll, and
+  spread by a deterministic per-entity offset `hash(entity_id) mod (age / 5)`, because pg-router's
+  triggers have no jitter. Whether the remote tier is allowed is an open operator decision (D5 of the
+  design). Why: the list fingerprint cannot see review threads, merge-state status or edited
+  comment bodies, and a failed decider run needs a cheap local recovery.
+- **S32 (Proposed)** — Fast-check cadence is per entity type, set in pg-router's query config:
+  `pr` 60s; `issue` backed by beads 5m until the anchor echo loop (`pg2-u4c1s`) has landed and then
+  60s; `issue` backed by Jira 5m with no cursor (the cursor-bounded `updated >= ` list can miss a
+  change and advances on read); `thread` backed by Slack is excluded from the fast check because its
+  list is an LLM call that is always truncated and cannot be fingerprinted or report removals. A
+  beads fingerprint MUST exclude `metadata.last_checked_at`.
+- **S33 (Proposed)** — The adapter emits ONE item per changed entity per poll with
+  `emit = <type>.changed`, `id = <entity_id>@<seq>` and the coalesced kinds in `metadata.kinds`. The
+  adapter MUST set `emit`, because pg-router types an event from `emit` (default: the query's first
+  declared emit), never from the item's `type`. The seq in the id makes a change that lands while a
+  run is in flight a distinct event instead of a deduplicated one. This amends the design's 9.4 and
+  keeps S4 ("one event per changed entity with its change kinds") and S22 (exact-string binds).
+- **S34 (Proposed)** — When an entity leaves every watched query, pg-desk MUST perform one
+  confirmation read before deactivating it, so that a PR that merged or closed is classified
+  `merged` or `closed` and not logged only as `removed`; a failed read leaves the entity active and
+  is repeated on the next call. Why: every watched PR query is `is:open`, so a merged PR is, by
+  construction, absent from the list.
+
+### Consequences
+
+- pg-router's core, ADR 0031, `DEC-EVENT-1`, `DEC-EVENT-2`, `INV-FAIL-1` and `INV-CONC-1` are
+  unchanged and need no amendment; the design relies on their current text and adds tests only
+  (an in-flight dedupe queue test and a multi-emit loader test).
+- pg-connector's `list` result gains an additive `fingerprints` map and the GitHub backend logs
+  `graphql_cost`; the cached `changes` ledger keeps serving its other consumers. The cache
+  tombstone written by `changes` is no longer written for entities pg-desk sees removed, so a
+  backend-down `list` may serve a removed entity from the cache for the cache max-age, marked
+  stale and degraded; pg-desk treats a degraded source as contributing no removals.
+- pg-desk's `entity` table gains `list_fp` in the same cutover migration that already adds
+  `version`, `hydrated_at` and `active`; the `change_flow.deferred.<type>` meta key is removed.
+- The live v1 store (schema 1) holds no baseline for any type; the new commands refuse it, so the
+  check is first exercised on a store copy migrated with `pg-desk migrate --cutover`.
+- `pg2-u4c1s` MUST land before, and block, every issue-type implementation bead that follows from
+  these rows.
 
 ## Related Decisions
 
