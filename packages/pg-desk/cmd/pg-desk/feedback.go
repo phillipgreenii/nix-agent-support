@@ -155,8 +155,15 @@ func renderFeedbackList(w io.Writer, rows []feedbackDisposition) error {
 }
 
 func runFeedbackSet(cmd *cobra.Command, ref, commentID string) error {
-	if !validDisposition(feedbackSetFlags.disposition) {
-		return fmt.Errorf("feedback set: --disposition must be one of open|will-fix|wont-fix|no-action, got %q", feedbackSetFlags.disposition)
+	return runFeedbackSetWith(cmd, ref, commentID, feedbackSetFlags.disposition, feedbackSetFlags.actor)
+}
+
+// runFeedbackSetWith is runFeedbackSet with the flag values passed in, so the
+// typed `pg-desk pr feedback set` can run the old-schema behavior from its
+// own flags without sharing feedbackSetFlags.
+func runFeedbackSetWith(cmd *cobra.Command, ref, commentID, disposition, actorFlag string) error {
+	if !validDisposition(disposition) {
+		return fmt.Errorf("feedback set: --disposition must be one of open|will-fix|wont-fix|no-action, got %q", disposition)
 	}
 
 	cfg, err := deskConfigLoad(cmd.Context())
@@ -193,7 +200,7 @@ func runFeedbackSet(cmd *cobra.Command, ref, commentID string) error {
 		return fmt.Errorf("feedback set: comment %q does not resolve on %s", commentID, ref)
 	}
 
-	actor := actorFor(cfg, feedbackSetFlags.actor)
+	actor := actorFor(cfg, actorFlag)
 	if actor == "" {
 		return fmt.Errorf("feedback set: no actor available (pass --actor or set config's actor)")
 	}
@@ -203,7 +210,7 @@ func runFeedbackSet(cmd *cobra.Command, ref, commentID string) error {
 		EntityType:  entityTypePR,
 		EntityID:    id,
 		CommentID:   commentID,
-		Disposition: feedbackSetFlags.disposition,
+		Disposition: disposition,
 		SetBy:       actor,
 		SetAt:       feedbackNow(),
 	}

@@ -10,6 +10,19 @@ over its own verdict on every later run (see [`interpret.md`](interpret.md)) —
 re-run and wins. This is the write path the rewritten process-feedback workflow uses in place of
 the retired `pg-pr feedback disposition`.
 
+## Typed form
+
+`pg-desk pr feedback list <id>` and `pg-desk pr feedback set <id> <comment-id> --disposition ...
+[--actor A]` are the typed homes of the verbs above (entity-change-flow design 6.9); feedback is
+built for `pr` only. The top-level verbs are unchanged. The typed forms depend on the store's schema:
+
+- On an old-schema store they behave exactly like the top-level verbs.
+- On a migrated store `set` records the override as the annotation `disposition.<comment-id>` (see
+  [`annotate.md`](annotate.md)) with the disposition as given, attributed to the caller, and
+  appends one `annotation_changed` record; `list` overlays those annotations on the stored
+  verdicts and marks them `(overridden)`. The checks are the same: the PR and the comment must
+  resolve, and the disposition must be one of the four values.
+
 ## Exit codes, telemetry, and logs
 
 `0` on success; `1` when `<pr>` or `<comment-id>` does not resolve, `--disposition` is not one of

@@ -27,7 +27,9 @@ stored entity), `serve` (behind the soak option only), `open`, `hide`/`unhide`/`
 `feedback list`/`feedback set`, `show`, `links` (a read-only batch lookup of cross-reference
 links, see [`links.md`](links.md), which also holds the `<type> link add|remove` external-link
 verbs), `<type> consumer list|forget` (see [`consumer.md`](consumer.md)), `status`, `doctor`, `heartbeat`/`heartbeat-item`, and
-`import-pg-pr-annotations`.
+`import-pg-pr-annotations`, and the annotation verbs `<type> annotate|suppress|unsuppress`,
+`pr force-review` and the typed `hide`/`unhide`/`wip`/`pr feedback` forms (see
+[`annotate.md`](annotate.md)).
 
 **Out of scope for the whole set, named once here so no individual doc needs to repeat it as a
 qualifier every time:**
@@ -62,8 +64,9 @@ back here — not the full list.
 | [`run-thread.md`](run-thread.md)                             | `pg-desk run thread` — the Slack half: permalink/ticket-key cross-references and interpret-only re-run                             |
 | [`serve.md`](serve.md)                                       | `pg-desk serve`, soak-port only this phase                                                                                         |
 | [`open.md`](open.md)                                         | `pg-desk open`                                                                                                                     |
-| [`hide-unhide-wip.md`](hide-unhide-wip.md)                   | `pg-desk hide`/`unhide`/`wip`                                                                                                      |
-| [`feedback.md`](feedback.md)                                 | `pg-desk feedback list`/`feedback set`                                                                                             |
+| [`hide-unhide-wip.md`](hide-unhide-wip.md)                   | `pg-desk hide`/`unhide`/`wip` and their typed `<type>` forms                                                                       |
+| [`feedback.md`](feedback.md)                                 | `pg-desk feedback list`/`feedback set` and `pr feedback list`/`set`                                                                |
+| [`annotate.md`](annotate.md)                                 | `pg-desk <type> annotate`/`suppress`/`unsuppress` and `pr force-review` — the key/value annotation verbs                           |
 | [`history.md`](history.md)                                   | `pg-desk pr`/`issue`/`thread` groups and `<type> history`                                                                          |
 | [`links.md`](links.md)                                       | `pg-desk links` — read-only batch lookup of PR/issue/thread/build cross-reference links; `<type> link add`/`remove` external links |
 | [`consumer.md`](consumer.md)                                 | `pg-desk <type> consumer list`/`forget` — change-log consumer lifecycle                                                            |
