@@ -1280,6 +1280,39 @@
                     touch $out
                   '';
 
+              # Drift check between the pb command markdown (canonical for agents) and
+              # claude-marketplace/pb/queues.json (the exporter's machine-readable mirror),
+              # with automated mutants. NOT generated from either side (ADR 0017 rejects
+              # build-time substitution into static marketplace content).
+              test-pb-queues-mirror =
+                let
+                  pbQueuesSrc = lib.fileset.toSource {
+                    root = ./claude-marketplace/pb;
+                    fileset = lib.fileset.unions [
+                      ./claude-marketplace/pb/queues.json
+                      ./claude-marketplace/pb/commands/drain-beads.md
+                      ./claude-marketplace/pb/commands/unblock-human-beads.md
+                    ];
+                  };
+                in
+                pkgs.runCommand "test-pb-queues-mirror"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bats
+                      pkgs.jq
+                      pkgs.gawk
+                      pkgs.gnugrep
+                      pkgs.gnused
+                      pkgs.coreutils
+                    ];
+                  }
+                  ''
+                    export PBQ_CHECK="${./tests/pb-queues-mirror-check.sh}"
+                    export PBQ_PB_DIR="${pbQueuesSrc}"
+                    bats --verbose-run ${./tests/pb-queues-mirror.bats}
+                    touch $out
+                  '';
+
               # Structural gate for the "never invoked" bug (pg2-o3eyk): the bats
               # suite cannot test CC auto-discovery, and mkClaudeMarketplace only
               # cp's hooks.json (never parses it). Assert the BUILT marketplace

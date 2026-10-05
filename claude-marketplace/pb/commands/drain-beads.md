@@ -74,6 +74,8 @@ last resort.
 
 You are DONE only when a SUCCESSFUL query returns no agent-workable, non-template bead:
 
+<!-- pb-queue:drain-termination -->
+
 ```bash
 bd ready --exclude-label human,human-focus-required,refactor-campaign --json -n 10
 ```
@@ -236,6 +238,8 @@ proceeding on currently loaded text (direct interactive invocation).`)
        park.
      - Report directly to the operator that this session's own loaded command
        content is stale and the session should be restarted fresh.
+
+      <!-- pb-queue:drain-claim -->
 
    ```bash
    bd ready --exclude-label human,human-focus-required,refactor-campaign --exclude-type epic --json

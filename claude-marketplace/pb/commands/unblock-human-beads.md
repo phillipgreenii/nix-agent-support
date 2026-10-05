@@ -72,6 +72,8 @@ Main loop step 1) is NEVER the bare atomic form — it is always this two-step s
    (DEFAULT shown; substitute the `--include-focus-required` / `--focus-required-only` label
    set — see below — when one of those flags is active):
 
+   <!-- pb-queue:unblock-human -->
+
    ```bash
    bd ready --label human --exclude-label refactor-campaign,human-focus-required --exclude-type handoff --json
    ```
@@ -128,7 +130,14 @@ or neither):
   carries `human` (the invariant above), `bd ready --label human-focus-required ...` alone is
   sufficient — `--label` is AND-semantics, `--exclude-label` is OR-semantics (confirmed via
   `bd ready --help`/`bd list --help`) — though `--label human,human-focus-required` (relying on
-  the AND-semantics) is also correct and slightly more defensive, if preferred.
+  the AND-semantics) is also correct and slightly more defensive, if preferred. The
+  `--focus-required-only` query is:
+
+  <!-- pb-queue:unblock-human-focus -->
+
+  ```bash
+  bd ready --label human-focus-required --exclude-label refactor-campaign --exclude-type handoff --json
+  ```
 
 These two flags are dedicated MODE flags parsed out of `$ARGUMENTS` BEFORE the rest of
 `$ARGUMENTS` is applied as ordinary narrowing (see "Optional scope arguments") — they are a new
