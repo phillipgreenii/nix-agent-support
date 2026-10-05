@@ -15,13 +15,19 @@
 //	                 writes nothing at all -- no snapshot update, no bd
 //	                 call [design: "Exit codes" paragraph].
 //	4 partial     -- at least one sub-check was attempted and actually
-//	                 degraded (its ccpool dependency was unreachable, or
-//	                 the pg-connector dedup query itself failed), while at
+//	                 degraded (its ccpool dependency was unreachable, the
+//	                 pg-connector dedup query itself failed, or the
+//	                 last-run snapshot could not be persisted), while at
 //	                 least one other sub-check (or the dedup query, when
 //	                 reached) produced a result; this run proceeds with
 //	                 whatever succeeded, and any bead it files/updates
 //	                 carries a note about which sub-check was skipped or
-//	                 degraded [design: same paragraph].
+//	                 degraded [design: same paragraph]. A snapshot that
+//	                 cannot be saved is degraded, not merely warned about:
+//	                 every later run would see "no baseline" and the
+//	                 drift/never-prompted checks would stay silently inert
+//	                 (pg2-d845f), and the handler discards stderr on
+//	                 exit 0, so only a non-zero exit surfaces it.
 //
 // Unlike pg-router-probe's own run.go, this binary's sub-checks are
 // never individually "unconfigured" -- they always attempt a ccpool call
@@ -159,7 +165,7 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 		findings = append(findings, checkNeedsInput(pool, niRows)...)
 	}
 
-	// Sub-check 2: errored/working zombie-count drift (one count summed
+	// Sub-check 2: working-and-dead zombie-count drift (one count summed
 	// over every pool) and sub-check 3: live sessions stuck in ready
 	// (per pool), both fed by one full list per pool.
 	prevReady := make(map[string]bool, len(prevSnap.ReadySeen))
@@ -230,7 +236,14 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 		CheckedAt:               deps.now().UTC().Format(time.RFC3339),
 		ReadySeen:               readySeen,
 	}); err != nil {
-		warn(fmt.Sprintf("failed to persist snapshot: %v", err))
+		// A snapshot that cannot be persisted silently disables the drift
+		// and never-prompted checks (every later run sees "no baseline";
+		// pg2-d845f), so it is a degraded sub-check: exit 4 after the
+		// findings are filed (their bodies carry this note), not merely a
+		// stderr warning nobody reads. Appended BEFORE skippedNote is
+		// computed so the filed bodies mention it.
+		warn(fmt.Sprintf("failed to persist snapshot %s: %v", opts.snapshotPath, err))
+		degraded = append(degraded, fmt.Sprintf("snapshot: persist %s: %v", opts.snapshotPath, err))
 	}
 
 	skippedNote := strings.Join(degraded, "; ")

@@ -12,7 +12,7 @@ func TestCheckNeedsInputEmptyRows(t *testing.T) {
 }
 
 func TestCheckNeedsInputOneRow(t *testing.T) {
-	rows := []ccpoolSessionRow{{ExternalID: "sess-1", Name: "worker", State: "needs_input", CWD: "/tmp/w1"}}
+	rows := []ccpoolSessionRow{{ExternalID: "sess-1", Name: "worker", State: "needs_input", Live: true, CWD: "/tmp/w1"}}
 	got := checkNeedsInput(poolRef{Label: ambientPoolLabel}, rows)
 	if len(got) != 1 {
 		t.Fatalf("expected 1 finding, got %d", len(got))
@@ -31,8 +31,8 @@ func TestCheckNeedsInputOneRow(t *testing.T) {
 
 func TestCheckNeedsInputMultipleRowsIndependentFindings(t *testing.T) {
 	rows := []ccpoolSessionRow{
-		{ExternalID: "sess-1", State: "needs_input"},
-		{ExternalID: "sess-2", State: "needs_input"},
+		{ExternalID: "sess-1", State: "needs_input", Live: true},
+		{ExternalID: "sess-2", State: "needs_input", Live: true},
 	}
 	got := checkNeedsInput(poolRef{Label: ambientPoolLabel}, rows)
 	if len(got) != 2 {
@@ -139,21 +139,72 @@ func TestCheckZombieDriftGrowthProducesFinding(t *testing.T) {
 	}
 }
 
+// TestCountZombieSessions pins the zombie definition (pg2-d845f): ONLY
+// state == working && !live counts. errored history grows without bound
+// and a dead ready/starting row never reached a turn, so neither counts;
+// no live row counts.
 func TestCountZombieSessions(t *testing.T) {
+	cases := []struct {
+		state string
+		live  bool
+		want  int
+	}{
+		{"working", false, 1},
+		{"working", true, 0},
+		{"errored", false, 0},
+		{"errored", true, 0},
+		{"idle", false, 0},
+		{"idle", true, 0},
+		{"ready", false, 0},
+		{"ready", true, 0},
+		{"starting", false, 0},
+		{"starting", true, 0},
+		{"needs_input", false, 0},
+		{"needs_input", true, 0},
+		{"done", false, 0},
+	}
+	for _, c := range cases {
+		name := c.state + "/dead"
+		if c.live {
+			name = c.state + "/live"
+		}
+		t.Run(name, func(t *testing.T) {
+			if got := countZombieSessions([]ccpoolSessionRow{{State: c.state, Live: c.live}}); got != c.want {
+				t.Fatalf("countZombieSessions(%s live=%v) = %d, want %d", c.state, c.live, got, c.want)
+			}
+		})
+	}
+}
+
+func TestCountZombieSessionsSumsOnlyWorkingAndDead(t *testing.T) {
 	rows := []ccpoolSessionRow{
-		{State: "working"},
-		{State: "errored"},
-		{State: "idle"},
-		{State: "needs_input"},
+		{State: "working", Live: false},
+		{State: "working", Live: false},
+		{State: "working", Live: true},
+		{State: "errored", Live: false},
+		{State: "ready", Live: false},
 	}
 	if got := countZombieSessions(rows); got != 2 {
 		t.Fatalf("got %d, want 2", got)
 	}
 }
 
+// TestCheckNeedsInputIgnoresDeadRows: a needs_input row whose process is
+// gone is dead history, not a stuck session (pg2-d845f).
+func TestCheckNeedsInputIgnoresDeadRows(t *testing.T) {
+	rows := []ccpoolSessionRow{
+		{ExternalID: "dead-1", State: "needs_input", Live: false},
+		{ExternalID: "live-1", State: "needs_input", Live: true},
+	}
+	got := checkNeedsInput(poolRef{Label: ambientPoolLabel}, rows)
+	if len(got) != 1 || got[0].Fingerprint != "needs-input:live-1" {
+		t.Fatalf("expected only the live row to be reported, got %+v", got)
+	}
+}
+
 func TestCheckNeedsInputNamesNamedPool(t *testing.T) {
 	pool := poolRef{Label: "pg-router-ccpool-review", Dir: "/pools/pg-router-ccpool-review"}
-	got := checkNeedsInput(pool, []ccpoolSessionRow{{ExternalID: "sess-1", State: "needs_input"}})
+	got := checkNeedsInput(pool, []ccpoolSessionRow{{ExternalID: "sess-1", State: "needs_input", Live: true}})
 	if len(got) != 1 {
 		t.Fatalf("expected 1 finding, got %d", len(got))
 	}

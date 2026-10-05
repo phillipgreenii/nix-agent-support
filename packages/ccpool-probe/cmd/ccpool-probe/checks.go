@@ -2,10 +2,10 @@
 // independently testable via fixtures [design: "ccpool-probe run
 // checks"]:
 //
-//  1. checkNeedsInput — ccpool sessions in needs_input state that
+//  1. checkNeedsInput — LIVE ccpool sessions in needs_input state that
 //     pg-router-ccpool-handler dispatched (item 1).
-//  2. checkZombieDrift — errored/working "zombie" session count vs. a
-//     persisted baseline (item 2).
+//  2. checkZombieDrift — "zombie" session count (state working AND not
+//     live) vs. a persisted baseline (item 2).
 //  3. checkNeverPrompted — live sessions parked in ccpool's "ready" state
 //     (launched, no turn ever started) across two consecutive runs
 //     (bead pg2-bkzrc).
@@ -65,9 +65,18 @@ type finding struct {
 // needs_input state and pg-router's own session pool (ccpoolexec.go's
 // listCcpoolSessions with state="needs_input") [design: item 1]. An empty
 // input yields zero findings, not an error.
+//
+// Only LIVE rows are reported (pg2-d845f): a needs_input row whose
+// process is gone (live=false) is not "stuck waiting on an answer", it is
+// a dead record nobody can answer, and ccpool's list does not prune it.
+// Reporting it would file a bead for history, not for an actionable
+// session.
 func checkNeedsInput(pool poolRef, rows []ccpoolSessionRow) []finding {
 	findings := make([]finding, 0, len(rows))
 	for _, r := range rows {
+		if !r.Live {
+			continue
+		}
 		findings = append(findings, finding{
 			Kind:        kindNeedsInput,
 			Fingerprint: needsInputFingerprint(pool.fingerprintScope(), r.ExternalID),
@@ -117,7 +126,7 @@ func checkNeverPrompted(pool poolRef, rows []ccpoolSessionRow, prevReady map[str
 	return findings, current
 }
 
-// severityZombieBand classifies how much the errored/working "zombie"
+// severityZombieBand classifies how much the working-and-dead "zombie"
 // session count has drifted from the persisted baseline. Thresholds
 // (below, in classifyZombieBand) are this packet's own implementation
 // choice — no design citation: exact severity-band thresholds are
@@ -169,7 +178,7 @@ func classifyZombieBand(previous, current, consecutiveGrowthBefore int) (severit
 	}
 }
 
-// checkZombieDrift compares the current errored/working zombie count
+// checkZombieDrift compares the current zombie count (countZombieSessions)
 // against the previous snapshot's own reading [design: item 2]. It
 // returns (nil, 0) whenever there is no prior baseline to diff against —
 // this run is quiet on drift by construction, matching checkQueueGrowth's
@@ -192,21 +201,34 @@ func checkZombieDrift(hasPrevious bool, previous, current, consecutiveGrowthBefo
 	return &finding{
 		Kind:        kindZombieDrift,
 		Fingerprint: zombieDriftFingerprint(band),
-		Summary:     fmt.Sprintf("errored/working zombie session count is growing (%d -> %d, %s band)", previous, current, band),
+		Summary:     fmt.Sprintf("working-and-dead zombie session count is growing (%d -> %d, %s band)", previous, current, band),
 		Evidence:    fmt.Sprintf("previous=%d\ncurrent=%d\nband=%s\nconsecutive_growth_runs=%d", previous, current, band, streak),
 		State:       string(band),
 	}, streak
 }
 
-// countZombieSessions counts rows in ccpool's own "working" or "errored"
-// state — a pg-router-dispatched session sitting there is a "zombie": it
-// should have reached needs_input/idle/done but has not [design:
-// Contract's "ccpool's own list CLI" bullet; "ccpool-probe run checks"
-// item 2].
+// countZombieSessions counts rows in ccpool's "working" state whose
+// process is NOT live (state == working && !live): a session ccpool
+// believes is mid-turn but whose process is gone — the zombie signal
+// ccpool's own metric documents (packages/ccpool/internal/telemetry/
+// metrics.go: live=false, state=working) [design: Contract's "ccpool's
+// own list CLI" bullet; "ccpool-probe run checks" item 2].
+//
+// Deliberately NOT counted (pg2-d845f):
+//   - errored (live or dead): errored history only ever grows (ccpool
+//     keeps the rows), so counting it would trip drift on ordinary churn;
+//     an errored session is a recorded failure, not a hung one.
+//   - starting/ready && !live: a dead ready/starting row never reached a
+//     turn, so it is not a hung working session; live ready sessions are
+//     the never-prompted check's concern (checkNeverPrompted), and dead
+//     ones are inert history.
+//   - any live row: a live working session is healthy, and a live errored
+//     one is a recorded failure of a running process, not a vanished one.
+//   - idle/needs_input/done: reached their expected resting state.
 func countZombieSessions(rows []ccpoolSessionRow) int {
 	n := 0
 	for _, r := range rows {
-		if r.State == "working" || r.State == "errored" {
+		if r.State == "working" && !r.Live {
 			n++
 		}
 	}

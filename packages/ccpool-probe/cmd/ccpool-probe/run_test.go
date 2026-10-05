@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -134,12 +135,16 @@ func (s *spyDeps) toRunDeps(clock time.Time) runDeps {
 	}
 }
 
+// baseOpts points the snapshot at a path whose PARENT DIRECTORIES DO NOT
+// EXIST, like the real default ($HOME/.local/state/ccpool-probe/ on a
+// fresh host). An existing t.TempDir() parent hid pg2-d845f: every
+// two-run test passed while production never persisted a snapshot.
 func baseOpts(t *testing.T) runOptions {
 	return runOptions{
 		ccpoolTimeout:      time.Second,
 		pgConnectorTimeout: time.Second,
 		dedupQuery:         defaultDedupQuery,
-		snapshotPath:       filepath.Join(t.TempDir(), "snapshot.json"),
+		snapshotPath:       filepath.Join(t.TempDir(), "nested", "ccpool-probe", "snapshot.json"),
 	}
 }
 
@@ -192,7 +197,7 @@ func TestRunProbeNeedsInputFindingCreatesIssue(t *testing.T) {
 	cmd, _ := testCmd()
 	opts := baseOpts(t)
 	spy := &spyDeps{
-		needsInputRows: []ccpoolSessionRow{{ExternalID: "sess-1", Name: "worker", State: "needs_input"}},
+		needsInputRows: []ccpoolSessionRow{{ExternalID: "sess-1", Name: "worker", State: "needs_input", Live: true}},
 	}
 	err := runProbe(cmd, opts, spy.toRunDeps(time.Now()))
 	if err != nil {
@@ -214,7 +219,7 @@ func TestRunProbeDedupSkipsWhenNothingNew(t *testing.T) {
 	cmd, _ := testCmd()
 	opts := baseOpts(t)
 	spy := &spyDeps{
-		needsInputRows: []ccpoolSessionRow{{ExternalID: "sess-1", State: "needs_input"}},
+		needsInputRows: []ccpoolSessionRow{{ExternalID: "sess-1", State: "needs_input", Live: true}},
 		listEscalatedResult: []connectorIssue{{
 			ID: "zr-1",
 			Metadata: map[string]string{
@@ -235,13 +240,15 @@ func TestRunProbeDedupSkipsWhenNothingNew(t *testing.T) {
 // TestRunProbeZombieDriftEstablishesBaselineThenAlertsOnGrowth drives
 // runProbe TWICE against the same persisted snapshot path: the first run
 // has no prior baseline (quiet by construction), the second observes
-// 100% growth and creates a finding.
+// 100% growth in working-and-dead sessions and creates a finding. The
+// snapshot path's parent directories do not exist (baseOpts), so the first
+// run must create them for the second to see a baseline (pg2-d845f).
 func TestRunProbeZombieDriftEstablishesBaselineThenAlertsOnGrowth(t *testing.T) {
 	opts := baseOpts(t)
 
 	cmd1, _ := testCmd()
 	spy1 := &spyDeps{
-		allPoolRows: []ccpoolSessionRow{{ExternalID: "sess-1", State: "working"}},
+		allPoolRows: []ccpoolSessionRow{{ExternalID: "sess-1", State: "working", Live: false}},
 	}
 	if err := runProbe(cmd1, opts, spy1.toRunDeps(time.Now())); err != nil {
 		t.Fatalf("first run: expected exit 0, got %v", err)
@@ -249,12 +256,15 @@ func TestRunProbeZombieDriftEstablishesBaselineThenAlertsOnGrowth(t *testing.T) 
 	if len(spy1.created) != 0 {
 		t.Fatalf("first run: expected no finding with no prior baseline, got %d", len(spy1.created))
 	}
+	if _, ok := loadSnapshot(opts.snapshotPath); !ok {
+		t.Fatalf("first run must persist a snapshot, creating its missing parent directories")
+	}
 
 	cmd2, _ := testCmd()
 	spy2 := &spyDeps{
 		allPoolRows: []ccpoolSessionRow{
-			{ExternalID: "sess-1", State: "working"},
-			{ExternalID: "sess-2", State: "errored"},
+			{ExternalID: "sess-1", State: "working", Live: false},
+			{ExternalID: "sess-2", State: "working", Live: false},
 		},
 	}
 	err := runProbe(cmd2, opts, spy2.toRunDeps(time.Now()))
@@ -279,7 +289,7 @@ func TestRunProbePartialWhenNeedsInputSubcheckDegrades(t *testing.T) {
 	}
 	spy := &spyDeps{
 		needsInputErr: errCcpoolFailed,
-		allPoolRows:   []ccpoolSessionRow{{ExternalID: "s1", State: "working"}, {ExternalID: "s2", State: "errored"}},
+		allPoolRows:   []ccpoolSessionRow{{ExternalID: "s1", State: "working"}, {ExternalID: "s2", State: "working"}},
 	}
 	err := runProbe(cmd, opts, spy.toRunDeps(time.Now()))
 	if exitCodeOf(t, err) != 4 {
@@ -297,7 +307,7 @@ func TestRunProbeDedupQueryFailureIsPartial(t *testing.T) {
 	cmd, _ := testCmd()
 	opts := baseOpts(t)
 	spy := &spyDeps{
-		needsInputRows:   []ccpoolSessionRow{{ExternalID: "sess-1", State: "needs_input"}},
+		needsInputRows:   []ccpoolSessionRow{{ExternalID: "sess-1", State: "needs_input", Live: true}},
 		listEscalatedErr: errConnectorFailed,
 	}
 	err := runProbe(cmd, opts, spy.toRunDeps(time.Now()))
@@ -320,7 +330,7 @@ var (
 func TestRunProbeReportsStuckSessionInRolePoolNamingThePool(t *testing.T) {
 	cmd, _ := testCmd()
 	opts := baseOpts(t)
-	stuck := ccpoolSessionRow{ExternalID: "sess-r1", Name: "reviewer", State: "needs_input", CWD: "/tmp/r1"}
+	stuck := ccpoolSessionRow{ExternalID: "sess-r1", Name: "reviewer", State: "needs_input", Live: true, CWD: "/tmp/r1"}
 	spy := &spyDeps{
 		pools: []poolRef{{Label: ambientPoolLabel}, workerPool, reviewPool},
 		needsInputByPool: map[string][]ccpoolSessionRow{
@@ -353,7 +363,7 @@ func TestRunProbeReportsStuckSessionInRolePoolNamingThePool(t *testing.T) {
 func TestRunProbeScansEveryPoolForNeedsInput(t *testing.T) {
 	cmd, _ := testCmd()
 	opts := baseOpts(t)
-	row := ccpoolSessionRow{ExternalID: "same-id", State: "needs_input"}
+	row := ccpoolSessionRow{ExternalID: "same-id", State: "needs_input", Live: true}
 	spy := &spyDeps{
 		pools: []poolRef{workerPool, reviewPool},
 		needsInputByPool: map[string][]ccpoolSessionRow{
@@ -419,13 +429,26 @@ func TestRunProbeFailedPoolKeepsReadyClockAndBaseline(t *testing.T) {
 		t.Fatal(err)
 	}
 	cmd, _ := testCmd()
+	// The surviving pool alone holds 10 working-and-dead rows: summed as if
+	// it were the whole fleet (5 -> 10, +100%) it would raise a drift
+	// finding, so a finding or a clobbered baseline both mean a partial
+	// sum leaked through. The failed pool must turn drift OFF for every
+	// pool, not just itself.
+	var ambientRows []ccpoolSessionRow
+	for i := 0; i < 10; i++ {
+		ambientRows = append(ambientRows, ccpoolSessionRow{ExternalID: fmt.Sprintf("z%d", i), State: "working", Live: false})
+	}
 	spy := &spyDeps{
 		pools:        []poolRef{{Label: ambientPoolLabel}, workerPool},
+		allByPool:    map[string][]ccpoolSessionRow{ambientPoolLabel: ambientRows},
 		allErrByPool: map[string]error{workerPool.Label: errCcpoolFailed},
 	}
 	err := runProbe(cmd, opts, spy.toRunDeps(time.Now()))
 	if exitCodeOf(t, err) != 4 {
 		t.Fatalf("expected exit 4 (partial), got %v", err)
+	}
+	if len(spy.created) != 0 {
+		t.Fatalf("drift must be skipped when any pool's list failed, got findings: %+v", spy.created)
 	}
 	snap, ok := loadSnapshot(opts.snapshotPath)
 	if !ok {
@@ -460,7 +483,7 @@ func TestRunProbeDedupSeesHumanLabeledBead(t *testing.T) {
 	}
 	newSpy := func() *spyDeps {
 		return &spyDeps{
-			needsInputRows: []ccpoolSessionRow{{ExternalID: "sess-1", State: "needs_input"}},
+			needsInputRows: []ccpoolSessionRow{{ExternalID: "sess-1", State: "needs_input", Live: true}},
 			listEscalatedByQuery: map[string][]connectorIssue{
 				"escalated-work":  nil, // ready --label escalated --exclude-label human
 				defaultDedupQuery: {parked},
@@ -511,5 +534,76 @@ func TestRunCmdDedupQueryDefault(t *testing.T) {
 	}
 	if f.DefValue != defaultDedupQuery || defaultDedupQuery == "escalated-work" {
 		t.Fatalf("dedup-query default = %q (want %q, never the ready-only escalated-work)", f.DefValue, defaultDedupQuery)
+	}
+}
+
+// TestRunProbeDeadRowsAreNotZombiesAndNotStuck: errored rows and dead
+// ready rows piling up must not trip zombie drift, and a dead needs_input
+// row must not be filed (pg2-d845f).
+func TestRunProbeDeadRowsAreNotZombiesAndNotStuck(t *testing.T) {
+	opts := baseOpts(t)
+
+	cmd1, _ := testCmd()
+	spy1 := &spyDeps{allPoolRows: []ccpoolSessionRow{{ExternalID: "w", State: "working", Live: false}}}
+	if err := runProbe(cmd1, opts, spy1.toRunDeps(time.Now())); err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+
+	cmd2, _ := testCmd()
+	spy2 := &spyDeps{
+		allPoolRows: []ccpoolSessionRow{
+			{ExternalID: "w", State: "working", Live: false},
+			{ExternalID: "e1", State: "errored", Live: false},
+			{ExternalID: "e2", State: "errored", Live: true},
+			{ExternalID: "r1", State: "ready", Live: false},
+			{ExternalID: "s1", State: "starting", Live: false},
+			{ExternalID: "lw", State: "working", Live: true},
+		},
+		needsInputRows: []ccpoolSessionRow{{ExternalID: "dead-ni", State: "needs_input", Live: false}},
+	}
+	if err := runProbe(cmd2, opts, spy2.toRunDeps(time.Now())); err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+	if len(spy2.created) != 0 {
+		t.Fatalf("errored/dead-ready growth and a dead needs_input row must file nothing, got %+v", spy2.created)
+	}
+	snap, ok := loadSnapshot(opts.snapshotPath)
+	if !ok || snap.ZombieCount != 1 {
+		t.Fatalf("zombie_count = %d ok=%v, want 1 (only the working+dead row)", snap.ZombieCount, ok)
+	}
+}
+
+// TestRunProbeSnapshotSaveFailureIsPartialButStillFiles forces the write
+// error portably by making the snapshot's parent a regular file. The run
+// must still file its findings (bodies carry the degraded note), print the
+// persist failure on stderr, and exit 4 -- the handler discards stderr on
+// exit 0, so a swallowed warning is invisible (pg2-d845f).
+func TestRunProbeSnapshotSaveFailureIsPartialButStillFiles(t *testing.T) {
+	cmd, stderr := testCmd()
+	opts := baseOpts(t)
+	blocker := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	opts.snapshotPath = filepath.Join(blocker, "snapshot.json")
+	spy := &spyDeps{
+		needsInputRows: []ccpoolSessionRow{{ExternalID: "sess-1", Name: "worker", State: "needs_input", Live: true}},
+	}
+	err := runProbe(cmd, opts, spy.toRunDeps(time.Now()))
+	if exitCodeOf(t, err) != 4 {
+		t.Fatalf("expected exit 4 (partial) on snapshot save failure, got err=%v", err)
+	}
+	wantStderr := "ccpool-probe: failed to persist snapshot " + opts.snapshotPath + ": "
+	if !strings.Contains(stderr.String(), wantStderr) {
+		t.Fatalf("stderr missing %q:\n%s", wantStderr, stderr.String())
+	}
+	if err == nil || !strings.Contains(err.Error(), "snapshot: persist "+opts.snapshotPath+": ") {
+		t.Fatalf("exit error must name the degraded snapshot persist, got %v", err)
+	}
+	if len(spy.created) != 1 {
+		t.Fatalf("findings must still be filed on a save failure, got %d", len(spy.created))
+	}
+	if !strings.Contains(spy.created[0].body, "snapshot: persist "+opts.snapshotPath) {
+		t.Fatalf("filed body must carry the degraded note:\n%s", spy.created[0].body)
 	}
 }

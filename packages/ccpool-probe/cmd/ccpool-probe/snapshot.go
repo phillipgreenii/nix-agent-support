@@ -21,6 +21,7 @@ package main
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 )
 
 // snapshotVersion is bumped whenever this file's own field shape changes,
@@ -29,7 +30,7 @@ import (
 const snapshotVersion = 1
 
 // snapshot is the on-disk shape. ZombieCount/ZombieConsecutiveGrowth
-// track the errored/working zombie-count drift sub-check's own baseline
+// track the working-and-dead zombie-count drift sub-check's own baseline
 // and how many CONSECUTIVE runs in a row have observed growth (used by
 // checkZombieDrift's own sustained-growth band) [Binding decisions:
 // "'Nothing new' rule" bullet, "bands: e.g. baseline / +50% / +100% /
@@ -68,11 +69,20 @@ func loadSnapshot(path string) (snapshot, bool) {
 }
 
 // saveSnapshot always stamps the current snapshotVersion, regardless of
-// what (if anything) the caller populated s.Version with.
+// what (if anything) the caller populated s.Version with. It creates the
+// parent directory (0o700) when missing: the default location,
+// $HOME/.local/state/ccpool-probe, does not exist on a fresh host, and
+// without this every write failed (pg2-d845f; the identical bug
+// pg-router-probe fixed under pg2-3gqtw), leaving every run without a
+// baseline and the zombie-drift and never-prompted checks permanently
+// inert.
 func saveSnapshot(path string, s snapshot) error {
 	s.Version = snapshotVersion
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
 	return os.WriteFile(path, data, 0o600)

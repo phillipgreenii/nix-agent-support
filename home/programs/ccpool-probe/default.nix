@@ -13,9 +13,13 @@ in
     enable = lib.mkEnableOption ''
       ccpool-probe (a deterministic health probe over ccpool's own
       operational health, from pg-router's point of view: stuck
-      needs_input sessions and errored/working zombie-session-count
-      drift -- files/updates an `escalated`-labeled bd issue via
-      pg-connector on a real finding, no LLM involved).
+      LIVE needs_input sessions, live sessions parked in ready across
+      two runs, and zombie-session-count drift where a zombie is a
+      session in state working whose process is gone, i.e.
+      state=working and live=false; errored sessions, and starting/ready
+      sessions that are not live, are NOT counted -- files/updates an
+      `escalated`-labeled bd issue via pg-connector on a real finding,
+      no LLM involved).
 
       This module only puts the binary on PATH -- it exposes no
       config.yaml-style settings of its own, since every `run` invocation

@@ -73,3 +73,35 @@ func TestSaveSnapshotAlwaysStampsCurrentVersion(t *testing.T) {
 		t.Fatalf("got version %d ok=%v, want %d/true", got.Version, ok, snapshotVersion)
 	}
 }
+
+// TestSaveSnapshotCreatesMissingParentDirectories is the pg2-d845f
+// regression: the default location ($HOME/.local/state/ccpool-probe) does
+// not exist on a fresh host, and saveSnapshot used to fail there forever.
+func TestSaveSnapshotCreatesMissingParentDirectories(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nested", "ccpool-probe", "snapshot.json")
+	if err := saveSnapshot(path, snapshot{ZombieCount: 3}); err != nil {
+		t.Fatalf("saveSnapshot with missing parents: %v", err)
+	}
+	got, ok := loadSnapshot(path)
+	if !ok || got.ZombieCount != 3 {
+		t.Fatalf("round trip after mkdir: got %+v ok=%v", got, ok)
+	}
+	info, err := os.Stat(filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o700 {
+		t.Errorf("created directory mode = %o, want 700", perm)
+	}
+}
+
+// TestSaveSnapshotParentIsFileFails: the error is returned, not swallowed.
+func TestSaveSnapshotParentIsFileFails(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveSnapshot(filepath.Join(blocker, "snapshot.json"), snapshot{}); err == nil {
+		t.Fatalf("expected an error when the parent path is a regular file")
+	}
+}
