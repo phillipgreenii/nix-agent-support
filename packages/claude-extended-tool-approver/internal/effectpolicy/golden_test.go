@@ -988,6 +988,27 @@ var goldenCases = []goldenCase{
 	// PathRead of ".git" (metadata).
 	{"git_log_basic", "git log", evalcontract.Approve, nil},
 	{"git_log_unknown_flag", "git log --frobnicate", evalcontract.Abstain, nil},
+	// pg2-5ctay: a positional that BEGINS with a live expansion may expand to
+	// an option the schema never saw (`git log --output=/tmp/pwn` writes a
+	// file), so it abstains instead of riding as an inert literal. The
+	// three-call shape the bead names: the bare live positional, the same
+	// positional after an in-command assignment of an option-shaped value, and
+	// an earlier call's `export` whose value a later call's `$X` reads. The
+	// export itself still approves (its value is not judged, as before); the
+	// later `git log $X` is the gate.
+	{"git_log_live_positional", "git log $X", evalcontract.Abstain, nil},
+	{"git_log_live_positional_braced", "git log ${X}", evalcontract.Abstain, nil},
+	{"git_log_live_positional_quoted", `git log "$X"`, evalcontract.Abstain, nil},
+	{"git_log_live_positional_cmdsubst", "git log $(echo x)", evalcontract.Abstain, nil},
+	{"git_log_assigned_option_then_live_positional", "X=--output=/tmp/pwn; git log $X", evalcontract.Abstain, nil},
+	{"git_log_export_option_then_live_positional", "export X=--output=/tmp/pwn && git log $X", evalcontract.Abstain, nil},
+	{"export_option_shaped_value_alone", "export X=--output=/tmp/pwn", evalcontract.Approve, nil},
+	{"git_log_live_positional_after_dashdash", "git log -- $X", evalcontract.Approve, nil},
+	{"git_log_literal_prefix_live_positional", "git log main..$X", evalcontract.Approve, nil},
+	{"git_log_inert_flag_value_live", "git log --format=$X", evalcontract.Approve, nil},
+	{"echo_live_positional_inert_options", `echo "$X"`, evalcontract.Approve, nil},
+	{"test_live_operand_beside_operator", `[ -z "$X" ]`, evalcontract.Approve, nil},
+	{"test_two_adjacent_live_operands", `[ "$X" "$Y" ]`, evalcontract.Abstain, nil},
 	{"git_rev_parse_show_toplevel", "git rev-parse --show-toplevel", evalcontract.Approve, nil},
 	{"git_rev_parse_unknown_flag", "git rev-parse --frobnicate", evalcontract.Abstain, nil},
 	{"git_rev_list_head", "git rev-list HEAD", evalcontract.Approve, nil},

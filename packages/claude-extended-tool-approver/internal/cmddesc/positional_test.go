@@ -2,6 +2,7 @@ package cmddesc
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -265,6 +266,68 @@ func TestPositionalLayoutThroughInterpreter(t *testing.T) {
 			}
 			if tc.sufficient && !reflect.DeepEqual(got.Effects, tc.effects) {
 				t.Errorf("effects = %+v\nwant     %+v", got.Effects, tc.effects)
+			}
+		})
+	}
+}
+
+// TestLiveOperandOptionInjection pins pg2-5ctay: a Literal/Message positional
+// that begins with a runtime expansion is insufficient (it may expand to an
+// option the schema never saw), except where no option can follow.
+func TestLiveOperandOptionInjection(t *testing.T) {
+	logSchema := CommandSchema{
+		Name:         "frob",
+		Flags:        map[string]FlagSpec{"-q": {}},
+		Positionals:  PositionalSpec{Rest: Literal},
+		EndOfOptions: true,
+		UnknownFlag:  UnknownFlagInsufficient,
+	}
+	inertSchema := logSchema
+	inertSchema.UnknownFlag = UnknownFlagInert
+	testSchema := logSchema
+	testSchema.Positionals = PositionalSpec{Rest: Literal, LiveOperandNextToOperator: true}
+	testSchema.Flags = map[string]FlagSpec{"-z": {}, "-gt": {}}
+	pathFlagInert := inertSchema
+	pathFlagInert.Flags = map[string]FlagSpec{"-o": {Arity: ArityOne, Operand: PathTruncate}}
+	msgSchema := logSchema
+	msgSchema.Positionals = PositionalSpec{Rest: Message}
+
+	cases := []struct {
+		name       string
+		schema     CommandSchema
+		command    string
+		sufficient bool
+	}{
+		{"bare", logSchema, "frob $X", false},
+		{"braced", logSchema, "frob ${X}", false},
+		{"double quoted", logSchema, `frob "$X"`, false},
+		{"command substitution", logSchema, "frob $(cmd)", false},
+		{"backtick", logSchema, "frob `cmd`", false},
+		{"expansion then suffix", logSchema, "frob $X/foo", false},
+		{"message role", msgSchema, `frob "$X"`, false},
+		{"second positional", logSchema, "frob a $X", false},
+		{"literal", logSchema, "frob abc", true},
+		{"literal prefix then expansion", logSchema, "frob main..$X", true},
+		{"dot prefix", logSchema, `frob ./$X`, true},
+		{"after end of options", logSchema, "frob -- $X", true},
+		{"flag before expansion does not end options", logSchema, "frob -q $X", false},
+		{"inert unknown flags", inertSchema, "frob $X", true},
+		{"inert unknown flags but a modeled path flag", pathFlagInert, "frob $X", false},
+		{"test operand beside unary operator", testSchema, `frob -z "$X"`, true},
+		{"test operand beside binary operator", testSchema, `frob "$a" -gt 1`, true},
+		{"test operand beside string operator", testSchema, `frob "$a" != "$b"`, true},
+		{"test two adjacent expansions", testSchema, `frob "$a" "$b"`, false},
+		{"test lone expansion", testSchema, `frob "$a"`, false},
+		{"test expansion beside live operator", testSchema, `frob "$a" "$op" 1`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := GenericInterpreter{}.Interpret(leaf(t, tc.command), tc.schema, Context{})
+			if got.Sufficient != tc.sufficient {
+				t.Fatalf("sufficient = %v (%s), want %v", got.Sufficient, got.Insufficiency, tc.sufficient)
+			}
+			if !tc.sufficient && !strings.Contains(got.Insufficiency, "option injection") {
+				t.Errorf("insufficiency = %q, want it to name option injection", got.Insufficiency)
 			}
 		})
 	}

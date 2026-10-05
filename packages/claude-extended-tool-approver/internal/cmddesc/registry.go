@@ -1331,7 +1331,11 @@ var testSchema = CommandSchema{
 		"-gt": inert, "-ge": inert,
 		"-nt": inert, "-ot": inert, "-ef": inert,
 	},
-	Positionals: PositionalSpec{Rest: Literal},
+	// LiveOperandNextToOperator (pg2-5ctay): a live operand beside a literal
+	// operator (`-z "$X"`, `"$n" -gt 1`, `"$a" != "$b"`) is that operator's
+	// operand; two adjacent expansions could still form the unmodeled
+	// `-v NAME[$(cmd)]`, so those abstain like any other live positional.
+	Positionals: PositionalSpec{Rest: Literal, LiveOperandNextToOperator: true},
 	Stdin:       StdinNever,
 	Stdout:      StdoutNone,
 }

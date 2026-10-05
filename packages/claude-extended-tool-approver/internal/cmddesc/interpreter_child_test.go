@@ -198,7 +198,9 @@ func TestCurlInterpreter(t *testing.T) {
 		{"upload implies put", "curl -T a.txt https://example.com", true, []Effect{net("example.com", "PUT", NetOutbound, "arg 2")}, ""},
 		{"-G keeps get but data leaves", "curl -G -d q=1 https://example.com", true, []Effect{net("example.com", "GET", NetOutbound, "arg 3")}, ""},
 		{"--url and two urls", "curl --url https://a.example https://b.example", true, []Effect{net("b.example", "GET", NetInbound, "arg 2"), net("a.example", "GET", NetInbound, "arg 1")}, ""},
-		{"dynamic url", `curl "$URL"`, true, []Effect{{Kind: EffectNet, Host: "$URL", Direction: NetInbound, Method: "GET", Dynamic: true, Source: "arg 0"}}, ""},
+		// pg2-5ctay: a URL that begins with a live expansion could expand to an option (`curl -o /etc/x`).
+		{"dynamic url", `curl "$URL"`, false, nil, "option injection"},
+		{"dynamic url after literal prefix", `curl "https://$HOST/x"`, true, []Effect{{Kind: EffectNet, Host: "https://$HOST/x", Direction: NetInbound, Method: "GET", Dynamic: true, Source: "arg 0"}}, ""},
 		{"no url", "curl -s", false, nil, "no URL operand"},
 		{"unparseable host", "curl file:///etc/passwd", false, nil, "cannot determine the host"},
 		{"dynamic method", `curl -X "$M" https://example.com`, false, nil, "runtime expansion"},

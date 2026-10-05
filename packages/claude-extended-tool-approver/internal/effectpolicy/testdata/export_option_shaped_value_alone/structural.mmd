@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: export X=--output=/tmp/pwn"]
+    n1{{"env: X"}}
+    n0 -->|"assign: X=--output=/tmp/pwn"| n1

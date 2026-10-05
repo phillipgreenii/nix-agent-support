@@ -50,6 +50,15 @@ type pluginForm struct {
 //     even `WT=/abs && git -C "$WT" status` abstains. Approval applies to the
 //     LITERAL-path form agents can type (`git -C /abs/path status`). Skill
 //     templates that say `"$WT"` should instruct a literal absolute path.
+//   - A LIVE EXPANSION AS A POSITIONAL (`bd show "$ID"`, `git log $X`;
+//     pg2-5ctay) is a runtime value that may start with `-` and be parsed as an
+//     option the schema never modeled (X=--output=/tmp/pwn), so it abstains
+//     even where the same command with a literal argument approves. The
+//     exceptions are positionals after `--`, words that open with a literal
+//     character (`main..$X`), commands whose options are all inert (echo,
+//     true, false), and `test`/`[` operands beside a literal operator. This
+//     is the same remedy as the quoted-variable path forms above: type the
+//     literal value.
 //   - `[[ ]]`, `(( ))`, `let`, an array-element assignment and `$((...))`
 //     evaluate their operands as ARITHMETIC, which runs a command substitution
 //     found in variable text; `[ -v ]`/`[ -R ]` take a name that may carry an
@@ -415,6 +424,21 @@ var pluginForms = []pluginForm{
 	{"integrate-branch", `WT=<ROOT> && git -C "$WT" status`, evalcontract.Abstain, "even a literal in-command assignment is not resolved by this engine (the old engine's InCommandVars seam is not threaded in); type the literal path"},
 	{"integrate-branch", `WT="$(pwd)"; git -C "$WT" status`, evalcontract.Abstain, "the variable holds a runtime value, not a literal"},
 	{"integrate-branch", `git -C <ROOT> status`, evalcontract.Approve, ""},
+
+	// A LIVE EXPANSION AS A POSITIONAL (pg2-5ctay): a bare $X / ${X} / "$X" /
+	// $(cmd) that begins a positional word may carry an option the schema
+	// never saw, so it abstains unless the command's options are all inert
+	// (echo), the word sits beside a literal test operator, or it follows
+	// `--`. Skill templates that pass an identifier through a variable should
+	// instruct the literal value instead (`bd show pg2-abc12`).
+	{"beads-lifecycle", `bd show "$ID"`, evalcontract.Abstain, "a live positional could expand to an option (option injection); type the literal id"},
+	{"integrate-branch", `git log $X`, evalcontract.Abstain, "X may hold --output=/tmp/pwn (git log writes the file); a live positional is not inert"},
+	{"integrate-branch", `X=--output=/tmp/pwn; git log $X`, evalcontract.Abstain, "the in-command assignment is not resolved, and even a resolved option-shaped value must not ride as a literal"},
+	{"integrate-branch", `export X=--output=/tmp/pwn && git log $X`, evalcontract.Abstain, "an earlier call's export reaches a later call's $X; the live positional is the gate"},
+	{"integrate-branch", `git log -- $X`, evalcontract.Approve, ""},
+	{"integrate-branch", `git log main..$X`, evalcontract.Approve, ""},
+	{"integrate-branch", `echo "$X"`, evalcontract.Approve, ""},
+	{"integrate-branch", `[ "$X" "$Y" ]`, evalcontract.Abstain, "two adjacent expansions could form the unmodeled test -v NAME[$(cmd)] operator"},
 
 	// Persistent assignments of variables that change later commands' meaning.
 	{"bash-scripting", `IFS=/; echo hi`, evalcontract.Abstain, "persistent IFS changes how every later expansion splits"},

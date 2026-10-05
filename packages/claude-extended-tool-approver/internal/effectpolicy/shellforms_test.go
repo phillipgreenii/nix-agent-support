@@ -76,7 +76,11 @@ func TestShellStatementForms(t *testing.T) {
 		{"let is unmodeled", `let a=1`, evalcontract.Abstain, "no executable"},
 
 		// --- loops / case -------------------------------------------------
-		{"for: literal list", `for f in a b; do bd show "$f"; done`, evalcontract.Approve, ""},
+		{"for: literal list", `for f in a b; do bd show "id-$f"; done`, evalcontract.Approve, ""},
+		// pg2-5ctay: the loop variable is not resolved to its word list, so a bare
+		// "$f" positional could be an option; a literal prefix or an inert
+		// command (echo) keeps the loop approvable.
+		{"for: loop variable as bare positional", `for f in a b; do bd show "$f"; done`, evalcontract.Abstain, "option injection"},
 		{"for: substitution list approved", `for f in $(ls); do echo "$f"; done`, evalcontract.Approve, ""},
 		{"for: substitution list not approved", `for f in $(rm -rf foo); do echo "$f"; done`, evalcontract.Abstain, "rm"},
 		{"for: body not approved", `for f in a b; do rm -rf "$f"; done`, evalcontract.Abstain, "rm"},

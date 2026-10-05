@@ -147,6 +147,10 @@ type pendingOp struct {
 	positional bool
 	flag       string
 	role       OperandRole
+	// afterOpts is true for a positional that follows the end-of-options
+	// boundary (`--`, or a PositionalsEndOptions command's first positional):
+	// the command cannot parse it as an option.
+	afterOpts bool
 }
 
 // interpState accumulates one interpretation. Insufficiency is recorded at
@@ -185,7 +189,7 @@ func scan(leaf cmdparse.ParsedCommand, schema CommandSchema, ctx Context) *inter
 		tok := args[i]
 		isFlag := !optionsEnded && strings.HasPrefix(tok, "-") && tok != "-" && tok != schema.Positionals.StdinToken
 		if !isFlag {
-			st.ops = append(st.ops, pendingOp{tok: tok, idx: i, positional: true})
+			st.ops = append(st.ops, pendingOp{tok: tok, idx: i, positional: true, afterOpts: optionsEnded})
 			if schema.PositionalsEndOptions {
 				optionsEnded = true
 			}
@@ -324,11 +328,108 @@ func (st *interpState) operand(op pendingOp, role OperandRole) {
 	case role.Kind == KindAllowedLiteral:
 		st.allowedLiteral(role, op.tok, live, source)
 	case role.Kind == KindLiteral, role.Kind == KindMessage:
-		// Inert: no effect. A live expansion in a literal slot is still inert —
-		// its value cannot change what the command touches.
+		// Inert: no effect of its own. But a positional that BEGINS with a live
+		// expansion may expand to an option the schema never saw (`git log $X`
+		// with X=--output=/tmp/pwn), so it is only inert when no option can
+		// follow — see liveOptionRisk (pg2-5ctay).
+		if st.liveOptionRisk(op, live) {
+			st.fail("%s is a runtime expansion in a positional slot and could expand to an option (option injection); abstaining", source)
+		}
 	default:
 		st.fail("unmodeled operand role %d at %s", role.Kind, source)
 	}
+}
+
+// liveOptionRisk reports whether a Literal/Message positional could be parsed
+// by the command as an OPTION because its value is only known at runtime
+// (pg2-5ctay). It is false for a non-live token, a positional after the
+// end-of-options boundary, a word that starts with an ordinary literal
+// character (so it can never begin with `-`), a command whose every option is
+// inert (optionsAllInert), and — for a schema that opts in with
+// LiveOperandNextToOperator — a positional beside a literal operator token.
+func (st *interpState) liveOptionRisk(op pendingOp, live bool) bool {
+	if !op.positional || !live || op.afterOpts {
+		return false
+	}
+	if optionsAllInert(st.schema) {
+		return false
+	}
+	if !startsWithExpansion(op.tok) {
+		return false
+	}
+	if st.schema.Positionals.LiveOperandNextToOperator && st.nextToOperator(op.idx) {
+		return false
+	}
+	return true
+}
+
+// optionsAllInert reports whether NO option of the command can change any
+// effect: unmodeled flags are inert (UnknownFlagInert) AND every modeled flag
+// is effect-free (no value, or a Literal/Message value, and no transform), and
+// the schema has no bespoke interpreter or subcommand layer that gives
+// operands meaning of its own. echo, true and false qualify; bd's verbs do not
+// (UnknownFlagInert, but `-C` retargets the directory, `--body-file` reads a
+// file and `export -o` writes one).
+func optionsAllInert(s CommandSchema) bool {
+	if s.UnknownFlag != UnknownFlagInert || s.Interpreter != "" || len(s.Subcommands) > 0 || s.VerbFamily != "" {
+		return false
+	}
+	effectFree := func(r OperandRole) bool { return r.Kind == KindLiteral || r.Kind == KindMessage }
+	for _, f := range s.Flags {
+		if f.Transform.Kind != TransformNone {
+			return false
+		}
+		if f.Arity != ArityNone && !effectFree(f.Operand) {
+			return false
+		}
+		for _, r := range f.Operands {
+			if !effectFree(r) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// startsWithExpansion reports whether a (shell-unquoted) argument word could
+// BEGIN with a runtime value. A word that opens with an ordinary literal
+// character other than `-` keeps that character as its first byte whatever
+// the expansion later in the word produces; everything else (`$X`, `${X}`,
+// `$(cmd)`, a backtick, a quote left in the text, `<(...)`, an empty word)
+// is treated as possibly expanding to a leading `-`.
+func startsWithExpansion(tok string) bool {
+	if tok == "" {
+		return true
+	}
+	c := tok[0]
+	switch {
+	case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		return false
+	case c == '/' || c == '.' || c == '_' || c == '~' || c == ':' || c == ',':
+		return false
+	}
+	return true
+}
+
+// nextToOperator reports whether the argument at idx is adjacent to a LITERAL
+// (non-live) operator token: a flag the schema models, or one of the string
+// comparison operators. Used only by schemas that opt in with
+// LiveOperandNextToOperator (test / `[`).
+func (st *interpState) nextToOperator(idx int) bool {
+	for _, j := range []int{idx - 1, idx + 1} {
+		if j < 0 || j >= len(st.leaf.Args) || st.leaf.ArgIsLiveExpansion(j) {
+			continue
+		}
+		t := st.leaf.Args[j]
+		if _, ok := st.schema.Flags[t]; ok {
+			return true
+		}
+		switch t {
+		case "=", "==", "!=", "<", ">":
+			return true
+		}
+	}
+	return false
 }
 
 // chdir emits the two effects a KindChdir operand stands for: a metadata read

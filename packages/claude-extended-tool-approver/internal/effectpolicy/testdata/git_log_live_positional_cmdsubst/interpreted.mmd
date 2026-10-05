@@ -1,0 +1,9 @@
+flowchart LR
+    n0["command: git log $(echo x)<br/>- path:read .git [implicit]<br/>- stdio:stdout metadata<br/>mark=insufficient: arg 0 is a runtime expansion in a positional slot and could expand to an option (option injection); abstaining"]
+    n2[/"file: .git"/]
+    subgraph sg_s0["$(echo x)"]
+        n1["command: echo x<br/>- stdio:stdout content<br/>mark=permitted"]
+    end
+    n1 -->|"substitution: $(echo x)"| n0
+    n0 -->|"reads: read"| n2
+    n1 -->|"flow: stdout-#gt;argv"| n0

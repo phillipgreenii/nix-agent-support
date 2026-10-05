@@ -1,2 +1,2 @@
 flowchart LR
-    n0["command: curl #quot;$URL#quot;<br/>- stdio:stdout content<br/>- net:inbound $URL GET (dynamic) [arg 0]<br/>mark=insufficient: net:inbound $URL GET (dynamic) [arg 0]: network-access (host is a runtime expansion)"]
+    n0["command: curl #quot;$URL#quot;<br/>- stdio:stdout content<br/>- net:inbound $URL GET (dynamic) [arg 0]<br/>mark=insufficient: arg 0 is a runtime expansion in a positional slot and could expand to an option (option injection); abstaining"]

@@ -426,6 +426,7 @@
           "kind": "literal"
         }
       },
+      "liveOperandNextToOperator": true,
       "citation": {
         "source": "bash builtin: help test: \"test: test [expr]\""
       }

@@ -409,16 +409,40 @@ type FlagSpec struct {
 // a file" (`-` for the coreutils family): a positional token equal to it in a
 // path-role slot is a stdin effect, not a path effect. Empty means the
 // command has no such token.
+//
+// LIVE EXPANSION IN AN INERT SLOT (pg2-5ctay). A positional whose role is
+// Literal or Message emits no effect, and a live expansion ($X, ${X}, "$X",
+// $(cmd)) in it is a value only the runtime knows. When the word BEGINS with
+// that expansion the runtime value may start with `-`, so the command may
+// parse it as an OPTION (`git log $X` with X=--output=/tmp/pwn writes a file)
+// — an effect no schema entry models. The interpreter therefore makes such a
+// positional insufficient (abstain) unless (a) it follows the end-of-options
+// marker (`--`, or the schema's PositionalsEndOptions boundary), (b) the word
+// starts with an ordinary literal character so it can never begin with `-`,
+// (c) no option of the command can change any effect (UnknownFlagInert and
+// every modeled flag effect-free: echo, true, false; NOT bd, whose `-C`,
+// `--body-file` and `export -o` are modeled non-inert flags), or (d) LiveOperandNextToOperator is
+// set and the positional is adjacent to a literal operator token. A path-role
+// positional is not affected: it already yields a Dynamic path effect, which
+// the path policies abstain on.
+//
+// LiveOperandNextToOperator is the (d) opt-in, for `test` / `[`: there a
+// positional beside a modeled operator (`-z "$X"`, `"$n" -gt 1`,
+// `"$a" != "$b"`) is that operator's OPERAND, never an operator itself. Two
+// adjacent expansions (`[ "$X" "$Y" ]`) can still smuggle the unmodeled
+// `-v NAME[$(cmd)]` form, so a live positional with no literal operator beside
+// it stays guarded.
 type PositionalSpec struct {
-	Leading                []OperandRole
-	LeadingSkippedByFlags  []string
-	LeadingOptional        bool
-	Rest                   OperandRole
-	RestOverride           RestOverride
-	MinRest                int
-	Trailing               []OperandRole
-	TrailingSkippedByFlags []string
-	StdinToken             string
+	Leading                   []OperandRole
+	LeadingSkippedByFlags     []string
+	LeadingOptional           bool
+	Rest                      OperandRole
+	RestOverride              RestOverride
+	MinRest                   int
+	Trailing                  []OperandRole
+	TrailingSkippedByFlags    []string
+	StdinToken                string
+	LiveOperandNextToOperator bool
 }
 
 // RestOverride names the flag spellings that, when any appeared, replace

@@ -1,0 +1,7 @@
+flowchart LR
+    n0["command: export X=--output=/tmp/pwn<br/>- env:set X<br/>mark=permitted"]
+    n1{{"env: X"}}
+    n2["command: git log $X<br/>- path:read .git [implicit]<br/>- stdio:stdout metadata<br/>mark=insufficient: arg 0 is a runtime expansion in a positional slot and could expand to an option (option injection); abstaining"]
+    n3[/"file: .git"/]
+    n0 -->|"assign: X=--output=/tmp/pwn"| n1
+    n2 -->|"reads: read"| n3

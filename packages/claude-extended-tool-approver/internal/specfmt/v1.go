@@ -96,7 +96,10 @@ type PositionalSpecV1 struct {
 	Trailing               []OperandRoleV1 `json:"trailing,omitempty"`
 	TrailingSkippedByFlags []string        `json:"trailingSkippedByFlags,omitempty"`
 	StdinToken             string          `json:"stdinToken,omitempty"`
-	Citation               Citation        `json:"citation"`
+	// LiveOperandNextToOperator is the wire form of
+	// cmddesc.PositionalSpec.LiveOperandNextToOperator (pg2-5ctay).
+	LiveOperandNextToOperator bool     `json:"liveOperandNextToOperator,omitempty"`
+	Citation                  Citation `json:"citation"`
 }
 
 // ImplicitEffectV1 is the wire form of cmddesc.ImplicitEffect, plus its own

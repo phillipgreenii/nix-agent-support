@@ -250,11 +250,12 @@ func positionalsToV1(p cmddesc.PositionalSpec, citation Citation) PositionalSpec
 			Flags: p.RestOverride.Flags,
 			Role:  roleToV1(p.RestOverride.Role),
 		},
-		MinRest:                p.MinRest,
-		Trailing:               rolesToV1(p.Trailing),
-		TrailingSkippedByFlags: p.TrailingSkippedByFlags,
-		StdinToken:             p.StdinToken,
-		Citation:               citation,
+		MinRest:                   p.MinRest,
+		Trailing:                  rolesToV1(p.Trailing),
+		TrailingSkippedByFlags:    p.TrailingSkippedByFlags,
+		StdinToken:                p.StdinToken,
+		LiveOperandNextToOperator: p.LiveOperandNextToOperator,
+		Citation:                  citation,
 	}
 }
 
@@ -284,10 +285,11 @@ func positionalsFromV1(p PositionalSpecV1) (cmddesc.PositionalSpec, error) {
 			Flags: p.RestOverride.Flags,
 			Role:  overrideRole,
 		},
-		MinRest:                p.MinRest,
-		Trailing:               trailing,
-		TrailingSkippedByFlags: p.TrailingSkippedByFlags,
-		StdinToken:             p.StdinToken,
+		MinRest:                   p.MinRest,
+		Trailing:                  trailing,
+		TrailingSkippedByFlags:    p.TrailingSkippedByFlags,
+		StdinToken:                p.StdinToken,
+		LiveOperandNextToOperator: p.LiveOperandNextToOperator,
 	}, nil
 }
 

@@ -1,0 +1,6 @@
+flowchart LR
+    n0["command: git log $(echo x)"]
+    subgraph sg_s0["$(echo x)"]
+        n1["command: echo x"]
+    end
+    n1 -->|"substitution: $(echo x)"| n0

@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: git log ${X}<br/>- path:read .git [implicit]<br/>- stdio:stdout metadata<br/>mark=insufficient: arg 0 is a runtime expansion in a positional slot and could expand to an option (option injection); abstaining"]
+    n1[/"file: .git"/]
+    n0 -->|"reads: read"| n1
