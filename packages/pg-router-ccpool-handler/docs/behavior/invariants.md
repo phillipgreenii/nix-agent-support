@@ -209,7 +209,8 @@ review`. The claim is still released (status open, assignee cleared) — the lab
     run. (d) The spared session's handler dies with the old daemon, but its supervision lease
     (`INV-CCH-18`) then expires, and the next dispatch of the same role reclaims it: an idle one
     is closed and its bead claim released, a working one has its time budget enforced from its
-    launch time. Until then the session runs unsupervised.
+    launch time. Until then the session runs unsupervised. (e) A worktree left with no session row at all
+    is reclaimed by the worktree-keyed sweep of `INV-CCH-19`.
 - **`INV-CCH-15`** — a dispatch-time worktree cleanup (after a session reaches a terminal outcome)
   MUST NOT remove a per-bead worktree while another live session in `starting`, `ready`, `working`
   or `needs_input` still uses the same directory; the last session to detach removes it. A
@@ -283,3 +284,37 @@ review`. The claim is still released (status open, assignee cleared) — the lab
     only `ccpool`'s idle timeout bounds it); a role with no time budget leaves a `working` orphan
     alone; and only the time budget is enforced for an orphan, not tokens or cost. Operator ruling
     (Phillip, 2026-10-05, bead `pg2-g2u9m`); see ADR 0083.
+- **`INV-CCH-19`** — a per-bead worktree, and its `pg-router/<bead>` anchor branch, MUST NOT stay
+  behind once nothing can be using it, even when no session row leads to it: a handler killed or
+  crashed after it created the worktree but before the session existed, or a session closed
+  (`idle_ttl`, eviction, the operator) before anyone reclaimed its worktree, leaves one. Before
+  checking capacity, a dispatch of a role with worktree isolation MUST therefore scan the worktree
+  directory itself (after the orphan reconcile of `INV-CCH-18`, and bounded to a handful of removals
+  per dispatch) and remove a worktree and its anchor branch only when ALL of the following hold,
+  each re-checked while holding an exclusive per-bead lock:
+  - it is a linked worktree directly under the worktree directory whose checked-out branch is
+    exactly its own anchor branch, and git does not hold it locked;
+  - it is older than a grace window (the launch wait plus the lease TTL);
+  - no open or live session row of the role's pool names it, by working directory or by bead; a row
+    that is closed and no longer live does not protect it;
+  - its working tree is clean, and its branch holds no commit the canonical clone's `HEAD` lacks;
+    an unreadable status or commit count keeps it, and so does a git refusal (the removal is never
+    forced);
+  - no live dispatch holds the per-bead worktree lock. Every dispatch of a role with worktree
+    isolation MUST hold that lock, shared, from before it creates the worktree until it returns;
+    the operating system drops it when its holder dies, so a killed handler stops protecting its
+    worktree at the moment it dies.
+
+  A session list that cannot be read, a lock that cannot be taken, or a missing lock directory
+  means no action. Each removal is logged and recorded as an event naming the bead, role, worktree
+  and age. A worktree that is kept for any reason is left for a later dispatch or for
+  `pg-disk-reclaimer`. This closes the gap `INV-CCH-15` and the session-keyed reconciles leave: each
+  of them keys on a session row. Not covered, accepted: a worktree is reclaimed only when SOME
+  worktree-isolation role next dispatches (until then it only costs disk); only the dispatching
+  role's own pool is visible, so a clean, commit-free worktree used by an idle or orphaned session
+  of another role's pool is removable (the same blind spot `INV-CCH-15` has); and a session row
+  left in `starting`, `ready`, `working` or `errored` by a killed handler is bounded by
+  `INV-CCH-18`'s lease, not by this invariant (a lease-bearing row is reclaimed or budget-stopped
+  there, and its worktree follows it; a leaseless one is bounded by `ccpool`'s idle timeout, after
+  which this invariant reclaims its worktree). Follow-up to bead `pg2-w3usi`; bead `pg2-ganjb`;
+  see ADR 0084.

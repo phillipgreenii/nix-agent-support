@@ -168,6 +168,14 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 	// Remember whether the per-bead worktree already existed: only a worktree
 	// THIS dispatch created is reclaimed if the dispatch dies before a session
 	// takes ownership of it (reclaimAbandonedWorktree, pg2-w3usi).
+	//
+	// Hold the per-bead worktree lock (SHARED) from before the worktree exists
+	// until this dispatch returns, so the worktree-keyed sweep can tell a worktree
+	// a live dispatch is using from one a killed handler leaked (pg2-ganjb,
+	// INV-CCH-19). A SIGKILL drops the lock with the process.
+	if usesWorktreeIsolation(cc.Isolation) {
+		defer r.holdWorktreeLock(ctx, d.Item.ID)()
+	}
 	preexisting := usesWorktreeIsolation(cc.Isolation) && r.worktreePathExists(d.Item.ID)
 	wt, wtErr := newIsolation(cc.Isolation, r.deps).Ensure(ctx, d.Item.ID)
 	if wtErr != nil {
@@ -340,8 +348,9 @@ func (r *ccpoolRun) worktreePathExists(beadID string) bool {
 // and every git/ccpool call on a dead ctx would fail for that reason alone.
 // Fails soft like cleanupWorktree.
 //
-// A SIGKILLed handler runs none of this; that window needs a worktree-keyed
-// sweep (not implemented here, see pg2-w3usi's follow-up).
+// A SIGKILLed handler runs none of this; that window is covered by the
+// worktree-keyed sweep (cmd/pg-router-ccpool-handler/worktreesweep.go,
+// pg2-ganjb, INV-CCH-19), which keys on the worktree rather than a session row.
 func (r *ccpoolRun) reclaimAbandonedWorktree(ctx context.Context, cc *roles.CCPoolConfig, beadID, wt string, createdHere bool) {
 	if wt == "" || !createdHere || !usesWorktreeIsolation(cc.Isolation) {
 		return

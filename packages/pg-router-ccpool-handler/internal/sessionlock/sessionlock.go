@@ -45,10 +45,31 @@ func path(dir, externalID string) string {
 	return filepath.Join(dir, name+".lock")
 }
 
+// WorktreeKey is the lock key for the per-bead worktree of beadID. It is the
+// same flock mechanism as a session lock but a different key space (an
+// external_id never starts with "worktree--"), used to serialize the
+// worktree-keyed sweep against live dispatches (bead pg2-ganjb, INV-CCH-19): a
+// dispatch holds it SHARED from before it creates the worktree until it
+// returns, and the sweep takes it EXCLUSIVE.
+func WorktreeKey(beadID string) string { return "worktree--" + beadID }
+
+// TryRLock takes a SHARED lock for externalID without blocking: any number of
+// shared holders coexist, and they conflict only with an exclusive holder
+// (TryLock). It returns ErrHeld when an exclusive holder has it. As with
+// TryLock, the kernel drops the lock if the holder dies, which is exactly the
+// "this dispatch is alive" signal the worktree sweep reads.
+func TryRLock(dir, externalID string) (*Lock, error) {
+	return tryFlock(dir, externalID, syscall.LOCK_SH)
+}
+
 // TryLock takes the exclusive lock for externalID without blocking. It returns
 // ErrHeld when another holder has it, and any other error when the lock file
 // cannot be created or locked (the caller MUST treat that as "do not act").
 func TryLock(dir, externalID string) (*Lock, error) {
+	return tryFlock(dir, externalID, syscall.LOCK_EX)
+}
+
+func tryFlock(dir, externalID string, how int) (*Lock, error) {
 	if externalID == "" {
 		return nil, errors.New("sessionlock: empty external id")
 	}
@@ -59,7 +80,7 @@ func TryLock(dir, externalID string) (*Lock, error) {
 	if err != nil {
 		return nil, fmt.Errorf("sessionlock: %w", err)
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	if err := syscall.Flock(int(f.Fd()), how|syscall.LOCK_NB); err != nil {
 		_ = f.Close()
 		if errors.Is(err, syscall.EWOULDBLOCK) {
 			return nil, ErrHeld

@@ -98,6 +98,43 @@ func TestRunDispatch_reconciliationRunsForCcpoolRole(t *testing.T) {
 	}
 }
 
+// TestRunDispatch_worktreeSweepRunsForCcpoolRole proves the worktree-keyed
+// sweep (pg2-ganjb, INV-CCH-19) is wired into the dispatch path: with a
+// non-empty worktree directory, dispatching a worktree-isolation ccpool role
+// reaches sweepLeakedWorktrees, which asks ccpool for the session rows first
+// (observed via its list-failure log, PATH being broken as above).
+func TestRunDispatch_worktreeSweepRunsForCcpoolRole(t *testing.T) {
+	t.Setenv("PATH", "/usr/bin")
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	dir := t.TempDir()
+	wtDir := filepath.Join(dir, "worktrees")
+	if err := os.MkdirAll(filepath.Join(wtDir, "zr-leaked"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(cfgPath, []byte(`{"WorktreeDir":"`+wtDir+`"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rolePath := filepath.Join(dir, "role.json")
+	roleJSON := `{"name":"worker","type":"ccpool","ccpool":{"actor":"test-actor","completion":"close-only","onFailure":"unclaim","onDispatchFail":"unclaim","promptBody":"hello"}}`
+	if err := os.WriteFile(rolePath, []byte(roleJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	restoreIn := redirectStdin(t, `{"schemaVersion":"1","id":"d-1","event":{"id":"e-1","type":"dispatch","payload":{"id":"zr-w"}}}`)
+	defer restoreIn()
+
+	var msgs []string
+	_ = captureStdout(t, func() {
+		msgs = captureSlog(t, func() {
+			runDispatch([]string{"--role-config", rolePath, "--config", cfgPath})
+		})
+	})
+	if !containsSubstring(msgs, "worktree sweep: session list failed") {
+		t.Fatalf("runDispatch for a worktree-isolation ccpool role must reach sweepLeakedWorktrees; got messages=%v", msgs)
+	}
+}
+
 // TestRunDispatch_reconciliationSkippedForCommandRole proves a "command"
 // role dispatch never reaches reconcileClosedBeadSessions at all — it has no
 // ccpool sessions to reconcile, and (per dispatch.go's own doc comment on

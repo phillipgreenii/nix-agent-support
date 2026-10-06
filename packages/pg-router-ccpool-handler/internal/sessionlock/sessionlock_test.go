@@ -109,3 +109,41 @@ func TestDir(t *testing.T) {
 		t.Errorf("Dir = %q", got)
 	}
 }
+
+// Shared holders coexist and conflict only with an exclusive holder (bead
+// pg2-ganjb: live dispatches hold the worktree lock shared, the sweep takes it
+// exclusive).
+func TestTryRLock_sharedCoexistExclusiveConflicts(t *testing.T) {
+	dir := t.TempDir()
+	key := WorktreeKey("zr-1")
+	a, err := TryRLock(dir, key)
+	if err != nil {
+		t.Fatalf("first TryRLock: %v", err)
+	}
+	b, err := TryRLock(dir, key)
+	if err != nil {
+		t.Fatalf("second shared TryRLock must coexist: %v", err)
+	}
+	if _, err := TryLock(dir, key); !errors.Is(err, ErrHeld) {
+		t.Fatalf("exclusive TryLock under shared holders = %v, want ErrHeld", err)
+	}
+	a.Unlock()
+	if _, err := TryLock(dir, key); !errors.Is(err, ErrHeld) {
+		t.Fatalf("exclusive TryLock with one shared holder left = %v, want ErrHeld", err)
+	}
+	b.Unlock()
+	x, err := TryLock(dir, key)
+	if err != nil {
+		t.Fatalf("exclusive TryLock after all shared released: %v", err)
+	}
+	if _, err := TryRLock(dir, key); !errors.Is(err, ErrHeld) {
+		t.Fatalf("TryRLock under an exclusive holder = %v, want ErrHeld", err)
+	}
+	x.Unlock()
+}
+
+func TestWorktreeKey_isDistinctFromSessionIDs(t *testing.T) {
+	if k := WorktreeKey("zr-1"); k != "worktree--zr-1" || strings.HasPrefix(k, "pg-router-") {
+		t.Errorf("WorktreeKey = %q", k)
+	}
+}

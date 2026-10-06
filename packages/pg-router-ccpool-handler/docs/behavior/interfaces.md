@@ -50,6 +50,10 @@ treatment of its own named boundaries (its `INTF-BRIDGE` — example only, not a
   (`INV-CCH-18`), never as a `ccpool` label. Before checking capacity, a dispatch also reconciles
   its own role's orphaned sessions in that role's pool: a session whose lease has expired is
   reclaimed or, if still working and over its time budget, hard-stopped (`INV-CCH-18`).
+  A dispatch of a role with worktree isolation also holds a shared per-bead worktree lock for its
+  whole run and, before checking capacity, sweeps the worktree directory for leaked per-bead
+  worktrees no session row leads to, removing a worktree and its anchor branch only under the
+  guards of `INV-CCH-19`.
 - **`INTF-CCH-BEADS`** <!-- uuid: 01dd79ce-ffbc-4234-9d6e-e7125561694f --> — this module's
   beads-backed source querying `bd` for events, and a handler session's completion policy writing
   a result back to `bd`. **Counterparty:** `bd` (boundary). **Initiator:** this module.

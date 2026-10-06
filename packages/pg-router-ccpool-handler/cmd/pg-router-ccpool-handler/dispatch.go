@@ -204,6 +204,17 @@ func runDispatch(args []string) int {
 		}); reclaimed+stopped > 0 {
 			slog.Info("dispatch: reconciled orphaned sessions", "reclaimed", reclaimed, "hard_stopped", stopped)
 		}
+		// Worktree-keyed sweep (pg2-ganjb, INV-CCH-19): reclaim per-bead worktrees
+		// no session row can lead to (a handler killed between worktree creation and
+		// session creation, or a row closed before anyone reclaimed its worktree).
+		// After the orphan reconcile, so a worktree that reconcile just released is
+		// not double-handled; best effort, never a dispatch failure.
+		if swept := sweepLeakedWorktrees(ctx, role, deps, orphanEnv{
+			open:    gitWorktreeOpener,
+			lockDir: deps.LockDir,
+		}); swept > 0 {
+			slog.Info("dispatch: reclaimed leaked worktrees", "reclaimed", swept)
+		}
 	}
 	result, err := executor.For(role.Type).Dispatch(ctx, dctx, deps)
 	if reason, busy := busyDeclineReason(err); busy {
