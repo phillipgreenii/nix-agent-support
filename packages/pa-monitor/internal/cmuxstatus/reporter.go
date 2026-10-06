@@ -214,7 +214,9 @@ func stateAttrs(s State, resetAt time.Time) (value, icon, color string) {
 	case StatePaused:
 		v := "paused"
 		if !resetAt.IsZero() {
-			v = fmt.Sprintf("paused (resets %s)", resetAt.Format("15:04"))
+			// resetAt is UTC (timestamppb.AsTime); show the machine's local
+			// wall-clock time, matching render.BlockRow (pg2-cxhcs).
+			v = fmt.Sprintf("paused (resets %s)", resetAt.Local().Format("15:04"))
 		}
 		return v, "clock", "#ff8800"
 	case StateDormant:

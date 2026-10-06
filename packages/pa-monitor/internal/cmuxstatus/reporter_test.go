@@ -213,6 +213,14 @@ func TestCmuxPushPausedStateIncludesResetTime(t *testing.T) {
 		RunCmd:    recordingRun(&calls),
 		LookupEnv: inCmuxEnv(),
 	})
+	// The reset instant arrives as UTC (timestamppb.AsTime). The pill MUST render
+	// it in the machine's local zone (pg2-cxhcs), not UTC. Pin time.Local to a
+	// fixed non-UTC zone so the test is deterministic regardless of the host zone.
+	// Not parallel-safe: time.Local is process-global.
+	origLocal := time.Local
+	time.Local = time.FixedZone("TEST+9", 9*60*60)
+	t.Cleanup(func() { time.Local = origLocal })
+
 	resetAt := time.Date(2026, 5, 14, 15, 30, 0, 0, time.UTC)
 	r.Push(cmuxstatus.Snapshot{
 		State:         cmuxstatus.StatePaused,
@@ -221,8 +229,11 @@ func TestCmuxPushPausedStateIncludesResetTime(t *testing.T) {
 	if len(calls) < 1 {
 		t.Fatalf("expected ≥ 1 call, got %d", len(calls))
 	}
-	if !strings.Contains(calls[0], "paused (resets 15:30)") {
-		t.Errorf("call[0] = %q, want value 'paused (resets 15:30)'", calls[0])
+	if !strings.Contains(calls[0], "paused (resets 00:30)") {
+		t.Errorf("call[0] = %q, want value 'paused (resets 00:30)' (15:30 UTC in local zone UTC+9)", calls[0])
+	}
+	if strings.Contains(calls[0], "15:30") {
+		t.Errorf("call[0] = %q, must not render the UTC wall time", calls[0])
 	}
 }
 
