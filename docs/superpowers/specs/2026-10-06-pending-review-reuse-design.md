@@ -2,7 +2,10 @@
 
 - **Date**: 2026-10-06 (UTC; the live proofs ran on the evening of 2026-10-05 local time)
 - **Bead**: `pg2-8qui6` (design). Dependent: `pg2-8dez6` (live verification), `pg2-kftf9.19` (cleanup).
-- **Status**: DRAFT for operator approval, revised once after an independent review. Supersedes the
+- **Status**: APPROVED for decomposition (operator, interactive session, 2026-10-06 UTC: create race is
+  detect-and-report only, sidecar lives in the connector state dir, land then decompose). Revised once
+  after an independent review and once after the first decomposition attempt found the request-input
+  gap (section 3). Supersedes the
   delete-and-recreate recommendation in `2026-09-29-pending-review-handling-investigation.md`
   (section 4.3 and the recommended design in section 5) and the replace/escalation scope of
   `pg2-kftf9.13` and `pg2-kftf9.15`.
@@ -70,6 +73,18 @@ GitHub.
 
 Request: `{id, head_sha, body, comments[], supersede_pending?}`.
 
+- **Request input.** The verb reads the request JSON from stdin today and has no other input. The
+  review session runs in don't-ask permission mode, where its grant matches only a plain single-line
+  command: a stdin redirect, heredoc or pipe is denied, and a `<` redirect from outside the working
+  directories is denied too (this is why the escalator wrapper has a file option). So
+  `pg-connector pr review submit` gains `--from-file <absolute path>`, which reads the request JSON
+  from that file instead of stdin. The two sources are mutually exclusive (both, or a missing or
+  unreadable file, is `invalid_argument`); with neither flag, stdin is read as today. The tool, not
+  the shell, opens the file, so the path may be outside the working directories. The review prompt
+  writes the request to a fresh scratch file and runs exactly
+  `pg-connector pr review submit <pr-id> --from-file <path>`, and the deployment grants
+  `Bash(pg-connector pr review submit:*)` (step 3 of section 10).
+
 - `comments[]` item: either a NEW point `{path, line, side?, body}` or a REPLY `{thread_id, body}`.
   Supplying `thread_id` together with `path` or `line` is `invalid_argument`. `side` is normalized
   (`""` means `RIGHT`) before use. Two items in one request that are identical after normalization
@@ -90,7 +105,9 @@ Request: `{id, head_sha, body, comments[], supersede_pending?}`.
   the call is `invalid_argument` and nothing is written. With append this matters more, because a new
   thread anchors to the live head (A2, C3).
 
-Result: `{review_id, state: "pending", head_sha, as_of, status, added, already_present, dismissed, body, extra_pending_reviews, last_append?, pending_review}`.
+Result: `{review_id, state: "pending", head_sha, as_of, status, added, already_present, dismissed, body, extra_pending_reviews, last_append?, url?}`. `url` is the web URL of the review that was used or
+created (absent for a `no_change` that created none); the old `pending_review` reference object is
+retired with `PendingReviewRef`.
 
 - `status` is exactly `posted`, `append` or `no_change` (wire spelling `no_change`, matching the
   existing snake_case style): `posted` = a review was created, `append` = at least one comment or a
@@ -336,17 +353,28 @@ outside this repository), so a tool emitting `append` or `no_change` first would
    status switch in `escalate/escalator.go`, which today resolves only `posted`, `skipped` and
    `replaced` and otherwise returns "unknown status". `append` and `no_change` resolve an open
    escalation exactly as `posted` does. A superset, safe.
-2. The tool ships create-or-append with the three statuses, and `supersede_pending` as a no-op.
+2. The tool ships create-or-append with the three statuses, `--from-file` on the verb (section 3),
+   and `supersede_pending` as a no-op.
 3. The review prompt, in the deployment repo, drops `supersede_pending`, gains `thread_id` replies,
    the context rules and the "a rejected anchor needs a changed request" rule, AND moves back from the
-   wrapper `pg-router-review-escalator submit` to the direct verb `pg-connector pr review submit`.
+   wrapper `pg-router-review-escalator submit` to the direct verb
+   `pg-connector pr review submit <pr-id> --from-file <path>`; the deployment adds the grant
+   `Bash(pg-connector pr review submit:*)` in the same change. A live end-to-end review dispatch
+   proves it, because a grant mismatch fails silently in don't-ask mode.
 4. The deployment config stops passing `--exclude-escalated-query` to the router stanza and drops the
    escalator module and its permission grant. THEN, in this repo, the flag is removed from
    `pg-router-source-pg-connector` (the reverse order makes the list verb reject an unknown flag and
    stops dispatch).
 5. A one-time sweep closes the open escalation beads (`human` and `human-focus-required`) that exist
-   at cutover, because their closer is retired.
-6. The escalator package, its flake wiring and the pg-desk escalation fact are removed.
+   at cutover, because their closer is retired. They live in the deployment's own tracker, not the
+   shared `pg2-` tracker, and the sweep runs against that tracker.
+6. The escalator package, its flake wiring, the pg-desk escalation fact, and the `supersede_pending`
+   no-op in the tool (with its docs line) are removed.
+
+Steps 3 to 5 take effect on the machine only after `pn workspace apply`, which is operator-only, so
+an ordering edge between their beads is not enough: each later step's bead MUST be gated on the
+earlier step having been applied (a `pn:applied` gate keyed on the earlier commit), never on the
+earlier bead merely being closed.
 
 Documentation changes land with each step, behavior docs FIRST.
 
