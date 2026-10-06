@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/work-report/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/work-report/internal/narrative"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/work-report/internal/query"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/work-report/internal/rangespec"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/work-report/internal/report"
@@ -148,6 +149,13 @@ func newReportCmd() *cobra.Command {
 				}
 				return &reportOutcome{reason: reason}
 			}
+
+			// The narrative generator is built from the loaded config, so it is
+			// registered per invocation, before the kind lookup.
+			report.Register(narrative.New(narrative.Options{
+				Model:            cfg.Kinds.Narrative.Model,
+				SystemPromptFile: cfg.Kinds.Narrative.SystemPromptFile,
+			}))
 
 			gen, ok := report.Lookup(kind)
 			if !ok {

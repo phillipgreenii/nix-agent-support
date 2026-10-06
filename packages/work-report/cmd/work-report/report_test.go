@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/work-report/internal/claudefake"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/work-report/internal/report"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/work-report/internal/store"
 )
@@ -112,14 +113,14 @@ func TestReportEmptyRange(t *testing.T) {
 }
 
 func TestReportUnknownKindIsOutcome(t *testing.T) {
-	for _, kind := range []string{"narrative", "bogus"} {
+	for _, kind := range []string{"bogus"} {
 		t.Run(kind, func(t *testing.T) {
 			_, storePath, err := runReport(t, "--kind", kind, "--range", "2026-03-01")
 			var oc *reportOutcome
 			if !errors.As(err, &oc) {
 				t.Fatalf("err = %v, want a reportOutcome (exit 1)", err)
 			}
-			for _, want := range []string{kind, "no generator", "--kind baseline"} {
+			for _, want := range []string{kind, "no generator", "baseline, narrative", "--kind baseline"} {
 				if !strings.Contains(oc.Error(), want) {
 					t.Errorf("outcome %q lacks %q", oc.Error(), want)
 				}
@@ -214,5 +215,154 @@ func TestReportBadRangeIsError(t *testing.T) {
 	var oc *reportOutcome
 	if errors.As(err, &oc) {
 		t.Error("a bad range is a usage error, not a report outcome")
+	}
+}
+
+const fakeNarrative = "## What I did\nWrote the thing.\n"
+
+func TestReportNarrativeClaudeAbsentIsOutcome(t *testing.T) {
+	for _, format := range []string{"human", "json"} {
+		t.Run(format, func(t *testing.T) {
+			isolate(t)
+			t.Setenv("PATH", t.TempDir())
+			storePath := seedQueryStore(t)
+			cfg := writeCfg(t, "timezone: UTC\n")
+			out, err := runCLI(t, "--config", cfg, "--store", storePath, "--output", format,
+				"report", "--kind", "narrative", "--range", "2026-03-01")
+			var oc *reportOutcome
+			if !errors.As(err, &oc) {
+				t.Fatalf("err = %v, want a reportOutcome (exit 1)", err)
+			}
+			for _, want := range []string{"claude", "--kind baseline"} {
+				if !strings.Contains(oc.Error(), want) {
+					t.Errorf("outcome %q lacks %q", oc.Error(), want)
+				}
+			}
+			if lastReport(t, storePath) != nil {
+				t.Error("an outcome must not store a report")
+			}
+			lines := reportLogLines(t)
+			if len(lines) != 1 || !strings.Contains(lines[0], `"status":"outcome"`) {
+				t.Errorf("report.jsonl = %v", lines)
+			}
+			if format == "json" {
+				var got reportOutcomeJSON
+				if err := json.Unmarshal([]byte(out), &got); err != nil || !strings.Contains(got.Outcome, "claude") {
+					t.Errorf("stdout = %q, %v; want {\"outcome\": ...} naming claude", out, err)
+				}
+			}
+		})
+	}
+}
+
+func TestReportNarrativeStoresAndPrints(t *testing.T) {
+	isolate(t)
+	rec := claudefake.Install(t, claudefake.Behavior{Stdout: fakeNarrative})
+	storePath := seedQueryStore(t)
+	cfg := writeCfg(t, "timezone: UTC\n")
+	out, err := runCLI(t, "--config", cfg, "--store", storePath, "report", "--kind", "narrative", "--range", "2026-03-01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != fakeNarrative {
+		t.Errorf("stdout = %q, want %q", out, fakeNarrative)
+	}
+	r := lastReport(t, storePath)
+	if r == nil || r.Kind != "narrative" || r.Generator != "narrative" || r.Content != fakeNarrative {
+		t.Fatalf("stored row = %+v", r)
+	}
+	lines := reportLogLines(t)
+	if len(lines) != 1 || !strings.Contains(lines[0], `"status":"rendered"`) || !strings.Contains(lines[0], `"kind":"narrative"`) {
+		t.Errorf("report.jsonl = %v", lines)
+	}
+	if n := len(rec.Calls()); n != 1 {
+		t.Errorf("claude called %d times, want 1", n)
+	}
+}
+
+func TestReportNarrativeConfigReachesGenerator(t *testing.T) {
+	isolate(t)
+	rec := claudefake.Install(t, claudefake.Behavior{Stdout: fakeNarrative})
+	promptFile := filepath.Join(t.TempDir(), "prompt.md")
+	if err := os.WriteFile(promptFile, []byte("CUSTOM PROMPT MARKER"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	storePath := seedQueryStore(t)
+	cfg := writeCfg(t, "timezone: UTC\nkinds:\n  narrative:\n    model: test-model\n    systemPromptFile: "+promptFile+"\n")
+	if _, err := runCLI(t, "--config", cfg, "--store", storePath, "report", "--kind", "narrative", "--range", "2026-03-01"); err != nil {
+		t.Fatal(err)
+	}
+	calls := rec.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("calls = %d, want 1", len(calls))
+	}
+	argv := strings.Join(calls[0].Args, "\x00")
+	if !strings.Contains(argv, "--model\x00test-model") || !strings.Contains(argv, "CUSTOM PROMPT MARKER") {
+		t.Errorf("configured model/prompt did not reach claude: %q", calls[0].Args)
+	}
+}
+
+func TestReportNarrativeJSONWrapsContent(t *testing.T) {
+	isolate(t)
+	claudefake.Install(t, claudefake.Behavior{Stdout: fakeNarrative})
+	storePath := seedQueryStore(t)
+	cfg := writeCfg(t, "timezone: UTC\n")
+	out, err := runCLI(t, "--config", cfg, "--store", storePath, "--output", "json",
+		"report", "--kind", "narrative", "--range", "2026-03-01", "--label", "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got reportJSON
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("not the JSON response: %v\n%s", err, out)
+	}
+	if got.Kind != "narrative" || got.Content != fakeNarrative || got.Range.Since == nil || got.Range.Before == "" {
+		t.Errorf("response = %+v", got)
+	}
+	if len(got.Narrowing.Labels) != 1 || got.Narrowing.Labels[0] != "x" || got.Narrowing.Sources == nil || got.Narrowing.Types == nil {
+		t.Errorf("narrowing = %+v", got.Narrowing)
+	}
+}
+
+func TestReportNarrativeReceivesNarrowedEntries(t *testing.T) {
+	isolate(t)
+	rec := claudefake.Install(t, claudefake.Behavior{Stdout: fakeNarrative})
+	storePath := seedQueryStore(t)
+	cfg := writeCfg(t, "timezone: UTC\n")
+	// Label y matches only entry b (backend-two); a and c are narrowed out.
+	if _, err := runCLI(t, "--config", cfg, "--store", storePath,
+		"report", "--kind", "narrative", "--range", "2026-03-01..2026-03-02", "--label", "y"); err != nil {
+		t.Fatal(err)
+	}
+	calls := rec.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("calls = %d, want 1", len(calls))
+	}
+	stdin := calls[0].Stdin
+	if !strings.Contains(stdin, "issue b (backend-two") {
+		t.Errorf("narrowed-in entry missing from stdin:\n%s", stdin)
+	}
+	for _, gone := range []string{"change a v2 (backend-one", "review c (backend-one"} {
+		if strings.Contains(stdin, gone) {
+			t.Errorf("narrowed-out entry %q reached claude:\n%s", gone, stdin)
+		}
+	}
+}
+
+func TestReportNarrativeClaudeFailureIsOutcome(t *testing.T) {
+	isolate(t)
+	claudefake.Install(t, claudefake.Behavior{Exit: 3})
+	storePath := seedQueryStore(t)
+	cfg := writeCfg(t, "timezone: UTC\n")
+	_, err := runCLI(t, "--config", cfg, "--store", storePath, "report", "--kind", "narrative", "--range", "2026-03-01")
+	var oc *reportOutcome
+	if !errors.As(err, &oc) {
+		t.Fatalf("err = %v, want a reportOutcome (exit 1)", err)
+	}
+	if !strings.Contains(oc.Error(), "--kind baseline") {
+		t.Errorf("outcome %q does not point at --kind baseline", oc.Error())
+	}
+	if lastReport(t, storePath) != nil {
+		t.Error("an outcome must not store a report")
 	}
 }
