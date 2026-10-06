@@ -330,6 +330,27 @@ func TestBackend_Transition_InProgress_NoActor_Refused(t *testing.T) {
 	}
 }
 
+// A list is a read: filtering by `--status in_progress` selects beads, it does
+// not claim one, so it reaches bd with no actor configured and carries no
+// --actor.
+func TestCLIRunner_Run_ListInProgress_NoActorNeeded(t *testing.T) {
+	argvFile := bdArgvRecorder(t)
+	r := &CLIRunner{Dir: t.TempDir(), Getenv: fakeEnv(nil)}
+	for _, args := range [][]string{
+		{"list", "--status", "in_progress", "--json", "-n", "0"},
+		{"list", "--status=in_progress", "--json"},
+		{"list", "--assignee", "someone", "--json"},
+	} {
+		if _, err := r.Run(context.Background(), args...); err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		got := recordedArgv(t, argvFile)
+		if strings.Contains(got, "--actor") || !strings.Contains(got, strings.Join(args, " ")) {
+			t.Errorf("%v: argv = %q", args, got)
+		}
+	}
+}
+
 // Non-claiming calls (reads, close/open transitions, a release's empty
 // assignee, claim-looking text behind "--") still run with no actor, and
 // carry no --actor.

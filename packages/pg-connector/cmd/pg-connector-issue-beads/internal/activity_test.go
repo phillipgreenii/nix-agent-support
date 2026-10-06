@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
@@ -184,8 +185,8 @@ func TestListActivity_BdArgvIsBoundedAndWidened(t *testing.T) {
 	if _, err := New(fr).ListActivity(actCtx("me"), actSince, actBefore); err != nil {
 		t.Fatal(err)
 	}
-	if len(fr.calls) != 1 {
-		t.Fatalf("bd calls = %v, want exactly one", fr.calls)
+	if len(fr.calls) != 3 {
+		t.Fatalf("bd calls = %v, want exactly three (created, closed, in-progress)", fr.calls)
 	}
 	args := fr.calls[0]
 	if args[0] != "list" || !containsArg(args, "--json") || !containsArg(args, "--all") {
@@ -275,5 +276,287 @@ func TestNewActivityItem_FieldsAlwaysAnObject(t *testing.T) {
 		if it.EntityType != "issue" || it.Stale || it.ID != "" {
 			t.Errorf("item = %+v: entity_type issue, stale false, id left to the caller", it)
 		}
+	}
+}
+
+// --- issue.started / issue.closed ---
+
+// actWork renders a bead with the fields issue.started/issue.closed read.
+// startedAt/closedAt "" omit the key (bd omits started_at when unset and
+// reports closed_at null/absent when not closed).
+func actWork(id, assignee, owner, status, startedAt, closedAt string) string {
+	s := `{"id":"` + id + `","title":"title of ` + id + `","status":"` + status + `","priority":1,"issue_type":"task",` +
+		`"created_by":"nobody","created_at":"2020-01-01T00:00:00Z","assignee":"` + assignee + `","owner":"` + owner + `"`
+	if startedAt != "" {
+		s += `,"started_at":"` + startedAt + `"`
+	}
+	if closedAt != "" {
+		s += `,"closed_at":"` + closedAt + `"`
+	} else {
+		s += `,"closed_at":null`
+	}
+	return s + `}`
+}
+
+// workFake answers each of the three list calls from its own row set, telling
+// them apart by their flags.
+func workFake(closed, inProgress []string) *fakeRunner {
+	return &fakeRunner{workspace: "/some/where/tracker-ws", handle: func(args []string) (string, error) {
+		switch {
+		case containsArg(args, "--closed-before"):
+			return bdListJSON(closed...), nil
+		case containsArg(args, "--status"):
+			return bdListJSON(inProgress...), nil
+		}
+		return bdListJSON(), nil
+	}}
+}
+
+func itemsOfKind(items []schema.ActivityItem, kind string) []string {
+	var out []string
+	for _, it := range items {
+		if it.Kind == kind {
+			out = append(out, it.ID)
+		}
+	}
+	return out
+}
+
+func TestListActivity_ClosedAndStartedOnlyConfiguredActorsAssigneeOrOwner(t *testing.T) {
+	fr := workFake(
+		[]string{
+			actWork("tp-a", "me", "", "closed", "2026-09-02T00:00:00Z", "2026-09-03T00:00:00Z"),
+			actWork("tp-b", "", "my-agent", "closed", "", "2026-09-04T00:00:00Z"),
+			actWork("tp-c", "stranger", "other", "closed", "2026-09-02T00:00:00Z", "2026-09-05T00:00:00Z"),
+			actWork("tp-d", "", "", "closed", "2026-09-02T00:00:00Z", "2026-09-05T00:00:00Z"),
+		},
+		[]string{
+			actWork("tp-e", "me", "", "in_progress", "2026-09-06T00:00:00Z", ""),
+			actWork("tp-f", "stranger", "", "in_progress", "2026-09-06T00:00:00Z", ""),
+		},
+	)
+	got, err := New(fr).ListActivity(actCtx("me", "my-agent"), actSince, actBefore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed := strings.Join(itemsOfKind(got.Items, "issue.closed"), ",")
+	if want := "tp-a#issue.closed#2026-09-03T00:00:00Z,tp-b#issue.closed#2026-09-04T00:00:00Z"; closed != want {
+		t.Errorf("closed ids = %s, want %s", closed, want)
+	}
+	started := strings.Join(itemsOfKind(got.Items, "issue.started"), ",")
+	if want := "tp-e#issue.started#2026-09-06T00:00:00Z,tp-a#issue.started#2026-09-02T00:00:00Z"; started != want {
+		t.Errorf("started ids = %s, want %s", started, want)
+	}
+}
+
+func TestListActivity_ClosedStartedItemShape(t *testing.T) {
+	fr := workFake([]string{actWork("tp-a", "me", "my-agent", "closed", "2026-09-02T00:00:00Z", "2026-09-03T00:00:00Z")}, nil)
+	got, err := New(fr).ListActivity(actCtx("me", "my-agent"), actSince, actBefore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Assignee and owner are both configured actors: one item per happening.
+	if len(got.Items) != 2 {
+		t.Fatalf("items = %+v, want one started and one closed", got.Items)
+	}
+	for _, it := range got.Items {
+		if it.EntityType != "issue" || it.EntityID != "tp-a" || it.Approximate || it.Stale {
+			t.Errorf("item = %+v", it)
+		}
+		var f map[string]any
+		if err := json.Unmarshal(it.Fields, &f); err != nil {
+			t.Fatalf("fields: %v", err)
+		}
+		if f["attribution"] != "assignee" {
+			t.Errorf("%s fields.attribution = %v, want assignee", it.Kind, f["attribution"])
+		}
+		for _, k := range []string{"title", "assignee", "owner", "issue_type", "status", "priority"} {
+			if _, ok := f[k]; !ok {
+				t.Errorf("%s fields missing %q: %v", it.Kind, k, f)
+			}
+		}
+		wantLabels := "workspace:tracker-ws|tracker:beads"
+		if strings.Join(it.Labels, "|") != wantLabels {
+			t.Errorf("labels = %v", it.Labels)
+		}
+	}
+	for _, it := range got.Items {
+		want := map[string]string{"issue.started": "2026-09-02T00:00:00Z", "issue.closed": "2026-09-03T00:00:00Z"}[it.Kind]
+		if it.OccurredAt != want {
+			t.Errorf("%s occurred_at = %q, want %q (the bead's own timestamp)", it.Kind, it.OccurredAt, want)
+		}
+	}
+}
+
+func TestListActivity_ClosedIDStabilityAndReopen(t *testing.T) {
+	b1 := actWork("tp-a", "me", "", "closed", "", "2026-09-05T00:00:00Z")
+	b1offset := actWork("tp-a", "me", "", "closed", "", "2026-09-05T02:00:00+02:00") // same instant
+	b2 := actWork("tp-a", "me", "", "closed", "", "2026-09-20T00:00:00Z")            // re-closed later
+
+	ids := func(row string, since, before time.Time) []string {
+		got, err := New(workFake([]string{row}, nil)).ListActivity(actCtx("me"), since, before)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return itemsOfKind(got.Items, "issue.closed")
+	}
+	first := ids(b1, actSince, actBefore)
+	overlap := ids(b1, actSince.AddDate(0, 0, 2), actBefore.AddDate(0, 1, 0))
+	if len(first) != 1 || strings.Join(first, "") != strings.Join(overlap, "") {
+		t.Errorf("same closed_at over overlapping ranges: %v vs %v, want identical ids", first, overlap)
+	}
+	if off := ids(b1offset, actSince, actBefore); strings.Join(off, "") != strings.Join(first, "") || !strings.HasSuffix(off[0], "#2026-09-05T00:00:00Z") {
+		t.Errorf("offset closed_at id = %v, want UTC-rendered %v", off, first)
+	}
+	if later := ids(b2, actSince, actBefore); len(later) != 1 || later[0] == first[0] {
+		t.Errorf("re-close ids = %v vs %v, want a different id", later, first)
+	}
+	// One closed_at per row: a prior close bd no longer reports is not re-emitted.
+	if got := ids(b2, actSince, actBefore); len(got) != 1 || strings.Contains(strings.Join(got, ""), "09-05") {
+		t.Errorf("ids = %v, want only the reported close", got)
+	}
+}
+
+func TestListActivity_ClosedStartedRangeBoundaries(t *testing.T) {
+	fr := workFake([]string{
+		actWork("tp-before-since", "me", "", "closed", "", "2026-08-31T23:59:59Z"),
+		actWork("tp-at-since", "me", "", "closed", "", "2026-09-01T00:00:00Z"),
+		actWork("tp-at-before", "me", "", "closed", "", "2026-10-01T00:00:00Z"),
+		actWork("tp-no-date", "me", "", "closed", "", ""),
+		actWork("tp-bad-date", "me", "", "closed", "", "last tuesday"),
+		actWork("tp-updated-only", "me", "", "closed", "", ""),
+	}, []string{
+		actWork("tp-s-at-since", "me", "", "in_progress", "2026-09-01T00:00:00Z", ""),
+		actWork("tp-s-at-before", "me", "", "in_progress", "2026-10-01T00:00:00Z", ""),
+		actWork("tp-s-old", "me", "", "in_progress", "2026-08-01T00:00:00Z", ""),
+		actWork("tp-s-missing", "me", "", "in_progress", "", ""),
+		actWork("tp-s-bad", "me", "", "in_progress", "soon", ""),
+	})
+	got, err := New(fr).ListActivity(actCtx("me"), actSince, actBefore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ents []string
+	for _, it := range got.Items {
+		ents = append(ents, it.Kind+":"+it.EntityID)
+	}
+	if want := "issue.closed:tp-at-since,issue.started:tp-s-at-since"; strings.Join(ents, ",") != want {
+		t.Errorf("items = %v, want %s", ents, want)
+	}
+}
+
+func TestListActivity_InProgressYieldsStartedOnlyClosedYieldsBoth(t *testing.T) {
+	fr := workFake(
+		[]string{
+			actWork("tp-closed", "me", "", "closed", "2026-09-02T00:00:00Z", "2026-09-03T00:00:00Z"),
+			actWork("tp-closed-old-start", "me", "", "closed", "2026-07-02T00:00:00Z", "2026-09-03T00:00:00Z"),
+		},
+		[]string{actWork("tp-wip", "me", "", "in_progress", "2026-09-06T00:00:00Z", "")},
+	)
+	got, err := New(fr).ListActivity(actCtx("me"), actSince, actBefore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ents []string
+	for _, it := range got.Items {
+		ents = append(ents, it.Kind+":"+it.EntityID)
+	}
+	want := "issue.closed:tp-closed,issue.closed:tp-closed-old-start,issue.started:tp-wip,issue.started:tp-closed"
+	if strings.Join(ents, ",") != want {
+		t.Errorf("items = %v, want %s", ents, want)
+	}
+}
+
+func TestListActivity_ExactlyThreeListCallsAndNoneWithoutActors(t *testing.T) {
+	fr := workFake(nil, nil)
+	if _, err := New(fr).ListActivity(actCtx("me"), actSince, actBefore); err != nil {
+		t.Fatal(err)
+	}
+	if len(fr.calls) != 3 {
+		t.Fatalf("bd calls = %v, want exactly 3", fr.calls)
+	}
+	for _, c := range fr.calls {
+		if c[0] != "list" || !containsArg(c, "--json") {
+			t.Errorf("call %v is not a bd list --json", c)
+		}
+		if n, ok := argValue(c, "-n"); !ok || n != "0" {
+			t.Errorf("call %v lacks -n 0", c)
+		}
+	}
+	var inProgress int
+	for _, c := range fr.calls {
+		if v, ok := argValue(c, "--status"); ok && v == "in_progress" {
+			inProgress++
+		}
+	}
+	if inProgress != 1 {
+		t.Errorf("in-progress calls = %d, want 1", inProgress)
+	}
+
+	none := workFake(nil, nil)
+	if _, err := New(none).ListActivity(actCtx(), actSince, actBefore); !errors.Is(err, scriptout.ErrUnavailable) || len(none.calls) != 0 {
+		t.Errorf("empty actors: err = %v, calls = %v", err, none.calls)
+	}
+}
+
+func TestListActivity_ClosedArgvWidenedAndSinceOmitted(t *testing.T) {
+	fr := workFake(nil, nil)
+	if _, err := New(fr).ListActivity(actCtx("me"), actSince, actBefore); err != nil {
+		t.Fatal(err)
+	}
+	var closedArgs []string
+	for _, c := range fr.calls {
+		if containsArg(c, "--closed-before") {
+			closedArgs = c
+		}
+	}
+	if closedArgs == nil || !containsArg(closedArgs, "--all") {
+		t.Fatalf("calls = %v, want a closed-range call with --all", fr.calls)
+	}
+	after, _ := argValue(closedArgs, "--closed-after")
+	afterT, err := time.Parse(time.RFC3339, after)
+	if err != nil || afterT.After(actSince.Add(-24*time.Hour)) {
+		t.Errorf("--closed-after %q (%v) is tighter than since minus one day", after, err)
+	}
+	beforeV, _ := argValue(closedArgs, "--closed-before")
+	beforeT, err := time.Parse(time.RFC3339, beforeV)
+	if err != nil || beforeT.Before(actBefore.Add(24*time.Hour)) {
+		t.Errorf("--closed-before %q (%v) is tighter than before plus one day", beforeV, err)
+	}
+
+	// since omitted: no --closed-after, and the full record comes back.
+	fr = workFake([]string{
+		actWork("tp-old", "me", "", "closed", "", "2001-01-01T00:00:00Z"),
+		actWork("tp-new", "me", "", "closed", "", "2026-09-05T00:00:00Z"),
+	}, nil)
+	got, err := New(fr).ListActivity(actCtx("me"), time.Time{}, actBefore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range fr.calls {
+		if containsArg(c, "--closed-after") {
+			t.Errorf("argv %v carries --closed-after with since omitted", c)
+		}
+	}
+	if n := len(itemsOfKind(got.Items, "issue.closed")); n != 2 {
+		t.Errorf("closed items = %d, want the full record (2)", n)
+	}
+}
+
+func TestListActivity_StartedDuplicateAcrossInProgressAndClosedEmitsOnce(t *testing.T) {
+	row := actWork("tp-a", "me", "", "closed", "2026-09-02T00:00:00Z", "2026-09-03T00:00:00Z")
+	fr := workFake([]string{row}, []string{row})
+	got, err := New(fr).ListActivity(actCtx("me"), actSince, actBefore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(itemsOfKind(got.Items, "issue.started")); n != 1 {
+		t.Errorf("started items = %d, want 1", n)
+	}
+}
+
+func TestActivityKinds_ListsAllThree(t *testing.T) {
+	if got := strings.Join(ActivityKinds, ","); got != "issue.created,issue.started,issue.closed" {
+		t.Errorf("ActivityKinds = %s", got)
 	}
 }

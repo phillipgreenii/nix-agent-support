@@ -253,8 +253,8 @@ func TestNewDispatchTable_DeclaresActivityCapability(t *testing.T) {
 		t.Fatalf("schemaVersions[activity] = %d, want %d", got, schema.ActivitySchemaVersion)
 	}
 	raw, _ := json.Marshal(resp.Vocabulary["activity_kinds"])
-	if string(raw) != `["issue.created"]` {
-		t.Fatalf("vocabulary.activity_kinds = %s, want [\"issue.created\"]", raw)
+	if want := `["issue.created","issue.started","issue.closed"]`; string(raw) != want {
+		t.Fatalf("vocabulary.activity_kinds = %s, want %s", raw, want)
 	}
 }
 

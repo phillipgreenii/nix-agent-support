@@ -164,8 +164,13 @@ var ErrActorNotConfigured = errors.New(
 // isClaim reports whether args (up to the "--" terminator, after which
 // everything is a literal positional) claim a bead: `--claim`,
 // `--status in_progress`, or a non-empty `--assignee`. An empty assignee is a
-// release, not a claim.
+// release, not a claim. A `list` invocation is a read and is never a claim,
+// whatever filters it carries (`list --status in_progress` selects beads, it
+// does not claim one).
 func isClaim(args []string) bool {
+	if len(args) > 0 && args[0] == "list" {
+		return false
+	}
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		next := ""
