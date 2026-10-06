@@ -64,6 +64,10 @@ func RuleKinds() []string {
 	return out
 }
 
+// causeConflict is the pr.own-needs-action cause that means the PR itself is
+// broken.
+const causeConflict = "merge conflict"
+
 // Rule kinds of the initial rule set.
 const (
 	KindReviewRequested = "pr.review-requested"
@@ -128,7 +132,9 @@ func (r ownCIFailing) Raise(v *View, p RuleSettings) ([]Candidate, string) {
 	case f.CIState != "failure":
 		return nil, "ci rollup state is " + f.CIState
 	}
-	return []Candidate{v.candidate(r.Kind(), p.Severity, "CI failing on my PR")}, ""
+	c := v.candidate(r.Kind(), p.Severity, "CI failing on my PR")
+	c.SelfBroken = true
+	return []Candidate{c}, ""
 }
 
 // ownNeedsAction raises for an own, open PR in panel mine_awaiting_me for a
@@ -168,7 +174,7 @@ func (r ownNeedsAction) Raise(v *View, p RuleSettings) ([]Candidate, string) {
 		causes = append(causes, "bot disapproval")
 	}
 	if f.Conflict {
-		causes = append(causes, "merge conflict")
+		causes = append(causes, causeConflict)
 	}
 	if f.UnresolvedThread {
 		causes = append(causes, "unresolved review thread")
@@ -189,5 +195,10 @@ func (r ownNeedsAction) Raise(v *View, p RuleSettings) ([]Candidate, string) {
 			severity = SeverityLow
 		}
 	}
-	return []Candidate{v.candidate(r.Kind(), severity, "my PR needs action: "+joinReasons(causes))}, ""
+	c := v.candidate(r.Kind(), severity, "my PR needs action: "+joinReasons(causes))
+	// A merge conflict is the entity itself being broken; review feedback
+	// and readiness to land are not. Only a conflict-only candidate is
+	// self-broken, so a changes-requested PR is never held back by a stack.
+	c.SelfBroken = len(causes) == 1 && causes[0] == causeConflict
+	return []Candidate{c}, ""
 }

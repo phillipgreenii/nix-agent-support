@@ -34,6 +34,10 @@ type prSpec struct {
 	thread   bool   // an unresolved review thread
 	ci       string // "" (none), "failure", "pending", "success"
 	noFacts  bool
+
+	// branch and base are the PR's head and base branches (the stack source
+	// of the dependency data reads them); empty omits the field.
+	branch, base string
 }
 
 func (p prSpec) id() string { return fmt.Sprintf("%s#%d", testRepo, p.number) }
@@ -44,6 +48,12 @@ func (p prSpec) facts() string {
 		state = "open"
 	}
 	show := map[string]any{"number": p.number, "state": state, "draft": p.draft, "head_sha": "h1", "author": "me"}
+	if p.branch != "" {
+		show["branch"] = p.branch
+	}
+	if p.base != "" {
+		show["base"] = p.base
+	}
 	if p.conflict {
 		show["mergeable"] = "CONFLICTING"
 	}
@@ -596,8 +606,8 @@ func TestRepoFilter(t *testing.T) {
 type ctxSuppressor struct{}
 
 func (ctxSuppressor) Name() string { return "test-context" }
-func (ctxSuppressor) Suppress(c Candidate, _ map[string]*View) bool {
-	return strings.HasSuffix(c.ID, "#4242")
+func (ctxSuppressor) Suppress(c Candidate, _ *SuppressEnv) (bool, error) {
+	return strings.HasSuffix(c.ID, "#4242"), nil
 }
 
 func TestContextSuppressorIsLastInTheChain(t *testing.T) {

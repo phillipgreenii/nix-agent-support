@@ -51,7 +51,8 @@ clock, and returns the surviving items and their groups. It runs four stages in 
    2. the entity carries `suppress.attention`, or `suppress.<rule kind>` for the candidate's own
       kind (steps 1 and 2 of every PR rule's precedence order in [`annotate.md`](annotate.md));
    3. a registered context suppressor claims it. The chain is open to further suppressors that
-      look at the entity's neighbours; none ships in the first release (see "Deferred").
+      look at the entity's neighbours; the first is `blocked-by-open-dependency` (see "Dependency
+      suppression").
 4. **Group and rank.** See "Grouping and order".
 
 Which parts are fresh at read time, so that no reader assumes more than is true:
@@ -244,18 +245,42 @@ evaluation is reported (`attention` is `null` with an `attention_error`, never `
   MUST NOT raise a candidate. An unreadable store MUST be an error, never an empty list that reads
   as "all clear".
 
+## Dependency suppression
+
+The context suppressor `blocked-by-open-dependency` drops a candidate that is raised because the
+entity ITSELF is broken while any pull request the entity depends on is still open. A broken PR
+stacked on an open PR is not actionable yet, and its breakage usually clears when the base merges.
+The suppressor is the PR-to-PR dependency data's consumer (see "PR dependencies" in
+[`links.md`](links.md)): the stack, derived at read time from the stored base and head branches, and
+the external `depends_on` link an operator records, which exists on the migrated store only. A
+shared issue is a group, never a dependency: three PRs on one issue are siblings.
+
+- A candidate is "broken itself" when its cause is the entity's own state rather than someone
+  else's action: `pr.own-ci-failing`, and `pr.own-needs-action` when a merge conflict is its ONLY
+  cause. A review request, changes requested, bot disapproval, an unresolved thread, and approved
+  and ready to land are never claimed, so a stacked PR with review feedback still surfaces.
+- Only a dependency whose stored state is `open` holds a candidate back. A merged or closed
+  dependency, and one with no stored row, does not. A PR that depends on several PRs, for example
+  one stacked on an open PR and linked to an open sibling, stays suppressed until the LAST of them
+  has merged or closed, and then the candidate fires on the very next read: the dependency is
+  re-derived at every read from the dependency's own stored row.
+- The suppressor runs after `hidden` and the `suppress.*` annotations, so an explicit annotation is
+  the recorded reason when both apply. The dropped candidate is recorded as suppressed by
+  `blocked-by-open-dependency` (`attention explain` prints it, INV-ATTNEVAL-4).
+- It works on an unmigrated store for the stack source (that source reads entity rows); the
+  external source yields nothing there, so only the stack holds candidates back.
+- A dependency read that fails is an error, never an empty result that reads as "all clear"
+  (INV-ATTNEVAL-6).
+
 ## Deferred
 
 None of the following is part of the first release. Each is named so that no reader mistakes its
 absence for a defect.
 
-- **Suppress while a dependency is open.** A candidate raised because the entity itself is broken
-  is suppressed while an entity it depends on is open, and fires once the last such dependency has
-  merged. The PR-to-PR dependency source it reads exists (derived at read time from the stored base
-  and head branches, the stack, or recorded by an operator as an external `depends_on` link on the
-  migrated store only; see "PR dependencies" in [`links.md`](links.md)), but neither this
-  suppression nor the PR stack grouping level reads it yet. A shared issue is a group, never a
-  dependency.
+- **PR stack grouping.** The PR-to-PR dependency data (see "PR dependencies" in
+  [`links.md`](links.md)) exists and the dependency suppression above reads it, but the PR stack
+  grouping level does not read it yet, so a stack's items group by their issue or fall through to
+  the next level.
 - **Re-review after my approval.** Needs the commit each review was submitted against, which the
   connector's review record does not carry. Restoring it is an operator decision tracked outside
   this doc.

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/dependency"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
@@ -22,13 +23,26 @@ import (
 // Steps 1 and 2 are the first two steps of every PR rule's precedence order
 // in docs/behavior/pg-desk/annotate.md.
 
+// SuppressEnv is what a context suppressor may read about an entity's
+// neighbours. It is read-only and offline, like the rest of the evaluator.
+type SuppressEnv struct {
+	// Views is every projected entity, keyed by "<type>:<id>".
+	Views map[string]*View
+	// Dependencies answers PR-to-PR dependency questions over the same store
+	// read as the rest of the evaluation.
+	Dependencies *dependency.Resolver
+}
+
 // Suppressor is a context suppressor: step 3 of the chain, which MAY look at
-// the entity's neighbours through views. None ships in the first release.
+// the entity's neighbours through env. The first member is
+// blockedByOpenDependency (dependency_suppressor.go).
 type Suppressor interface {
 	// Name is recorded as the suppressing reason.
 	Name() string
-	// Suppress reports whether it claims the candidate.
-	Suppress(c Candidate, views map[string]*View) bool
+	// Suppress reports whether it claims the candidate. An error is an
+	// unreadable store, which fails the evaluation: it is never an all-clear
+	// (INV-ATTNEVAL-6).
+	Suppress(c Candidate, env *SuppressEnv) (bool, error)
 }
 
 var (
@@ -125,21 +139,25 @@ func (a *annotationReader) read(repo, entityType, id string) (annotationState, e
 
 // firstSuppressor walks the chain and returns the first applicable
 // suppressor's name.
-func firstSuppressor(chain []Suppressor, c Candidate, st annotationState, views map[string]*View) (by string, dropped bool) {
+func firstSuppressor(chain []Suppressor, c Candidate, st annotationState, env *SuppressEnv) (by string, dropped bool, err error) {
 	switch {
 	case st.hidden:
-		return "hidden", true
+		return "hidden", true, nil
 	case st.wip && strings.HasPrefix(c.Kind, "pr.own-"):
-		return "wip", true
+		return "wip", true, nil
 	case st.suppressed["attention"]:
-		return store.KeySuppress("attention"), true
+		return store.KeySuppress("attention"), true, nil
 	case st.suppressed[c.Kind]:
-		return store.KeySuppress(c.Kind), true
+		return store.KeySuppress(c.Kind), true, nil
 	}
 	for _, s := range chain {
-		if s.Suppress(c, views) {
-			return s.Name(), true
+		claimed, serr := s.Suppress(c, env)
+		if serr != nil {
+			return "", false, fmt.Errorf("attention: suppressor %s on %s: %w", s.Name(), Ref(c.Type, c.ID), serr)
+		}
+		if claimed {
+			return s.Name(), true, nil
 		}
 	}
-	return "", false
+	return "", false, nil
 }

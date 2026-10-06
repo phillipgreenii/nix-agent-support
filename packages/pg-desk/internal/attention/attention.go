@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/dependency"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/interpret"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/links"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
@@ -99,6 +100,13 @@ type Candidate struct {
 	ID       string
 	Severity Severity
 	Reason   string
+	// SelfBroken is true when the candidate is raised because the entity
+	// ITSELF is broken (its CI is failing, it has a merge conflict), as
+	// opposed to waiting on someone else's action (a review, a decision). A
+	// context suppressor that waits on a dependency claims only such
+	// candidates: a PR that is broken because the PR it is stacked on is
+	// still open is not actionable yet.
+	SelfBroken bool
 	// Since is when the cause began, as far as the stored data says (the
 	// interpretation's as-of); the zero time when unknown.
 	Since time.Time
@@ -234,6 +242,7 @@ func Evaluate(in Inputs) (Result, error) {
 		byRef[v.Ref()] = v
 	}
 	chain := suppressorChain()
+	env := &SuppressEnv{Views: byRef, Dependencies: dependency.NewResolver(in.Store, in.Repo)}
 
 	res := Result{
 		Now:      now,
@@ -273,7 +282,11 @@ func Evaluate(in Inputs) (Result, error) {
 				return Result{}, err
 			}
 			for _, c := range raised {
-				if by, dropped := firstSuppressor(chain, c, state, byRef); dropped {
+				by, dropped, serr := firstSuppressor(chain, c, state, env)
+				if serr != nil {
+					return Result{}, serr
+				}
+				if dropped {
 					tr.Dropped = append(tr.Dropped, Dropped{Candidate: c, By: by})
 					continue
 				}
