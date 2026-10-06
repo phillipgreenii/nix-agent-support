@@ -609,7 +609,9 @@ has no event type or duration, which is the gap `pg2-nimab` and decision D10 add
    for a deterministic (non-LLM) Slack thread list.
 8. **D8 (Q10).** Authorize the R3 shadow check on a store copy, which makes real GitHub calls; allow
    the list to run alongside the v1 feeds at 5m during it (about 170 extra points per hour at the
-   2-points-per-one-string estimate, to be confirmed by `graphql_cost`).
+   2-points-per-one-string estimate, to be confirmed by `graphql_cost`). Reconciled 2026-10-06 (bead
+   `pg2-ckll8`): `graphql_cost` measured 1 point per string at `first: 74`, so 12 shadow ticks over
+   11 strings cost `12 x 11 x 1 = 132` extra points per hour (see 10.2).
 9. **D9 (Q6).** Confirm that per-poll caps which carry work forward (no loss, only delay, bound
    checked and alerting) satisfy "no total limit", and that removing the deferral queue's give-up
    after five polls is required.
@@ -695,11 +697,64 @@ sequential tick of 7 strings near 21 s at p50, and 11 strings near `21.4 + 4 x (
 at p50 and `35.7 + 4 x (27.23 / 6) = 53.9 s` at p99 (a conservative sum), under the 60 second period
 with thin margin at p99.
 
+The variant table, the budget table and the cost of 2 points above are the 2026-10-05 probe at a page
+size of `first: 100`. They are kept as the record of that probe and are SUPERSEDED for the shipped
+list by the reconciliation below.
+
+#### Reconciliation at `first: 74` (2026-10-06, bead `pg2-ckll8`)
+
+The shipped list requests pages of `first: 74` (bead `pg2-cw6b3.9`), which section 6.6 of the
+attention-evaluator design (`2026-10-05-pg-desk-attention-evaluator-and-connector-refresh-cache-design.md`)
+measured as 1 point per page against 2 at `first: 100`. Bead `pg2-x3h8c.11` then measured the real
+connector end to end (read-only, a scratch state home, main at `95e5b5f5`, one call each, the
+current cheap field set, 11 strings made of 1 `mine` string and 10 `team` strings, one string per
+author), and its result comment is the source of the figures below:
+
+| Query | Strings | `graphql_cost` | Per string | `duration_ms` |
+| ----- | ------- | -------------- | ---------- | ------------- |
+| mine  | 1       | 1              | 1          | 3,782         |
+| team  | 10      | 10             | 1          | 27,446        |
+
+The measured per-string cost is 1 point, not the 2 assumed above. The recomputed worst-hour total
+uses the same non-list spend of 1,713 and the same 72 ticks (60 plus 12 shadow):
+
+| Strings, cost per page | Calculation         | Total | Headroom to 4,000 | Source                     |
+| ---------------------- | ------------------- | ----- | ----------------- | -------------------------- |
+| 11, 1 (measured)       | 1,713 + 11 x 1 x 72 | 2,505 | 1,495             | `pg2-x3h8c.11`             |
+| 11, 2 (`first: 100`)   | 1,713 + 11 x 2 x 72 | 3,297 | 703               | the 2026-10-05 probe above |
+
+At the 60 s cadence the list spends `60 x (1 + 10) = 660` points per hour; a sequential tick takes
+`3.782 + 27.446 = 31.2 s` against the 60 s period (one run each, so p50 and p99 are not measured and
+the p99 tail stays the thin spot). Verdict: the budget holds at 60 s with the current field set.
+
+The measurement carries two caveats that a reader MUST keep with the figure:
+
+- It assumes no string paginates past one page of 74 results (cost equalled the string count). A
+  string that overflows pays one extra page. Adding a field to the batched query can move the 74
+  boundary, which `TestSearchBatchedQuery_PinnedFieldSet` pins for the current field set.
+- The 3-point and 4-point variants of the table above (`reviewRequests`, CI `contexts`) were priced
+  at `first: 100` and were NOT re-measured at `first: 74`. The 11-string rows for those variants stay
+  conservative upper bounds until a field-set change re-measures them (S35 item f requires the
+  recomputation anyway).
+
+One more reading of the same measurement. The `mine` row logged `graphql_remaining` 4,985 with a
+reset at 18:01:21Z while the `team` row logged 3,978 with a reset at 18:12:12Z, so the two calls
+reported different rate-limit windows. This is NOT a stale rate-limit read: every `list` call runs
+its own fresh `rateLimit` read (`checkRateReserve` calls `ReadRateLimit`, a new `gh api graphql`
+request, before its first search) and the rows of two separate invocations share no state. The
+windows differ because the credentials differ: the connector's token chain takes an ambient
+`GH_TOKEN` or `GITHUB_TOKEN` first and only then `gh auth token`, so two invocations launched with
+different environments are two different rate-limit principals. A window that had spent 15 of 5,000
+points is not the live feed's token, which had spent about 1,000. The cost figures do not depend on
+the window. The log does not record which credential a row used, so attributing a row to a window
+needs the launching environment.
+
 ### 10.3 Field set and guardrails
 
 ADR 0077 row S35 records the resulting rules: add `reviewThreads` `totalCount` and the labels
 `totalCount`; defer `reviewRequests`; keep `mergeStateStatus` show-only; add no CI-detail field;
 require a field-coverage test (every field a consumer reads is in the list fingerprint or on a
 declared blind-spot list that names its refresh tier); and recompute the points budget whenever the
-string count or field set changes. The follow-up beads are `pg2-eax6d` (decompose into
-implementation beads), `pg2-sve9v`, `pg2-ynxy2` and `pg2-yye5p`.
+string count, the page size or the field set changes. The follow-up beads are `pg2-eax6d` (decompose
+into implementation beads), `pg2-sve9v`, `pg2-ynxy2` and `pg2-yye5p`. The budget figures in 10.2 are
+reconciled to the measured 1 point per string at `first: 74` (bead `pg2-ckll8`, 2026-10-06).

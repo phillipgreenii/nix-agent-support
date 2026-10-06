@@ -620,6 +620,16 @@ This amendment records S29, S30, S31, S32, S33, S34, S35.
   per page) and showed that, at 7 strings, adding every field leaves 271 points of headroom in the
   worst hour; correcting the watched set to 11 strings (bead `pg2-yye5p`) removes that headroom for
   anything above 2 points per page.
+  Reconciliation note (2026-10-06, bead `pg2-ckll8`; this does not change the ruling): the 2, 3 and
+  4 points per page above are the 2026-10-05 probe at a page size of `first: 100`. The shipped list
+  requests `first: 74` (bead `pg2-cw6b3.9`), and bead `pg2-x3h8c.11` measured the connector end to
+  end at 1 point per search string (1 `mine` string cost 1, 10 `team` strings cost 10), so the
+  worst-hour total for the 11 strings is `1,713 + 11 x 1 x 72 = 2,505` points, a headroom of 1,495 to
+  the 4,000 ceiling, and the budget holds at the 60 second cadence. The full table, the
+  caveats and the sequential tick time are in the design's section "Cost probe of the cheap PR list"
+  (`docs/superpowers/specs/2026-10-05-fast-per-type-change-check-design.md`). The figure assumes no
+  string paginates past one page of 74; adding a field can move that boundary (pinned by
+  `TestSearchBatchedQuery_PinnedFieldSet`), and clause (f) still requires the recomputation then.
 
 ### Consequences
 

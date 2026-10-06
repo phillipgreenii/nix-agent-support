@@ -838,6 +838,16 @@ named constant with a unit test that pins the field set (`searchBatchedPageSize`
 `TestSearchBatchedQuery_PinnedFieldSet`, bead `pg2-cw6b3.9`), and the `D7` verification MUST re-read
 the cost to catch a formula change. Adding fields to the batched query can move the boundary.
 
+Reconciliation (2026-10-06, bead `pg2-ckll8`): bead `pg2-x3h8c.11` confirmed the 1 point per page at
+`first: 74` end to end on the real connector (1 `mine` string cost 1, 10 `team` strings cost 10; the
+figures are in section 10.2 of
+`2026-10-05-fast-per-type-change-check-design.md`). The arithmetic table above counts six `team`
+strings; the corrected watched set (bead `pg2-yye5p`) has ten, one per author. Derived, not
+measured: `pr-team` at 60 s is `10 x 60 = 600` points per hour, so the 60 s baseline is
+`600 + 60 + 869 = 1,529` (30.6 percent), above the 25 percent target, which is still the `D7`
+acceptance measurement and not a guarantee. The hard guardrail is the 4,000 point ceiling of ADR 0077
+row S35, which the measured total (`2,505`) meets with 1,495 points of headroom.
+
 The 869 points per hour of other consumers remain an estimate and are the largest single line;
 Direction 2's read-through for desk's per-event runs and the `pg2-ii38x` design (if the operator
 approves it on `pg2-32wg6`), which removes the reconcile event class, are what reduce it, and
