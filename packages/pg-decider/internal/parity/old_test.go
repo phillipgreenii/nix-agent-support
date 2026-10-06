@@ -14,7 +14,9 @@ import (
 // oldWantKinds is, per scenario, the set of ledger kinds the OLD sync stage
 // leaves as planned (not-yet-applied) rows. A write that only adopts an existing
 // bead carries that bead's id and so is not a planned row: scenarios 09 to 14
-// start from existing beads and plan nothing new.
+// start from existing beads and plan nothing new. Scenario 15 lists only the
+// open beads, as production does, so the old sync cannot see the two closed
+// ones and plans a fresh cycle and review request.
 var oldWantKinds = map[string][]string{
 	"01-": {"anchor", "feedback-cycle", "review-request"},
 	"02-": {"anchor", "review-request"},
@@ -30,6 +32,7 @@ var oldWantKinds = map[string][]string{
 	"12-": nil,
 	"13-": nil,
 	"14-": nil,
+	"15-": {"feedback-cycle", "review-request"},
 }
 
 func wantFor[T any](t *testing.T, table map[string]T, name string) T {

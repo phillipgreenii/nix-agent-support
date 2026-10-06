@@ -30,6 +30,7 @@ var newWantActions = map[string][]rule{
 	"12-": {{"reopen", "review-pr", "review.head-advanced"}},
 	"13-": {{"update", "review-pr", "adoption"}, {"update", "process-feedback", "adoption"}},
 	"14-": {{"create", "process-feedback", "feedback.digest-changed"}},
+	"15-": {{"create", "process-feedback", "feedback.digest-changed"}},
 }
 
 var newWantAbsent = map[string][]rule{
@@ -42,6 +43,9 @@ var newWantAbsent = map[string][]rule{
 	// S26: the closed review request for the unchanged head is not reopened,
 	// and the one comment the closed cycle covered does not re-trigger it.
 	"14-": {{"reopen", "review-pr", "review.head-advanced"}, {"reopen", "process-feedback", "feedback.digest-changed"}},
+	// The new side reads closed items however the work-beads listing is
+	// filtered, so scenario 15 plans exactly what scenario 14 does.
+	"15-": {{"create", "review-pr", "review.head-advanced"}, {"reopen", "review-pr", "review.head-advanced"}, {"reopen", "process-feedback", "feedback.digest-changed"}},
 }
 
 func hasAction(p action.PlanResult, r rule) bool {

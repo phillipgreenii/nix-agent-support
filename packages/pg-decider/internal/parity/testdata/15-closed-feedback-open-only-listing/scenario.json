@@ -1,0 +1,66 @@
+{
+  "name": "15-closed-feedback-open-only-listing",
+  "description": "The scenario 14 PR and beads, but the tracker lists only OPEN beads for the work-beads query, the way production does: the old sync, with no ledger row for the closed review request or the closed feedback cycle, cannot see either and plans a fresh one of each; the new decider still sees both closed items, so it does not recreate the review request, and creates only the cycle for the comment no earlier cycle covered.",
+  "entities": ["acme/api#114"],
+  "prs": [
+    {
+      "number": 114,
+      "title": "Cache the lookup results",
+      "author": "phillipgreenii",
+      "comments": [
+        {
+          "id": "c1",
+          "author": "teammate",
+          "body": "Please document the eviction policy."
+        },
+        {
+          "id": "c2",
+          "author": "teammate",
+          "body": "The cache key should include the locale."
+        }
+      ]
+    }
+  ],
+  "beads": [
+    {
+      "id": "bd-114a",
+      "title": "acme/api#114: Cache the lookup results",
+      "metadata": {
+        "repo": "acme/api",
+        "pr_number": "114",
+        "state": "open",
+        "branch": "feature-114",
+        "base": "main",
+        "author": "phillipgreenii",
+        "draft": "false"
+      }
+    },
+    {
+      "id": "bd-114r",
+      "title": "review-pr: acme/api#114",
+      "state": "closed",
+      "parent": "bd-114a",
+      "metadata": {
+        "repo": "acme/api",
+        "pr_number": "114",
+        "branch": "feature-114",
+        "head_sha": "head0114",
+        "ownership": "mine"
+      }
+    },
+    {
+      "id": "bd-114f",
+      "title": "process-feedback: acme/api#114",
+      "state": "closed",
+      "parent": "bd-114a",
+      "labels": ["mine"],
+      "fbsum": ["c1"],
+      "metadata": {
+        "repo": "acme/api",
+        "pr_number": "114",
+        "branch": "feature-114"
+      }
+    }
+  ],
+  "work_beads_open_only": true
+}

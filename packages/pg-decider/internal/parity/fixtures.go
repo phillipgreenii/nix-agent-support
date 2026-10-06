@@ -88,6 +88,13 @@ type Fixture struct {
 	// Hidden lists entities hidden through the pre-cutover `pg-desk hide`
 	// before the cutover, on both sides.
 	Hidden []string `json:"hidden,omitempty"`
+	// WorkBeadsOpenOnly makes the fake `issue list --query work-beads` list
+	// only beads whose state is "open", the way the production query
+	// (`bd list --status open`) does. Unset, it lists every bead, closed
+	// included: a stand-in for the ids the old sync already holds in its
+	// ledger, which the harness's fresh store cannot seed. `issue show`
+	// answers every bead either way.
+	WorkBeadsOpenOnly bool `json:"work_beads_open_only,omitempty"`
 }
 
 // PRFixture is one synthetic pull request; unset fields take realistic
@@ -528,10 +535,20 @@ func (fx *Fixture) issueDepsJSON(b BeadFixture) []byte {
 }
 
 // workBeadsJSON is the bare fan-out answer of `issue list --query work-beads`.
+//
+// Production's query is `list --type merge-request --status open` (the
+// beads backend's config.queries.work-beads), so it never lists a closed bead.
+// By default this fake lists every fixture bead anyway: the old sync resolves
+// a bead it created earlier from its ledger, and the harness starts the old
+// side with an empty store, so the listing stands in for those ledger ids.
+// A fixture sets work_beads_open_only to model the listing literally.
 func (fx *Fixture) workBeadsJSON() []byte {
 	entities := make([]issueWire, 0, len(fx.Beads))
 	ids := make([]string, 0, len(fx.Beads))
 	for _, b := range fx.Beads {
+		if fx.WorkBeadsOpenOnly && b.State != "open" {
+			continue
+		}
 		entities = append(entities, b.wire())
 		ids = append(ids, b.ID)
 	}

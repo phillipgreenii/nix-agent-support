@@ -18,7 +18,9 @@ import (
 //	pr show <id> [--fresh]                    the PR (exit 4 when unknown)
 //	pr files <id>, pr commits <id>            the PR's files and commits
 //	ci list <id>                              the CI runs (bare fan-out answer)
-//	issue list --query work-beads             every fixture bead (bare)
+//	issue list --query work-beads             every fixture bead, or only the open
+//	                                          ones when the fixture sets
+//	                                          work_beads_open_only (bare)
 //	issue list --query pending-review-escalations   none (bare)
 //	issue show <bead id> [--fresh]            one bead (exit 4 when unknown)
 //	issue deps <bead id> --full               no dependencies

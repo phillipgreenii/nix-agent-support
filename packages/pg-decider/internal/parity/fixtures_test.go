@@ -187,3 +187,30 @@ func mustDecode(t *testing.T, raw []byte, into any) {
 		t.Fatalf("decode %s: %v", raw, err)
 	}
 }
+
+// TestFixtureWorkBeadsOpenOnly pins the production listing: with
+// work_beads_open_only the work-beads answer drops every bead whose state is not
+// open (`bd list --status open`), while `issue show` still answers all of them.
+func TestFixtureWorkBeadsOpenOnly(t *testing.T) {
+	beads := `"beads":[{"id":"o","title":"acme/api#1: t"},{"id":"p","title":"x","state":"in_progress"},{"id":"c","title":"y","state":"closed"}]`
+	base := `{"name":"x","description":"d","entities":["acme/api#1"],"prs":[{"number":1}],`
+	for open, want := range map[bool][]string{false: {"o", "p", "c"}, true: {"o"}} {
+		in := base + beads + `,"work_beads_open_only":` + map[bool]string{false: "false", true: "true"}[open] + `}`
+		fx, err := ParseFixture([]byte(in))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var list struct {
+			Entities   []struct{ ID string }
+			PresentIDs []string `json:"present_ids"`
+		}
+		mustDecode(t, fx.workBeadsJSON(), &list)
+		var got []string
+		for _, e := range list.Entities {
+			got = append(got, e.ID)
+		}
+		if strings.Join(got, ",") != strings.Join(want, ",") || strings.Join(list.PresentIDs, ",") != strings.Join(want, ",") {
+			t.Errorf("open-only=%v: listed %v / %v, want %v", open, got, list.PresentIDs, want)
+		}
+	}
+}
