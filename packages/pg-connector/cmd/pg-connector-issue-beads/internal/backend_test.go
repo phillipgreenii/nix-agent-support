@@ -2,6 +2,7 @@ package internal
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -290,6 +291,37 @@ func TestBackend_Show_IncludesFreshnessAndMetadataFields(t *testing.T) {
 	}
 	if got.Metadata["foo"] != "bar" || got.Metadata["num"] != "42" || got.Metadata["flag"] != "true" {
 		t.Fatalf("Metadata = %+v, want string-coerced values", got.Metadata)
+	}
+}
+
+// TestBdIssue_DecodesActivityTimestampsAndCreator locks in the activity
+// fields: a row with all four set decodes to those values, and a row with
+// started_at absent and closed_at null decodes both to the empty string.
+func TestBdIssue_DecodesActivityTimestampsAndCreator(t *testing.T) {
+	data := json.RawMessage(`[` +
+		`{"id":"tp-1","title":"full","status":"closed","priority":1,` +
+		`"created_at":"2026-09-01T10:00:00Z","started_at":"2026-09-02T11:00:00Z",` +
+		`"closed_at":"2026-09-03T12:00:00Z","created_by":"creator@example.com"},` +
+		`{"id":"tp-2","title":"open","status":"open","priority":1,` +
+		`"created_at":"2026-09-01T10:00:00Z","closed_at":null,"created_by":"creator@example.com"}]`)
+	issues, err := bdIssuesFromArray(data)
+	if err != nil {
+		t.Fatalf("bdIssuesFromArray: %v", err)
+	}
+	if len(issues) != 2 {
+		t.Fatalf("len = %d, want 2", len(issues))
+	}
+	full := issues[0]
+	if full.CreatedAt != "2026-09-01T10:00:00Z" || full.StartedAt != "2026-09-02T11:00:00Z" ||
+		full.ClosedAt != "2026-09-03T12:00:00Z" || full.CreatedBy != "creator@example.com" {
+		t.Fatalf("full row = %+v", full)
+	}
+	open := issues[1]
+	if open.CreatedAt != "2026-09-01T10:00:00Z" || open.CreatedBy != "creator@example.com" {
+		t.Fatalf("open row = %+v", open)
+	}
+	if open.StartedAt != "" || open.ClosedAt != "" {
+		t.Fatalf("StartedAt/ClosedAt = %q/%q, want both empty (absent/null)", open.StartedAt, open.ClosedAt)
 	}
 }
 

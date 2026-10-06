@@ -51,6 +51,13 @@ import (
 // pg2-t9zzg (D-F8), decoding bd's own `owner` field — distinct from
 // Assignee — verified live against a real `bd show --json` (bd's own
 // `owner`/`assignee` keys hold different values for the same issue).
+// CreatedAt, StartedAt, ClosedAt, and CreatedBy were added by the
+// work-tracker activity backend (design C7) so a later list_activity can
+// date and attribute created/started/closed happenings; the wire names are
+// bd's own (`created_at`, `started_at`, `closed_at`, `created_by`), verified
+// against real `bd list --json` output (bd 1.2.2). started_at is absent
+// when unset and closed_at is null or absent when not closed; both decode
+// to the empty string.
 type bdIssue struct {
 	ID           string                     `json:"id"`
 	Title        string                     `json:"title"`
@@ -64,6 +71,10 @@ type bdIssue struct {
 	Parent       string                     `json:"parent,omitempty"`
 	Dependencies []bdDependency             `json:"dependencies,omitempty"`
 	UpdatedAt    string                     `json:"updated_at,omitempty"`
+	CreatedAt    string                     `json:"created_at,omitempty"`
+	StartedAt    string                     `json:"started_at,omitempty"`
+	ClosedAt     string                     `json:"closed_at,omitempty"`
+	CreatedBy    string                     `json:"created_by,omitempty"`
 	DueAt        string                     `json:"due_at,omitempty"`
 	ExternalRef  string                     `json:"external_ref,omitempty"`
 	Metadata     map[string]json.RawMessage `json:"metadata,omitempty"`
