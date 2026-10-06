@@ -454,3 +454,253 @@ func TestListActivity_ConformsToListActivityCase(t *testing.T) {
 		}
 	}
 }
+
+// ----- issue.transitioned and issue.commented -----
+
+const actOtherEmail = "other@example.com"
+
+func actUser(email string) string {
+	return `{"email":"` + email + `","account_id":"acct-` + email + `","display_name":"Someone"}`
+}
+
+// actChange renders one pjira changelog entry.
+func actChange(id, from, to, authorEmail, at string) string {
+	return `{"id":"` + id + `","field":"status","from":"` + from + `","to":"` + to + `","author":` + actUser(authorEmail) + `,"at":"` + at + `"}`
+}
+
+// actComment renders one pjira comment.
+func actComment(id, authorEmail, body, created string) string {
+	return `{"id":"` + id + `","author":` + actUser(authorEmail) + `,"body":"` + body + `","created":"` + created + `"}`
+}
+
+// actIssueWith renders an issue (created long before any range, reported by
+// someone else) carrying the given changelog and comment entries.
+func actIssueWith(key string, changelog, comments []string) string {
+	base := actIssue(key, "2026-01-01T00:00:00.000+0000", actOtherEmail, "2026-09-30T00:00:00.000+0000")
+	return strings.TrimSuffix(base, "}") +
+		`,"changelog":[` + strings.Join(changelog, ",") + `],"comments":[` + strings.Join(comments, ",") + `]}`
+}
+
+func listIDs(t *testing.T, b *Backend, since, before time.Time) map[string]schema.ActivityItem {
+	t.Helper()
+	res, err := b.ListActivity(context.Background(), since, before)
+	if err != nil {
+		t.Fatalf("ListActivity: %v", err)
+	}
+	m := activityIDs(res)
+	if len(m) != len(res.Items) {
+		t.Fatalf("duplicate ids in %+v", res.Items)
+	}
+	return m
+}
+
+func TestListActivity_TransitionsAndCommentsOnlyOperators(t *testing.T) {
+	b, _ := newActivityBackend(actOperatorEmail, actSearch(false, actIssueWith("PROJ-1",
+		[]string{
+			actChange("100", "To Do", "In Progress", actOperatorEmail, "2026-09-05T10:00:00.000+0000"),
+			actChange("101", "In Progress", "Done", actOtherEmail, "2026-09-06T10:00:00.000+0000"),
+			actChange("102", "Done", "To Do", actOperatorEmail, "2026-09-07T10:00:00.000+0000"),
+		},
+		[]string{
+			actComment("200", actOperatorEmail, "mine", "2026-09-05T11:00:00.000+0000"),
+			actComment("201", actOtherEmail, "theirs", "2026-09-05T12:00:00.000+0000"),
+		})), "")
+	got := listIDs(t, b, actSince, actBefore)
+	want := []string{"PROJ-1#issue.transitioned#100", "PROJ-1#issue.transitioned#102", "PROJ-1#issue.commented#200"}
+	for _, id := range want {
+		if _, ok := got[id]; !ok {
+			t.Errorf("missing %s in %v", id, got)
+		}
+	}
+	if len(got) != len(want) {
+		t.Errorf("ids = %v, want exactly %v (other people's entries produce nothing)", got, want)
+	}
+}
+
+func TestListActivity_TransitionAndCommentShapeAndFieldsPinned(t *testing.T) {
+	b, _ := newActivityBackend(actOperatorEmail, actSearch(false, actIssueWith("PROJ-1",
+		[]string{actChange("100", "To Do", "In Progress", actOperatorEmail, "2026-09-05T10:00:00.000+0000")},
+		[]string{actComment("200", actOperatorEmail, "hello there", "2026-09-05T11:30:00.000+0000")})), "")
+	got := listIDs(t, b, actSince, actBefore)
+
+	tr := got["PROJ-1#issue.transitioned#100"]
+	if tr.Kind != KindIssueTransitioned || tr.EntityType != "issue" || tr.EntityID != "PROJ-1" {
+		t.Errorf("transition identity = %+v", tr)
+	}
+	if tr.OccurredAt != "2026-09-05T10:00:00Z" {
+		t.Errorf("transition occurred_at = %q, want the entry's own at (not the issue's updated)", tr.OccurredAt)
+	}
+	if got, want := string(tr.Fields), `{"from":"To Do","to":"In Progress"}`; got != want {
+		t.Errorf("transition fields = %s, want %s (no resolution key invented)", got, want)
+	}
+	if strings.Contains(string(tr.Fields), "resolution") {
+		t.Errorf("transition fields carry a resolution key: %s", tr.Fields)
+	}
+	if got := strings.Join(tr.Labels, ","); got != "project:PROJ,tracker:jira" {
+		t.Errorf("labels = %q", got)
+	}
+
+	cm := got["PROJ-1#issue.commented#200"]
+	if cm.Kind != KindIssueCommented || cm.EntityType != "issue" || cm.EntityID != "PROJ-1" {
+		t.Errorf("comment identity = %+v", cm)
+	}
+	if cm.OccurredAt != "2026-09-05T11:30:00Z" {
+		t.Errorf("comment occurred_at = %q, want the comment's own created", cm.OccurredAt)
+	}
+	if got, want := string(cm.Fields), `{"body_excerpt":"hello there","comment_id":"200"}`; got != want {
+		t.Errorf("comment fields = %s, want %s", got, want)
+	}
+}
+
+func TestListActivity_CommentExcerptIsCapped(t *testing.T) {
+	long := strings.Repeat("x", commentExcerptRunes+50)
+	b, _ := newActivityBackend(actOperatorEmail, actSearch(false, actIssueWith("PROJ-1", nil,
+		[]string{actComment("200", actOperatorEmail, long, "2026-09-05T11:30:00.000+0000")})), "")
+	it := listIDs(t, b, actSince, actBefore)["PROJ-1#issue.commented#200"]
+	var f struct {
+		Excerpt string `json:"body_excerpt"`
+	}
+	if err := json.Unmarshal(it.Fields, &f); err != nil {
+		t.Fatal(err)
+	}
+	if want := strings.Repeat("x", commentExcerptRunes) + "..."; f.Excerpt != want {
+		t.Errorf("excerpt = %q, want capped and ellipsized", f.Excerpt)
+	}
+}
+
+func TestListActivity_TwoTransitionsOfOneIssueDistinctAndStable(t *testing.T) {
+	out := actSearch(false, actIssueWith("PROJ-1", []string{
+		actChange("100", "To Do", "In Progress", actOperatorEmail, "2026-09-05T10:00:00.000+0000"),
+		actChange("101", "In Progress", "To Do", actOperatorEmail, "2026-09-08T10:00:00.000+0000"),
+	}, nil))
+	b, _ := newActivityBackend(actOperatorEmail, out, "")
+	r1 := listIDs(t, b, actSince, actBefore)
+	if len(r1) != 2 {
+		t.Fatalf("items = %v, want two distinct", r1)
+	}
+	// An overlapping range that still contains both yields identical ids.
+	r2 := listIDs(t, b, actSince.AddDate(0, 0, 2), actBefore.AddDate(0, 1, 0))
+	for id := range r1 {
+		if _, ok := r2[id]; !ok {
+			t.Errorf("id %s not stable across overlapping ranges: %v", id, r2)
+		}
+	}
+}
+
+func TestListActivity_SharedHistoryIDDisambiguatedStablyRegardlessOfFilters(t *testing.T) {
+	// Two status entries inside one history (id 100), plus a unique entry 101.
+	// The second shared entry is by someone else / outside a narrower range.
+	out := actSearch(false, actIssueWith("PROJ-1", []string{
+		actChange("100", "To Do", "In Progress", actOtherEmail, "2026-09-05T10:00:00.000+0000"),
+		actChange("100", "In Progress", "In Review", actOperatorEmail, "2026-09-05T10:00:00.000+0000"),
+		actChange("101", "In Review", "Done", actOperatorEmail, "2026-09-09T10:00:00.000+0000"),
+	}, nil))
+	b, _ := newActivityBackend(actOperatorEmail, out, "")
+
+	// The other person's entry (position 0) is filtered out by author, yet the
+	// operator's keeps position 1, and the unique id carries no suffix.
+	r1 := listIDs(t, b, actSince, actBefore)
+	if _, ok := r1["PROJ-1#issue.transitioned#100#1"]; !ok {
+		t.Errorf("want PROJ-1#issue.transitioned#100#1 in %v", r1)
+	}
+	if _, ok := r1["PROJ-1#issue.transitioned#101"]; !ok {
+		t.Errorf("want unsuffixed unique id 101 in %v", r1)
+	}
+	if len(r1) != 2 {
+		t.Errorf("ids = %v, want exactly two", r1)
+	}
+
+	// A range that excludes the unique entry leaves the shared one unchanged.
+	r2 := listIDs(t, b, actSince, time.Date(2026, 9, 6, 0, 0, 0, 0, time.UTC))
+	if _, ok := r2["PROJ-1#issue.transitioned#100#1"]; !ok || len(r2) != 1 {
+		t.Errorf("narrower range ids = %v, want only ...#100#1", r2)
+	}
+
+	// Both operator-authored: two distinct ids #0 and #1.
+	both := actSearch(false, actIssueWith("PROJ-1", []string{
+		actChange("100", "To Do", "In Progress", actOperatorEmail, "2026-09-05T10:00:00.000+0000"),
+		actChange("100", "In Progress", "In Review", actOperatorEmail, "2026-09-05T10:00:00.000+0000"),
+	}, nil))
+	b2, _ := newActivityBackend(actOperatorEmail, both, "")
+	r3 := listIDs(t, b2, actSince, actBefore)
+	for _, id := range []string{"PROJ-1#issue.transitioned#100#0", "PROJ-1#issue.transitioned#100#1"} {
+		if _, ok := r3[id]; !ok {
+			t.Errorf("missing %s in %v", id, r3)
+		}
+	}
+}
+
+func TestListActivity_TransitionAndCommentRangeIsExactAndOwnTimestamp(t *testing.T) {
+	b, _ := newActivityBackend(actOperatorEmail, actSearch(false, actIssueWith("PROJ-1",
+		[]string{
+			actChange("1", "A", "B", actOperatorEmail, "2026-08-31T23:59:59.000+0000"), // before since
+			actChange("2", "B", "C", actOperatorEmail, "2026-09-01T00:00:00.000+0000"), // at since: in
+			actChange("3", "C", "D", actOperatorEmail, "2026-10-01T00:00:00.000+0000"), // at before: out
+			actChange("4", "D", "E", actOperatorEmail, ""),                             // undatable
+			actChange("5", "E", "F", actOperatorEmail, "not a time"),                   // unparseable
+		},
+		[]string{
+			actComment("10", actOperatorEmail, "a", "2026-08-31T23:59:59.000+0000"),
+			actComment("11", actOperatorEmail, "b", "2026-09-01T00:00:00.000+0000"),
+			actComment("12", actOperatorEmail, "c", "2026-10-01T00:00:00.000+0000"),
+			actComment("13", actOperatorEmail, "d", ""),
+			actComment("14", actOperatorEmail, "e", "garbage"),
+		})), "")
+	got := listIDs(t, b, actSince, actBefore)
+	if _, ok := got["PROJ-1#issue.transitioned#2"]; !ok {
+		t.Errorf("entry exactly at since not emitted: %v", got)
+	}
+	if _, ok := got["PROJ-1#issue.commented#11"]; !ok {
+		t.Errorf("comment exactly at since not emitted: %v", got)
+	}
+	if len(got) != 2 {
+		t.Errorf("ids = %v, want only the two at since (issue updated is in range but must not stand in)", got)
+	}
+}
+
+func TestListActivity_TransitionIgnoresNonStatusAndIDLessEntries(t *testing.T) {
+	out := actSearch(false, actIssueWith("PROJ-1", []string{
+		`{"id":"7","field":"resolution","from":"","to":"Fixed","author":` + actUser(actOperatorEmail) + `,"at":"2026-09-05T10:00:00.000+0000"}`,
+		`{"field":"status","from":"A","to":"B","author":` + actUser(actOperatorEmail) + `,"at":"2026-09-05T10:00:00.000+0000"}`,
+	}, []string{actComment("", actOperatorEmail, "no id", "2026-09-05T10:00:00.000+0000")}))
+	b, _ := newActivityBackend(actOperatorEmail, out, "")
+	if got := listIDs(t, b, actSince, actBefore); len(got) != 0 {
+		t.Errorf("ids = %v, want none (no stable id can be built)", got)
+	}
+}
+
+func TestListActivity_AccountIDOnlyTransitionAuthorMatches(t *testing.T) {
+	// The reporter proves the operator's account id (via the matching email);
+	// the comment author then carries only the account id.
+	issue := strings.TrimSuffix(actIssue("PROJ-1", "2026-09-05T10:00:00.000+0000", actOperatorEmail, "2026-09-06T00:00:00.000+0000"), "}") +
+		`,"comments":[{"id":"9","author":{"account_id":"acct-` + actOperatorEmail + `"},"body":"b","created":"2026-09-06T10:00:00.000+0000"}]}`
+	b, _ := newActivityBackend(actOperatorEmail, actSearch(false, issue), "")
+	got := listIDs(t, b, actSince, actBefore)
+	if _, ok := got["PROJ-1#issue.commented#9"]; !ok {
+		t.Errorf("account-id-only comment author not matched: %v", got)
+	}
+}
+
+func TestListActivity_RepeatedIssueEmitsEntriesOnce(t *testing.T) {
+	one := actIssueWith("PROJ-1",
+		[]string{actChange("100", "A", "B", actOperatorEmail, "2026-09-05T10:00:00.000+0000")},
+		[]string{actComment("200", actOperatorEmail, "x", "2026-09-05T11:00:00.000+0000")})
+	b, _ := newActivityBackend(actOperatorEmail, actSearch(false, one, one), "")
+	if got := listIDs(t, b, actSince, actBefore); len(got) != 2 {
+		t.Errorf("ids = %v, want one transition and one comment", got)
+	}
+}
+
+func TestListActivity_ConformanceWithTransitionsAndComments(t *testing.T) {
+	b, _ := newActivityBackend(actOperatorEmail, actSearch(false, actIssueWith("PROJ-1",
+		[]string{actChange("100", "A", "B", actOperatorEmail, "2026-09-05T10:00:00.000+0000")},
+		[]string{actComment("200", actOperatorEmail, "x", "2026-09-05T11:00:00.000+0000")})), "")
+	backend := conformance.TableBackend{Table: activity.NewDispatchTable(b)}
+	for _, since := range []time.Time{actSince, {}} {
+		for _, r := range conformance.RunListActivityCase(context.Background(), backend, since, actBefore) {
+			if r.Err != nil {
+				t.Errorf("%s (since=%v): %v", r.Name, since, r.Err)
+			}
+		}
+	}
+}

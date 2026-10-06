@@ -233,8 +233,8 @@ func TestNewDispatchTable_DeclaresActivityCapability(t *testing.T) {
 		t.Fatalf("vocabulary = %v, want activity_kinds", resp.Vocabulary)
 	}
 	raw, _ := json.Marshal(kinds)
-	if string(raw) != `["issue.created"]` {
-		t.Fatalf("vocabulary.activity_kinds = %s, want [\"issue.created\"]", raw)
+	if string(raw) != `["issue.created","issue.transitioned","issue.commented"]` {
+		t.Fatalf("vocabulary.activity_kinds = %s, want [\"issue.created\",\"issue.transitioned\",\"issue.commented\"]", raw)
 	}
 }
 

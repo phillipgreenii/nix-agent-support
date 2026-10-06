@@ -61,10 +61,25 @@
 // Documented item "fields" keys (an object, always present with every key
 // listed; the envelope is the contract, these keys are this backend's own):
 //
-//	issue.created: title, issue_type, priority
+//	issue.created:      title, issue_type, priority
+//	issue.transitioned: from, to
+//	issue.commented:    comment_id, body_excerpt (the comment text, at most
+//	                    commentExcerptRunes runes, ellipsized when cut)
+//
+// issue.transitioned carries NO "resolution" key: pjira's changelog keeps only
+// status items and exposes no resolution value, so the key is omitted rather
+// than invented. (Adding it is a change in pjira's own repo.)
 //
 // Item ids: issue.created happens at most once per issue, so its id is
-// "<KEY>#issue.created", identical on every call over any range.
+// "<KEY>#issue.created", identical on every call over any range. The
+// repeatable kinds use the system's own event id: "<KEY>#issue.transitioned#
+// <changelog id>" and "<KEY>#issue.commented#<comment id>". pjira's changelog
+// id is a Jira history id, so two status entries inside one history could
+// share it; when a history id is not unique among ALL the status entries
+// pjira returned for the issue (computed before author and range filtering,
+// so an id never depends on the range or the operator), "#<n>" (the 0-based
+// position among the colliding entries, in pjira's order) is appended to
+// each colliding entry's id.
 package internal
 
 import (
@@ -86,12 +101,20 @@ var _ activity.Provider = (*Backend)(nil)
 // configured Jira account email from; see the identity source above.
 const EnvEmail = "JIRA_EMAIL"
 
-// KindIssueCreated is the once-per-issue kind this file emits.
-const KindIssueCreated = "issue.created"
+// The kinds this file emits. issue.created is once-per-issue; the other two
+// are repeatable and use the system's own event id in their item ids.
+const (
+	KindIssueCreated      = "issue.created"
+	KindIssueTransitioned = "issue.transitioned"
+	KindIssueCommented    = "issue.commented"
+)
+
+// commentExcerptRunes caps issue.commented's fields.body_excerpt.
+const commentExcerptRunes = 280
 
 // ActivityKinds is the vocabulary this backend contributes to capabilities
 // vocabulary.activity_kinds.
-var ActivityKinds = []string{KindIssueCreated}
+var ActivityKinds = []string{KindIssueCreated, KindIssueTransitioned, KindIssueCommented}
 
 // activityIssueSearchJQL selects every issue the operator is involved in; the
 // lower `updated >=` bound is appended by rangedJQL.
@@ -243,6 +266,20 @@ func (b *Backend) ListActivity(ctx context.Context, since, before time.Time) (*s
 	items = append(items, created...)
 	truncated = truncated || createdTrunc
 
+	transitioned, transTrunc, err := collectIssueTransitioned(ctx, me, result.Items, since, before)
+	if err != nil {
+		return nil, err
+	}
+	items = append(items, transitioned...)
+	truncated = truncated || transTrunc
+
+	commented, commentTrunc, err := collectIssueCommented(ctx, me, result.Items, since, before)
+	if err != nil {
+		return nil, err
+	}
+	items = append(items, commented...)
+	truncated = truncated || commentTrunc
+
 	return &schema.ActivityListResult{Items: items, Truncated: truncated}, nil
 }
 
@@ -367,4 +404,115 @@ func collectIssueCreated(_ context.Context, me *operatorIdentity, issues []pjira
 		items = append(items, it)
 	}
 	return items, false, nil
+}
+
+// transitionIDs returns the item id for each of iss's status changelog entries
+// (index-aligned with iss.Changelog; "" for an entry that cannot be given a
+// stable id: no history id, or a non-status field). It is computed over ALL of
+// the issue's status entries, before author and range filtering.
+func transitionIDs(iss *pjiraIssue) []string {
+	count := map[string]int{}
+	for _, e := range iss.Changelog {
+		if isStatusEntry(e) && e.ID != "" {
+			count[e.ID]++
+		}
+	}
+	seen := map[string]int{}
+	ids := make([]string, len(iss.Changelog))
+	for i, e := range iss.Changelog {
+		if !isStatusEntry(e) || e.ID == "" {
+			continue
+		}
+		id := iss.Key + "#" + KindIssueTransitioned + "#" + e.ID
+		if count[e.ID] > 1 {
+			id += fmt.Sprintf("#%d", seen[e.ID])
+			seen[e.ID]++
+		}
+		ids[i] = id
+	}
+	return ids
+}
+
+// isStatusEntry reports whether a changelog entry is a status transition.
+// pjira keeps only status items, so an empty field is accepted as status.
+func isStatusEntry(e pjiraChangelogEntry) bool {
+	f := strings.TrimSpace(e.Field)
+	return f == "" || strings.EqualFold(f, "status")
+}
+
+// collectIssueTransitioned emits one issue.transitioned per status changelog
+// entry authored by the operator whose own `at` lies in [since, before). An
+// entry with a missing or unparseable `at` cannot be dated and is never
+// emitted. It never reports truncated itself.
+func collectIssueTransitioned(_ context.Context, me *operatorIdentity, issues []pjiraIssue, since, before time.Time) (items []schema.ActivityItem, truncated bool, err error) {
+	seen := map[string]bool{}
+	for i := range issues {
+		iss := &issues[i]
+		if iss.Key == "" {
+			continue
+		}
+		ids := transitionIDs(iss)
+		for j, e := range iss.Changelog {
+			if ids[j] == "" || !me.Matches(e.Author) {
+				continue
+			}
+			at, ok := parseJiraUpdated(e.At)
+			if !ok || !inActivityRange(at, since, before) {
+				continue
+			}
+			if seen[ids[j]] {
+				continue
+			}
+			seen[ids[j]] = true
+			it := newActivityItem(iss, KindIssueTransitioned, at,
+				fmt.Sprintf("transitioned %s: %s -> %s", iss.Key, e.From, e.To),
+				map[string]any{"from": e.From, "to": e.To})
+			it.ID = ids[j]
+			items = append(items, it)
+		}
+	}
+	return items, false, nil
+}
+
+// collectIssueCommented emits one issue.commented per comment authored by the
+// operator whose own `created` lies in [since, before). A comment with no id,
+// or a missing or unparseable `created`, is never emitted. It never reports
+// truncated itself.
+func collectIssueCommented(_ context.Context, me *operatorIdentity, issues []pjiraIssue, since, before time.Time) (items []schema.ActivityItem, truncated bool, err error) {
+	seen := map[string]bool{}
+	for i := range issues {
+		iss := &issues[i]
+		if iss.Key == "" {
+			continue
+		}
+		for _, c := range iss.Comments {
+			if c.ID == "" || !me.Matches(c.Author) {
+				continue
+			}
+			created, ok := parseJiraUpdated(c.Created)
+			if !ok || !inActivityRange(created, since, before) {
+				continue
+			}
+			id := iss.Key + "#" + KindIssueCommented + "#" + c.ID
+			if seen[id] {
+				continue
+			}
+			seen[id] = true
+			it := newActivityItem(iss, KindIssueCommented, created, "commented on "+iss.Key,
+				map[string]any{"comment_id": c.ID, "body_excerpt": excerpt(c.Body, commentExcerptRunes)})
+			it.ID = id
+			items = append(items, it)
+		}
+	}
+	return items, false, nil
+}
+
+// excerpt trims s and cuts it to at most n runes, ellipsizing when cut.
+func excerpt(s string, n int) string {
+	s = strings.TrimSpace(s)
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "..."
 }
