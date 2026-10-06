@@ -1,0 +1,6 @@
+activity:
+  sources:
+    - pg-connector-pr-github
+connector:
+  pr:
+    - pg-connector-pr-github

@@ -8515,6 +8515,10 @@
                   # connector.mail = [ ] is omitted exactly like alert/thread
                   same ${fixtures + "/mail.yaml"} ${rendered.mail}
                   same ${fixtures + "/legacy.yaml"} ${rendered.legacyEmptyMail}
+                  # activity (docket pg2-vfmp7.1): renders, and an explicit empty
+                  # activity.sources omits the whole activity: mapping
+                  same ${fixtures + "/activity.yaml"} ${rendered.activity}
+                  same ${fixtures + "/legacy.yaml"} ${rendered.legacyEmptyActivity}
                   touch $out
                 '';
 

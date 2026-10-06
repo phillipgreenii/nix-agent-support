@@ -65,6 +65,13 @@ let
   renderedSearch = lib.optionalAttrs (cfg.search.sources != [ ]) {
     inherit (cfg.search) sources;
   };
+  # activity.sources (docket pg2-vfmp7.1): same top-level, always-list-valued
+  # shape and the same empty-list omission as attention/search -- the registry
+  # rejects an explicit `activity: {sources: []}`, so an empty list omits the
+  # whole activity: mapping.
+  renderedActivity = lib.optionalAttrs (cfg.activity.sources != [ ]) {
+    inherit (cfg.activity) sources;
+  };
 
   # attentionBackendExtra (bead pg2-7wqkr) renders one
   # attention.perBackend.<name> entry onto the wire's own opaque
@@ -147,6 +154,7 @@ let
     // lib.optionalAttrs (renderedConnector != { }) { connector = renderedConnector; }
     // lib.optionalAttrs (renderedAttention != { }) { attention = renderedAttention; }
     // lib.optionalAttrs (renderedSearch != { }) { search = renderedSearch; }
+    // lib.optionalAttrs (renderedActivity != { }) { activity = renderedActivity; }
     // lib.optionalAttrs (renderedBackends != { }) { backends = renderedBackends; }
     // lib.optionalAttrs (cfg.state != { }) { inherit (cfg) state; }
     // lib.optionalAttrs (cfg.configSchemaVersion != null) { inherit (cfg) configSchemaVersion; };
@@ -380,6 +388,31 @@ in
         backend binaries `pg-connector search <query>` fans out to.
         Independent of `connector.<type>` -- a backend may be registered
         here as well as under `connector.<type>`.
+      '';
+    };
+
+    # activity.sources (docket pg2-vfmp7.1): the top-level registration read
+    # independently of connector.<type> by the registry's activity parse.
+    # Shaped as a submodule (like `search`) so a later `perBackend` option can
+    # be added without changing this option path; per-backend activity
+    # semantics are, for now, ordinary keys on each backend's opaque
+    # `backends.<name>` block.
+    activity = lib.mkOption {
+      type = lib.types.submodule {
+        options = {
+          sources = lib.mkOption {
+            type = lib.types.listOf lib.types.str;
+            default = [ ];
+            description = "Registered `activity.sources` backends (bare binary names, resolved on PATH) serving the `activity` capability's `list_activity`, in config order.";
+          };
+        };
+      };
+      default = { };
+      description = ''
+        The `activity:` registry rendered into the shared config file: which
+        backend binaries serve the `activity` capability. Independent of
+        `connector.<type>`. An empty `sources` omits the whole `activity:`
+        mapping (the registry rejects an explicit empty list).
       '';
     };
 

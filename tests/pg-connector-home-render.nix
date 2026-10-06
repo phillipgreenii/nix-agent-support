@@ -94,6 +94,12 @@ let
     attention.sources = [ "pg-connector-mail-osx-bridge" ];
     search.sources = [ "pg-connector-mail-osx-bridge" ];
   };
+
+  # activity (docket pg2-vfmp7.1): the registration alone, example-only values.
+  activityExample = {
+    connector.pr = [ "pg-connector-pr-github" ];
+    activity.sources = [ "pg-connector-pr-github" ];
+  };
 in
 {
   # Pre-alert configuration: MUST stay byte-for-byte unchanged.
@@ -116,6 +122,15 @@ in
       connector = legacy.connector // {
         mail = [ ];
       };
+    }
+  );
+  # activity registration on its own.
+  activity = render activityExample;
+  # An explicit empty activity.sources is omitted exactly like attention/search.
+  legacyEmptyActivity = render (
+    legacy
+    // {
+      activity.sources = [ ];
     }
   );
   # The design 5.1 Grafana sample, on its own.
