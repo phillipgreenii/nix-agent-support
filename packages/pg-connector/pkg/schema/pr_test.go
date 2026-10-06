@@ -94,8 +94,72 @@ func TestPR_CommentIDAndCommentIDAreStrings(t *testing.T) {
 // forgets to bump it alongside a new field-shape change is caught here
 // first.
 func TestPRSchemaVersion_IsCurrent(t *testing.T) {
-	if PRSchemaVersion != 7 {
-		t.Fatalf("PRSchemaVersion = %d, want 7", PRSchemaVersion)
+	if PRSchemaVersion != 8 {
+		t.Fatalf("PRSchemaVersion = %d, want 8", PRSchemaVersion)
+	}
+}
+
+// TestPR_V8FieldSet_RoundTripsAndOmitsWhenEmpty pins the cheap list's two
+// totals (bead pg2-x3h8c.2) under their wire keys, omitempty.
+func TestPR_V8FieldSet_RoundTripsAndOmitsWhenEmpty(t *testing.T) {
+	in := PR{ID: "pr-1", ReviewThreadCount: 3, LabelCount: 25}
+	raw, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var out PR
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !reflect.DeepEqual(out, in) {
+		t.Fatalf("round-trip mismatch: got %+v, want %+v", out, in)
+	}
+	var m map[string]any
+	_ = json.Unmarshal(raw, &m)
+	for _, key := range []string{"review_thread_count", "label_count"} {
+		if _, ok := m[key]; !ok {
+			t.Errorf("wire JSON missing %q: %s", key, raw)
+		}
+	}
+
+	empty, _ := json.Marshal(PR{ID: "pr-1"})
+	var em map[string]any
+	_ = json.Unmarshal(empty, &em)
+	for _, key := range []string{"review_thread_count", "label_count"} {
+		if _, ok := em[key]; ok {
+			t.Errorf("wire JSON carries %q for an empty value: %s", key, empty)
+		}
+	}
+}
+
+// TestPRListFields_NamesRealPRFields keeps PRListFields honest on the schema
+// side: every name is a JSON field of PR, once, and both new counts are in it.
+func TestPRListFields_NamesRealPRFields(t *testing.T) {
+	real := map[string]bool{}
+	typ := reflect.TypeOf(PR{})
+	for i := 0; i < typ.NumField(); i++ {
+		name := strings.Split(typ.Field(i).Tag.Get("json"), ",")[0]
+		real[name] = true
+	}
+	seen := map[string]bool{}
+	for _, f := range PRListFields {
+		if !real[f] {
+			t.Errorf("PRListFields names %q, which is not a PR JSON field", f)
+		}
+		if seen[f] {
+			t.Errorf("PRListFields lists %q twice", f)
+		}
+		seen[f] = true
+	}
+	for _, f := range []string{"review_thread_count", "label_count"} {
+		if !seen[f] {
+			t.Errorf("PRListFields is missing %q", f)
+		}
+	}
+	for _, f := range []string{"merge_state_status", "review_requests", "base_sha"} {
+		if seen[f] {
+			t.Errorf("PRListFields must not include %q (show-path only)", f)
+		}
 	}
 }
 

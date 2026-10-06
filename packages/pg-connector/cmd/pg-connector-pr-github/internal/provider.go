@@ -983,6 +983,11 @@ func toSchemaPR(id string, in *api.PR, comments []api.Comment, reviews []api.Rev
 		CommentCount:   topLevelCommentCount(in, comments),
 		ReviewCount:    in.ReviewCount,
 
+		// bead pg2-x3h8c.2: the list's review-thread and label totals; the
+		// show path leaves ReviewThreadCount zero (it carries the threads).
+		ReviewThreadCount: in.ReviewThreadCount,
+		LabelCount:        in.LabelCount,
+
 		// bead pg2-2j5ac.52.6.2: the base commit, filled by GetPR on the show
 		// path only; the list path's api.PR never carries it.
 		BaseSHA: in.BaseSHA,

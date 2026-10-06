@@ -158,9 +158,28 @@ source plus Grafana alert rules for it are registered in that backend's own nix 
 `PG_CONNECTOR_PR_GITHUB_EVENTS_FILE`; `off` disables it), rotated at 5 MiB to `events.jsonl.1`. Each
 event carries `time`, `level`, `msg`, `op`, `error_code`, `duration_ms` and, on calls that read the
 GraphQL budget, `graphql_remaining`, `graphql_reset_at`, `graphql_reserve` and `graphql_headroom`.
+Every `op=list` event also carries a numeric `graphql_cost`: the points that one list call spent on
+its search requests, summed over every page of every search string (0 for an `--ids-only` call or a
+call refused below the reserve). The row names no query, so attribute cost to one search string by
+running a single list call at a time.
 `packages/pg-connector/grafana/alerting/pr-github-alerts.yaml` alerts on auth failure, sustained
 `unavailable`, and the budget sitting under `rate_reserve_points`. Writing the log is best effort and
 never changes an op's result.
+
+The `pg-connector-pr-github` PR list is deliberately cheap. Its batched GraphQL search selects the
+fields in `schema.PRListFields` (identity, state, body, labels with their `label_count`, the
+comment, review and `review_thread_count` totals, head SHA and a `statusCheckRollup { state }`
+rollup) and every search request also selects `rateLimit { cost remaining resetAt }`. The list MUST
+NOT select `reviewRequests` (a nested connection that adds 3 points per page), `mergeStateStatus`
+(it made the search answer HTTP 502 or 504 on strings matching 24 or more PRs; it stays on `show`)
+or any other CI detail. Cost per 100-PR page is 2 points however many PRs match, and a string
+matching nothing still costs 2 points.
+
+Points budget rule: the non-list GitHub spend per hour, plus the number of PR search strings times
+the cost per page times the list calls per hour (the 60 PR-cadence polls plus the 12 other list
+calls, so `60 + 12`), MUST stay at or under the 4,000 points per hour usable ceiling. Recompute it
+whenever the string count or the list field set changes, using the logged `graphql_cost` rather than
+an estimate.
 
 An event's `error` field is capped at 1024 bytes. A longer message keeps its first 256 bytes (the
 failing command) and its last bytes (the `gh` stderr, which names the cause), with an

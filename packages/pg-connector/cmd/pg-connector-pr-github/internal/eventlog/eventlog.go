@@ -83,7 +83,14 @@ type Event struct {
 	GraphQLResetAt   *string `json:"graphql_reset_at,omitempty"`
 	GraphQLReserve   *int    `json:"graphql_reserve,omitempty"`
 	GraphQLHeadroom  *int    `json:"graphql_headroom,omitempty"`
-	BelowReserve     bool    `json:"below_reserve,omitempty"`
+	// GraphQLCost is the points an op=list call spent on its search requests,
+	// summed over every page of every search string (bead pg2-x3h8c.2). Every
+	// op=list row carries it, 0 included (the ids-only path spends none). The
+	// row carries no query name, so a reader attributes cost to one query by
+	// running a single list call at a time. The rate-limit read that guards the
+	// call is not counted.
+	GraphQLCost  *int `json:"graphql_cost,omitempty"`
+	BelowReserve bool `json:"below_reserve,omitempty"`
 }
 
 // LevelForCode maps a wire error code to a log level (see evlog.LevelForCode).
@@ -110,6 +117,7 @@ type rateLimitReading struct {
 type recorder struct {
 	mu   sync.Mutex
 	rate *rateLimitReading
+	cost int
 }
 
 type recorderKey struct{}
@@ -124,6 +132,20 @@ func RecordRateLimit(ctx context.Context, remaining int, resetAt string, reserve
 	}
 	r.mu.Lock()
 	r.rate = &rateLimitReading{remaining: remaining, resetAt: resetAt, reserve: reserve}
+	r.mu.Unlock()
+}
+
+// AddGraphQLCost adds points to the in-flight call's GraphQL cost (bead
+// pg2-x3h8c.2): each search request calls it with that request's own
+// rateLimit.cost, and the op=list row logs the sum as graphql_cost. It is a
+// no-op when ctx carries no recorder.
+func AddGraphQLCost(ctx context.Context, points int) {
+	r, ok := ctx.Value(recorderKey{}).(*recorder)
+	if !ok {
+		return
+	}
+	r.mu.Lock()
+	r.cost += points
 	r.mu.Unlock()
 }
 
@@ -161,6 +183,13 @@ func buildEvent(op, version string, start, end time.Time, err error, rec *record
 			ev.GraphQLResetAt = &resetAt
 		}
 		ev.BelowReserve = headroom < 0
+	}
+	// Every op=list row carries a numeric graphql_cost, 0 when the call made
+	// no search request (ids-only, or refused below the reserve), so a reader
+	// can tell "cost 0" from "cost not logged".
+	if op == "list" {
+		cost := rec.cost
+		ev.GraphQLCost = &cost
 	}
 	return ev
 }

@@ -75,7 +75,31 @@ import "encoding/json"
 // per-connection truncated/total/returned report). Additive and omitempty, so
 // every version-6 consumer keeps decoding unchanged; the bump follows this
 // const's own rule that ANY field-shape change bumps the version.
-const PRSchemaVersion = 7
+//
+// Bumped 7 -> 8 by bead pg2-x3h8c.2, which added PR's ReviewThreadCount and
+// LabelCount summary fields (the cheap list's review-thread and label totals)
+// and the exported PRListFields set. Additive and omitempty, so every
+// version-7 consumer keeps decoding unchanged; the bump follows this const's
+// own rule that ANY field-shape change bumps the version, additive or not.
+const PRSchemaVersion = 8
+
+// PRListFields is the authoritative set of schema.PR JSON field names the
+// cheap `list` populates (bead pg2-x3h8c.2). The list's batched search
+// selection and this set MUST agree: a pr-github test pins them together, so
+// adding a field to the list query without naming it here (or the reverse)
+// fails a test instead of drifting silently. Every field here is part of the
+// list fingerprint, because the fingerprint hashes the whole summary entity.
+//
+// Fields the list deliberately leaves out: branch and base, merged,
+// additions/deletions/changed_files, merge_state_status, review_requests,
+// base_sha, comments, reviews and connections.
+var PRListFields = []string{
+	"id", "repo", "number", "title", "state", "author", "url", "draft",
+	"body", "labels", "as_of", "stale",
+	"head_sha", "mergeable", "checks_rollup",
+	"node_id", "updated_at", "review_decision",
+	"comment_count", "review_count", "review_thread_count", "label_count",
+}
 
 // PR is the pr capability's shared JSON wire shape, returned by the pr
 // capability's "show" op and carried by pkg/provider/pr.Provider.Show
@@ -215,6 +239,17 @@ type PR struct {
 	// ReviewCount is the number of reviews on the PR, counted from the same
 	// reviews connection on every read path.
 	ReviewCount int `json:"review_count,omitempty"`
+	// ReviewThreadCount is the number of inline code-review threads on the PR
+	// (bead pg2-x3h8c.2): filled on the list path from the batched search's
+	// reviewThreads { totalCount }, so a new or resolved-away thread changes
+	// the list fingerprint. Left zero on the show path, which carries the
+	// threads themselves under Reviews.
+	ReviewThreadCount int `json:"review_thread_count,omitempty"`
+	// LabelCount is the PR's total label count (bead pg2-x3h8c.2), from
+	// labels { totalCount }. Labels carries at most the first 20 names, so
+	// LabelCount is the figure that still moves when a PR holds more than
+	// that, and it is part of the list fingerprint.
+	LabelCount int `json:"label_count,omitempty"`
 	// BaseSHA is the commit the PR's base branch points at (bead
 	// pg2-2j5ac.52.6.2), so a conflict's context is (head branch, head
 	// commit, base branch, base commit). It is filled on the show path only:

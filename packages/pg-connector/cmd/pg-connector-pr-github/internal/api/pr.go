@@ -160,9 +160,16 @@ type PR struct {
 	// for this exact field (packages/pg-pr/pkg/provider/vcs/github/
 	// fingerprint.go). List stopped populating this field as of bead
 	// pg2-aehpr (its FingerprintCursor consumer became vestigial), and no
-	// other code path in this module ever populated it — it is now always
-	// this field's zero value everywhere.
+	// other code path in this module ever populated it. Bead pg2-x3h8c.2
+	// brings it back for the list path only: SearchPRsEnriched fills it from
+	// the batched search's reviewThreads { totalCount }, a selection that adds
+	// no points per page. The show path leaves it zero.
 	ReviewThreadCount int `json:"review_thread_count,omitempty"`
+	// LabelCount is the PR's total label count (bead pg2-x3h8c.2).
+	// SearchPRsEnriched fills it from labels { totalCount }; Labels holds only
+	// the first 20 names, so this is the figure that still moves past that.
+	// GetPR fills it with the number of labels it decoded.
+	LabelCount int `json:"label_count,omitempty"`
 }
 
 // Check outcomes (Check.Outcome), the same three-way split

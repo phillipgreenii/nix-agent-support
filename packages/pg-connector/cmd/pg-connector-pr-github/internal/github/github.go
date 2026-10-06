@@ -48,6 +48,7 @@ import (
 	"unicode"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/api"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/eventlog"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/vcs"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
@@ -376,6 +377,7 @@ func (p ghPR) toAPI(repo string) api.PR {
 	for _, l := range p.Labels {
 		out.Labels = append(out.Labels, l.Name)
 	}
+	out.LabelCount = len(out.Labels)
 	for _, rr := range p.ReviewRequests {
 		if rr.Login != "" { // accounts (users/bots/mannequins) have a login; teams do not
 			out.RequestedReviewers = append(out.RequestedReviewers, rr.Login)
@@ -781,11 +783,21 @@ func (p *Provider) SearchPRsActivity(ctx context.Context, query string, limit in
 // directly on the search result, so one call per query string replaces
 // what used to be 1 (search) + 2*N (GetPR, ReviewThreadCount) calls.
 //
-// reviewThreads{totalCount} is deliberately NOT requested: the design doc
-// traced every consumer of the old fan-out's ReviewThreadCount field and
-// found none once FingerprintCursor (List's own cursor emission) stops
-// being computed — see List's own doc comment in provider.go. Adding it
-// back here would be dead weight dressed up as fidelity to the old shape.
+// reviewThreads { totalCount } and labels { totalCount } (bead pg2-x3h8c.2)
+// ARE requested: both are cheap scalar counts that add no points per page (the
+// measured cost stays 2 points per 100-PR page), and they let a new review
+// thread, or a label added past the first 20, change the list fingerprint.
+// The list still MUST NOT select reviewRequests (a nested first:N connection,
+// 3 points per page), mergeStateStatus (an expensive field that made the
+// search answer HTTP 502/504 on strings matching 24 or more PRs; it stays on
+// the show path only) or any CI-detail field beyond statusCheckRollup { state }.
+// schema.PRListFields names the schema.PR fields this selection populates, and
+// a test pins the two together.
+//
+// rateLimit { cost remaining resetAt } (bead pg2-x3h8c.2) is selected on every
+// search request so the cost of each list is measured, not estimated:
+// SearchPRsEnriched adds each request's cost to the in-flight call's event,
+// and the op=list row logs the sum as graphql_cost.
 //
 // id, reviewDecision and reviews{totalCount} (bead pg2-2j5ac.52.6.1) ARE
 // requested, next to updatedAt and comments{totalCount}: they feed
@@ -821,6 +833,7 @@ func (p *Provider) SearchPRsActivity(ctx context.Context, query string, limit in
 // documented limitation, not an oversight.
 const searchBatchedQuery = `
 query($q: String!, $after: String) {
+  rateLimit { cost remaining resetAt }
   search(query: $q, type: ISSUE, first: 100, after: $after) {
     pageInfo { hasNextPage endCursor }
     nodes {
@@ -829,9 +842,10 @@ query($q: String!, $after: String) {
         number title url state body isDraft updatedAt reviewDecision mergeable
         author { login }
         repository { nameWithOwner }
-        labels(first: 20) { nodes { name } }
+        labels(first: 20) { totalCount nodes { name } }
         comments { totalCount }
         reviews { totalCount }
+        reviewThreads { totalCount }
         headRefOid
         commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
       }
@@ -867,7 +881,10 @@ type ghBatchedSearchNode struct {
 		NameWithOwner string `json:"nameWithOwner"`
 	} `json:"repository"`
 	Labels struct {
-		Nodes []struct {
+		// TotalCount (bead pg2-x3h8c.2) is the PR's full label count, which
+		// can exceed the 20 names Nodes carries.
+		TotalCount int `json:"totalCount"`
+		Nodes      []struct {
 			Name string `json:"name"`
 		} `json:"nodes"`
 	} `json:"labels"`
@@ -877,6 +894,10 @@ type ghBatchedSearchNode struct {
 	Reviews struct {
 		TotalCount int `json:"totalCount"`
 	} `json:"reviews"`
+	// ReviewThreads (bead pg2-x3h8c.2) is the inline review-thread total.
+	ReviewThreads struct {
+		TotalCount int `json:"totalCount"`
+	} `json:"reviewThreads"`
 	HeadRefOid string `json:"headRefOid"`
 	Commits    struct {
 		Nodes []struct {
@@ -903,6 +924,11 @@ type ghBatchedSearchNode struct {
 // envelope.
 type ghBatchedSearchResponse struct {
 	Data struct {
+		// RateLimit (bead pg2-x3h8c.2) is the request's own rateLimit
+		// selection: Cost is the points this one request cost.
+		RateLimit struct {
+			Cost int `json:"cost"`
+		} `json:"rateLimit"`
 		Search struct {
 			PageInfo struct {
 				HasNextPage bool   `json:"hasNextPage"`
@@ -964,6 +990,10 @@ func (n ghBatchedSearchNode) toAPI() api.PR {
 		ReviewDecision: n.ReviewDecision,
 		ReviewCount:    n.Reviews.TotalCount,
 		Mergeable:      n.Mergeable,
+
+		// bead pg2-x3h8c.2: the cheap list's two extra totals.
+		ReviewThreadCount: n.ReviewThreads.TotalCount,
+		LabelCount:        n.Labels.TotalCount,
 	}
 	for _, l := range n.Labels.Nodes {
 		out.Labels = append(out.Labels, l.Name)
@@ -991,6 +1021,10 @@ func (n ghBatchedSearchNode) headCommitStatusState() string {
 // and by ListAttention() — none of which this design touches (design doc
 // section 6: "The ids_only=true path is unchanged", and Search/
 // ListAttention are never mentioned in scope at all).
+//
+// Each request also selects rateLimit { cost }, and its cost is added to the
+// call's event (eventlog.AddGraphQLCost) so a list's total cost is logged as
+// graphql_cost.
 //
 // query is GitHub's own bare search-syntax string (the same shape
 // SearchPRs' own doc comment describes) — this method prepends "is:pr "
@@ -1031,6 +1065,10 @@ func (p *Provider) SearchPRsEnriched(ctx context.Context, query string) ([]api.P
 		if err := json.Unmarshal(raw, &resp); err != nil {
 			return nil, fmt.Errorf("github: parse batched search graphql response: %w", err)
 		}
+		// Every request's own cost is summed onto the call's event (a no-op
+		// when ctx carries no recorder), so the op=list row logs the points
+		// the whole call spent across its pages.
+		eventlog.AddGraphQLCost(ctx, resp.Data.RateLimit.Cost)
 		for _, n := range resp.Data.Search.Nodes {
 			if n.Number == 0 {
 				// The matched search() node's inline PullRequest fragment
@@ -1777,11 +1815,12 @@ func (p *Provider) ViewerLogin(ctx context.Context) (string, error) {
 //
 // No longer called by internal/provider.go's List (bead pg2-aehpr:
 // List's per-matched-PR GetPR/ReviewThreadCount fan-out was replaced by
-// SearchPRsEnriched's own single batched query, which does not request
-// reviewThreads at all — see SearchPRsEnriched's own doc comment on why
-// not). Kept, untouched and still tested, as a general-purpose read with
-// no current caller — the same treatment this file's package doc comment
-// already gives its twelve carried-over write methods.
+// SearchPRsEnriched's own single batched query). Bead pg2-x3h8c.2 later added
+// reviewThreads { totalCount } to that batched query (the count rides the
+// list for free), so this per-PR call is still not needed by List. Kept,
+// untouched and still tested, as a general-purpose read with no current
+// caller — the same treatment this file's package doc comment already gives
+// its twelve carried-over write methods.
 const reviewThreadCountQuery = `
 query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {

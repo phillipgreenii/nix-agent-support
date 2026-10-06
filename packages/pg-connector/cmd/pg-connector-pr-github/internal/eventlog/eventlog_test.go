@@ -457,3 +457,66 @@ func TestLine_GoldenWireShape(t *testing.T) {
 		t.Errorf("wire shape changed:\n got %s\nwant %s", line, want)
 	}
 }
+
+// TestInstrument_ListRowAlwaysCarriesNumericGraphQLCost: every op=list row has
+// a numeric graphql_cost, 0 included, whether the call recorded no cost (the
+// ids-only path), failed, or summed several requests.
+func TestInstrument_ListRowAlwaysCarriesNumericGraphQLCost(t *testing.T) {
+	cases := []struct {
+		name string
+		run  func(ctx context.Context) error
+		want int
+	}{
+		{"no search request made", func(context.Context) error { return nil }, 0},
+		{"failed before any search", func(context.Context) error { return errors.New("boom") }, 0},
+		{"one request", func(ctx context.Context) error { AddGraphQLCost(ctx, 2); return nil }, 2},
+		{"summed over pages and strings", func(ctx context.Context) error {
+			AddGraphQLCost(ctx, 2)
+			AddGraphQLCost(ctx, 2)
+			AddGraphQLCost(ctx, 3)
+			return nil
+		}, 7},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			sink := &memSink{}
+			tb := Instrument(table(func(ctx context.Context, _ json.RawMessage) (any, error) {
+				return nil, c.run(ctx)
+			}), sink, "", fakeClock(time.Now(), time.Millisecond))
+			_, _ = call(t, tb, "list")
+
+			ev := sink.events[0]
+			if ev.GraphQLCost == nil || *ev.GraphQLCost != c.want {
+				t.Fatalf("graphql_cost = %v, want %d", ev.GraphQLCost, c.want)
+			}
+			line, _ := Line(ev)
+			var m map[string]any
+			_ = json.Unmarshal(line, &m)
+			if got, ok := m["graphql_cost"]; !ok || got != float64(c.want) {
+				t.Errorf("serialized graphql_cost = %v (present %v), want %d", got, ok, c.want)
+			}
+		})
+	}
+}
+
+// TestInstrument_NonListRowHasNoGraphQLCost: the cost field is the list op's;
+// another op's row omits it even if something recorded a cost on its context.
+func TestInstrument_NonListRowHasNoGraphQLCost(t *testing.T) {
+	sink := &memSink{}
+	tb := scriptout.DispatchTable{"show": scriptout.OpHandler{
+		SchemaVersion: 1,
+		Handle: func(ctx context.Context, _ json.RawMessage) (any, error) {
+			AddGraphQLCost(ctx, 5)
+			return nil, nil
+		},
+	}}
+	tb = Instrument(tb, sink, "", fakeClock(time.Now(), time.Millisecond))
+	_, _ = tb["show"].Handle(context.Background(), nil)
+	if sink.events[0].GraphQLCost != nil {
+		t.Errorf("graphql_cost = %d on a show row, want omitted", *sink.events[0].GraphQLCost)
+	}
+}
+
+func TestAddGraphQLCost_NoRecorderIsNoOp(t *testing.T) {
+	AddGraphQLCost(context.Background(), 2) // must not panic
+}

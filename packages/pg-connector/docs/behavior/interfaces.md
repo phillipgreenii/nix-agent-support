@@ -192,6 +192,14 @@ does not change an issue's fingerprint while a status or other content change st
 unchanged entity fingerprints identically across calls; a change to any field outside the exclusions
 changes it. Slack `thread` listings carry no fingerprint.
 
+The `pr` list summary is deliberately cheap: it carries identity, state, body, labels, head SHA,
+the checks rollup, `mergeable`, `review_decision`, and the totals `comment_count`, `review_count`,
+`review_thread_count` and `label_count` (the connector's `PRListFields` names the exact set). Every
+one of those is part of the fingerprint, so a new review thread, or a label added past the first
+twenty, shows as a change. `merge_state_status`, `review_requests` and CI detail are not on the
+list; a caller wanting them calls `show`. The GitHub backend logs the points each `list` call
+spent as a numeric `graphql_cost` on that call's event-log row.
+
 The outcome also carries a top-level boolean `truncated`, true when ANY queried backend's `list`
 result reported `truncated` (the umbrella previously dropped that value), so a caller that deletes
 what a listing no longer contains can withhold removals from a listing it cannot trust as complete.
