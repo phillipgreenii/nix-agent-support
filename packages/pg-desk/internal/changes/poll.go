@@ -142,11 +142,20 @@ func listComplete(res gather.ListFingerprintsResult) bool {
 // is absent from that query's complete listing and is held by NO other
 // configured query: the other-query test reads the persisted set of EVERY
 // configured query, not only the queries run this call (--query Q runs one).
-// Each candidate is deactivated as removed, and is dropped from the persisted
-// sets only AFTER that succeeded, so a failed deactivation leaves it in the
-// persisted set and it is found again next tick. It returns the failures to
-// surface (never fatal).
+// Each candidate is first CONFIRMED by exactly one `show` read through the
+// hydrate path (see confirmRemoval) and then deactivated: logged closed or
+// merged when the read shows it terminal, removed when it is still open or
+// not found. A candidate is dropped from the persisted sets only AFTER its
+// confirmation and deactivation succeeded, so a failed read or deactivation
+// leaves it in the persisted set and it is found again next tick. It returns
+// the failures to surface (never fatal).
 func (e *Engine) applyMembership(entityType string, runs []queryRun) []string {
+	return e.applyMembershipCtx(context.Background(), entityType, runs)
+}
+
+// applyMembershipCtx is applyMembership under the caller's context, which the
+// confirmation reads honour.
+func (e *Engine) applyMembershipCtx(ctx context.Context, entityType string, runs []queryRun) []string {
 	var failures []string
 	configured := e.Cfg.WatchQueries(entityType)
 	persisted := make(map[string]map[string]bool, len(configured))
@@ -204,16 +213,42 @@ func (e *Engine) applyMembership(entityType string, runs []queryRun) []string {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
-	for _, id := range ids {
-		if err := e.deactivate(entityType, id, []string{string(classify.KindRemoved)}); err != nil {
-			failures = append(failures, fmt.Sprintf("remove %s: %v", id, err))
-			// Keep it in every persisted set that held it so the next tick
-			// finds it again.
-			for q := range complete {
-				if persisted[q][id] {
-					next[q][id] = true
-				}
+	// keep leaves id in every persisted set that held it so the next tick
+	// finds it again.
+	keep := func(id string) {
+		for q := range complete {
+			if persisted[q][id] {
+				next[q][id] = true
 			}
+		}
+	}
+	// Confirmation reads draw on no budget: each candidate costs exactly one
+	// read, they run before the hydration budget exists, and a backend that
+	// answers degraded backendDownStreak times in a row ends the reads for
+	// this tick (the rest are left untouched and found again next tick).
+	streak := 0
+	for i, id := range ids {
+		if streak >= backendDownStreak {
+			failures = append(failures, fmt.Sprintf("remove %s: %s", id, ReasonBackendDegraded))
+			keep(id)
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			failures = append(failures, fmt.Sprintf("remove %s: %v", id, err))
+			for _, rest := range ids[i:] {
+				keep(rest)
+			}
+			break
+		}
+		err := e.confirmRemoval(ctx, entityType, id)
+		if errors.Is(err, errDegraded) {
+			streak++
+		} else {
+			streak = 0
+		}
+		if err != nil {
+			failures = append(failures, fmt.Sprintf("remove %s: %v", id, firstErrLine(err.Error())))
+			keep(id)
 		}
 	}
 	for q := range dirty {
@@ -225,6 +260,49 @@ func (e *Engine) applyMembership(entityType string, runs []queryRun) []string {
 		}
 	}
 	return failures
+}
+
+// confirmRemoval confirms one removal candidate with ONE `show` read through
+// the hydrate path (change kind removed, nil list fingerprint, so list_fp is
+// never moved by it) and then deactivates it. An entity the store does not
+// hold or that is already inactive needs no read and nothing is written.
+//
+//   - the read shows it terminal: the classifier has logged closed or merged
+//     and the entity is deactivated with no further record;
+//   - the source reports not_found: nothing was written, one removed record;
+//   - the read shows it still open (it merely left a query): one removed
+//     record;
+//   - the read fails or degrades: nothing is written and the error is
+//     returned, so the caller leaves membership untouched.
+func (e *Engine) confirmRemoval(ctx context.Context, entityType, id string) error {
+	row, found, err := e.Store.GetEntity(e.repo(), entityType, id)
+	if err != nil {
+		return err
+	}
+	if !found || row.Inactive {
+		return nil
+	}
+	res, err := e.hydrateResult(ctx, entityType, id, gather.ChangeRemoved, OriginPGConnector, false, nil)
+	if err != nil {
+		return fmt.Errorf("confirmation read: %w", err)
+	}
+	removed := []string{string(classify.KindRemoved)}
+	if res.NotFound {
+		return e.deactivate(entityType, id, removed)
+	}
+	row, found, err = e.Store.GetEntity(e.repo(), entityType, id)
+	if err != nil {
+		return err
+	}
+	if !found || row.Inactive {
+		return nil // terminal: the hydrate path deactivated it
+	}
+	if classify.SourceTerminal(entityType, json.RawMessage(row.Facts), e.now(), e.Cfg.ThreadActiveWindow()) {
+		// The classifier logged closed/merged but hydrate's own deactivation
+		// failed: retry it without a second record.
+		return e.deactivate(entityType, id, nil)
+	}
+	return e.deactivate(entityType, id, removed)
 }
 
 func cloneSet(in map[string]bool) map[string]bool {

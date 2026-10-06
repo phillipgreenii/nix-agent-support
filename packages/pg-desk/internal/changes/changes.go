@@ -153,7 +153,7 @@ func (e *Engine) Run(ctx context.Context, opts Options, emit func(Envelope) erro
 	if !total {
 		// Phase A2: watched-set membership. An entity no configured query
 		// lists any more becomes removed/inactive [design 6.1].
-		st.side = append(st.side, e.applyMembership(opts.EntityType, runs)...)
+		st.side = append(st.side, e.applyMembershipCtx(ctx, opts.EntityType, runs)...)
 
 		// Phase B: --reset replays every active entity as reconcile. The
 		// replay is exempt from hydration.max_per_poll (see the behavior
@@ -329,8 +329,16 @@ func (e *Engine) envelope(opts Options, from int64, sources []Source, rows []sto
 // hydrate runs one entity through the pipeline and records the outcome. It
 // returns the failure (error or degraded note) or nil. listFP is the list
 // fingerprint observed this tick for a hydration driven by a listed entity,
-// nil for every read that did not come from a list (reset replay, sweep).
+// nil for every read that did not come from a list (reset replay, sweep, the
+// removal confirmation read).
 func (e *Engine) hydrate(ctx context.Context, entityType, id string, change gather.ChangeKind, origin string, forceReconcile bool, listFP *string) error {
+	_, err := e.hydrateResult(ctx, entityType, id, change, origin, forceReconcile, listFP)
+	return err
+}
+
+// hydrateResult is hydrate that also returns the pipeline's result, for the
+// caller that must tell a not_found read from one that wrote a snapshot.
+func (e *Engine) hydrateResult(ctx context.Context, entityType, id string, change gather.ChangeKind, origin string, forceReconcile bool, listFP *string) (pipeline.EntityChangeResult, error) {
 	res, err := e.Hydrator.RunEntityChange(ctx, entityType, id, change, pipeline.EntityChangeOptions{
 		Origin:             origin,
 		ThreadActiveWindow: e.Cfg.ThreadActiveWindow(),
@@ -339,10 +347,15 @@ func (e *Engine) hydrate(ctx context.Context, entityType, id string, change gath
 	})
 	RecordHydration(e.Store, entityType, id, res, err)
 	if err != nil {
-		return err
+		return res, err
 	}
 	if res.Degraded != "" {
-		return fmt.Errorf("%w: %s", errDegraded, res.Degraded)
+		return res, fmt.Errorf("%w: %s", errDegraded, res.Degraded)
+	}
+	if res.NotFound {
+		// Nothing was written: the stored facts say nothing new, so the
+		// caller (the removal confirmation) decides what to log.
+		return res, nil
 	}
 	// Spec 6.1 (a): an entity terminal in its source system stops being
 	// active so the sweep leaves it alone. A failure here is not a hydration
@@ -350,7 +363,7 @@ func (e *Engine) hydrate(ctx context.Context, entityType, id string, change gath
 	if derr := e.deactivateIfTerminal(entityType, id); derr != nil {
 		e.warnf("changes: deactivate %s %s: %v\n", entityType, id, derr)
 	}
-	return nil
+	return res, nil
 }
 
 // activeEntityIDs lists the ids of the type's active entities, sorted.

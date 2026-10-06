@@ -6,7 +6,8 @@ pg-connector's fingerprints, compares them with the fingerprints it stored at ea
 hydration, hydrates and classifies only the entities that differ, and hands the caller the
 change-log records past its cursor as the `pg-desk.changes/v1` envelope (entity-change-flow design
 6.2, 9.2, 9.3). Besides the list-and-diff core it keeps the watched set
-honest: an entity that dropped out of every watched query becomes removed, an entity terminal in
+honest: an entity that dropped out of every watched query is confirmed by one `show` read and then becomes
+closed, merged or removed, an entity terminal in
 its source system stops being active, a rolling sweep re-hydrates the active entities by age, and
 a per-poll hydration budget bounds the detail reads (design 6.1, 8.4, 8.5).
 
@@ -117,14 +118,36 @@ replayed by `--reset`.
   candidate** is an id that was in a query's persisted set, is absent from that query's complete
   listing, and is held by no other configured query: the other-query test reads the persisted set
   of EVERY configured query, not only the queries run in this call (`--query Q` runs one). A
-  candidate becomes inactive and one `removed` record (origin `pg-connector`) is logged, and the
-  id leaves the persisted sets only AFTER that succeeded, so a failed deactivation keeps it in the
+  candidate is first **confirmed** by exactly one `show` read (the **removal confirmation read**,
+  see below), then becomes inactive, and the id leaves the persisted sets only AFTER the
+  confirmation and the deactivation succeeded, so a failed read or deactivation keeps it in the
   set and it is found again on the next call. An entity another query still lists stays active. A
-  removal for an entity the store does not hold, or that is already inactive, writes nothing.
+  removal for an entity the store does not hold, or that is already inactive, reads and writes
+  nothing.
   `removed` says nothing about the source state: a removed entity's own state is unknown until a
   watched query lists it again, when it is added and becomes active with a `reconcile` record
   (first observation after a gap). The same absence in a targeted `refresh <id>` fails loudly
   instead (that half belongs to `refresh`).
+- **Removal confirmation read.** Every watched PR query is `is:open` and the work-bead query is
+  `--status open`, so a PR that merged or closed, and a bead that closed, leave the list as a
+  plain absence. pg-desk therefore reads each removal candidate once (`pr show` / `issue show`,
+  through the hydrate path with change kind `removed` and no list fingerprint, so the stored
+  `list_fp` never moves) before deactivating it, and the outcome decides what is logged:
+
+  | The read shows                                                      | Logged                                                        | Entity                                             |
+  | ------------------------------------------------------------------- | ------------------------------------------------------------- | -------------------------------------------------- |
+  | the entity terminal (merged / closed PR; issue in a terminal state) | the classifier's `merged` or `closed` (origin `pg-connector`) | inactive                                           |
+  | `not_found`                                                         | one `removed`                                                 | inactive                                           |
+  | the entity still open (it merely left a query)                      | one `removed`                                                 | inactive                                           |
+  | a failed or degraded read                                           | nothing                                                       | active, membership untouched, read again next call |
+
+  Exactly one read is issued per candidate per call. The confirmation reads do not count against
+  `hydration.max_per_poll`: they run in the membership phase, before the hydration budget, and
+  several candidates are read in sorted id order. Three consecutive degraded reads end the reads
+  for that call and leave the remaining candidates untouched. A degraded, truncated or failed
+  listing produces no candidate, hence no read. Retry is the next scheduled call only; pg-desk
+  keeps no timer, counter or queue for it.
+
 - **Source-terminal deactivation.** After every successful hydration (added/changed, sweep or
   reset) an entity that is terminal in its source system (closed or merged PR, issue in a terminal
   state, thread with no reply inside `watch.thread.active_window`) is set inactive through a
@@ -218,6 +241,9 @@ changes`.
   hydration, and MUST be left unchanged by every failed, degraded or lost hydration.
 - **INV-CHANGES-10.** pg-desk MUST NOT keep a retry counter, a deferral queue or a timer for the
   list-and-diff flow; the next scheduled call is the only retry.
+- **INV-CHANGES-11.** A removal candidate MUST be confirmed by exactly one `show` read before it is
+  deactivated, with a nil list fingerprint; a failed or degraded read MUST leave the entity active
+  and its membership untouched, and a degraded, truncated or failed listing MUST NOT cause a read.
 
 ## Telemetry and logs
 
