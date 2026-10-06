@@ -6043,6 +6043,13 @@
                       specialArgs = { inherit pkgs lib; };
                       modules = [
                         ./home/programs/pg-desk/default.nix
+                        # pg-desk's attentionPlugin registration writes to
+                        # pg-connector's `attention.sources` (bead pg2-5l0x4.5;
+                        # home/default.nix imports both together), and a
+                        # definition of an undeclared option errors even under
+                        # mkIf false, so this standalone eval needs it declared
+                        # (bead pg2-9yuqa).
+                        ./home/programs/pg-connector/default.nix
                         (
                           { lib, ... }:
                           {
