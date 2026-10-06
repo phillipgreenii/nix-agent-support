@@ -1,6 +1,7 @@
 # Fast per-type change check scheduled by pg-router — design
 
-**Status**: Draft, awaiting operator ruling (see "Open decisions for the operator" at the end)
+**Status**: Approved 2026-10-05 (operator rulings on decision bead `pg2-32wg6`; see section 10 and
+ADR 0077 rows S29 to S35). Section 9 is kept as the original list of decisions.
 **Date**: 2026-10-05
 **Bead**: `pg2-ii38x` (P0, label `router-health-2026-10`)
 **Related**: ADR 0077 (entity change flow) and its program epic `pg2-2j5ac.52`; `pg2-u4c1s` (anchor
@@ -619,3 +620,86 @@ has no event type or duration, which is the gap `pg2-nimab` and decision D10 add
     parity) and that `pg2-u4c1s` blocks every issue-type implementation bead.
 
 <!-- OPEN-DECISIONS-END -->
+
+## 10. Rulings and cost-probe addendum (2026-10-05)
+
+### 10.1 Rulings
+
+The operator ruled every decision above on 2026-10-05, recorded on bead `pg2-32wg6` and in ADR 0077
+rows S29 to S35.
+
+| Decision | Ruling                                                                                                                                                                         |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| D1       | (b), in one step: `pg-desk <type> changes` lists, diffs, pulls what differs and emits `<type>.changed`. No changed-items command on v1, no separate pull event or puller role. |
+| D2       | None. `pr-sweep` and `desk-pr` are not changed. (The design recommended O-1.)                                                                                                  |
+| D3       | Move the baseline into pg-desk (`entity.list_fp`), call `list` not `changes`, delete the deferral queue.                                                                       |
+| D4       | One `<type>.changed` event per entity per poll.                                                                                                                                |
+| D5       | Local reconcile at 30 minutes plus remote re-hydration at 6 hours.                                                                                                             |
+| D6       | Confirmed as recommended.                                                                                                                                                      |
+| D7       | Confirmed; the deterministic Slack list design is authorized (`pg2-ynxy2`).                                                                                                    |
+| D8       | Authorized: the shadow check on a store copy, at 5 minutes, with real GitHub calls.                                                                                            |
+| D9       | Confirmed as recommended.                                                                                                                                                      |
+| D10      | Yes; follow-up bead `pg2-sve9v`.                                                                                                                                               |
+| D11      | Approved.                                                                                                                                                                      |
+| D12      | Confirmed; `pg2-u4c1s` has already landed.                                                                                                                                     |
+
+The orchestration the operator described (a per-minute check that finds what changed, then a pull of
+those items, then the change events) is what D1 records, with one correction found while checking
+it: GitHub search cannot OR across qualifiers, so there is no single query that returns the changed
+items. Each watched query is listed separately and pg-desk takes the union (section 4, Q2).
+
+### 10.2 Cost probe of the cheap PR list
+
+Method: `rateLimit(dryRun: true) { cost nodeCount }` over one real watched search string (dry runs
+consume no points), plus timed real runs of the baseline and the widest variant that works. Cost
+follows GitHub's connection rule: one request for the search plus one per nested `first:N`
+connection per PR, divided by 100 and rounded (the baseline is `(1 + 100 + 100) / 100 = 2`).
+
+| Variant (added to the baseline node) | Cost per page     | Node count |
+| ------------------------------------ | ----------------- | ---------- |
+| baseline                             | 2                 | 2,200      |
+| `reviewThreads { totalCount }`       | 2                 | 2,200      |
+| labels `totalCount`                  | 2                 | 2,200      |
+| `mergeStateStatus`                   | 2 (but see below) | 2,200      |
+| `reviewRequests(first: 10)`          | 3                 | 3,200      |
+| CI `contexts(first: 1)`              | 3                 | 2,300      |
+| all of the above                     | 4                 | 3,300      |
+
+Findings:
+
+- `mergeStateStatus` makes the search time out: HTTP 502 or 504 at about 11 seconds on strings that
+  match 24 or more PRs, in 6 of 6 attempts; without it the same query ran in 7 to 8 seconds.
+  GitHub appears to cut a request near 10 seconds and the largest baseline string already takes up to
+  9.6 seconds.
+- A mixed-qualifier OR in a search string parses and silently returns zero rows. The comma form
+  works for `label:` and does not for `author:`. One string per author is the only form that works.
+  Bead `pg2-yye5p` tracks the watched string this breaks.
+- Cost does not depend on the number of PRs: a string that matches nothing still costs 2 points.
+
+Budget. Worst measured hour: whole-token spend 2,457 points, of which the list share was 744, so
+the non-list spend is `2,457 - 744 = 1,713`. Usable ceiling is `5,000 - 1,000 = 4,000` per hour (the
+connector refuses a list when fewer than 1,000 points remain). Total = `1,713 + strings x cost x 72`
+(60 ticks plus 12 shadow ticks per hour):
+
+| Strings, cost per page | Calculation         | Total | Headroom to 4,000 |
+| ---------------------- | ------------------- | ----- | ----------------- |
+| 7, 2                   | 1,713 + 7 x 2 x 72  | 2,721 | 1,279             |
+| 7, 4                   | 1,713 + 7 x 4 x 72  | 3,729 | 271               |
+| 11, 2                  | 1,713 + 11 x 2 x 72 | 3,297 | 703               |
+| 11, 3                  | 1,713 + 11 x 3 x 72 | 4,089 | -89               |
+| 11, 4                  | 1,713 + 11 x 4 x 72 | 4,881 | -881              |
+
+The `show` reduction (about 280 calls an hour falling to about 80) is an unmeasured estimate and is
+not counted. Tick time: the measured list latency (p50 5.97 s, p90 21.15 s, p99 25.31 s) puts a
+sequential tick of 7 strings near 21 s at p50, and 11 strings near `21.4 + 4 x (18.86 / 6) = 34.0 s`
+at p50 and `35.7 + 4 x (27.23 / 6) = 53.9 s` at p99 (a conservative sum), under the 60 second period
+with thin margin at p99.
+
+### 10.3 Field set and guardrails
+
+ADR 0077 row S35 records the resulting rules: add `reviewThreads` `totalCount` and the labels
+`totalCount`; defer `reviewRequests`; keep `mergeStateStatus` show-only; add no CI-detail field;
+require a field-coverage test (every field a consumer reads is in the list fingerprint or on a
+declared blind-spot list that names its refresh tier); and recompute the points budget whenever the
+string count or field set changes. The follow-up beads are `pg2-eax6d` (decompose into
+implementation beads), `pg2-sve9v`, `pg2-ynxy2` and `pg2-yye5p`.

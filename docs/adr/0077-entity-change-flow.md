@@ -48,14 +48,13 @@ the code, and it changes none of S1 to S28. The operator's rulings it builds on 
 unremovable stale pending reviews MUST escalate quickly (2026-09-29) and "no further changes are to
 be made to pg-pr" (2026-10-03).
 
-**Proposed amendment 2026-10-05** (bead `pg2-ii38x`, not yet in force): rows S29 through S34, in
-the section "Proposed amendment 2026-10-05" before Related Decisions, would change how the
-pull-through detects a change (a pg-desk-owned baseline written with the hydrated snapshot), how
-the age sweep is tiered, which entity types get a fast check and at what cadence, and the event
-shape the adapter emits. They would amend S5, S6, S8 and S12 in place. They stay marked Proposed
-until the operator rules on the decision bead that cites the design
-`docs/superpowers/specs/2026-10-05-fast-per-type-change-check-design.md`; no earlier row is edited
-by this paragraph.
+**Amendment 2026-10-05** (design bead `pg2-ii38x`, operator rulings recorded on decision bead
+`pg2-32wg6`, in force): rows S29 through S35, in the section "Amendment 2026-10-05" before Related
+Decisions, change how the pull-through detects a change (a pg-desk-owned baseline written with the
+hydrated snapshot), how the age sweep is tiered, which entity types get a fast check and at what
+cadence, the event shape the adapter emits, and which fields the cheap list may carry. They amend S5,
+S6, S8 and S12 in place; each rewritten row says so and keeps the earlier wording's gist. The design
+is `docs/superpowers/specs/2026-10-05-fast-per-type-change-check-design.md`.
 
 **Approval and provenance.** The operator (Phillip) approved the design and its implementation plan
 on 2026-09-29 ("if good, consider it approved and continue", recorded on bead `pg2-2j5ac.51`). The
@@ -204,9 +203,16 @@ This cluster records S4, S5, S6, S7, S19, S22, S27, S28.
 - **S5** — pg-connector implementations produce most deltas; pg-desk adds changes they cannot see.
   Operator, in session, 2026-09-29. Why: it lets pg-connector detect most changes itself, without
   duplicating detection logic that pg-connector already gets cheaply from summary fields.
+  (Rewritten in place 2026-10-05, S29, bead `pg2-32wg6`: pg-connector still detects most deltas, but
+  through its summary fingerprint on `list`, not through its `changes` ledger; the baseline that
+  fingerprint is compared against lives in pg-desk's store.)
 - **S6** — `pg-desk changes` pulls fresh data from pg-connector by default; pg-router stays the
   only clock. Operator, in session, 2026-09-29. Why: it avoids a second polling clock inside
   pg-desk while still letting an operator force a fresh read on demand with `--refresh`.
+  (Rewritten in place 2026-10-05, S29, bead `pg2-32wg6`: the pulled call is
+  `pg-connector <type> list` with no cursor, once per watched query, and `show` runs only for
+  entities whose list fingerprint differs from the stored one. Check and pull happen in one command
+  per tick; there is no separate pull event or puller role.)
 - **S7** — Events carry a reference and change kinds, not the full entity; deciders read the
   snapshot from pg-desk. Operator, in session, 2026-09-29. Why: it keeps the change feed small and
   single-sourced; the entity's current truth lives in exactly one place (the store), never
@@ -296,13 +302,18 @@ This cluster records S8, S12, S18.
 
 - **S8** — The sweep MUST NOT replay everything; a duration-based approach replaces `--full`.
   Operator, in session, 2026-09-29. Why: it bounds the cost of catching missed events and rule
-  changes without a full-replay storm on every poll.
+  changes without a full-replay storm on every poll. (Rewritten in place 2026-10-05, S31, bead
+  `pg2-32wg6`: the sweep has two rolling, capped tiers, a local reconcile at 30 minutes and a remote
+  re-hydration at 6 hours.)
 - **S12** — Advance the cursor after flush plus an age-based sweep; no explicit ack. Derived, from
   the idempotent-decider goal and the design's duplicate-tolerant delivery semantics, 2026-09-29.
   Why: deciders are idempotent and consumers already tolerate duplicates and reordering; the sweep
   already bounds the loss window, no user story needs faster-than-sweep recovery, and the
   operator's `--reset` covers "I need this now". An ack protocol would buy correctness this design
-  does not need.
+  does not need. (Rewritten in place 2026-10-05, S29 and S30, bead `pg2-32wg6`: the cursor rule
+  stays for deciders and other consumers; the DETECTION baseline is advanced only on hydration
+  success, which is an acknowledgment gated on hydration. There is still no decider-acknowledgement
+  protocol: a failed decider run is recovered by the local reconcile tier.)
 - **S18** — The only day-one time-based change source is thread `resolved` (no reply within
   `watch.thread.active_window`); others are added only when a story needs one. Derived, from
   minimality, 2026-09-29. Why: no user story needs a different time-based signal yet, and
@@ -483,16 +494,19 @@ This cluster records S11.
 - New pg-desk commands refuse on an old-schema store, and an old binary refuses a newer schema, so
   an early deploy changes nothing the running system uses and a mismatched binary cannot half-run.
 
-## Proposed amendment 2026-10-05
+## Amendment 2026-10-05
 
-> **Status: Proposed.** Drafted by bead `pg2-ii38x` from the operator's direction of 2026-10-05
-> (session `c7a2ef42-bfb6-4c46-ad4e-540354f66bb8`): "pg-router handles the scheduling, pg-desk is
-> primarily for specific business logic, if it is doing its own retries, that would conflict with the
-> scheduling from pg-router"; "age limitations are fine, no total limit though"; "we want something
-> for any entity type for which pg-desk supports"; "5 minutes for PRs is too long ... 1m is better
-> for PRs". None of the rows below is a ruling until the operator records it on the decision bead.
-> On a ruling, each accepted row is converted to an "Operator ruling" row with its date, and S5, S6,
-> S8 and S12 are rewritten in place to match, as the earlier amendments did.
+> **Status: Accepted, 2026-10-05.** Drafted by bead `pg2-ii38x` from the operator's direction of
+> 2026-10-05 (session `c7a2ef42-bfb6-4c46-ad4e-540354f66bb8`): "pg-router handles the scheduling,
+> pg-desk is primarily for specific business logic, if it is doing its own retries, that would
+> conflict with the scheduling from pg-router"; "age limitations are fine, no total limit though";
+> "we want something for any entity type for which pg-desk supports"; "5 minutes for PRs is too long
+> ... 1m is better for PRs". The operator (Phillip) ruled on decisions D1 to D12 and the cheap-list
+> field set interactively on 2026-10-05, recorded on decision bead `pg2-32wg6`. Each row below is
+> now an "Operator ruling" row with its date, and S5, S6, S8 and S12 are rewritten in place to
+> match, as the earlier amendments did. Two of the design's recommendations were ruled differently or
+> narrowed: D2 (the interim v1 relief) was ruled NONE, and the cheap-list field set is narrower than
+> the full set the cost probe priced (S35).
 
 ### Context
 
@@ -508,52 +522,76 @@ two of its adapter and removal behaviors do not work as written (findings F-1 an
 
 ### Decision
 
-This amendment would record S29, S30, S31, S32, S33, S34.
+This amendment records S29, S30, S31, S32, S33, S34, S35.
 
-- **S29 (Proposed)** — The detection baseline is owned by pg-desk, per entity, as the list
+- **S29 (Operator ruling, 2026-10-05)** — The detection baseline is owned by pg-desk, per entity, as the list
   fingerprint observed when the entity was last hydrated successfully, stored in the same
   transaction as the snapshot, `hydrated_at`, `active` and the `change_log` rows. A pull-through
   call lists each watched query (`pg-connector <type> list`, no cursor), compares fingerprints
-  against the store, and hydrates what differs. A failed hydration writes nothing, so the entity is
-  still different on the next scheduled call. The fingerprint is produced by the connector for the
+  against the store, and hydrates what differs, all inside one command per tick: the check and the
+  pull are NOT two events routed through pg-router. An entity's watched membership is the union of
+  the per-query lists, computed in pg-desk, because GitHub search cannot OR across qualifiers (a
+  mixed-qualifier OR parses and silently returns nothing). A failed hydration writes nothing, so the
+  entity is still different on the next scheduled call. The fingerprint is produced by the connector for the
   type and MUST be compared list against list, never recomputed from a detail read. This amends S5
   (pg-connector still detects most deltas, but through its summary fingerprint, not its ledger), S6
   (the pulled call is `list`, not `changes`) and S12 (the cursor rule stays for consumers; the
   detection baseline is gated on hydration success, which is an acknowledgment). Why: constraint 4
   of the operator's direction (the baseline is pg-desk's store, the only remote call is the cheap
   list) and per-entity success, which one monotonic consumer cursor cannot express.
-- **S30 (Proposed)** — pg-router owns every clock. pg-desk MUST NOT run a retry, backoff or timer
+- **S30 (Operator ruling, 2026-10-05)** — pg-router owns every clock. pg-desk MUST NOT run a retry, backoff or timer
   loop, and MUST NOT keep a retry counter or a deferral queue for the pull-through. Capping work per
   poll is allowed only if the cap carries work to the next poll (no entity is dropped) and the
   sizing bound `active_count / max_per_poll x poll_interval <= max_age` is checked and alerting. The
   v1 `sync_error` automatic retry stays on the v1 pipeline only and is deleted with `internal/sync`
   at cutover. Why: the operator's retry direction, and a deferral queue that gives up after a fixed
   number of polls is a drop.
-- **S31 (Proposed)** — The age sweep (S8) has two tiers. A local reconcile tier re-emits a
-  `reconcile` record for an active entity whose latest change-log row is older than
-  `reconcile_age`, with no remote call and no hydration. A remote tier re-hydrates an entity whose
-  `hydrated_at` is older than `sweep.max_age`. Both are rolling (oldest first), capped per poll, and
-  spread by a deterministic per-entity offset `hash(entity_id) mod (age / 5)`, because pg-router's
-  triggers have no jitter. Whether the remote tier is allowed is an open operator decision (D5 of the
-  design). Why: the list fingerprint cannot see review threads, merge-state status or edited
+- **S31 (Operator ruling, 2026-10-05)** — The age sweep (S8) has two tiers. A local reconcile tier
+  re-emits a `reconcile` record for an active entity whose latest change-log row is older than
+  `reconcile_age` (default 30 minutes, which MAY be lowered because the tier makes no remote call),
+  with no remote call and no hydration. A remote tier re-hydrates an entity whose `hydrated_at` is
+  older than `sweep.max_age` (default 6 hours). The operator ruled the remote tier allowed (D5). Both
+  tiers are rolling (oldest first), capped per poll, and spread by a deterministic per-entity offset
+  `hash(entity_id) mod (age / 5)`, because pg-router's triggers have no jitter. A failed decider run
+  is recovered by the local tier, not by a decider-acknowledgement protocol (D6). Why: the list fingerprint cannot see review threads, merge-state status or edited
   comment bodies, and a failed decider run needs a cheap local recovery.
-- **S32 (Proposed)** — Fast-check cadence is per entity type, set in pg-router's query config:
-  `pr` 60s; `issue` backed by beads 5m until the anchor echo loop (`pg2-u4c1s`) has landed and then
-  60s; `issue` backed by Jira 5m with no cursor (the cursor-bounded `updated >= ` list can miss a
-  change and advances on read); `thread` backed by Slack is excluded from the fast check because its
-  list is an LLM call that is always truncated and cannot be fingerprinted or report removals. A
-  beads fingerprint MUST exclude `metadata.last_checked_at`.
-- **S33 (Proposed)** — The adapter emits ONE item per changed entity per poll with
+- **S32 (Operator ruling, 2026-10-05)** — Fast-check cadence is per entity type, set in
+  pg-router's query config: `pr` 60s; `issue` backed by beads 5m now and 60s once local list
+  latency is measured under 10 seconds (the anchor echo loop fix `pg2-u4c1s` has landed); `issue`
+  backed by Jira 5m with no cursor (the cursor-bounded `updated >= ` list can miss a change and
+  advances on read); `thread` backed by Slack is excluded from the fast check because its list is an
+  LLM call that is always truncated and cannot be fingerprinted or report removals. A separate
+  design for a deterministic, non-LLM Slack list is authorized (bead `pg2-ynxy2`). A beads
+  fingerprint MUST exclude `metadata.last_checked_at`. The `pr` cadence holds only while the points
+  budget in S35 holds.
+- **S33 (Operator ruling, 2026-10-05)** — The adapter emits ONE item per changed entity per poll with
   `emit = <type>.changed`, `id = <entity_id>@<seq>` and the coalesced kinds in `metadata.kinds`. The
   adapter MUST set `emit`, because pg-router types an event from `emit` (default: the query's first
   declared emit), never from the item's `type`. The seq in the id makes a change that lands while a
   run is in flight a distinct event instead of a deduplicated one. This amends the design's 9.4 and
   keeps S4 ("one event per changed entity with its change kinds") and S22 (exact-string binds).
-- **S34 (Proposed)** — When an entity leaves every watched query, pg-desk MUST perform one
-  confirmation read before deactivating it, so that a PR that merged or closed is classified
-  `merged` or `closed` and not logged only as `removed`; a failed read leaves the entity active and
-  is repeated on the next call. Why: every watched PR query is `is:open`, so a merged PR is, by
-  construction, absent from the list.
+- **S34 (Operator ruling, 2026-10-05)** — When an entity leaves every watched query, pg-desk MUST
+  perform one confirmation read before deactivating it, so that a PR that merged or closed is
+  classified `merged` or `closed` and not logged only as `removed`; a failed read leaves the entity
+  active and is repeated on the next call. Why: every watched PR query is `is:open`, so a merged PR
+  is, by construction, absent from the list.
+- **S35 (Operator ruling, 2026-10-05)** — The cheap PR list carries only fields that fit the points
+  and time budget, and the budget is a guardrail, not a hope. (a) The list ADDS `reviewThreads`
+  `totalCount` and the labels `totalCount` (measured cost unchanged at 2 points per 100-PR page).
+  (b) `reviewRequests` is DEFERRED: it adds a nested `first:N` connection (3 points per page) and at
+  the 11 search strings the corrected watched set needs it exceeds the usable ceiling in the worst
+  measured hour. (c) `mergeStateStatus` stays show-only, reaffirming S28 with a measurement: adding
+  it made the search return HTTP 502 or 504 at about 11 seconds on strings with 24 or more PRs, and
+  GitHub appears to cut a request near 10 seconds. (d) No CI-detail field is added. (e) A
+  field-coverage test is REQUIRED: every field a consumer reads is either in the list fingerprint or
+  on a declared blind-spot list that names its refresh tier (S31). (f) The list spend MUST fit under
+  the usable ceiling of the GraphQL limit minus the connector's reserve (5,000 minus 1,000 = 4,000
+  points per hour) in the worst measured hour INCLUDING the shadow run, computed as
+  `non-list spend + strings x cost per page x (60 + 12)` and recomputed whenever the string count or
+  the field set changes. Why: the cost probe of 2026-10-05 priced the variants (2, 3 and 4 points
+  per page) and showed that, at 7 strings, adding every field leaves 271 points of headroom in the
+  worst hour; correcting the watched set to 11 strings (bead `pg2-yye5p`) removes that headroom for
+  anything above 2 points per page.
 
 ### Consequences
 
@@ -570,7 +608,18 @@ This amendment would record S29, S30, S31, S32, S33, S34.
 - The live v1 store (schema 1) holds no baseline for any type; the new commands refuse it, so the
   check is first exercised on a store copy migrated with `pg-desk migrate --cutover`.
 - `pg2-u4c1s` MUST land before, and block, every issue-type implementation bead that follows from
-  these rows.
+  these rows. It has landed (closed 2026-10-05), so the ordering is already satisfied.
+- The cutover is not re-sequenced ahead of the decider phase (phase 8, decider parity); the
+  amendment lands in phases 6 and 7 of `pg2-2j5ac.52` and adds no pg-router core change.
+- The interim relief for the v1 queueing problem (design decision D2) was ruled NONE: `pr-sweep` and
+  `desk-pr` are not changed, and the effort goes into the new flow.
+- The R3 shadow check on a COPY of the store is authorized. It makes real GitHub calls and runs the
+  list alongside the v1 feeds at a 5 minute cadence, costing `12 x strings x cost per page` points
+  per hour; the S35 budget MUST be recomputed immediately before it runs.
+- Follow-up beads from the rulings: `pg2-eax6d` (decompose the approved design into implementation
+  beads), `pg2-sve9v` (a `type` label on `pg_router_dispatch_latency`, follow-up to `pg2-nimab`),
+  `pg2-ynxy2` (the deterministic Slack list design) and `pg2-yye5p` (the watched `team` string that
+  returns no results, which gates the S35 budget).
 
 ## Related Decisions
 
