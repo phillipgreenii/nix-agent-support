@@ -219,22 +219,25 @@ run_git_branch_maintenance() {
 }
 
 @test "git-branch-maintenance accepts --protect-worktree flag" {
-    # Create a worktree
-    mkdir -p /tmp/test-worktree-$$
-    git worktree add /tmp/test-worktree-$$ test-branch
+    # Create a worktree under the fixture's work dir ($GFH_WORK is the
+    # GIT_CEILING_DIRECTORIES boundary), in its physical form so the literal
+    # path matches what git registers.
+    local wt
+    wt="$(cd "$GFH_WORK" && pwd -P)/test-worktree"
+    git worktree add "$wt" test-branch
 
     # Merge the branch
     git checkout main
     git merge test-branch
 
     # Try to delete with worktree protection
-    run_git_branch_maintenance --delete-merged --delete-merged-worktrees --protect-worktree /tmp/test-worktree-$$
+    run_git_branch_maintenance --delete-merged --delete-merged-worktrees --protect-worktree "$wt"
     [ "$status" -eq 0 ]
     # Worktree should still exist
-    [ -d /tmp/test-worktree-$$ ]
+    [ -d "$wt" ]
 
     # Cleanup
-    git worktree remove /tmp/test-worktree-$$ --force
+    git worktree remove "$wt" --force
 }
 
 @test "git-branch-maintenance --protect-branch requires argument" {
@@ -277,15 +280,16 @@ run_git_branch_maintenance() {
 @test "git-branch-maintenance cleans up leftover temporary worktree" {
     # Create a leftover temporary worktree from a "previous run"
     git branch tmp-gbm main
-    mkdir -p /tmp/test-leftover-worktree-$$
-    git worktree add /tmp/test-leftover-worktree-$$ tmp-gbm
+    local wt
+    wt="$(cd "$GFH_WORK" && pwd -P)/test-leftover-worktree"
+    git worktree add "$wt" tmp-gbm
 
     # Run git-branch-maintenance - should clean up the leftover worktree
     run_git_branch_maintenance --dry-run
     [ "$status" -eq 0 ]
 
     # The leftover worktree should have been cleaned up
-    ! git worktree list | grep -q "/tmp/test-leftover-worktree-$$"
+    ! git worktree list | grep -qF "$wt"
 }
 
 @test "git-branch-maintenance never proposes deleting the repo's own primary worktree" {
@@ -322,14 +326,14 @@ run_git_branch_maintenance() {
 
     # git canonicalizes worktree paths when it registers them (e.g. resolving
     # /tmp to /private/tmp on macOS), and get_branch_worktree() reports that
-    # canonical form back. Build the paths already-canonical (via a fresh
-    # mktemp dir resolved with `pwd -P`) so the literal string passed to
+    # canonical form back. Build the paths already-canonical (via the
+    # fixture work dir resolved with `pwd -P`) so the literal string passed to
     # --protect-worktree is guaranteed to match what the script compares it
     # against - a plain "/tmp/..." literal would not.
-    protected_wt="$(cd "$(mktemp -d)" && pwd -P)/protected-worktree"
+    protected_wt="$(cd "$GFH_WORK" && pwd -P)/protected-worktree"
     git worktree add "$protected_wt" protected-branch
 
-    ordinary_wt="$(cd "$(mktemp -d)" && pwd -P)/ordinary-worktree"
+    ordinary_wt="$(cd "$GFH_WORK" && pwd -P)/ordinary-worktree"
     git worktree add "$ordinary_wt" ordinary-branch
 
     run_git_branch_maintenance --delete-merged --delete-merged-worktrees --protect-worktree "$protected_wt"
@@ -358,17 +362,17 @@ run_git_branch_maintenance() {
     git branch ordinary-branch main
 
     # Deliberately DO NOT canonicalize this path (contrast with the previous
-    # test's `cd "$(mktemp -d)" && pwd -P`). On macOS, mktemp -d returns a
+    # test's `cd "$GFH_WORK" && pwd -P`). On macOS, mktemp -d returns a
     # path under /var/folders/... which is itself a symlink chain to
     # /private/var/folders/...; git canonicalizes worktree paths when it
     # registers them, so get_branch_worktree() reports back the resolved
     # /private/... form. A raw, un-resolved --protect-worktree path must
     # still match - is_protected_worktree() must canonicalize the configured
     # path(s), not just compare the literal strings.
-    protected_wt="$(mktemp -d)/protected-worktree-raw"
+    protected_wt="$GFH_WORK/protected-worktree-raw"
     git worktree add "$protected_wt" protected-branch
 
-    ordinary_wt="$(mktemp -d)/ordinary-worktree-raw"
+    ordinary_wt="$GFH_WORK/ordinary-worktree-raw"
     git worktree add "$ordinary_wt" ordinary-branch
 
     run_git_branch_maintenance --delete-merged --delete-merged-worktrees --protect-worktree "$protected_wt"
@@ -395,7 +399,7 @@ run_git_branch_maintenance() {
     # front (see the comment in the previous test) so the mock below matches
     # on exactly the path the script will actually pass to
     # `git worktree remove`.
-    fail_wt="$(cd "$(mktemp -d)" && pwd -P)/worktree-remove-fail"
+    fail_wt="$(cd "$GFH_WORK" && pwd -P)/worktree-remove-fail"
     git worktree add "$fail_wt" test-branch
 
     # Make origin/main point at test-branch's commit so it shows as merged
