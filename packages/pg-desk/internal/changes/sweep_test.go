@@ -260,3 +260,32 @@ func TestSelectReconcileAfterResetOf88IsCappedOldestFirstAndSpread(t *testing.T)
 		t.Errorf("%d of 88 due at the window's midpoint, want some but not all", n)
 	}
 }
+
+func TestEvaluateSweepBound(t *testing.T) {
+	// The live count of 88 active PRs: 88 / 20 x 1m = 4.4m, far below 6h.
+	live := SweepInputs{ActiveCount: 88, MaxPerPoll: 20, MaxAge: 6 * time.Hour}
+	cases := []struct {
+		name  string
+		in    SweepInputs
+		poll  time.Duration
+		known bool
+		want  BoundVerdict
+	}{
+		{"live count holds against the remote tier", live, time.Minute, true, BoundHolds},
+		{"the boundary holds (<=)", SweepInputs{ActiveCount: 6, MaxPerPoll: 1, MaxAge: 3 * time.Minute}, 30 * time.Second, true, BoundHolds},
+		{"over the bound is violated", SweepInputs{ActiveCount: 7, MaxPerPoll: 1, MaxAge: 3 * time.Minute}, 30 * time.Second, true, BoundViolated},
+		{"local tier violated while remote holds", SweepInputs{ActiveCount: 88, MaxPerPoll: 20, MaxAge: 4 * time.Minute}, time.Minute, true, BoundViolated},
+		{"unknown poll interval is no verdict, never a violation", SweepInputs{ActiveCount: 1000, MaxPerPoll: 1, MaxAge: time.Second}, 0, false, BoundUnknown},
+	}
+	for _, c := range cases {
+		if got := EvaluateSweepBound(c.in, c.poll, c.known); got != c.want {
+			t.Errorf("%s: EvaluateSweepBound = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+func TestSweepTiersCoverLocalAndRemote(t *testing.T) {
+	if len(SweepTiers) != 2 || SweepTiers[0] != TierLocal || SweepTiers[1] != TierRemote {
+		t.Errorf("SweepTiers = %v, want [local remote]", SweepTiers)
+	}
+}

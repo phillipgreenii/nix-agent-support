@@ -132,3 +132,63 @@ func TestMetricsExposeOldestAnchorCheckAge(t *testing.T) {
 		t.Errorf("new-schema scrape missing the zero anchor-check gauge:\n%s", body)
 	}
 }
+
+// TestMetricsSweepBoundViolatedPerTier scrapes the real handler: the poll
+// interval comes from WithPollInterval, the bound from the SAME evaluation as
+// doctor. 7 active PRs / cap 1 x 30s = 210s: over the local tier's 3m age
+// (violated) and under the remote tier's 6h (holds); issue has no known poll
+// interval, so it has no series at all.
+func TestMetricsSweepBoundViolatedPerTier(t *testing.T) {
+	s := store.OpenNewSchemaForTest(t)
+	setClock(t, time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC))
+	for _, id := range []string{"o/r#1", "o/r#2", "o/r#3", "o/r#4", "o/r#5", "o/r#6", "o/r#7"} {
+		e := store.Entity{Repo: "o/r", EntityType: "pr", EntityID: id, Facts: `{}`, AsOf: "x"}
+		if _, err := s.WriteEntityStateWithLog(e, 0, "2026-10-01T11:59:00Z", true, []string{"created"}, "poll", "2026-10-01T11:59:00Z"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustUpsertInterpretation(t, s, store.Interpretation{
+		Repo: "o/r", EntityType: "pr", EntityID: "o/r#1", Panel: PanelMineAwaitingMe, AsOf: "2026-10-01T11:59:00Z",
+	})
+	one := 1
+	cfg := testConfig()
+	cfg.Sweep.MaxPerPoll = &one
+	cfg.Sweep.ReconcileAge = "3m"
+
+	scrapeWith := func(opts ...Option) string {
+		handler, err := NewHandler(s, cfg, opts...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d: %s", rr.Code, rr.Body.String())
+		}
+		return rr.Body.String()
+	}
+
+	body := scrapeWith(WithPollInterval(func(typ string) (time.Duration, bool) {
+		if typ == "pr" {
+			return 30 * time.Second, true
+		}
+		return 0, false
+	}))
+	for _, want := range []string{
+		`pg_desk_sweep_bound_violated{tier="local",type="pr"} 1`,
+		`pg_desk_sweep_bound_violated{tier="remote",type="pr"} 0`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, `pg_desk_sweep_bound_violated{tier="local",type="issue"}`) ||
+		strings.Contains(body, `pg_desk_sweep_bound_violated{tier="remote",type="issue"}`) {
+		t.Errorf("issue has no known poll interval, so no series is expected:\n%s", body)
+	}
+
+	// Without a supplier no family member is emitted: never a false violation.
+	if body := scrapeWith(); strings.Contains(body, "pg_desk_sweep_bound_violated{") {
+		t.Errorf("a series was emitted without a poll interval:\n%s", body)
+	}
+}

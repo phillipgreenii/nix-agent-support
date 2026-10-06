@@ -53,6 +53,38 @@ func SweepBoundHolds(activeCount, maxPerPoll int, maxAge, pollInterval time.Dura
 	return float64(activeCount)/float64(maxPerPoll)*float64(pollInterval) <= float64(maxAge)
 }
 
+// BoundVerdict is the outcome of evaluating the sweep sizing bound for one
+// (type, tier). BoundUnknown means the poll interval is not known, so there is
+// NO verdict: callers MUST NOT treat it as a violation.
+type BoundVerdict int
+
+const (
+	// BoundUnknown: the poll interval is unknown (pg-desk does not own it).
+	BoundUnknown BoundVerdict = iota
+	// BoundHolds: active_count / max_per_poll x poll_interval <= max_age.
+	BoundHolds
+	// BoundViolated: the sweep falls behind its tier's max age.
+	BoundViolated
+)
+
+// SweepTiers lists the capped age tiers whose bound is checked: the local
+// reconcile tier and the remote re-hydration tier.
+var SweepTiers = []string{TierLocal, TierRemote}
+
+// EvaluateSweepBound is the ONE evaluation of the sizing bound for a tier,
+// shared by `doctor` and the /metrics sweep-bound gauge so the doctor line and
+// the alert always agree. known=false (the poll interval is not supplied)
+// yields BoundUnknown, never a violation.
+func EvaluateSweepBound(in SweepInputs, pollInterval time.Duration, known bool) BoundVerdict {
+	if !known {
+		return BoundUnknown
+	}
+	if SweepBoundHolds(in.ActiveCount, in.MaxPerPoll, in.MaxAge, pollInterval) {
+		return BoundHolds
+	}
+	return BoundViolated
+}
+
 // hydratedTime parses an entity's hydrated_at; ok is false for "" (never
 // hydrated) and for a value that is not RFC3339.
 func hydratedTime(e store.Entity) (time.Time, bool) {

@@ -31,7 +31,7 @@ import (
 // fresh per test (and once per real serve invocation), and a shared
 // global registry would make repeated construction within one test binary
 // collide with "duplicate metrics collector registration attempted".
-func newMetricsHandler(st *store.Store, cfg *config.Config) (http.Handler, error) {
+func newMetricsHandler(st *store.Store, cfg *config.Config, pollInterval PollIntervalFunc) (http.Handler, error) {
 	registry := prometheus.NewRegistry()
 	// WithoutScopeInfo: without it every catalog member would carry extra
 	// otel_scope_name/otel_scope_version labels and the exporter would add
@@ -95,7 +95,19 @@ func newMetricsHandler(st *store.Store, cfg *config.Config) (http.Handler, error
 	flowFn := func() (changes.Flow, error) {
 		return changes.Observe(st, nowUTC(), cfg.SweepMaxAge())
 	}
-	if err := metrics.RegisterChangeFlow(mp, flowFn); err != nil {
+	// The sizing bound is evaluated per (type, tier) with the SAME function
+	// `doctor` uses (changes.EvaluateSweepBound). The poll interval is not
+	// owned by pg-desk: without a supplier, or when it does not know the
+	// type, there is no verdict and the metric emits no series.
+	sweepBound := func(tf changes.TypeFlow, tier string) changes.BoundVerdict {
+		var poll time.Duration
+		known := false
+		if pollInterval != nil {
+			poll, known = pollInterval(tf.Type)
+		}
+		return changes.EvaluateSweepBound(changes.SweepInputsForTier(cfg, tf, tier), poll, known)
+	}
+	if err := metrics.RegisterChangeFlow(mp, flowFn, metrics.WithSweepBound(sweepBound)); err != nil {
 		return nil, fmt.Errorf("httpapi: register change-flow metrics: %w", err)
 	}
 

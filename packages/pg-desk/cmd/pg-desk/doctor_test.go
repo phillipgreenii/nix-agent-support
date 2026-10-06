@@ -514,6 +514,26 @@ func TestDoctorSweepBoundViolation(t *testing.T) {
 	}
 }
 
+func TestDoctorSweepBoundIsCheckedPerTier(t *testing.T) {
+	// 7 active / 1 x 30s = 210s: the remote tier (1h) holds, the local tier (3m)
+	// is violated.
+	cfg := sweepCfg("1h", 1)
+	cfg.Sweep.ReconcileAge = "3m"
+	seed := newSchemaDoctor(t, cfg)
+	seedActive(t, seed, 7)
+
+	stdout, err := runDoctorWithRouter(t, doctorRouterFixture)
+	if err == nil || !strings.Contains(err.Error(), "sweep bound") {
+		t.Fatalf("doctor err = %v, want a failure naming the sweep bound\n%s", err, stdout)
+	}
+	if !strings.Contains(stdout, "pr remote: active_count=7 max_per_poll=1 max_age=1h0m0s poll_interval=30s: holds") {
+		t.Errorf("remote tier should hold:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "pr local: active_count=7 max_per_poll=1 max_age=3m0s poll_interval=30s: VIOLATED") {
+		t.Errorf("local tier should be violated:\n%s", stdout)
+	}
+}
+
 func TestDoctorSweepBoundHoldsAtTheBoundary(t *testing.T) {
 	// 6 active / 1 x 30s = 180s == D=3m: holds (<=).
 	seed := newSchemaDoctor(t, sweepCfg("3m", 1))

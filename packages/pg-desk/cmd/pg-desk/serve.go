@@ -40,6 +40,10 @@ const defaultServeLogPathSuffix = "Library/Logs/pg-desk-serve.log"
 var (
 	serveAddr string
 	servePort string
+	// serveRouterConfig is the pg-router config path serve reads, on every
+	// scrape, for the poll interval of the sweep sizing bound behind the
+	// pg_desk_sweep_bound_violated metric (pg-desk does not own the interval).
+	serveRouterConfig string
 )
 
 // serveCmd implements `pg-desk serve`: the soak-port-only HTTP server
@@ -67,7 +71,30 @@ var serveCmd = &cobra.Command{
 func init() {
 	serveCmd.Flags().StringVar(&serveAddr, "addr", "", "listen address (host:port); overrides serve.addr from config")
 	serveCmd.Flags().StringVar(&servePort, "port", "", "listen port only, binding 127.0.0.1 (a convenience alias for --addr; mutually exclusive with it)")
+	serveCmd.Flags().StringVar(&serveRouterConfig, "router-config", "", "path to the pg-router config (read as a file on every scrape; env PG_DESK_ROUTER_CONFIG when unset): supplies the poll interval for the pg_desk_sweep_bound_violated metric. Without it the metric reports no verdict")
 	rootCmd.AddCommand(serveCmd)
+}
+
+// routerPollIntervals returns the poll-interval supplier behind the
+// pg_desk_sweep_bound_violated metric: it re-reads the router config at path
+// on every call (so an edited config is picked up without a restart) and
+// answers with the smallest period of the router queries naming the type
+// (routerConfig.PollInterval, the lookup `doctor --router-config` uses). An
+// empty path yields nil, and an unreadable or unparseable file or a type with
+// no matching query answers "unknown": the metric then reports NO verdict,
+// never a false violation.
+func routerPollIntervals(path string, logger *slog.Logger) func(string) (time.Duration, bool) {
+	if path == "" {
+		return nil
+	}
+	return func(entityType string) (time.Duration, bool) {
+		rc, err := loadRouterConfig(path)
+		if err != nil {
+			logger.Warn("serve: router config unreadable; sweep bound has no verdict", "path", path, "error", err)
+			return 0, false
+		}
+		return rc.PollInterval(entityType)
+	}
 }
 
 func runServe(cmd *cobra.Command, args []string) error {
@@ -115,7 +142,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = st.Close() }()
 
-	handler, err := httpapi.NewHandler(st, cfg)
+	routerPath := serveRouterConfig
+	if routerPath == "" {
+		routerPath = os.Getenv("PG_DESK_ROUTER_CONFIG")
+	}
+	handler, err := httpapi.NewHandler(st, cfg, httpapi.WithPollInterval(routerPollIntervals(routerPath, logger)))
 	if err != nil {
 		return fmt.Errorf("serve: %w", err)
 	}

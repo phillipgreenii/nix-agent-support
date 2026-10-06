@@ -105,6 +105,22 @@ half.
   (or that were never hydrated).
 - `pg_desk_consumer_lag{type,consumer}` — the type's highest change sequence minus the consumer's
   cursor.
+- `pg_desk_sweep_bound_violated{type,tier}` — `1` for a (type, tier) whose sweep sizing bound
+  `active_count / sweep.max_per_poll x poll_interval <= age` is violated, `0` when it holds. The
+  bound is checked per capped age tier: `tier="remote"` (re-hydration, age `sweep.max_age`) and
+  `tier="local"` (reconcile, age `sweep.reconcile_age`). It is the same evaluation `doctor` prints
+  (`changes.EvaluateSweepBound`), so the metric and the doctor line always agree. `pg-desk` does not
+  own the poll interval: `serve` reads it from the router config named by `serve --router-config
+<path>` (or the `PG_DESK_ROUTER_CONFIG` environment variable), re-reading the file on every scrape
+  and using the same lookup as `doctor --router-config` (the smallest period among the router queries
+  naming the type). When the interval is not supplied, the file is unreadable, or no router query
+  names the type, that type has NO series: the metric reports no verdict and MUST NOT report a
+  violation.
+
+The Grafana rule `pg-desk-sweep-bound-violated` (`packages/pg-desk/grafana/alerting/alerts.yaml`,
+expression `max by (type, tier) (pg_desk_sweep_bound_violated)`, threshold `>= 1`, `for: 15m`,
+warning) fires per (type, tier) while a bound is violated. A cap on the sweep is allowed only while
+its bound is checked and alerting. An absent series (no verdict) is Normal, not an alert.
 
 On a store that has not been cut over to the new schema these families MUST be absent from the
 scrape; `serve` keeps answering with the dashboard families and MUST NOT refuse or fail the scrape.

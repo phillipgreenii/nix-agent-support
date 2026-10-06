@@ -147,9 +147,13 @@ func doctorStalledConsumers(w io.Writer, cfg *config.Config, rc *routerConfig, f
 	}
 }
 
-// doctorSweepBound evaluates active_count / N x poll_interval <= D per type
-// when the router config supplies the poll interval; otherwise it reports the
-// bound's inputs with poll_interval: unknown and NO verdict [design 8.4].
+// doctorSweepBound evaluates active_count / N x poll_interval <= max_age per
+// type AND per capped age tier (remote re-hydration against sweep.max_age,
+// local reconcile against sweep.reconcile_age) when the router config supplies
+// the poll interval; otherwise it reports the bound's inputs with
+// poll_interval: unknown and NO verdict [design 8.4]. The verdict is
+// changes.EvaluateSweepBound, the same evaluation behind the
+// pg_desk_sweep_bound_violated metric and its alert, so the two agree.
 func doctorSweepBound(w io.Writer, cfg *config.Config, rc *routerConfig, flow changes.Flow, failures *[]string) {
 	fmt.Fprintln(w, "  sweep bound:")
 	violated := false
@@ -157,22 +161,23 @@ func doctorSweepBound(w io.Writer, cfg *config.Config, rc *routerConfig, flow ch
 		if !isFlowEntityType(t.Type) {
 			continue
 		}
-		in := changes.SweepInputsFor(cfg, t)
-		inputs := fmt.Sprintf("active_count=%d max_per_poll=%d max_age=%s", in.ActiveCount, in.MaxPerPoll, in.MaxAge.Round(time.Second))
 		var poll time.Duration
 		known := false
 		if rc != nil {
 			poll, known = rc.PollInterval(t.Type)
 		}
-		if !known {
-			fmt.Fprintf(w, "    %s: %s poll_interval: unknown (no verdict)\n", t.Type, inputs)
-			continue
-		}
-		if changes.SweepBoundHolds(in.ActiveCount, in.MaxPerPoll, in.MaxAge, poll) {
-			fmt.Fprintf(w, "    %s: %s poll_interval=%s: holds\n", t.Type, inputs, poll)
-		} else {
-			violated = true
-			fmt.Fprintf(w, "    %s: %s poll_interval=%s: VIOLATED (the sweep falls behind; some active entities will go longer than max_age between hydrations)\n", t.Type, inputs, poll)
+		for _, tier := range []string{changes.TierRemote, changes.TierLocal} {
+			in := changes.SweepInputsForTier(cfg, t, tier)
+			inputs := fmt.Sprintf("active_count=%d max_per_poll=%d max_age=%s", in.ActiveCount, in.MaxPerPoll, in.MaxAge.Round(time.Second))
+			switch changes.EvaluateSweepBound(in, poll, known) {
+			case changes.BoundUnknown:
+				fmt.Fprintf(w, "    %s %s: %s poll_interval: unknown (no verdict)\n", t.Type, tier, inputs)
+			case changes.BoundHolds:
+				fmt.Fprintf(w, "    %s %s: %s poll_interval=%s: holds\n", t.Type, tier, inputs, poll)
+			case changes.BoundViolated:
+				violated = true
+				fmt.Fprintf(w, "    %s %s: %s poll_interval=%s: VIOLATED (the sweep falls behind; some active entities will go longer than max_age between hydrations)\n", t.Type, tier, inputs, poll)
+			}
 		}
 	}
 	if violated {

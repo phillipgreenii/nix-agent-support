@@ -1,6 +1,10 @@
 package main
 
 import (
+	"io"
+	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -106,5 +110,47 @@ command = { argv = ["a", "pr", "--consumer=c"], format = "json" }
 	}
 	if d, ok := rc.ConsumerPeriod("pr", "c"); !ok || d != 2*time.Minute {
 		t.Errorf("period = %v, %v; want 2m via --consumer=c and an inline command table", d, ok)
+	}
+}
+
+func TestRouterPollIntervalsSupplierForServe(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	if routerPollIntervals("", logger) != nil {
+		t.Error("no router config path must yield no supplier (no verdict)")
+	}
+
+	fn := routerPollIntervals("testdata/doctor_router_config.toml", logger)
+	if d, ok := fn("pr"); !ok || d != 30*time.Second {
+		t.Errorf("pr = %v, %v; want 30s (the smallest matching period, as doctor reads it)", d, ok)
+	}
+	if _, ok := fn("nonexistent-type"); ok {
+		t.Error("a type no router query names must be unknown")
+	}
+
+	// Re-read on every call: an edited config is picked up without a restart,
+	// and an unreadable one degrades to unknown rather than a stale answer.
+	path := filepath.Join(t.TempDir(), "router.toml")
+	write := func(every string) {
+		t.Helper()
+		body := "[[query]]\nname = \"q\"\ntrigger = { kind = \"period\", every = \"" + every + "\" }\n[query.command]\nargv = [\"example-adapter\", \"pg-desk\", \"pr\", \"--consumer\", \"c\"]\n"
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("60s")
+	live := routerPollIntervals(path, logger)
+	if d, ok := live("pr"); !ok || d != time.Minute {
+		t.Fatalf("first read = %v, %v", d, ok)
+	}
+	write("2m")
+	if d, ok := live("pr"); !ok || d != 2*time.Minute {
+		t.Errorf("after edit = %v, %v; want 2m", d, ok)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := live("pr"); ok {
+		t.Error("an unreadable config must be unknown")
 	}
 }

@@ -34,7 +34,30 @@ const (
 	// MetricRepeatedDegraded is the number of entities with repeated
 	// degraded hydrations (changes.RepeatedDegraded), by type.
 	MetricRepeatedDegraded = "pg_desk_repeated_degraded_entities"
+	// MetricSweepBoundViolated is 1 for a (type, tier) whose sweep sizing
+	// bound active_count / max_per_poll x poll_interval <= max_age is
+	// violated and 0 when it holds. A tier whose poll interval is unknown has
+	// NO series (never a false violation). Labels: type, tier (local|remote).
+	MetricSweepBoundViolated = "pg_desk_sweep_bound_violated"
 )
+
+// SweepBoundFunc evaluates the sizing bound for one observed type and sweep
+// tier. It MUST be the same evaluation `pg-desk doctor` uses
+// (changes.EvaluateSweepBound), so the alert and the doctor line agree.
+type SweepBoundFunc func(tf changes.TypeFlow, tier string) changes.BoundVerdict
+
+// ChangeFlowOption customises RegisterChangeFlow.
+type ChangeFlowOption func(*changeFlowOptions)
+
+type changeFlowOptions struct {
+	sweepBound SweepBoundFunc
+}
+
+// WithSweepBound supplies the sizing-bound evaluation behind
+// MetricSweepBoundViolated. Without it the metric emits no series.
+func WithSweepBound(fn SweepBoundFunc) ChangeFlowOption {
+	return func(o *changeFlowOptions) { o.sweepBound = fn }
+}
 
 // ChangeFlowFunc supplies the change-flow observation at collect time. It
 // MUST return a zero Flow (Migrated false) for a store that is not on the new
@@ -46,7 +69,11 @@ type ChangeFlowFunc func() (changes.Flow, error)
 // One callback reads the observation once per scrape and feeds every
 // instrument, so the families always agree with each other. It is separate
 // from New so the existing dashboard catalog is untouched.
-func RegisterChangeFlow(mp metric.MeterProvider, fn ChangeFlowFunc) error {
+func RegisterChangeFlow(mp metric.MeterProvider, fn ChangeFlowFunc, opts ...ChangeFlowOption) error {
+	var o0 changeFlowOptions
+	for _, opt := range opts {
+		opt(&o0)
+	}
 	m := mp.Meter("github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk")
 
 	records, err := m.Int64ObservableGauge(MetricChangeRecords,
@@ -85,6 +112,12 @@ func RegisterChangeFlow(mp metric.MeterProvider, fn ChangeFlowFunc) error {
 		return err
 	}
 
+	bound, err := m.Int64ObservableGauge(MetricSweepBoundViolated,
+		metric.WithDescription("1 when the sweep sizing bound active_count / max_per_poll x poll_interval <= max_age is violated for a type and tier, 0 when it holds; absent when the poll interval is unknown"))
+	if err != nil {
+		return err
+	}
+
 	_, err = m.RegisterCallback(func(_ context.Context, o metric.Observer) error {
 		flow, err := fn()
 		if err != nil {
@@ -104,6 +137,19 @@ func RegisterChangeFlow(mp metric.MeterProvider, fn ChangeFlowFunc) error {
 			o.ObserveInt64(retries, t.Stats.OCCRetries, metric.WithAttributes(typ))
 			o.ObserveInt64(due, int64(t.Due), metric.WithAttributes(typ))
 			o.ObserveInt64(repeated, int64(len(t.Repeated)), metric.WithAttributes(typ))
+			if o0.sweepBound == nil || !isFlowType(t.Type) {
+				continue
+			}
+			for _, tier := range changes.SweepTiers {
+				var v int64
+				switch o0.sweepBound(t, tier) {
+				case changes.BoundUnknown:
+					continue // no verdict: emit no series
+				case changes.BoundViolated:
+					v = 1
+				}
+				o.ObserveInt64(bound, v, metric.WithAttributes(typ, attribute.String("tier", tier)))
+			}
 		}
 		for _, c := range flow.Consumers {
 			o.ObserveInt64(lag, c.Lag, metric.WithAttributes(
@@ -111,6 +157,18 @@ func RegisterChangeFlow(mp metric.MeterProvider, fn ChangeFlowFunc) error {
 			))
 		}
 		return nil
-	}, records, hydrations, failures, retries, due, lag, repeated)
+	}, records, hydrations, failures, retries, due, lag, repeated, bound)
 	return err
+}
+
+// isFlowType reports whether t is one of the change flow's entity types: the
+// sizing bound is defined for those only (consumer-only extra types carry no
+// active set).
+func isFlowType(t string) bool {
+	for _, k := range changes.FlowEntityTypes {
+		if k == t {
+			return true
+		}
+	}
+	return false
 }

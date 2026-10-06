@@ -141,7 +141,10 @@ has been cut over to the change-flow schema:
   `consumer_stale_after` (default 7 days) instead, because no period is known. A consumer that was
   never seen counts as stalled.
 - **The sweep sizing bound** (`active_count / N x poll_interval <= D`, see [`changes.md`](changes.md))
-  per entity type. `doctor` evaluates it ONLY when `--router-config` supplies the poll interval: the
+  per entity type and per capped age tier (`remote`: `sweep.max_age`; `local`:
+  `sweep.reconcile_age`), one line per type and tier. A violated bound also alerts: `/metrics`
+  exports the same evaluation as `pg_desk_sweep_bound_violated{type,tier}` (see
+  [`serve.md`](serve.md)). `doctor` evaluates it ONLY when `--router-config` supplies the poll interval: the
   period of the router `[[query]]` entries whose command names the type and carries a `--consumer`,
   taking the smallest when several match. Otherwise it prints the bound's inputs (`active_count`,
   `max_per_poll`, `max_age`) with `poll_interval: unknown` and no verdict, exactly as `status`

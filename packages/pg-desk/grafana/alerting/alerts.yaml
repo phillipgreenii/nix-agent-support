@@ -368,3 +368,65 @@ groups:
                 - evaluator:
                     type: gt
                     params: [21600]
+
+      # Sweep sizing bound (docket pg2-x3h8c, ADR 0077 S30/S31): a cap on the
+      # per-poll sweep is allowed ONLY while its bound
+      #   active_count / sweep.max_per_poll x poll_interval <= age
+      # is checked AND alerting, so a violated bound pages, not just a
+      # `pg-desk doctor` line. pg_desk_sweep_bound_violated{type,tier} reads 1
+      # for a (type, tier) whose bound is violated and 0 when it holds, per
+      # capped age tier (tier=remote: re-hydration against sweep.max_age;
+      # tier=local: reconcile against sweep.reconcile_age). It is computed at
+      # scrape time by changes.EvaluateSweepBound -- the SAME evaluation
+      # `pg-desk doctor` prints -- so the alert and the doctor line agree.
+      #
+      # pg-desk does not own the poll interval; `pg-desk serve --router-config
+      # <path>` (or env PG_DESK_ROUTER_CONFIG) supplies it from the router
+      # config. While it is not supplied (or the type has no matching router
+      # query) the metric has NO series for that type: no verdict, never a
+      # false violation. noDataState: OK treats that absence as Normal.
+      #
+      # `max by (type, tier)` collapses the duplicate job=pg-desk / job=pg-pr
+      # series so each (type, tier) is ONE alert instance. `for: 15m` rides
+      # out a transient count spike (the bound is a steady-state sizing
+      # property, not a point-in-time fault); warning, because a violated
+      # bound degrades freshness gradually rather than breaking serving.
+      - uid: pg-desk-sweep-bound-violated
+        title: pg-desk sweep sizing bound is violated (by type and tier)
+        condition: C
+        for: 15m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-desk sweep bound violated for type {{ $labels.type }}, tier {{ $labels.tier }}"
+          description: "pg_desk_sweep_bound_violated has read 1 for type {{ $labels.type }}, tier {{ $labels.tier }} for over 15 minutes -- active_count / sweep.max_per_poll x poll_interval exceeds the tier's age (tier=remote: sweep.max_age; tier=local: sweep.reconcile_age), so the sweep falls behind and some active entities go longer than that age between refreshes. Run `pg-desk doctor --router-config <path>` for the inputs, then raise sweep.max_per_poll, lengthen the age, or shorten the poll interval."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: max by (type, tier) (pg_desk_sweep_bound_violated)
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gte
+                    params: [1]

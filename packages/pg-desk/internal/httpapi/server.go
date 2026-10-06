@@ -431,14 +431,38 @@ func isStale(asOf, now time.Time, boundSeconds int) bool {
 	return now.Sub(asOf) > time.Duration(boundSeconds)*time.Second
 }
 
+// PollIntervalFunc returns the router's poll interval for an entity type;
+// ok is false when it is unknown. pg-desk does not own the interval, so the
+// process that runs serve supplies it (see WithPollInterval).
+type PollIntervalFunc func(entityType string) (interval time.Duration, ok bool)
+
+type options struct {
+	pollInterval PollIntervalFunc
+}
+
+// Option customises NewHandler.
+type Option func(*options)
+
+// WithPollInterval supplies the router poll interval used to evaluate the
+// sweep sizing bound behind the pg_desk_sweep_bound_violated metric. It is
+// called on every scrape, so a changed router config is picked up without a
+// restart. Without it the metric reports no verdict (no series).
+func WithPollInterval(fn PollIntervalFunc) Option {
+	return func(o *options) { o.pollInterval = fn }
+}
+
 // NewHandler returns the pg-desk serve HTTP handler: GET /api/v1/dashboard
 // and GET /metrics, both gated behind the same 503-until-first-interpretation
 // check. It returns an error only if constructing the OTel metrics catalog
 // (newMetricsHandler, in metrics_handler.go) fails — in practice this
 // cannot happen with a fresh registry and a fixed, valid instrument set,
 // but the constructor is fallible so we propagate rather than panic.
-func NewHandler(st *store.Store, cfg *config.Config) (http.Handler, error) {
-	metricsHandler, err := newMetricsHandler(st, cfg)
+func NewHandler(st *store.Store, cfg *config.Config, opts ...Option) (http.Handler, error) {
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
+	metricsHandler, err := newMetricsHandler(st, cfg, o.pollInterval)
 	if err != nil {
 		return nil, fmt.Errorf("httpapi: new handler: %w", err)
 	}
