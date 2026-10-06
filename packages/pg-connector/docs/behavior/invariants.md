@@ -209,16 +209,16 @@ create`), `--backend` is how an operator resolves an otherwise-ambiguous N > 1 r
   (i.e., ranking/failover beyond "first non-`not_found` wins") is a future concern this set does
   not yet resolve.
 
-- **`INV-REG-3`** <!-- uuid: 5adff190-3848-4fdb-b02b-16f4c8f55591 --> — `attention.sources` and
-  `search.sources` MUST be flat, top-level, always-list-valued registry keys, independent of
+- **`INV-REG-3`** <!-- uuid: 5adff190-3848-4fdb-b02b-16f4c8f55591 --> — `attention.sources`,
+  `search.sources` and `activity.sources` MUST be flat, top-level, always-list-valued registry keys, independent of
   `connector.<type>` (never nested under it, never sharing its own zero/single/list-valued
   distinction per type). A backend name MAY be registered under one of these AND under a
   `connector.<type>` entry at once, with no cross-check between the two — the same binary
   answering more than one capability, extending `INV-REG-1`'s multi-capability-backend allowance
-  to these two keys. Neither key participates in `auth status`'s or `config validate`'s own
-  fan-out — both resolve their backend set from `AllBackends` (`connector.<type>` only) — so a
-  backend registered ONLY under `attention.sources`/`search.sources` reports its own health
-  solely through `attention list`'s/`search`'s own `sources[]` rows, never through `auth
+  to these three keys. None of the keys participates in `auth status`'s or `config validate`'s own
+  fan-out — all resolve their backend set from `AllBackends` (`connector.<type>` only) — so a
+  backend registered ONLY under `attention.sources`/`search.sources`/`activity.sources` reports its own health
+  solely through `attention list`'s/`search`'s/`activity list`'s own `sources[]` rows, never through `auth
 status`/`config validate`.
 
 ## CLI outcome reporting and exit codes

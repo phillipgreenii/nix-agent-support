@@ -87,11 +87,20 @@ system (GitHub, beads, local git, …) defines its own terms, out of this set's 
 source}` plus an optional `attributes` map carrying whatever type-declared or backend-declared
   extension attribute a query's `fields` list requested and the returning backend chose to
   populate. Carries no score/rank/relevance field under any name.
-- **`attention.sources` / `search.sources`** — the two top-level, always-list-valued registry
-  keys backing these capabilities, siblings of — never nested under — `connector.<type>`
-  (`INV-REG-3`). A backend name MAY be registered under one of these AND under a
-  `connector.<type>` entry at once (the same binary answering more than one capability); its
-  health under one registration is reported independently of the other, and neither key
+- **Activity** — the third cross-cutting, fan-out-only capability: "what the operator did, and
+  what happened to their entities, within a time range." Range-shaped and stateless — it has no
+  cursor, no ledger and no cache entry — and its results are concatenated across sources in
+  configuration order, each row carrying its `source`, never merged, deduplicated or capped.
+  Implemented by a capability's own Tier-2 backend, scoped to the operator's own identity.
+- **Activity item** — the activity capability's shared wire shape: `{id, kind, entity_type,
+entity_id, occurred_at, summary, as_of, stale}` plus an optional `approximate` marker, an
+  optional `url` and `labels`, and an opaque `fields` map the umbrella passes through unread. The
+  `kind` values are source-defined.
+- **`attention.sources` / `search.sources` / `activity.sources`** — the three top-level,
+  always-list-valued registry keys backing these capabilities, siblings of — never nested under —
+  `connector.<type>` (`INV-REG-3`). A backend name MAY be registered under one of these AND under
+  a `connector.<type>` entry at once (the same binary answering more than one capability); its
+  health under one registration is reported independently of the other, and none of the keys
   participates in `auth status`'s or `config validate`'s own fan-out (`INV-REG-3`).
 
 ## Registry

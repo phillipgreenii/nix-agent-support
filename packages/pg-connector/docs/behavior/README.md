@@ -60,10 +60,10 @@ becoming pg-connector's own caller, which the boundary above does not authorize.
 ## Scope (extent + floor)
 
 - **Extent (in)** — the registry (`connector.<type>`, list- or single-valued per type, plus the
-  per-backend `backends.<binary>` config block); the two top-level, always-list-valued
-  `attention.sources`/`search.sources` registry keys and the cross-cutting `attention`/`search`
-  capabilities they back (`list_attention`/`search`, each capability's own aggregation rule, and
-  the `pg-connector attention list`/`pg-connector search` CLI verbs); the wire protocol (envelope,
+  per-backend `backends.<binary>` config block); the three top-level, always-list-valued
+  `attention.sources`/`search.sources`/`activity.sources` registry keys and the cross-cutting `attention`/`search`/`activity`
+  capabilities they back (`list_attention`/`search`/`list_activity`, each capability's own aggregation rule, and
+  the `pg-connector attention list`/`pg-connector search`/`pg-connector activity list` CLI verbs); the wire protocol (envelope,
   `protocolVersion`/`schemaVersion` negotiation, the closed seven-value error taxonomy, the
   `capabilities`/`auth_status` meta-ops, the optional `config` member and its statelessness rule,
   the optional `AuthChecker` sub-interface); the operator CLI surface for the landed
