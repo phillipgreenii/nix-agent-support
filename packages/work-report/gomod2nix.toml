@@ -1,7 +1,8 @@
 schema = 3
 cachePackages = [
   'github.com/spf13/cobra',
-  'github.com/spf13/pflag'
+  'github.com/spf13/pflag',
+  'gopkg.in/yaml.v3'
 ]
 
 [mod]
@@ -16,3 +17,7 @@ cachePackages = [
   [mod.'github.com/spf13/pflag']
     version = 'v1.0.10'
     hash = 'sha256-uDPnWjHpSrzXr17KEYEA1yAbizfcsfo5AyztY2tS6ZU='
+
+  [mod.'gopkg.in/yaml.v3']
+    version = 'v3.0.1'
+    hash = 'sha256-FqL9TKYJ0XkNwJFnq9j0VvJ5ZUU1RvH/52h/f5bkYAU='
