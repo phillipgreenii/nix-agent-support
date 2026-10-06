@@ -390,6 +390,15 @@
           pg-desk = final.callPackage ./packages/pg-desk {
             inherit (goBuilders) mkGoApp;
           };
+          # pg-desk-attention: pg-desk's attention plugin (bead pg2-5l0x4.5), a
+          # scriptout-only `list_attention` backend registered by bare name in
+          # pg-connector's attention.sources. A second mkGoApp call over the SAME
+          # packages/pg-desk module as the pg-desk entry above (per-binary shape
+          # of the pg-connector-* entries), from
+          # packages/pg-desk/pg-desk-attention.nix.
+          pg-desk-attention = final.callPackage ./packages/pg-desk/pg-desk-attention.nix {
+            inherit (goBuilders) mkGoApp;
+          };
           # work-report: sibling Go module shaped exactly like pg-desk (Pattern
           # B, local `replace => ../pg-connector` for the test suite only);
           # `pg-connector` resolves via callPackage against `final.pg-connector`.
@@ -4098,18 +4107,31 @@
               # itself re-exec'd as a wire double (beadref/gather/sync
               # helperCmdFactory), and internal/browser's darwin tests stub Chrome
               # with a t.TempDir() script.
-              pg-desk-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
-                pname = "pg-desk-go-tests";
-                src = lib.fileset.toSource {
-                  root = ./packages;
-                  fileset = lib.fileset.unions [
-                    ./packages/pg-desk
-                    ./packages/pg-connector
-                  ];
-                };
-                modRoot = "pg-desk";
-                gomod2nixToml = ./packages/pg-desk/gomod2nix.toml;
-              };
+              #
+              # cmd/pg-desk-attention's end-to-end tests drive the REAL
+              # `pg-connector attention list` over a fixture store (bead
+              # pg2-5l0x4.5). The umbrella is package main in another module and
+              # cannot be built from this module's vendor env, so the check
+              # hands its built binary to the suite through
+              # PG_DESK_E2E_PG_CONNECTOR; unset (a plain `go test`), those tests
+              # skip. It is an env var, not `testDeps`, so pg-connector does not
+              # land on PATH for the rest of the suite.
+              pg-desk-go-tests =
+                (pkgs._agentSupportGoBuilders.mkGoTest {
+                  pname = "pg-desk-go-tests";
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.unions [
+                      ./packages/pg-desk
+                      ./packages/pg-connector
+                    ];
+                  };
+                  modRoot = "pg-desk";
+                  gomod2nixToml = ./packages/pg-desk/gomod2nix.toml;
+                }).overrideAttrs
+                  (_: {
+                    PG_DESK_E2E_PG_CONNECTOR = "${pkgs.pg-connector}/bin/pg-connector";
+                  });
 
               # work-report: whole-module Go test gate, same Pattern-B shape as
               # pg-desk-go-tests above (go.mod `replace => ../pg-connector`).
@@ -8614,6 +8636,26 @@
                   touch $out
                 '';
 
+              # home/programs/pg-desk's `attention.plugin` option (bead
+              # pg2-5l0x4.5): enabling it installs pg-desk-attention and appends
+              # its bare name LAST to pg-connector's attention.sources; off (the
+              # default) it changes nothing. Pure module eval, no package build.
+              test-pg-desk-attention-registration =
+                let
+                  r = import ./tests/pg-desk-attention-registration.nix { inherit lib pkgs; };
+                in
+                assert
+                  r.enabled.sources == [
+                    "pg-connector-alert-grafana"
+                    "pg-desk-attention"
+                  ];
+                assert r.enabled.hasPlugin && r.enabled.hasDesk;
+                assert r.enabledAlone.sources == [ "pg-desk-attention" ];
+                assert r.enabledAlone.hasPlugin;
+                assert r.disabled.sources == [ "pg-connector-alert-grafana" ];
+                assert !r.disabled.hasPlugin && r.disabled.hasDesk;
+                pkgs.runCommand "pg-desk-attention-registration-ok" { } "touch $out";
+
               # Regression guard that the pa-monitor binary's version string is
               # actually stamped by the build-time ldflag (versionPath =
               # "main.version" in packages/pa-monitor/default.nix). Before that
@@ -9147,6 +9189,7 @@
               pg-rescue
               integrate-branch-support
               pg-desk
+              pg-desk-attention
               work-report
               claude-hook-router
               plugin-conformance-check

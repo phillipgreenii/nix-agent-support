@@ -31,8 +31,15 @@ mkGoApp {
   # third-party deps; pg-connector is intentionally absent from it.
   gomod2nixToml = ./gomod2nix.toml;
 
-  # No `subPackages` set (mirrors packages/pg-router/default.nix). This
-  # package build is NOT the Go test gate: repo-base's mkGoApp defaults
+  subPackages = [ "cmd/pg-desk" ];
+
+  # Pinned to cmd/pg-desk: the module also carries cmd/pg-desk-attention (the
+  # list_attention plugin, built by ./pg-desk-attention.nix), which must not
+  # ride in this package's bin/ (this derivation wraps pg-desk with
+  # pg-connector on PATH; the plugin execs nothing and is installed
+  # separately).
+  #
+  # This package build is NOT the Go test gate: repo-base's mkGoApp defaults
   # `doCheck = false` (bead pg2-pla9d.2, operator ruling 2026-10-01), so
   # `nix build .#pg-desk` compiles the binary and runs no tests. The
   # whole-module gate is `checks.<system>.pg-desk-go-tests` in flake.nix

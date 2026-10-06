@@ -534,6 +534,18 @@ in
       '';
     };
 
+    # attention.plugin (bead pg2-5l0x4.5): the `pg-desk-attention` plugin, a
+    # scriptout-only `list_attention` backend that answers "which entities
+    # need the operator now" from pg-desk's local store
+    # (docs/behavior/pg-desk/attention.md). It is a separate binary, not a
+    # subcommand of pg-desk, so enabling it both installs it and registers its
+    # bare name in pg-connector's `attention.sources` — the umbrella knows the
+    # plugin only as that registry entry (ADR 0077's runtime carve-out).
+    attention.plugin = {
+      enable = lib.mkEnableOption "the pg-desk-attention plugin: install it and register it in `phillipgreenii.programs.pg-connector.attention.sources`";
+      package = lib.mkPackageOption pkgs "pg-desk-attention" { };
+    };
+
     links = {
       issueUrlTemplate = lib.mkOption {
         type = lib.types.nullOr lib.types.str;
@@ -552,7 +564,20 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    home.packages = [ cfg.package ];
+    home.packages = [
+      cfg.package
+    ]
+    ++ lib.optional cfg.attention.plugin.enable cfg.attention.plugin.package;
+
+    # Registered LAST in config order: `pg-connector attention list` breaks a
+    # dedup tie at equal severity in favor of the earliest source, so the
+    # plugin yields to the connector-owned sources on an {type, id} they both
+    # report. The option lives in home/programs/pg-connector, which
+    # home/default.nix imports alongside this module; with pg-connector itself
+    # disabled the entry renders nowhere.
+    phillipgreenii.programs.pg-connector.attention.sources = lib.mkIf cfg.attention.plugin.enable (
+      lib.mkAfter [ "pg-desk-attention" ]
+    );
 
     xdg.configFile."pg-desk/config.yaml".source =
       (pkgs.formats.yaml { }).generate "pg-desk-config.yaml"
