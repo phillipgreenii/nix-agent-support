@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/phillipgreenii/ccpool/internal/config"
 	"github.com/phillipgreenii/ccpool/internal/session"
@@ -13,7 +14,8 @@ import (
 )
 
 // runCapacity reports the pool's occupancy: max_sessions, live, preserved,
-// counted, and free (ADR 0072) — the read-only query an admission gate (the
+// counted, and free (ADR 0072), plus usage_limit when an account usage window
+// is at its limit (Free is then 0) — the read-only query an admission gate (the
 // pg-router-ccpool-handler, in a later packet) consults before launching,
 // reusing the exact same capacity definition Reap's Pass 2 already applies
 // (session.Service.Capacity -> countedSessions).
@@ -36,6 +38,10 @@ func runCapacity(args []string) int {
 		fmt.Fprintf(os.Stderr, "capacity: %v\n", err)
 		return 1
 	}
+	// A hit usage window zeroes Free and is reported alongside, so every
+	// admission gate that reads Free (pg-router's handler among them) declines
+	// without needing to know about usage windows.
+	c = c.WithUsageLimit(currentUsageLimit(context.Background(), cfg))
 
 	if err := emitCapacityMetrics(opts.emitMetrics, cfg.PoolRoot, c, telemetry.RecordPoolCapacity); err != nil {
 		fmt.Fprintf(os.Stderr, "capacity: emit metrics: %v\n", err)
@@ -91,6 +97,10 @@ func emitCapacityMetrics(emit bool, poolRoot string, c session.Capacity, record 
 
 // renderCapacityText is the pure human-line renderer for `ccpool capacity`.
 func renderCapacityText(c session.Capacity) string {
-	return fmt.Sprintf("free=%d counted=%d preserved=%d live=%d max=%d\n",
+	line := fmt.Sprintf("free=%d counted=%d preserved=%d live=%d max=%d",
 		c.Free, c.Counted, c.Preserved, c.Live, c.MaxSessions)
+	if c.UsageLimit != nil {
+		line += fmt.Sprintf(" usage_limit=%s resets_at=%s", c.UsageLimit.Window, c.UsageLimit.ResetsAt.Format(time.RFC3339))
+	}
+	return line + "\n"
 }

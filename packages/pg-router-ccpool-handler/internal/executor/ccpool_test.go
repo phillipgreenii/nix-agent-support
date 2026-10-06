@@ -1393,6 +1393,71 @@ func TestRun_poolFullDeclinesBusy(t *testing.T) {
 	}
 }
 
+// TestRun_usageLimitDeclinesBusyWithoutMutation: a hit account usage window
+// (ccpool reports free=0 plus usage_limit) declines the dispatch exactly like a
+// full pool — same ErrPoolAtCapacity sentinel (so the same at-capacity busy tag,
+// the same exclusion from the failure-rate alert, the same re-offer with
+// backoff) — with no Ensure, no worktree and no bead mutation, and the log says
+// which window and until when.
+func TestRun_usageLimitDeclinesBusyWithoutMutation(t *testing.T) {
+	var buf bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(old) })
+
+	cfg := fastCfg()
+	bd := &dtest.ScriptBD{}
+	resets := time.Date(2026, 10, 6, 17, 0, 0, 0, time.UTC)
+	cc := &dtest.FakeCC{Cap: ccpool.Capacity{
+		MaxSessions: 6, Free: 0,
+		UsageLimit: &ccpool.UsageLimit{Window: "five_hour", UsedPct: 100, ResetsAt: resets},
+	}}
+	e := newExec(cc, bd, cfg)
+	g := &dtest.NoopGitOpener{}
+	e.deps.GitOpener = g.Open
+	d := DispatchContext{Role: workerRole(cfg), Item: item.Item{ID: "zr-w"}}
+	_, err := e.run(context.Background(), d)
+	if !errors.Is(err, ErrPoolAtCapacity) {
+		t.Fatalf("err = %v, want ErrPoolAtCapacity (a usage limit is the same busy decline)", err)
+	}
+	if errors.Is(err, ErrPoolCapacityUnknown) {
+		t.Fatalf("a usage-limit decline must not satisfy ErrPoolCapacityUnknown; err = %v", err)
+	}
+	for _, want := range []string{"five_hour", "2026-10-06T17:00:00Z"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err %q must name %q", err, want)
+		}
+	}
+	if logged := buf.String(); !strings.Contains(logged, "usage limit hit") || !strings.Contains(logged, "five_hour") {
+		t.Errorf("log %q must say which usage window is hit", logged)
+	}
+	if len(cc.Ensured) != 0 || len(g.Calls) != 0 || len(bd.Updates) != 0 {
+		t.Fatalf("launched, prepared a worktree, or mutated a bead: ensured=%v git=%v updates=%v", cc.Ensured, g.Calls, bd.Updates)
+	}
+}
+
+// TestRun_usageLimitAtLaunchDeclinesBusyNoEscalation: the window can fill between
+// the capacity pre-check and `ccpool new` (which then exits 8). That is a busy
+// decline, never a launch failure: no pool-launch-fail label, no human escalation,
+// and the abandoned session is still purged.
+func TestRun_usageLimitAtLaunchDeclinesBusyNoEscalation(t *testing.T) {
+	cfg := fastCfg()
+	bd := &dtest.ScriptBD{Show: map[string]string{"zr-w": `{"id":"zr-w","status":"open","labels":[]}`}}
+	cc := &dtest.FakeCC{EnsureErr: fmt.Errorf("ccpool new: %w", ccpool.ErrUsageLimited)}
+	_, err := dispatchWorker(t, cc, bd, cfg, "pg-router-worker-zr-w")
+	if !errors.Is(err, ErrPoolAtCapacity) {
+		t.Fatalf("err = %v, want ErrPoolAtCapacity (the busy decline)", err)
+	}
+	for _, u := range bd.Updates {
+		if strings.Contains(u, "pool-launch-fail") || strings.Contains(u, "human") {
+			t.Fatalf("a usage-limit refusal must not stamp or escalate the bead; updates=%v", bd.Updates)
+		}
+	}
+	if len(cc.Closed) == 0 {
+		t.Error("the abandoned session must still be purged")
+	}
+}
+
 // TestRun_poolCapacityErrorDeclinesBusy proves an unreadable pool fails
 // CLOSED as busy — never as "launch anyway" — and as its OWN sentinel
 // (ErrPoolCapacityUnknown, bead pg2-j4uwg), NOT ErrPoolAtCapacity: before

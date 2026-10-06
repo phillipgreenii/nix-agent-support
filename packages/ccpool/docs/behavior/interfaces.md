@@ -18,7 +18,8 @@ whether that party is an **essential or optional** participant in what ccpool ex
 | `INTF-NOTIFY`      | a notifying event out                        | notification sink (implementer, optional) | optional                | ccpool    |
 
 capacity reports free slots under ADR 0072's definition so a caller can decline to dispatch
-instead of launching into a full pool.
+instead of launching into a full pool, and reports none while the account's usage window is at its
+limit (`INV-POOL-4`).
 
 `INTF-CALLER`, `INTF-AGENTSIGNAL` and `INTF-DENY` are **essential** — driving a session, learning
 what it did, and denying it a question it cannot ask are all core to what ccpool is for.
@@ -47,6 +48,9 @@ flowchart LR
   afterward, distinct from closing it.
 - **In/Out, metadata** — the caller sets and reads its own opaque key/value tags on a session;
   ccpool stores and returns them uninterpreted.
+- **Out (ccpool → caller), usage-limit refusal** — a dispatch, or a launch of a new session, while
+  the account's usage window is at its limit is refused with its own outcome naming the window and
+  its reset; the capacity read then reports no free slot plus the limit (`INV-POOL-4`).
 - **Guarantee** — a dispatch aimed at a `working` session is refused, never queued or dropped
   silently (`INV-SESS-2`).
 

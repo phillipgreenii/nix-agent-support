@@ -53,6 +53,7 @@ import (
 
 	"github.com/phillipgreenii/ccpool/internal/config"
 	"github.com/phillipgreenii/ccpool/internal/registry"
+	"github.com/phillipgreenii/ccpool/internal/usagelimit"
 )
 
 // hermeticRoot is the sandbox TestMain created. It is "" only when TestMain did
@@ -79,6 +80,10 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	hermeticRoot = root
+	// No test runs the real usage-gate monitor: a developer machine whose limit
+	// is genuinely hit would otherwise make unrelated new/reply/capacity tests
+	// refuse. Tests of the gate inject their own checker over this one.
+	newUsageChecker = func(config.UsageGate) usagelimit.Checker { return usagelimit.Off{} }
 	// The sandbox's default socket, as the production default config names it
 	// (no config.toml exists in the sandbox, so this is the built-in default).
 	cfg, err := config.LoadForPool("")

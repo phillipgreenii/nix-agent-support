@@ -4,6 +4,9 @@
   mkGoApp,
   makeWrapper,
   tmux,
+  # The co-resident usage monitor: ccpool's usage gate runs `pa-monitor status
+  # --json` to learn whether the 5-hour block or weekly limit is hit (ADR 0080).
+  pa-monitor,
 }:
 
 mkGoApp {
@@ -43,8 +46,9 @@ mkGoApp {
   nativeCheckInputs = [ pkgs.git ];
 
   # Render the hook plugin with an ABSOLUTE binary path (the repo's template uses
-  # `ccpool hook <event>`; substitute the store path). Wrap tmux onto PATH so the
-  # binary works under launchd's minimal PATH.
+  # `ccpool hook <event>`; substitute the store path). Wrap tmux and pa-monitor
+  # onto PATH so the binary (and its usage gate's default `pa-monitor` command)
+  # works under launchd's minimal PATH, in every pool whatever its config.toml.
   postInstall = ''
     mkdir -p $out/share/ccpool-plugin/.claude-plugin $out/share/ccpool-plugin/hooks
     cp ${./ccpool-plugin/.claude-plugin/plugin.json} $out/share/ccpool-plugin/.claude-plugin/plugin.json
@@ -62,7 +66,12 @@ mkGoApp {
     cp ${./completions/_ccpool} $out/share/zsh/site-functions/_ccpool
     cp ${./completions/ccpool.bash} $out/share/bash-completion/completions/ccpool
 
-    wrapProgram $out/bin/ccpool --prefix PATH : ${lib.makeBinPath [ tmux ]}
+    wrapProgram $out/bin/ccpool --prefix PATH : ${
+      lib.makeBinPath [
+        tmux
+        pa-monitor
+      ]
+    }
   '';
 
   meta = {

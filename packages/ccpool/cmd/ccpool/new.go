@@ -53,6 +53,10 @@ func runNew(args []string) int {
 		slog.Error("new: config load failed", "err", err)
 		return 1
 	}
+	// Admission: a hit usage window means no new work, however ccpool was called.
+	if code, refused := refuseOnUsageLimit("new", cfg); refused {
+		return code
+	}
 	dir := *cwd
 	if dir == "" {
 		if cfg.Claude.DefaultCwd != "" {

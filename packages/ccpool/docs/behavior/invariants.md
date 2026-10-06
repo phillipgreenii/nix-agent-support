@@ -26,6 +26,17 @@ Rules this set's implementation MUST hold, following the behavior-docs method
   still-working sessions remain (ADR 0072). A session belonging to a run that no longer exists
   MUST NOT accumulate across restarts; the next sweep MUST reclaim it.
 
+- **`INV-POOL-4`** <!-- uuid: 627882d5-f2ad-4be6-97be-f24e6963f0c1 --> — **A pool MUST NOT accept
+  work while the account's usage window is at its limit.** Whenever the co-resident monitor's
+  account-level usage surface (`packages/pa-monitor/docs/behavior · INTF-STATE`) reports the
+  short (5-hour) block or the weekly window at its limit with its reset still in the future, a
+  dispatch that would launch a session or deliver a prompt MUST be refused with its own distinct
+  outcome — never conflated with busy (`INV-SESS-2`) — naming the window and when it resets, and the
+  pool's capacity read MUST report no free slot and the limit, whatever its occupancy. This holds
+  however the pool is driven, so a caller that re-offers work later is held until the reset. When
+  the usage surface cannot be read, or reports a hit window with no known reset, the pool MUST
+  keep accepting work: not knowing is never a refusal. (ADR 0080)
+
 ## Session lifecycle (`INV-STATE-*`, `INV-SESS-*`, `INV-CCPOOL-CWD-*`)
 
 The two state vocabularies, the six store states, a session's dispatch/status/ingestion

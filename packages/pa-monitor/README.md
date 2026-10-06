@@ -53,7 +53,7 @@ pa-monitor config show
 | ---------------------------------------------------- | ------------------------------------------------------------ |
 | `daemon`                                             | Run the long-running daemon (RPC server + tick loop).        |
 | `tui`                                                | Interactive TUI (always daemon-backed).                      |
-| `status`                                             | One-shot dump of daemon state.                               |
+| `status [--json]`                                    | One-shot dump of daemon state (`--json`: see below).         |
 | `caffeinate on\|off\|toggle`                         | Drive the caffeinate manager.                                |
 | `nudge <selector> [--text=...]`                      | Signal a session via the daemon.                             |
 | `info <selector>`                                    | Print session or directory details.                          |
@@ -63,6 +63,26 @@ pa-monitor config show
 | `config show`                                        | Print loaded config (read-only).                             |
 
 `<selector>` accepts `session:<id>`, `path:<workspace-path>`, `cmux:<workspace-id>`, or a bare value (slash → path, otherwise session).
+
+### `status --json`: the `rate_limits` object
+
+`status --json` prints one JSON document: `sessions`, `active_block`, `active_week`, and — when the
+daemon holds an authoritative status-line reading (ADR 0021) — `rate_limits`:
+
+```json
+{
+  "rate_limits": {
+    "five_hour": { "used_pct": 100, "resets_at": "2026-10-06T17:00:00Z" },
+    "seven_day": { "used_pct": 42.5 },
+    "captured_at": "2026-10-06T14:02:11Z"
+  }
+}
+```
+
+Every field is independently optional: an absent `used_pct` or `resets_at` means unknown, never `0`
+and never 1970, and the whole `rate_limits` key is omitted when neither window is known. This is the
+contract `ccpool`'s usage gate binds (it refuses work while a window is at its limit and its reset is
+still in the future), so a field rename here is a breaking change for it.
 
 ### Busy/idle gates: a blocked session counts as idle
 

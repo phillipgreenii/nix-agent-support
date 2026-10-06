@@ -297,6 +297,50 @@ func TestCLI_Capacity(t *testing.T) {
 	}
 }
 
+// A hit account usage window arrives as free=0 plus a usage_limit object; an
+// older ccpool that never emits the key leaves UsageLimit nil.
+func TestCLI_CapacityDecodesUsageLimit(t *testing.T) {
+	cli, _, setOut := newSpy()
+	setOut([]byte(`{"max_sessions":6,"live":0,"preserved":0,"counted":0,"free":0,` +
+		`"usage_limit":{"window":"five_hour","used_pct":100,"resets_at":"2026-10-06T17:00:00Z"}}`))
+	got, err := cli.Capacity(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := time.Date(2026, 10, 6, 17, 0, 0, 0, time.UTC)
+	if got.Free != 0 || got.UsageLimit == nil || got.UsageLimit.Window != "five_hour" ||
+		got.UsageLimit.UsedPct != 100 || !got.UsageLimit.ResetsAt.Equal(want) {
+		t.Fatalf("got %+v (usage_limit %+v), want free=0 and a five_hour limit resetting %v", got, got.UsageLimit, want)
+	}
+
+	setOut([]byte(`{"max_sessions":6,"live":0,"preserved":0,"counted":0,"free":6}`))
+	got, err = cli.Capacity(context.Background())
+	if err != nil || got.UsageLimit != nil {
+		t.Fatalf("got %+v err %v, want nil UsageLimit when the key is absent", got, err)
+	}
+}
+
+// ccpool exit 8 (usage limit hit) is recognized whether it arrives as the typed
+// sentinel or as a raw exit status, and nothing else is mistaken for it.
+func TestIsUsageLimited(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"sentinel", ErrUsageLimited, true},
+		{"wrapped sentinel", fmt.Errorf("ccpool new: %w", ErrUsageLimited), true},
+		{"raw exit 8", fmt.Errorf("ccpool new: %w", &fakeExit{code: 8}), true},
+		{"exit 7 is not it", &fakeExit{code: 7}, false},
+		{"exit 1 is not it", &fakeExit{code: 1}, false},
+		{"nil", nil, false},
+	} {
+		if got := IsUsageLimited(tc.err); got != tc.want {
+			t.Errorf("%s: IsUsageLimited = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
 // EmitCapacity opts in to metric emission with --emit-metrics; the gate-path
 // Capacity call must never carry that flag (bead pg2-om899.6).
 func TestCLI_EmitCapacityPassesFlagAndCapacityDoesNot(t *testing.T) {

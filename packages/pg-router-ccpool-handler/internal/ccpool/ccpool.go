@@ -14,6 +14,7 @@ package ccpool
 import (
 	"context"
 	"errors"
+	"time"
 )
 
 // ErrPromptNotIngested mirrors ccpool's exit code 7: a fire-and-forget delivery
@@ -27,6 +28,22 @@ func IsNotIngested(err error) bool {
 	}
 	var ec exitCoder
 	return errors.As(err, &ec) && ec.ExitCode() == 7
+}
+
+// ErrUsageLimited mirrors ccpool's exit code 8: `ccpool new`/`reply` declined to
+// accept work because an account usage window (5-hour block or weekly limit) is
+// at its limit. It is the race backstop for the capacity pre-check (the window
+// can fill between that check and the launch): a caller treats it as "not right
+// now", never as a launch failure.
+var ErrUsageLimited = errors.New("ccpool: usage limit hit")
+
+// IsUsageLimited reports whether err is (or wraps) a ccpool exit-code-8 outcome.
+func IsUsageLimited(err error) bool {
+	if errors.Is(err, ErrUsageLimited) {
+		return true
+	}
+	var ec exitCoder
+	return errors.As(err, &ec) && ec.ExitCode() == 8
 }
 
 // SessionState mirrors ccpool's store states — observed session FACTS only, not
@@ -71,6 +88,19 @@ type Capacity struct {
 	Preserved   int `json:"preserved"`
 	Counted     int `json:"counted"`
 	Free        int `json:"free"`
+	// UsageLimit is non-nil while an account usage window (the 5-hour block or
+	// the weekly limit) is at its limit; ccpool then reports Free == 0, so the
+	// admission gate declines without reading this field. It is carried only so
+	// the decline can say WHY and until when. Absent from older ccpool output.
+	UsageLimit *UsageLimit `json:"usage_limit,omitempty"`
+}
+
+// UsageLimit mirrors ccpool's usagelimit.Limit JSON: which usage window is at its
+// limit and when it resets.
+type UsageLimit struct {
+	Window   string    `json:"window"` // "five_hour" or "seven_day"
+	UsedPct  float64   `json:"used_pct"`
+	ResetsAt time.Time `json:"resets_at"`
 }
 
 type SendMode int

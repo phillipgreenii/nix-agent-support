@@ -424,3 +424,58 @@ func TestLoad_metricLabelAllowlistConfigurable(t *testing.T) {
 		})
 	}
 }
+
+// TestLoad_usageGateDefaults pins the [usage_gate] block defaults: on, the
+// monitor resolved on PATH, the limit counted as hit at 100%, and a bounded query.
+func TestLoad_usageGateDefaults(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "cfg"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	g := c.UsageGate
+	if !g.Enabled {
+		t.Error("UsageGate.Enabled must default to true")
+	}
+	if g.Command != "pa-monitor" {
+		t.Errorf("UsageGate.Command = %q, want pa-monitor", g.Command)
+	}
+	if g.ThresholdPct != 100 {
+		t.Errorf("UsageGate.ThresholdPct = %v, want 100", g.ThresholdPct)
+	}
+	if g.Timeout != Duration(5*time.Second) {
+		t.Errorf("UsageGate.Timeout = %v, want 5s", time.Duration(g.Timeout))
+	}
+}
+
+// TestLoad_usageGateTOMLOverrides confirms [usage_gate] decodes over the defaults
+// key by key, so a partial block (just `enabled = false`) keeps the other defaults.
+func TestLoad_usageGateTOMLOverrides(t *testing.T) {
+	dir := t.TempDir()
+	cfgDir := filepath.Join(dir, "cfg", "ccpool")
+	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := `
+[usage_gate]
+enabled = false
+command = "/opt/bin/pa-monitor"
+threshold_pct = 95.5
+timeout = "2s"
+`
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "cfg"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	want := UsageGate{Enabled: false, Command: "/opt/bin/pa-monitor", ThresholdPct: 95.5, Timeout: Duration(2 * time.Second)}
+	if c.UsageGate != want {
+		t.Errorf("UsageGate = %+v, want %+v", c.UsageGate, want)
+	}
+}

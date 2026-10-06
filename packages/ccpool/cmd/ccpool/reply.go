@@ -49,6 +49,11 @@ func runReply(args []string) int {
 		slog.Error("reply: config load failed", "err", err)
 		return 1
 	}
+	// Admission: a prompt is work, so a hit usage window refuses it up front,
+	// before the session is resumed or anything is delivered.
+	if code, refused := refuseOnUsageLimit("reply", cfg); refused {
+		return code
+	}
 	el := openEventLog(cfg)
 	st, err := store.Open(cfg.DBPath, clock.Real{}, store.WithEventLog(el))
 	if err != nil {

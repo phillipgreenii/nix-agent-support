@@ -89,6 +89,70 @@ func TestStatusJSON_DeadPidOmitted(t *testing.T) {
 	}
 }
 
+func TestStatusJSON_RateLimits(t *testing.T) {
+	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+	five, seven := 100.0, 42.5
+	state := &pb.DaemonState{
+		FiveHourPct:      &five,
+		FiveHourResetsAt: timestamppb.New(now.Add(2 * time.Hour)),
+		SevenDayPct:      &seven, // percentage known, reset unknown
+		LimitsCapturedAt: timestamppb.New(now.Add(-time.Minute)),
+	}
+	raw, err := json.Marshal(statusJSON(state, nil, now))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var parsed struct {
+		RateLimits *struct {
+			FiveHour *struct {
+				UsedPct  *float64 `json:"used_pct"`
+				ResetsAt *string  `json:"resets_at"`
+			} `json:"five_hour"`
+			SevenDay *struct {
+				UsedPct  *float64 `json:"used_pct"`
+				ResetsAt *string  `json:"resets_at"`
+			} `json:"seven_day"`
+			CapturedAt *string `json:"captured_at"`
+		} `json:"rate_limits"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	rl := parsed.RateLimits
+	if rl == nil || rl.FiveHour == nil || rl.SevenDay == nil {
+		t.Fatalf("rate_limits missing windows: %s", raw)
+	}
+	if rl.FiveHour.UsedPct == nil || *rl.FiveHour.UsedPct != 100 {
+		t.Errorf("five_hour.used_pct = %v, want 100", rl.FiveHour.UsedPct)
+	}
+	if rl.FiveHour.ResetsAt == nil || *rl.FiveHour.ResetsAt != "2026-10-06T14:00:00Z" {
+		t.Errorf("five_hour.resets_at = %v, want 2026-10-06T14:00:00Z", rl.FiveHour.ResetsAt)
+	}
+	if rl.SevenDay.UsedPct == nil || *rl.SevenDay.UsedPct != 42.5 {
+		t.Errorf("seven_day.used_pct = %v, want 42.5", rl.SevenDay.UsedPct)
+	}
+	if rl.SevenDay.ResetsAt != nil {
+		t.Errorf("seven_day.resets_at must be absent when unknown, got %q", *rl.SevenDay.ResetsAt)
+	}
+	if rl.CapturedAt == nil || *rl.CapturedAt != "2026-10-06T11:59:00Z" {
+		t.Errorf("captured_at = %v, want 2026-10-06T11:59:00Z", rl.CapturedAt)
+	}
+}
+
+func TestStatusJSON_RateLimitsOmittedWhenUnknown(t *testing.T) {
+	raw, err := json.Marshal(statusJSON(&pb.DaemonState{}, nil, time.Now().UTC()))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, ok := parsed["rate_limits"]; ok {
+		t.Errorf("rate_limits must be omitted when no window is known, got %v", parsed["rate_limits"])
+	}
+}
+
 func TestStripJSONFlag(t *testing.T) {
 	rest, jsonMode := stripJSONFlag([]string{"session:s1", "--json"})
 	if !jsonMode || len(rest) != 1 || rest[0] != "session:s1" {

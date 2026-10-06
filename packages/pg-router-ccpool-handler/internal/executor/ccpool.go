@@ -129,6 +129,18 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 		return report.Result{}, fmt.Errorf("%w: %v", ErrPoolCapacityUnknown, capErr)
 	}
 	if capacity.Free == 0 {
+		if ul := capacity.UsageLimit; ul != nil {
+			// The account's usage window is at its limit, so ccpool reports no free
+			// slot whatever the occupancy. This is the SAME healthy backpressure as a
+			// full pool (and keeps the same at-capacity tag, so the failure-rate alert
+			// that excludes it stays quiet for the hours a window takes to reset): the
+			// core re-offers the event with backoff until the window clears or the
+			// event's TTL expires. No bead is touched.
+			slog.Info("dispatch declined: usage limit hit", "role", d.Role.Name, "bead", d.Item.ID,
+				"window", ul.Window, "used_pct", ul.UsedPct, "resets_at", ul.ResetsAt)
+			return report.Result{}, fmt.Errorf("%w: usage limit %s hit until %s",
+				ErrPoolAtCapacity, ul.Window, ul.ResetsAt.Format(time.RFC3339))
+		}
 		slog.Info("dispatch declined: pool at capacity", "role", d.Role.Name, "bead", d.Item.ID,
 			"counted", capacity.Counted, "max", capacity.MaxSessions, "preserved", capacity.Preserved)
 		return report.Result{}, fmt.Errorf("%w: counted=%d max=%d preserved=%d",
@@ -202,6 +214,15 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 		// The worktree created just above has no session to own it now, so no
 		// reconcile keyed on a session row can ever find it (pg2-w3usi).
 		r.reclaimAbandonedWorktree(ctx, cc, d.Item.ID, wt, !preexisting)
+		if ccpool.IsUsageLimited(err) {
+			// ccpool declined the launch because the account's usage window filled
+			// between the capacity pre-check and `new` (exit 8). That is "not right
+			// now", never a defect of THIS bead: no pool-launch-fail stamp, no
+			// escalation to human. The abandoned session and worktree are already
+			// reclaimed above; the busy decline re-offers the event with backoff.
+			slog.Info("dispatch declined: usage limit hit at launch", "role", d.Role.Name, "bead", d.Item.ID, "err", err)
+			return report.Result{}, fmt.Errorf("%w: ensure %s: %v", ErrPoolAtCapacity, r.deps.ExternalID, err)
+		}
 		var res report.Result
 		if r.escalateLaunchFailure(ctx, d.Item.ID) {
 			res = failureAction(report.Escalated, d.Item.ID)

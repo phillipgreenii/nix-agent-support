@@ -97,10 +97,66 @@ type usageWindowJSON struct {
 	CapHitAt *string `json:"cap_hit_at,omitempty"`
 }
 
+// rateLimitWindowJSON is one authoritative status-line rate_limits window
+// (ADR 0021): the server-side used_percentage and the window's reset instant.
+// Each field is independently optional — absent means unknown, never 0 and never
+// 1970 — so a consumer MUST NOT read a missing used_pct as "unused".
+type rateLimitWindowJSON struct {
+	UsedPct  *float64 `json:"used_pct,omitempty"`
+	ResetsAt *string  `json:"resets_at,omitempty"`
+}
+
+// rateLimitsJSON is the account-global 5h / 7d reading, wire shape for
+// `status --json`'s "rate_limits" key. It is the contract ccpool's usage gate
+// binds (packages/ccpool/internal/usagelimit), so changing a field name here is a
+// breaking change for that consumer. The key is omitted entirely when the daemon
+// holds no reading at all.
+type rateLimitsJSON struct {
+	FiveHour   *rateLimitWindowJSON `json:"five_hour,omitempty"`
+	SevenDay   *rateLimitWindowJSON `json:"seven_day,omitempty"`
+	CapturedAt *string              `json:"captured_at,omitempty"`
+}
+
 type statusJSONDoc struct {
 	Sessions    []sessionJSON    `json:"sessions"`
 	ActiveBlock *usageWindowJSON `json:"active_block,omitempty"`
 	ActiveWeek  *usageWindowJSON `json:"active_week,omitempty"`
+	RateLimits  *rateLimitsJSON  `json:"rate_limits,omitempty"`
+}
+
+// toRateLimitWindowJSON builds one window, or nil when neither the percentage nor
+// the reset is known. A nil/zero input stays absent in the output.
+func toRateLimitWindowJSON(pct *float64, resetsAt *timestamppb.Timestamp) *rateLimitWindowJSON {
+	w := &rateLimitWindowJSON{}
+	if pct != nil {
+		p := *pct
+		w.UsedPct = &p
+	}
+	if resetsAt != nil {
+		s := resetsAt.AsTime().UTC().Format(time.RFC3339)
+		w.ResetsAt = &s
+	}
+	if w.UsedPct == nil && w.ResetsAt == nil {
+		return nil
+	}
+	return w
+}
+
+// toRateLimitsJSON converts the daemon state's account-global rate_limits fields,
+// or returns nil when the daemon holds no reading for either window.
+func toRateLimitsJSON(state *pb.DaemonState) *rateLimitsJSON {
+	rl := &rateLimitsJSON{
+		FiveHour: toRateLimitWindowJSON(state.FiveHourPct, state.GetFiveHourResetsAt()),
+		SevenDay: toRateLimitWindowJSON(state.SevenDayPct, state.GetSevenDayResetsAt()),
+	}
+	if ts := state.GetLimitsCapturedAt(); ts != nil {
+		s := ts.AsTime().UTC().Format(time.RFC3339)
+		rl.CapturedAt = &s
+	}
+	if rl.FiveHour == nil && rl.SevenDay == nil {
+		return nil
+	}
+	return rl
 }
 
 // toSessionJSON converts one SessionView into the wire shape. now is
@@ -162,6 +218,7 @@ func statusJSON(state *pb.DaemonState, details []*pb.SessionDetail, now time.Tim
 	if w := state.GetActiveWeek(); w != nil {
 		doc.ActiveWeek = toUsageWindowJSON(w.GetId(), w.GetCostUsd(), w.GetCapHitAt())
 	}
+	doc.RateLimits = toRateLimitsJSON(state)
 	return doc
 }
 

@@ -20,6 +20,8 @@ type Config struct {
 	Notify Notify `toml:"notify"`
 	Retry  Retry  `toml:"retry"`
 
+	UsageGate UsageGate `toml:"usage_gate"`
+
 	Telemetry Telemetry `toml:"telemetry"`
 
 	// Resolved (not from TOML):
@@ -108,6 +110,32 @@ type Retry struct {
 	Classes []string `toml:"classes"`
 }
 
+// UsageGate configures the account usage-window gate (the 5-hour block and the
+// weekly limit): while either window is at its limit, ccpool refuses to accept
+// new work — `ccpool new` and `ccpool reply` exit 8, and `ccpool capacity`
+// reports zero free slots plus the limit that is hit — regardless of which
+// caller (a person, pg-router's handler, a script) invoked it. The reading comes
+// from the co-resident monitor's `status --json` (its rate_limits object).
+//
+// The gate FAILS OPEN: a missing monitor binary, an unreachable daemon, or a
+// reading with no usable reset instant is "unknown", never "blocked" — ccpool
+// never stops working because it could not find out whether it should.
+type UsageGate struct {
+	// Enabled, default true, turns the gate on. false is a pure opt-out: ccpool
+	// never runs the command and never refuses on account of a usage window.
+	Enabled bool `toml:"enabled"`
+	// Command is the monitor binary (resolved on PATH unless absolute) run as
+	// `<command> status --json`. The packaged ccpool wrapper puts the packaged
+	// monitor on PATH, so the default resolves without configuration.
+	Command string `toml:"command"`
+	// ThresholdPct is the used_percentage at or above which a window counts as
+	// hit. The default 100 means "the limit is actually reached"; lower it to
+	// stop accepting work earlier.
+	ThresholdPct float64 `toml:"threshold_pct"`
+	// Timeout bounds one monitor query, so an admission check can never hang.
+	Timeout Duration `toml:"timeout"`
+}
+
 // Duration is a TOML-decodable time.Duration ("30m", "10m", ...).
 type Duration time.Duration
 
@@ -134,6 +162,12 @@ func defaults() Config {
 			BaseDelay:   Duration(time.Second),
 			Timeout:     Duration(60 * time.Second),
 			Classes:     []string{"transient_server", "transient_network"},
+		},
+		UsageGate: UsageGate{
+			Enabled:      true,
+			Command:      "pa-monitor",
+			ThresholdPct: 100,
+			Timeout:      Duration(5 * time.Second),
 		},
 		Telemetry: Telemetry{MetricLabelAllowlist: []string{"pgrouter.role"}},
 	}

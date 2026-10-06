@@ -33,7 +33,10 @@ module as an **implementer** of `INTF-HANDLER`/`INTF-SOURCE`.
   read. It signals this ONLY through the transport's pre-accept busy decline
   (`conformance.ExitBusy`), so the core re-offers the event with backoff; it mutates no bead
   and creates no worktree. This is consistent with `INV-CCH-3`: busy is a pre-accept signal,
-  not a post-accept outcome. A command-backed role whose configured argv exits `9` is the same
+  not a post-accept outcome. A pool that reports its account usage window at its limit
+  (`packages/ccpool/docs/behavior · INV-POOL-4`) has no free slot by construction, so it takes this
+  same path under the same decline reason, and a launch that ccpool refuses for that reason after
+  the capacity read is the same decline: the handler MUST NOT stamp or escalate the bead for it. A command-backed role whose configured argv exits `9` is the same
   signal: the handler MUST report it as the pre-accept busy decline (reason `command-busy`), not
   as a handler failure, and MUST NOT carry the command's stderr into that decline.
 - **`INV-CCH-7`** — when a session ends before its bead completes, the handler MUST read
