@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/x/gitclient"
+	"github.com/phillipgreenii/x/gitfixture"
+	"github.com/phillipgreenii/x/gittest"
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/ccpool"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/config"
@@ -23,9 +25,18 @@ import (
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/worktree"
 )
 
-// Worktree-keyed sweep (bead pg2-ganjb, INV-CCH-19), against REAL git: a temp
-// repository, real linked worktrees under a temp WorktreeDir, and the real
-// gitclient opener (HOME and git config isolated from this machine).
+// Worktree-keyed sweep (bead pg2-ganjb, INV-CCH-19), against REAL git: a
+// fixture repository from x/gittest (hermetic by construction: temp root, fixture
+// HOME, environment rebuilt from an allowlist), real linked worktrees under a temp
+// WorktreeDir, and the real gitclient opener.
+//
+// Bead pg2-vvra0: this file once built its repository by hand with `git init`
+// and an enumerated scrub of inherited GIT_* variables. Under a git hook (the
+// commit's own pre-commit run) GIT_DIR points at the OUTER repository, and an
+// unscrubbed `git init` wrote the fixture's temp path into that repository's
+// .git/config as core.worktree; once the temp dir was deleted every git command in
+// the clone failed with "fatal: Invalid path". Every git child here now goes
+// through gitclient's allowlist environment instead.
 
 type sweepHarness struct {
 	t        *testing.T
@@ -38,8 +49,8 @@ type sweepHarness struct {
 	logPath  string
 	role     roles.Role
 	opener   worktree.Opener
-	gitEnv   []string
 	homeDir  string
+	fixture  string // fixture root: repo, home and hooks live under it
 	nowFixed time.Time
 }
 
@@ -48,22 +59,14 @@ func newSweepHarness(t *testing.T) *sweepHarness {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
-	h := &sweepHarness{t: t, homeDir: t.TempDir(), lockDir: t.TempDir()}
-	// Drop every inherited GIT_* variable: under a git hook (the commit's own
-	// pre-commit run) GIT_DIR/GIT_INDEX_FILE/... point at the OUTER repository and
-	// would redirect these fixture commands into it.
-	h.gitEnv = append(
-		envWithoutGit(os.Environ()),
-		"HOME="+h.homeDir, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
-		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t",
-	)
-	repo, err := filepath.EvalSymlinks(t.TempDir())
-	if err != nil {
+	h := &sweepHarness{t: t, lockDir: t.TempDir()}
+	fx := gittest.New(t, gitfixture.RepoOptions{Suite: "ccpool-handler-worktreesweep", InitialBranch: "main"})
+	h.repo = fx.Dir
+	h.fixture = filepath.Dir(fx.Dir)
+	h.homeDir = filepath.Join(h.fixture, "home") // gitfixture.NewRepo layout: <root>/{repo,home,hooks}
+	if _, err := fx.Commit(context.Background(), "init", nil); err != nil {
 		t.Fatal(err)
 	}
-	h.repo = repo
-	h.git(repo, "init", "-q", "-b", "main")
-	h.git(repo, "commit", "-q", "--allow-empty", "-m", "init")
 	wtDir, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -86,7 +89,7 @@ func newSweepHarness(t *testing.T) *sweepHarness {
 	}
 	t.Cleanup(func() { _ = lw.Close() })
 	cfg := config.Default()
-	cfg.RepoRoot = repo
+	cfg.RepoRoot = h.repo
 	cfg.WorktreeDir = wtDir
 	cfg.SessionPrefix = "pg-router-"
 	h.nowFixed = time.Now()
@@ -96,21 +99,25 @@ func newSweepHarness(t *testing.T) *sweepHarness {
 	return h
 }
 
-func envWithoutGit(env []string) []string {
-	out := make([]string, 0, len(env))
-	for _, kv := range env {
-		if !strings.HasPrefix(kv, "GIT_") {
-			out = append(out, kv)
-		}
+// client returns a gitclient anchored at dir (the fixture repo or one of its
+// linked worktrees) with the fixture's HOME and an allowlisted environment.
+func (h *sweepHarness) client(dir string) *gitclient.Client {
+	h.t.Helper()
+	c, err := gitclient.New(
+		context.Background(), dir,
+		gitclient.WithHome(h.homeDir),
+		gitclient.WithoutInherited("SSH_AUTH_SOCK"),
+		gitclient.WithEnv("GIT_CONFIG_NOSYSTEM", "1"),
+	)
+	if err != nil {
+		h.t.Fatalf("gitclient.New(%s): %v", dir, err)
 	}
-	return out
+	return c
 }
 
 func (h *sweepHarness) git(dir string, args ...string) string {
 	h.t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	cmd.Env = h.gitEnv
-	out, err := cmd.CombinedOutput()
+	out, err := h.client(dir).Run(context.Background(), args...)
 	if err != nil {
 		h.t.Fatalf("git -C %s %v: %v\n%s", dir, args, err, out)
 	}
@@ -142,9 +149,8 @@ func (h *sweepHarness) exists(path string) bool {
 }
 
 func (h *sweepHarness) branchExists(bead string) bool {
-	cmd := exec.Command("git", "-C", h.repo, "rev-parse", "--verify", "--quiet", "refs/heads/pg-router/"+bead)
-	cmd.Env = h.gitEnv
-	return cmd.Run() == nil
+	_, err := h.client(h.repo).Run(context.Background(), "rev-parse", "--verify", "--quiet", "refs/heads/pg-router/"+bead)
+	return err == nil
 }
 
 func (h *sweepHarness) reclaimEvents() []map[string]any {
@@ -172,6 +178,63 @@ func (h *sweepHarness) wantKept(path, bead string) {
 	h.t.Helper()
 	if !h.exists(path) || !h.branchExists(bead) {
 		h.t.Errorf("worktree %s and branch pg-router/%s must be kept", path, bead)
+	}
+}
+
+// Regression pin for pg2-vvra0. A git hook (the commit's own pre-commit run)
+// exports GIT_DIR/GIT_INDEX_FILE/GIT_COMMON_DIR pointing at the OUTER repository;
+// a fixture that inherits them writes its temp path into the outer .git/config as
+// core.worktree and breaks every later git command in that clone. Simulate the
+// hook environment against a DECOY outer repository, run the whole fixture + leak
+// + sweep path, and assert the decoy was never touched.
+func TestSweep_hookGitEnvironmentDoesNotLeakIntoTheOuterRepository(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	ctx := context.Background()
+	outer := gittest.New(t, gitfixture.RepoOptions{Suite: "ccpool-handler-worktreesweep-outer", InitialBranch: "main"})
+	if _, err := outer.Commit(ctx, "outer init", nil); err != nil {
+		t.Fatal(err)
+	}
+	outerGitDir := filepath.Join(outer.Dir, ".git")
+	configBefore, err := os.ReadFile(filepath.Join(outerGitDir, "config"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	branchesBefore, err := outer.Client.Run(ctx, "branch", "--list")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("GIT_DIR", outerGitDir)
+	t.Setenv("GIT_COMMON_DIR", outerGitDir)
+	// GIT_WORK_TREE is what makes an inheriting `git init` WRITE core.worktree
+	// into GIT_DIR's config (verified: GIT_DIR alone does not leak).
+	t.Setenv("GIT_WORK_TREE", t.TempDir())
+	t.Setenv("GIT_INDEX_FILE", filepath.Join(outerGitDir, "index"))
+
+	h := newSweepHarness(t)
+	path := h.leak("zr-k")
+	if got := h.sweep(); got != 1 || h.exists(path) {
+		t.Fatalf("fixture sanity under a hook environment: removed=%d exists=%v, want the leaked worktree reclaimed", got, h.exists(path))
+	}
+
+	configAfter, err := os.ReadFile(filepath.Join(outerGitDir, "config"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(configAfter) != string(configBefore) {
+		t.Errorf("the outer repository's .git/config changed (core.worktree leak):\nbefore:\n%s\nafter:\n%s", configBefore, configAfter)
+	}
+	if strings.Contains(string(configAfter), "worktree =") {
+		t.Errorf("outer .git/config gained core.worktree:\n%s", configAfter)
+	}
+	branchesAfter, err := outer.Client.Run(ctx, "branch", "--list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(branchesAfter) != string(branchesBefore) {
+		t.Errorf("the outer repository's branches changed: before %q, after %q", branchesBefore, branchesAfter)
 	}
 }
 
@@ -416,7 +479,9 @@ func TestSweep_killedHandlerBetweenWorktreeAndSession_reclaimedOnNextDispatch(t 
 	path := h.leak("zr-k")
 
 	cmd := exec.Command(os.Args[0], "-test.run=^TestHelperHoldWorktreeLock$")
-	cmd.Env = append(envWithoutGit(os.Environ()), "PGR_HELPER_HOLD_LOCK=1", "PGR_HELPER_LOCK_DIR="+h.lockDir, "PGR_HELPER_BEAD=zr-k")
+	// The helper never runs git, so it gets a minimal environment: nothing
+	// inherited (in particular no GIT_*), only what it reads.
+	cmd.Env = append([]string{"PATH=" + os.Getenv("PATH")}, "PGR_HELPER_HOLD_LOCK=1", "PGR_HELPER_LOCK_DIR="+h.lockDir, "PGR_HELPER_BEAD=zr-k")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
