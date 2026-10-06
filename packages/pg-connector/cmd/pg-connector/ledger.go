@@ -347,12 +347,28 @@ func ListLedgerKeys() ([]LedgerKey, error) {
 // two structurally-equal entities always hash identically regardless of how
 // their source JSON was formatted.
 func canonicalHash(entity json.RawMessage) (string, error) {
+	return canonicalHashExcluding(entity, nil)
+}
+
+// canonicalHashExcluding is canonicalHash with per-backend volatile-field
+// exclusions on top of the as_of/stale drop: each element of excludes is a
+// dotted JSON path (one nesting level per dot, e.g.
+// "metadata.last_checked_at") removed from the entity before hashing. It
+// backs the list fingerprint (list.go's listFingerprints), whose exclusion
+// list the backend declares for the fields it knows are volatile. A path
+// that is absent from the entity is a no-op, and a parent object emptied by
+// an exclusion is dropped too, so an entity whose only metadata key was
+// excluded hashes the same as one that never carried metadata.
+func canonicalHashExcluding(entity json.RawMessage, excludes []string) (string, error) {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(entity, &fields); err != nil {
 		return "", fmt.Errorf("ledger: decode entity for hashing: %w", err)
 	}
 	delete(fields, "as_of")
 	delete(fields, "stale")
+	for _, path := range excludes {
+		excludeFieldPath(fields, strings.Split(path, "."))
+	}
 	normalizeMergeableForHash(fields)
 	data, err := json.Marshal(fields)
 	if err != nil {
@@ -360,6 +376,38 @@ func canonicalHash(entity json.RawMessage) (string, error) {
 	}
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:]), nil
+}
+
+// excludeFieldPath deletes the field at path (one key per element) from
+// fields, recursing into nested JSON objects and dropping any parent object
+// the deletion leaves empty. A missing key, or a non-object value on the way
+// down, leaves fields unchanged.
+func excludeFieldPath(fields map[string]json.RawMessage, path []string) {
+	if len(path) == 0 {
+		return
+	}
+	if len(path) == 1 {
+		delete(fields, path[0])
+		return
+	}
+	raw, ok := fields[path[0]]
+	if !ok {
+		return
+	}
+	var nested map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &nested); err != nil || nested == nil {
+		return
+	}
+	excludeFieldPath(nested, path[1:])
+	if len(nested) == 0 {
+		delete(fields, path[0])
+		return
+	}
+	data, err := json.Marshal(nested)
+	if err != nil {
+		return
+	}
+	fields[path[0]] = data
 }
 
 // normalizeMergeableForHash collapses a PR's "mergeable" field to its

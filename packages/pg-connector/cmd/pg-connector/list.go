@@ -10,6 +10,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -111,4 +112,24 @@ func listQueryNotRecognizedErr(entityType, query string) error {
 // outcome itself.
 func listExitCode(sources []SourceResult) int {
 	return FanOutOutcome{Sources: sources}.ExitCode()
+}
+
+// addListFingerprint records entity's fingerprint under id in into: the
+// canonicalHash of its summary (as_of and stale dropped) with the backend's
+// own declared volatile-field excludes (FingerprintExcludes on its list
+// result) removed first. The connector, never a caller, computes it because
+// only the connector knows which fields are volatile; callers treat the
+// string as opaque and compare it only for equality. A marshal/hash failure
+// leaves the id out of the map rather than failing the whole listing (a
+// typed schema entity cannot fail either step in practice).
+func addListFingerprint(into map[string]string, id string, entity any, excludes []string) {
+	raw, err := json.Marshal(entity)
+	if err != nil {
+		return
+	}
+	fp, err := canonicalHashExcluding(raw, excludes)
+	if err != nil {
+		return
+	}
+	into[id] = fp
 }

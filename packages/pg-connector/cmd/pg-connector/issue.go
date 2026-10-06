@@ -320,6 +320,17 @@ type issueListOutcome struct {
 	Entities   []schema.Issue `json:"entities"`
 	PresentIDs []string       `json:"present_ids"`
 	Sources    []SourceResult `json:"sources"`
+	// Truncated is true when ANY queried backend's list result was
+	// truncated (its own Truncated, which the fan-out previously dropped),
+	// so a caller comparing this listing against a prior one can withhold
+	// removals it can no longer trust. A source that did not succeed stays
+	// visible in Sources as before.
+	Truncated bool `json:"truncated"`
+	// Fingerprints maps each entity id in Entities to its fingerprint
+	// string (list.go's addListFingerprint). Present only when the call
+	// passed --fingerprints; omitted otherwise, so the outcome stays
+	// decodable by every consumer that predates it.
+	Fingerprints map[string]string `json:"fingerprints,omitempty"`
 }
 
 // fanOutIssueList mirrors pr.go's fanOutPRList exactly, decoding into
@@ -327,11 +338,14 @@ type issueListOutcome struct {
 // cache-fallback/cache-write behavior on scriptout.ErrUnavailable/live
 // success respectively (see fanOutPRList's own doc comment for the full
 // description; this docket's design of record section 5.6).
-func fanOutIssueList(ctx context.Context, reg *Registry, backends []string, query string, idsOnly bool, bounds scriptout.TimeRange) issueListOutcome {
+func fanOutIssueList(ctx context.Context, reg *Registry, backends []string, query string, idsOnly bool, bounds scriptout.TimeRange, fingerprints bool) issueListOutcome {
 	out := issueListOutcome{
 		Entities:   make([]schema.Issue, 0),
 		PresentIDs: make([]string, 0),
 		Sources:    make([]SourceResult, 0, len(backends)),
+	}
+	if fingerprints {
+		out.Fingerprints = make(map[string]string)
 	}
 	for _, b := range backends {
 		config, err := listBackendConfig(reg, b, bounds)
@@ -349,6 +363,11 @@ func fanOutIssueList(ctx context.Context, reg *Registry, backends []string, quer
 						var issue schema.Issue
 						if decErr := scriptout.Decode(raw, &issue); decErr == nil {
 							out.Entities = append(out.Entities, issue)
+							if fingerprints {
+								// The cache holds no backend-declared excludes,
+								// so a fallback fingerprint hashes the full summary.
+								addListFingerprint(out.Fingerprints, issue.ID, issue, nil)
+							}
 						}
 					}
 					out.PresentIDs = append(out.PresentIDs, ids...)
@@ -366,6 +385,12 @@ func fanOutIssueList(ctx context.Context, reg *Registry, backends []string, quer
 		}
 		out.Entities = append(out.Entities, result.Entities...)
 		out.PresentIDs = append(out.PresentIDs, result.PresentIDs...)
+		out.Truncated = out.Truncated || result.Truncated
+		if fingerprints {
+			for _, entity := range result.Entities {
+				addListFingerprint(out.Fingerprints, entity.ID, entity, result.FingerprintExcludes)
+			}
+		}
 		out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceSucceeded, Count: len(result.PresentIDs)})
 		for _, entity := range result.Entities {
 			raw, err := json.Marshal(entity)
@@ -381,6 +406,7 @@ func fanOutIssueList(ctx context.Context, reg *Registry, backends []string, quer
 func newIssueListCmd() *cobra.Command {
 	var query string
 	var idsOnly bool
+	var fingerprints bool
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List issues matching a named query, fanned out across every registered issue backend unless --backend pins one",
@@ -389,6 +415,7 @@ func newIssueListCmd() *cobra.Command {
 	backendFlag := addBackendFlag(cmd, "pin the fan-out to exactly this backend instead of every registered issue backend")
 	cmd.Flags().StringVar(&query, "query", "", "named query to run, resolved against each backend's own config.queries (required)")
 	cmd.Flags().BoolVar(&idsOnly, "ids-only", false, "return only each matched issue's id, omitting full entity detail")
+	cmd.Flags().BoolVar(&fingerprints, "fingerprints", false, "also return a fingerprints map (entity id to fingerprint string) so a caller can diff one listing against another without a cursor")
 	bounds := addTimeBoundFlags(cmd, "issues last updated", listTimeBoundAsymmetryHelp)
 	_ = cmd.MarkFlagRequired("query")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
@@ -404,7 +431,7 @@ func newIssueListCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		outcome := fanOutIssueList(cmd.Context(), reg, backends, query, idsOnly, rng)
+		outcome := fanOutIssueList(cmd.Context(), reg, backends, query, idsOnly, rng, fingerprints)
 		if allQueryNotRecognized(outcome.Sources) {
 			return reportIssueTargetedOutcome(cmd, nil, listQueryNotRecognizedErr("issue", query), func(json.RawMessage) (string, error) { return "", nil })
 		}

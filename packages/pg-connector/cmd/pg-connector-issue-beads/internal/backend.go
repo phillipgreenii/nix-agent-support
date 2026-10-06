@@ -364,6 +364,13 @@ func (b *Backend) Transition(ctx context.Context, id, targetState string) error 
 	return err
 }
 
+// listFingerprintExcludes is the volatile-field list this backend declares
+// on every list result (IssueListResult.FingerprintExcludes): bd's
+// `metadata.last_checked_at` is stamped by a periodic checker on issues whose
+// content did not change, so it MUST NOT change an issue's list fingerprint
+// (a status or other content change still does).
+var listFingerprintExcludes = []string{"metadata.last_checked_at"}
+
 // List implements issue.Provider.List against bd (bead pg2-2j5ac.28.1,
 // design's own binding decision): query has ALREADY been resolved
 // from the request's own config.queries block by
@@ -435,7 +442,13 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 	for _, e := range entities {
 		ids = append(ids, e.ID)
 	}
-	result := &schema.IssueListResult{Entities: entities, PresentIDs: ids, Cursor: nil, Truncated: imprecise}
+	result := &schema.IssueListResult{
+		Entities:            entities,
+		PresentIDs:          ids,
+		Cursor:              nil,
+		Truncated:           imprecise,
+		FingerprintExcludes: listFingerprintExcludes,
+	}
 	if idsOnly {
 		result.Entities = nil
 	}

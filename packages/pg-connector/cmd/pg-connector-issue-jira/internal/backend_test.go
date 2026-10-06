@@ -976,6 +976,40 @@ func TestBackend_List_MalformedCursor_TreatedAsAbsent(t *testing.T) {
 	}
 }
 
+// TestBackend_List_NilOrNullCursor_RunsUnboundedSearch is a regression pin:
+// the pg-desk list-fingerprint check calls list with NO cursor and relies on
+// that running the unbounded search, so no `updated >=` lookback clause may
+// appear in either search's JQL (the umbrella's list verb always passes a nil
+// cursor, and the wire "cursor": null decodes to the literal JSON null).
+func TestBackend_List_NilOrNullCursor_RunsUnboundedSearch(t *testing.T) {
+	for name, cursor := range map[string]json.RawMessage{
+		"nil":      nil,
+		"json-nul": json.RawMessage(`null`),
+	} {
+		t.Run(name, func(t *testing.T) {
+			var jqls []string
+			fr := &fakeRunner{handle: func(args []string) (string, error) {
+				jqls = append(jqls, jqlArg(args))
+				return `{"items":[{"key":"PROJ-1","summary":"a","status":"To Do"}],"truncated":false}`, nil
+			}}
+			if _, err := New(fr).List(context.Background(), []string{"assignee = currentUser()"}, false, cursor); err != nil {
+				t.Fatalf("List: %v", err)
+			}
+			if len(jqls) == 0 {
+				t.Fatal("no search ran")
+			}
+			for _, jql := range jqls {
+				if strings.Contains(jql, "updated >=") {
+					t.Fatalf("jql %q carries an updated >= lookback clause; a cursorless list must be unbounded", jql)
+				}
+				if jql != "assignee = currentUser()" {
+					t.Fatalf("jql = %q, want the configured JQL unchanged", jql)
+				}
+			}
+		})
+	}
+}
+
 // ----------------------------------------------------------------------
 // Cursor helpers (jiraCursor / decodeJiraCursor / newJiraCursor / boundedJQL)
 // ----------------------------------------------------------------------

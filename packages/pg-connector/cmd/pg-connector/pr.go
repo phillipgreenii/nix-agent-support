@@ -178,6 +178,17 @@ type prListOutcome struct {
 	Entities   []schema.PR    `json:"entities"`
 	PresentIDs []string       `json:"present_ids"`
 	Sources    []SourceResult `json:"sources"`
+	// Truncated is true when ANY queried backend's list result was
+	// truncated (its own Truncated, which the fan-out previously dropped),
+	// so a caller comparing this listing against a prior one can withhold
+	// removals it can no longer trust. A source that did not succeed stays
+	// visible in Sources as before.
+	Truncated bool `json:"truncated"`
+	// Fingerprints maps each entity id in Entities to its fingerprint
+	// string (list.go's addListFingerprint). Present only when the call
+	// passed --fingerprints; omitted otherwise, so the outcome stays
+	// decodable by every consumer that predates it.
+	Fingerprints map[string]string `json:"fingerprints,omitempty"`
 }
 
 // fanOutPRList queries "list" against every backend in backends (design
@@ -200,7 +211,7 @@ type prListOutcome struct {
 // Puts every returned entity into that backend's own cache
 // (putLiveEntity) so the cache stays current for the next unavailable
 // window.
-func fanOutPRList(ctx context.Context, reg *Registry, backends []string, query string, idsOnly bool, bounds scriptout.TimeRange) prListOutcome {
+func fanOutPRList(ctx context.Context, reg *Registry, backends []string, query string, idsOnly bool, bounds scriptout.TimeRange, fingerprints bool) prListOutcome {
 	// Entities and Sources both start as non-nil empty slices so a
 	// zero-backend (misconfigured host) result, or a backend that
 	// answers with zero matches, still marshals entities[]/sources[] as
@@ -209,6 +220,9 @@ func fanOutPRList(ctx context.Context, reg *Registry, backends []string, query s
 		Entities:   make([]schema.PR, 0),
 		PresentIDs: make([]string, 0),
 		Sources:    make([]SourceResult, 0, len(backends)),
+	}
+	if fingerprints {
+		out.Fingerprints = make(map[string]string)
 	}
 	for _, b := range backends {
 		config, err := listBackendConfig(reg, b, bounds)
@@ -227,6 +241,11 @@ func fanOutPRList(ctx context.Context, reg *Registry, backends []string, query s
 						var pr schema.PR
 						if decErr := scriptout.Decode(raw, &pr); decErr == nil {
 							out.Entities = append(out.Entities, pr)
+							if fingerprints {
+								// The cache holds no backend-declared excludes,
+								// so a fallback fingerprint hashes the full summary.
+								addListFingerprint(out.Fingerprints, pr.ID, pr, nil)
+							}
 						}
 					}
 					out.PresentIDs = append(out.PresentIDs, ids...)
@@ -244,6 +263,12 @@ func fanOutPRList(ctx context.Context, reg *Registry, backends []string, query s
 		}
 		out.Entities = append(out.Entities, result.Entities...)
 		out.PresentIDs = append(out.PresentIDs, result.PresentIDs...)
+		out.Truncated = out.Truncated || result.Truncated
+		if fingerprints {
+			for _, entity := range result.Entities {
+				addListFingerprint(out.Fingerprints, entity.ID, entity, result.FingerprintExcludes)
+			}
+		}
 		out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceSucceeded, Count: len(result.PresentIDs)})
 		for _, entity := range result.Entities {
 			raw, err := json.Marshal(entity)
@@ -259,6 +284,7 @@ func fanOutPRList(ctx context.Context, reg *Registry, backends []string, query s
 func newPrListCmd() *cobra.Command {
 	var query string
 	var idsOnly bool
+	var fingerprints bool
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List PRs matching a named query, fanned out across every registered pr backend unless --backend pins one",
@@ -267,6 +293,7 @@ func newPrListCmd() *cobra.Command {
 	backendFlag := addBackendFlag(cmd, "pin the fan-out to exactly this backend instead of every registered pr backend")
 	cmd.Flags().StringVar(&query, "query", "", "named query to run, resolved against each backend's own config.queries (required)")
 	cmd.Flags().BoolVar(&idsOnly, "ids-only", false, "return only each matched PR's id, omitting full entity detail")
+	cmd.Flags().BoolVar(&fingerprints, "fingerprints", false, "also return a fingerprints map (entity id to fingerprint string) so a caller can diff one listing against another without a cursor")
 	bounds := addTimeBoundFlags(cmd, "PRs last updated", listTimeBoundAsymmetryHelp)
 	_ = cmd.MarkFlagRequired("query")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
@@ -283,7 +310,7 @@ func newPrListCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		outcome := fanOutPRList(cmd.Context(), reg, backends, query, idsOnly, rng)
+		outcome := fanOutPRList(cmd.Context(), reg, backends, query, idsOnly, rng, fingerprints)
 		if allQueryNotRecognized(outcome.Sources) {
 			// design: every registered backend answered
 			// query_not_recognized -> the umbrella fails the whole call

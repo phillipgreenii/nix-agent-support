@@ -234,6 +234,17 @@ type IssueListResult struct {
 	PresentIDs []string        `json:"present_ids"`
 	Cursor     json.RawMessage `json:"cursor"`
 	Truncated  bool            `json:"truncated"`
+
+	// FingerprintExcludes lists the entity fields this backend declares
+	// volatile for the umbrella's list-fingerprint (pg-connector <type>
+	// list --fingerprints): dotted JSON paths (e.g.
+	// "metadata.last_checked_at") removed from each entity before it is
+	// hashed, so a change confined to them does not change the fingerprint.
+	// Omitted (nil) when the backend declares none; the umbrella already
+	// drops as_of and stale from every hash. Additive: a backend that never
+	// sets it, and a consumer that never reads it, are unaffected, so this
+	// does not bump the schema version.
+	FingerprintExcludes []string `json:"fingerprint_excludes,omitempty"`
 }
 
 // IssueDepsResult is the "deps" op's wire result payload for the issue

@@ -1261,3 +1261,22 @@ func TestParseBDListExpr_RejectsOtherFirstTokens(t *testing.T) {
 		}
 	}
 }
+
+// TestBackend_List_DeclaresLastCheckedAtFingerprintExclude pins the beads
+// backend's volatile-field declaration: every list result (full and
+// ids-only) names metadata.last_checked_at, which the umbrella's list
+// fingerprint drops before hashing.
+func TestBackend_List_DeclaresLastCheckedAtFingerprintExclude(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		return `{"data":[{"id":"tp-1","title":"a","status":"open","priority":1,"metadata":{"last_checked_at":"2026-10-05T00:00:00Z"}}],"schema_version":1}`, nil
+	}}
+	for _, idsOnly := range []bool{false, true} {
+		got, err := New(fr).List(context.Background(), []string{"list"}, idsOnly, nil)
+		if err != nil {
+			t.Fatalf("List(idsOnly=%v): %v", idsOnly, err)
+		}
+		if len(got.FingerprintExcludes) != 1 || got.FingerprintExcludes[0] != "metadata.last_checked_at" {
+			t.Fatalf("FingerprintExcludes = %v, want [metadata.last_checked_at]", got.FingerprintExcludes)
+		}
+	}
+}
