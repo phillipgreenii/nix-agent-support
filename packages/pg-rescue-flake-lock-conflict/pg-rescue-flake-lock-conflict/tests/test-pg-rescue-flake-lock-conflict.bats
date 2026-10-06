@@ -8,29 +8,35 @@
 # packages/pg-rescue/cmd/pg-rescue/flakelock_handler_test.go.
 
 setup() {
-  # Hook environment: a `git commit` from a linked worktree exports GIT_DIR and
-  # friends into the pre-commit hook, and this suite inherits them from the
-  # run-unit-tests hook. Drop every GIT_* variable so a fixture can never
-  # resolve to (and mutate) the real repository.
-  local v
-  for v in $(compgen -e | grep '^GIT_' || true); do unset "$v"; done
-
+  # Capture what the suite needs across gfh_setup: gfh_reset_env rebuilds the
+  # exported environment from an allowlist, so SCRIPTS_DIR / SCRIPT_UNDER_TEST /
+  # TEST_SUPPORT (injected by the nix check, or computed below for a local
+  # `bats tests/` run) MUST be saved BEFORE it and restored AFTER it
+  # (code-file-standards "Tests That Need Git"; pg2-emjgm).
   if [[ -z ${SCRIPTS_DIR:-} ]]; then
     SCRIPTS_DIR="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
   fi
+  if [[ -z ${TEST_SUPPORT:-} ]]; then
+    TEST_SUPPORT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)/test-support"
+  fi
+  # shellcheck disable=SC1091
+  source "$TEST_SUPPORT/git-fixture-harness.bash"
+  gfh_save_env SCRIPTS_DIR SCRIPT_UNDER_TEST TEST_SUPPORT
+
+  # Hermetic-by-construction git fixture (GIT_CEILING_DIRECTORIES + env
+  # allowlist reset + fresh HOME + hooks disabled + per-suite identity): a
+  # `git commit` from a linked worktree exports GIT_DIR and friends into the
+  # pre-commit hook, and this suite inherits them from the run-unit-tests hook.
+  gfh_setup "pg-rescue-flake-lock-conflict"
+  gfh_restore_env
+
   if [[ -n ${SCRIPT_UNDER_TEST:-} ]]; then
     HANDLER=("$SCRIPT_UNDER_TEST")
   else
     HANDLER=(bash -euo pipefail "$SCRIPTS_DIR/pg-rescue-flake-lock-conflict.sh")
   fi
 
-  TEST_DIR="$(mktemp -d)"
-  export HOME="$TEST_DIR/home"
-  mkdir -p "$HOME"
-  export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
-  export GIT_CEILING_DIRECTORIES="$TEST_DIR"
-  # The handler's `git rebase --continue` makes commits, so it needs an identity.
-  export GIT_AUTHOR_NAME=T GIT_AUTHOR_EMAIL=t@example.com GIT_COMMITTER_NAME=T GIT_COMMITTER_EMAIL=t@example.com
+  TEST_DIR="$GFH_WORK"
 
   # Fakes live OUTSIDE the repository under test.
   STUB_DIR="$TEST_DIR/bin"
@@ -60,14 +66,19 @@ case "$2" in resolved) exit 0 ;; declined) exit 2 ;; *) exit 3 ;; esac
 RESCUE
   chmod +x "$STUB_DIR/nix" "$STUB_DIR/pg-rescue"
 
-  REPO="$TEST_DIR/repo"
+  # Distinct from GFH_REPO (the harness's own seeded repo at $GFH_WORK/repo).
+  REPO="$TEST_DIR/handler-repo"
 }
 
 teardown() {
-  rm -rf "$TEST_DIR"
+  gfh_teardown
 }
 
-g() { git -C "$REPO" -c user.name=T -c user.email=t@example.com -c commit.gpgsign=false "$@"; }
+# The repo under test; `new_repo` creates it with the harness (identity comes
+# from the repo's own per-suite config, so no -c overrides are needed).
+g() { git -C "$REPO" "$@"; }
+
+new_repo() { gfh_init_repo "$REPO" "pg-rescue-flake-lock-conflict"; }
 
 lock_with_node() { # NAME REV
   printf '{\n  "nodes": {\n    "%s": {\n      "rev": "%s"\n    },\n    "root": {}\n  }\n}\n' "$1" "$2"
@@ -76,8 +87,7 @@ lock_with_node() { # NAME REV
 # A repo on main whose feature branch rebases onto a diverged main, conflicting
 # on flake.lock (and on README.md when $1 = readme). Leaves the rebase stopped.
 make_conflict() {
-  mkdir -p "$REPO"
-  g init -q -b main
+  new_repo
   printf '{\n  "nodes": {\n    "root": {}\n  }\n}\n' >"$REPO/flake.lock"
   echo base >"$REPO/README.md"
   g add .
@@ -114,8 +124,7 @@ make_conflict() {
 }
 
 @test "with no rebase in progress it declines and touches nothing" {
-  mkdir -p "$REPO"
-  g init -q -b main
+  new_repo
   echo x >"$REPO/flake.lock"
   g add .
   g commit -q -m seed

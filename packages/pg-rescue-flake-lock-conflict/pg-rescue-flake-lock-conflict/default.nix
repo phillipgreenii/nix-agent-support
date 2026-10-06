@@ -1,6 +1,7 @@
 {
   mkBashScript,
   pkgs,
+  testSupport ? null,
 }:
 
 mkBashScript {
@@ -31,4 +32,5 @@ mkBashScript {
     pkgs.gnused
     pkgs.coreutils
   ];
+  inherit testSupport;
 }
