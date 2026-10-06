@@ -47,6 +47,34 @@ let
     max_backoff = cfg.sync.retry.maxBackoff;
   };
 
+  # The only attention.ordering.ties value pg-desk's config loader accepts
+  # (besides unset). MUST equal AttentionTiesDefault in
+  # packages/pg-desk/internal/config/config.go; test-pg-desk-module greps that
+  # file for this exact string, so drift fails the check.
+  attentionTiesDefault = "severity descending, then group size descending, then entity id";
+
+  # attention (bead pg2-xaqag): rendered only when the option is set. Within
+  # the block each rule kind keeps only the keys that were given (a null
+  # enabled/severity falls through to the rule's built-in default), and
+  # ordering is rendered only when ties is set.
+  renderedAttention =
+    if cfg.attention == null then
+      null
+    else
+      let
+        renderedRules = lib.mapAttrs (
+          _: r:
+          lib.filterAttrs (_: v: v != null) {
+            inherit (r) enabled severity;
+          }
+        ) cfg.attention.rules;
+        renderedOrdering = lib.filterAttrs (_: v: v != null) {
+          inherit (cfg.attention.ordering) ties;
+        };
+      in
+      lib.optionalAttrs (renderedRules != { }) { rules = renderedRules; }
+      // lib.optionalAttrs (renderedOrdering != { }) { ordering = renderedOrdering; };
+
   # The complete rendered document: every section-7.8 config key, each
   # included only when this module was actually given something for it —
   # mirrors home/programs/pg-connector's own "omit rather than render
@@ -96,7 +124,10 @@ let
   // lib.optionalAttrs (cfg.staleAfter != null) { stale_after = cfg.staleAfter; }
   // lib.optionalAttrs (renderedServe != { }) { serve = renderedServe; }
   // lib.optionalAttrs (renderedOpen != { }) { open = renderedOpen; }
-  // lib.optionalAttrs (renderedLinks != { }) { links = renderedLinks; };
+  // lib.optionalAttrs (renderedLinks != { }) { links = renderedLinks; }
+  // lib.optionalAttrs (renderedAttention != null && renderedAttention != { }) {
+    attention = renderedAttention;
+  };
 in
 {
   # Renders pg-desk's config.yaml from the docket design's section 7.8 key
@@ -437,6 +468,70 @@ in
           exec besides pg-connector.
         '';
       };
+    };
+
+    # attention (bead pg2-xaqag): mirrors packages/pg-desk/internal/config's
+    # AttentionConfig. The set of valid rule kinds is owned by pg-desk's
+    # attention registry (an unknown kind is rejected at config load), so
+    # `rules` is a free-form attrset keyed by rule kind here rather than an
+    # enumeration this module would have to keep in sync.
+    attention = lib.mkOption {
+      type = lib.types.nullOr (
+        lib.types.submodule {
+          options = {
+            rules = lib.mkOption {
+              type = lib.types.attrsOf (
+                lib.types.submodule {
+                  options = {
+                    enabled = lib.mkOption {
+                      type = lib.types.nullOr lib.types.bool;
+                      default = null;
+                      description = "config.yaml's attention.rules.<kind>.enabled. Null keeps the rule's built-in default (enabled).";
+                    };
+                    severity = lib.mkOption {
+                      type = lib.types.nullOr (
+                        lib.types.enum [
+                          "low"
+                          "medium"
+                          "high"
+                        ]
+                      );
+                      default = null;
+                      description = "config.yaml's attention.rules.<kind>.severity. Null keeps the rule's built-in default severity.";
+                    };
+                  };
+                }
+              );
+              default = { };
+              description = ''
+                config.yaml's attention.rules: per-rule-kind tuning, keyed by
+                rule kind (for example `pr.own-ci-failing`). A kind left out
+                takes its built-in default. pg-desk rejects an unknown kind
+                at config load.
+              '';
+            };
+            ordering = {
+              ties = lib.mkOption {
+                type = lib.types.nullOr (lib.types.enum [ attentionTiesDefault ]);
+                default = null;
+                description = ''
+                  config.yaml's attention.ordering.ties. pg-desk accepts only
+                  its default rule, "${attentionTiesDefault}" (the same as
+                  leaving it unset) and rejects any other value at config
+                  load, so that is the only value this option admits. Null
+                  renders nothing.
+                '';
+              };
+            };
+          };
+        }
+      );
+      default = null;
+      description = ''
+        config.yaml's attention block (docs/behavior/pg-desk/attention.md,
+        "Configuration"). Null (the default) renders no attention block, so
+        every rule kind takes its built-in default.
+      '';
     };
 
     links = {

@@ -103,7 +103,8 @@ so they share one source of truth):
 `attention.ordering.ties` admits only its default (leaving it unset is the same): any other value is
 a configuration error at load, so a deployment cannot believe it re-ordered the feed when it did
 not. An unknown rule kind in the block is a configuration error at load. A missing kind takes its
-built-in default, so a deployment with no `attention` block works.
+built-in default, so a deployment with no `attention` block works. The home-manager module renders
+this block from `phillipgreenii.programs.pg-desk.attention`.
 
 ## Grouping and order
 

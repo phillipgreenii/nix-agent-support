@@ -6069,6 +6069,30 @@
                     repos = [ { remote = "phillipgreenii/example-repo"; } ];
                   };
                   # areaLabels (bead pg2-lvoye): rendered as config.yaml's area_labels.
+                  # pg2-xaqag: attention block rendered only when set.
+                  hmAttention = evalHM {
+                    enable = true;
+                    selfLogin = "phillipgreenii";
+                    repos = [ { remote = "phillipgreenii/example-repo"; } ];
+                    attention = {
+                      rules = {
+                        "pr.own-ci-failing" = {
+                          enabled = false;
+                          severity = "low";
+                        };
+                        "pr.review-requested".severity = "high";
+                      };
+                      ordering.ties = "severity descending, then group size descending, then entity id";
+                    };
+                  };
+                  # Attention set but empty: still renders nothing.
+                  hmAttentionEmpty = evalHM {
+                    enable = true;
+                    selfLogin = "phillipgreenii";
+                    repos = [ { remote = "phillipgreenii/example-repo"; } ];
+                    attention = { };
+                  };
+
                   hmAreaLabels = evalHM {
                     enable = true;
                     selfLogin = "phillipgreenii";
@@ -6160,6 +6184,24 @@
                   grep -q 'field: title' "$f"
                   grep -q 'field: branch' "$f"
                   grep -q 'PROJ-\[0-9\]+' "$f"
+
+                  # attention (pg2-xaqag): absent by default and when set but empty;
+                  # rendered with the config loader's keys when set.
+                  ! grep -q attention ${hmEnabled.xdg.configFile."pg-desk/config.yaml".source}
+                  ! grep -q attention ${hmAttentionEmpty.xdg.configFile."pg-desk/config.yaml".source}
+                  a=${hmAttention.xdg.configFile."pg-desk/config.yaml".source}
+                  grep -q '^attention:' "$a"
+                  grep -q '^  rules:' "$a"
+                  grep -q '^    pr.own-ci-failing:' "$a"
+                  grep -q '^      enabled: false' "$a"
+                  grep -q '^      severity: low' "$a"
+                  # a rule given only a severity renders no enabled key (null is omitted)
+                  sed -n '/pr.review-requested:/,/^[^ ]/p' "$a" | grep -q 'severity: high'
+                  [ "$(grep -c 'enabled:' "$a")" = 1 ]
+                  grep -q '^  ordering:' "$a"
+                  grep -q '^    ties: severity descending, then group size descending, then entity id$' "$a"
+                  # the enum's single value must equal the Go loader's AttentionTiesDefault
+                  grep -qF 'const AttentionTiesDefault = "severity descending, then group size descending, then entity id"' ${./packages/pg-desk/internal/config/config.go}
                   touch $out
                 '';
 
