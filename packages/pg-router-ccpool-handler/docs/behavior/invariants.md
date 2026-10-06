@@ -221,3 +221,20 @@ review`. The claim is still released (status open, assignee cleared) — the lab
   intended change (unified diff, or full content for a new file). The notice MUST NOT be sent when
   the session runs under any other permission mode. This invariant does not choose the permission
   mode; that remains a deployment decision.
+- **`INV-CCH-17`** — once a dispatch reaches a terminal outcome (success, an applied failure
+  action, or a budget stop), the handler MUST close, without purging, the settled session it
+  launched or absorbed, so a finished session does not hold a counted slot of the pool until
+  `ccpool`'s idle timeout. The close applies to that session only, never to another row, and only
+  when ALL of the following hold at the moment of closing: the session is quiet (neither it nor
+  its Agent-tool subagents have written for the quiet window; for every isolation type, not only
+  worktrees); a fresh read shows the row present, not yet closed by anyone, and `idle` or
+  `errored`. A `needs_input` session (`phillipgreenii-nix-agent-support` ADR 0037), a session still starting, ready or working, a session already closed (the budget-stop
+  watchdog, an external idle-timeout, eviction or operator close), and any dispatch ended by daemon
+  shutdown are exempt; the shutdown sweep owns that teardown. A session that is not yet quiet is
+  left open and the deferral is logged. A failed close MUST NOT change the dispatch's outcome; it
+  is logged and the session is left to `ccpool`'s idle timeout. A settled row closed this way is
+  still the duplicate a crash-window redelivery of the same dispatch absorbs (`INV-CCH-2`,
+  `INV-EVT-2`) rather than a reason to launch a second session; a row closed by anyone else, or a
+  non-terminal dead row, is not. Operator ruling (Phillip, 2026-10-05, bead `pg2-58edz`), narrowing
+  the purge-on-teardown of `phillipgreenii-nix-agent-support` ADR 0015 to a non-purge close; see
+  ADR 0082.

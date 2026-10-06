@@ -42,6 +42,8 @@ treatment of its own named boundaries (its `INTF-BRIDGE` — example only, not a
   The `preShutdown` sweep MUST spare every actively working session (`INV-CCH-14`): it purges only
   sessions closable for another reason (turn ended, or `needs_input` with its bead already closed)
   and leaves a working session and its worktree untouched.
+  When a dispatch reaches a terminal outcome, this module also closes (without purging) the one
+  session it launched or absorbed, if it is settled and quiet (`INV-CCH-17`).
 - **`INTF-CCH-BEADS`** <!-- uuid: 01dd79ce-ffbc-4234-9d6e-e7125561694f --> — this module's
   beads-backed source querying `bd` for events, and a handler session's completion policy writing
   a result back to `bd`. **Counterparty:** `bd` (boundary). **Initiator:** this module.

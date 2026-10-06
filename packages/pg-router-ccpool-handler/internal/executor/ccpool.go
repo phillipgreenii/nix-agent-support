@@ -395,9 +395,14 @@ func budgetUnlimited(b budget.Budget) bool {
 // the decision names as "already distinguished elsewhere in this code" — one
 // cleanupWorktree call here covers all three, rather than three separate call
 // sites.
+//
+// It then closes (non-purge) the settled session this dispatch launched or
+// absorbed (closeSettledSession, INV-CCH-17, ADR 0082), so a finished session
+// does not hold a counted slot of a max_sessions=1 pool until idle_ttl.
 func (r *ccpoolRun) finishWait(ctx context.Context, cc *roles.CCPoolConfig, d DispatchContext, name, wt string, werr error) (report.Result, error) {
 	r.recordDispatchFailure(d, name, werr)
-	r.cleanupWorktree(ctx, cc, name, d.Item.ID, wt)
+	q := r.cleanupWorktree(ctx, cc, name, d.Item.ID, wt)
+	r.closeSettledSession(ctx, d.Item.ID, name, werr, q)
 	if werr == nil {
 		// A successful completion resets the eviction strike counter so
 		// escalateEviction's two-strike count stays CONSECUTIVE, not lifetime
@@ -452,38 +457,131 @@ func (r *ccpoolRun) finishWait(ctx context.Context, cc *roles.CCPoolConfig, d Di
 // for the next sweep (a future dispatch of the same bead reusing the same
 // worktree path, or pg-disk-reclaimer's independent belt-and-suspenders
 // sweep, decision item 4) rather than force-removing.
-func (r *ccpoolRun) cleanupWorktree(ctx context.Context, cc *roles.CCPoolConfig, name, beadID, wt string) {
+//
+// The returned quietResult reports whether this call already ran
+// waitSessionQuiet (and what it found), so finishWait's following
+// closeSettledSession reuses the verdict instead of polling a second time.
+func (r *ccpoolRun) cleanupWorktree(ctx context.Context, cc *roles.CCPoolConfig, name, beadID, wt string) quietResult {
 	if wt == "" || !usesWorktreeIsolation(cc.Isolation) {
-		return
+		return quietResult{}
 	}
 	if r.needsInputAlive(ctx, name) {
 		slog.Info("dispatch: worktree cleanup deferred -- session still needs_input",
 			"session", name, "worktree", wt)
-		return
+		return quietResult{}
 	}
 	if r.worktreeSharedWithLivePeer(ctx, name, wt) {
 		slog.Info("dispatch: worktree cleanup deferred -- another live session still uses it",
 			"session", name, "worktree", wt)
-		return
+		return quietResult{}
 	}
 	if !r.waitSessionQuiet(ctx, name) {
 		slog.Warn("dispatch: worktree cleanup deferred -- session or its subagents still active (left for next sweep)",
 			"session", name, "worktree", wt, "quietWindow", r.deps.Cfg.WorktreeQuietWindow)
-		return
+		return quietResult{checked: true, quiet: false}
 	}
+	q := quietResult{checked: true, quiet: true}
 	wm, err := r.deps.gitOpener()(ctx, wt)
 	if err != nil {
 		slog.Warn("dispatch: worktree cleanup: open failed (left for next sweep)",
 			"session", name, "worktree", wt, "err", err)
-		return
+		return q
 	}
 	if err := wm.RemoveWorktree(ctx, wt, false); err != nil {
 		slog.Warn("dispatch: worktree cleanup: remove failed (left for next sweep)",
 			"session", name, "worktree", wt, "err", err)
-		return
+		return q
 	}
 	slog.Info("dispatch: worktree removed", "session", name, "worktree", wt)
 	r.deleteBranch(ctx, name, beadID)
+	return q
+}
+
+// quietResult is cleanupWorktree's report of whether it already ran
+// waitSessionQuiet for this dispatch (checked) and, if so, its verdict
+// (quiet). The zero value means "not checked yet".
+type quietResult struct {
+	checked bool
+	quiet   bool
+}
+
+// closeSettledSessionTimeout bounds the settled-session close.
+const closeSettledSessionTimeout = time.Minute
+
+// closeSettledSession closes (non-purge, --reason handler) the session name
+// that this dispatch launched or absorbed, once the dispatch has reached a
+// terminal outcome and the session has settled (INV-CCH-17, ADR 0082). Without
+// it a finished session stays live and idle, counting against the pool's
+// max_sessions until ccpool's idle_ttl + reap tick, because a gated dispatcher
+// never pushes the pool over cap, so cap eviction never fires (ADR 0072).
+//
+// It closes ONLY name -- never another row -- and only when ALL hold:
+//   - neither ctx nor werr is a cancellation (a daemon shutdown is owned by
+//     the INV-CCH-14 preShutdown sweep, not by this dispatch tail);
+//   - the session is quiet (no write to its transcript or its Agent-tool
+//     subagents' for WorktreeQuietWindow; reuses cleanupWorktree's verdict
+//     when it already ran, otherwise runs waitSessionQuiet), for EVERY
+//     isolation type -- closing the tmux pane would kill running subagents;
+//   - a fresh List row for name is present, carries no CloseReason (nobody
+//     closed it already: watchdog hard stop, waitDone's death branch,
+//     idle_ttl/cap_eviction/operator), and is idle or errored (never
+//     starting/ready/working, and never needs_input, ADR 0037).
+//
+// A close failure is best effort: WARN and continue; werr and the dispatch
+// result are never changed. Every close logs INFO.
+func (r *ccpoolRun) closeSettledSession(ctx context.Context, beadID, name string, werr error, q quietResult) {
+	if ctx.Err() != nil || errors.Is(werr, context.Canceled) || errors.Is(werr, context.DeadlineExceeded) {
+		return
+	}
+	if !q.checked {
+		q.quiet = r.waitSessionQuiet(ctx, name)
+	}
+	if ctx.Err() != nil {
+		return // cancelled while waiting for quiet
+	}
+	if !q.quiet {
+		slog.Info("settled-session close deferred -- subagents active", "session", name, "bead", beadID)
+		return
+	}
+	sessions, err := r.deps.CC.List(ctx)
+	if err != nil {
+		slog.Warn("settled-session close skipped: could not re-read session", "session", name, "bead", beadID, "err", err)
+		return
+	}
+	var row ccpool.Session
+	found := false
+	for _, s := range sessions {
+		if s.ExternalID == name {
+			row, found = s, true
+			break
+		}
+	}
+	if !found || row.CloseReason != "" || (row.State != ccpool.StateIdle && row.State != ccpool.StateErrored) {
+		return
+	}
+	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), closeSettledSessionTimeout)
+	defer cancel()
+	if err := r.deps.CC.Close(cctx, name, false); err != nil {
+		slog.Warn("settled-session close failed (left to idle_ttl)", "session", name, "bead", beadID, "err", err)
+		return
+	}
+	slog.Info("settled session closed", "session", name, "bead", beadID,
+		"state", string(row.State), "outcome", settledOutcome(werr))
+}
+
+// settledOutcome labels a dispatch's terminal outcome for closeSettledSession's
+// INFO log line.
+func settledOutcome(werr error) string {
+	switch {
+	case werr == nil:
+		return "success"
+	case errors.Is(werr, watchdog.ErrBudgetExceeded):
+		return "budget_stop"
+	case errors.Is(werr, ErrExternallyClosed):
+		return "externally_closed"
+	default:
+		return "failure"
+	}
 }
 
 // deleteBranch removes this bead's own throwaway pg-router/<beadID> anchor
@@ -613,8 +711,10 @@ func usesWorktreeIsolation(cfg roles.IsolationConfig) bool {
 // closed still correlates a genuine already-settled duplicate (INV-EVT-2's
 // own "absorb rather than start a second session" guarantee) — only a row
 // that either crashed mid-flight (Live=false, never reached idle/errored) or
-// has ALREADY been explicitly closed (CloseReason set — nothing left to
-// absorb) counts as dead here.
+// has ALREADY been explicitly closed by someone other than this handler's own
+// settled-session close (CloseReason set otherwise — nothing left to absorb)
+// counts as dead here. A settled row this handler closed itself (CloseReason
+// "handler", idle/errored; INV-CCH-17) is still a duplicate to absorb.
 func (r *ccpoolRun) findSessionByName(ctx context.Context, name string) (ccpool.Session, bool) {
 	sessions, err := r.deps.CC.List(ctx)
 	if err != nil {
@@ -632,30 +732,36 @@ func (r *ccpoolRun) findSessionByName(ctx context.Context, name string) (ccpool.
 // must treat as ABSENT rather than a genuine duplicate worth absorbing
 // (pg2-04bf7):
 //
-//   - Live sessions are never crash-orphaned — still literally running,
+//   - Live sessions are never crash-orphaned -- still literally running,
 //     whatever their store State (active()'s own polling logic decides
 //     separately whether it's still worth WAITING on).
-//   - A row ccpool has ALREADY explicitly closed (CloseReason != "" —
-//     idle_ttl/cap_eviction/operator, or this handler's own "handler" close,
-//     including waitDone's own dead-row cleanup below) has nothing left to
-//     absorb: re-matching it would just re-run the SAME dead-row collision
-//     waitDone already resolved once.
+//   - A settled row this handler itself closed (CloseReason == "handler" with
+//     State idle/errored) is NOT orphaned: closeSettledSession closes every
+//     session it settles (INV-CCH-17, ADR 0082), so a crash-window
+//     redelivery of that same dispatch finds exactly this row and must still
+//     absorb it (INV-EVT-2) rather than launch a second session for an
+//     already-settled bead.
+//   - Any OTHER row ccpool has ALREADY explicitly closed (CloseReason != "" --
+//     idle_ttl/cap_eviction/operator, or a handler close of a non-terminal row
+//     such as waitDone's own dead-row cleanup) has nothing left to absorb:
+//     re-matching it would just re-run the SAME dead-row collision waitDone
+//     already resolved once.
 //   - Otherwise (never closed by anyone, not live): a row that reached a
 //     Claude-hook-driven terminal state (Idle: Stop hook, the turn legitimately
 //     ended; Errored: StopFailure hook, an API error legitimately ended the
-//     turn) is a genuinely-settled prior duplicate — nothing auto-closes a
-//     settled session (ADR 0072/0015), so Live going false on its own here is
-//     NOT a crash signal. A row stuck in a NON-terminal state
+//     turn) is a genuinely-settled prior duplicate -- Live going false on its
+//     own here is NOT a crash signal. A row stuck in a NON-terminal state
 //     (starting/ready/working/needs_input) while not live never reached
-//     either hook: its tmux pane died mid-flight — a genuine crash.
+//     either hook: its tmux pane died mid-flight -- a genuine crash.
 func crashOrphaned(s ccpool.Session) bool {
 	if s.Live {
 		return false
 	}
+	settled := s.State == ccpool.StateIdle || s.State == ccpool.StateErrored
 	if s.CloseReason != "" {
-		return true
+		return !(s.CloseReason == "handler" && settled)
 	}
-	return s.State != ccpool.StateIdle && s.State != ccpool.StateErrored
+	return !settled
 }
 
 // absorbDuplicate treats this dispatch as an already-in-flight duplicate of

@@ -4,6 +4,11 @@
 **Date**: 2026-09-21
 **Deciders**: Phillip Green II
 
+> **Later note (2026-10-05, ADR 0082):** Decision item 2's claim that eviction reclaims settled
+> sessions does not hold for a gated dispatcher-only pool, which never exceeds the cap, so cap
+> eviction never runs for it. The handler now closes (without purging) the settled session it
+> launched or absorbed once its dispatch finishes. The admission gate itself is unchanged.
+
 ## Context
 
 ADR 0037 spares a `needs_input` session from both reap passes and lets it keep counting

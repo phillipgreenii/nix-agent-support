@@ -628,10 +628,12 @@ func TestWaitDone_externalCloseDoesNotDoubleClose(t *testing.T) {
 
 // TestCrashOrphaned_cases pins down the exact predicate findSessionByName
 // relies on (pg2-04bf7): dead ONLY for a row that is not live AND (already
-// explicitly closed by ccpool, OR never reached a hook-driven terminal
-// state) — never for a still-live row, and never for a not-live row that
-// legitimately settled (idle/errored) without ever being explicitly closed
-// (INV-EVT-2's own "absorb, don't re-launch" guarantee for that case).
+// explicitly closed by someone other than this handler's own settled-session
+// close, OR never reached a hook-driven terminal state) — never for a
+// still-live row, never for a not-live row that legitimately settled
+// (idle/errored) without ever being explicitly closed, and never for a
+// settled (idle/errored) row this handler closed itself (INV-CCH-17):
+// INV-EVT-2's own "absorb, don't re-launch" guarantee for those cases.
 func TestCrashOrphaned_cases(t *testing.T) {
 	cases := []struct {
 		name string
@@ -643,7 +645,13 @@ func TestCrashOrphaned_cases(t *testing.T) {
 		{"crash while starting, never closed", ccpool.Session{Live: false, State: ccpool.StateStarting}, true},
 		{"settled idle, never explicitly closed", ccpool.Session{Live: false, State: ccpool.StateIdle}, false},
 		{"settled errored, never explicitly closed", ccpool.Session{Live: false, State: ccpool.StateErrored}, false},
-		{"already closed by ccpool despite idle state", ccpool.Session{Live: false, State: ccpool.StateIdle, CloseReason: "handler"}, true},
+		{"handler-closed settled idle row is a duplicate to absorb (INV-CCH-17)", ccpool.Session{Live: false, State: ccpool.StateIdle, CloseReason: "handler"}, false},
+		{"handler-closed settled errored row is a duplicate to absorb (INV-CCH-17)", ccpool.Session{Live: false, State: ccpool.StateErrored, CloseReason: "handler"}, false},
+		{"handler-closed non-terminal dead row stays absent", ccpool.Session{Live: false, State: ccpool.StateWorking, CloseReason: "handler"}, true},
+		{"handler-closed starting dead row stays absent", ccpool.Session{Live: false, State: ccpool.StateStarting, CloseReason: "handler"}, true},
+		{"idle_ttl-closed despite idle state", ccpool.Session{Live: false, State: ccpool.StateIdle, CloseReason: "idle_ttl"}, true},
+		{"cap_eviction-closed despite idle state", ccpool.Session{Live: false, State: ccpool.StateIdle, CloseReason: "cap_eviction"}, true},
+		{"operator-closed despite idle state", ccpool.Session{Live: false, State: ccpool.StateIdle, CloseReason: "operator"}, true},
 		{"already closed by ccpool despite errored state", ccpool.Session{Live: false, State: ccpool.StateErrored, CloseReason: "idle_ttl"}, true},
 		{"already closed but somehow still live (defensive)", ccpool.Session{Live: true, State: ccpool.StateErrored, CloseReason: "operator"}, false},
 		{"live and working", ccpool.Session{Live: true, State: ccpool.StateWorking}, false},
@@ -672,7 +680,8 @@ func TestFindSessionByName_deadRowTreatedAsAbsent(t *testing.T) {
 	}{
 		{"crash-orphaned, never closed (Live=false)", ccpool.Session{Name: "pg-router-feedback-zr-c", Live: false, State: ccpool.StateWorking}},
 		{"crash-orphaned while needs_input", ccpool.Session{Name: "pg-router-feedback-zr-c", Live: false, State: ccpool.StateNeedsInput}},
-		{"already closed by ccpool (fix b's own Close, idle state)", ccpool.Session{Name: "pg-router-feedback-zr-c", Live: false, State: ccpool.StateIdle, CloseReason: "handler"}},
+		{"closed by waitDone's death-branch Close of a non-terminal row", ccpool.Session{Name: "pg-router-feedback-zr-c", Live: false, State: ccpool.StateWorking, CloseReason: "handler"}},
+		{"already closed by ccpool (idle_ttl, idle state)", ccpool.Session{Name: "pg-router-feedback-zr-c", Live: false, State: ccpool.StateIdle, CloseReason: "idle_ttl"}},
 		{"already closed by ccpool (errored state)", ccpool.Session{Name: "pg-router-feedback-zr-c", Live: false, State: ccpool.StateErrored, CloseReason: "cap_eviction"}},
 	}
 	for _, tc := range cases {
@@ -711,10 +720,12 @@ func TestFindSessionByName_liveMatchFound(t *testing.T) {
 // TestFindSessionByName_settledWithoutExplicitClose_stillMatched is the
 // direct regression lock for TestDispatch_crashWindowRedelivery_
 // absorbsIntoExistingSession's own premise: a row that legitimately finished
-// (Idle: Claude's Stop hook fired) and has since gone Live=false on its own —
-// nothing auto-closes a settled session (ADR 0072/0015) — but was NEVER
-// explicitly closed by ccpool (CloseReason=="") must still be matched. This
-// is NOT the zombie case: the row settled naturally rather than crashing
+// (Idle: Claude's Stop hook fired) and has since gone Live=false on its own,
+// but was NEVER explicitly closed by ccpool (CloseReason=="") must still be
+// matched. (Since INV-CCH-17 / ADR 0082 the handler normally closes a settled
+// session itself; this covers a row nobody closed, e.g. a failed or deferred
+// close, and the sibling test below covers the handler-closed row.) This is
+// NOT the zombie case: the row settled naturally rather than crashing
 // mid-flight, so INV-EVT-2 still requires absorbing it rather than launching
 // a redundant second session for an already-completed bead.
 func TestFindSessionByName_settledWithoutExplicitClose_stillMatched(t *testing.T) {
@@ -724,6 +735,23 @@ func TestFindSessionByName_settledWithoutExplicitClose_stillMatched(t *testing.T
 	got, ok := e.findSessionByName(context.Background(), "pg-router-feedback-zr-c")
 	if !ok || got.ExternalID != "att-1" {
 		t.Errorf("a naturally-settled (never explicitly closed) row must still be matched; got=%v ok=%v", got, ok)
+	}
+}
+
+// TestFindSessionByName_handlerClosedSettledRow_stillMatched: a settled
+// (idle/errored) row the handler closed itself (CloseReason "handler",
+// INV-CCH-17) is still the duplicate a crash-window redelivery must absorb.
+func TestFindSessionByName_handlerClosedSettledRow_stillMatched(t *testing.T) {
+	for _, state := range []ccpool.SessionState{ccpool.StateIdle, ccpool.StateErrored} {
+		t.Run(string(state), func(t *testing.T) {
+			sess := ccpool.Session{ExternalID: "att-1", Name: "pg-router-feedback-zr-c", Live: false, State: state, CloseReason: "handler"}
+			cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{sess}}}
+			e := newExec(cc, &dtest.ScriptBD{}, fastCfg())
+			got, ok := e.findSessionByName(context.Background(), "pg-router-feedback-zr-c")
+			if !ok || got.ExternalID != "att-1" {
+				t.Errorf("a handler-closed settled row must still be matched; got=%v ok=%v", got, ok)
+			}
+		})
 	}
 }
 
@@ -1581,8 +1609,17 @@ func TestDispatch_crashWindowRedelivery_absorbsIntoExistingSession(t *testing.T)
 		{{ExternalID: "att-1", Name: display, Live: true, State: ccpool.StateWorking}},
 		{{ExternalID: "att-1", Name: display, Live: true, State: ccpool.StateWorking}},
 		{{ExternalID: "att-1", Name: display, Live: true, State: ccpool.StateWorking}},
-		// att-1's own session has since settled by the time the redelivery lands.
-		{{ExternalID: "att-1", Name: display, Live: false, State: ccpool.StateIdle}},
+		// att-1 has settled (idle) when its own finishWait runs: cleanupWorktree's
+		// needs_input, live-peer and quiet List reads, then closeSettledSession's
+		// re-read (4 Lists, INV-CCH-17), which closes it (non-purge).
+		{{ExternalID: "att-1", Name: display, Live: true, State: ccpool.StateIdle}},
+		{{ExternalID: "att-1", Name: display, Live: true, State: ccpool.StateIdle}},
+		{{ExternalID: "att-1", Name: display, Live: true, State: ccpool.StateIdle}},
+		{{ExternalID: "att-1", Name: display, Live: true, State: ccpool.StateIdle}},
+		// By the time the redelivery lands the handler's own close has stamped the
+		// row (dtest.FakeCC.Close does not mutate it, so it is scripted here). The
+		// settled handler-closed row must still be absorbed (INV-EVT-2).
+		{{ExternalID: "att-1", Name: display, Live: false, State: ccpool.StateIdle, CloseReason: "handler"}},
 	}}
 	d := DispatchContext{Role: role, Item: item.Item{ID: "zr-c"}}
 
@@ -1617,6 +1654,11 @@ func TestDispatch_crashWindowRedelivery_absorbsIntoExistingSession(t *testing.T)
 	}
 	if got := cc.Sent; len(got) != 1 || got[0] != "att-1" {
 		t.Errorf("exactly one Send (the first attempt's own nudge) may ever happen; Sent=%v", got)
+	}
+	// The first dispatch closed its settled session once, non-purge; the absorbed
+	// redelivery saw the handler-stamped row and closed nothing further.
+	if len(cc.Closed) != 1 || cc.Closed[0] != "att-1" || len(cc.ClosedPurge) != 1 || cc.ClosedPurge[0] {
+		t.Errorf("exactly one non-purge close of att-1 expected; Closed=%v ClosedPurge=%v", cc.Closed, cc.ClosedPurge)
 	}
 }
 

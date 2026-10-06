@@ -61,7 +61,13 @@ func failedDispatch(t *testing.T, cc ccpoolRunnerFor, path string) (map[string]a
 		t.Fatal(err)
 	}
 	clk := &dtest.ManualClock{T: time.Unix(0, 0)}
-	e := &ccpoolRun{deps: Deps{CC: cc.fake(), BD: bd, Cfg: cfg, Now: clk.Now, Tick: clk.TickAdvancing(), Log: w}}
+	// These tests are about the failure signature, not the settled-session
+	// close's quiet check (INV-CCH-17). The manual clock starts at the epoch
+	// while the fixture transcript's mtime is real, so without this stub the
+	// quiet wait would spin its whole WorktreeQuietMax of fake ticks (each an
+	// os.Stat) per dispatch, taking minutes. "No observable activity" => quiet.
+	noActivity := func(string) (time.Time, bool) { return time.Time{}, false }
+	e := &ccpoolRun{deps: Deps{CC: cc.fake(), BD: bd, Cfg: cfg, Now: clk.Now, Tick: clk.TickAdvancing(), Log: w, LatestActivity: noActivity}}
 	d := DispatchContext{Role: workerRole(cfg), Item: item.Item{ID: "zr-w"}}
 	werr := e.waitDone(context.Background(), nil, d, sigSession)
 	if werr == nil {
