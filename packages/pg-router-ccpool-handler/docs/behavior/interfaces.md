@@ -32,18 +32,24 @@ treatment of its own named boundaries (its `INTF-BRIDGE` — example only, not a
 - **`INTF-CCH-CCPOOL`** <!-- uuid: d1fc9c42-5d04-4df3-bfb1-a11cc97d668d --> — a ccpool-backed
   handler session's crossing into the `ccpool` CLI to start, observe, and reap an agent session,
   PLUS (pg2-oju6w.15) this module's own `preShutdown` hook sweeping the prefix-matching sessions
-  across the whole process — not scoped to one dispatch — the once-per-process-lifetime
+  of the daemon's default pool — not scoped to one dispatch — the once-per-process-lifetime
   relocation of a sweep pg-router's own core used to run directly against `ccpool` before this
   module existed. **Counterparty:** `ccpool` (boundary; `packages/ccpool/docs/behavior` owns its
   internals). **Initiator:** this module. **Multiplicity:** one per ccpool-backed handler session
-  for the per-dispatch crossing; one sweep per `preShutdown` call (itself once per enabled role
-  sharing this process, per `INTF-HANDLER`'s own lifecycle-hooks note on no cross-role
-  de-duplication).
+  for the per-dispatch crossing, plus one lease write per poll interval for as long as that
+  dispatch runs and one role-scoped orphan reconcile per dispatch; one sweep per daemon shutdown
+  (the core delivers `preShutdown` to the first enabled role's handler only, so the sweep is not
+  repeated per role).
   The `preShutdown` sweep MUST spare every actively working session (`INV-CCH-14`): it purges only
   sessions closable for another reason (turn ended, or `needs_input` with its bead already closed)
-  and leaves a working session and its worktree untouched.
+  and leaves a working session and its worktree untouched. It lists only the default pool; a
+  session in a role's own pool is outside it.
   When a dispatch reaches a terminal outcome, this module also closes (without purging) the one
   session it launched or absorbed, if it is settled and quiet (`INV-CCH-17`).
+  While a dispatch runs, this module writes a supervision lease into the session's metadata
+  (`INV-CCH-18`), never as a `ccpool` label. Before checking capacity, a dispatch also reconciles
+  its own role's orphaned sessions in that role's pool: a session whose lease has expired is
+  reclaimed or, if still working and over its time budget, hard-stopped (`INV-CCH-18`).
 - **`INTF-CCH-BEADS`** <!-- uuid: 01dd79ce-ffbc-4234-9d6e-e7125561694f --> — this module's
   beads-backed source querying `bd` for events, and a handler session's completion policy writing
   a result back to `bd`. **Counterparty:** `bd` (boundary). **Initiator:** this module.

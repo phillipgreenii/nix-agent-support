@@ -61,3 +61,39 @@ func TestOriginProbe_defaultsAndValidate(t *testing.T) {
 		}
 	}
 }
+
+// TestDefault_leaseTTL pins the supervision-lease default (bead pg2-g2u9m,
+// INV-CCH-18): 2 minutes, i.e. 12 polls of the default 10s PollInterval.
+func TestDefault_leaseTTL(t *testing.T) {
+	d := Default()
+	if d.LeaseTTL.Minutes() != 2 {
+		t.Fatalf("Default().LeaseTTL = %v, want 2m", d.LeaseTTL)
+	}
+	if d.PollInterval.Seconds() != 10 {
+		t.Fatalf("Default().PollInterval = %v, want 10s", d.PollInterval)
+	}
+}
+
+// TestValidate_leaseTTL: load rejects a TTL below LeaseTTLMinPolls x
+// PollInterval (a live handler's lease could lapse after a few missed
+// refreshes) and accepts the boundary.
+func TestValidate_leaseTTL(t *testing.T) {
+	c := Default()
+	c.LeaseTTL = LeaseTTLMinPolls * c.PollInterval // exactly the minimum
+	if err := c.Validate(); err != nil {
+		t.Errorf("TTL == 10 x PollInterval must validate: %v", err)
+	}
+	c.LeaseTTL = LeaseTTLMinPolls*c.PollInterval - 1
+	if err := c.Validate(); err == nil {
+		t.Error("TTL just under 10 x PollInterval must be rejected")
+	}
+	c.LeaseTTL = 0
+	if err := c.Validate(); err == nil {
+		t.Error("a zero TTL must be rejected")
+	}
+	c = Default()
+	c.PollInterval = 30 * 1e9 // 30s => 10x = 5m > the 2m default
+	if err := c.Validate(); err == nil {
+		t.Error("a PollInterval whose 10x exceeds the TTL must be rejected")
+	}
+}

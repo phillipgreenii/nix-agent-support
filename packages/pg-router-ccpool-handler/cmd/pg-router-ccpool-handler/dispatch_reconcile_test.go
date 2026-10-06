@@ -91,6 +91,11 @@ func TestRunDispatch_reconciliationRunsForCcpoolRole(t *testing.T) {
 	if !containsSubstring(msgs, "reconcile: list failed") {
 		t.Fatalf("runDispatch for a ccpool role must reach reconcileClosedBeadSessions (observed via its list-failure log); got messages=%v", msgs)
 	}
+	// The role-scoped orphan reconcile (pg2-g2u9m, INV-CCH-18) runs right after
+	// it, from this same dispatch path.
+	if !containsSubstring(msgs, "orphan reconcile: list failed") {
+		t.Fatalf("runDispatch for a ccpool role must also reach reconcileOrphanSessions (observed via its list-failure log); got messages=%v", msgs)
+	}
 }
 
 // TestRunDispatch_reconciliationSkippedForCommandRole proves a "command"
@@ -116,7 +121,7 @@ func TestRunDispatch_reconciliationSkippedForCommandRole(t *testing.T) {
 		})
 	})
 	for _, m := range msgs {
-		if strings.Contains(m, "reconcile:") {
+		if strings.Contains(m, "reconcile:") || strings.Contains(m, "orphan reconcile") {
 			t.Fatalf("a command-role dispatch must never reach reconcileClosedBeadSessions; got messages=%v", msgs)
 		}
 	}

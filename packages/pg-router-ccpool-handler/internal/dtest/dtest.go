@@ -83,6 +83,30 @@ type FakeCC struct {
 	// set CapErr.
 	Cap    ccpool.Capacity
 	CapErr error
+	// MetaSets records every SetMeta call in order (the supervision-lease
+	// refreshes, INV-CCH-18); SetMetaErr, when set, makes every call fail after
+	// recording it. Guarded by mu: the lease ticker runs concurrently with the
+	// dispatch.
+	MetaSets   []MetaSet
+	SetMetaErr error
+}
+
+// MetaSet is one recorded FakeCC.SetMeta call.
+type MetaSet struct{ ExternalID, Key, Value string }
+
+// SetMetaCalls returns a copy of the recorded SetMeta calls (safe to read while
+// a lease ticker is still running).
+func (f *FakeCC) SetMetaCalls() []MetaSet {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]MetaSet(nil), f.MetaSets...)
+}
+
+func (f *FakeCC) SetMeta(_ context.Context, externalID, key, value string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.MetaSets = append(f.MetaSets, MetaSet{externalID, key, value})
+	return f.SetMetaErr
 }
 
 func (f *FakeCC) Ensure(_ context.Context, externalID, name, cwd string, env, meta map[string]string) error {

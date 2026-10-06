@@ -194,3 +194,21 @@ func mustEval(t *testing.T, p string) string {
 	}
 	return r
 }
+
+// buildDeps wires the per-session lock directory under the handler state dir
+// (the one holding events.jsonl), so the orphan reconcile and an absorbing
+// dispatch share their flocks (pg2-g2u9m, INV-CCH-18).
+func TestBuildDeps_lockDirUnderHandlerStateDir(t *testing.T) {
+	cfg := config.Default()
+	cfg.OriginProbe.StateDir = "/state/handler"
+	deps := buildDeps(cfg, roles.Role{Name: "worker", Type: "ccpool", CCPool: &roles.CCPoolConfig{}})
+	if deps.LockDir != "/state/handler/locks" {
+		t.Errorf("LockDir = %q, want /state/handler/locks", deps.LockDir)
+	}
+	t.Setenv("XDG_STATE_HOME", "/xdg")
+	cfg.OriginProbe.StateDir = ""
+	deps = buildDeps(cfg, roles.Role{Name: "worker", Type: "ccpool", CCPool: &roles.CCPoolConfig{}})
+	if deps.LockDir != "/xdg/pg-router-ccpool-handler/locks" {
+		t.Errorf("default LockDir = %q, want /xdg/pg-router-ccpool-handler/locks", deps.LockDir)
+	}
+}

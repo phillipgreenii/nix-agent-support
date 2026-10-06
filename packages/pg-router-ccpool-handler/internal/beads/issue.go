@@ -36,6 +36,10 @@ type Issue struct {
 	CommentCount int            `json:"comment_count"`
 	Metadata     map[string]any `json:"metadata"`
 	CreatedBy    string         `json:"created_by"` // bd attributes creation to BEADS_ACTOR; lets a dispatch claim only its own new beads
+	// Assignee is the bd assignee (the claiming actor) on `bd show --json`; ""
+	// when unassigned. The orphan reconcile unclaims only a bead still assigned to
+	// the role's own actor (INV-CCH-18).
+	Assignee string `json:"assignee"`
 }
 
 // HasLabel reports whether the issue carries the given label.

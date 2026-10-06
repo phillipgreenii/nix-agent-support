@@ -56,7 +56,9 @@ The dispatch-time reconcile does not help: it closes only sessions whose bead is
   is absorbed rather than relaunched, for as long as the row exists. Bounding that (for example
   to rows whose bead is already complete) is a follow-up, not part of this decision.
 - Orphaned sessions whose handler died (daemon restart, crash) are not covered here; they need a
-  supervision step in the reconcile.
+  supervision step in the reconcile. Later note (2026-10-06): ADR 0083 adds that step, a
+  supervision lease the handler keeps fresh and a role-scoped orphan reconcile that acts on an
+  expired one.
 - Rejected: leaving the slot to `idle_ttl` and shortening it. It also shortens the life of
   sessions that are legitimately idle between turns, and adds no signal that the dispatch is
   finished.

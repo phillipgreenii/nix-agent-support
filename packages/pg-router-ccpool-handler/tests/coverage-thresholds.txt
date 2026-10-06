@@ -32,3 +32,4 @@ internal/beads 70
 # leak. The bar is 95, which leaves the usual small margin below the measured
 # value.
 internal/failsig 95
+internal/sessionlock 80

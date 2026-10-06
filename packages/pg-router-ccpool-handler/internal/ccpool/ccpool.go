@@ -6,8 +6,8 @@
 // This package is the per-dispatch half of this module's INTF-CCH-CCPOOL
 // boundary crossing (docs/behavior/interfaces.md): starting, observing, and
 // reaping a ccpool-backed handler session's own agent session. The other
-// half — the once-per-process-lifetime preShutdown sweep across every
-// prefix-matching session — lives in
+// half — the once-per-process-lifetime preShutdown sweep across the default
+// pool's prefix-matching sessions — lives in
 // cmd/pg-router-ccpool-handler/preshutdown.go's teardownAllSessions.
 package ccpool
 
@@ -124,4 +124,9 @@ type Runner interface {
 	// Capacity reports the pool's current occupancy (ADR 0072), for an
 	// admission gate to consult before dispatch (a later packet's concern).
 	Capacity(ctx context.Context) (Capacity, error)
+	// SetMeta upserts one session-metadata key (`ccpool meta set`). The handler
+	// uses it to refresh the supervision lease (pgrouter.lease_until, INV-CCH-18)
+	// and to mark a reclaimed orphan; it is an unconditional write, never a
+	// compare-and-set (mutual exclusion is the handler's own flock).
+	SetMeta(ctx context.Context, externalID, key, value string) error
 }

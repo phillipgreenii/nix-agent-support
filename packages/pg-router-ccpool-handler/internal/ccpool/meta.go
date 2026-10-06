@@ -1,5 +1,7 @@
 package ccpool
 
+import "time"
+
 // pg-router's session-metadata key namespace. Keys are PREFIXED (pgrouter.*) because
 // they live in a KV store shared with ccpool and any other consumer; the prefix
 // prevents collision with a key ccpool or another writer might use. (Design:
@@ -8,6 +10,24 @@ const (
 	MetaKeyBead = "pgrouter.bead" // the bead id the session is working
 	MetaKeyRole = "pgrouter.role" // the pg-router role name
 	MetaKeyPool = "pgrouter.pool" // owner tag; always PoolName
+
+	// MetaKeyLeaseUntil is the supervision lease (bead pg2-g2u9m, INV-CCH-18):
+	// an RFC3339 UTC instant until which a live handler vouches that it is
+	// supervising the session. The dispatching handler stamps it at launch
+	// (covering the launch wait plus one TTL) and refreshes it every poll; a
+	// lease in the past means nobody is supervising the session any more. A
+	// session with NO lease (launched by an older build) is never an orphan.
+	// NEVER passed as a ccpool --label: a per-poll value would churn telemetry.
+	MetaKeyLeaseUntil = "pgrouter.lease_until"
+	// MetaKeyLaunchedAt is the RFC3339 UTC instant the dispatch launched the
+	// session. It lets a reconcile (or an absorbing dispatch) measure the time
+	// budget from the real launch rather than from "now". Never a --label.
+	MetaKeyLaunchedAt = "pgrouter.launched_at"
+	// MetaKeyOrphanReclaimed marks a session the orphan reconcile closed
+	// (RFC3339 UTC of the reclaim). A reclaimed row is NOT a duplicate worth
+	// absorbing: its work was abandoned, so a redelivered dispatch must launch
+	// afresh. Never a --label.
+	MetaKeyOrphanReclaimed = "pgrouter.orphan_reclaimed"
 )
 
 // PoolName is the owner value stamped on pgrouter.pool, identifying pg-router's sessions
@@ -15,10 +35,46 @@ const (
 const PoolName = "pg-router"
 
 // DispatchMeta builds the session metadata pg-router stamps on a session at dispatch.
-func DispatchMeta(beadID, role string) map[string]string {
-	return map[string]string{
+//
+// now is the dispatch's clock reading and leaseTTL the supervision-lease TTL
+// (config.Config.LeaseTTL). The initial lease covers the whole `ccpool new`
+// wait (EnsureTimeout) plus one TTL, so a session still launching is never
+// mistaken for an orphan; the handler shortens it to now+TTL on its first
+// refresh once Ensure succeeds. A zero now or a non-positive leaseTTL omits the
+// lease keys (the session is then never treated as an orphan).
+func DispatchMeta(beadID, role string, now time.Time, leaseTTL time.Duration) map[string]string {
+	m := map[string]string{
 		MetaKeyBead: beadID,
 		MetaKeyRole: role,
 		MetaKeyPool: PoolName,
 	}
+	if !now.IsZero() && leaseTTL > 0 {
+		m[MetaKeyLaunchedAt] = FormatMetaTime(now)
+		m[MetaKeyLeaseUntil] = FormatMetaTime(now.Add(EnsureTimeout + leaseTTL))
+	}
+	return m
 }
+
+// FormatMetaTime renders t the way the pgrouter.* time keys carry it: RFC3339, UTC.
+func FormatMetaTime(t time.Time) string { return t.UTC().Format(time.RFC3339) }
+
+// ParseMetaTime parses a pgrouter.* time value; ok is false for an absent or
+// malformed value.
+func ParseMetaTime(v string) (time.Time, bool) {
+	if v == "" {
+		return time.Time{}, false
+	}
+	t, err := time.Parse(time.RFC3339, v)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t, true
+}
+
+// LeaseUntil returns the session's supervision-lease expiry; ok is false when
+// the session carries no (parseable) lease.
+func (s Session) LeaseUntil() (time.Time, bool) { return ParseMetaTime(s.Meta[MetaKeyLeaseUntil]) }
+
+// LaunchedAt returns the instant the dispatch launched the session; ok is
+// false when the session carries no (parseable) launch time.
+func (s Session) LaunchedAt() (time.Time, bool) { return ParseMetaTime(s.Meta[MetaKeyLaunchedAt]) }

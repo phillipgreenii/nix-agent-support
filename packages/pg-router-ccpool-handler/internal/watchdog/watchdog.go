@@ -76,6 +76,14 @@ type Watchdog struct {
 	Now  func() time.Time
 	Poll time.Duration
 
+	// Start is the instant the budget's elapsed time is measured from. The zero
+	// value means "now" (Run begins its clock when it starts), which is right for
+	// a dispatch that just launched its session. An absorbing dispatch sets it to
+	// the session's recorded launch time (pgrouter.launched_at) so absorbing an
+	// under-budget orphan does not grant it a fresh budget (bead pg2-g2u9m,
+	// INV-CCH-18; pg2-3j76b's case).
+	Start time.Time
+
 	// FirstTurnStarted reports whether the model has taken at least one turn in the
 	// session transcript. The reminder/wrap-up NUDGES are gated on this: a
 	// context-less model that never ingested its task must not be prompted, or it
@@ -142,7 +150,10 @@ func (w *Watchdog) emit(level, kind, msg string, fields map[string]any) {
 // except through the opaque completion-outcome string
 // cmd/pg-router-ccpool-handler/dispatch.go's writeReply produces.
 func (w *Watchdog) Run(ctx context.Context, sessionName, beadID string) error {
-	start := w.now()
+	start := w.Start
+	if start.IsZero() {
+		start = w.now()
+	}
 	highest := budget.None
 	for {
 		snap, _ := w.Reader.Read(ctx, w.transcriptPath(ctx, sessionName))

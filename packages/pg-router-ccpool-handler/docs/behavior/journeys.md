@@ -12,7 +12,7 @@ Realization gaps; these are the stories Task 5.2 onward realizes.
   want a registered handler participant to run an agent session on my behalf through `ccpool` (or
   a bare configured command), so pg-router itself never needs to know how to drive an agent.
   _(→ `USECASE-CCH-DISPATCH`; `INV-CCH-2`, `INV-CCH-3`, `INV-CCH-4`, `INV-CCH-5`,
-  `INV-CCH-9`, `INV-CCH-10`, `INV-CCH-17`.)_
+  `INV-CCH-9`, `INV-CCH-10`, `INV-CCH-14`, `INV-CCH-17`, `INV-CCH-18`.)_
 - **`STORY-CCH-QUERY`** <!-- uuid: 661a1b2c-4243-42b3-8fcc-607e8ec7e4af --> — As pg-router's core, I
   want a registered source to query beads for events on my behalf, so pg-router itself never needs
   to know beads' query language. _(→ `USECASE-CCH-QUERY`; `INV-CCH-1`, `INV-CCH-4`, `INV-CCH-5`.)_
@@ -25,12 +25,14 @@ Realization gaps; these are the stories Task 5.2 onward realizes.
 **Level:** user-goal.
 **Preconditions:** this module is registered with a reachable core (`phillipgreenii-nix-agent-support`
 ADR 0036 — this module never starts a core).
-_Requires:_ `INTF-HANDLER`, `INV-CCH-2`, `INV-CCH-3`, `INV-CCH-17`.
+_Requires:_ `INTF-HANDLER`, `INV-CCH-2`, `INV-CCH-3`, `INV-CCH-14`, `INV-CCH-17`, `INV-CCH-18`.
 _Includes:_ `INTF-CCH-CCPOOL` or a configured command, per the role's own backing kind.
 
 1. The core dispatches one event under one tracking id to a bound role.
 2. This module starts (or continues) a handler session: a ccpool-backed role drives `ccpool`; a
    command-backed role execs its configured argv.
+   2c. While the session runs, this module keeps a supervision lease on it fresh (`INV-CCH-18`),
+   so a later dispatch can tell it from an orphan.
 3. This module replies inline with a completion outcome, or defers with an ack and finishes the
    session on its own, later.
    3b. The session's turn has ended: this module closes it, non-purge (`INV-CCH-17`), once it is
@@ -44,6 +46,16 @@ Extensions:
 - 2b. The git origin the dispatch runs against is unavailable (`INV-CCH-10`): this module declines
   `busy` with reason `origin-unavailable` before touching any bead; dispatches into other origins
   are unaffected, and dispatch resumes on the first successful probe.
+- 2d. An earlier dispatch's handler died (the daemon restarted at `INV-CCH-14`'s shutdown, or the
+  handler crashed) and left its session unsupervised: its lease has expired. Before checking
+  capacity this module handles each such orphan of its own role (`INV-CCH-18`). An `idle` or
+  `errored` one is closed (not purged), its bead claim released if the role's own actor still
+  holds it, and its worktree removed; a `starting`, `ready` or `working` one past its time budget
+  is hard-stopped as a supervised session would be (`INV-CCH-11`), then its worktree is removed;
+  an under-budget one, a `needs_input` one, and one with no lease are left alone. The freed pool
+  slot is then available to this very dispatch. If this dispatch is instead a redelivery that
+  absorbs an orphan still within its budget, it takes over the lease and keeps the orphan's
+  original launch time as the start of its budget.
 - 3a. The session hits a post-accept failure (`retryable`, `resource-limit`, `critical`): this
   module surfaces it on its own logs/metrics or as a new event, never as anything but the opaque
   completion outcome the core already stores (`INV-CCH-3`).

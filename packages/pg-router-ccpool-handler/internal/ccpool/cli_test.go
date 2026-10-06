@@ -659,7 +659,7 @@ func TestEnsure_argv_includesLabels(t *testing.T) {
 		got = append(got, args)
 		return nil, nil, nil
 	}
-	meta := DispatchMeta("zr-1", "worker")
+	meta := DispatchMeta("zr-1", "worker", time.Time{}, 0)
 	if err := cli.Ensure(context.Background(), "s", "", "/r", nil, meta); err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
@@ -688,5 +688,28 @@ func TestEnsure_argv_omitsLabelsWhenMetaAbsent(t *testing.T) {
 		if a == "--label" {
 			t.Errorf("argv must omit --label when meta carries no role/pool; got %v", (*got)[0])
 		}
+	}
+}
+
+// SetMeta shells out to `ccpool meta set <external_id> <key> <value>` with no
+// --label (the lease value changes every poll; it must never reach telemetry).
+func TestSetMeta_argv(t *testing.T) {
+	cli, got, _ := newSpy()
+	if err := cli.SetMeta(context.Background(), "ext-1", MetaKeyLeaseUntil, "2026-10-06T12:00:00Z"); err != nil {
+		t.Fatalf("SetMeta: %v", err)
+	}
+	want := []string{"meta", "set", "ext-1", "pgrouter.lease_until", "2026-10-06T12:00:00Z"}
+	if len(*got) != 1 || !reflect.DeepEqual((*got)[0], want) {
+		t.Errorf("argv = %v, want %v", *got, want)
+	}
+}
+
+func TestSetMeta_propagatesError(t *testing.T) {
+	cli := NewCLIRunner(config.Default())
+	cli.run = func(context.Context, []string) ([]byte, []byte, error) {
+		return nil, []byte("no such session"), errors.New("exit 1")
+	}
+	if err := cli.SetMeta(context.Background(), "ext-1", "k", "v"); err == nil {
+		t.Fatal("SetMeta must surface a ccpool failure")
 	}
 }

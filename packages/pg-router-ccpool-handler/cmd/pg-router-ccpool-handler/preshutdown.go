@@ -148,16 +148,22 @@ func servePreShutdown(cc ccpool.Runner, open worktree.Opener, br beads.Runner, s
 //
 // What bounds leaked sessions after the daemon exits (pg2-hwt7v): a spared
 // session outlives the daemon, so it is a deliberate leak. It is bounded by
-// three independent mechanisms (ADR 0072, ADR 0037):
+// the mechanisms below (ADR 0072, ADR 0037, ADR 0083).
 //
-//  1. Next-start reconcile. The next daemon's dispatch-time
-//     reconcileClosedBeadSessions (reconcile.go) purges a spared session once
-//     its turn has ended (idle/needs_input) AND its bead is closed, worktree
-//     and anchor branch included, transcript-quiet guarded -- as soon as new
-//     work arrives for any ccpool role; the next shutdown sweep purges it
-//     too. This is the ONLY bound for a session that parks in needs_input
-//     (ccpool's reaper exempts needs_input rows, ADR 0037) with an open
-//     bead: it waits for the operator, by design.
+// This sweep lists only the daemon's DEFAULT ccpool pool (runPreShutdown
+// builds a plain ccpool.NewCLIRunner(cfg), no role pool): a session in a
+// role's own dedicated pool (review/worker/feedback) is outside it, neither
+// purged nor spared by shutdown, so the bounds below are what apply there.
+//
+//  1. Next-dispatch reconcile. The next dispatch's reconcileClosedBeadSessions
+//     (reconcile.go), run against the dispatching role's own pool, purges a
+//     spared session once its turn has ended (idle/needs_input) AND its bead
+//     is closed, worktree and anchor branch included, transcript-quiet
+//     guarded -- as soon as new work arrives for that role; the next shutdown
+//     sweep purges it too, but only in the default pool. This is the ONLY
+//     bound for a session that parks in needs_input (ccpool's reaper exempts
+//     needs_input rows, ADR 0037) with an open bead: it waits for the
+//     operator, by design.
 //  2. ccpool's own reaper (packages/ccpool, ADR 0072). Pass 1 closes any
 //     live non-needs_input session whose last_activity_at is older than
 //     idle_ttl -- a hung working row included -- and Pass 2 evicts
@@ -165,13 +171,15 @@ func servePreShutdown(cc ccpool.Runner, open worktree.Opener, br beads.Runner, s
 //     both stamp close_reason. A spared session whose turn ends idle with
 //     its bead still open is therefore reclaimed by ccpool after idle_ttl.
 //  3. Pool capacity (INV-CCH-6). Spared starting/ready/working rows count
-//     toward max_sessions, so the next daemon cannot launch past the cap
-//     while they run; the leak cannot grow the pool beyond the cap.
-//
-// Not covered, accepted: a spared session's bead stays claimed by the old
-// daemon until that session's turn ends and the bead is resolved or
-// reconciled -- the old daemon's in-memory dispatch tracking is gone, so no
-// executor watches it any more.
+//     toward max_sessions, so the next daemon cannot launch past the cap while
+//     they run; the leak cannot grow the pool beyond the cap.
+//  4. The supervision lease (pg2-g2u9m, INV-CCH-18, ADR 0083). The spared
+//     session's handler dies with the old daemon, so its pgrouter.lease_until
+//     stops being refreshed and expires; the next dispatch of the same role
+//     (reconcileOrphanSessions, orphan.go) then closes an idle orphan and
+//     releases its bead claim, or enforces a working orphan's time budget from
+//     its launch time. Until then the session runs unsupervised; an orphan is
+//     handled only when its OWN role next dispatches.
 //
 // This is the once-per-process-lifetime sweep half of this module's
 // INTF-CCH-CCPOOL boundary crossing (docs/behavior/interfaces.md) — not

@@ -242,3 +242,21 @@ func TestIsID(t *testing.T) {
 		}
 	}
 }
+
+// bd's `show --json` carries the claiming actor as `assignee`; the orphan
+// reconcile compares it to the role's own actor before unclaiming a bead
+// (INV-CCH-18).
+func TestShowObj_parsesAssignee(t *testing.T) {
+	fr := &fakeRunner{out: `{"id":"zr-1","status":"in_progress","assignee":"pgii-pool__worker"}`}
+	iss, err := ShowObj(context.Background(), fr, "zr-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if iss.Assignee != "pgii-pool__worker" {
+		t.Errorf("Assignee = %q", iss.Assignee)
+	}
+	fr = &fakeRunner{out: `{"id":"zr-1","status":"open"}`}
+	if iss, _ = ShowObj(context.Background(), fr, "zr-1"); iss.Assignee != "" {
+		t.Errorf("absent assignee must decode empty, got %q", iss.Assignee)
+	}
+}

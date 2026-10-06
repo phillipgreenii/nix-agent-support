@@ -288,3 +288,18 @@ type OSGit struct{}
 func (OSGit) Run(ctx context.Context, dir string, args ...string) error {
 	return gitenv.Command(ctx, dir, args...).Run()
 }
+
+// HardStop runs the 100% hard-stop sequence (terminal) for a session whose
+// dispatching handler is gone, so no Run loop is metering it: the dispatch-time
+// orphan reconcile calls it for a starting/ready/working session whose
+// supervision lease expired and whose time budget is exhausted (bead
+// pg2-g2u9m, INV-CCH-18). The caller owns the "should this stop fire" decision
+// and the single-terminal guarantee (it holds the per-session lock and
+// re-checked the lease); w needs BD, CC, Log, RepoRoot, WorktreeDir (the
+// session's own worktree, which safeToReset requires to be a worktree root) and
+// BudgetStopEscalateAfter. w.ClaimTerminal is not consulted -- nothing races.
+// The worktree is NOT removed here; the caller removes it afterwards under its
+// own guards, as the dispatch-time cleanup does.
+func HardStop(ctx context.Context, w *Watchdog, sessionName, beadID string, be *BudgetError) {
+	w.terminal(ctx, sessionName, beadID, be)
+}

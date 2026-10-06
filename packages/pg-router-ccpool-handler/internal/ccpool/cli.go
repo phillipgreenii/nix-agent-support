@@ -25,12 +25,14 @@ type exitCoder interface{ ExitCode() int }
 // Per-call timeouts backstop ctx cancellation: even if the orchestrator never
 // cancels, a wedged ccpool must not hang the pool forever (pg2-yy42).
 const (
-	// quickCallTimeout bounds the fast calls (list/reply/cancel/close).
+	// quickCallTimeout bounds the fast calls (list/reply/cancel/close/meta set).
 	quickCallTimeout = 60 * time.Second
-	// ensureTimeout bounds `ccpool new`, which blocks until the session reaches
+	// EnsureTimeout bounds `ccpool new`, which blocks until the session reaches
 	// ready. ccpool's own wait default is 10m, so this sits comfortably above it
 	// to avoid killing a legitimately-slow launch while still bounding a wedge.
-	ensureTimeout = 12 * time.Minute
+	// Exported because the supervision lease's initial value must cover it
+	// (DispatchMeta, INV-CCH-18).
+	EnsureTimeout = 12 * time.Minute
 )
 
 // CLIRunner is the Phase-1 Runner: it shells out to the `ccpool` binary on PATH.
@@ -196,7 +198,7 @@ func (c *CLIRunner) Ensure(ctx context.Context, externalID, name, cwd string, en
 	if c.Autonomous {
 		args = append(args, "--autonomous")
 	}
-	_, err := c.ccpool(ctx, ensureTimeout, args...)
+	_, err := c.ccpool(ctx, EnsureTimeout, args...)
 	return err
 }
 
@@ -291,4 +293,12 @@ func (c *CLIRunner) List(ctx context.Context) ([]Session, error) {
 		return nil, fmt.Errorf("ccpool list --json decode: %w", err)
 	}
 	return sessions, nil
+}
+
+// SetMeta: ccpool meta set <external_id> <key> <value>. An unconditional upsert
+// of one session-metadata key under this runner's pool (no --label, so nothing
+// flows into telemetry). Used for the supervision-lease refresh (INV-CCH-18).
+func (c *CLIRunner) SetMeta(ctx context.Context, externalID, key, value string) error {
+	_, err := c.ccpool(ctx, quickCallTimeout, "meta", "set", externalID, key, value)
+	return err
 }

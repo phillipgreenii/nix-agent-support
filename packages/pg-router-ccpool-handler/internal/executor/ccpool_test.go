@@ -656,6 +656,8 @@ func TestCrashOrphaned_cases(t *testing.T) {
 		{"already closed but somehow still live (defensive)", ccpool.Session{Live: true, State: ccpool.StateErrored, CloseReason: "operator"}, false},
 		{"live and working", ccpool.Session{Live: true, State: ccpool.StateWorking}, false},
 		{"live and idle", ccpool.Session{Live: true, State: ccpool.StateIdle}, false},
+		{"orphan-reclaimed idle row is abandoned work, not a duplicate (INV-CCH-18)", ccpool.Session{Live: false, State: ccpool.StateIdle, CloseReason: "handler", Meta: map[string]string{ccpool.MetaKeyOrphanReclaimed: "2026-10-06T12:00:00Z"}}, true},
+		{"orphan-reclaimed marker on a still-live row is ignored", ccpool.Session{Live: true, State: ccpool.StateIdle, Meta: map[string]string{ccpool.MetaKeyOrphanReclaimed: "2026-10-06T12:00:00Z"}}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

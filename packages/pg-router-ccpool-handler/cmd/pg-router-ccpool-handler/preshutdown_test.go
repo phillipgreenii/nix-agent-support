@@ -60,6 +60,8 @@ func (f *fakeCC) List(context.Context) ([]ccpool.Session, error) {
 	return f.ListSeq[i], nil
 }
 
+func (f *fakeCC) SetMeta(context.Context, string, string, string) error { return nil }
+
 func (f *fakeCC) Capacity(context.Context) (ccpool.Capacity, error) {
 	return ccpool.Capacity{Free: 1}, nil
 }

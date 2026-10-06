@@ -114,7 +114,17 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 	// absorbing it (rather than starting a second session for the same bead)
 	// closes register row INV-EVT-2 for real (ADR 0065's "Register" section).
 	if existing, ok := r.findSessionByName(ctx, display); ok {
-		return r.absorbDuplicate(ctx, d, existing)
+		// Take the per-session lock and refresh the supervision lease BEFORE
+		// waiting, so a concurrent orphan reconcile either already finished (the
+		// row is then closed and not absorbable: fall through to a fresh launch)
+		// or sees the fresh lease and stands down (INV-CCH-18).
+		existing, ok, err := r.takeOverForAbsorb(ctx, existing)
+		if err != nil {
+			return report.Result{}, fmt.Errorf("absorb %s: %w", display, err)
+		}
+		if ok {
+			return r.absorbDuplicate(ctx, d, existing)
+		}
 	}
 
 	// Admission gate (INV-CCH-6, ADR 0072's Decision item 3): consult the
@@ -192,7 +202,7 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 		"BEADS_DIR":      beadsDirFor(r.deps.Cfg.RepoRoot, cc) + "/.beads",
 		"WORKSPACE_ROOT": wt,
 	}
-	if err := r.deps.CC.Ensure(ctx, r.deps.ExternalID, display, wt, env, ccpool.DispatchMeta(d.Item.ID, d.Role.Name)); err != nil {
+	if err := r.deps.CC.Ensure(ctx, r.deps.ExternalID, display, wt, env, ccpool.DispatchMeta(d.Item.ID, d.Role.Name, r.deps.clock(), r.deps.Cfg.LeaseTTL)); err != nil {
 		// Could not even create the session. The bead was never dispatched, so we
 		// do not flag/unclaim it on a transient hiccup. But a bead that fails to
 		// launch repeatedly is escalated (ADR 0015): stamp pool-launch-fail on the
@@ -229,6 +239,11 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 		}
 		return res, fmt.Errorf("ensure %s: %w", r.deps.ExternalID, err)
 	}
+	// From here until Dispatch returns (Send, the wait, the watchdog, the
+	// worktree cleanup's quiet wait and the settled-session close) a background
+	// ticker keeps the supervision lease fresh, so a later dispatch can tell this
+	// live session from an orphan (INV-CCH-18).
+	defer r.startLease(ctx, r.deps.ExternalID)()
 	// The bead was dispatched: clear any pool-launch-fail from a prior attempt so
 	// the escalation counts CONSECUTIVE launch failures, not lifetime ones (ADR
 	// 0015). Best-effort.
@@ -268,7 +283,7 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 	if budgetUnlimited(cc.Budget) {
 		werr = r.waitDone(ctx, nil, d, r.deps.ExternalID)
 	} else {
-		werr = r.workerWaitWithWatchdog(ctx, d, r.deps.ExternalID, wt)
+		werr = r.workerWaitWithWatchdog(ctx, d, r.deps.ExternalID, wt, time.Time{})
 	}
 	return r.finishWait(ctx, cc, d, r.deps.ExternalID, wt, werr)
 }
@@ -757,6 +772,12 @@ func crashOrphaned(s ccpool.Session) bool {
 	if s.Live {
 		return false
 	}
+	// A row the orphan reconcile closed (INV-CCH-18) was ABANDONED work, not a
+	// settled duplicate: a redelivered dispatch must launch afresh rather than
+	// absorb it and fail on its stale outcome.
+	if s.Meta[ccpool.MetaKeyOrphanReclaimed] != "" {
+		return true
+	}
 	settled := s.State == ccpool.StateIdle || s.State == ccpool.StateErrored
 	if s.CloseReason != "" {
 		return !(s.CloseReason == "handler" && settled)
@@ -781,6 +802,9 @@ func crashOrphaned(s ccpool.Session) bool {
 func (r *ccpoolRun) absorbDuplicate(ctx context.Context, d DispatchContext, existing ccpool.Session) (report.Result, error) {
 	r.noteSession(existing)
 	cc := d.Role.CCPool
+	// The lease covers this absorbed session for as long as this dispatch is alive
+	// (takeOverForAbsorb already wrote the first refresh under the session lock).
+	defer r.startLease(ctx, existing.ExternalID)()
 	// pg2-oq6cy: a live session still in `ready` never took a turn — no prompt
 	// was ever delivered (a healthy dispatched session moves ready->working
 	// within seconds of Send, and afterwards settles at idle, never back to
@@ -805,7 +829,12 @@ func (r *ccpoolRun) absorbDuplicate(ctx context.Context, d DispatchContext, exis
 	if budgetUnlimited(cc.Budget) {
 		werr = r.waitDone(ctx, nil, d, existing.ExternalID)
 	} else {
-		werr = r.workerWaitWithWatchdog(ctx, d, existing.ExternalID, existing.CWD)
+		// An absorbed session keeps its original launch time as the budget's
+		// start, so absorbing an under-budget orphan does not grant it a fresh
+		// budget (INV-CCH-18; pg2-3j76b's case). Absent launched_at (an older
+		// build) falls back to now, as before.
+		start, _ := existing.LaunchedAt()
+		werr = r.workerWaitWithWatchdog(ctx, d, existing.ExternalID, existing.CWD, start)
 	}
 	return r.finishWait(ctx, cc, d, existing.ExternalID, existing.CWD, werr)
 }
@@ -875,7 +904,7 @@ func (r *ccpoolRun) escalateLaunchFailure(ctx context.Context, beadID string) bo
 // and waitDone's add-human could both fire (bead ends open AND human), or the
 // watchdog's unclaim could be misread by waitDone as a successful hand-back
 // (a budget hard-stop reported as success). (pg2-c1vp)
-func (r *ccpoolRun) workerWaitWithWatchdog(ctx context.Context, d DispatchContext, name, worktreeDir string) error {
+func (r *ccpoolRun) workerWaitWithWatchdog(ctx context.Context, d DispatchContext, name, worktreeDir string, start time.Time) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -894,6 +923,7 @@ func (r *ccpoolRun) workerWaitWithWatchdog(ctx context.Context, d DispatchContex
 		BudgetStopEscalateAfter: d.Role.CCPool.BudgetStopEscalateAfter,
 		RepoRoot:                r.deps.Cfg.RepoRoot,
 		WorktreeDir:             worktreeDir, // the per-bead worktree the worker ran in (pg2-yukh)
+		Start:                   start,       // zero = now; an absorbed session passes its recorded launch time
 		ReminderMsg:             r.deps.Cfg.ReminderMsg,
 		WrapUpMsg:               r.deps.Cfg.WrapUpMsg,
 		Git:                     r.deps.git(),

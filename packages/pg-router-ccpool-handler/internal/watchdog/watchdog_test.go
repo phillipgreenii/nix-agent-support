@@ -54,6 +54,8 @@ func (f *fakeCC) Capacity(context.Context) (ccpool.Capacity, error) {
 	return ccpool.Capacity{Free: 1}, nil
 }
 
+func (f *fakeCC) SetMeta(context.Context, string, string, string) error { return nil }
+
 type recBD struct{ calls []string }
 
 func (r *recBD) Run(_ context.Context, args ...string) (string, error) {
@@ -378,5 +380,67 @@ func TestRun_budgetErrorCarriesContext(t *testing.T) {
 				t.Errorf("no prompt content allowed: %q", msg)
 			}
 		})
+	}
+}
+
+// Watchdog.Start: elapsed time is measured from the supplied start (an absorbed
+// session's recorded launch time), not from when Run begins (bead pg2-g2u9m,
+// INV-CCH-18). With a 25m time budget and a launch 30 minutes in the past, the
+// very first poll is already over budget and hard-stops; with the zero Start
+// the same run begins its clock "now" and does not.
+func TestRun_startFromLaunchTimeHardStopsImmediately(t *testing.T) {
+	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+	timeBudget := budget.Budget{
+		Time:       25 * time.Minute,
+		Thresholds: budget.Thresholds{Reminder: 0.725, Cancel: 0.90, Hard: 1.00},
+	}
+	r := &fakeReader{seq: []usage.Snapshot{{}}}
+	cc := &fakeCC{list: []ccpool.Session{{ExternalID: "s", Live: true, CWD: "/repo"}}}
+	bd := &recBD{}
+	wd := newWD(r, cc, bd, timeBudget)
+	wd.Now = func() time.Time { return now }
+	wd.Start = now.Add(-30 * time.Minute)
+	if err := wd.Run(context.Background(), "s", "zr-1"); !errors.Is(err, ErrBudgetExceeded) {
+		t.Fatalf("a session launched 30m ago is over a 25m budget on the first poll; got %v", err)
+	}
+	var be *BudgetError
+	_ = errors.As(wd.Run(context.Background(), "s", "zr-1"), &be)
+	if be == nil || be.Limit != budget.LimitTime || be.Elapsed != 30*time.Minute {
+		t.Errorf("BudgetError = %+v, want time limit with 30m elapsed", be)
+	}
+}
+
+func TestRun_zeroStartMeasuresFromNow(t *testing.T) {
+	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+	timeBudget := budget.Budget{
+		Time:       25 * time.Minute,
+		Thresholds: budget.Thresholds{Reminder: 0.725, Cancel: 0.90, Hard: 1.00},
+	}
+	r := &fakeReader{seq: []usage.Snapshot{{}}}
+	cc := &fakeCC{list: []ccpool.Session{{ExternalID: "s", Live: true, CWD: "/repo"}}}
+	wd := newWD(r, cc, &recBD{}, timeBudget)
+	wd.Now = func() time.Time { return now } // frozen: elapsed stays 0
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if err := wd.Run(ctx, "s", "zr-1"); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("zero Start must not hard-stop a fresh run, got %v", err)
+	}
+}
+
+// HardStop drives the same terminal sequence for a session nobody is metering.
+func TestHardStop_runsTerminalSequence(t *testing.T) {
+	cc := &fakeCC{list: []ccpool.Session{{ExternalID: "s", Live: true, CWD: "/elsewhere"}}}
+	bd := &recBD{}
+	wd := newWD(&fakeReader{seq: []usage.Snapshot{{}}}, cc, bd, budget.Budget{})
+	be := &BudgetError{Role: "worker", Pool: "default", Bead: "zr-1", Session: "s", Limit: budget.LimitTime, Used: 1800, Cap: 1500, Elapsed: 30 * time.Minute}
+	HardStop(context.Background(), wd, "s", "zr-1", be)
+	if len(cc.closed) != 1 || cc.closed[0] != "s" {
+		t.Errorf("hard stop must close the session, closed=%v", cc.closed)
+	}
+	if cc.cancels != 1 {
+		t.Errorf("hard stop issues the 2nd cancel, got %d", cc.cancels)
+	}
+	if !bd.has("update zr-1 --status=open --assignee=") {
+		t.Errorf("hard stop must unclaim; calls=%v", bd.calls)
 	}
 }

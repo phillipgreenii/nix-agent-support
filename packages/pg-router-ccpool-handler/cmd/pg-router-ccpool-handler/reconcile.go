@@ -25,6 +25,14 @@ import (
 // shutdown (bead zr-50s7h.2: closed 2026-09-19, its own session still live
 // ~2.5 days later).
 //
+// Scope: it runs against ONE pool -- the runner it is handed. From
+// dispatch.go's runDispatch that is the dispatching role's own pool
+// (deps.CC, scoped by buildDeps), so a role reconciles only its own pool's
+// sessions; query.go's call uses the default-pool runner. It handles closed
+// beads only; sessions whose HANDLER died while the bead is still open are the
+// separate, role-scoped orphan reconcile (orphan.go, INV-CCH-18), which
+// runDispatch runs right after this one.
+//
 // Invoked primarily from dispatch.go's runDispatch, once per queued item for
 // every enabled ccpool role (review/feedback/worker) — the invocation
 // actually GUARANTEED to recur frequently in the live deployment. An earlier

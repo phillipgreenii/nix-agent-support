@@ -191,19 +191,25 @@ review`. The claim is still released (status open, assignee cleared) — the lab
   is already closed. A `needs_input` session whose bead is still open, or whose bead status cannot
   be determined, is also preserved (so a person can still attach). A purged session's worktree
   MUST be kept when a spared session still uses the same directory (a per-bead worktree is shared
-  by every role's session for that bead). Operator ruling (Phillip, 2026-09-30, bead `pg2-hwt7v`),
-  superseding the earlier behavior of closing working sessions and force-removing their worktrees.
+  by every role's session for that bead). The shutdown sweep lists only the daemon's default
+  `ccpool` pool: a session in a role's own dedicated pool is outside it, neither purged nor spared
+  by shutdown, and is bounded only by the mechanisms below. Operator ruling (Phillip, 2026-09-30,
+  bead `pg2-hwt7v`), superseding the earlier behavior of closing working sessions and
+  force-removing their worktrees.
   - **What bounds a spared session after the daemon exits.** Sparing leaves a deliberate, bounded
-    leak. (a) The next daemon's dispatch-time reconcile purges it, worktree included, once its turn
-    has ended (`idle` or `needs_input`) and its bead is closed; the next shutdown sweep does too.
-    This is the only bound for a session parked in `needs_input` with an open bead, which waits for
-    a person by design. (b) `ccpool`'s own reaper closes any live session that is not in
+    leak. (a) The dispatch-time reconcile of the next dispatch, run against the dispatching role's
+    own pool, purges it, worktree included, once its turn has ended (`idle` or `needs_input`) and
+    its bead is closed; the next shutdown sweep does too, but only for a session in the default
+    pool. This is the only bound for a session parked in `needs_input` with an open bead, which
+    waits for a person by design. (b) `ccpool`'s own reaper closes any live session that is not in
     `needs_input` once its last activity is older than `idle_ttl`, and evicts `idle`/`errored`
     sessions over `max_sessions` (never `starting`/`ready`/`working`); both stamp a close reason
     (`phillipgreenii-nix-agent-support` ADR 0072). (c) Spared sessions still count toward
     `max_sessions`, so `INV-CCH-6` stops the next daemon from launching past the cap while they
-    run. Not covered: the spared session's bead stays claimed by the old daemon until the session
-    ends and its bead is resolved or reconciled, because no executor watches it any more.
+    run. (d) The spared session's handler dies with the old daemon, but its supervision lease
+    (`INV-CCH-18`) then expires, and the next dispatch of the same role reclaims it: an idle one
+    is closed and its bead claim released, a working one has its time budget enforced from its
+    launch time. Until then the session runs unsupervised.
 - **`INV-CCH-15`** — a dispatch-time worktree cleanup (after a session reaches a terminal outcome)
   MUST NOT remove a per-bead worktree while another live session in `starting`, `ready`, `working`
   or `needs_input` still uses the same directory; the last session to detach removes it. A
@@ -238,3 +244,42 @@ review`. The claim is still released (status open, assignee cleared) — the lab
   non-terminal dead row, is not. Operator ruling (Phillip, 2026-10-05, bead `pg2-58edz`), narrowing
   the purge-on-teardown of `phillipgreenii-nix-agent-support` ADR 0015 to a non-purge close; see
   ADR 0082.
+- **`INV-CCH-18`** — a session the handler launched MUST NOT stay unsupervised once its handler is
+  gone. While a handler is alive it MUST keep a supervision lease on its session: the lease is
+  stamped when the session is launched (covering the whole launch wait, so a session still
+  starting is never mistaken for an orphan), refreshed on every poll for as long as the dispatch
+  runs, and covers the wait, the budget watchdog, the worktree cleanup and the close of the settled
+  session. A failure to refresh the lease MUST NOT fail the dispatch; it is logged, and repeated
+  consecutive failures are logged at error level so a live handler whose lease is lapsing is
+  visible. The lease TTL is configurable and MUST be at least ten poll intervals. A session of a
+  role's own pool that carries that role's tags and an expired lease is an **orphan**; a session
+  with no lease at all (launched before leases existed) is never an orphan, and neither is a
+  closed one. Before checking capacity, a dispatch MUST handle every orphan of its own role, one
+  at a time, while holding an exclusive per-session lock (an orphan whose lock is held is skipped)
+  and only after re-reading the session to confirm the lease is still expired:
+  - **`idle` or `errored`, and quiet** (neither it nor its subagents wrote within the quiet
+    window): apply the role's completion rule to its bead. A role that claims its beads
+    (close-only, close-or-handback) MUST release the claim, with a comment naming the session,
+    only when the bead is still in progress AND claimed by that role's own actor; a bead that is
+    open, closed, or claimed by someone else is not written, and a role that never claims its
+    bead (the triage roles) writes nothing. If the bead cannot be read, nothing is done this
+    time. Then the session MUST be closed without purging, and its worktree and anchor branch
+    removed under the guards of `INV-CCH-15` (kept when a live or `needs_input` session still uses
+    the directory, and kept, with the reason logged, when git refuses because the tree is dirty).
+  - **`starting`, `ready` or `working`**: enforce the role's time budget, measured from the
+    session's recorded launch time. Over budget, the handler MUST apply the same hard stop a
+    supervised session gets (`INV-CCH-11`) and then remove the worktree under the same guards;
+    under budget it MUST leave the session alone. A role with no time budget leaves such an
+    orphan alone, and an over-budget orphan whose bead is already closed is left alone rather than
+    reopened.
+  - **`needs_input`**: left alone (`phillipgreenii-nix-agent-support` ADR 0037).
+    A dispatch that absorbs an existing session as a duplicate (`INV-EVT-2`) MUST take the same
+    per-session lock and refresh the lease before it starts waiting, and MUST measure that session's
+    budget from its original launch time, so absorbing an under-budget orphan never grants it a fresh
+    budget. A session reclaimed as an orphan is abandoned work, not a settled duplicate: a redelivery
+    of the same dispatch launches a fresh session. Every reclaim and every orphan hard stop is
+    recorded as an event naming the session, bead, role, pool, state, lease expiry and launch time.
+    Not covered, accepted: an orphan is handled only when its OWN role next dispatches (until then
+    only `ccpool`'s idle timeout bounds it); a role with no time budget leaves a `working` orphan
+    alone; and only the time budget is enforced for an orphan, not tokens or cost. Operator ruling
+    (Phillip, 2026-10-05, bead `pg2-g2u9m`); see ADR 0083.

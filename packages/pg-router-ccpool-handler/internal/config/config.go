@@ -66,6 +66,13 @@ type Config struct {
 	WorktreeQuietMax time.Duration
 	// PollInterval is how often waitDone re-checks ccpool's session list.
 	PollInterval time.Duration
+	// LeaseTTL is the supervision-lease TTL (bead pg2-g2u9m, INV-CCH-18): the
+	// handler stamps pgrouter.lease_until = now + LeaseTTL on its session every
+	// PollInterval, and an expired lease means nobody is supervising the session
+	// (the handler died). Default 2m; validated at load to be at least
+	// LeaseTTLMinPolls x PollInterval so a few missed refreshes never expire a
+	// live handler's lease.
+	LeaseTTL time.Duration
 	// Effort/Model/PermissionMode/AllowedTools/Autonomous are forwarded
 	// verbatim to `ccpool new` (NewCLIRunner).
 	Effort         string
@@ -233,6 +240,9 @@ func (c Config) Validate() error {
 	if !validPermissionModes[c.PermissionMode] {
 		return fmt.Errorf("invalid permissionMode %q (valid: default, acceptEdits, plan, auto, dontAsk, bypassPermissions)", c.PermissionMode)
 	}
+	if err := c.validateLease(); err != nil {
+		return err
+	}
 	return c.OriginProbe.Validate()
 }
 
@@ -296,6 +306,7 @@ func Default() Config {
 		BeadsPrefix:         "zr",
 		MaxWait:             1800 * time.Second,
 		PollInterval:        10 * time.Second,
+		LeaseTTL:            2 * time.Minute,
 		WorktreeQuietWindow: 2 * time.Minute,
 		WorktreeQuietMax:    10 * time.Minute,
 		Effort:              "max",
@@ -316,4 +327,20 @@ func Default() Config {
 		HardPct:             1.00,
 		OriginProbe:         DefaultOriginProbe(),
 	}
+}
+
+// LeaseTTLMinPolls is the smallest LeaseTTL, in PollInterval units, Validate
+// accepts: the lease is refreshed once per poll, so a TTL below this many polls
+// could expire on a live handler after a couple of slow or failed refreshes.
+const LeaseTTLMinPolls = 10
+
+// validateLease enforces LeaseTTL >= LeaseTTLMinPolls x PollInterval (bead
+// pg2-g2u9m). A zero PollInterval is not this check's concern (it is not a
+// valid runtime value either way); only a positive one bounds the TTL.
+func (c Config) validateLease() error {
+	min := LeaseTTLMinPolls * c.PollInterval
+	if c.LeaseTTL <= 0 || c.LeaseTTL < min {
+		return fmt.Errorf("invalid leaseTTL %v: must be >= %d x pollInterval (%v)", c.LeaseTTL, LeaseTTLMinPolls, min)
+	}
+	return nil
 }

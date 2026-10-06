@@ -73,6 +73,11 @@ type Deps struct {
 	// transcript files (nil ⇒ filesystem scan, LatestTranscriptActivity).
 	// ok=false means nothing observable. Tests substitute a fake.
 	LatestActivity func(transcriptPath string) (t time.Time, ok bool)
+	// LockDir is the directory holding the per-session flocks that serialize an
+	// absorbing dispatch against the orphan reconcile (sessionlock, bead
+	// pg2-g2u9m, INV-CCH-18): <handler state dir>/locks. Empty disables the lock
+	// (unit tests; buildDeps always sets it).
+	LockDir string
 }
 
 func (d Deps) git() watchdog.GitRunner {

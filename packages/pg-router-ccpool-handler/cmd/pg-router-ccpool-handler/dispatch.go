@@ -20,6 +20,7 @@ import (
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/item"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/originprobe"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/roles"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/sessionlock"
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/schemas"
 )
@@ -190,6 +191,19 @@ func runDispatch(args []string) int {
 		if closed := reconcileClosedBeadSessions(ctx, deps.CC, gitWorktreeOpener, deps.BD, cfg.SessionPrefix, cfg.RepoRoot, newTranscriptQuietCheck(cfg.WorktreeQuietWindow, nil, nil)); closed > 0 {
 			slog.Info("dispatch: reconciled sessions with closed beads", "closed", closed)
 		}
+		// Orphan reconcile (pg2-g2u9m, INV-CCH-18): reclaim or budget-stop the
+		// sessions of THIS role whose handler died (expired supervision lease),
+		// scoped to the role's own pool runner (deps.CC) and run before the
+		// capacity check inside the executor, so a reclaimed orphan frees its slot
+		// for this very dispatch. Deliberately NOT called from query.go's default-pool
+		// reconcile, which has no role. Best effort: never a dispatch failure.
+		if reclaimed, stopped := reconcileOrphanSessions(ctx, role, deps, orphanEnv{
+			open:    gitWorktreeOpener,
+			quiet:   newTranscriptQuietCheck(cfg.WorktreeQuietWindow, nil, nil),
+			lockDir: deps.LockDir,
+		}); reclaimed+stopped > 0 {
+			slog.Info("dispatch: reconciled orphaned sessions", "reclaimed", reclaimed, "hard_stopped", stopped)
+		}
 	}
 	result, err := executor.For(role.Type).Dispatch(ctx, dctx, deps)
 	if reason, busy := busyDeclineReason(err); busy {
@@ -307,6 +321,10 @@ func buildDeps(cfg config.Config, role roles.Role) executor.Deps {
 		BD:  beads.NewCLIRunnerForRepo(bdDir, roleActor(role)),
 		Cfg: cfg,
 		Log: newEventLog(cfg),
+		// Per-session flocks under the handler state directory (the same one as
+		// events.jsonl) serialize the orphan reconcile against an absorbing
+		// dispatch (pg2-g2u9m, INV-CCH-18).
+		LockDir: sessionlock.Dir(handlerStateDir(cfg)),
 	}
 }
 
@@ -334,11 +352,7 @@ const handlerEventLogName = "events.jsonl"
 // opened the handler still must dispatch, so it falls back to a writer on
 // os.DevNull (events dropped, warning logged via slog) rather than nil.
 func newEventLog(cfg config.Config) *eventlog.Writer {
-	sd := cfg.OriginProbe.StateDir
-	if sd == "" {
-		sd = originprobe.DefaultStateDir()
-	}
-	w, err := eventlog.New(filepath.Join(sd, handlerEventLogName))
+	w, err := eventlog.New(filepath.Join(handlerStateDir(cfg), handlerEventLogName))
 	if err != nil {
 		slog.Warn("dispatch: event log unavailable; events dropped", "err", err)
 		if w, err = eventlog.New(os.DevNull); err != nil {
@@ -423,4 +437,15 @@ func busyDeclineReason(err error) (reason string, ok bool) {
 // required").
 func writeBusyReply(w io.Writer, reason string) {
 	writeReply(w, map[string]any{"schemaVersion": schemas.SchemaVersion, "reason": reason})
+}
+
+// handlerStateDir resolves the handler state directory exactly as the origin
+// prober does: cfg.OriginProbe.StateDir, else $XDG_STATE_HOME/pg-router-
+// ccpool-handler, else ~/.local/state/pg-router-ccpool-handler. It holds
+// events.jsonl, the origin state, and the per-session locks.
+func handlerStateDir(cfg config.Config) string {
+	if sd := cfg.OriginProbe.StateDir; sd != "" {
+		return sd
+	}
+	return originprobe.DefaultStateDir()
 }

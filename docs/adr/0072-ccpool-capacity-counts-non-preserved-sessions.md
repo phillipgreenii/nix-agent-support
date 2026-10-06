@@ -8,6 +8,11 @@
 > sessions does not hold for a gated dispatcher-only pool, which never exceeds the cap, so cap
 > eviction never runs for it. The handler now closes (without purging) the settled session it
 > launched or absorbed once its dispatch finishes. The admission gate itself is unchanged.
+>
+> **Later note (2026-10-06, ADR 0083):** a session whose handler died is not closed by that rule
+> and, in a `max_sessions = 1` pool, held the only slot until `idle_ttl`. ADR 0083 adds a
+> supervision lease and a role-scoped orphan reconcile that reclaims such a session at the next
+> dispatch of the same role.
 
 ## Context
 
