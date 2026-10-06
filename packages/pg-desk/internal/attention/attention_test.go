@@ -486,6 +486,22 @@ func (f failingReader) ListKVAnnotations(string, string, string) ([]store.KVAnno
 	return nil, f.err
 }
 
+func (f failingReader) ListXrefLinksFrom(string, string, string) ([]store.XrefLink, error) {
+	return nil, f.err
+}
+
+func (f failingReader) ListXrefLinksTo(string, string, string) ([]store.XrefLink, error) {
+	return nil, f.err
+}
+
+func (f failingReader) ListXrefsByFrom(string, string, string, string) ([]store.Xref, error) {
+	return nil, f.err
+}
+
+func (f failingReader) ListXrefsByTo(string, string, string) ([]store.Xref, error) {
+	return nil, f.err
+}
+
 type annotationFailingReader struct {
 	Reader
 	err error

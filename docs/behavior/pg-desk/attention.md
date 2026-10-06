@@ -100,7 +100,9 @@ so they share one source of truth):
 | `attention.rules.<kind>.severity` | as in the rule table                                            |
 | `attention.ordering.ties`         | severity descending, then group size descending, then entity id |
 
-An unknown rule kind in the block is a configuration error at load. A missing kind takes its
+`attention.ordering.ties` admits only its default (leaving it unset is the same): any other value is
+a configuration error at load, so a deployment cannot believe it re-ordered the feed when it did
+not. An unknown rule kind in the block is a configuration error at load. A missing kind takes its
 built-in default, so a deployment with no `attention` block works.
 
 ## Grouping and order
@@ -118,7 +120,12 @@ A group anchored on an entity carries a key that is itself a `<type>:<id>` ref (
 links in the one call it already makes for the items. The group's label is for display.
 
 Within a group, items are ordered most urgent first (severity descending, then entity id). Groups
-are ordered by their most urgent item, then by size. `Evaluate` computes this once and emits items
+are ordered by their most urgent item's severity descending, then by size descending, then by that
+item's entity id; the group key makes the order total. When several issues (or several work items)
+qualify, the lexicographically smallest id is the key. The cross-reference and stack levels are
+read for pull requests; an entity of another type is its own singleton group. A group holds only
+items that survived suppression: a suppressed entity neither joins a group nor counts toward its
+size. A cross-reference that cannot be read is an error, never an ungrouped result. `Evaluate` computes this once and emits items
 in that canonical order. A consumer MUST NOT apply a second ordering: it groups by `group.key` in
 order of first appearance in the feed and keeps feed order inside each group, which reproduces the
 evaluator's order for this source's items. Items from other sources have no group and are

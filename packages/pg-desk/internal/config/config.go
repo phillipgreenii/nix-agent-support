@@ -368,9 +368,7 @@ func validateChangeFlow(cfg *Config) error {
 type AttentionConfig struct {
 	// Rules maps a rule kind (for example "pr.own-ci-failing") to its tuning.
 	Rules map[string]AttentionRuleConfig `yaml:"rules,omitempty" json:"rules,omitempty"`
-	// Ordering configures the grouping and ordering stage. It is parsed here
-	// so a deployment may set it; the stage that consumes it is separate from
-	// the evaluator core.
+	// Ordering configures the grouping and ordering stage of the evaluator.
 	Ordering AttentionOrderingConfig `yaml:"ordering,omitempty" json:"ordering,omitempty"`
 }
 
@@ -381,11 +379,25 @@ type AttentionRuleConfig struct {
 	Severity string `yaml:"severity,omitempty" json:"severity,omitempty"`
 }
 
+// AttentionTiesDefault is the one tie rule the evaluator implements for
+// attention.ordering.ties: groups are ordered by their most urgent item's
+// severity descending, then group size descending, then entity id.
+const AttentionTiesDefault = "severity descending, then group size descending, then entity id"
+
 // AttentionOrderingConfig is the attention.ordering block.
 type AttentionOrderingConfig struct {
-	// Ties is attention.ordering.ties; empty means the documented default
-	// (severity descending, then group size descending, then entity id).
+	// Ties is attention.ordering.ties; empty means AttentionTiesDefault, which
+	// is also the only value the vocabulary admits.
 	Ties string `yaml:"ties,omitempty" json:"ties,omitempty"`
+}
+
+// Validate rejects a tie rule the evaluator does not implement, so a
+// deployment cannot believe it re-ordered the feed when it did not.
+func (o AttentionOrderingConfig) Validate() error {
+	if o.Ties == "" || o.Ties == AttentionTiesDefault {
+		return nil
+	}
+	return fmt.Errorf("attention.ordering.ties %q is not supported; the only supported rule is %q (or leave it unset)", o.Ties, AttentionTiesDefault)
 }
 
 // AttentionSeverities is the closed severity vocabulary of
@@ -394,6 +406,9 @@ var AttentionSeverities = []string{"low", "medium", "high"}
 
 // validateAttention checks the value vocabularies of the attention block.
 func validateAttention(a AttentionConfig) error {
+	if err := a.Ordering.Validate(); err != nil {
+		return err
+	}
 	kinds := make([]string, 0, len(a.Rules))
 	for k := range a.Rules {
 		kinds = append(kinds, k)

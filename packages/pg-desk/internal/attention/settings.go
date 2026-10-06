@@ -28,6 +28,9 @@ type Settings struct {
 // default severity), so a deployment with no attention block works. A kind
 // the registry does not know is an error naming it and the known kinds.
 func Resolve(c config.AttentionConfig) (Settings, error) {
+	if err := c.Ordering.Validate(); err != nil {
+		return Settings{}, err
+	}
 	known := map[string]Rule{}
 	for _, r := range registeredRules() {
 		known[r.Kind()] = r

@@ -56,6 +56,17 @@ const (
 	entityTypeThread = "thread"
 )
 
+// LinkedReader is the slice of the store ReadLinked needs. *store.Store
+// satisfies it; the attention evaluator names it so that it can read the same
+// edges without depending on the concrete store.
+type LinkedReader interface {
+	RequireNewSchema() error
+	ListXrefLinksFrom(repo, fromType, fromID string) ([]store.XrefLink, error)
+	ListXrefLinksTo(repo, toType, toID string) ([]store.XrefLink, error)
+	ListXrefsByFrom(repo, fromType, fromID, toType string) ([]store.Xref, error)
+	ListXrefsByTo(repo, toType, toID string) ([]store.Xref, error)
+}
+
 // ReadLinked is the shared linked-entity read helper: every entity related to
 // (repo, entityType, id), from both ends of each stored edge, with the
 // origins that claim each link. It is read-only and does no network I/O.
@@ -68,7 +79,7 @@ const (
 // as relation "jira". Callers wanting a different shape (the Phase 6 `show`
 // composite view) add fields on top of Linked rather than re-reading the
 // xref table.
-func ReadLinked(st *store.Store, repo, entityType, id string) (linked []Linked, degraded bool, err error) {
+func ReadLinked(st LinkedReader, repo, entityType, id string) (linked []Linked, degraded bool, err error) {
 	linked, _, degraded, err = readLinkedAsOf(st, repo, entityType, id)
 	return linked, degraded, err
 }
@@ -77,7 +88,7 @@ func ReadLinked(st *store.Store, repo, entityType, id string) (linked []Linked, 
 // the stored edge rows read ("" when there are none, or on a degraded read,
 // where the legacy rows carry no such time). It is the one linked-entity read
 // both ReadLinked and ReadDetailed use.
-func readLinkedAsOf(st *store.Store, repo, entityType, id string) (linked []Linked, linksAsOf string, degraded bool, err error) {
+func readLinkedAsOf(st LinkedReader, repo, entityType, id string) (linked []Linked, linksAsOf string, degraded bool, err error) {
 	if err := st.RequireNewSchema(); err != nil {
 		if !errors.Is(err, store.ErrOldSchema) {
 			return nil, "", false, err
@@ -156,7 +167,7 @@ func readLinkedAsOf(st *store.Store, repo, entityType, id string) (linked []Link
 
 // readLinkedLegacy serves an unmigrated store: only the legacy pr-to-issue
 // ticket-key rows exist there.
-func readLinkedLegacy(st *store.Store, repo, entityType, id string) ([]Linked, error) {
+func readLinkedLegacy(st LinkedReader, repo, entityType, id string) ([]Linked, error) {
 	var out []Linked
 	switch entityType {
 	case entityTypePR:

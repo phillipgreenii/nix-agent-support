@@ -11,9 +11,9 @@
 //     (rules.go);
 //  3. suppress: a Chain of Responsibility drops a candidate with a recorded
 //     reason (suppress.go);
-//  4. rank: surviving candidates collapse to one Item per entity, ordered
-//     most urgent first (this file). Work-context grouping beyond the
-//     singleton fallback belongs to a later stage.
+//  4. group and rank: surviving candidates collapse to one Item per entity
+//     (this file), which is placed in its work-context group, and groups and
+//     items are put in canonical order (group.go).
 //
 // Purity (INV-ATTNEVAL-1): the package writes nothing, execs nothing, opens
 // no network connection and reads time only through the injected Clock. It
@@ -28,6 +28,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/interpret"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/links"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
@@ -71,6 +72,9 @@ type Reader interface {
 	GetEntity(repo, entityType, entityID string) (store.Entity, bool, error)
 	GetPRAnnotation(repo, entityType, entityID string) (store.Annotation, bool, error)
 	ListKVAnnotations(repo, entityType, entityID string) ([]store.KVAnnotation, error)
+	// LinkedReader is the cross-reference read grouping uses (the same one
+	// `pg-desk links` uses, so the two cannot disagree on what is linked).
+	links.LinkedReader
 }
 
 // Inputs is everything Evaluate reads.
@@ -80,6 +84,9 @@ type Inputs struct {
 	Repo   string
 	Config *config.Config
 	Clock  Clock
+	// Stacks names the PR stack of a PR. Nil switches the stack grouping
+	// level off (see group.go).
+	Stacks StackSource
 }
 
 // Candidate is one reason a rule found that an entity needs the operator.
@@ -273,22 +280,21 @@ func Evaluate(in Inputs) (Result, error) {
 		res.Traces[v.Ref()] = tr
 	}
 
+	labels := map[string]string{}
+	var items []Item
 	for _, s := range survivors {
 		item := collapse(s.view, s.cands)
-		res.Items = append(res.Items, item)
+		anchor, err := groupOf(in, s.view)
+		if err != nil {
+			return Result{}, fmt.Errorf("attention: group %s: %w", s.view.Ref(), err)
+		}
+		item.Group = anchor.key()
+		labels[item.Group] = anchor.Label
+		items = append(items, item)
 	}
-	sort.SliceStable(res.Items, func(i, j int) bool {
-		a, b := res.Items[i], res.Items[j]
-		if a.Severity.rank() != b.Severity.rank() {
-			return a.Severity.rank() > b.Severity.rank()
-		}
-		if a.Type != b.Type {
-			return a.Type < b.Type
-		}
-		return a.ID < b.ID
-	})
+	res.Groups = buildGroups(items, labels)
+	res.Items = flatten(res.Groups)
 	for _, it := range res.Items {
-		res.Groups = append(res.Groups, Group{Key: it.Group, Label: it.ID, Items: []Item{it}})
 		tr := res.Traces[Ref(it.Type, it.ID)]
 		tr.Group = it.Group
 		res.Traces[Ref(it.Type, it.ID)] = tr
@@ -319,10 +325,7 @@ func collapse(v *View, cands []Candidate) Item {
 		Summary:  summary,
 		Severity: primary.Severity,
 		Rule:     primary.Kind,
-		// Until a work-context stage exists every item is a singleton group
-		// keyed by its entity (the documented last grouping level), which is
-		// itself a valid ref for `pg-desk links`.
-		Group: Ref(v.Type, v.ID),
+		// Group is filled in by the grouping stage (group.go).
 	}
 }
 
