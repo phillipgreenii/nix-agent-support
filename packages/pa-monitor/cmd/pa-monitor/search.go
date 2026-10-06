@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	claudetranscript "github.com/phillipgreenii/claude-transcript"
@@ -30,21 +32,64 @@ type searchJSONDoc struct {
 	Matches []searchMatchJSON `json:"matches"`
 }
 
-// parseTimeBound parses a --since/--before value as either a
-// time.ParseDuration string (interpreted as "this long ago" relative to
-// now — mirrors this repo's existing attention.perBackend.threshold
-// convention, e.g. "24h") or an absolute RFC3339 timestamp. The two forms
-// never collide syntactically (a duration string has no "-"/":"/"T"
-// punctuation), so duration is tried first with no ambiguity.
+// maxBoundDays caps "<N>d" so N*24h cannot overflow time.Duration
+// (math.MaxInt64 ns is roughly 106751 days). It matches the cap of
+// pg-connector's parseTimeBound so one bound syntax holds across both tools.
+const maxBoundDays = 100000
+
+// parseTimeBound parses a --since/--before value as one of three forms:
+//
+//   - a time.ParseDuration string ("24h", "90m"), interpreted as "this long
+//     ago" relative to now — mirrors this repo's existing
+//     attention.perBackend.threshold convention;
+//   - a whole-day duration "<N>d" ("7d", "0d"), N one or more ASCII digits
+//     (at most maxBoundDays), also "this long ago". time.ParseDuration
+//     rejects "7d", so the suffix is parsed here. The offset is a fixed
+//     N*24h, never calendar arithmetic, so a DST transition inside the
+//     window cannot shift the bound;
+//   - an absolute RFC3339 timestamp.
+//
+// The forms never collide syntactically (a duration string has no
+// "-"/":"/"T" punctuation and an RFC3339 timestamp never ends in a lowercase
+// "d"), so duration is tried first with no ambiguity.
+//
+// Accepting a negative Go duration ("-1h", a bound in the future) is a
+// pa-monitor-only legacy form that pg-connector's umbrella parser rejects;
+// it is kept here unchanged so every input accepted before "<N>d" was added
+// keeps its result.
 func parseTimeBound(s string, now time.Time) (time.Time, error) {
 	if d, err := time.ParseDuration(s); err == nil {
 		return now.Add(-d), nil
 	}
+	if digits, ok := strings.CutSuffix(s, "d"); ok && isAllDigits(digits) {
+		n, err := strconv.Atoi(digits)
+		if err != nil || n > maxBoundDays {
+			return time.Time{}, errBadTimeBound(s)
+		}
+		return now.Add(-time.Duration(n) * 24 * time.Hour), nil
+	}
 	t, err := time.Parse(time.RFC3339, s)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("invalid time bound %q: not a duration (e.g. \"24h\") or RFC3339 timestamp", s)
+		return time.Time{}, errBadTimeBound(s)
 	}
 	return t, nil
+}
+
+func errBadTimeBound(s string) error {
+	return fmt.Errorf("invalid time bound %q: not a duration (e.g. \"24h\"), whole days (e.g. \"7d\", at most %d) or RFC3339 timestamp", s, maxBoundDays)
+}
+
+// isAllDigits reports whether s is non-empty and entirely ASCII digits.
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // parseSearchArgs parses `search`'s own argv: exactly one positional query
