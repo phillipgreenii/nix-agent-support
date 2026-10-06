@@ -14,8 +14,8 @@ import (
 )
 
 // logRecord renders one record in logFormat's layout.
-func logRecord(sha, authorDate, email, subject string) string {
-	return recordSep + strings.Join([]string{sha, authorDate, email, "", subject}, fieldSep)
+func logRecord(sha, authorDate, email, subject string, body ...string) string {
+	return recordSep + strings.Join([]string{sha, authorDate, email, "", subject, strings.Join(body, "")}, fieldSep)
 }
 
 func TestParseLog(t *testing.T) {
@@ -28,8 +28,16 @@ func TestParseLog(t *testing.T) {
 	if len(recs) != 2 || recs[0].sha != "aaa" || recs[0].subject != "first subject" || recs[1].subject != "subject: with | odd chars" {
 		t.Errorf("recs = %+v", recs)
 	}
+	if recs[0].body != "" {
+		t.Errorf("body = %q, want empty", recs[0].body)
+	}
 	if recs[0].when.UTC() != time.Date(2026, 9, 5, 17, 0, 0, 0, time.UTC) {
 		t.Errorf("when = %v", recs[0].when)
+	}
+	multi, err := parseLog(logRecord("ddd", "2026-09-06T10:00:00Z", "me@example.test", "subj", "line one\n\nFixes acme/widgets#12\n") + "\n" +
+		logRecord("eee", "2026-09-06T10:00:00Z", "me@example.test", "next"))
+	if err != nil || len(multi) != 2 || multi[0].subject != "subj" || !strings.Contains(multi[0].body, "line one\n\nFixes acme/widgets#12") || multi[1].sha != "eee" {
+		t.Errorf("multi-line body: recs=%+v err=%v", multi, err)
 	}
 	if recs, err := parseLog(""); err != nil || len(recs) != 0 {
 		t.Errorf("empty log: recs=%v err=%v", recs, err)

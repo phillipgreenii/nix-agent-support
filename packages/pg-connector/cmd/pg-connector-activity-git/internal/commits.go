@@ -29,8 +29,9 @@ const (
 	recordSep = "\x1e"
 	fieldSep  = "\x1f"
 	// logFormat: record separator, then sha, author date (strict ISO 8601),
-	// author email, parent shas, subject.
-	logFormat = "--pretty=format:%x1e%H%x1f%aI%x1f%ae%x1f%P%x1f%s"
+	// author email, parent shas, subject, body (the body is last: it is
+	// free text spanning lines).
+	logFormat = "--pretty=format:%x1e%H%x1f%aI%x1f%ae%x1f%P%x1f%s%x1f%b"
 )
 
 // logSkip records one skipped configured path: exactly one line, naming the
@@ -126,6 +127,7 @@ func (b *Backend) collectRepoCommits(ctx context.Context, repo string, includeMe
 			"author_email": c.email,
 			"insertions":   det.insertions,
 			"deletions":    det.deletions,
+			"refs":         extractRefs(c.subject, c.body),
 		})
 		entityID := ident + "@" + c.sha
 		items = append(items, schema.ActivityItem{
@@ -145,8 +147,8 @@ func (b *Backend) collectRepoCommits(ctx context.Context, repo string, includeMe
 }
 
 type commitRecord struct {
-	sha, email, subject string
-	when                time.Time
+	sha, email, subject, body string
+	when                      time.Time
 }
 
 // parseLog parses logFormat output.
@@ -157,15 +159,15 @@ func parseLog(out string) ([]commitRecord, error) {
 		if rec == "" {
 			continue
 		}
-		f := strings.SplitN(rec, fieldSep, 5)
-		if len(f) != 5 {
+		f := strings.SplitN(rec, fieldSep, 6)
+		if len(f) != 6 {
 			return nil, fmt.Errorf("unparseable git log record %q", rec)
 		}
 		when, err := time.Parse(time.RFC3339, f[1])
 		if err != nil {
 			return nil, fmt.Errorf("commit %s: unparseable author date %q: %w", f[0], f[1], err)
 		}
-		recs = append(recs, commitRecord{sha: f[0], when: when, email: f[2], subject: f[4]})
+		recs = append(recs, commitRecord{sha: f[0], when: when, email: f[2], subject: f[4], body: f[5]})
 	}
 	return recs, nil
 }
