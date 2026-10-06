@@ -315,6 +315,15 @@
           pg-router-source-pg-desk = final.callPackage ./packages/pg-router-source-pg-desk {
             inherit (goBuilders) mkGoApp;
           };
+          # pg-decider: Pattern A (ADR 0008), same shape as
+          # pg-router-source-pg-desk above — the decider that plans and
+          # applies work-item changes from the pg-desk composite view. It
+          # execs pg-desk and pg-connector as subprocesses (no compile-time
+          # dependency), so no local `replace`/modRoot; the built wrapper
+          # carries both on PATH (docket pg2-2j5ac.52.18).
+          pg-decider = final.callPackage ./packages/pg-decider {
+            inherit (goBuilders) mkGoApp;
+          };
           # pg-router-probe: Pattern A (ADR 0008), same shape as
           # pg-router-source-pg-connector above — a standalone deterministic
           # health probe over pg-router's own operational health (docket
@@ -1132,6 +1141,7 @@
                 "pg-connector"
                 "pg-router-source-pg-connector"
                 "pg-router-source-pg-desk"
+                "pg-decider"
                 "pg-router-probe"
                 "pg-router-disk-watchdog"
                 "pg-router-review-escalator"
@@ -3217,6 +3227,17 @@
                 pname = "pg-router-source-pg-desk-go-tests";
                 src = lib.cleanSource ./packages/pg-router-source-pg-desk; # matches default.nix
                 gomod2nixToml = ./packages/pg-router-source-pg-desk/gomod2nix.toml;
+              };
+
+              # pg-decider (docket pg2-2j5ac.52.18) — whole-module Go test
+              # gate. Pattern A: flat src at the module dir, no local replace.
+              # The G8 guard (TestNoPackageImportsPgPr) skips inside this
+              # isolated build (no flake.nix above the module); it is enforced
+              # by the commit-time and pre-land hooks in the checkout.
+              pg-decider-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-decider-go-tests";
+                src = lib.cleanSource ./packages/pg-decider; # matches default.nix
+                gomod2nixToml = ./packages/pg-decider/gomod2nix.toml;
               };
 
               # pg-router-probe (docket pg2-93e5s, packet 1) — fixture-driven
@@ -9357,6 +9378,7 @@
               pg-ccaudit
               pg-router-source-pg-connector
               pg-router-source-pg-desk
+              pg-decider
               pg-router-probe
               pg-router-disk-watchdog
               pg-router-review-escalator
