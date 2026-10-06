@@ -314,3 +314,36 @@ func (s *Store) queryChanges(query string, args ...any) ([]ChangeRecord, error) 
 	}
 	return out, nil
 }
+
+// LatestChangeAt returns, per entity of entityType, the newest change_log.at
+// (max(at), RFC3339 as written) keyed by entity id. An entity with no
+// change_log row is absent from the map: change_log is pruned and a reset or
+// backfilled entity may hold none. Nothing is stored for this: it is derived
+// on every read, so no column can drift from the log. It requires the new
+// schema.
+func (s *Store) LatestChangeAt(entityType string) (map[string]string, error) {
+	if err := s.RequireNewSchema(); err != nil {
+		return nil, err
+	}
+	rows, err := s.sql.Query(
+		`SELECT entity_id, MAX(at) FROM change_log WHERE entity_type = ? GROUP BY entity_id`,
+		entityType,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("store: latest change_log time: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := map[string]string{}
+	for rows.Next() {
+		var id, at string
+		if err := rows.Scan(&id, &at); err != nil {
+			return nil, fmt.Errorf("store: scan latest change_log time: %w", err)
+		}
+		out[id] = at
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: latest change_log time: %w", err)
+	}
+	return out, nil
+}

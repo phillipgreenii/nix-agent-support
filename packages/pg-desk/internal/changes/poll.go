@@ -503,12 +503,16 @@ func idSet(ids []string) map[string]bool {
 	return out
 }
 
-// sweep re-hydrates up to sweep.max_per_poll ACTIVE entities of the type whose
-// hydrated_at is older than sweep.max_age, oldest first, as reconcile (origin
-// sweep) [design 8.4]. It draws on the same budget as the added/changed
-// hydrations and runs after them, so a tight budget starves it first; when
-// the budget or a degraded backend stops it short, every watched-query row is
-// marked degraded because a sweep entity belongs to no single query.
+// sweep is the age sweep's REMOTE tier: it re-hydrates up to
+// sweep.max_per_poll ACTIVE entities of the type whose hydrated_at is older
+// than sweep.max_age plus the entity's jitter, oldest first, as reconcile
+// (origin sweep). The list fingerprint cannot see review threads, merge-state
+// status or edited comment bodies, so only a re-hydration notices them. It
+// draws on the same budget as the added/changed hydrations and runs after
+// them, so a tight budget starves it first; when the budget or a degraded
+// backend stops it short, every watched-query row is marked degraded because a
+// sweep entity belongs to no single query. Entities not reached stay due and
+// are selected on the next poll.
 func (e *Engine) sweep(ctx context.Context, entityType string, st *pollState, bud *budget, exclude map[string]bool) error {
 	all, err := e.Store.ListEntities()
 	if err != nil {
@@ -538,4 +542,64 @@ func (e *Engine) sweep(ctx context.Context, entityType string, st *pollState, bu
 		}
 	}
 	return nil
+}
+
+// reconcileLocal is the age sweep's LOCAL tier: for up to sweep.max_per_poll
+// ACTIVE entities of the type whose latest change_log row is older than
+// sweep.reconcile_age plus the entity's jitter, oldest first, it re-emits one
+// `reconcile` record (origin local-reconcile) from the store alone. It makes
+// no remote call, runs no hydration and draws on no hydration budget, so it
+// re-evaluates what is already stored and recovers a decider run that failed
+// on an earlier record. What the cap leaves stays due for the next poll.
+// Entities hydrated this call are skipped: their fresh record already
+// restarted the age.
+func (e *Engine) reconcileLocal(ctx context.Context, entityType string, st *pollState) error {
+	all, err := e.Store.ListEntities()
+	if err != nil {
+		return fmt.Errorf("changes: list entities: %w", err)
+	}
+	latest, err := e.Store.LatestChangeAt(entityType)
+	if err != nil {
+		return fmt.Errorf("changes: %w", err)
+	}
+	skip := make(map[string]bool, len(st.hydrated))
+	for id := range st.hydrated {
+		skip[id] = true
+	}
+	ids := selectReconcile(all, latest, entityType, e.now(), e.Cfg.ReconcileAge(), e.Cfg.SweepMaxPerPoll(), skip)
+	for _, id := range ids {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("changes: %w", err)
+		}
+		if err := e.reconcileOne(entityType, id); err != nil {
+			st.side = append(st.side, fmt.Sprintf("reconcile %s: %s", id, firstErrLine(err.Error())))
+		}
+	}
+	return nil
+}
+
+// reconcileOne appends one local reconcile record for an active entity
+// through a compare-and-set write that keeps the stored snapshot, hydrated_at
+// (so the remote tier's age clock is not reset), the active flag and list_fp
+// (the non-FP write leaves it untouched), while bumping the version and
+// appending the change_log row. An absent or inactive entity is left alone.
+func (e *Engine) reconcileOne(entityType, id string) error {
+	at := e.now().UTC().Format(time.RFC3339)
+	for attempt := 0; attempt < casAttempts; attempt++ {
+		row, found, err := e.Store.GetEntity(e.repo(), entityType, id)
+		if err != nil {
+			return err
+		}
+		if !found || row.Inactive {
+			return nil
+		}
+		_, err = e.Store.WriteEntityStateWithLog(row, row.Version, row.HydratedAt, true, []string{string(classify.KindReconcile)}, OriginLocalReconcile, at)
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, store.ErrVersionConflict) {
+			return err
+		}
+	}
+	return fmt.Errorf("still losing the version race after %d attempts: %w", casAttempts, store.ErrVersionConflict)
 }

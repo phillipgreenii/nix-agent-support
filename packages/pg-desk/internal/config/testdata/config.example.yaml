@@ -97,6 +97,7 @@ watch:
 
 sweep:
   max_age: 6h
+  reconcile_age: 30m
   max_per_poll: 20
 
 hydration:

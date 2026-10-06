@@ -155,23 +155,51 @@ replayed by `--reset`.
   classifier already logged `closed`/`merged` where it saw the transition. `closed`/`merged` never
   implies the entity left every watched query, and `removed` never implies it was closed.
 
-## Rolling sweep (design 8.4)
+## Rolling age sweep: two tiers (design 8.4)
 
-On every real call pg-desk also hydrates up to `sweep.max_per_poll` (default 20) ACTIVE entities
-of the type whose `hydrated_at` is empty or older than `sweep.max_age` (default 6h), OLDEST FIRST
-(never hydrated first, ties by id), skipping entities already hydrated in the call, and logs
-`reconcile` with origin `sweep` for each: a sweep hydration treats the previous snapshot as
-unobserved, so an unchanged entity still logs exactly one `reconcile` and a change the sweep finds
-surfaces as `reconcile` only. Inactive entities are excluded. The sizing bound
-`active_count / sweep.max_per_poll x poll_interval <= sweep.max_age` is evaluated by
+On every real call pg-desk also runs an age sweep with two tiers. Both are rolling (OLDEST due
+first), both are capped per call at `sweep.max_per_poll` (default 20; the cap applies to each tier
+separately), and in both the cap only carries work forward: an entity the cap does not reach stays
+due and is selected on the next call, nothing is queued and nothing is dropped. Inactive entities
+are excluded from both. Skipping the entities already hydrated in the call, the remote tier runs
+first and the local tier second.
+
+- **Remote re-hydration tier.** Re-hydrates ACTIVE entities whose `hydrated_at` is empty or older
+  than `sweep.max_age` (default 6h) plus the entity's jitter (below), oldest first (never
+  hydrated first, then by due time, ties by id), and logs `reconcile` with origin `sweep` for each:
+  a sweep hydration treats the previous snapshot as unobserved, so an unchanged entity still logs
+  exactly one `reconcile` and a change the sweep finds surfaces as `reconcile` only. It exists
+  because the list fingerprint cannot see review threads, merge-state status or edited comment
+  bodies. It makes remote reads, so it draws on `hydration.max_per_poll` (below).
+- **Local reconcile tier.** For ACTIVE entities whose LATEST `change_log` row is older than
+  `sweep.reconcile_age` (default 30m; MAY be lowered, because the tier is local) plus the entity's
+  jitter, appends one `reconcile` record with origin `local-reconcile`. It makes NO remote call, runs
+  NO hydration and draws on no hydration budget: it re-evaluates what is already stored and so
+  recovers a decider run that failed on an earlier record, without any acknowledgement protocol.
+  The write is one compare-and-set that bumps the entity's version and appends the row while it
+  keeps the snapshot, `hydrated_at` (so the remote tier's age clock is NOT reset), the active flag
+  and the stored list fingerprint unchanged. The latest change time is `max(change_log.at)` per
+  entity, derived on read. `change_log` rows are pruned and a reset or backfilled entity may hold
+  none: such an entity falls back to its `hydrated_at`, and one with neither is due now and ranks
+  oldest of all.
+- **Jitter.** Each entity's due time is its base time (`hydrated_at` or latest change time) plus the
+  tier's age plus a deterministic offset `hash(entity_id) mod (age / 5)` (FNV-1a 64 over the id, so
+  it is the same for the same id on every run and process). Entities hydrated together by `--reset`
+  or the cutover bootstrap therefore do not all fall due in the same call; pg-router triggers carry
+  no jitter, so the spreading lives here. Order within a tier is by that due time.
+
+The sizing bound `active_count / sweep.max_per_poll x poll_interval <= age` is evaluated by
 `changes.SweepBoundHolds` over `changes.ActiveCount` and `changes.DueBacklog`, the shared helpers
-`status`, `/metrics` and `doctor` use. This sweep is selection logic inside `changes`; the old
+`status`, `/metrics` and `doctor` use; `changes.SweepInputsForTier` gives its inputs per tier
+(`remote`: `sweep.max_age`; `local`: `sweep.reconcile_age`, with the same cap). `reconcile_age` is
+configured as `sweep.reconcile_age`. This sweep is selection logic inside `changes`; the old
 top-level `pg-desk sweep` bulk backfill is unrelated and unchanged.
 
 ## Hydration budget (design 8.5)
 
 `hydration.max_per_poll` (default 50) caps the DETAIL reads per call across both sources: the
-added/changed entities first, then the sweep batch, so a tight budget starves the sweep first.
+added/changed entities first, then the remote sweep batch, so a tight budget starves the sweep
+first. The local reconcile tier reads nothing remote and is outside the budget.
 `--reset` replays are exempt (see `--reset`).
 
 - When the budget runs out, or the backend answers degraded three hydrations in a row, the
@@ -232,7 +260,7 @@ changes`.
 - **INV-CHANGES-6.** A `removed` record MUST be logged only when no configured watched query still
   holds the entity: every configured query's persisted set is consulted, and only a complete
   (succeeded, non-truncated) listing may take an id out of its query's set.
-- **INV-CHANGES-7.** An inactive entity MUST NOT be swept or replayed by `--reset`.
+- **INV-CHANGES-7.** An inactive entity MUST NOT be swept (either tier) or replayed by `--reset`.
 - **INV-CHANGES-8.** A call MUST NOT start more than `hydration.max_per_poll` added/changed plus
   sweep hydrations (a `--reset` replay is exempt); changed/added work MUST be served before sweep
   work.
@@ -244,6 +272,8 @@ changes`.
 - **INV-CHANGES-11.** A removal candidate MUST be confirmed by exactly one `show` read before it is
   deactivated, with a nil list fingerprint; a failed or degraded read MUST leave the entity active
   and its membership untouched, and a degraded, truncated or failed listing MUST NOT cause a read.
+- **INV-CHANGES-12.** The local reconcile tier MUST make no remote call and no hydration, and the
+  record it appends MUST leave the entity's `hydrated_at`, active flag and list fingerprint unchanged.
 
 ## Telemetry and logs
 

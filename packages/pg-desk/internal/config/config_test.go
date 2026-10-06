@@ -87,7 +87,7 @@ func TestConfigCoversAllSection78Keys(t *testing.T) {
 		{"WatchConfig", reflect.TypeOf(WatchConfig{}), []string{"pr", "issue", "thread"}},
 		{"WatchTypeConfig", reflect.TypeOf(WatchTypeConfig{}), []string{"queries"}},
 		{"WatchThreadConfig", reflect.TypeOf(WatchThreadConfig{}), []string{"queries", "active_window"}},
-		{"SweepConfig", reflect.TypeOf(SweepConfig{}), []string{"max_age", "max_per_poll"}},
+		{"SweepConfig", reflect.TypeOf(SweepConfig{}), []string{"max_age", "max_per_poll", "reconcile_age"}},
 		{"HydrationConfig", reflect.TypeOf(HydrationConfig{}), []string{"max_per_poll"}},
 	}
 	for _, c := range cases {
@@ -274,6 +274,7 @@ func TestLoadFile_FullExample(t *testing.T) {
 	}
 	if cfg.ThreadActiveWindow() != 7*24*time.Hour || cfg.SweepMaxAge() != 6*time.Hour ||
 		cfg.SweepMaxPerPoll() != 20 || cfg.HydrationMaxPerPoll() != 50 ||
+		cfg.ReconcileAge() != 30*time.Minute ||
 		cfg.ChangeLogRetention() != 14*24*time.Hour || cfg.ConsumerStaleAfter() != 7*24*time.Hour {
 		t.Errorf("change-flow scalars not parsed: %+v", cfg)
 	}
@@ -600,6 +601,9 @@ func TestChangeFlowKeys_Defaults(t *testing.T) {
 	if got := cfg.SweepMaxPerPoll(); got != 20 {
 		t.Errorf("SweepMaxPerPoll = %d, want 20", got)
 	}
+	if got := cfg.ReconcileAge(); got != 30*time.Minute {
+		t.Errorf("ReconcileAge = %v, want 30m", got)
+	}
 	if got := cfg.HydrationMaxPerPoll(); got != 50 {
 		t.Errorf("HydrationMaxPerPoll = %d, want 50", got)
 	}
@@ -623,6 +627,7 @@ watch:
     active_window: 3d
 sweep:
   max_age: 90m
+  reconcile_age: 10m
   max_per_poll: 5
 hydration:
   max_per_poll: 9
@@ -649,6 +654,9 @@ consumer_stale_after: 36h
 	}
 	if got := cfg.SweepMaxPerPoll(); got != 5 {
 		t.Errorf("SweepMaxPerPoll = %d", got)
+	}
+	if got := cfg.ReconcileAge(); got != 10*time.Minute {
+		t.Errorf("ReconcileAge = %v, want the lowered 10m", got)
 	}
 	if got := cfg.HydrationMaxPerPoll(); got != 9 {
 		t.Errorf("HydrationMaxPerPoll = %d", got)
@@ -688,6 +696,8 @@ func TestLoadFile_ChangeFlowInvalidValuesFail(t *testing.T) {
 		"malformed active_window": {"watch:\n  thread:\n    active_window: soon", "watch.thread.active_window"},
 		"negative active_window":  {"watch:\n  thread:\n    active_window: -1d", "watch.thread.active_window"},
 		"malformed max_age":       {"sweep:\n  max_age: xyz", "sweep.max_age"},
+		"malformed reconcile_age": {"sweep:\n  reconcile_age: xyz", "sweep.reconcile_age"},
+		"zero reconcile_age":      {"sweep:\n  reconcile_age: 0s", "sweep.reconcile_age"},
 		"malformed retention":     {"change_log_retention: 14", "change_log_retention"},
 		"zero retention":          {"change_log_retention: 0d", "change_log_retention"},
 		"malformed stale after":   {"consumer_stale_after: forever", "consumer_stale_after"},

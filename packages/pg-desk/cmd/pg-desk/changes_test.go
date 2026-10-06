@@ -532,6 +532,9 @@ func TestSeenAtLivenessReplacesHeartbeat(t *testing.T) {
 
 func TestChangesLimitPagesThroughTheLog(t *testing.T) {
 	f := newChangesFixture(t, "issue", "open")
+	// The seeded records are days old on purpose; keep the local reconcile
+	// tier (sweep.reconcile_age) from re-emitting a record for them.
+	f.cfg.Sweep.ReconcileAge = "3650d"
 	f.listing("open", 0, okSource)
 	for i := 1; i <= 5; i++ {
 		if _, err := f.seed.WriteEntityStateWithLog(
@@ -574,6 +577,9 @@ func TestChangesLimitPagesThroughTheLog(t *testing.T) {
 
 func TestChangesConcurrentCallsForOneConsumerSerialize(t *testing.T) {
 	f := newChangesFixture(t, "issue", "open")
+	// The seeded records are days old on purpose; keep the local reconcile
+	// tier (sweep.reconcile_age) from re-emitting a record for them.
+	f.cfg.Sweep.ReconcileAge = "3650d"
 	f.listing("open", 0, okSource)
 	for i := 1; i <= 6; i++ {
 		if _, err := f.seed.WriteEntityStateWithLog(
@@ -636,6 +642,9 @@ func TestChangesPrunesWithConfiguredRetentionAndStaleness(t *testing.T) {
 			f := newChangesFixture(t, "issue", "open")
 			f.cfg.ChangeLogRetentionRaw = "1h"
 			f.cfg.ConsumerStaleAfterRaw = "1h"
+			// The seeded records are old on purpose (they are what prune removes);
+			// keep the local reconcile tier from re-emitting fresh ones.
+			f.cfg.Sweep.ReconcileAge = "3650d"
 			f.listing("open", 0, okSource)
 			for i := 1; i <= 2; i++ {
 				if _, err := f.seed.WriteEntityStateWithLog(

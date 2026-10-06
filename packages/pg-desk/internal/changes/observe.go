@@ -175,3 +175,24 @@ type SweepInputs struct {
 func SweepInputsFor(cfg *config.Config, tf TypeFlow) SweepInputs {
 	return SweepInputs{ActiveCount: tf.Active, MaxPerPoll: cfg.SweepMaxPerPoll(), MaxAge: cfg.SweepMaxAge()}
 }
+
+// Sweep tiers accepted by SweepInputsForTier.
+const (
+	// TierRemote is the re-hydration tier, aged by sweep.max_age.
+	TierRemote = "remote"
+	// TierLocal is the local reconcile tier, aged by sweep.reconcile_age.
+	TierLocal = "local"
+)
+
+// SweepInputsForTier returns the sizing bound's inputs for one observed type
+// and age-sweep tier. TierRemote is identical to SweepInputsFor (sweep.max_age).
+// TierLocal ages by sweep.reconcile_age and takes the local tier's cap, which
+// is sweep.max_per_poll (the same key caps each tier separately). An unknown
+// tier is treated as TierRemote.
+func SweepInputsForTier(cfg *config.Config, tf TypeFlow, tier string) SweepInputs {
+	in := SweepInputsFor(cfg, tf)
+	if tier == TierLocal {
+		in.MaxAge = cfg.ReconcileAge()
+	}
+	return in
+}

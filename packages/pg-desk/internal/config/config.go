@@ -148,7 +148,7 @@ type Config struct {
 	// ConsumerStaleAfterRaw are the entity-change-flow keys (design 9.10,
 	// docs/superpowers/specs/2026-09-29-entity-change-flow-design.md). Read
 	// them through the typed accessors (WatchQueries, ThreadActiveWindow,
-	// SweepMaxAge, SweepMaxPerPoll, HydrationMaxPerPoll, ChangeLogRetention,
+	// SweepMaxAge, ReconcileAge, SweepMaxPerPoll, HydrationMaxPerPoll, ChangeLogRetention,
 	// ConsumerStaleAfter), which own the documented defaults.
 	Watch     WatchConfig     `yaml:"watch,omitempty" json:"watch,omitempty"`
 	Sweep     SweepConfig     `yaml:"sweep,omitempty" json:"sweep,omitempty"`
@@ -169,6 +169,7 @@ type Config struct {
 const (
 	DefaultThreadActiveWindow  = 7 * 24 * time.Hour
 	DefaultSweepMaxAge         = 6 * time.Hour
+	DefaultReconcileAge        = 30 * time.Minute
 	DefaultSweepMaxPerPoll     = 20
 	DefaultHydrationMaxPerPoll = 50
 )
@@ -199,10 +200,16 @@ type SweepConfig struct {
 	// MaxAge is how stale a row may be before the sweep re-hydrates it
 	// (a duration such as "6h"); empty means DefaultSweepMaxAge.
 	MaxAge string `yaml:"max_age,omitempty" json:"max_age,omitempty"`
-	// MaxPerPoll caps sweep re-hydrations per poll; nil means
+	// MaxPerPoll caps sweep re-hydrations per poll (and, separately, the
+	// local reconcile tier's re-emits per poll); nil means
 	// DefaultSweepMaxPerPoll. A pointer so an explicit 0 is rejected rather
 	// than mistaken for unset.
 	MaxPerPoll *int `yaml:"max_per_poll,omitempty" json:"max_per_poll,omitempty"`
+	// ReconcileAge is how old an active entity's latest change_log row may be
+	// before the LOCAL reconcile tier re-emits a reconcile record for it (a
+	// duration such as "30m"; no remote call, so it MAY be lowered); empty
+	// means DefaultReconcileAge.
+	ReconcileAge string `yaml:"reconcile_age,omitempty" json:"reconcile_age,omitempty"`
 }
 
 // HydrationConfig is config.yaml's hydration block.
@@ -248,6 +255,13 @@ func (c *Config) ThreadActiveWindow() time.Duration {
 // SweepMaxAge returns sweep.max_age (default 6h).
 func (c *Config) SweepMaxAge() time.Duration {
 	return durationOrDefault(c.Sweep.MaxAge, DefaultSweepMaxAge)
+}
+
+// ReconcileAge returns sweep.reconcile_age (default 30m): the age of an
+// active entity's latest change_log row past which the local reconcile tier
+// re-emits a reconcile record for it.
+func (c *Config) ReconcileAge() time.Duration {
+	return durationOrDefault(c.Sweep.ReconcileAge, DefaultReconcileAge)
 }
 
 // SweepMaxPerPoll returns sweep.max_per_poll (default 20).
@@ -349,6 +363,7 @@ func validateChangeFlow(cfg *Config) error {
 	for _, d := range []struct{ key, val string }{
 		{"watch.thread.active_window", cfg.Watch.Thread.ActiveWindow},
 		{"sweep.max_age", cfg.Sweep.MaxAge},
+		{"sweep.reconcile_age", cfg.Sweep.ReconcileAge},
 		{"change_log_retention", cfg.ChangeLogRetentionRaw},
 		{"consumer_stale_after", cfg.ConsumerStaleAfterRaw},
 	} {

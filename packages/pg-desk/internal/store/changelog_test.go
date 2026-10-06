@@ -341,3 +341,44 @@ func TestAppendChangeLogTx_UsableInCallerTransaction(t *testing.T) {
 		t.Fatalf("rows after rollback = %d, want 0", n)
 	}
 }
+
+func TestLatestChangeAt_PerEntityMaxTypeScopedAndAbsentWhenNoRows(t *testing.T) {
+	s := OpenNewSchemaForTest(t)
+	mk := func(typ, id string) Entity {
+		return Entity{Repo: clRepo, EntityType: typ, EntityID: id, Facts: "{}", AsOf: "x"}
+	}
+	var v int64
+	var err error
+	if v, err = s.WriteEntityWithLog(mk("pr", "a"), 0, []string{"created"}, "sync", "2026-09-10T00:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.WriteEntityWithLog(mk("pr", "a"), v, []string{"reconcile"}, "sweep", "2026-09-12T00:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.WriteEntityWithLog(mk("pr", "b"), 0, []string{"created"}, "sync", "2026-09-11T00:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.WriteEntityWithLog(mk("issue", "c"), 0, []string{"created"}, "sync", "2026-09-13T00:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	// An entity written with no kinds appends no change_log row.
+	if _, err = s.WriteEntityStateWithLog(mk("pr", "quiet"), 0, "", true, nil, "sync", "2026-09-14T00:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.LatestChangeAt("pr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"a": "2026-09-12T00:00:00Z", "b": "2026-09-11T00:00:00Z"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("LatestChangeAt(pr) = %v, want %v (type-scoped, max per entity, none for a row-less entity)", got, want)
+	}
+}
+
+func TestLatestChangeAt_RefusesOldSchema(t *testing.T) {
+	s := OpenForTest(t)
+	if _, err := s.LatestChangeAt("pr"); !errors.Is(err, ErrOldSchema) {
+		t.Fatalf("err = %v, want ErrOldSchema", err)
+	}
+}

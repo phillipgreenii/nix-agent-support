@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/pipeline"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
@@ -106,5 +107,32 @@ func TestObserveDegradesOnAnOldSchemaStore(t *testing.T) {
 	}
 	if flow.Migrated || len(flow.Types) != 0 || len(flow.Consumers) != 0 {
 		t.Errorf("flow = %+v, want zero", flow)
+	}
+}
+
+func TestSweepInputsForTier(t *testing.T) {
+	cfg := &config.Config{}
+	tf := TypeFlow{Type: "pr", Active: 88}
+	remote := SweepInputsForTier(cfg, tf, TierRemote)
+	if want := SweepInputsFor(cfg, tf); remote != want {
+		t.Errorf("remote = %+v, want SweepInputsFor %+v", remote, want)
+	}
+	if remote.MaxAge != 6*time.Hour || remote.MaxPerPoll != 20 || remote.ActiveCount != 88 {
+		t.Errorf("remote defaults = %+v", remote)
+	}
+	local := SweepInputsForTier(cfg, tf, TierLocal)
+	if local.MaxAge != 30*time.Minute || local.MaxPerPoll != 20 || local.ActiveCount != 88 {
+		t.Errorf("local defaults = %+v, want 30m age, the shared cap 20, 88 active", local)
+	}
+
+	cfg.Sweep.ReconcileAge = "10m"
+	cap := 7
+	cfg.Sweep.MaxPerPoll = &cap
+	cfg.Sweep.MaxAge = "2h"
+	if got := SweepInputsForTier(cfg, tf, TierLocal); got.MaxAge != 10*time.Minute || got.MaxPerPoll != 7 {
+		t.Errorf("lowered local = %+v", got)
+	}
+	if got := SweepInputsForTier(cfg, tf, "remote"); got.MaxAge != 2*time.Hour || got.MaxPerPoll != 7 {
+		t.Errorf("remote with overrides = %+v", got)
 	}
 }
