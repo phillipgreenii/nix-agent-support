@@ -226,12 +226,10 @@ func TestIdentifierGuardWorkReportTree(t *testing.T) {
 	if stats.TestdataFiles < 1 {
 		t.Fatalf("guard visited %d testdata file(s) under %s; expected at least 1", stats.TestdataFiles, root)
 	}
-	// docs/behavior arrives with a later change; once it exists it MUST be
-	// scanned.
-	if info, statErr := os.Stat(filepath.Join(root, "docs", "behavior")); statErr == nil && info.IsDir() {
-		if stats.BehaviorFiles < 1 {
-			t.Fatalf("docs/behavior exists under %s but the guard visited %d file(s) in it", root, stats.BehaviorFiles)
-		}
+	// The behavior docs live in docs/behavior and MUST be scanned: a walk that
+	// misses them would pass vacuously over the largest prose surface.
+	if stats.BehaviorFiles < 1 {
+		t.Fatalf("guard visited %d file(s) under docs/behavior in %s; expected at least 1", stats.BehaviorFiles, root)
 	}
 	t.Logf("scanned %d .go, %d testdata, %d docs file(s) (%d under docs/behavior) under %s",
 		stats.GoFiles, stats.TestdataFiles, stats.DocsFiles, stats.BehaviorFiles, root)
