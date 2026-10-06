@@ -1,0 +1,3 @@
+{"type":"user","uuid":"o-1","timestamp":"2026-09-18T09:00:00Z","sessionId":"orig","cwd":"/work/alpha","gitBranch":"main","message":{"role":"user","content":"<system-reminder>ignored</system-reminder>Please summarize the repository layout."}}
+{"type":"assistant","uuid":"o-2","timestamp":"2026-09-18T09:01:00Z","sessionId":"orig","message":{"id":"msg_o1","model":"claude-sonnet-4-6","role":"assistant","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":600000,"output_tokens":60000,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}
+{"type":"user","uuid":"o-3","timestamp":"2026-09-18T09:05:00Z","sessionId":"orig","message":{"role":"user","content":"second prompt"}}

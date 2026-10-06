@@ -27,6 +27,7 @@ var subcommandNames = []string{
 	"cmux-bridge",
 	"auto-resume",
 	"search",
+	"sessions",
 	"tui",
 }
 
@@ -122,6 +123,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		runAutoResume(rest)
 	case "search":
 		runSearch(rest)
+	case "sessions":
+		runSessions(rest)
 	case "tui":
 		runTUI(rest)
 	default:

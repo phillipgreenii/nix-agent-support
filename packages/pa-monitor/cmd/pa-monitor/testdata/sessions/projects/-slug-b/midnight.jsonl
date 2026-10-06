@@ -1,0 +1,2 @@
+{"type":"user","uuid":"m-1","timestamp":"2026-09-20T23:50:00Z","sessionId":"midnight","cwd":"/work/beta","gitBranch":"feature-m","message":{"role":"user","content":"Work that spans midnight."}}
+{"type":"assistant","uuid":"m-2","timestamp":"2026-09-21T00:10:00Z","sessionId":"midnight","message":{"id":"msg_m1","model":"claude-opus-4-7","role":"assistant","content":[{"type":"text","text":"done"}],"usage":{"input_tokens":200000,"output_tokens":40000,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}

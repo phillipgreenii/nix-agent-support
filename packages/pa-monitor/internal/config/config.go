@@ -71,6 +71,10 @@ type Config struct {
 	// heuristic (internal/signal.TmuxSignaler.HasUnsubmittedInput) has not yet
 	// been validated against a live Claude Code TUI capture.
 	AutoSessionWrapUp AutoSessionWrapUpConfig
+	// FirstPromptMaxChars is the rune count the `sessions` subcommand truncates
+	// each session's first_prompt to. Sourced from the top-level
+	// first_prompt_max_chars key; a non-positive value falls back to the default.
+	FirstPromptMaxChars int
 }
 
 // AutoSessionWrapUpConfig is the [auto_session_wrap_up] block.
@@ -143,6 +147,7 @@ type tomlConfig struct {
 	CaffeinateGraceS         *int    `toml:"caffeinate_grace_s"`
 	WorkingThresholdS        *int    `toml:"working_threshold_s"`
 	IdleThresholdS           *int    `toml:"idle_threshold_s"`
+	FirstPromptMaxChars      *int    `toml:"first_prompt_max_chars"`
 	WaitingFreshWindowS      *int    `toml:"waiting_fresh_window_s"`
 	StaleAfterS              *int    `toml:"stale_after_s"`
 	AutoResumeDelayS         *int    `toml:"auto_resume_delay_s"`
@@ -235,6 +240,8 @@ func defaults() Config {
 		// Enable defaults to false (opt-in) — see the AutoSessionWrapUp field
 		// doc. 45m is safely under the ~1h prompt-cache TTL.
 		AutoSessionWrapUp: AutoSessionWrapUpConfig{Enable: false, IdleThresholdMinutes: 45},
+		// Keeps a `sessions` first_prompt to a single readable line.
+		FirstPromptMaxChars: DefaultFirstPromptMaxChars,
 	}
 }
 
@@ -257,6 +264,10 @@ func defaultPricing() PricingConfig {
 		},
 	}
 }
+
+// DefaultFirstPromptMaxChars is the default (and the fallback for a
+// non-positive configured value) of Config.FirstPromptMaxChars.
+const DefaultFirstPromptMaxChars = 200
 
 func Load(path string) (Config, error) {
 	cfg := defaults()
@@ -298,6 +309,9 @@ func apply(cfg *Config, raw tomlConfig) {
 	}
 	if raw.IdleThresholdS != nil {
 		cfg.IdleThreshold = time.Duration(*raw.IdleThresholdS) * time.Second
+	}
+	if raw.FirstPromptMaxChars != nil && *raw.FirstPromptMaxChars > 0 {
+		cfg.FirstPromptMaxChars = *raw.FirstPromptMaxChars
 	}
 	if raw.WaitingFreshWindowS != nil {
 		cfg.WaitingFreshWindow = time.Duration(*raw.WaitingFreshWindowS) * time.Second

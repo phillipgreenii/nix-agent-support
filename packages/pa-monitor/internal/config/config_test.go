@@ -510,3 +510,44 @@ idle_threshold_minutes = 20
 		t.Errorf("AutoSessionWrapUp.IdleThresholdMinutes = %d, want 20", cfg.AutoSessionWrapUp.IdleThresholdMinutes)
 	}
 }
+
+func TestFirstPromptMaxChars(t *testing.T) {
+	load := func(t *testing.T, content string) Config {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "config.toml")
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return cfg
+	}
+	t.Run("default when file absent", func(t *testing.T) {
+		cfg, err := Load(filepath.Join(t.TempDir(), "nonexistent.toml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.FirstPromptMaxChars != 200 {
+			t.Errorf("FirstPromptMaxChars = %d, want 200", cfg.FirstPromptMaxChars)
+		}
+	})
+	t.Run("default when key absent", func(t *testing.T) {
+		if got := load(t, `plan_tier = "pro"`).FirstPromptMaxChars; got != 200 {
+			t.Errorf("FirstPromptMaxChars = %d, want 200", got)
+		}
+	})
+	t.Run("override", func(t *testing.T) {
+		if got := load(t, "first_prompt_max_chars = 40\n").FirstPromptMaxChars; got != 40 {
+			t.Errorf("FirstPromptMaxChars = %d, want 40", got)
+		}
+	})
+	t.Run("non-positive falls back to default", func(t *testing.T) {
+		for _, v := range []string{"0", "-5"} {
+			if got := load(t, "first_prompt_max_chars = "+v+"\n").FirstPromptMaxChars; got != 200 {
+				t.Errorf("first_prompt_max_chars=%s: FirstPromptMaxChars = %d, want 200", v, got)
+			}
+		}
+	})
+}

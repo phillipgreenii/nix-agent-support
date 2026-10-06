@@ -1,0 +1,2 @@
+{"type":"user","uuid":"o-3","timestamp":"2026-09-18T09:05:00Z","sessionId":"resumed","cwd":"/work/alpha","gitBranch":"main","message":{"role":"user","content":"second prompt"}}
+{"type":"assistant","uuid":"r-2","timestamp":"2026-09-18T09:30:00Z","sessionId":"resumed","message":{"id":"msg_r1","model":"claude-sonnet-4-6","role":"assistant","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":400000,"output_tokens":40000,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}

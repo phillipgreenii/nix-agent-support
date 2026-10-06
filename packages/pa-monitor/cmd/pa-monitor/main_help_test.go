@@ -11,7 +11,7 @@ import (
 // this list is caught here.
 var allSubcommandNames = []string{
 	"daemon", "status", "agents-busy-check", "wait-until-agents-finished",
-	"config", "caffeinate", "nudge", "info", "cmux-bridge", "auto-resume", "search", "tui",
+	"config", "caffeinate", "nudge", "info", "cmux-bridge", "auto-resume", "search", "sessions", "tui",
 }
 
 // TestPickSubcommandHelpFlags asserts -h/--help route to the pure "help"

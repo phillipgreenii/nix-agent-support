@@ -1,0 +1,1 @@
+{"type":"assistant","uuid":"n-1","timestamp":"2026-09-23T10:00:00Z","sessionId":"noprompt","cwd":"/work/delta","gitBranch":"main","message":{"id":"msg_n1","model":"claude-sonnet-4-6","role":"assistant","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":1000000,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":1000000}}}

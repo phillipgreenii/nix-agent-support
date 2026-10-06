@@ -1,0 +1,2 @@
+{"type":"user","uuid":"k-1","timestamp":"2026-09-22T08:00:00Z","sessionId":"unknown","cwd":"/work/gamma","gitBranch":"main","message":{"role":"user","content":"Use a model with no known price."}}
+{"type":"assistant","uuid":"k-2","timestamp":"2026-09-22T08:02:00Z","sessionId":"unknown","message":{"id":"msg_k1","model":"mystery-model","role":"assistant","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":10,"output_tokens":20,"cache_creation_input_tokens":3,"cache_read_input_tokens":4}}}
