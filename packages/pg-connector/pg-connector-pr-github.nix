@@ -62,6 +62,9 @@ mkGoApp {
       ./pkg/provider/pr
       ./pkg/provider/search
       ./pkg/provider/attention
+      # list_activity capability: internal/activity.go and main.go import
+      # pkg/provider/activity (dispatch table + iface).
+      ./pkg/provider/activity
       # Shared event-log writer (bead pg2-kjdfi): this backend's internal/eventlog
       # imports it, so it is part of the build+test dependency graph.
       ./pkg/eventlog
