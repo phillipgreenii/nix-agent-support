@@ -274,6 +274,53 @@ func (l *blockingListener) Offer(Offering) OfferResult {
 	return OfferResult{Accepted: true, Decline: DeclineNone}
 }
 
+// TestEnqueue_InFlightDedupe pins the in-flight dedupe contract a per-entity
+// `<type>.changed` emitter relies on: while an Offer for event id X is blocked
+// mid-pass the pair is unsettled, so X is still RETAINED even though the event
+// is born expired. A re-Enqueue of X is Deduped; the same entity under a
+// different `@seq` suffix is a distinct id and is Enqueued; once the offer
+// settles (accepted) and the event is past expiry, X is no longer retained and
+// the same id is Enqueued again.
+func TestEnqueue_InFlightDedupe(t *testing.T) {
+	clk := newClock()
+	q := newQueue(t, clk)
+	l := &blockingListener{id: "h", binds: map[string]bool{"pr.changed": true}, proceed: make(chan struct{}), entered: make(chan struct{})}
+	q.Register(l)
+	// Born expired (no expiresAt): retention rests solely on the unsettled pair.
+	if r := mustEnqueue(t, q, evt("<owner>/<repo>#1@1", "pr.changed")); r != Enqueued {
+		t.Fatalf("first enqueue = %v, want Enqueued", r)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		q.Dispatch()
+	}()
+	select {
+	case <-l.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Offer never entered its blocking wait (timeout)")
+	}
+
+	if r := mustEnqueue(t, q, evt("<owner>/<repo>#1@1", "pr.changed")); r != Deduped {
+		t.Fatalf("re-enqueue of same id while offer in flight = %v, want Deduped", r)
+	}
+	if r := mustEnqueue(t, q, evt("<owner>/<repo>#1@2", "pr.changed")); r != Enqueued {
+		t.Fatalf("enqueue of id with a different @seq while offer in flight = %v, want Enqueued", r)
+	}
+
+	close(l.proceed)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Dispatch did not return after Offer unblocked (timeout)")
+	}
+
+	if r := mustEnqueue(t, q, evt("<owner>/<repo>#1@1", "pr.changed")); r != Enqueued {
+		t.Fatalf("re-enqueue of same id after the offer settled = %v, want Enqueued (born-expired entry no longer retained)", r)
+	}
+}
+
 // TestDispatch_CustodyPinnedDuringBlockingOffer is Task 2.2's own pinned
 // acceptance test: a listener double that blocks inside Offer while the test
 // issues a status-shaped read asserts SessionsInFlight() == 1 and

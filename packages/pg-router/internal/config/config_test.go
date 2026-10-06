@@ -856,6 +856,110 @@ format = "jsonl"
 	}
 }
 
+// A config declaring the exact-match `<type>.changed` emit and a role bound to
+// it loads with no finding. The config MUST declare a [[role]]: with none the
+// loader falls back to built-in queries and the test would prove nothing.
+func TestLoad_changedEmitWithBoundRoleLoads(t *testing.T) {
+	writeCfg(t, `
+[[query]]
+name = "pr-changes"
+emits = ["pr.changed"]
+type = "command"
+[query.command]
+argv = ["x"]
+format = "jsonl"
+
+[[role]]
+name = "pr-decider"
+type = "command"
+cap = 1
+binds = ["pr.changed"]
+[role.command]
+argv = ["x"]
+`)
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("a pr.changed emit with a bound role must load without a finding: %v", err)
+	}
+	if len(c.Roles) != 1 || c.Roles[0].Name != "pr-decider" || len(c.Roles[0].Binds) != 1 || c.Roles[0].Binds[0] != "pr.changed" {
+		t.Fatalf("role bound to pr.changed did not decode: %+v", c.Roles)
+	}
+	if len(c.Queries) != 1 || c.Queries[0].Name != "pr-changes" {
+		t.Fatalf("query emitting pr.changed did not decode: %+v", c.Queries)
+	}
+	if got := c.Queries[0].Query.Emits(); len(got) != 1 || got[0] != "pr.changed" {
+		t.Fatalf("emits = %v, want [pr.changed]", got)
+	}
+}
+
+// A `<type>.changed` emit with no role bound to it is an orphan producer, and a
+// role binding `<type>.changed` with no query emitting it is an orphan
+// consumer; matching is exact, so a near-miss type does not satisfy either.
+func TestLoad_changedOrphansAreRejected(t *testing.T) {
+	t.Run("emit with no bound role", func(t *testing.T) {
+		writeCfg(t, `
+[[query]]
+name = "pr-changes"
+emits = ["pr.changed"]
+type = "command"
+[query.command]
+argv = ["x"]
+format = "jsonl"
+
+[[role]]
+name = "other"
+type = "command"
+cap = 1
+binds = ["issue.changed"]
+[role.command]
+argv = ["x"]
+
+[[query]]
+name = "issue-changes"
+emits = ["issue.changed"]
+type = "command"
+[query.command]
+argv = ["x"]
+format = "jsonl"
+`)
+		_, err := Load()
+		if err == nil || !strings.Contains(err.Error(), "orphan producer") || !strings.Contains(err.Error(), "pr.changed") {
+			t.Fatalf("an unbound pr.changed emit must be an orphan-producer finding naming it; got %v", err)
+		}
+	})
+	t.Run("bind with no producer", func(t *testing.T) {
+		writeCfg(t, `
+[[query]]
+name = "issue-changes"
+emits = ["issue.changed"]
+type = "command"
+[query.command]
+argv = ["x"]
+format = "jsonl"
+
+[[role]]
+name = "issue-decider"
+type = "command"
+cap = 1
+binds = ["issue.changed"]
+[role.command]
+argv = ["x"]
+
+[[role]]
+name = "pr-decider"
+type = "command"
+cap = 1
+binds = ["pr.changed"]
+[role.command]
+argv = ["x"]
+`)
+		_, err := Load()
+		if err == nil || !strings.Contains(err.Error(), "orphan consumer") || !strings.Contains(err.Error(), "pr.changed") {
+			t.Fatalf("an unproduced pr.changed bind must be an orphan-consumer finding naming it; got %v", err)
+		}
+	})
+}
+
 // A threshold-triggered query fires off an upstream event type (Q1); it decodes
 // and wires without error.
 func TestLoad_thresholdTriggerDecodes(t *testing.T) {
