@@ -40,6 +40,15 @@ ci_only_attempts_threshold: 3
 # CI job names whose failure alone does not make a PR unreviewable.
 review_exempt_checks: [slow-nightly]
 
+# Area labels for the merge-request bead (and copied to its review-pr /
+# process-feedback children), derived from the PR title or branch.
+area_labels:
+  - pattern: '^feat\(svc/alpha\)'
+    labels: [alpha]
+  - pattern: "PROJ-[0-9]+"
+    field: branch
+    labels: [proj]
+
 jira:
   high_priority_values: [Highest, High]
   incident_labels: [incident]

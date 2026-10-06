@@ -107,6 +107,13 @@ type Config struct {
 	// interpret stage (packet 5) runs base urgency only.
 	Urgency *UrgencyConfig `yaml:"urgency,omitempty" json:"urgency,omitempty"`
 
+	// AreaLabels derives area labels for the merge-request (anchor) bead from
+	// the PR title or branch, and is the vocabulary the review-pr /
+	// process-feedback children copy from their anchor (bead pg2-lvoye). Empty
+	// (the default) labels nothing. Labels are only ever ADDED: a label an
+	// operator or agent put on a bead is never removed by sync.
+	AreaLabels []AreaLabelRule `yaml:"area_labels,omitempty" json:"area_labels,omitempty"`
+
 	// AgentTrackerBackend selects which agent tracker pg-desk signals
 	// through for every pg-connector issue write and feedback-set
 	// attribution. A config key, never a literal, so the beads backend
@@ -718,6 +725,9 @@ func finalize(cfg *Config) error {
 		return fmt.Errorf("sync.retry: %w", err)
 	}
 	if err := validateChangeFlow(cfg); err != nil {
+		return err
+	}
+	if err := validateAreaLabels(cfg.AreaLabels); err != nil {
 		return err
 	}
 	if err := validateIssueURLTemplate(cfg.Links.IssueURLTemplate); err != nil {

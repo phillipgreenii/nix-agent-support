@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/interpret"
@@ -82,6 +83,57 @@ func (rc *runContext) mergeAdoption(a adoption) {
 	if rc.reviewID == "" && a.Review != nil {
 		rc.reviewID = a.Review.ID
 	}
+}
+
+// areaLabels is the area label set derived from config (area_labels) for
+// this PR's title and branch (bead pg2-lvoye); nil when none is configured or
+// none matches.
+func (rc *runContext) areaLabels() []string {
+	return rc.syncer.cfg.AreaLabelsFor(rc.pr.Title, rc.pr.Branch)
+}
+
+// childAreaLabels is the area label set a review-pr / process-feedback child
+// carries: the labels derived for the PR, plus any area-vocabulary label the
+// parent merge-request bead already carries (so a label an operator or agent
+// put on the anchor flows to its children too). Sorted, de-duplicated.
+func (rc *runContext) childAreaLabels() []string {
+	set := map[string]bool{}
+	for _, l := range rc.areaLabels() {
+		set[l] = true
+	}
+	if rc.anchorEntity != nil {
+		for _, l := range rc.syncer.cfg.AreaVocabulary() {
+			if hasLabel(rc.anchorEntity.Labels, l) {
+				set[l] = true
+			}
+		}
+	}
+	return setToSorted(set)
+}
+
+// missingLabels returns the entries of want absent from have, sorted. Sync
+// only ever ADDS area labels, so a label an operator or agent removed or
+// added by hand is never fought over.
+func missingLabels(want, have []string) []string {
+	var out []string
+	for _, l := range want {
+		if !hasLabel(have, l) {
+			out = append(out, l)
+		}
+	}
+	return sortedCopy(out)
+}
+
+func setToSorted(set map[string]bool) []string {
+	if len(set) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(set))
+	for k := range set {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func (rc *runContext) upsertLedger(kind, beadID, contentHash, lastReviewedHeadSHA string) error {
@@ -239,6 +291,10 @@ type anchorHashInput struct {
 	AddLabels, RemoveLabels          []string
 	Priority                         int
 	SetPriority                      bool
+	// AreaLabels is the full derived area set (not the delta), so the hash
+	// is stable; omitted when empty so a deployment without area_labels keeps
+	// its existing ledger hashes (no one-time rewrite of every anchor).
+	AreaLabels []string `json:",omitempty"`
 }
 
 // ensureAnchor implements the Anchor rule (design section 7.5): exactly one
@@ -255,11 +311,13 @@ func (rc *runContext) ensureAnchor(ctx context.Context, coOwned, actsAsMine bool
 	}
 	addLabels, removeLabels, priority, setPriority := priorityDelta(curPriority, curLabels, actsAsMine, rc.pr.hasConflict())
 
+	area := rc.areaLabels()
 	hash := contentHash(anchorHashInput{
 		State: rc.pr.State, Branch: rc.pr.Branch, Base: rc.pr.Base, Author: rc.pr.Author, URL: rc.pr.URL,
 		Draft: rc.pr.Draft, CoOwned: coOwned,
 		AddLabels: sortedCopy(addLabels), RemoveLabels: sortedCopy(removeLabels),
 		Priority: priority, SetPriority: setPriority,
+		AreaLabels: area,
 	})
 
 	metadata := map[string]string{
@@ -276,6 +334,7 @@ func (rc *runContext) ensureAnchor(ctx context.Context, coOwned, actsAsMine bool
 			if coOwned {
 				labels = append(labels, "co-owned")
 			}
+			labels = append(labels, area...)
 			id, err := rc.syncer.client.Create(ctx, createInput{
 				Title:     fmt.Sprintf("%s#%d: %s", rc.repo, rc.prNumber, rc.pr.Title),
 				IssueType: "merge-request",
@@ -312,7 +371,15 @@ func (rc *runContext) ensureAnchor(ctx context.Context, coOwned, actsAsMine bool
 		return rc.upsertLedger(KindAnchor, rc.anchorID, hash, "")
 	}
 	if rc.mode == ModeApply {
-		upd := updateInput{Metadata: metadata, AddLabels: addLabels, RemoveLabels: removeLabels}
+		var curAnchorLabels []string
+		if rc.anchorEntity != nil {
+			curAnchorLabels = rc.anchorEntity.Labels
+		}
+		upd := updateInput{
+			Metadata:     metadata,
+			AddLabels:    append(append([]string{}, addLabels...), missingLabels(area, curAnchorLabels)...),
+			RemoveLabels: removeLabels,
+		}
 		if setPriority {
 			upd.Priority = formatPriority(priority)
 		}
@@ -342,6 +409,8 @@ func (rc *runContext) ensureCycle(ctx context.Context, unaddressed []string, act
 	if digest != "" {
 		labels = append(labels, fbsumLabelPrefix+digest)
 	}
+	area := rc.childAreaLabels()
+	labels = append(labels, area...)
 
 	hash := contentHash(cycleHashInput{Description: description, Labels: sortedCopy(labels)})
 
@@ -380,6 +449,11 @@ func (rc *runContext) ensureCycle(ctx context.Context, unaddressed []string, act
 		if actsAsMine && (rc.cycleEntity == nil || !hasLabel(rc.cycleEntity.Labels, "mine")) {
 			addLabels = append(addLabels, "mine")
 		}
+		var curCycleLabels []string
+		if rc.cycleEntity != nil {
+			curCycleLabels = rc.cycleEntity.Labels
+		}
+		addLabels = append(addLabels, missingLabels(area, curCycleLabels)...)
 		if err := rc.syncer.client.Update(ctx, rc.cycleID, updateInput{
 			Metadata:     map[string]string{"repo": rc.repo, "pr_number": strconv.Itoa(rc.prNumber), "branch": rc.pr.Branch},
 			AddLabels:    addLabels,
@@ -409,6 +483,7 @@ func (rc *runContext) ensureReviewRequest(ctx context.Context) error {
 			id, err := rc.syncer.client.Create(ctx, createInput{
 				Title:     fmt.Sprintf("review-pr: %s#%d", rc.repo, rc.prNumber),
 				IssueType: "task",
+				Labels:    rc.childAreaLabels(),
 				Metadata:  metadata,
 				Parent:    rc.anchorID,
 			})
@@ -435,7 +510,12 @@ func (rc *runContext) ensureReviewRequest(ctx context.Context) error {
 		// and that deferral belongs to the OLD head. Verified on bd 1.2.2: a
 		// reopen that leaves defer_until in place keeps the bead out of `bd
 		// ready` until it expires, delaying review of the new head.
+		var curReviewLabels []string
+		if rc.reviewEntity != nil {
+			curReviewLabels = rc.reviewEntity.Labels
+		}
 		if err := rc.syncer.client.Update(ctx, rc.reviewID, updateInput{
+			AddLabels:     missingLabels(rc.childAreaLabels(), curReviewLabels),
 			Status:        "open",
 			ClearAssignee: true,
 			ClearDefer:    true,

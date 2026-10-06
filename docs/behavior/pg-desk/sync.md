@@ -128,6 +128,17 @@ review submit` (`pg2-kftf9.13`, whose replace behavior `pg2-8qui6` supersedes wi
   review or comment exists for the current head) and the last append
   ([`show.md`](show.md), "Pending review"). A failed lookup reads `unknown`, never "no pending
   review". Sync neither reads nor writes it.
+- **Area labels** (`pg2-lvoye`) — when the deployment configures `area_labels`, each rule is a
+  regular expression searched in the PR title (default) or head branch, naming the labels a
+  matching PR carries; the union of every matching rule is the PR's area label set. Sync adds the
+  set to the anchor at create, and the review-request and feedback-cycle beads carry the same set
+  plus any area label (a label named by some rule) their anchor already carries, so a label an
+  operator put on the anchor flows to its children. Sync MUST only ever ADD area labels: it MUST
+  NOT remove a label from any bead for this reason, so labels added by hand, and an area label
+  later removed by hand, are never fought over. With no `area_labels` configured, sync adds
+  nothing and the bead write hashes are unchanged. An existing anchor and feedback cycle gain
+  missing area labels on their next content write; a review request gains them on creation or on
+  its head-advance reopen. Which labels exist is deployment config: this repo names none.
 - **Recorded losses (D15)** — draft auto-promotion, `wip on`'s upstream draft conversion, and
   pending reply posting are not performed by sync.
 

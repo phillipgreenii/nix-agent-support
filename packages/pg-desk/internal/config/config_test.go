@@ -44,7 +44,7 @@ func TestConfigCoversAllSection78Keys(t *testing.T) {
 		"self_login", "self_issue_owner", "team_members", "watch_labels", "repos",
 		"ticket_patterns", "agents", "approver_allowlist",
 		"verdict_generations", "check_interpreters",
-		"ci_only_attempts_threshold", "review_exempt_checks", "jira", "category_vocabulary",
+		"ci_only_attempts_threshold", "review_exempt_checks", "area_labels", "jira", "category_vocabulary",
 		"urgency", "agent_tracker_backend", "actor", "sync",
 		"heartbeat_period", "stale_after", "serve", "open",
 		// links (bead pg2-apuyx) postdates the section-7.8 table: the
@@ -180,6 +180,10 @@ func TestLoadFile_FullExample(t *testing.T) {
 
 	if want := []string{"slow-nightly"}; !reflect.DeepEqual(cfg.ReviewExemptChecks, want) {
 		t.Errorf("review_exempt_checks: got %v want %v", cfg.ReviewExemptChecks, want)
+	}
+
+	if len(cfg.AreaLabels) != 2 || cfg.AreaLabels[1].Field != "branch" || !reflect.DeepEqual(cfg.AreaLabels[0].Labels, []string{"alpha"}) {
+		t.Errorf("area_labels: got %+v", cfg.AreaLabels)
 	}
 
 	if cfg.CIOnlyAttemptsThreshold != 3 {
