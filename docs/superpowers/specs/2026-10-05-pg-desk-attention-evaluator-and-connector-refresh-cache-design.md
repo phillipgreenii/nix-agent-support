@@ -698,35 +698,113 @@ membership and refresh policy belongs in the umbrella, which also makes Jira and
 configuration choice rather than three implementations. The operator's wording was "bring this
 back to `pg-connector-pr-github`", and the placement is therefore recorded as an open question
 (item 8) with the umbrella as the recommendation. The backend-level change is small and PR
-specific: fold the rate-limit read into the batched query (dropping the separate 1-point guard
-probe) and expose a refresh-by-id operation.
+specific: fold the rate-limit read into the batched query (dropping the separate guard probe, which
+section 6.6 measures as costing no points, so the fold is a latency and simplicity change) and
+expose a refresh-by-id operation.
 
 ### 6.6 Cost and the budget target
 
-All figures are inherited from the bead (estimates, labelled E, not re-measured here because this
-design opened no network connection). The arithmetic is shown so a reader can check it.
+The GraphQL point costs below were **measured on 2026-10-06** by bead `pg2-cw6b3.1` (the `D1`
+spike), against a large public repository and the operator's own account, read-only. Figures that
+the spike did not re-measure (the menu bar demand and the 869 points per hour of other consumers)
+are still inherited from the bead and stay labelled E (estimate). The arithmetic is shown so a
+reader can check it.
 
-| Line                                                        | Calculation                                                                | Points per hour |
-| ----------------------------------------------------------- | -------------------------------------------------------------------------- | --------------- |
-| Hourly budget                                               | given                                                                      | 5,000           |
-| 25 percent target                                           | 0.25 x 5,000                                                               | 1,250           |
-| Menu bar attention demand before `71ce9888` (E)             | 165 points per minute x 60                                                 | 9,900           |
-| `pr-team` per tick (E)                                      | 6 search strings x 2 points per page + 1 guard probe                       | 13              |
-| `pr-team` at 60 s                                           | 13 x 60 ticks                                                              | 780             |
-| `pr-team` at 120 s                                          | 13 x 30 ticks                                                              | 390             |
-| `pr-mine` at 60 s (E)                                       | (1 x 2 + 1) x 60                                                           | 180             |
-| `pr-sweep`, desk per-event runs, desk reconcile, others (E) | 4 + 250 + 385 + 230                                                        | 869             |
-| Non-attention baseline today                                | 780 + 180 + 869                                                            | 1,829 (36.6 %)  |
-| Baseline with `pr-team` at 120 s                            | 1,829 - (780 - 390)                                                        | 1,439 (28.8 %)  |
-| Probe folded into the batched queries, at 120 s             | removes 1 point per tick: 30 + 60 (`pr-mine` still at 60 s) ticks per hour | -90             |
+#### Measured cost per call shape
 
-So the cadence change alone leaves the baseline at about 28.8 percent, still above the 25 percent
-target, and the folded probe leaves about 1,349 per hour (27 percent). The remaining reduction
-has to come from Direction 2's read-through for desk's per-event runs and from the `pg2-ii38x` design (if
-the operator approves it on `pg2-32wg6`), which removes the reconcile event class. Neither can be quantified from the bead's data, so **the 25
-percent target is a Direction 2 acceptance measurement, not a spec guarantee**. The first task in
-Direction 2 is a measurement spike (section 14, bead `D1`) that settles the cost of the
-membership-only query, a refresh by ids, and a read-through hit, before the policy is built.
+The `cost` field of `rateLimit` is the primary evidence. Where it mattered, the charge was also
+confirmed from the `remaining` delta of a back-to-back sequence (other consumers share the same
+token, so a lone delta is noisy by a point or two).
+
+| Call shape (all `search` forms use `type: ISSUE`)                                        | Requested nodes   | Points per call                      |
+| ---------------------------------------------------------------------------------------- | ----------------- | ------------------------------------ |
+| Membership only: `search { issueCount, nodes { ... on PullRequest { id } } }`            | `first: 100`      | 1                                    |
+| Membership only, same shape                                                              | `first: 50`       | 1                                    |
+| Batched search page (the `SearchPRsEnriched` field set), 100 results returned            | `first: 100`      | 2                                    |
+| Batched search page, only 15 results returned (the operator's own open PRs)              | `first: 100`      | 2                                    |
+| Batched search page, same field set                                                      | `first: 74`       | 1                                    |
+| Batched search page, same field set                                                      | `first: 75`       | 2                                    |
+| Batched search page, same field set                                                      | `first: 25 to 74` | 1                                    |
+| Refresh by ids: `nodes(ids: [...]) { ... on PullRequest { <same field set> } }`          | 1 to 74 ids       | 1                                    |
+| Refresh by ids, same shape                                                               | 75 to 100 ids     | 2                                    |
+| Six aliased batched `search` fields in one document                                      | 6 x `first: 100`  | 12                                   |
+| Six aliased batched `search` fields in one document                                      | 6 x `first: 74`   | 9                                    |
+| Six aliased batched `search` fields in one document                                      | 6 x `first: 50`   | 6                                    |
+| Six aliased batched `search` fields in one document                                      | 6 x `first: 25`   | 3                                    |
+| Batched search page plus `contexts(first: 100)` on the head commit's `statusCheckRollup` | `first: 100`      | 3                                    |
+| Batched search page plus `contexts(first: 100)`, same field set                          | `first: 25`       | 1                                    |
+| Read-through cache hit                                                                   | not applicable    | 0 (no origin call by construction)   |
+| Document whose only root field is `rateLimit { remaining resetAt }` (the guard probe)    | not applicable    | reports 1, **charged 0** (see below) |
+
+What the numbers say:
+
+- **Cost follows the page size requested, not the number of results returned.** A search that
+  matches 15 pull requests but asks for `first: 100` costs the same 2 points as one that returns 100. The batched page and the refresh-by-ids query both step from 1 to 2 points at 75 requested
+  nodes (74 costs 1, 75 costs 2), so `first: 74` and 74 ids per refresh call are the cheapest
+  sizes per result: a refresh of 148 ids costs 2 points as two calls of 74, against 3 as 100 plus 48.
+- **The refresh by ids is not cheaper than a search page of the same size.** At 100 ids it costs
+  2 points, exactly the batched search page. Its saving comes from fetching only the new or aged
+  ids (section 6.2), not from the call shape.
+- **The membership-only query costs 1 point, and `first: 50` costs the same as `first: 100`.**
+  The `idsOnly` path used today (`gh search prs`) bills the REST search bucket (one request of
+  30 per minute), plus one GraphQL introspection call for the `SearchType` enum that cost 1 point
+  per call in six consecutive calls. A GraphQL membership page therefore costs the same 1 GraphQL
+  point and no search-bucket request.
+- **Folding the rate-limit read into the batched query saves no points.** A document whose only
+  root field is `rateLimit` reports a `cost` of 1 but was not charged: eight consecutive probes
+  moved the used counter by one in total (a concurrent consumer), while a one-field `viewer`
+  document moved it by about one per call. Adding `rateLimit` fields to a search document adds nothing
+  to its cost (one field and five fields both cost 2). The spec's earlier "+1 guard probe per tick"
+  was therefore an overcount of points. Folding the probe still removes one process spawn and one
+  round trip per tick, which is a latency and simplicity reason for bead `D5`, not a budget reason.
+- **Inlining check contexts costs about one more point per full page** (3 against 2 at
+  `first: 100`), and nothing extra at `first: 25`. The bead's earlier "about 3 points per page
+  instead of 1" compared against a 1-point page that does not exist at `first: 100`.
+
+#### Revised budget arithmetic
+
+| Line                                                        | Calculation                                                     | Points per hour |
+| ----------------------------------------------------------- | --------------------------------------------------------------- | --------------- |
+| Hourly budget                                               | given                                                           | 5,000           |
+| 25 percent target                                           | 0.25 x 5,000                                                    | 1,250           |
+| Menu bar attention demand before `71ce9888` (E)             | 165 points per minute x 60                                      | 9,900           |
+| `pr-team` per tick, `first: 100`                            | 6 search strings x 2 points per page + 0 (probe is not charged) | 12              |
+| `pr-team` at 60 s                                           | 12 x 60 ticks                                                   | 720             |
+| `pr-team` at 120 s                                          | 12 x 30 ticks                                                   | 360             |
+| `pr-mine` at 60 s                                           | (1 x 2 + 0) x 60                                                | 120             |
+| `pr-sweep`, desk per-event runs, desk reconcile, others (E) | 4 + 250 + 385 + 230                                             | 869             |
+| Non-attention baseline today                                | 720 + 120 + 869                                                 | 1,709 (34.2 %)  |
+| Baseline with `pr-team` at 120 s                            | 1,709 - (720 - 360)                                             | 1,349 (27.0 %)  |
+| Probe folded into the batched queries                       | 0 points saved (the probe is not charged)                       | 0               |
+| `pr-team` per tick at `first: 74`                           | 6 search strings x 1 point per page                             | 6               |
+| `pr-team` at 120 s with `first: 74`                         | 6 x 30 ticks                                                    | 180             |
+| `pr-mine` at 60 s with `first: 74`                          | 1 x 60 ticks                                                    | 60              |
+| Baseline with 120 s cadence and `first: 74` pages           | 180 + 60 + 869                                                  | 1,109 (22.2 %)  |
+| Baseline with 60 s cadence and `first: 74` pages            | 360 + 60 + 869                                                  | 1,289 (25.8 %)  |
+
+So the earlier "28.8 percent after the cadence change and 27 percent after the folded probe"
+was built on an overcounted probe. Measured, the cadence change alone leaves the baseline at
+27.0 percent, still above the 25 percent target, and the folded probe adds nothing. What moves
+the baseline below target is a **page-size change**: requesting `first: 74` instead of
+`first: 100` halves the cost of every search page and leaves the baseline at about 22.2 percent
+with the 120 s cadence, or 25.8 percent without it. Both levers together clear the target by
+about 140 points per hour (1,250 - 1,109); the 120 s cadence is no longer sufficient on its own.
+
+The page-size change is safe only while a single search string matches 74 or fewer pull requests.
+The live ledger shows 72 ids for the whole team query across all six strings, so no single string
+approaches the bound today, and a string that does overflow only pays one extra page
+(`hasNextPage`, already handled by `SearchPRsEnriched`). The 74 boundary is an observed
+property of GitHub's cost formula for this exact field set, not a documented constant. It MUST be a
+named constant with a unit test that pins the field set, and the `D7` verification MUST re-read
+the cost to catch a formula change. Adding fields to the batched query can move the boundary.
+
+The 869 points per hour of other consumers remain an estimate and are the largest single line;
+Direction 2's read-through for desk's per-event runs and the `pg2-ii38x` design (if the operator
+approves it on `pg2-32wg6`), which removes the reconcile event class, are what reduce it, and
+neither can be quantified from measured data. **The 25 percent target remains a Direction 2
+acceptance measurement (bead `D7`), not a spec guarantee**, but the plan to reach it is now
+evidence-based: the page-size change plus the cadence change put the measured per-source lines
+under the target before any read-through saving.
 
 ### 6.7 Jira and Slack
 
@@ -744,14 +822,14 @@ membership-only query, a refresh by ids, and a read-through hit, before the poli
 These are defaults the spec author sets. They are NOT blockers: each has a recommendation and the
 operator can veto at review.
 
-| Parameter                                      | Recommended default                                                                                                                                                       | Effect and reasoning                                                                                                                                                                                                                             |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `pr-team` poll cadence                         | 60 s to **120 s**                                                                                                                                                         | Saves 390 points per hour (13 x 60 - 13 x 30, table in 6.6) and is needed to approach the 25 percent target. Change latency for team PRs doubles to at most 2 minutes. Deployment-repo change.                                                   |
-| Own-PR CI contexts in the refresh query        | Inline up to 100 check contexts per PR (about 3 points per page instead of 1, measured by the bead); **fall back to a per-PR fetch for a PR with more than 100 contexts** | The roll-up state is accurate at any count, but applying `ci_exclude` needs the failing check names, which the first 100 contexts may omit. Recommend accepting the fallback. Only applies if the refresh query inlines contexts; measure first. |
-| Source staleness threshold                     | **15 minutes**                                                                                                                                                            | Section 5.4.                                                                                                                                                                                                                                     |
-| Connector `read_ttl` (reader TTL)              | **120 s**                                                                                                                                                                 | Equal to the post-change `pr-team` period, so a reader never sees data older than one refresh cycle plus jitter. Independent of the existing one-hour fallback max age.                                                                          |
-| Connector `refresh_after` (tracked-entity TTL) | **120 s** for the team and mine queries                                                                                                                                   | The bound on change latency for a non-membership change (section 6.4). The spike (bead `D1`) confirms whether a tighter value is affordable.                                                                                                     |
-| Group-key tie rule                             | Lexicographically smallest Jira key                                                                                                                                       | Deterministic; revisit if two Jira issues routinely share PRs.                                                                                                                                                                                   |
+| Parameter                                      | Recommended default                                                                                                                                                 | Effect and reasoning                                                                                                                                                                                                                                            |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pr-team` poll cadence                         | 60 s to **120 s**                                                                                                                                                   | Saves 360 points per hour (12 x 60 - 12 x 30, measured, table in 6.6); with the `first: 74` page size it takes the baseline to about 22 percent, below the 25 percent target. Change latency for team PRs doubles to at most 2 minutes. Deployment-repo change. |
+| Own-PR CI contexts in the refresh query        | Inline up to 100 check contexts per PR (3 points per full page instead of 2, measured in 6.6); **fall back to a per-PR fetch for a PR with more than 100 contexts** | The roll-up state is accurate at any count, but applying `ci_exclude` needs the failing check names, which the first 100 contexts may omit. Recommend accepting the fallback. Only applies if the refresh query inlines contexts; measure first.                |
+| Source staleness threshold                     | **15 minutes**                                                                                                                                                      | Section 5.4.                                                                                                                                                                                                                                                    |
+| Connector `read_ttl` (reader TTL)              | **120 s**                                                                                                                                                           | Equal to the post-change `pr-team` period, so a reader never sees data older than one refresh cycle plus jitter. Independent of the existing one-hour fallback max age.                                                                                         |
+| Connector `refresh_after` (tracked-entity TTL) | **120 s** for the team and mine queries                                                                                                                             | The bound on change latency for a non-membership change (section 6.4). The spike (bead `D1`) confirms whether a tighter value is affordable.                                                                                                                    |
+| Group-key tie rule                             | Lexicographically smallest Jira key                                                                                                                                 | Deterministic; revisit if two Jira issues routinely share PRs.                                                                                                                                                                                                  |
 
 ## 8. Prerequisite: a PR-to-PR dependency source
 
