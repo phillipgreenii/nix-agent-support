@@ -25,6 +25,7 @@
     ./programs/pg-router-probe
     ./programs/ccpool-probe
     ./programs/pg-desk
+    ./programs/work-report
     ./programs/pb
     ./programs/claude-extended-tool-approver
     ./programs/claude-hook-router

@@ -6234,6 +6234,142 @@
                   touch $out
                 '';
 
+              # test-work-report-module (docket pg2-vfmp7.3, Phase 2): proves
+              # home/programs/work-report evaluates standalone, renders a
+              # config.yaml the built work-report loads (strict: an unknown key
+              # fails), that pgRouterConfigText is read-only, and that it is
+              # byte-identical to `work-report config pg-router-query` for the
+              # same schedule.* values (the Go side is the template of record).
+              test-work-report-module =
+                let
+                  evalHM =
+                    workReportCfg:
+                    (lib.evalModules {
+                      specialArgs = { inherit pkgs lib; };
+                      modules = [
+                        ./home/programs/work-report/default.nix
+                        (
+                          { lib, ... }:
+                          {
+                            options = {
+                              home.packages = lib.mkOption {
+                                type = lib.types.listOf lib.types.package;
+                                default = [ ];
+                              };
+                              xdg.configFile = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
+                            };
+                          }
+                        )
+                        { phillipgreenii.programs.work-report = workReportCfg; }
+                      ];
+                    }).config;
+
+                  hmDisabled = evalHM { enable = false; };
+                  hmDefaults = evalHM { enable = true; };
+                  hmCustom = evalHM {
+                    enable = true;
+                    timezone = "America/New_York";
+                    sources = {
+                      source-one = {
+                        enable = false;
+                        labels = [ "alpha" ];
+                      };
+                      source-two.labels = [
+                        "beta"
+                        "gamma"
+                      ];
+                    };
+                    schedule = {
+                      interval = "30m";
+                      window = "7d";
+                    };
+                    store.path = "/var/tmp/wr/store.db";
+                  };
+                  # The module option is read-only: defining it must fail to
+                  # evaluate.
+                  readOnlyAttempt =
+                    builtins.tryEval
+                      (evalHM {
+                        enable = true;
+                        pgRouterConfigText = "x";
+                      }).phillipgreenii.programs.work-report.pgRouterConfigText;
+                  # Bad values are rejected by the option types, matching the
+                  # loader's own validation.
+                  badWindow =
+                    builtins.tryEval
+                      (evalHM {
+                        enable = true;
+                        schedule.window = "90m";
+                      }).phillipgreenii.programs.work-report.schedule.window;
+                  badInterval =
+                    builtins.tryEval
+                      (evalHM {
+                        enable = true;
+                        schedule.interval = "soon";
+                      }).phillipgreenii.programs.work-report.schedule.interval;
+                in
+                # Disabled: nothing installed or rendered.
+                assert hmDisabled.home.packages == [ ];
+                assert hmDisabled.xdg.configFile == { };
+                # Enabled: the package is installed and the config is rendered.
+                assert lib.elem pkgs.work-report hmDefaults.home.packages;
+                assert hmDefaults.xdg.configFile ? "work-report/config.yaml";
+                assert !readOnlyAttempt.success;
+                assert !badWindow.success;
+                assert !badInterval.success;
+                pkgs.runCommand "test-work-report-module-ok"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.work-report
+                      pkgs.jq
+                    ];
+                  }
+                  ''
+                    export HOME=$TMPDIR/home
+                    export XDG_STATE_HOME=$TMPDIR/state
+                    mkdir -p "$HOME"
+                    defaults=${hmDefaults.xdg.configFile."work-report/config.yaml".source}
+                    custom=${hmCustom.xdg.configFile."work-report/config.yaml".source}
+
+                    # Defaults: only the schedule is rendered, with 1h / 48h.
+                    grep -q '^schedule:' "$defaults"
+                    grep -q 'interval: 1h' "$defaults"
+                    grep -q 'window: 48h' "$defaults"
+                    ! grep -Eq 'timezone|sources|store:' "$defaults"
+                    got=$(work-report config show --config "$defaults" --output json)
+                    [ "$(jq -r .schedule.interval <<<"$got")" = 1h ]
+                    [ "$(jq -r .schedule.window <<<"$got")" = 48h ]
+                    # store.path unset: the loader's default, resolved.
+                    [ "$(jq -r .store.path <<<"$got")" = "$XDG_STATE_HOME/work-report/store.db" ]
+
+                    # Custom values round-trip through the strict loader.
+                    got=$(work-report config show --config "$custom" --output json)
+                    [ "$(jq -r .timezone <<<"$got")" = America/New_York ]
+                    [ "$(jq -r .schedule.interval <<<"$got")" = 30m ]
+                    [ "$(jq -r .schedule.window <<<"$got")" = 7d ]
+                    [ "$(jq -r .store.path <<<"$got")" = /var/tmp/wr/store.db ]
+                    [ "$(jq -r '.sources["source-one"].enable' <<<"$got")" = false ]
+                    [ "$(jq -c '.sources["source-one"].labels' <<<"$got")" = '["alpha"]' ]
+                    [ "$(jq -r '.sources["source-two"].enable' <<<"$got")" = true ]
+                    [ "$(jq -c '.sources["source-two"].labels' <<<"$got")" = '["beta","gamma"]' ]
+
+                    # pgRouterConfigText equals the CLI's own rendering for the
+                    # same schedule.* values (defaults and custom).
+                    printf '%s' ${lib.escapeShellArg hmDefaults.phillipgreenii.programs.work-report.pgRouterConfigText} > want-defaults
+                    work-report config pg-router-query --config "$defaults" > got-defaults
+                    diff want-defaults got-defaults
+                    printf '%s' ${lib.escapeShellArg hmCustom.phillipgreenii.programs.work-report.pgRouterConfigText} > want-custom
+                    work-report config pg-router-query --config "$custom" > got-custom
+                    diff want-custom got-custom
+                    grep -q 'last-7d' want-custom
+                    grep -q 'every = "30m"' want-custom
+                    grep -q 'emits = \["escalated.pg2"\]' want-custom
+                    touch $out
+                  '';
+
               # INTRA-evaluator mechanical coverage (bead pg2-hvlyj.14, plan
               # item 5.2): drive the behavior-docs-intra-conformance skill's
               # self-checks.sh over inline-status / floor-leakage FAIL & PASS
