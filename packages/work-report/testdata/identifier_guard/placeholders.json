@@ -1,0 +1,7 @@
+{
+  "note": "Committed so the identifier guard's walk always has at least one testdata file to visit. Only allowlisted placeholder identities appear here.",
+  "entries": [
+    { "author": { "login": "alice" }, "branch": "teammate.PROJ-1.example" },
+    { "reviewer": "review-bot", "user": { "login": "dependabot" } }
+  ]
+}
