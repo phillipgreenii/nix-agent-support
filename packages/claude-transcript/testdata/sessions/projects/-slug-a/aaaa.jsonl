@@ -1,0 +1,11 @@
+{"type":"user","uuid":"a-u1","timestamp":"2026-09-18T23:50:00Z","sessionId":"aaaa","cwd":"/work/alpha","gitBranch":"feature-x","message":{"role":"user","content":"start the thing"}}
+not json at all
+{"type":"last-prompt","sessionId":"aaaa","lastPrompt":"no timestamp here"}
+{"type":"assistant","uuid":"a-a1","timestamp":"2026-09-18T23:51:00Z","sessionId":"aaaa","cwd":"/work/alpha","message":{"id":"msg_1","model":"model-one","role":"assistant","content":[{"type":"text","text":"working"}],"usage":{"input_tokens":10,"output_tokens":5,"cache_creation_input_tokens":100,"cache_read_input_tokens":1000}}}
+{"type":"assistant","uuid":"a-a2","timestamp":"2026-09-18T23:51:01Z","sessionId":"aaaa","message":{"id":"msg_1","model":"model-one","role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash"}],"usage":{"input_tokens":10,"output_tokens":40,"cache_creation_input_tokens":100,"cache_read_input_tokens":1000}}}
+{"type":"user","uuid":"a-u2","timestamp":"2026-09-18T23:52:00Z","sessionId":"aaaa","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}}
+{"type":"user","uuid":"a-u3","timestamp":"2026-09-18T23:52:30Z","sessionId":"aaaa","isMeta":true,"message":{"role":"user","content":"meta caveat"}}
+{"type":"user","uuid":"a-u4","timestamp":"2026-09-18T23:53:00Z","sessionId":"aaaa","message":{"role":"user","content":[{"type":"text","text":"   "}]}}
+{"type":"assistant","uuid":"a-a3","timestamp":"2026-09-18T23:55:00Z","sessionId":"aaaa","isSidechain":true,"message":{"id":"msg_side","model":"model-two","role":"assistant","content":[{"type":"text","text":"side work"}],"usage":{"input_tokens":3,"output_tokens":7,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}
+{"type":"user","uuid":"a-u5","timestamp":"2026-09-19T00:05:00Z","sessionId":"aaaa","message":{"role":"user","content":[{"type":"text","text":"next day follow-up"}]}}
+{"type":"assistant","uuid":"a-a4","timestamp":"2026-09-19T00:10:00Z","sessionId":"aaaa","message":{"id":"msg_2","model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"done"}],"usage":{"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}

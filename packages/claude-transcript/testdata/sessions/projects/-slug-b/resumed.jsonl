@@ -1,0 +1,5 @@
+{"type":"user","uuid":"o-1","timestamp":"2026-09-20T09:00:00Z","sessionId":"resumed-id","cwd":"/work/beta","gitBranch":"main","message":{"role":"user","content":"original prompt"}}
+{"type":"assistant","uuid":"o-2","timestamp":"2026-09-20T09:01:00Z","sessionId":"resumed-id","message":{"id":"msg_o1","model":"model-one","role":"assistant","content":[{"type":"text","text":"reply"}],"usage":{"input_tokens":20,"output_tokens":30,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}
+{"type":"user","uuid":"o-3","timestamp":"2026-09-20T09:05:00Z","sessionId":"resumed-id","message":{"role":"user","content":"second prompt"}}
+{"type":"user","uuid":"r-1","timestamp":"2026-09-20T09:30:00Z","sessionId":"resumed-id","message":{"role":"user","content":"after resume"}}
+{"type":"assistant","uuid":"r-2","timestamp":"2026-09-20T09:31:00Z","sessionId":"resumed-id","message":{"id":"msg_r1","model":"model-one","role":"assistant","content":[{"type":"text","text":"continued"}],"usage":{"input_tokens":5,"output_tokens":6,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}
