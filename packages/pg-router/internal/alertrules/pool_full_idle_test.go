@@ -11,7 +11,7 @@ import (
 // the instance carries `role`; role -> pool is mapped EXPLICITLY (review, worker,
 // feedback -> pg-router-ccpool-<role>; *triager -> pg-router-ccpool), because
 // mapping every role with "(.*)" would invent pools like pg-router-ccpool-desk-pr.
-const wantPoolFullIdleExpr = `(label_replace(sum by (role)(increase(pg_router_failures_total{class="declined",reason="at-capacity",role=~"review|worker|feedback"}[15m])), "pool", "pg-router-ccpool-$1", "role", "(.*)") or label_replace(sum by (role)(increase(pg_router_failures_total{class="declined",reason="at-capacity",role=~".*triager"}[15m])), "pool", "pg-router-ccpool", "", "")) > 0 and on(pool) (max by (pool)(last_over_time(ccpool_pool_capacity{dim="free"}[10m])) == 0) and on(pool) (sum by (pool)(last_over_time(ccpool_session_states{live="true",state=~"starting|ready|working"}[10m])) == 0)`
+const wantPoolFullIdleExpr = `(label_replace(sum by (role)(increase(pg_router_failures_total{class="declined",reason="at-capacity",role=~"review|worker|feedback"}[15m])), "pool", "pg-router-ccpool-$1", "role", "(.*)") or label_replace(sum by (role)(increase(pg_router_failures_total{class="declined",reason="at-capacity",role=~".*triager"}[15m])), "pool", "pg-router-ccpool", "", "")) > 0 and on(pool) (max by (pool)(last_over_time(ccpool_pool_capacity{dim="free"}[10m])) == 0) and on(pool) (max by (pool)(last_over_time(ccpool_pool_capacity{dim="counted"}[10m])) >= on(pool) max by (pool)(last_over_time(ccpool_pool_capacity{dim="max_sessions"}[10m]))) and on(pool) (sum by (pool)(last_over_time(ccpool_session_states{live="true",state=~"starting|ready|working"}[10m])) == 0)`
 
 func TestPoolFullIdleRule(t *testing.T) {
 	r := ruleBlock(t, "pg-router-pool-full-idle")
@@ -54,5 +54,22 @@ func TestPoolFullIdleMapsRolesExplicitly(t *testing.T) {
 	}
 	if strings.Contains(got, `{class="declined",reason="at-capacity"}`) || strings.Contains(got, `role=~".*"`) {
 		t.Errorf("pool-full-idle must not select every role: %q", got)
+	}
+}
+
+// A usage-limited EMPTY pool reports free == 0 (session.Capacity.WithUsageLimit)
+// while nothing is counted, and the handler declines at-capacity: healthy
+// backpressure, not a stall (pg2-nzp3z). The rule must require the pool to be
+// genuinely full, counted >= max_sessions, and not rely on free == 0 alone.
+func TestPoolFullIdleRequiresGenuinelyFullPool(t *testing.T) {
+	got := ruleExpr(t, ruleBlock(t, "pg-router-pool-full-idle"))
+	for _, need := range []string{
+		`ccpool_pool_capacity{dim="counted"}`,
+		`ccpool_pool_capacity{dim="max_sessions"}`,
+		`>= on(pool)`,
+	} {
+		if !strings.Contains(got, need) {
+			t.Errorf("pool-full-idle expr lost %q", need)
+		}
 	}
 }

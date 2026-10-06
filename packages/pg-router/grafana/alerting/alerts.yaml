@@ -762,12 +762,20 @@ groups:
       # (depth stayed 1-3 in the 2026-10-05 stall: review pool held by an idle
       # session, 74 at-capacity declines 16:17-16:52Z, no alert).
       #
-      # Three clauses, all joined on the ccpool `pool` label:
+      # Four clauses, all joined on the ccpool `pool` label:
       #   - demand (LEFT-hand side, so the alert value is the decline count > 0 and
       #     the instance carries `role`): at-capacity declines in the last 15m,
       #     carrying `role` as of pg2-nimab;
       #   - the pool has no free slot (ccpool_pool_capacity dim=free, emitted about
       #     every 60s by the pg-router-ccpool-handler pool-metrics agent);
+      #   - the pool is genuinely FULL: dim=counted >= dim=max_sessions. ccpool
+      #     reports free = 0 for the hours an account usage window (five_hour) is at
+      #     its limit, whatever the occupancy (session.Capacity.WithUsageLimit), and
+      #     the handler tags those declines at-capacity too. Without this clause the
+      #     rule fired on every usage-limit window with an EMPTY pool (pg2-nzp3z:
+      #     2026-10-06 20:40-22:10Z, counted=0, review declined "usage limit hit"
+      #     until the window reset at 22:10Z). That is healthy backpressure, not a
+      #     stall; a usage-limited pool that is ALSO held by idle sessions still fires;
       #   - no counted session is active (ccpool_session_states, emitted on each
       #     ccpool-reap run, every 300s -- near Prometheus' 5m staleness, hence
       #     last_over_time over 10m): none starting, ready or working.
@@ -801,7 +809,7 @@ groups:
           severity: warning
         annotations:
           summary: "ccpool pool {{ $labels.pool }} is full but no session is active; {{ $labels.role }} dispatches are declined at-capacity"
-          description: "Every slot of ccpool pool {{ $labels.pool }} is held (ccpool_pool_capacity free is 0) while no counted session is starting, ready or working, and {{ $labels.role }} dispatches were declined at-capacity in the last 15 minutes: the slots are held by idle or errored counted sessions, so the lane is stalled at capacity. Inspect with `ccpool --pool ~/.local/state/{{ $labels.pool }} list --json`. For a pool with more than one slot this fires only when NO slot is active."
+          description: "Every slot of ccpool pool {{ $labels.pool }} is held (ccpool_pool_capacity counted >= max_sessions, so free is 0) while no counted session is starting, ready or working, and {{ $labels.role }} dispatches were declined at-capacity in the last 15 minutes: the slots are held by idle or errored counted sessions, so the lane is stalled at capacity. Inspect with `ccpool --pool ~/.local/state/{{ $labels.pool }} list --json`. For a pool with more than one slot this fires only when NO slot is active."
         data:
           - refId: A
             relativeTimeRange:
@@ -812,7 +820,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: (label_replace(sum by (role)(increase(pg_router_failures_total{class="declined",reason="at-capacity",role=~"review|worker|feedback"}[15m])), "pool", "pg-router-ccpool-$1", "role", "(.*)") or label_replace(sum by (role)(increase(pg_router_failures_total{class="declined",reason="at-capacity",role=~".*triager"}[15m])), "pool", "pg-router-ccpool", "", "")) > 0 and on(pool) (max by (pool)(last_over_time(ccpool_pool_capacity{dim="free"}[10m])) == 0) and on(pool) (sum by (pool)(last_over_time(ccpool_session_states{live="true",state=~"starting|ready|working"}[10m])) == 0)
+              expr: (label_replace(sum by (role)(increase(pg_router_failures_total{class="declined",reason="at-capacity",role=~"review|worker|feedback"}[15m])), "pool", "pg-router-ccpool-$1", "role", "(.*)") or label_replace(sum by (role)(increase(pg_router_failures_total{class="declined",reason="at-capacity",role=~".*triager"}[15m])), "pool", "pg-router-ccpool", "", "")) > 0 and on(pool) (max by (pool)(last_over_time(ccpool_pool_capacity{dim="free"}[10m])) == 0) and on(pool) (max by (pool)(last_over_time(ccpool_pool_capacity{dim="counted"}[10m])) >= on(pool) max by (pool)(last_over_time(ccpool_pool_capacity{dim="max_sessions"}[10m]))) and on(pool) (sum by (pool)(last_over_time(ccpool_session_states{live="true",state=~"starting|ready|working"}[10m])) == 0)
           - refId: B
             datasourceUid: __expr__
             model:
