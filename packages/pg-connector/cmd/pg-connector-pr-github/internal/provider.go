@@ -82,26 +82,31 @@ type ghProvider interface {
 	// for a pending, unsubmitted review); it backs the pr.reviewed activity
 	// kind. A separate read so ListReviews' own output stays unchanged.
 	ListReviewsSubmitted(ctx context.Context, repo string, number int) ([]api.Review, error)
-	// DeleteReview/PostPendingReview back review_submit (SubmitReview,
-	// review_submit.go); finding the pending review is GetPendingReview's job.
-	DeleteReview(ctx context.Context, repo string, number int, reviewID int64) error
-	PostPendingReview(ctx context.Context, repo string, number int, commitID, body string, comments []github.ReviewSubmitComment) (*api.Review, error)
-	// GetPendingReview backs review_pending (PendingReview, review_pending.go).
+	// GetPendingReview backs review_pending (PendingReview, review_pending.go)
+	// and is the read review_submit starts from and reconciles with.
 	GetPendingReview(ctx context.Context, repo string, number int) (*github.PendingReviewData, error)
+	// CreateBodyOnlyPendingReview, WriteReviewItems and UpdateReviewBody are
+	// the write primitives review_submit (SubmitReview, review_submit.go) is
+	// built from. None deletes, replaces or submits a review.
+	CreateBodyOnlyPendingReview(ctx context.Context, repo string, number int, commitID, body string) (*github.CreatedReview, error)
+	WriteReviewItems(ctx context.Context, reviewID string, items []github.ReviewWriteItem) ([]github.ReviewWriteResult, error)
+	UpdateReviewBody(ctx context.Context, reviewID, body string) error
 }
 
 // Backend is pg-connector-pr-github's concrete pr.Provider implementation.
 type Backend struct {
 	gh ghProvider
-	// archiver persists a pending review's content before the guarded
-	// supersede deletes it (review_submit.go). Nil means no archive location
-	// is configured, in which case every supersede that would delete is
-	// refused as archive_failed.
+	// archiver is no longer used by review_submit, which never deletes a
+	// review; it stays wired until the archive package is retired.
 	archiver archive.Archiver
 	// posted reads the per-PR posted-sidecar review_pending takes last_append
 	// from. The zero Store has no directory, in which case no last_append is
 	// reported.
 	posted pgposted.Store
+	// locker serializes review_submit runs per PR. The zero Locker has no
+	// directory, in which case review_submit cannot run (it reports
+	// unavailable rather than writing without the lock).
+	locker pgposted.Locker
 }
 
 // New returns a Backend wrapping gh. Production wiring passes a
@@ -127,11 +132,18 @@ type retryGuardSetter interface {
 	SetRetryGuard(func(ctx context.Context) error)
 }
 
-// WithArchiver sets where a superseded pending review's content is persisted
-// before it is deleted, and returns b. Production wiring passes
-// archive.FromEnv; without it the guarded supersede never deletes.
+// WithArchiver sets the archiver and returns b. review_submit no longer
+// archives anything (it deletes nothing); the setter stays until the archive
+// package is retired. Production wiring passes archive.FromEnv.
 func (b *Backend) WithArchiver(a archive.Archiver) *Backend {
 	b.archiver = a
+	return b
+}
+
+// WithLocker sets the per-PR lock review_submit runs under, and returns b.
+// Production wiring passes posted.LockerFromEnv.
+func (b *Backend) WithLocker(l pgposted.Locker) *Backend {
+	b.locker = l
 	return b
 }
 

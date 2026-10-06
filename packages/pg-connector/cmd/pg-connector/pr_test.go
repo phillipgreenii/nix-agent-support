@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -602,7 +603,7 @@ func TestReviewSubmitNotFoundExits4(t *testing.T) {
 }
 
 func TestReviewSubmitStdinParsedIntoWireArgs(t *testing.T) {
-	args, err := readReviewSubmitArgs(strings.NewReader(`{"id":"ignored","head_sha":"abc","body":"b","comments":[{"path":"a.go","line":3,"side":"RIGHT","body":"c"}],"supersede_pending":true}`), "pr-9")
+	args, err := readReviewSubmitArgs(strings.NewReader(`{"id":"ignored","head_sha":"abc","body":"b","comments":[{"path":"a.go","line":3,"side":"RIGHT","body":"c"}],"supersede_pending":true}`), "pr-9", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -612,7 +613,7 @@ func TestReviewSubmitStdinParsedIntoWireArgs(t *testing.T) {
 	if cs, ok := args["comments"].([]any); !ok || len(cs) != 1 {
 		t.Fatalf("comments = %+v", args["comments"])
 	}
-	if _, err := readReviewSubmitArgs(strings.NewReader(`not json`), "pr-9"); err == nil {
+	if _, err := readReviewSubmitArgs(strings.NewReader(`not json`), "pr-9", ""); err == nil {
 		t.Fatal("want error for non-JSON stdin")
 	}
 }
@@ -626,45 +627,14 @@ func TestReviewSubmitBadStdinExits1(t *testing.T) {
 	}
 }
 
-func TestReviewSubmitFailedSupersedeStillExits0(t *testing.T) {
-	writeOpAwareFakeBackend(t, "backend-rs-sup", map[string]string{
-		"review_submit": `{"protocolVersion":1,"schemaVersion":4,"result":{"review_id":"r1","state":"pending","head_sha":"abc","as_of":"t","supersede":{"attempted":true,"deleted":false,"error":"boom"}}}`,
-	}, `{}`)
-	writeConfigFor(t, "backend-rs-sup")
-	stdout, _, code := executePrWithStdin(t, `{"head_sha":"abc","body":"b","supersede_pending":true}`, []string{"pr", "review", "submit", "pr-1"})
-	if code != 0 {
-		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
-	}
-	var resp scriptout.Response
-	if err := json.Unmarshal([]byte(stdout), &resp); err != nil {
-		t.Fatal(err)
-	}
-	var res struct {
-		Supersede struct {
-			Attempted bool   `json:"attempted"`
-			Deleted   bool   `json:"deleted"`
-			Error     string `json:"error"`
-		} `json:"supersede"`
-		State string `json:"state"`
-	}
-	if err := json.Unmarshal(resp.Result, &res); err != nil {
-		t.Fatal(err)
-	}
-	if res.State != "pending" || !res.Supersede.Attempted || res.Supersede.Deleted || res.Supersede.Error != "boom" {
-		t.Fatalf("result = %+v", res)
-	}
-}
-
-// TestReviewSubmitSupersedeStatusesAllExit0: every status of the guarded
-// supersede, blocked_human_pending included, is a well-formed result, so the
-// CLI exits 0 (INV-EXIT-1's Targeted scheme) and the status in the JSON output
-// is what distinguishes them.
-func TestReviewSubmitSupersedeStatusesAllExit0(t *testing.T) {
+// TestReviewSubmitStatusesAllExit0: every status (posted, append, no_change) is
+// a well-formed result, so the CLI exits 0 (INV-EXIT-1's Targeted scheme) and
+// the status in the JSON output is what distinguishes them.
+func TestReviewSubmitStatusesAllExit0(t *testing.T) {
 	results := map[string]string{
-		"posted":                `{"review_id":"r1","state":"pending","head_sha":"abc","as_of":"t","status":"posted"}`,
-		"skipped":               `{"review_id":"r0","state":"pending","head_sha":"abc","as_of":"t","status":"skipped","reason":"pending_review_exists_same_head","pending_review":{"review_id":"r0","database_id":5,"commit_sha":"abc"}}`,
-		"replaced":              `{"review_id":"r2","state":"pending","head_sha":"abc","as_of":"t","status":"replaced","superseded":{"review_id":"r1","database_id":5,"commit_sha":"old","archive_path":"/a/b.json","body":"x","comments":[]}}`,
-		"blocked_human_pending": `{"review_id":"","state":"","head_sha":"abc","as_of":"t","status":"blocked_human_pending","reason":"human_edited","message":"left untouched","pending_review":{"review_id":"r1","database_id":5,"url":"https://example.invalid/r","commit_sha":"old"}}`,
+		"posted":    `{"review_id":"r1","state":"pending","head_sha":"abc","as_of":"t","status":"posted","added":2,"already_present":0,"dismissed":0,"body":"written","extra_pending_reviews":0,"url":"https://example.invalid/r"}`,
+		"append":    `{"review_id":"r1","state":"pending","head_sha":"abc","as_of":"t","status":"append","added":1,"already_present":1,"dismissed":0,"body":"kept","extra_pending_reviews":1,"last_append":{"at":"t","added":1,"head":"abc"}}`,
+		"no_change": `{"review_id":"","state":"none","head_sha":"abc","as_of":"t","status":"no_change","added":0,"already_present":2,"dismissed":0,"body":"absent","extra_pending_reviews":0}`,
 	}
 	for status, result := range results {
 		t.Run(status, func(t *testing.T) {
@@ -688,8 +658,8 @@ func TestReviewSubmitSupersedeStatusesAllExit0(t *testing.T) {
 			if res.Status != status {
 				t.Fatalf("status = %q, want %q", res.Status, status)
 			}
-			if status == "blocked_human_pending" && (res.ReviewID != "" || res.Reason != "human_edited" || res.PendingReview == nil || res.PendingReview.URL == "") {
-				t.Errorf("blocked result = %+v", res)
+			if status == "no_change" && (res.ReviewID != "" || res.State != "none") {
+				t.Errorf("no_change result = %+v", res)
 			}
 		})
 	}
@@ -700,17 +670,18 @@ func TestHumanizeReviewSubmitByStatus(t *testing.T) {
 		raw  string
 		want []string
 	}{
-		"posted":  {`{"review_id":"r1","state":"pending","head_sha":"abc","as_of":"t","status":"posted"}`, []string{"posted", "r1"}},
-		"skipped": {`{"review_id":"r0","state":"pending","head_sha":"abc","as_of":"t","status":"skipped","reason":"pending_review_exists_same_head"}`, []string{"skipped", "pending_review_exists_same_head", "r0"}},
-		"replaced": {
-			`{"review_id":"r2","state":"pending","head_sha":"abc","as_of":"t","status":"replaced","superseded":{"review_id":"r1","archive_path":"/a/b.json"}}`,
-			[]string{"replaced", "r2", "r1", "/a/b.json"},
+		"posted": {
+			`{"review_id":"r1","state":"pending","head_sha":"abc","as_of":"t","status":"posted","added":2,"body":"written","url":"https://example.invalid/r"}`,
+			[]string{"posted", "r1", "2 added", "body: written", "https://example.invalid/r"},
 		},
-		"blocked": {
-			`{"head_sha":"abc","as_of":"t","status":"blocked_human_pending","reason":"delete_refused","message":"host said no","pending_review":{"url":"https://example.invalid/r"}}`,
-			[]string{"BLOCKED", "delete_refused", "host said no", "https://example.invalid/r", "nothing was posted"},
+		"append": {
+			`{"review_id":"r0","state":"pending","head_sha":"abc","as_of":"t","status":"append","added":1,"already_present":1,"body":"kept","extra_pending_reviews":1,"last_append":{"at":"t0","added":1,"head":"abc"}}`,
+			[]string{"append", "r0", "1 already present", "extra pending reviews: 1", "last append: t0"},
 		},
-		"legacy (no status)": {`{"review_id":"r1","state":"pending","head_sha":"abc","as_of":"t"}`, []string{"review r1 [pending]"}},
+		"no_change": {
+			`{"review_id":"","state":"none","head_sha":"abc","as_of":"t","status":"no_change","already_present":2,"body":"absent"}`,
+			[]string{"no_change", "none created", "2 already present"},
+		},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -724,6 +695,92 @@ func TestHumanizeReviewSubmitByStatus(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestReviewSubmitFromFileOutsideWorkingDirectory: --from-file reads the
+// request from a file outside the working directory, the positional id wins,
+// and stdin is not read.
+func TestReviewSubmitFromFileOutsideWorkingDirectory(t *testing.T) {
+	dir := t.TempDir() // not the process working directory
+	path := filepath.Join(dir, "request.json")
+	if err := os.WriteFile(path, []byte(`{"id":"ignored","head_sha":"abc","body":"b","comments":[{"thread_id":"PRRT_1","body":"r"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	args, err := readReviewSubmitArgs(strings.NewReader(""), "pr-9", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if args["id"] != "pr-9" || args["head_sha"] != "abc" {
+		t.Fatalf("args = %+v", args)
+	}
+	if cs, ok := args["comments"].([]any); !ok || len(cs) != 1 {
+		t.Fatalf("comments = %+v", args["comments"])
+	}
+}
+
+func TestReviewSubmitFromFileEndToEnd(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-rs-ff", map[string]string{"review_submit": reviewSubmitOKResp}, `{}`)
+	writeConfigFor(t, "backend-rs-ff")
+	path := filepath.Join(t.TempDir(), "request.json")
+	if err := os.WriteFile(path, []byte(`{"head_sha":"abc","body":"b"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stdout, _, code := executePrWithStdin(t, ``, []string{"pr", "review", "submit", "pr-1", "--from-file", path})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+}
+
+// TestReviewSubmitFromFileInvalidArgument: both sources, a missing file, an
+// unreadable file, a relative path and a non-object file are all
+// invalid_argument (exit 1), and nothing reaches the backend.
+func TestReviewSubmitFromFileInvalidArgument(t *testing.T) {
+	dir := t.TempDir()
+	good := filepath.Join(dir, "good.json")
+	if err := os.WriteFile(good, []byte(`{"head_sha":"abc","body":"b"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	notObject := filepath.Join(dir, "array.json")
+	if err := os.WriteFile(notObject, []byte(`[1]`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string]struct {
+		stdin string
+		file  string
+		want  string
+	}{
+		"both given":    {`{"head_sha":"abc"}`, good, "mutually exclusive"},
+		"missing file":  {``, filepath.Join(dir, "nope.json"), "--from-file"},
+		"directory":     {``, dir, "--from-file"},
+		"relative path": {``, "request.json", "absolute"},
+		"not an object": {``, notObject, "JSON object"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := readReviewSubmitArgs(strings.NewReader(c.stdin), "pr-9", c.file)
+			if err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("err = %v, want one mentioning %q", err, c.want)
+			}
+		})
+	}
+	writeOpAwareFakeBackend(t, "backend-rs-ffbad", map[string]string{"review_submit": reviewSubmitOKResp}, `{}`)
+	writeConfigFor(t, "backend-rs-ffbad")
+	stdout, _, code := executePrWithStdin(t, `{"head_sha":"abc"}`, []string{"pr", "review", "submit", "pr-1", "--from-file", good})
+	if code != 1 {
+		t.Fatalf("both sources: exit code = %d, want 1; stdout=%s", code, stdout)
+	}
+	if !strings.Contains(stdout, "invalid_argument") {
+		t.Errorf("both sources must be invalid_argument: %s", stdout)
+	}
+}
+
+// TestReviewSubmitStdinStillReadWithoutFromFile: with no --from-file the
+// request is read from stdin exactly as before.
+func TestReviewSubmitStdinStillReadWithoutFromFile(t *testing.T) {
+	args, err := readReviewSubmitArgs(strings.NewReader(`{"head_sha":"abc"}`), "pr-9", "")
+	if err != nil || args["head_sha"] != "abc" {
+		t.Fatalf("args = %+v, err = %v", args, err)
 	}
 }
 

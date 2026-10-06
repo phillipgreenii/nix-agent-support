@@ -1,14 +1,19 @@
-// pr_review.go: the "pg-connector pr review" verb group. submit posts a
-// PENDING (unsubmitted) review through the targeted review_submit wire op
-// (contract 9.1 of the entity-change-flow design); pending reads the acting
-// identity's pending review back as a structured record through the targeted
-// review_pending wire op (contract 9.1a).
+// pr_review.go: the "pg-connector pr review" verb group. submit puts content
+// into the acting identity's PENDING (unsubmitted) review through the targeted
+// review_submit wire op, creating the review when there is none and appending
+// to it otherwise (contract 9.1 of the entity-change-flow design); pending
+// reads the acting identity's pending review back as a structured record
+// through the targeted review_pending wire op (contract 9.1a).
 package main
 
 import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/pr"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
@@ -27,20 +32,32 @@ func newPrReviewCmd() *cobra.Command {
 
 // newPrReviewSubmitCmd is "pr review submit <id>": an id-keyed targeted
 // write (DispatchTargeted, never Dispatch, so INV-REG-2's try-each policy
-// and --backend pinning apply). The 9.1 request body is read from stdin;
+// and --backend pinning apply). The 9.1 request body is JSON, read from stdin
+// or, with --from-file, from the named file (the two are mutually exclusive);
 // the exit code follows INV-EXIT-1's Targeted scheme (0/4/1) via
-// writeTargetedResult. Every status the op reports, blocked_human_pending
-// included, is a well-formed result and so exits 0: a caller MUST read the
-// output's status, never infer a posted review from the exit code.
+// writeTargetedResult. Every status the op reports (posted, append, no_change)
+// is a well-formed result and so exits 0: a caller MUST read the output's
+// status, never infer what was written from the exit code. A run in which some
+// comments did not land is an error and exits 1.
 func newPrReviewSubmitCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "submit <id>",
-		Short: "Post a PENDING review (JSON request on stdin: head_sha, body, comments, supersede_pending); the output's status says what happened",
-		Args:  cobra.ExactArgs(1),
+		Use: "submit <id>",
+		Short: "Add content to the acting identity's PENDING review, creating it when there is none " +
+			"(JSON request on stdin or --from-file: head_sha, body, comments); the output's status says what happened",
+		Long: "Add content to the acting identity's PENDING review on a PR. A pending review that already exists " +
+			"is appended to and one is created when there is none; nothing is ever deleted, replaced or submitted.\n\n" +
+			"The request is a JSON object {head_sha, body, comments} read from stdin, or from the file given " +
+			"with --from-file (an absolute path; the file is opened by this command, so it may live outside the " +
+			"working directory). Giving both, or a missing or unreadable file, is an invalid_argument error. " +
+			"A comment is a new point {path, line, side?, body} or a reply {thread_id, body}.\n\n" +
+			"The output's status is posted (a review was created), append (content was added to an existing " +
+			"review) or no_change (nothing needed writing); all three exit 0.",
+		Args: cobra.ExactArgs(1),
 	}
 	backendFlag := addBackendFlag(cmd, "pin to exactly this backend, skipping the multi-instance try-each resolution policy")
+	fromFile := cmd.Flags().String("from-file", "", "read the request JSON from this absolute file path instead of stdin")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
-		wireArgs, err := readReviewSubmitArgs(cmd.InOrStdin(), args[0])
+		wireArgs, err := readReviewSubmitArgs(cmd.InOrStdin(), args[0], *fromFile)
 		if err != nil {
 			return reportPrTargetedOutcome(cmd, nil, scriptout.WrapError(scriptout.ErrInvalidArgument, err.Error()), humanizeReviewSubmit)
 		}
@@ -54,49 +71,86 @@ func newPrReviewSubmitCmd() *cobra.Command {
 	return cmd
 }
 
-// readReviewSubmitArgs builds the op args {"id": id, ...stdin JSON fields}.
-// The positional id always wins over an "id" field in the stdin object.
-func readReviewSubmitArgs(in io.Reader, id string) (map[string]any, error) {
-	raw, err := io.ReadAll(in)
-	if err != nil {
+// stdinInputWait bounds how long --from-file waits to learn whether stdin also
+// carries a request: stdin that is idle (no data and not closed) is treated as
+// not given, so a caller that leaves a pipe open cannot hang the command.
+const stdinInputWait = 250 * time.Millisecond
+
+// stdinHasInput reports whether in carries any non-whitespace bytes. A
+// terminal or /dev/null never does. It reads at most one chunk and never
+// blocks longer than stdinInputWait.
+func stdinHasInput(in io.Reader) bool {
+	if f, ok := in.(*os.File); ok {
+		if info, err := f.Stat(); err != nil || info.Mode()&os.ModeCharDevice != 0 {
+			return false
+		}
+	}
+	got := make(chan bool, 1)
+	go func() {
+		buf := make([]byte, 4096)
+		n, _ := in.Read(buf)
+		got <- strings.TrimSpace(string(buf[:n])) != ""
+	}()
+	select {
+	case v := <-got:
+		return v
+	case <-time.After(stdinInputWait):
+		return false
+	}
+}
+
+// readReviewSubmitArgs builds the op args {"id": id, ...request JSON fields}.
+// The request is read from fromFile when it is set, else from in. With
+// fromFile set, stdin input too is an error (the sources are mutually
+// exclusive), as is a path that is not absolute, missing or unreadable. The
+// positional id always wins over an "id" field in the request object.
+func readReviewSubmitArgs(in io.Reader, id, fromFile string) (map[string]any, error) {
+	var raw []byte
+	var err error
+	source := "stdin"
+	if fromFile != "" {
+		if !filepath.IsAbs(fromFile) {
+			return nil, fmt.Errorf("--from-file must be an absolute path, got %q", fromFile)
+		}
+		if stdinHasInput(in) {
+			return nil, fmt.Errorf("--from-file and stdin input are mutually exclusive; give the request one way")
+		}
+		source = "--from-file " + fromFile
+		if raw, err = os.ReadFile(fromFile); err != nil {
+			return nil, fmt.Errorf("read request from --from-file: %w", err)
+		}
+	} else if raw, err = io.ReadAll(in); err != nil {
 		return nil, fmt.Errorf("read request from stdin: %w", err)
 	}
 	fields := map[string]any{}
 	if err := json.Unmarshal(raw, &fields); err != nil {
-		return nil, fmt.Errorf("stdin must be a JSON object: %w", err)
+		return nil, fmt.Errorf("%s must be a JSON object: %w", source, err)
 	}
 	fields["id"] = id
 	return fields, nil
 }
 
 // humanizeReviewSubmit formats a review_submit result for human display. The
-// status is authoritative: a blocked_human_pending result posted nothing, so
-// it is never shown as a review.
+// status is authoritative.
 func humanizeReviewSubmit(raw json.RawMessage) (string, error) {
 	var r pr.ReviewSubmitResult
 	if err := scriptout.Decode(raw, &r); err != nil {
 		return "", err
 	}
 	var s string
-	switch r.Status {
-	case pr.StatusBlockedHumanPending:
-		s = fmt.Sprintf("BLOCKED (%s): nothing was posted at %s (as of %s)\n  %s", r.Reason, r.HeadSHA, r.AsOf, r.Message)
-		if r.PendingReview != nil && r.PendingReview.URL != "" {
-			s += "\n  review: " + r.PendingReview.URL
-		}
-		return s, nil
-	case pr.StatusSkipped:
-		s = fmt.Sprintf("skipped (%s): pending review %s already at %s (as of %s)", r.Reason, r.ReviewID, r.HeadSHA, r.AsOf)
-	case pr.StatusReplaced:
-		s = fmt.Sprintf("replaced: review %s [%s] at %s (as of %s)", r.ReviewID, r.State, r.HeadSHA, r.AsOf)
-		if r.Superseded != nil {
-			s += fmt.Sprintf("\n  superseded: %s (archived at %s)", r.Superseded.ReviewID, r.Superseded.ArchivePath)
-		}
+	switch {
+	case r.State == pr.StateNone || r.ReviewID == "":
+		s = fmt.Sprintf("%s: no pending review at %s and none created (as of %s)", r.Status, r.HeadSHA, r.AsOf)
 	default:
-		s = fmt.Sprintf("review %s [%s] at %s (as of %s)", r.ReviewID, r.State, r.HeadSHA, r.AsOf)
-		if r.Status != "" {
-			s = r.Status + ": " + s
-		}
+		s = fmt.Sprintf("%s: review %s [%s] at %s (as of %s)", r.Status, r.ReviewID, r.State, r.HeadSHA, r.AsOf)
+	}
+	s += fmt.Sprintf("\n  comments: %d added, %d already present, %d dismissed  body: %s  extra pending reviews: %d",
+		r.Added, r.AlreadyPresent, r.Dismissed, r.Body, r.ExtraPendingReviews)
+	if r.URL != "" {
+		s += "\n  review: " + r.URL
+	}
+	if la := r.LastAppend; la != nil {
+		s += fmt.Sprintf("\n  last append: %s (+%d at %s)", la.At, la.Added, la.Head)
 	}
 	return s, nil
 }

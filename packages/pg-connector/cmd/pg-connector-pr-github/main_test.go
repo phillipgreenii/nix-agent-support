@@ -83,13 +83,15 @@ func (fakeGH) ListReviewsSubmitted(ctx context.Context, repo string, number int)
 	return nil, nil
 }
 
-func (fakeGH) DeleteReview(ctx context.Context, repo string, number int, reviewID int64) error {
-	return nil
+func (fakeGH) CreateBodyOnlyPendingReview(ctx context.Context, repo string, number int, commitID, body string) (*github.CreatedReview, error) {
+	return &github.CreatedReview{NodeID: "RV", State: "pending"}, nil
 }
 
-func (fakeGH) PostPendingReview(ctx context.Context, repo string, number int, commitID, body string, comments []github.ReviewSubmitComment) (*api.Review, error) {
-	return &api.Review{ID: "RV", State: "pending"}, nil
+func (fakeGH) WriteReviewItems(ctx context.Context, reviewID string, items []github.ReviewWriteItem) ([]github.ReviewWriteResult, error) {
+	return make([]github.ReviewWriteResult, len(items)), nil
 }
+
+func (fakeGH) UpdateReviewBody(ctx context.Context, reviewID, body string) error { return nil }
 
 func (fakeGH) GetPendingReview(ctx context.Context, repo string, number int) (*github.PendingReviewData, error) {
 	return &github.PendingReviewData{HeadSHA: "deadbeef"}, nil

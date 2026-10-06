@@ -70,13 +70,11 @@ type fakeGH struct {
 	// pr.reviewed kind).
 	reviewsSubmittedFn func(ctx context.Context, repo string, number int) ([]api.Review, error)
 
-	// review_submit seam (see review_submit_test.go). ops records the order
-	// of the lookup / delete / post calls (and the fake archiver's writes).
-	deleteErr error
-	postErr   error
-	deleted   []int64
-	posts     []postedReview
-	ops       []string
+	// review_submit seam (see review_submit_test.go). host, when set, is a
+	// stateful simulation of the PR's reviews that backs GetPendingReview and
+	// the write primitives. ops records the order of the host calls.
+	host *fakeHost
+	ops  []string
 
 	// review_pending seam (see review_pending_test.go). pendingSeq, when set,
 	// answers successive GetPendingReview calls in order (the last entry

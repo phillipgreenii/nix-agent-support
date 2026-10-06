@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/archive"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/github"
+	pgposted "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/posted"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/pr"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
@@ -17,407 +17,574 @@ import (
 // and listed in capabilities.ops for the GitHub backend.
 var _ pr.ReviewSubmitter = (*Backend)(nil)
 
-// SubmitReview implements pr.ReviewSubmitter (contract 9.1): it posts a
-// PENDING review anchored to req.HeadSHA with the bot marker stamped on each
-// comment and the content-digest marker on the body.
+const (
+	// maxRequestComments caps the comments of one request.
+	maxRequestComments = 200
+	// maxFailuresListed caps the failures an error message lists.
+	maxFailuresListed = 20
+	// maxReviewBody is GitHub's limit on a review body.
+	maxReviewBody = 65536
+	// maxSubmitAttempts bounds how often a run starts over after the host
+	// changed under it (a pending review appeared or went away between its
+	// read and its write).
+	maxSubmitAttempts = 3
+)
+
+// SubmitReview implements pr.ReviewSubmitter: it puts the request's content
+// into the acting identity's PENDING review. It uses the existing pending
+// review when there is one, creates one when there is not, and never deletes,
+// replaces or submits anything: new content is merged in and added, so the
+// operator's edits survive.
 //
-// Live-head pre-check (bead pg2-qr4sr): before anything is deleted or posted,
-// the PR's current head is read and compared to req.HeadSHA. GitHub itself
-// accepts ANY commit that exists in the repo as a review anchor (an older head
-// or a force-push-orphaned one posts fine), so without this check a stale
-// head_sha would silently anchor the review to the wrong commit. A mismatch is
-// invalid_argument (the closed INV-ERR-1 set has no head_moved code) whose
-// message says the head moved and names the current head; nothing is posted or
-// deleted. A head that moves between the pre-check and the post is not
-// detectable here (GitHub accepts it); the window is one API round trip.
+// One run, under a per-PR lock:
 //
-// Without req.SupersedePending the review is simply posted (status posted),
-// and an existing pending review makes GitHub answer 422, worded as "a pending
-// review already exists".
+//  1. Read the live head, every pending review of the identity (all comments
+//     paginated) and the identity's comments in submitted reviews, in one
+//     lookup. A head_sha that is not the live head is invalid_argument and
+//     nothing is written.
+//  2. Classify every requested comment by the hidden fingerprint marker it
+//     would carry: already on the host (already_present), written before and
+//     since deleted by the operator (dismissed, from the posted-sidecar), or
+//     to be written. Identical items in one request are one item.
+//  3. When nothing is to be written and no body section is needed the status
+//     is no_change and no review is created. Otherwise, with no pending review,
+//     a body-only review is created at the live head (a 422 "one pending
+//     review" starts the run over, which then appends); with one or more, the
+//     lowest database id is used.
+//  4. The review body is a series of delimited per-head sections. A section for
+//     the live head is added only when missing and never rewrites existing
+//     text; with more than one pending review the body is not touched.
+//  5. Comments go out in failure-isolated batches. The review is then re-read
+//     and what landed is decided by the markers found there, not by the write
+//     answers. The sidecar records only confirmed fingerprints.
 //
-// With req.SupersedePending the guarded supersede runs (see supersede), and
-// the result carries exactly one status: posted, skipped, replaced or
-// blocked_human_pending.
-//
-// Per-comment side is carried through: "" and "RIGHT" post on the right side,
-// "LEFT" on the left, anything else is invalid_argument (never silently
-// downgraded to RIGHT).
+// A run in which some comments did not land is an error whose message has the
+// stable shape "<n> of <m> comments landed; failed: <reason>:<fingerprint>
+// [:<path>:<line>] ..." (see failedMessage); replaying the identical request
+// skips what landed and retries what did not.
 func (b *Backend) SubmitReview(ctx context.Context, req pr.ReviewSubmitRequest) (pr.ReviewSubmitResult, error) {
 	repo, number, err := parsePRID(req.ID)
 	if err != nil {
 		return pr.ReviewSubmitResult{}, scriptout.WrapError(scriptout.ErrInvalidArgument, err.Error())
 	}
-	if req.HeadSHA == "" {
+	if strings.TrimSpace(req.HeadSHA) == "" {
 		return pr.ReviewSubmitResult{}, scriptout.WrapError(scriptout.ErrInvalidArgument, "review_submit: head_sha is required")
 	}
-	comments := make([]github.ReviewSubmitComment, 0, len(req.Comments))
-	for i, c := range req.Comments {
-		if c.Path == "" || c.Line <= 0 {
-			return pr.ReviewSubmitResult{}, scriptout.WrapError(scriptout.ErrInvalidArgument,
-				fmt.Sprintf("review_submit: comment %d needs a path and a positive line", i))
-		}
-		side := strings.ToUpper(c.Side)
-		if side != "" && side != "LEFT" && side != "RIGHT" {
-			return pr.ReviewSubmitResult{}, scriptout.WrapError(scriptout.ErrInvalidArgument,
-				fmt.Sprintf("review_submit: comment %d has unsupported side %q (want LEFT or RIGHT)", i, c.Side))
-		}
-		comments = append(comments, github.ReviewSubmitComment{Path: c.Path, Line: c.Line, Side: side, Body: c.Body})
-	}
-
-	cur, err := b.gh.GetPR(ctx, repo, number)
+	items, err := buildSubmitItems(req.Comments)
 	if err != nil {
-		return pr.ReviewSubmitResult{}, classifyReviewSubmitError(err, nil)
+		return pr.ReviewSubmitResult{}, err
 	}
-	if cur == nil || cur.HeadSHA == "" {
+	bodyText := pgposted.NormalizeBody(req.Body)
+	if bodyText != "" {
+		if strings.Contains(bodyText, pgposted.SectionClose) || strings.Contains(bodyText, "<!-- pg-section") {
+			return pr.ReviewSubmitResult{}, scriptout.WrapError(scriptout.ErrInvalidArgument,
+				"review_submit: body must not contain a review body section delimiter")
+		}
+		if pgposted.SectionOpen(req.HeadSHA) == "" {
+			return pr.ReviewSubmitResult{}, scriptout.WrapError(scriptout.ErrInvalidArgument,
+				"review_submit: head_sha is too short to name a review body section")
+		}
+	}
+	owner, name, _ := strings.Cut(repo, "/")
+
+	lock, err := b.locker.Acquire(owner, name, number)
+	if err != nil {
 		return pr.ReviewSubmitResult{}, scriptout.WrapError(scriptout.ErrUnavailable,
-			fmt.Sprintf("review_submit: could not determine the current head of %s; nothing was posted", req.ID))
+			fmt.Sprintf("review_submit: could not take the per-PR lock for %s: %v", req.ID, err))
 	}
-	if !strings.EqualFold(cur.HeadSHA, req.HeadSHA) {
-		return pr.ReviewSubmitResult{}, scriptout.WrapError(scriptout.ErrInvalidArgument,
-			fmt.Sprintf("review_submit: head moved: head_sha %s is not the current head of %s (current head is %s); "+
-				"refresh the PR and retry against the current head; nothing was posted or deleted",
-				req.HeadSHA, req.ID, cur.HeadSHA))
-	}
+	defer func() { _ = lock.Release() }()
 
-	if req.SupersedePending {
-		return b.supersede(ctx, req, repo, number, comments)
-	}
-	rev, err := b.gh.PostPendingReview(ctx, repo, number, req.HeadSHA, req.Body, comments)
-	if err != nil {
-		return pr.ReviewSubmitResult{}, classifyReviewSubmitError(err, nil)
-	}
-	return posted(req, rev.ID, pr.StatusPosted, nil), nil
-}
-
-// posted builds the result for a review that was posted.
-func posted(req pr.ReviewSubmitRequest, reviewID, status string, outcome *pr.SupersedeOutcome) pr.ReviewSubmitResult {
-	return pr.ReviewSubmitResult{
-		ReviewID:  reviewID,
-		State:     "pending",
-		HeadSHA:   req.HeadSHA,
-		AsOf:      time.Now().UTC().Format(time.RFC3339),
-		Status:    status,
-		Supersede: outcome,
-	}
-}
-
-// blocked builds the result for a supersede that left everything untouched and
-// needs a human: nothing was posted (so review_id is empty) and the review it
-// names, when there is one, is unmodified.
-func blocked(req pr.ReviewSubmitRequest, reason, message string, ref *pr.PendingReviewRef, outcome *pr.SupersedeOutcome) pr.ReviewSubmitResult {
-	return pr.ReviewSubmitResult{
-		HeadSHA:       req.HeadSHA,
-		AsOf:          time.Now().UTC().Format(time.RFC3339),
-		Status:        pr.StatusBlockedHumanPending,
-		Reason:        reason,
-		Message:       message,
-		PendingReview: ref,
-		Supersede:     outcome,
-	}
-}
-
-// supersede is the guarded supersede_pending path (entity-change-flow contract
-// 9.1; pending-review handling policies 2 to 4 and 7). It never deletes
-// unless every guard holds, and it never submits anything.
-//
-//  1. Look up the actor's pending review (review_pending). A failed lookup is
-//     fail-closed: blocked_human_pending, reason detection_failed, nothing
-//     posted or deleted. No pending review: post (posted).
-//  2. A pending review at the head being reviewed: do not post (skipped,
-//     reason pending_review_exists_same_head). The comparison is the REVIEW's
-//     commit against req.HeadSHA, never a comment's commit (not stable, P4).
-//  3. A stale pending review (different or null commit) is replaced only when
-//     the marker is on the body AND every comment AND the body's content digest
-//     verifies against the content as read (so a marker-preserving text edit,
-//     a removed marker, an added comment and a review with no digest are all
-//     refused: blocked, reason human_edited). The edit signal is the digest,
-//     never lastEditedAt (null after a web-UI edit, G2).
-//  4. The content is archived BEFORE the delete; a failed archive write blocks
-//     (archive_failed) and nothing is deleted.
-//  5. The delete is attempted once. Any failure blocks (delete_refused). An
-//     HTTP 422 non-pending (REST) or UNPROCESSABLE (GraphQL) answer, the shape
-//     of a lost submit-vs-delete race, re-lists once so the message can say
-//     what the review is now; the delete is never retried.
-//  6. Then the new review is posted (replaced). If that post fails after the
-//     delete, the error says the old review was deleted and where it is
-//     archived.
-func (b *Backend) supersede(ctx context.Context, req pr.ReviewSubmitRequest, repo string, number int, comments []github.ReviewSubmitComment) (pr.ReviewSubmitResult, error) {
-	look, err := b.legacyPendingLookup(ctx, req.ID)
-	if err != nil {
-		msg := "the actor's pending review could not be determined (" + err.Error() + "); nothing was posted, deleted or submitted"
-		return blocked(req, pr.ReasonDetectionFailed, msg, nil, &pr.SupersedeOutcome{Attempted: true, Error: err.Error()}), nil
-	}
-	if look.Review == nil {
-		rev, err := b.gh.PostPendingReview(ctx, repo, number, req.HeadSHA, req.Body, comments)
-		if err != nil {
-			return pr.ReviewSubmitResult{}, classifyReviewSubmitError(err, &pr.SupersedeOutcome{})
+	run := &submitRun{b: b, req: req, repo: repo, owner: owner, name: name, number: number, items: items, bodyText: bodyText}
+	for range maxSubmitAttempts {
+		res, again, err := run.once(ctx)
+		if !again {
+			return res, err
 		}
-		return posted(req, rev.ID, pr.StatusPosted, &pr.SupersedeOutcome{}), nil
 	}
+	return pr.ReviewSubmitResult{}, scriptout.WrapError(scriptout.ErrUnavailable,
+		fmt.Sprintf("review_submit: the pending reviews of %s kept changing during the run; retry", req.ID))
+}
 
-	old := look.Review
-	ref := &pr.PendingReviewRef{ReviewID: old.ReviewID, DatabaseID: old.DatabaseID, URL: old.URL, CommitSHA: old.CommitSHA}
+// submitItem is one distinct comment of a request, normalized.
+type submitItem struct {
+	fp       string
+	reply    bool
+	threadID string
+	path     string
+	line     int
+	side     string // "LEFT" or "RIGHT"; points only
+	body     string // normalized request text, without marker or attribution
+}
 
-	if strings.EqualFold(old.CommitSHA, req.HeadSHA) {
-		res := posted(req, old.ReviewID, pr.StatusSkipped, &pr.SupersedeOutcome{})
-		res.Reason = pr.ReasonSameHead
-		res.Message = "a pending review already exists at this head; nothing was posted"
-		res.PendingReview = ref
-		return res, nil
+// buildSubmitItems validates a request's comments and merges items that are
+// identical after normalization into one.
+func buildSubmitItems(comments []pr.ReviewComment) ([]submitItem, error) {
+	if len(comments) > maxRequestComments {
+		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument,
+			fmt.Sprintf("review_submit: %d comments exceed the limit of %d per request", len(comments), maxRequestComments))
 	}
-
-	if detail := editedDetail(old); detail != "" {
-		msg := "the stale pending review " + reviewLabel(ref) + " is not provably unedited agent-authored content (" + detail +
-			"); it was left untouched and nothing was posted"
-		return blocked(req, pr.ReasonHumanEdited, msg, ref, &pr.SupersedeOutcome{}), nil
-	}
-	if old.DatabaseID <= 0 {
-		return blocked(req, pr.ReasonDetectionFailed,
-			"the pending review "+reviewLabel(ref)+" carried no database id, so it cannot be archived or deleted; it was left untouched and nothing was posted",
-			ref, &pr.SupersedeOutcome{}), nil
-	}
-
-	archivePath, err := b.archiveReview(repo, number, look)
-	if err != nil {
-		msg := "the stale pending review " + reviewLabel(ref) + " could not be archived (" + err.Error() +
-			"); it was NOT deleted and nothing was posted"
-		return blocked(req, pr.ReasonArchiveFailed, msg, ref, &pr.SupersedeOutcome{}), nil
-	}
-
-	if err := b.gh.DeleteReview(ctx, repo, number, old.DatabaseID); err != nil {
-		msg := "the host refused to delete the stale pending review " + reviewLabel(ref) + " (" + err.Error() + ")"
-		if isLostDeleteRace(err) {
-			msg += "; " + b.relistDetail(ctx, req.ID, old.ReviewID)
+	seen := map[string]bool{}
+	out := make([]submitItem, 0, len(comments))
+	for i, c := range comments {
+		var it submitItem
+		if thread := strings.TrimSpace(c.ThreadID); thread != "" {
+			if c.Path != "" || c.Line != 0 {
+				return nil, scriptout.WrapError(scriptout.ErrInvalidArgument,
+					fmt.Sprintf("review_submit: comment %d has a thread_id together with path or line; a reply carries only thread_id and body", i))
+			}
+			it = submitItem{
+				reply: true, threadID: thread, body: pgposted.NormalizeBody(c.Body),
+				fp: pgposted.ReplyFingerprint(thread, c.Body),
+			}
+		} else {
+			if c.Path == "" || c.Line <= 0 {
+				return nil, scriptout.WrapError(scriptout.ErrInvalidArgument,
+					fmt.Sprintf("review_submit: comment %d needs a path and a positive line (or a thread_id to reply)", i))
+			}
+			side := strings.ToUpper(strings.TrimSpace(c.Side))
+			if side == "" {
+				side = "RIGHT"
+			}
+			if side != "LEFT" && side != "RIGHT" {
+				return nil, scriptout.WrapError(scriptout.ErrInvalidArgument,
+					fmt.Sprintf("review_submit: comment %d has unsupported side %q (want LEFT or RIGHT)", i, c.Side))
+			}
+			it = submitItem{
+				path: c.Path, line: c.Line, side: side, body: pgposted.NormalizeBody(c.Body),
+				fp: pgposted.PointFingerprint(c.Path, side, c.Line, c.Body),
+			}
 		}
-		msg += "; it was left as is and nothing was posted"
-		return blocked(req, pr.ReasonDeleteRefused, msg, ref, &pr.SupersedeOutcome{Attempted: true, Error: err.Error()}), nil
+		if seen[it.fp] {
+			continue
+		}
+		seen[it.fp] = true
+		out = append(out, it)
 	}
+	return out, nil
+}
 
-	outcome := &pr.SupersedeOutcome{Attempted: true, Deleted: true}
-	rev, err := b.gh.PostPendingReview(ctx, repo, number, req.HeadSHA, req.Body, comments)
+// submitRun is one SubmitReview call, holding the per-PR lock.
+type submitRun struct {
+	b        *Backend
+	req      pr.ReviewSubmitRequest
+	repo     string
+	owner    string
+	name     string
+	number   int
+	items    []submitItem
+	bodyText string
+}
+
+// hostFingerprints returns every comment fingerprint marker found on comments
+// the acting identity authored on the PR, in its pending reviews and its
+// submitted reviews.
+func hostFingerprints(data *github.PendingReviewData) map[string]bool {
+	out := map[string]bool{}
+	add := func(cs []github.PendingReviewComment) {
+		for _, c := range cs {
+			for _, fp := range pgposted.ExtractFingerprints(c.Body) {
+				out[fp] = true
+			}
+		}
+	}
+	for _, r := range data.Reviews {
+		add(r.Comments)
+	}
+	for _, r := range data.Submitted {
+		add(r.Comments)
+	}
+	return out
+}
+
+// reviewByID finds a pending review of data by its node id.
+func reviewByID(data *github.PendingReviewData, id string) *github.PendingReviewNode {
+	for i := range data.Reviews {
+		if data.Reviews[i].ID == id {
+			return &data.Reviews[i]
+		}
+	}
+	return nil
+}
+
+// buildSection renders the body section for head.
+func buildSection(head, text string) string {
+	return pgposted.SectionOpen(head) + "\n" + text + "\n" + pgposted.SectionClose
+}
+
+// appendSection appends section to a review body, leaving the existing text
+// untouched.
+func appendSection(existing, section string) string {
+	if strings.TrimSpace(existing) == "" {
+		return section
+	}
+	return existing + "\n\n" + section
+}
+
+// bodyHeadRecorded reports whether the sidecar records a body section as
+// written for head. Heads match on their section key, as in the body.
+func bodyHeadRecorded(st pgposted.State, head string) bool {
+	open := pgposted.SectionOpen(head)
+	for _, h := range st.BodyHeads {
+		if pgposted.SectionOpen(h) == open {
+			return true
+		}
+	}
+	return false
+}
+
+// bodyPlan is what the run will do about the review body.
+type bodyPlan struct {
+	// disposition is the pr.Body* value reported unless the write changes it.
+	disposition string
+	// write is true when a section for the head is to be added.
+	write bool
+}
+
+// planBody decides the body disposition from the review the run would use
+// (nil when there is none).
+func (r *submitRun) planBody(target *github.PendingReviewNode, extras int, st pgposted.State, head string) bodyPlan {
+	switch {
+	case r.bodyText == "":
+		return bodyPlan{disposition: pr.BodyAbsent}
+	case extras > 0:
+		return bodyPlan{disposition: pr.BodySkippedExtraPending}
+	}
+	existing := ""
+	if target != nil {
+		existing = target.Body
+		if _, _, ok := pgposted.FindSection(existing, head); ok {
+			return bodyPlan{disposition: pr.BodyKept}
+		}
+	}
+	if bodyHeadRecorded(st, head) {
+		return bodyPlan{disposition: pr.BodyDismissed}
+	}
+	if len(appendSection(existing, buildSection(head, r.bodyText))) > maxReviewBody {
+		return bodyPlan{disposition: pr.BodyTooLarge}
+	}
+	return bodyPlan{disposition: pr.BodyWritten, write: true}
+}
+
+// once runs the read-classify-write-reconcile sequence one time. again is true
+// when the host changed under the run before anything was written, so the run
+// starts over from its read.
+func (r *submitRun) once(ctx context.Context) (res pr.ReviewSubmitResult, again bool, err error) {
+	data, err := r.b.gh.GetPendingReview(ctx, r.repo, r.number)
 	if err != nil {
-		cerr := classifyReviewSubmitError(err, outcome)
-		return pr.ReviewSubmitResult{}, fmt.Errorf("%w; the deleted review's content is archived at %s", cerr, archivePath)
-	}
-	res := posted(req, rev.ID, pr.StatusReplaced, outcome)
-	res.Superseded = &pr.SupersededReview{
-		PendingReviewRef: *ref,
-		ArchivePath:      archivePath,
-		Body:             old.Body,
-		Comments:         old.Comments,
-	}
-	return res, nil
-}
-
-// legacyMarker is the invisible marker pg-pr stamps on the review bodies and
-// comments it posts. pg-pr is still a live review path until its retirement,
-// so a pending review it left behind is agent-authored and MUST count as
-// marked to the guarded supersede; otherwise that guard would treat every such
-// review as human-edited. It is a literal copy: pg-pr's marker package is
-// Go-internal and not importable from this module.
-const legacyPGPRMarker = "<!-- pg-pr -->"
-
-// hasBotMarker reports whether text carries a bot-authorship marker: this
-// backend's plain marker, its digest-bearing body marker, or pg-pr's. Only the
-// guarded supersede below uses it; the review_pending record no longer does.
-func hasBotMarker(text string) bool {
-	return strings.Contains(text, github.BotMarker) ||
-		strings.Contains(text, github.DigestMarkerPrefix) ||
-		strings.Contains(text, legacyPGPRMarker)
-}
-
-// legacyPendingReview is the acting identity's single pending review in the
-// shape the guarded supersede reads: the marker and digest verdicts are
-// computed here, not carried on the review_pending record. It goes away with
-// the supersede path.
-type legacyPendingReview struct {
-	ReviewID    string
-	DatabaseID  int64
-	URL         string
-	CommitSHA   string
-	Body        string
-	Comments    []pr.SupersededComment
-	AllMarked   bool
-	DigestState string
-}
-
-// legacyLookup is the supersede guard's pending-review answer; a nil Review is
-// the explicit "none".
-type legacyLookup struct {
-	HeadSHA string
-	Review  *legacyPendingReview
-}
-
-// legacyPendingLookup reads the actor's pending review for the guarded
-// supersede. It keeps that path's behavior from before review_pending learned
-// to tolerate several pending reviews: more than one is a failed lookup here
-// (the supersede deletes a review, so it must be sure which one it means), and
-// it fails closed the same way review_pending does.
-func (b *Backend) legacyPendingLookup(ctx context.Context, id string) (legacyLookup, error) {
-	repo, number, err := parsePRID(id)
-	if err != nil {
-		return legacyLookup{}, scriptout.WrapError(scriptout.ErrInvalidArgument, err.Error())
-	}
-	data, err := b.gh.GetPendingReview(ctx, repo, number)
-	if err != nil {
-		return legacyLookup{}, classifyPendingReviewError(err)
+		return res, false, classifyReviewSubmitError(err)
 	}
 	if data == nil || data.HeadSHA == "" {
-		return legacyLookup{}, scriptout.WrapError(scriptout.ErrUnavailable,
-			fmt.Sprintf("review_pending: detection_failed: could not determine the current head of %s", id))
+		return res, false, scriptout.WrapError(scriptout.ErrUnavailable,
+			fmt.Sprintf("review_submit: could not determine the current head of %s; nothing was written", r.req.ID))
 	}
-	look := legacyLookup{HeadSHA: data.HeadSHA}
-	if len(data.Reviews) > 1 {
-		return legacyLookup{}, scriptout.WrapError(scriptout.ErrUnavailable,
-			fmt.Sprintf("review_pending: detection_failed: expected at most one pending review for the viewer, host reported %d", len(data.Reviews)))
+	head := data.HeadSHA
+	if !strings.EqualFold(head, r.req.HeadSHA) {
+		return res, false, scriptout.WrapError(scriptout.ErrInvalidArgument,
+			fmt.Sprintf("review_submit: head moved: head_sha %s is not the current head of %s (current head is %s); "+
+				"refresh the PR and retry against the current head; nothing was written",
+				r.req.HeadSHA, r.req.ID, head))
 	}
-	rev := data.Lowest()
-	if rev == nil {
-		return look, nil
+	st, err := r.b.posted.Load(r.owner, r.name, r.number)
+	if err != nil {
+		return res, false, scriptout.WrapError(scriptout.ErrUnavailable,
+			fmt.Sprintf("review_submit: the posted-sidecar for %s could not be read (%v); nothing was written", r.req.ID, err))
 	}
-	old := &legacyPendingReview{
-		ReviewID: rev.ID, DatabaseID: rev.DatabaseID, URL: rev.URL, CommitSHA: rev.CommitOID, Body: rev.Body,
-		Comments:  make([]pr.SupersededComment, 0, len(rev.Comments)),
-		AllMarked: hasBotMarker(rev.Body),
-	}
-	commentTexts := make([]string, 0, len(rev.Comments))
-	for _, c := range rev.Comments {
-		marked := hasBotMarker(c.Body)
-		old.AllMarked = old.AllMarked && marked
-		commentTexts = append(commentTexts, c.Body)
-		old.Comments = append(old.Comments, pr.SupersededComment{ID: c.ID, Path: c.Path, Line: c.Line, Body: c.Body, Marked: marked})
-	}
-	old.DigestState = string(github.VerifyDigest(rev.Body, commentTexts))
-	look.Review = old
-	return look, nil
-}
 
-// editedDetail returns "" when the pending review is provably unedited,
-// fully-marked agent content, else a short description of why it is not.
-func editedDetail(old *legacyPendingReview) string {
-	if !old.AllMarked {
-		return "the bot marker is missing from the body or a comment"
+	fps := make([]string, len(r.items))
+	for i, it := range r.items {
+		fps[i] = it.fp
 	}
-	switch github.DigestState(old.DigestState) {
-	case github.DigestVerified:
-		return ""
-	case github.DigestMissing:
-		return "it carries no content digest"
-	case github.DigestUnreadable:
-		return "its content digest is unreadable"
-	case github.DigestMismatch:
-		return "its content no longer matches the digest recorded when it was posted"
-	default:
-		return "its content digest could not be verified"
-	}
-}
-
-// reviewLabel names a review for a message: its URL when known, else its id.
-func reviewLabel(ref *pr.PendingReviewRef) string {
-	if ref.URL != "" {
-		return ref.URL
-	}
-	return ref.ReviewID
-}
-
-// archiveReview persists the full pending review before it is deleted, and
-// returns where. A nil archiver (no location configured) is a failure: the
-// delete MUST NOT happen without an archive.
-func (b *Backend) archiveReview(repo string, number int, look legacyLookup) (string, error) {
-	if b.archiver == nil {
-		return "", errors.New("no archive location is configured")
-	}
-	old := look.Review
-	rec := archive.Record{
-		Repo: repo, PR: number,
-		ReviewID: old.ReviewID, DatabaseID: old.DatabaseID, URL: old.URL,
-		CommitSHA: old.CommitSHA, HeadSHA: look.HeadSHA, DigestState: old.DigestState,
-		Body: old.Body, Comments: make([]archive.Comment, 0, len(old.Comments)),
-	}
-	for _, c := range old.Comments {
-		rec.Comments = append(rec.Comments, archive.Comment{ID: c.ID, Path: c.Path, Line: c.Line, Body: c.Body, Marked: c.Marked})
-	}
-	return b.archiver.Write(rec)
-}
-
-// isLostDeleteRace reports whether a delete failure has the shape of GitHub
-// refusing to delete a review that is no longer pending: REST answers HTTP 422
-// ("Can not delete a non-pending pull request review"), GraphQL answers
-// UNPROCESSABLE (prerequisite P2).
-func isLostDeleteRace(err error) bool {
-	low := strings.ToLower(err.Error())
-	return strings.Contains(low, "http 422") || strings.Contains(low, "unprocessable") || strings.Contains(low, "non-pending")
-}
-
-// relistDetail re-lists the actor's pending review ONCE after a refused delete
-// and says what it found. It is informational: the caller reports
-// delete_refused whatever this finds, and never retries the delete.
-func (b *Backend) relistDetail(ctx context.Context, id, reviewID string) string {
-	again, err := b.legacyPendingLookup(ctx, id)
-	switch {
-	case err != nil:
-		return "re-listing it afterwards failed (" + err.Error() + ")"
-	case again.Review == nil:
-		return "re-listing shows it is no longer pending (it was submitted or deleted concurrently)"
-	case again.Review.ReviewID != reviewID:
-		return "re-listing shows a different pending review now exists"
-	default:
-		return "re-listing shows it is still pending"
-	}
-}
-
-// pendingExistsMarker is the phrase GitHub puts in the 422 body when the actor
-// already has a pending review on the PR ("User can only have one pending
-// review per pull request").
-const pendingExistsMarker = "one pending review"
-
-// classifyReviewSubmitError maps a review-post failure onto INV-ERR-1. Every
-// HTTP 422 is invalid_argument, but the message tells the causes apart: a
-// "pending review already exists" 422 says so and names supersede_pending as
-// the remedy; any other 422 (the head was verified against the live head
-// before posting, so this is typically a comment that could not be anchored)
-// is reported as a rejected review. Auth failures and 404 reuse
-// classifyGHError (deliberately not edited: it is hash-pinned); anything else
-// is unavailable. outcome, when non-nil, is the supersede attempt that
-// preceded the failed post and is appended to the message.
-func classifyReviewSubmitError(err error, outcome *pr.SupersedeOutcome) error {
-	suffix := supersedeSuffix(outcome)
-	low := strings.ToLower(err.Error())
-	if strings.Contains(low, "http 422") {
-		if strings.Contains(low, pendingExistsMarker) {
-			return scriptout.WrapError(scriptout.ErrInvalidArgument,
-				"review_submit: a pending review already exists for this PR (GitHub allows one pending review per user per PR); "+
-					"retry with supersede_pending=true or delete it first: "+err.Error()+suffix)
+	verdicts := pgposted.Classify(fps, hostFingerprints(data), st)
+	var toWrite []submitItem
+	var alreadyPresent, dismissed int
+	for i, v := range verdicts {
+		switch v {
+		case pgposted.AlreadyPresent:
+			alreadyPresent++
+		case pgposted.Dismissed:
+			dismissed++
+		default:
+			toWrite = append(toWrite, r.items[i])
 		}
-		return scriptout.WrapError(scriptout.ErrInvalidArgument,
-			"review_submit: GitHub rejected the review (HTTP 422; head_sha matched the live head, so check the comment anchors): "+
-				err.Error()+suffix)
+	}
+
+	target := data.Lowest()
+	extras := max(len(data.Reviews)-1, 0)
+	plan := r.planBody(target, extras, st, head)
+	res = pr.ReviewSubmitResult{
+		State:               "pending",
+		HeadSHA:             head,
+		Status:              pr.StatusNoChange,
+		AlreadyPresent:      alreadyPresent,
+		Dismissed:           dismissed,
+		Body:                plan.disposition,
+		ExtraPendingReviews: extras,
+		LastAppend:          lastAppendOf(st),
+	}
+	if len(toWrite) == 0 && !plan.write {
+		if target == nil {
+			res.State = pr.StateNone
+		} else {
+			res.ReviewID, res.URL = target.ID, target.URL
+		}
+		res.AsOf = nowRFC3339()
+		return res, false, nil
+	}
+
+	created := false
+	if target == nil {
+		body := ""
+		if plan.write {
+			body = buildSection(head, r.bodyText)
+		}
+		rev, err := r.b.gh.CreateBodyOnlyPendingReview(ctx, r.repo, r.number, head, body)
+		if errors.Is(err, github.ErrPendingReviewExists) {
+			return res, true, nil
+		}
+		if err != nil {
+			return res, false, classifyReviewSubmitError(err)
+		}
+		if rev == nil || rev.NodeID == "" {
+			return res, false, scriptout.WrapError(scriptout.ErrUnavailable,
+				"review_submit: the host created a pending review but did not identify it; retry the identical request")
+		}
+		created = true
+		// The cross-process create race is detected, not repaired: look again,
+		// and append to the lowest-numbered review whatever is found.
+		seen, err := r.b.gh.GetPendingReview(ctx, r.repo, r.number)
+		if err != nil {
+			return res, false, wrapAfterWrite(classifyReviewSubmitError(err), "a pending review was created")
+		}
+		target = seen.Lowest()
+		if target == nil {
+			return res, false, scriptout.WrapError(scriptout.ErrUnavailable,
+				"review_submit: the pending review that was just created is not visible; retry the identical request")
+		}
+		extras = max(len(seen.Reviews)-1, 0)
+		res.ExtraPendingReviews = extras
+		if extras > 0 && plan.write {
+			plan = bodyPlan{disposition: pr.BodySkippedExtraPending}
+		}
+
+	}
+
+	wroteBody := created && plan.write
+	if !created && plan.write {
+		body, wrote, restart, err := r.writeBody(ctx, target.ID, head)
+		if err != nil {
+			return res, false, err
+		}
+		if restart {
+			return res, true, nil
+		}
+		plan.disposition, wroteBody = body, wrote
+	}
+	res.Body = plan.disposition
+
+	var results []github.ReviewWriteResult
+	if len(toWrite) > 0 {
+		writeItems := make([]github.ReviewWriteItem, len(toWrite))
+		for i, it := range toWrite {
+			writeItems[i] = r.writeItem(it, head)
+		}
+		results, err = r.b.gh.WriteReviewItems(ctx, target.ID, writeItems)
+		if err != nil {
+			return res, false, scriptout.WrapError(scriptout.ErrInvalidArgument, "review_submit: "+err.Error())
+		}
+	}
+
+	// Reconcile by a re-read: the markers found on the review decide what
+	// landed, never the answers of the write calls.
+	final, err := r.b.gh.GetPendingReview(ctx, r.repo, r.number)
+	var finalRev *github.PendingReviewNode
+	if err == nil {
+		finalRev = reviewByID(final, target.ID)
+	}
+	if finalRev == nil {
+		cause := "the review could not be found again"
+		if err != nil {
+			cause = err.Error()
+		}
+		return res, false, scriptout.WrapError(scriptout.ErrUnavailable,
+			fmt.Sprintf("review_submit: writes were sent but could not be confirmed by a re-read (%s); nothing was recorded; retry the identical request", cause))
+	}
+	onHost := hostFingerprints(final)
+	var failures []submitFailure
+	var confirmed []string
+	for i, it := range toWrite {
+		if onHost[it.fp] {
+			confirmed = append(confirmed, it.fp)
+			continue
+		}
+		reason := github.ReasonUnconfirmed
+		if i < len(results) && !results[i].Landed && results[i].Reason != "" {
+			reason = results[i].Reason
+		}
+		failures = append(failures, submitFailure{reason: reason, item: it})
+	}
+	bodyConfirmed := false
+	if wroteBody {
+		_, _, bodyConfirmed = pgposted.FindSection(finalRev.Body, head)
+	}
+
+	res.ReviewID, res.URL = finalRev.ID, finalRev.URL
+	res.ExtraPendingReviews = max(len(final.Reviews)-1, 0)
+	res.Added = len(confirmed)
+	wrote := created || bodyConfirmed || len(confirmed) > 0
+	switch {
+	case created:
+		res.Status = pr.StatusPosted
+	case wrote:
+		res.Status = pr.StatusAppend
+	}
+
+	if wrote {
+		now := nowRFC3339()
+		st.AddFingerprints(confirmed...)
+		if bodyConfirmed && res.ExtraPendingReviews == 0 {
+			st.AddBodyHead(head)
+		}
+		st.LastAppend = &pgposted.LastAppend{At: now, Added: len(confirmed), Head: head}
+		if err := r.b.posted.Save(r.owner, r.name, r.number, st); err != nil {
+			return res, false, scriptout.WrapError(scriptout.ErrUnavailable,
+				fmt.Sprintf("review_submit: content was written to %s but the posted-sidecar could not be saved (%v); retry the identical request, which converges through the markers", finalRev.ID, err))
+		}
+		res.LastAppend = lastAppendOf(st)
+	}
+	res.AsOf = nowRFC3339()
+	if len(failures) > 0 {
+		return res, false, failedError(len(confirmed), len(toWrite), failures)
+	}
+	return res, false, nil
+}
+
+// writeBody adds the section for head to the body of the pending review id.
+// It re-reads the review immediately before the write and builds the new body
+// from that fresh read, so text the operator typed meanwhile survives. again is
+// true when the review is no longer the one the run planned for.
+func (r *submitRun) writeBody(ctx context.Context, reviewID, head string) (disposition string, wrote, again bool, err error) {
+	fresh, err := r.b.gh.GetPendingReview(ctx, r.repo, r.number)
+	if err != nil {
+		return "", false, false, classifyReviewSubmitError(err)
+	}
+	if fresh == nil || fresh.Lowest() == nil || fresh.Lowest().ID != reviewID {
+		return "", false, true, nil
+	}
+	rev := fresh.Lowest()
+	switch {
+	case len(fresh.Reviews) > 1:
+		return pr.BodySkippedExtraPending, false, false, nil
+	}
+	if _, _, ok := pgposted.FindSection(rev.Body, head); ok {
+		return pr.BodyKept, false, false, nil
+	}
+	body := appendSection(rev.Body, buildSection(head, r.bodyText))
+	if len(body) > maxReviewBody {
+		return pr.BodyTooLarge, false, false, nil
+	}
+	if err := r.b.gh.UpdateReviewBody(ctx, reviewID, body); err != nil {
+		if errors.Is(err, github.ErrTwoPendingReviews) {
+			return pr.BodySkippedExtraPending, false, false, nil
+		}
+		return "", false, false, classifyReviewSubmitError(err)
+	}
+	return pr.BodyWritten, true, false, nil
+}
+
+// writeItem renders one item for the write call: the request text, then the
+// attribution line and the hidden fingerprint marker.
+func (r *submitRun) writeItem(it submitItem, head string) github.ReviewWriteItem {
+	body := it.body + "\n\n" + attribution(head) + "\n" + pgposted.Marker(it.fp)
+	if it.reply {
+		return github.ReviewWriteItem{Body: body, ReplyToThreadID: it.threadID}
+	}
+	return github.ReviewWriteItem{Path: it.path, Line: it.line, Side: it.side, Body: body}
+}
+
+// attribution is the visible line every written comment ends with.
+func attribution(head string) string {
+	short := head
+	if len(short) > 7 {
+		short = short[:7]
+	}
+	return "*Posted by pg-connector at " + short + ".*"
+}
+
+func nowRFC3339() string { return time.Now().UTC().Format(time.RFC3339) }
+
+// lastAppendOf renders the sidecar's last append for the result, nil for none.
+func lastAppendOf(st pgposted.State) *pr.LastAppend {
+	if st.LastAppend == nil {
+		return nil
+	}
+	return &pr.LastAppend{At: st.LastAppend.At, Added: st.LastAppend.Added, Head: st.LastAppend.Head}
+}
+
+// submitFailure is one comment that did not land.
+type submitFailure struct {
+	reason github.WriteFailReason
+	item   submitItem
+}
+
+// failedError builds the error for a run in which some comments did not land.
+// The error envelope carries only code and message, so the message has a
+// stable shape:
+//
+//	<n> of <m> comments landed; failed: <reason>:<fingerprint>[:<path>:<line>] ...
+//
+// It lists at most maxFailuresListed failures and ends with "(+<k> more)" when
+// there were more. The code is unavailable when any failure could succeed on
+// retry (rate_limited, unconfirmed) and invalid_argument when every failure is
+// permanent (anchor_rejected, thread_not_found).
+func failedError(landed, total int, failures []submitFailure) error {
+	listed := failures
+	if len(listed) > maxFailuresListed {
+		listed = listed[:maxFailuresListed]
+	}
+	parts := make([]string, 0, len(listed))
+	retryable := false
+	for _, f := range failures {
+		if f.reason == github.ReasonRateLimited || f.reason == github.ReasonUnconfirmed {
+			retryable = true
+		}
+	}
+	for _, f := range listed {
+		p := string(f.reason) + ":" + f.item.fp
+		if !f.item.reply {
+			p += fmt.Sprintf(":%s:%d", f.item.path, f.item.line)
+		}
+		parts = append(parts, p)
+	}
+	msg := fmt.Sprintf("%d of %d comments landed; failed: %s", landed, total, strings.Join(parts, " "))
+	if extra := len(failures) - len(listed); extra > 0 {
+		msg += fmt.Sprintf(" (+%d more)", extra)
+	}
+	if retryable {
+		return scriptout.WrapError(scriptout.ErrUnavailable, msg)
+	}
+	return scriptout.WrapError(scriptout.ErrInvalidArgument, msg)
+}
+
+// wrapAfterWrite notes on err that a write already reached the host, so a
+// caller knows the identical request converges.
+func wrapAfterWrite(err error, what string) error {
+	return fmt.Errorf("%w; %s, so retry the identical request", err, what)
+}
+
+// classifyReviewSubmitError maps a host failure onto INV-ERR-1. An HTTP 422 is
+// invalid_argument (the host rejected what was sent); auth failures and 404
+// reuse classifyGHError (deliberately not edited: it is hash-pinned);
+// everything else, rate limits included, is unavailable and is not retried
+// inside the call.
+func classifyReviewSubmitError(err error) error {
+	if strings.Contains(strings.ToLower(err.Error()), "http 422") {
+		return scriptout.WrapError(scriptout.ErrInvalidArgument, "review_submit: GitHub rejected the request (HTTP 422): "+err.Error())
 	}
 	err = classifyGHError(err)
 	for _, s := range []error{scriptout.ErrNotFound, scriptout.ErrUnauthenticated, scriptout.ErrInvalidArgument} {
 		if errors.Is(err, s) {
-			if suffix == "" {
-				return err
-			}
-			return fmt.Errorf("%w%s", err, suffix)
+			return err
 		}
 	}
-	return scriptout.WrapError(scriptout.ErrUnavailable, err.Error()+suffix)
-}
-
-// supersedeSuffix renders a supersede outcome for an error message, or "" when
-// no supersede was requested.
-func supersedeSuffix(o *pr.SupersedeOutcome) string {
-	switch {
-	case o == nil:
-		return ""
-	case o.Deleted:
-		return "; supersede: the previous pending review was deleted before the post failed"
-	case o.Error != "":
-		return "; supersede: attempted but failed: " + o.Error + " (the previous pending review is untouched)"
-	case o.Attempted:
-		return "; supersede: attempted, not deleted"
-	default:
-		return "; supersede: no pending review was found to delete"
-	}
+	return scriptout.WrapError(scriptout.ErrUnavailable, err.Error())
 }

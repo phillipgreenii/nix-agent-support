@@ -3,243 +3,1063 @@ package internal
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/github"
+	pgposted "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/posted"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/pr"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
-// postedReview records one PostPendingReview call on fakeGH.
-type postedReview struct {
-	repo     string
-	number   int
-	commitID string
+const (
+	// headA and headB are realistic 40-hex heads; their section keys differ.
+	headA = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+	headB = "b9b8b7b6b5b4b3b2b1b0a9a8a7a6a5a4a3a2a1a0"
+)
+
+// hostComment is one comment held by the simulated host.
+type hostComment struct {
+	id       string
+	threadID string
+	path     string
+	line     int
 	body     string
-	comments []github.ReviewSubmitComment
+	commit   string
 }
 
-func (f *fakeGH) DeleteReview(ctx context.Context, repo string, number int, reviewID int64) error {
-	f.ops = append(f.ops, "delete")
-	if f.deleteErr != nil {
-		return f.deleteErr
+// hostReview is one review (pending or submitted) held by the simulated host.
+type hostReview struct {
+	dbID     int64
+	commit   string
+	body     string
+	comments []hostComment
+}
+
+func (r *hostReview) nodeID() string { return fmt.Sprintf("PRR_%d", r.dbID) }
+
+// writeCall records one WriteReviewItems call.
+type writeCall struct {
+	reviewID string
+	items    []github.ReviewWriteItem
+}
+
+// fakeHost is a stateful simulation of one PR's reviews on the host. It backs
+// the lookup and the three write primitives of fakeGH, so a test drives whole
+// create-or-append runs and the re-read sees what the writes did.
+type fakeHost struct {
+	head      string
+	pending   []*hostReview
+	submitted []*hostReview
+	threads   map[string]bool
+	nextID    int64
+
+	// Knobs.
+	readErr          func(call int) error
+	afterRead        func(call int, h *fakeHost)
+	create422        int // creates answered "one pending review" first, with a hand-started review appearing
+	afterCreate      func(h *fakeHost)
+	failItem         func(it github.ReviewWriteItem) github.WriteFailReason
+	storeDespiteFail bool // a failed item is stored anyway (the answer was lost)
+	dropWrites       bool // items are answered as landed but never stored
+	updateTwoPending bool
+	createErr        error
+
+	// Records.
+	reads   int
+	creates []string // bodies of created reviews
+	updates []string // bodies sent to UpdateReviewBody
+	writes  []writeCall
+}
+
+func newFakeHost(head string) *fakeHost {
+	return &fakeHost{head: head, threads: map[string]bool{}, nextID: 100}
+}
+
+// addPending adds a pending review (a hand-started one, say).
+func (h *fakeHost) addPending(commit, body string) *hostReview {
+	h.nextID++
+	r := &hostReview{dbID: h.nextID, commit: commit, body: body}
+	h.pending = append(h.pending, r)
+	return r
+}
+
+// addSubmitted adds a submitted review of the viewer holding comments.
+func (h *fakeHost) addSubmitted(commit string, cs ...hostComment) *hostReview {
+	h.nextID++
+	r := &hostReview{dbID: h.nextID, commit: commit, comments: cs}
+	for _, c := range cs {
+		h.threads[c.threadID] = true
 	}
-	f.deleted = append(f.deleted, reviewID)
+	h.submitted = append(h.submitted, r)
+	return r
+}
+
+func (h *fakeHost) toNode(r *hostReview) github.PendingReviewNode {
+	n := github.PendingReviewNode{
+		ID: r.nodeID(), DatabaseID: r.dbID, URL: fmt.Sprintf("https://example.invalid/pull/1#pullrequestreview-%d", r.dbID),
+		CommitOID: r.commit, Body: r.body,
+	}
+	for _, c := range r.comments {
+		n.Comments = append(n.Comments, github.PendingReviewComment{
+			ID: c.id, Path: c.path, Line: c.line, Body: c.body, OriginalCommitOID: c.commit, ReviewThreadID: c.threadID,
+		})
+	}
+	return n
+}
+
+// snapshot is the lookup: the head, every pending review (lowest id first) and
+// the viewer's submitted reviews.
+func (h *fakeHost) snapshot() (*github.PendingReviewData, error) {
+	h.reads++
+	call := h.reads
+	if h.readErr != nil {
+		if err := h.readErr(call); err != nil {
+			return nil, err
+		}
+	}
+	data := &github.PendingReviewData{HeadSHA: h.head}
+	for _, r := range h.pending {
+		data.Reviews = append(data.Reviews, h.toNode(r))
+	}
+	for _, r := range h.submitted {
+		n := h.toNode(r)
+		data.Submitted = append(data.Submitted, github.SubmittedReviewNode{ID: n.ID, DatabaseID: n.DatabaseID, CommitOID: n.CommitOID, Comments: n.Comments})
+	}
+	if h.afterRead != nil {
+		h.afterRead(call, h)
+	}
+	return data, nil
+}
+
+func (h *fakeHost) pendingByNode(id string) *hostReview {
+	for _, r := range h.pending {
+		if r.nodeID() == id {
+			return r
+		}
+	}
 	return nil
 }
 
-func (f *fakeGH) PostPendingReview(ctx context.Context, repo string, number int, commitID, body string, comments []github.ReviewSubmitComment) (*api.Review, error) {
-	f.ops = append(f.ops, "post")
-	if f.postErr != nil {
-		return nil, f.postErr
+func (f *fakeGH) CreateBodyOnlyPendingReview(ctx context.Context, repo string, number int, commitID, body string) (*github.CreatedReview, error) {
+	f.ops = append(f.ops, "create")
+	h := f.host
+	if h.createErr != nil {
+		return nil, h.createErr
 	}
-	f.posts = append(f.posts, postedReview{repo, number, commitID, body, comments})
-	return &api.Review{ID: "PRR_node", State: "pending"}, nil
+	if h.create422 > 0 {
+		h.create422--
+		h.addPending(h.head, "typed by the operator")
+		return nil, fmt.Errorf("github: create pending review: %w: %w", github.ErrPendingReviewExists, errors.New("HTTP 422"))
+	}
+	if len(h.pending) > 0 {
+		return nil, fmt.Errorf("github: create pending review: %w: %w", github.ErrPendingReviewExists, errors.New("HTTP 422"))
+	}
+	h.creates = append(h.creates, body)
+	r := h.addPending(commitID, body)
+	if h.afterCreate != nil {
+		h.afterCreate(h)
+	}
+	return &github.CreatedReview{NodeID: r.nodeID(), ID: r.dbID, State: "pending"}, nil
 }
 
-func baseSubmitReq() pr.ReviewSubmitRequest {
-	return pr.ReviewSubmitRequest{
-		ID:      "foo/bar#42",
-		HeadSHA: "deadbeef",
-		Body:    "looks mostly fine",
-		Comments: []pr.ReviewComment{
-			{Path: "main.go", Line: 12, Side: "RIGHT", Body: "rename x"},
-		},
+func (f *fakeGH) WriteReviewItems(ctx context.Context, reviewID string, items []github.ReviewWriteItem) ([]github.ReviewWriteResult, error) {
+	f.ops = append(f.ops, "write")
+	h := f.host
+	h.writes = append(h.writes, writeCall{reviewID: reviewID, items: items})
+	rev := h.pendingByNode(reviewID)
+	out := make([]github.ReviewWriteResult, len(items))
+	for i, it := range items {
+		reason := github.WriteFailReason("")
+		if h.failItem != nil {
+			reason = h.failItem(it)
+		}
+		if it.IsReply() && reason == "" && !h.threads[it.ReplyToThreadID] {
+			reason = github.ReasonThreadNotFound
+		}
+		if reason != "" {
+			out[i] = github.ReviewWriteResult{Reason: reason}
+			if !h.storeDespiteFail {
+				continue
+			}
+		} else {
+			out[i] = github.ReviewWriteResult{Landed: true}
+		}
+		if h.dropWrites || rev == nil {
+			continue
+		}
+		h.nextID++
+		c := hostComment{id: fmt.Sprintf("C_%d", h.nextID), path: it.Path, line: it.Line, body: it.Body, commit: h.head}
+		if it.IsReply() {
+			c.threadID = it.ReplyToThreadID
+		} else {
+			c.threadID = fmt.Sprintf("T_%d", h.nextID)
+			h.threads[c.threadID] = true
+		}
+		rev.comments = append(rev.comments, c)
 	}
+	return out, nil
 }
 
-// liveHeadPR is the PR the fake reports for GetPR: its head matches
-// baseSubmitReq's head_sha, so the live-head pre-check passes.
-func liveHeadPR() *api.PR { return &api.PR{HeadSHA: "deadbeef"} }
+func (f *fakeGH) UpdateReviewBody(ctx context.Context, reviewID, body string) error {
+	f.ops = append(f.ops, "update")
+	h := f.host
+	if h.updateTwoPending {
+		return fmt.Errorf("github: update review body: %w: %w", github.ErrTwoPendingReviews, errors.New("only have one pending review"))
+	}
+	rev := h.pendingByNode(reviewID)
+	if rev == nil {
+		return errors.New("no such review")
+	}
+	h.updates = append(h.updates, body)
+	rev.body = body
+	return nil
+}
 
-func TestReviewSubmitPendingOnly(t *testing.T) {
-	gh := &fakeGH{pr: liveHeadPR()}
-	res, err := New(gh).SubmitReview(context.Background(), baseSubmitReq())
+// submitFixture is a Backend over a fakeHost with a sidecar and lock in a temp
+// directory.
+type submitFixture struct {
+	t     *testing.T
+	host  *fakeHost
+	gh    *fakeGH
+	b     *Backend
+	store pgposted.Store
+	lock  pgposted.Locker
+}
+
+func newSubmitFixture(t *testing.T) *submitFixture {
+	t.Helper()
+	root := t.TempDir()
+	f := &submitFixture{
+		t:     t,
+		host:  newFakeHost(headA),
+		store: pgposted.Store{Dir: filepath.Join(root, "posted")},
+		lock:  pgposted.Locker{Dir: filepath.Join(root, "locks"), Wait: 100 * time.Millisecond, Poll: 5 * time.Millisecond},
+	}
+	f.gh = &fakeGH{host: f.host}
+	f.b = New(f.gh).WithPostedStore(f.store).WithLocker(f.lock)
+	return f
+}
+
+func (f *submitFixture) submit(req pr.ReviewSubmitRequest) (pr.ReviewSubmitResult, error) {
+	f.t.Helper()
+	return f.b.SubmitReview(context.Background(), req)
+}
+
+func (f *submitFixture) mustSubmit(req pr.ReviewSubmitRequest) pr.ReviewSubmitResult {
+	f.t.Helper()
+	res, err := f.submit(req)
 	if err != nil {
-		t.Fatalf("SubmitReview: %v", err)
+		f.t.Fatalf("SubmitReview: %v", err)
 	}
-	if res.State != "pending" || res.ReviewID != "PRR_node" || res.HeadSHA != "deadbeef" || res.AsOf == "" || res.Status != pr.StatusPosted {
-		t.Fatalf("unexpected result: %+v", res)
+	return res
+}
+
+func (f *submitFixture) sidecar() pgposted.State {
+	f.t.Helper()
+	st, err := f.store.Load("foo", "bar", 42)
+	if err != nil {
+		f.t.Fatalf("load sidecar: %v", err)
 	}
-	if res.Supersede != nil {
-		t.Errorf("Supersede must be nil when supersede_pending was not set; got %+v", res.Supersede)
-	}
-	if len(gh.posts) != 1 || gh.posts[0].commitID != "deadbeef" || gh.posts[0].repo != "foo/bar" || gh.posts[0].number != 42 {
-		t.Fatalf("expected one post anchored to head_sha on foo/bar#42; got %+v", gh.posts)
-	}
-	if len(gh.deleted) != 0 {
-		t.Errorf("nothing may be deleted without supersede_pending; got %v", gh.deleted)
+	return st
+}
+
+// untouched asserts the host was neither written to nor created in.
+func (f *submitFixture) untouched() {
+	f.t.Helper()
+	if len(f.host.creates) != 0 || len(f.host.updates) != 0 || len(f.host.writes) != 0 {
+		f.t.Errorf("host must be untouched; creates=%v updates=%v writes=%d", f.host.creates, f.host.updates, len(f.host.writes))
 	}
 }
 
-func TestReviewSubmitPost422IsInvalidArgument(t *testing.T) {
-	cases := map[string]error{
-		"post 422":        errors.New("github: post review: gh api failed: gh: Unprocessable Entity (HTTP 422)"),
-		"non-head 422":    errors.New("github: post review: gh: Validation Failed: line must be part of the diff (HTTP 422)"),
-		"upper-case 422":  errors.New("HTTP 422: Unprocessable Entity"),
-		"wrapped message": errors.New("github: post review: exit 1: stderr: gh: Unprocessable Entity (HTTP 422)"),
+func point(path string, line int, body string) pr.ReviewComment {
+	return pr.ReviewComment{Path: path, Line: line, Side: "RIGHT", Body: body}
+}
+
+func req(body string, cs ...pr.ReviewComment) pr.ReviewSubmitRequest {
+	return pr.ReviewSubmitRequest{ID: "foo/bar#42", HeadSHA: headA, Body: body, Comments: cs}
+}
+
+func pointFP(path string, line int, body string) string {
+	return pgposted.PointFingerprint(path, "RIGHT", line, body)
+}
+
+func isCode(t *testing.T, err, want error) {
+	t.Helper()
+	if !errors.Is(err, want) {
+		t.Fatalf("err = %v, want %v", err, want)
 	}
-	for name, postErr := range cases {
+}
+
+func sectionOf(head, text string) string {
+	return pgposted.SectionOpen(head) + "\n" + text + "\n" + pgposted.SectionClose
+}
+
+// TestSubmitPostedThenNoChangeThenAppend walks the three statuses on one PR.
+func TestSubmitPostedThenNoChangeThenAppend(t *testing.T) {
+	f := newSubmitFixture(t)
+	first := req("overall: fine", point("main.go", 12, "rename x"))
+
+	res := f.mustSubmit(first)
+	if res.Status != pr.StatusPosted || res.State != "pending" || res.Added != 1 || res.Body != pr.BodyWritten ||
+		res.HeadSHA != headA || res.AsOf == "" || res.ReviewID == "" || res.URL == "" || res.ExtraPendingReviews != 0 {
+		t.Fatalf("posted result = %+v", res)
+	}
+	if len(f.host.creates) != 1 || f.host.creates[0] != sectionOf(headA, "overall: fine") {
+		t.Fatalf("created review must carry the head section as its body: %q", f.host.creates)
+	}
+	rev := f.host.pending[0]
+	if rev.commit != headA || len(rev.comments) != 1 {
+		t.Fatalf("review = %+v", rev)
+	}
+	body := rev.comments[0].body
+	fp := pointFP("main.go", 12, "rename x")
+	for _, want := range []string{"rename x", "*Posted by pg-connector at a1b2c3d.*", pgposted.Marker(fp)} {
+		if !strings.Contains(body, want) {
+			t.Errorf("comment body %q must contain %q", body, want)
+		}
+	}
+	if !strings.HasSuffix(body, "*Posted by pg-connector at a1b2c3d.*\n"+pgposted.Marker(fp)) {
+		t.Errorf("the marker must follow the attribution line: %q", body)
+	}
+	st := f.sidecar()
+	if !st.Has(fp) || len(st.BodyHeads) != 1 || st.LastAppend == nil || st.LastAppend.Added != 1 || st.LastAppend.Head != headA {
+		t.Fatalf("sidecar = %+v", st)
+	}
+	if res.LastAppend == nil || res.LastAppend.Added != 1 {
+		t.Errorf("result last_append = %+v", res.LastAppend)
+	}
+
+	// The identical request again: nothing to write.
+	f.host.creates, f.host.updates, f.host.writes = nil, nil, nil
+	again := f.mustSubmit(first)
+	if again.Status != pr.StatusNoChange || again.Added != 0 || again.AlreadyPresent != 1 || again.Body != pr.BodyKept ||
+		again.ReviewID != rev.nodeID() || again.State != "pending" || again.URL == "" {
+		t.Fatalf("no_change result = %+v", again)
+	}
+	f.untouched()
+	if len(f.host.pending[0].comments) != 1 {
+		t.Fatalf("no second comment may be written: %+v", f.host.pending[0].comments)
+	}
+
+	// A reply to a real thread plus a new point appends.
+	thread := f.host.pending[0].comments[0].threadID
+	third := f.mustSubmit(req("", pr.ReviewComment{ThreadID: thread, Body: "agreed"}, point("main.go", 40, "second finding")))
+	if third.Status != pr.StatusAppend || third.Added != 2 || third.AlreadyPresent != 0 || third.Body != pr.BodyAbsent || third.ReviewID != rev.nodeID() {
+		t.Fatalf("append result = %+v", third)
+	}
+	if len(f.host.pending) != 1 || len(f.host.pending[0].comments) != 3 {
+		t.Fatalf("both comments must join the one review: %+v", f.host.pending)
+	}
+}
+
+func TestSubmitNoChangeCreatesNoReview(t *testing.T) {
+	f := newSubmitFixture(t)
+	fp := pointFP("main.go", 12, "rename x")
+	st := pgposted.State{}
+	st.AddFingerprints(fp)
+	if err := f.store.Save("foo", "bar", 42, st); err != nil {
+		t.Fatal(err)
+	}
+	// The sidecar remembers the comment, the host holds nothing: the operator
+	// deleted it.
+	res := f.mustSubmit(req("", point("main.go", 12, "rename x")))
+	if res.Status != pr.StatusNoChange || res.State != pr.StateNone || res.ReviewID != "" || res.URL != "" ||
+		res.Dismissed != 1 || res.Added != 0 || res.Body != pr.BodyAbsent {
+		t.Fatalf("result = %+v", res)
+	}
+	f.untouched()
+	if len(f.host.pending) != 0 {
+		t.Errorf("no review may be created: %+v", f.host.pending)
+	}
+	if after := f.sidecar(); after.LastAppend != nil {
+		t.Errorf("a run that wrote nothing must not touch last_append: %+v", after)
+	}
+}
+
+func TestSubmitAppendsToHandStartedReviewKeepingItsText(t *testing.T) {
+	f := newSubmitFixture(t)
+	hand := f.host.addPending(headA, "my own notes")
+
+	res := f.mustSubmit(req("agent summary", point("main.go", 3, "x")))
+	if res.Status != pr.StatusAppend || res.Body != pr.BodyWritten || res.Added != 1 || res.ReviewID != hand.nodeID() {
+		t.Fatalf("result = %+v", res)
+	}
+	want := "my own notes\n\n" + sectionOf(headA, "agent summary")
+	if hand.body != want {
+		t.Fatalf("body = %q, want %q", hand.body, want)
+	}
+	if len(f.host.creates) != 0 {
+		t.Errorf("an existing review must be used, not a new one created")
+	}
+}
+
+func TestSubmitNewHeadAddsASecondSection(t *testing.T) {
+	f := newSubmitFixture(t)
+	f.host.addPending(headA, sectionOf(headA, "old head text"))
+	f.host.head = headB
+	r := req("new head text", point("main.go", 3, "x"))
+	r.HeadSHA = headB
+	res := f.mustSubmit(r)
+	if res.Status != pr.StatusAppend || res.Body != pr.BodyWritten {
+		t.Fatalf("result = %+v", res)
+	}
+	want := sectionOf(headA, "old head text") + "\n\n" + sectionOf(headB, "new head text")
+	if f.host.pending[0].body != want {
+		t.Fatalf("body = %q, want %q", f.host.pending[0].body, want)
+	}
+}
+
+func TestSubmitBodyDispositions(t *testing.T) {
+	big := strings.Repeat("x", maxReviewBody-10)
+	cases := map[string]struct {
+		existing string
+		sidecar  bool // sidecar records the head's section as written
+		body     string
+		want     string
+		wantBody string // expected review body after the run
+		updates  int
+	}{
+		"written":   {"typed", false, "text", pr.BodyWritten, "typed\n\n" + sectionOf(headA, "text"), 1},
+		"kept":      {sectionOf(headA, "first text"), true, "different text", pr.BodyKept, sectionOf(headA, "first text"), 0},
+		"absent":    {"typed", false, "", pr.BodyAbsent, "typed", 0},
+		"dismissed": {"typed", true, "text", pr.BodyDismissed, "typed", 0},
+		"too_large": {big, false, "text that does not fit", pr.BodyTooLarge, big, 0},
+	}
+	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			gh := &fakeGH{pr: liveHeadPR(), postErr: postErr}
-			_, err := New(gh).SubmitReview(context.Background(), baseSubmitReq())
-			if !errors.Is(err, scriptout.ErrInvalidArgument) {
-				t.Fatalf("err = %v, want invalid_argument", err)
+			f := newSubmitFixture(t)
+			rev := f.host.addPending(headA, c.existing)
+			if c.sidecar {
+				st := pgposted.State{}
+				st.AddBodyHead(headA)
+				if err := f.store.Save("foo", "bar", 42, st); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// One comment so the run always has something to do besides the body.
+			res := f.mustSubmit(req(c.body, point("main.go", 3, "x")))
+			if res.Body != c.want {
+				t.Fatalf("body = %q, want %q", res.Body, c.want)
+			}
+			if rev.body != c.wantBody || len(f.host.updates) != c.updates {
+				t.Fatalf("review body = %q (updates %d), want %q (updates %d)", rev.body, len(f.host.updates), c.wantBody, c.updates)
+			}
+			if res.Status != pr.StatusAppend || res.Added != 1 {
+				t.Errorf("result = %+v", res)
 			}
 		})
 	}
 }
 
-func TestReviewSubmitErrorTaxonomy(t *testing.T) {
-	gh := &fakeGH{pr: liveHeadPR(), postErr: errors.New("gh: Not Found (HTTP 404)")}
-	if _, err := New(gh).SubmitReview(context.Background(), baseSubmitReq()); !errors.Is(err, scriptout.ErrNotFound) {
-		t.Errorf("404: err = %v, want not_found", err)
+// TestSubmitBodyOnlyNoChange: a kept, dismissed or absent body with nothing
+// else to write is no_change and the review is untouched.
+func TestSubmitBodyOnlyNoChange(t *testing.T) {
+	f := newSubmitFixture(t)
+	rev := f.host.addPending(headA, sectionOf(headA, "first"))
+	res := f.mustSubmit(req("second text"))
+	if res.Status != pr.StatusNoChange || res.Body != pr.BodyKept || res.ReviewID != rev.nodeID() {
+		t.Fatalf("result = %+v", res)
 	}
-	gh = &fakeGH{pr: liveHeadPR(), postErr: errors.Join(github.ErrGHAuthInvalid, errors.New("gh: Forbidden (HTTP 403)"))}
-	if _, err := New(gh).SubmitReview(context.Background(), baseSubmitReq()); !errors.Is(err, scriptout.ErrUnauthenticated) {
-		t.Errorf("403: err = %v, want unauthenticated", err)
+	f.untouched()
+}
+
+func TestSubmitBodySectionNeededCreatesReviewWithBodyOnly(t *testing.T) {
+	f := newSubmitFixture(t)
+	res := f.mustSubmit(req("just a summary"))
+	if res.Status != pr.StatusPosted || res.Body != pr.BodyWritten || res.Added != 0 {
+		t.Fatalf("result = %+v", res)
 	}
-	gh = &fakeGH{pr: liveHeadPR(), postErr: errors.New("gh: Bad Gateway (HTTP 502)")}
-	if _, err := New(gh).SubmitReview(context.Background(), baseSubmitReq()); !errors.Is(err, scriptout.ErrUnavailable) {
-		t.Errorf("502: err = %v, want unavailable", err)
+	if len(f.host.writes) != 0 {
+		t.Errorf("no comment write is expected: %+v", f.host.writes)
 	}
 }
 
-func TestReviewSubmitRejectsBadInput(t *testing.T) {
+// TestSubmitBodyMergesFromTheFreshRead: the body is rebuilt from a read made
+// immediately before the write, so text typed after the run's first read
+// survives.
+func TestSubmitBodyMergesFromTheFreshRead(t *testing.T) {
+	f := newSubmitFixture(t)
+	rev := f.host.addPending(headA, "typed early")
+	f.host.afterRead = func(call int, h *fakeHost) {
+		if call == 1 {
+			rev.body = "typed early\nand typed late"
+		}
+	}
+	f.mustSubmit(req("summary"))
+	want := "typed early\nand typed late\n\n" + sectionOf(headA, "summary")
+	if rev.body != want {
+		t.Fatalf("body = %q, want %q", rev.body, want)
+	}
+}
+
+func TestSubmitSectionAddedMeanwhileIsKept(t *testing.T) {
+	f := newSubmitFixture(t)
+	rev := f.host.addPending(headA, "")
+	f.host.afterRead = func(call int, h *fakeHost) {
+		if call == 1 {
+			rev.body = sectionOf(headA, "someone else's text")
+		}
+	}
+	res := f.mustSubmit(req("summary", point("main.go", 3, "x")))
+	if res.Body != pr.BodyKept || len(f.host.updates) != 0 {
+		t.Fatalf("result = %+v updates=%v", res, f.host.updates)
+	}
+}
+
+func TestSubmitTwoPendingReviews(t *testing.T) {
+	f := newSubmitFixture(t)
+	low := f.host.addPending(headA, "")
+	f.host.addPending(headA, "other")
+
+	res := f.mustSubmit(req("summary", point("main.go", 3, "x")))
+	if res.ExtraPendingReviews != 1 || res.Body != pr.BodySkippedExtraPending || res.Status != pr.StatusAppend || res.ReviewID != low.nodeID() {
+		t.Fatalf("result = %+v", res)
+	}
+	if len(f.host.updates) != 0 || len(low.comments) != 1 || len(f.host.pending[1].comments) != 0 {
+		t.Fatalf("comments go to the lowest-numbered review and no body is written: %+v", f.host.pending)
+	}
+	if st := f.sidecar(); len(st.BodyHeads) != 0 {
+		t.Errorf("a skipped body must not be recorded as written: %+v", st)
+	}
+	if len(f.host.pending) != 2 {
+		t.Errorf("nothing may be deleted")
+	}
+}
+
+// TestSubmitUpdateRefusedForTwoPendingReviews: the host refuses a body write
+// because a second pending review appeared; the comments still go out.
+func TestSubmitUpdateRefusedForTwoPendingReviews(t *testing.T) {
+	f := newSubmitFixture(t)
+	f.host.addPending(headA, "")
+	f.host.updateTwoPending = true
+	res := f.mustSubmit(req("summary", point("main.go", 3, "x")))
+	if res.Body != pr.BodySkippedExtraPending || res.Added != 1 {
+		t.Fatalf("result = %+v", res)
+	}
+	if st := f.sidecar(); len(st.BodyHeads) != 0 {
+		t.Errorf("sidecar = %+v", st)
+	}
+}
+
+// TestSubmitCreate422LoopsToAppend: a create answered "one pending review"
+// (a hand-started review appeared) starts the run over, which appends.
+func TestSubmitCreate422LoopsToAppend(t *testing.T) {
+	f := newSubmitFixture(t)
+	f.host.create422 = 1
+	res := f.mustSubmit(req("", point("main.go", 3, "x")))
+	if res.Status != pr.StatusAppend || res.Added != 1 {
+		t.Fatalf("result = %+v", res)
+	}
+	if len(f.host.pending) != 1 || len(f.host.pending[0].comments) != 1 || len(f.host.creates) != 0 {
+		t.Fatalf("the hand-started review must receive the comment: %+v", f.host.pending)
+	}
+}
+
+// TestSubmitStartingOverIsBounded: when the host keeps changing under the run
+// (a review is created by someone else and gone again on every read), the run
+// gives up as unavailable instead of looping forever.
+func TestSubmitStartingOverIsBounded(t *testing.T) {
+	f := newSubmitFixture(t)
+	f.host.createErr = fmt.Errorf("github: create pending review: %w: %w", github.ErrPendingReviewExists, errors.New("HTTP 422"))
+	_, err := f.submit(req("", point("main.go", 3, "x")))
+	isCode(t, err, scriptout.ErrUnavailable)
+	if f.host.reads != maxSubmitAttempts {
+		t.Errorf("reads = %d, want %d", f.host.reads, maxSubmitAttempts)
+	}
+	f.untouched()
+}
+
+// TestSubmitCreateRaceIsDetectedNotRepaired: a second pending review appears
+// around the create; the run reports it, appends to the lowest-numbered one,
+// and deletes nothing.
+func TestSubmitCreateRaceIsDetectedNotRepaired(t *testing.T) {
+	f := newSubmitFixture(t)
+	var low *hostReview
+	f.host.afterCreate = func(h *fakeHost) {
+		low = &hostReview{dbID: 1, commit: headA, body: "raced"}
+		h.pending = append([]*hostReview{low}, h.pending...)
+	}
+	res := f.mustSubmit(req("summary", point("main.go", 3, "x")))
+	if res.Status != pr.StatusPosted || res.ExtraPendingReviews != 1 || res.Body != pr.BodySkippedExtraPending || res.ReviewID != low.nodeID() {
+		t.Fatalf("result = %+v", res)
+	}
+	if len(low.comments) != 1 || len(f.host.pending) != 2 {
+		t.Fatalf("pending = %+v", f.host.pending)
+	}
+	if st := f.sidecar(); len(st.BodyHeads) != 0 {
+		t.Errorf("sidecar = %+v", st)
+	}
+}
+
+func TestSubmitCreateErrorTaxonomy(t *testing.T) {
+	f := newSubmitFixture(t)
+	f.host.createErr = errors.New("gh: Unprocessable Entity: commit_id is not part of the pull request (HTTP 422)")
+	_, err := f.submit(req("", point("main.go", 3, "x")))
+	isCode(t, err, scriptout.ErrInvalidArgument)
+
+	f.host.createErr = errors.New("gh: API rate limit exceeded (HTTP 403)")
+	_, err = f.submit(req("", point("main.go", 3, "x")))
+	isCode(t, err, scriptout.ErrUnavailable)
+}
+
+func TestSubmitReadErrorTaxonomy(t *testing.T) {
+	cases := map[string]struct {
+		err  error
+		want error
+	}{
+		"not found":   {errors.New("gh: Not Found (HTTP 404)"), scriptout.ErrNotFound},
+		"auth":        {errors.Join(github.ErrGHAuthInvalid, errors.New("gh: Forbidden (HTTP 403)")), scriptout.ErrUnauthenticated},
+		"unavailable": {errors.New("gh: Bad Gateway (HTTP 502)"), scriptout.ErrUnavailable},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := newSubmitFixture(t)
+			f.host.readErr = func(int) error { return c.err }
+			_, err := f.submit(req("", point("main.go", 3, "x")))
+			isCode(t, err, c.want)
+			f.untouched()
+		})
+	}
+}
+
+func TestSubmitRejectsBadInput(t *testing.T) {
+	tooMany := make([]pr.ReviewComment, 201)
+	for i := range tooMany {
+		tooMany[i] = point("a.go", i+1, "x")
+	}
 	mut := map[string]func(*pr.ReviewSubmitRequest){
 		"bad id":   func(r *pr.ReviewSubmitRequest) { r.ID = "nope" },
 		"no head":  func(r *pr.ReviewSubmitRequest) { r.HeadSHA = "" },
 		"bad side": func(r *pr.ReviewSubmitRequest) { r.Comments[0].Side = "MIDDLE" },
 		"no line":  func(r *pr.ReviewSubmitRequest) { r.Comments[0].Line = 0 },
 		"no path":  func(r *pr.ReviewSubmitRequest) { r.Comments[0].Path = "" },
+		"thread with path": func(r *pr.ReviewSubmitRequest) {
+			r.Comments[0] = pr.ReviewComment{ThreadID: "PRRT_1", Path: "a.go", Body: "x"}
+		},
+		"thread with line": func(r *pr.ReviewSubmitRequest) {
+			r.Comments[0] = pr.ReviewComment{ThreadID: "PRRT_1", Line: 3, Body: "x"}
+		},
+		"over 200 comments":        func(r *pr.ReviewSubmitRequest) { r.Comments = tooMany },
+		"section delimiter":        func(r *pr.ReviewSubmitRequest) { r.Body = "a " + pgposted.SectionClose },
+		"body with a short head":   func(r *pr.ReviewSubmitRequest) { r.Body = "text"; r.HeadSHA = "abc" },
+		"section opener in a body": func(r *pr.ReviewSubmitRequest) { r.Body = "<!-- pg-section head=zzz -->" },
 	}
 	for name, m := range mut {
 		t.Run(name, func(t *testing.T) {
-			gh := &fakeGH{pr: liveHeadPR()}
-			req := baseSubmitReq()
-			m(&req)
-			_, err := New(gh).SubmitReview(context.Background(), req)
-			if !errors.Is(err, scriptout.ErrInvalidArgument) {
-				t.Fatalf("err = %v, want invalid_argument", err)
+			f := newSubmitFixture(t)
+			r := req("", point("main.go", 3, "x"))
+			m(&r)
+			_, err := f.submit(r)
+			isCode(t, err, scriptout.ErrInvalidArgument)
+			if f.host.reads != 0 {
+				t.Errorf("validation must run before any read; reads = %d", f.host.reads)
 			}
-			if len(gh.posts) != 0 {
-				t.Errorf("nothing may be posted on invalid input; got %+v", gh.posts)
-			}
+			f.untouched()
 		})
 	}
 }
 
-func TestReviewSubmitLeftSideCarriedThrough(t *testing.T) {
-	gh := &fakeGH{pr: liveHeadPR()}
-	req := baseSubmitReq()
-	req.Comments[0].Side = "left"
-	if _, err := New(gh).SubmitReview(context.Background(), req); err != nil {
-		t.Fatalf("SubmitReview: %v", err)
+func TestSubmit200CommentsAreAccepted(t *testing.T) {
+	f := newSubmitFixture(t)
+	cs := make([]pr.ReviewComment, 200)
+	for i := range cs {
+		cs[i] = point("a.go", i+1, "x")
 	}
-	if got := gh.posts[0].comments[0].Side; got != "LEFT" {
-		t.Errorf("side = %q, want LEFT carried through", got)
-	}
-}
-
-// TestReviewSubmitBotMarkerPresent: the backend stamps its marker. The stamp
-// is applied by the github layer (PostPendingReview); this asserts the
-// production marker function the backend relies on, end to end through the
-// real github.Provider, in internal/github's tests. Here: the marker is the
-// pg-connector-specific one and is idempotent.
-func TestReviewSubmitBotMarkerPresent(t *testing.T) {
-	stamped := github.StampBotMarker("hello")
-	if !strings.Contains(stamped, github.BotMarker) || !strings.HasPrefix(stamped, "hello") {
-		t.Fatalf("stamp = %q", stamped)
-	}
-	if github.StampBotMarker(stamped) != stamped {
-		t.Errorf("StampBotMarker must be idempotent")
-	}
-	if strings.Contains(github.BotMarker, "pg-pr ") {
-		t.Errorf("marker must be pg-connector specific, not pg-pr's: %q", github.BotMarker)
-	}
-	if !strings.HasPrefix(github.StampBotMarker(""), "_Posted") {
-		t.Errorf("empty body must still receive the stamp")
+	res := f.mustSubmit(req("", cs...))
+	if res.Added != 200 {
+		t.Fatalf("added = %d", res.Added)
 	}
 }
 
-// TestReviewSubmitStaleHeadRejectedBeforePosting: a head_sha that is not the
-// PR's current head is invalid_argument naming the current head, and nothing
-// is posted or deleted (bead pg2-qr4sr).
-func TestReviewSubmitStaleHeadRejectedBeforePosting(t *testing.T) {
-	gh := &fakeGH{pr: &api.PR{HeadSHA: "cafef00d"}, pendingData: &github.PendingReviewData{HeadSHA: "cafef00d", Reviews: reviewsOf(postedAsBackend("old", "s", "c"))}}
-	req := baseSubmitReq() // head_sha deadbeef
-	req.SupersedePending = true
-	_, err := New(gh).SubmitReview(context.Background(), req)
-	if !errors.Is(err, scriptout.ErrInvalidArgument) {
-		t.Fatalf("err = %v, want invalid_argument", err)
-	}
-	for _, want := range []string{"head moved", "deadbeef", "cafef00d", "nothing was posted"} {
+func TestSubmitHeadMismatchUnderLockWritesNothing(t *testing.T) {
+	f := newSubmitFixture(t)
+	f.host.addPending(headB, "")
+	f.host.head = headB // the head moved
+	_, err := f.submit(req("summary", point("main.go", 3, "x")))
+	isCode(t, err, scriptout.ErrInvalidArgument)
+	for _, want := range []string{"head moved", headA, headB, "nothing was written"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q must mention %q", err, want)
 		}
 	}
-	if len(gh.posts) != 0 || len(gh.deleted) != 0 || len(gh.ops) != 0 {
-		t.Errorf("stale head must look up, post and delete nothing; posts=%+v deleted=%v ops=%v", gh.posts, gh.deleted, gh.ops)
+	f.untouched()
+	if _, statErr := os.Stat(filepath.Join(f.store.Dir)); statErr == nil {
+		t.Errorf("the sidecar must not be created by a refused run")
 	}
 }
 
-func TestReviewSubmitMatchingHeadPostsCaseInsensitive(t *testing.T) {
-	gh := &fakeGH{pr: &api.PR{HeadSHA: "DEADBEEF"}}
-	if _, err := New(gh).SubmitReview(context.Background(), baseSubmitReq()); err != nil {
-		t.Fatalf("matching head must post; got %v", err)
-	}
-	if len(gh.posts) != 1 {
-		t.Fatalf("posts = %d, want 1", len(gh.posts))
-	}
-}
-
-// TestReviewSubmitHeadLookupFailures: the pre-check's own failures never post.
-func TestReviewSubmitHeadLookupFailures(t *testing.T) {
-	cases := map[string]struct {
-		gh   *fakeGH
-		want error
-	}{
-		"not found":   {&fakeGH{getPRErr: errors.New("gh: Not Found (HTTP 404)")}, scriptout.ErrNotFound},
-		"unavailable": {&fakeGH{getPRErr: errors.New("gh: Bad Gateway (HTTP 502)")}, scriptout.ErrUnavailable},
-		"no head":     {&fakeGH{pr: &api.PR{}}, scriptout.ErrUnavailable},
-	}
-	for name, c := range cases {
-		t.Run(name, func(t *testing.T) {
-			_, err := New(c.gh).SubmitReview(context.Background(), baseSubmitReq())
-			if !errors.Is(err, c.want) {
-				t.Fatalf("err = %v, want %v", err, c.want)
-			}
-			if len(c.gh.posts) != 0 {
-				t.Errorf("nothing may be posted; got %+v", c.gh.posts)
-			}
-		})
+// TestSubmitHeadCheckUsesTheReadUnderTheLock: the head compared is the one the
+// lookup under the lock returned, case-insensitively.
+func TestSubmitHeadCheckUsesTheReadUnderTheLock(t *testing.T) {
+	f := newSubmitFixture(t)
+	f.host.head = strings.ToUpper(headA)
+	f.mustSubmit(req("", point("main.go", 3, "x")))
+	if f.host.reads == 0 {
+		t.Fatal("the run must read the head itself")
 	}
 }
 
-const pendingExists422 = `github: post review: gh api failed: {"message":"Unprocessable Entity","errors":["User can only have one pending review per pull request"]} gh: Unprocessable Entity (HTTP 422)`
+func TestSubmitSupersedePendingIsAcceptedAndIgnored(t *testing.T) {
+	f := newSubmitFixture(t)
+	hand := f.host.addPending(headB, "keep me")
+	r := req("", point("main.go", 3, "x"))
+	r.SupersedePending = true
+	res := f.mustSubmit(r)
+	if res.Status != pr.StatusAppend || len(f.host.pending) != 1 || hand.body != "keep me" || len(hand.comments) != 1 {
+		t.Fatalf("result = %+v pending = %+v", res, f.host.pending)
+	}
+}
 
-// TestReviewSubmitPendingExistsDistinguishableFromOtherRejections: both are
-// invalid_argument (the closed INV-ERR-1 set), but the message tells the
-// causes apart.
-func TestReviewSubmitPendingExistsDistinguishableFromOtherRejections(t *testing.T) {
-	_, pendErr := New(&fakeGH{pr: liveHeadPR(), postErr: errors.New(pendingExists422)}).
-		SubmitReview(context.Background(), baseSubmitReq())
-	_, otherErr := New(&fakeGH{pr: liveHeadPR(), postErr: errors.New("gh: Validation Failed: line must be part of the diff (HTTP 422)")}).
-		SubmitReview(context.Background(), baseSubmitReq())
-	for _, e := range []error{pendErr, otherErr} {
-		if !errors.Is(e, scriptout.ErrInvalidArgument) {
-			t.Fatalf("err = %v, want invalid_argument", e)
+func TestSubmitSideNormalizationAndIdenticalItemsMerge(t *testing.T) {
+	f := newSubmitFixture(t)
+	a := pr.ReviewComment{Path: "main.go", Line: 3, Body: "x"} // side "" is RIGHT
+	b := pr.ReviewComment{Path: "main.go", Line: 3, Side: "right", Body: "x\r\n"}
+	l := pr.ReviewComment{Path: "main.go", Line: 3, Side: "left", Body: "x"}
+	res := f.mustSubmit(req("", a, b, l))
+	if res.Added != 2 || len(f.host.writes) != 1 || len(f.host.writes[0].items) != 2 {
+		t.Fatalf("identical items are one item: result = %+v writes = %+v", res, f.host.writes)
+	}
+	var sides []string
+	for _, it := range f.host.writes[0].items {
+		sides = append(sides, it.Side)
+	}
+	if strings.Join(sides, ",") != "RIGHT,LEFT" {
+		t.Errorf("sides = %v", sides)
+	}
+}
+
+// TestSubmitCRLFRequestMatchesStoredComment: a comment that was written with
+// LF line endings is recognised when the request spells it with CRLF and
+// trailing whitespace, so a web-UI round trip cannot cause a repost.
+func TestSubmitCRLFRequestMatchesStoredComment(t *testing.T) {
+	f := newSubmitFixture(t)
+	rev := f.host.addPending(headA, "")
+	fp := pointFP("main.go", 3, "line one\nline two")
+	rev.comments = append(rev.comments, hostComment{id: "C_1", path: "main.go", line: 3, body: "line one\r\nline two\r\n\r\n" + pgposted.Marker(fp), commit: headA})
+	res := f.mustSubmit(req("", point("main.go", 3, "line one\r\nline two  \r\n")))
+	if res.Status != pr.StatusNoChange || res.AlreadyPresent != 1 {
+		t.Fatalf("result = %+v", res)
+	}
+	f.untouched()
+}
+
+func TestSubmitSubmittedReviewCommentsCountAsPresent(t *testing.T) {
+	f := newSubmitFixture(t)
+	fp := pointFP("main.go", 3, "x")
+	f.host.addSubmitted("old", hostComment{id: "C_s", threadID: "PRRT_s", path: "main.go", line: 3, body: "x\n" + pgposted.Marker(fp)})
+	res := f.mustSubmit(req("", point("main.go", 3, "x")))
+	if res.Status != pr.StatusNoChange || res.AlreadyPresent != 1 || res.State != pr.StateNone {
+		t.Fatalf("result = %+v", res)
+	}
+}
+
+// TestSubmitReplyRidesInThePendingReview: a reply to a thread of a SUBMITTED
+// review, and one to a thread of the pending review, both pass the pending
+// review's id.
+func TestSubmitReplyRidesInThePendingReview(t *testing.T) {
+	f := newSubmitFixture(t)
+	f.host.addSubmitted("old", hostComment{id: "C_s", threadID: "PRRT_sub", path: "main.go", line: 3, body: "earlier"})
+	pend := f.host.addPending(headA, "")
+	pend.comments = append(pend.comments, hostComment{id: "C_p", threadID: "PRRT_pend", path: "a.go", line: 1, body: "draft"})
+	f.host.threads["PRRT_pend"] = true
+
+	res := f.mustSubmit(req("",
+		pr.ReviewComment{ThreadID: "PRRT_sub", Body: "reply one"},
+		pr.ReviewComment{ThreadID: "PRRT_pend", Body: "reply two"}))
+	if res.Status != pr.StatusAppend || res.Added != 2 {
+		t.Fatalf("result = %+v", res)
+	}
+	if len(f.host.writes) != 1 || f.host.writes[0].reviewID != pend.nodeID() {
+		t.Fatalf("every reply must carry the pending review id: %+v", f.host.writes)
+	}
+	for _, it := range f.host.writes[0].items {
+		if !it.IsReply() {
+			t.Errorf("item = %+v", it)
 		}
 	}
-	if !strings.Contains(pendErr.Error(), "pending review already exists") || !strings.Contains(pendErr.Error(), "supersede_pending") {
-		t.Errorf("pending-exists error must say so and name the remedy: %q", pendErr)
+	if len(pend.comments) != 3 {
+		t.Errorf("replies must land in the pending review: %+v", pend.comments)
 	}
-	if strings.Contains(otherErr.Error(), "pending review already exists") || strings.Contains(otherErr.Error(), "head moved") {
-		t.Errorf("a non-pending 422 must not claim pending-exists or head-moved: %q", otherErr)
+}
+
+func TestSubmitReplyToUnknownThreadIsPermanentFailure(t *testing.T) {
+	f := newSubmitFixture(t)
+	_, err := f.submit(req("", pr.ReviewComment{ThreadID: "PRRT_other_pr", Body: "x"}))
+	isCode(t, err, scriptout.ErrInvalidArgument)
+	fp := pgposted.ReplyFingerprint("PRRT_other_pr", "x")
+	want := "0 of 1 comments landed; failed: thread_not_found:" + fp
+	if !strings.HasSuffix(err.Error(), want) {
+		t.Fatalf("err = %q, want suffix %q", err, want)
 	}
-	if !strings.Contains(otherErr.Error(), "rejected the review") {
-		t.Errorf("other 422 should be described as a rejected review: %q", otherErr)
+}
+
+func TestSubmitPartialFailureMessageShapeAndCodes(t *testing.T) {
+	fpBad := pointFP("bad.go", 5, "nope")
+	fpOK := pointFP("ok.go", 1, "fine")
+	mixed := []pr.ReviewComment{point("ok.go", 1, "fine"), point("bad.go", 5, "nope")}
+
+	t.Run("permanent only is invalid_argument", func(t *testing.T) {
+		f := newSubmitFixture(t)
+		f.host.failItem = func(it github.ReviewWriteItem) github.WriteFailReason {
+			if it.Path == "bad.go" {
+				return github.ReasonAnchorRejected
+			}
+			return ""
+		}
+		_, err := f.submit(req("", mixed...))
+		isCode(t, err, scriptout.ErrInvalidArgument)
+		want := "1 of 2 comments landed; failed: anchor_rejected:" + fpBad + ":bad.go:5"
+		if !strings.HasSuffix(err.Error(), want) {
+			t.Fatalf("err = %q, want suffix %q", err, want)
+		}
+		st := f.sidecar()
+		if !st.Has(fpOK) || st.Has(fpBad) || st.LastAppend == nil || st.LastAppend.Added != 1 {
+			t.Fatalf("only the confirmed fingerprint is recorded: %+v", st)
+		}
+		// Replaying the identical request lands nothing new and fails the same
+		// way: a permanent rejection needs a changed request.
+		f.host.writes = nil
+		_, err = f.submit(req("", mixed...))
+		isCode(t, err, scriptout.ErrInvalidArgument)
+		want = "0 of 1 comments landed; failed: anchor_rejected:" + fpBad + ":bad.go:5"
+		if !strings.HasSuffix(err.Error(), want) || len(f.host.writes) != 1 || len(f.host.writes[0].items) != 1 {
+			t.Fatalf("replay err = %q writes = %+v", err, f.host.writes)
+		}
+	})
+
+	t.Run("a retryable failure is unavailable and the replay converges", func(t *testing.T) {
+		f := newSubmitFixture(t)
+		f.host.failItem = func(it github.ReviewWriteItem) github.WriteFailReason {
+			if it.Path == "bad.go" {
+				return github.ReasonRateLimited
+			}
+			return ""
+		}
+		_, err := f.submit(req("", mixed...))
+		isCode(t, err, scriptout.ErrUnavailable)
+		if !strings.Contains(err.Error(), "1 of 2 comments landed; failed: rate_limited:"+fpBad+":bad.go:5") {
+			t.Fatalf("err = %q", err)
+		}
+		f.host.failItem = nil
+		res := f.mustSubmit(req("", mixed...))
+		if res.Status != pr.StatusAppend || res.Added != 1 || res.AlreadyPresent != 1 {
+			t.Fatalf("replay result = %+v", res)
+		}
+		if len(f.host.pending[0].comments) != 2 {
+			t.Fatalf("comments = %+v", f.host.pending[0].comments)
+		}
+	})
+
+	t.Run("a mix of permanent and retryable is unavailable", func(t *testing.T) {
+		f := newSubmitFixture(t)
+		f.host.failItem = func(it github.ReviewWriteItem) github.WriteFailReason {
+			if it.Path == "bad.go" {
+				return github.ReasonAnchorRejected
+			}
+			return github.ReasonRateLimited
+		}
+		_, err := f.submit(req("", mixed...))
+		isCode(t, err, scriptout.ErrUnavailable)
+	})
+}
+
+func TestSubmitFailureListIsCappedAtTwenty(t *testing.T) {
+	f := newSubmitFixture(t)
+	f.host.failItem = func(github.ReviewWriteItem) github.WriteFailReason { return github.ReasonAnchorRejected }
+	cs := make([]pr.ReviewComment, 25)
+	for i := range cs {
+		cs[i] = point("a.go", i+1, "x")
+	}
+	_, err := f.submit(req("", cs...))
+	isCode(t, err, scriptout.ErrInvalidArgument)
+	msg := err.Error()
+	if !strings.Contains(msg, "0 of 25 comments landed; failed: ") || strings.Count(msg, "anchor_rejected:") != 20 || !strings.HasSuffix(msg, "(+5 more)") {
+		t.Fatalf("message = %q", msg)
+	}
+}
+
+// TestSubmitTheReReadDecidesWhatLanded: a write answered as landed that the
+// re-read does not show is unconfirmed and not recorded; one answered as
+// failed that the re-read shows IS landed.
+func TestSubmitTheReReadDecidesWhatLanded(t *testing.T) {
+	t.Run("answered landed but absent", func(t *testing.T) {
+		f := newSubmitFixture(t)
+		f.host.addPending(headA, "")
+		f.host.dropWrites = true
+		_, err := f.submit(req("", point("main.go", 3, "x")))
+		isCode(t, err, scriptout.ErrUnavailable)
+		if !strings.Contains(err.Error(), "0 of 1 comments landed; failed: unconfirmed:"+pointFP("main.go", 3, "x")+":main.go:3") {
+			t.Fatalf("err = %q", err)
+		}
+		if st := f.sidecar(); len(st.Fingerprints) != 0 || st.LastAppend != nil {
+			t.Fatalf("nothing may be recorded: %+v", st)
+		}
+	})
+	t.Run("answered failed but present", func(t *testing.T) {
+		f := newSubmitFixture(t)
+		f.host.addPending(headA, "")
+		f.host.failItem = func(github.ReviewWriteItem) github.WriteFailReason { return github.ReasonUnconfirmed }
+		f.host.storeDespiteFail = true
+		res := f.mustSubmit(req("", point("main.go", 3, "x")))
+		if res.Added != 1 || res.Status != pr.StatusAppend {
+			t.Fatalf("result = %+v", res)
+		}
+		if st := f.sidecar(); !st.Has(pointFP("main.go", 3, "x")) {
+			t.Fatalf("sidecar = %+v", st)
+		}
+	})
+}
+
+// TestSubmitFailedReReadRecordsNothing covers truncation and pagination of
+// the re-read: the lookup is fail-closed, so a re-read that could not read
+// every comment is an error, and then no sidecar entry is written.
+func TestSubmitFailedReReadRecordsNothing(t *testing.T) {
+	f := newSubmitFixture(t)
+	f.host.addPending(headA, "")
+	f.host.readErr = func(call int) error {
+		if call >= 2 { // the first read passes; the re-read after the writes does not
+			return errors.New("github: review comments truncated (100 of 150 read)")
+		}
+		return nil
+	}
+	_, err := f.submit(req("", point("main.go", 3, "x")))
+	isCode(t, err, scriptout.ErrUnavailable)
+	if !strings.Contains(err.Error(), "could not be confirmed") {
+		t.Errorf("err = %q", err)
+	}
+	if _, statErr := os.Stat(f.store.Dir); statErr == nil {
+		if st := f.sidecar(); len(st.Fingerprints) != 0 || len(st.BodyHeads) != 0 || st.LastAppend != nil {
+			t.Fatalf("no entry may be written: %+v", st)
+		}
+	}
+}
+
+func TestSubmitMarkersOnLaterPagesAreSeen(t *testing.T) {
+	// The lookup returns every comment of every pending review; a marker on the
+	// 150th comment still classifies the request item as already present.
+	f := newSubmitFixture(t)
+	rev := f.host.addPending(headA, "")
+	for i := 0; i < 149; i++ {
+		rev.comments = append(rev.comments, hostComment{id: fmt.Sprintf("C_%d", i), path: "x.go", line: i + 1, body: "other"})
+	}
+	fp := pointFP("main.go", 3, "x")
+	rev.comments = append(rev.comments, hostComment{id: "C_last", path: "main.go", line: 3, body: "x " + pgposted.Marker(fp)})
+	res := f.mustSubmit(req("", point("main.go", 3, "x")))
+	if res.Status != pr.StatusNoChange || res.AlreadyPresent != 1 {
+		t.Fatalf("result = %+v", res)
+	}
+}
+
+func TestSubmitDismissedCommentIsNotWrittenAgain(t *testing.T) {
+	f := newSubmitFixture(t)
+	f.host.addPending(headA, "")
+	fp := pointFP("main.go", 3, "x")
+	st := pgposted.State{}
+	st.AddFingerprints(fp)
+	if err := f.store.Save("foo", "bar", 42, st); err != nil {
+		t.Fatal(err)
+	}
+	res := f.mustSubmit(req("", point("main.go", 3, "x"), point("main.go", 9, "y")))
+	if res.Dismissed != 1 || res.Added != 1 || res.Status != pr.StatusAppend {
+		t.Fatalf("result = %+v", res)
+	}
+	if len(f.host.writes[0].items) != 1 || f.host.writes[0].items[0].Line != 9 {
+		t.Fatalf("writes = %+v", f.host.writes)
+	}
+}
+
+func TestSubmitLockIsHeldForTheRun(t *testing.T) {
+	f := newSubmitFixture(t)
+	held, err := f.lock.Acquire("foo", "bar", 42)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.submit(req("", point("main.go", 3, "x")))
+	isCode(t, err, scriptout.ErrUnavailable)
+	if f.host.reads != 0 {
+		t.Errorf("nothing may be read without the lock; reads = %d", f.host.reads)
+	}
+	if err := held.Release(); err != nil {
+		t.Fatal(err)
+	}
+	f.mustSubmit(req("", point("main.go", 3, "x")))
+	// The lock is released after the run: a second acquire succeeds at once.
+	k, err := f.lock.Acquire("foo", "bar", 42)
+	if err != nil {
+		t.Fatalf("the lock must be released after the run: %v", err)
+	}
+	_ = k.Release()
+}
+
+func TestSubmitWithoutAStateDirectoryIsUnavailable(t *testing.T) {
+	gh := &fakeGH{host: newFakeHost(headA)}
+	_, err := New(gh).SubmitReview(context.Background(), req("", point("main.go", 3, "x")))
+	isCode(t, err, scriptout.ErrUnavailable)
+}
+
+func TestSubmitCorruptSidecarWritesNothing(t *testing.T) {
+	f := newSubmitFixture(t)
+	path, err := f.store.Path("foo", "bar", 42)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.submit(req("", point("main.go", 3, "x")))
+	isCode(t, err, scriptout.ErrUnavailable)
+	f.untouched()
+}
+
+// TestSubmitSidecarSaveFailureIsAnError: the content reached the host but the
+// sidecar could not be saved; the retry converges through the markers.
+func TestSubmitSidecarSaveFailureIsAnError(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("directory permissions do not bind root")
+	}
+	f := newSubmitFixture(t)
+	if err := os.MkdirAll(f.store.Dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(f.store.Dir, 0o700) })
+	_, err := f.submit(req("", point("main.go", 3, "x")))
+	isCode(t, err, scriptout.ErrUnavailable)
+	if !strings.Contains(err.Error(), "sidecar") {
+		t.Errorf("err = %q", err)
+	}
+	if len(f.host.pending) != 1 || len(f.host.pending[0].comments) != 1 {
+		t.Fatalf("the content did reach the host: %+v", f.host.pending)
+	}
+	// Once the sidecar is writable again the identical request converges.
+	if err := os.Chmod(f.store.Dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	res := f.mustSubmit(req("", point("main.go", 3, "x")))
+	if res.Status != pr.StatusNoChange || res.AlreadyPresent != 1 || len(f.host.pending[0].comments) != 1 {
+		t.Fatalf("replay result = %+v", res)
+	}
+}
+
+func TestSubmitNeverDeletesOrSubmits(t *testing.T) {
+	f := newSubmitFixture(t)
+	f.host.addPending(headB, "stale text")
+	f.host.addPending(headB, "other stale")
+	before := len(f.host.pending)
+	f.mustSubmit(req("summary", point("main.go", 3, "x")))
+	if len(f.host.pending) != before || len(f.host.submitted) != 0 {
+		t.Fatalf("pending = %d submitted = %d", len(f.host.pending), len(f.host.submitted))
+	}
+	for _, op := range f.gh.ops {
+		if op == "delete" || op == "submit" {
+			t.Errorf("forbidden op %q", op)
+		}
 	}
 }

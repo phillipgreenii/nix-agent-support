@@ -79,118 +79,99 @@ type Provider interface {
 	Commits(ctx context.Context, id string) (*schema.PRCommitsResult, error)
 }
 
-// ReviewComment is one inline comment of a ReviewSubmitRequest (contract
-// 9.1): anchored to Path/Line on Side ("LEFT" or "RIGHT").
+// ReviewComment is one comment of a ReviewSubmitRequest (contract 9.1). It is
+// either a NEW point anchored to Path/Line on Side ("LEFT" or "RIGHT"; "" means
+// RIGHT), or a REPLY to an existing review thread: ThreadID is the real
+// review-thread id (the review_thread_id that "pr show" reports) and Path and
+// Line MUST then be unset. An item with no ThreadID is always a new point.
 type ReviewComment struct {
-	Path string `json:"path"`
-	Line int    `json:"line"`
-	Side string `json:"side"`
-	Body string `json:"body"`
+	ThreadID string `json:"thread_id,omitempty"`
+	Path     string `json:"path,omitempty"`
+	Line     int    `json:"line,omitempty"`
+	Side     string `json:"side,omitempty"`
+	Body     string `json:"body"`
 }
 
 // ReviewSubmitRequest is the review_submit op's input (contract 9.1). ID is
 // the PR id, in the same style as every other pr op's args.
+//
+// SupersedePending is accepted and ignored: the op never deletes, replaces or
+// submits a review, but a caller that still sends the field keeps working.
 type ReviewSubmitRequest struct {
 	ID               string          `json:"id"`
 	HeadSHA          string          `json:"head_sha"`
 	Body             string          `json:"body"`
 	Comments         []ReviewComment `json:"comments"`
-	SupersedePending bool            `json:"supersede_pending"`
+	SupersedePending bool            `json:"supersede_pending,omitempty"`
 }
 
-// SupersedeOutcome reports the delete half of a supersede_pending request,
-// kept in its original shape alongside the status fields below (contract
-// 9.1). Attempted is true when a delete was issued; Deleted when it
-// succeeded; Error carries a failed delete's message. It is a mirror of what
-// status already says, so a caller reads status, not this.
-type SupersedeOutcome struct {
-	Attempted bool   `json:"attempted"`
-	Deleted   bool   `json:"deleted"`
-	Error     string `json:"error,omitempty"`
-}
-
-// review_submit statuses. With supersede_pending set, the op emits exactly one
-// of the four (contract 9.1); without it a successful post is StatusPosted.
+// review_submit statuses. Every one is a well-formed result and exits 0; the
+// status says what happened.
 const (
-	// StatusPosted: no pending review existed; a new PENDING review was posted.
+	// StatusPosted: no pending review existed, and one was created.
 	StatusPosted = "posted"
-	// StatusSkipped: a pending review already exists at the head being
-	// reviewed; nothing was posted. Callers treat it as success.
-	StatusSkipped = "skipped"
-	// StatusReplaced: a stale, provably unedited, fully marked pending review
-	// was archived and deleted, and a new one was posted.
-	StatusReplaced = "replaced"
-	// StatusBlockedHumanPending: a stale pending review could not be removed;
-	// the review is untouched, nothing was posted, and a human is needed.
-	StatusBlockedHumanPending = "blocked_human_pending"
+	// StatusAppend: at least one comment, or a new per-head body section, was
+	// written to an existing pending review.
+	StatusAppend = "append"
+	// StatusNoChange: nothing was written. When there was no pending review
+	// none is created, and State is StateNone.
+	StatusNoChange = "no_change"
 )
 
-// review_submit reasons, carried in ReviewSubmitResult.Reason.
+// StateNone is the result State of a no_change run that found no pending
+// review to use and created none.
+const StateNone = "none"
+
+// review_submit body dispositions (ReviewSubmitResult.Body).
 const (
-	// ReasonSameHead accompanies StatusSkipped.
-	ReasonSameHead = "pending_review_exists_same_head"
-	// The following accompany StatusBlockedHumanPending.
-	ReasonDetectionFailed = "detection_failed"
-	ReasonHumanEdited     = "human_edited"
-	ReasonArchiveFailed   = "archive_failed"
-	ReasonDeleteRefused   = "delete_refused"
+	// BodyWritten: a section for this head was added to the review body.
+	BodyWritten = "written"
+	// BodyKept: a section for this head already existed, so the supplied body
+	// text was NOT applied.
+	BodyKept = "kept"
+	// BodyAbsent: no body was supplied, so no section was written.
+	BodyAbsent = "absent"
+	// BodyDismissed: the section for this head was written before and the
+	// operator deleted it; it is not written again.
+	BodyDismissed = "dismissed"
+	// BodySkippedExtraPending: more than one pending review exists, so body
+	// updates are refused.
+	BodySkippedExtraPending = "skipped_extra_pending"
+	// BodyTooLarge: the section would exceed the host's review body limit.
+	BodyTooLarge = "too_large"
 )
-
-// PendingReviewRef identifies a pending review: the one a skip points at, the
-// one a block left untouched, or the one a replace removed.
-type PendingReviewRef struct {
-	ReviewID   string `json:"review_id"`
-	DatabaseID int64  `json:"database_id"`
-	URL        string `json:"url,omitempty"`
-	CommitSHA  string `json:"commit_sha"`
-}
-
-// SupersededReview is the full content of a pending review that a replace
-// removed, returned so the caller holds it even if the archive file is lost.
-// ArchivePath is where the same content was persisted BEFORE the delete.
-type SupersededReview struct {
-	PendingReviewRef
-	ArchivePath string              `json:"archive_path"`
-	Body        string              `json:"body"`
-	Comments    []SupersededComment `json:"comments"`
-}
-
-// SupersededComment is one inline comment of a pending review that a replace
-// removed. It keeps the per-comment bot marker the replace guard read (Marked),
-// which the review_pending record no longer carries; it goes away with the
-// replace path itself.
-type SupersededComment struct {
-	ID     string `json:"id"`
-	Path   string `json:"path"`
-	Line   int    `json:"line"`
-	Body   string `json:"body"`
-	Marked bool   `json:"marked"`
-}
 
 // ReviewSubmitResult is the review_submit op's output (contract 9.1).
 //
-// Status is one of the Status* constants. ReviewID/State name the pending
-// review that exists for the PR at HeadSHA after the call: the new one for
-// posted and replaced, the existing one for skipped, empty for
-// blocked_human_pending (nothing was posted). Reason and Message are set for
-// skipped and blocked_human_pending. PendingReview names the existing review
-// a skip points at or a block left untouched; Superseded is set only for
-// replaced. Supersede is nil (omitted) when supersede_pending was not set.
+// ReviewID/State/URL name the pending review that was used or created: State
+// is "pending", or StateNone (with an empty ReviewID and no URL) when the run
+// wrote nothing and found no pending review.
+//
+// Added, AlreadyPresent and Dismissed count the request's comments (after
+// identical items are merged) by disposition: written by this run, already on
+// the host, or deleted by the operator after an earlier run wrote them.
+// ExtraPendingReviews is the number of pending reviews beyond the one used
+// (normally 0). LastAppend is the backend's own record of the latest append to
+// the PR, as of the end of this run.
 type ReviewSubmitResult struct {
-	ReviewID      string            `json:"review_id"`
-	State         string            `json:"state"`
-	HeadSHA       string            `json:"head_sha"`
-	AsOf          string            `json:"as_of"`
-	Status        string            `json:"status,omitempty"`
-	Reason        string            `json:"reason,omitempty"`
-	Message       string            `json:"message,omitempty"`
-	PendingReview *PendingReviewRef `json:"pending_review,omitempty"`
-	Superseded    *SupersededReview `json:"superseded,omitempty"`
-	Supersede     *SupersedeOutcome `json:"supersede,omitempty"`
+	ReviewID            string      `json:"review_id"`
+	State               string      `json:"state"`
+	HeadSHA             string      `json:"head_sha"`
+	AsOf                string      `json:"as_of"`
+	Status              string      `json:"status"`
+	Added               int         `json:"added"`
+	AlreadyPresent      int         `json:"already_present"`
+	Dismissed           int         `json:"dismissed"`
+	Body                string      `json:"body"`
+	ExtraPendingReviews int         `json:"extra_pending_reviews"`
+	LastAppend          *LastAppend `json:"last_append,omitempty"`
+	URL                 string      `json:"url,omitempty"`
 }
 
-// ReviewSubmitter is an OPTIONAL capability of a pr backend: it posts a
-// PENDING review anchored to req.HeadSHA. It is deliberately not part of
+// ReviewSubmitter is an OPTIONAL capability of a pr backend: it puts content
+// into the acting identity's PENDING review, creating the review when there is
+// none and appending to it otherwise, never deleting, replacing or submitting
+// anything. It is deliberately not part of
 // Provider; NewDispatchTable registers the review_submit op only when the
 // provider type-asserts to it, so other backends keep compiling. Errors
 // MUST be wrapped with scriptout.Err* from INV-ERR-1's taxonomy.

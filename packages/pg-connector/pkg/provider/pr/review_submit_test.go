@@ -23,24 +23,24 @@ func (f *fakeReviewProvider) SubmitReview(_ context.Context, req ReviewSubmitReq
 func TestReviewSubmit_DispatchRoundTrip(t *testing.T) {
 	p := &fakeReviewProvider{res: ReviewSubmitResult{
 		ReviewID: "r1", State: "pending", HeadSHA: "abc", AsOf: "2026-01-01T00:00:00Z",
-		Supersede: &SupersedeOutcome{Attempted: true, Deleted: false, Error: "boom"},
+		Status: StatusAppend, Added: 2, Body: BodyWritten,
 	}}
 	table := NewDispatchTable(p)
 	entry, ok := table["review_submit"]
 	if !ok {
 		t.Fatal("review_submit missing for capable provider")
 	}
-	args := `{"id":"pr-1","head_sha":"abc","body":"hi","comments":[{"path":"a.go","line":3,"side":"RIGHT","body":"c"}],"supersede_pending":true}`
+	args := `{"id":"pr-1","head_sha":"abc","body":"hi","comments":[{"path":"a.go","line":3,"side":"RIGHT","body":"c"},{"thread_id":"PRRT_1","body":"r"}],"supersede_pending":true}`
 	out, err := entry.Handle(context.Background(), json.RawMessage(args))
 	if err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
 	want := ReviewSubmitRequest{
 		ID: "pr-1", HeadSHA: "abc", Body: "hi", SupersedePending: true,
-		Comments: []ReviewComment{{Path: "a.go", Line: 3, Side: "RIGHT", Body: "c"}},
+		Comments: []ReviewComment{{Path: "a.go", Line: 3, Side: "RIGHT", Body: "c"}, {ThreadID: "PRRT_1", Body: "r"}},
 	}
 	if p.got.ID != want.ID || p.got.HeadSHA != want.HeadSHA || p.got.Body != want.Body ||
-		!p.got.SupersedePending || len(p.got.Comments) != 1 || p.got.Comments[0] != want.Comments[0] {
+		!p.got.SupersedePending || len(p.got.Comments) != 2 || p.got.Comments[0] != want.Comments[0] || p.got.Comments[1] != want.Comments[1] {
 		t.Fatalf("request = %#v, want %#v", p.got, want)
 	}
 	raw, _ := json.Marshal(out)
@@ -48,7 +48,7 @@ func TestReviewSubmit_DispatchRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(raw, &m); err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"review_id", "state", "head_sha", "as_of", "supersede"} {
+	for _, k := range []string{"review_id", "state", "head_sha", "as_of", "status", "added", "already_present", "dismissed", "body", "extra_pending_reviews"} {
 		if _, ok := m[k]; !ok {
 			t.Errorf("output missing key %q: %s", k, raw)
 		}
@@ -58,12 +58,49 @@ func TestReviewSubmit_DispatchRoundTrip(t *testing.T) {
 	}
 }
 
-func TestReviewSubmit_SupersedeOmittedWhenNil(t *testing.T) {
-	raw, _ := json.Marshal(ReviewSubmitResult{ReviewID: "r", State: "pending"})
+// TestReviewSubmit_ResultWireShape pins the result's JSON names: the counters
+// and body are always present, and url and last_append are omitted when unset.
+// The retired supersede-era fields never appear.
+func TestReviewSubmit_ResultWireShape(t *testing.T) {
+	raw, _ := json.Marshal(ReviewSubmitResult{State: StateNone, Status: StatusNoChange, Body: BodyAbsent})
 	var m map[string]any
 	_ = json.Unmarshal(raw, &m)
-	if _, ok := m["supersede"]; ok {
-		t.Errorf("supersede present: %s", raw)
+	for _, k := range []string{"review_id", "state", "head_sha", "as_of", "status", "added", "already_present", "dismissed", "body", "extra_pending_reviews"} {
+		if _, ok := m[k]; !ok {
+			t.Errorf("missing %q: %s", k, raw)
+		}
+	}
+	for _, k := range []string{"url", "last_append", "pending_review", "reason", "message", "superseded", "supersede"} {
+		if _, ok := m[k]; ok {
+			t.Errorf("%q must be absent: %s", k, raw)
+		}
+	}
+	if m["state"] != "none" || m["status"] != "no_change" || m["body"] != "absent" {
+		t.Errorf("result = %s", raw)
+	}
+
+	raw, _ = json.Marshal(ReviewSubmitResult{
+		ReviewID: "r", State: "pending", Status: StatusPosted, URL: "u",
+		LastAppend: &LastAppend{At: "t", Added: 2, Head: "h"},
+	})
+	m = map[string]any{}
+	_ = json.Unmarshal(raw, &m)
+	la, _ := m["last_append"].(map[string]any)
+	if m["url"] != "u" || la["at"] != "t" || la["added"] != float64(2) || la["head"] != "h" {
+		t.Errorf("url/last_append = %s", raw)
+	}
+}
+
+// TestReviewSubmit_ReplyWireShape: a reply carries only thread_id and body, a
+// new point only path, line, side and body.
+func TestReviewSubmit_ReplyWireShape(t *testing.T) {
+	raw, _ := json.Marshal(ReviewComment{ThreadID: "PRRT_1", Body: "b"})
+	if string(raw) != `{"thread_id":"PRRT_1","body":"b"}` {
+		t.Errorf("reply = %s", raw)
+	}
+	raw, _ = json.Marshal(ReviewComment{Path: "a.go", Line: 3, Body: "b"})
+	if string(raw) != `{"path":"a.go","line":3,"body":"b"}` {
+		t.Errorf("point = %s", raw)
 	}
 }
 
@@ -94,45 +131,5 @@ func TestReviewSubmit_CapabilitiesGating(t *testing.T) {
 				t.Fatalf("inTable=%v inOps=%v want %v", inTable, inOps, c.want)
 			}
 		})
-	}
-}
-
-// TestReviewSubmit_StatusFieldsWireShape pins the JSON names of the guarded
-// supersede's output fields (contract 9.1): status, reason, message,
-// pending_review, superseded, and the omission of the optional ones when unset.
-func TestReviewSubmit_StatusFieldsWireShape(t *testing.T) {
-	res := ReviewSubmitResult{
-		HeadSHA: "abc", AsOf: "t", Status: StatusBlockedHumanPending, Reason: ReasonHumanEdited, Message: "m",
-		PendingReview: &PendingReviewRef{ReviewID: "r1", DatabaseID: 5, URL: "u", CommitSHA: "old"},
-	}
-	raw, _ := json.Marshal(res)
-	var m map[string]any
-	_ = json.Unmarshal(raw, &m)
-	for k, want := range map[string]any{"status": "blocked_human_pending", "reason": "human_edited", "message": "m", "review_id": ""} {
-		if m[k] != want {
-			t.Errorf("%s = %v, want %v: %s", k, m[k], want, raw)
-		}
-	}
-	ref, _ := m["pending_review"].(map[string]any)
-	if ref["review_id"] != "r1" || ref["database_id"] != float64(5) || ref["url"] != "u" || ref["commit_sha"] != "old" {
-		t.Errorf("pending_review = %v", ref)
-	}
-	if _, ok := m["superseded"]; ok {
-		t.Errorf("superseded must be omitted unless replaced: %s", raw)
-	}
-
-	rep := ReviewSubmitResult{Status: StatusReplaced, Superseded: &SupersededReview{
-		PendingReviewRef: PendingReviewRef{ReviewID: "r1", DatabaseID: 5, CommitSHA: "old"},
-		ArchivePath:      "/a.json", Body: "b", Comments: []SupersededComment{{ID: "c", Body: "x", Marked: true}},
-	}}
-	raw, _ = json.Marshal(rep)
-	m = map[string]any{}
-	_ = json.Unmarshal(raw, &m)
-	sup, _ := m["superseded"].(map[string]any)
-	if sup["review_id"] != "r1" || sup["archive_path"] != "/a.json" || sup["body"] != "b" {
-		t.Errorf("superseded flattens the old review's ref plus content: %v", sup)
-	}
-	if cs, _ := sup["comments"].([]any); len(cs) != 1 {
-		t.Errorf("superseded.comments = %v", sup["comments"])
 	}
 }

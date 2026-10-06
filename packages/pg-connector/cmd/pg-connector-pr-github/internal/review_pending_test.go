@@ -22,6 +22,9 @@ type pendingReply struct {
 
 func (f *fakeGH) GetPendingReview(ctx context.Context, repo string, number int) (*github.PendingReviewData, error) {
 	f.ops = append(f.ops, "lookup")
+	if f.host != nil {
+		return f.host.snapshot()
+	}
 	if len(f.pendingSeq) > 0 {
 		i := f.pendingCalls
 		if i >= len(f.pendingSeq) {
