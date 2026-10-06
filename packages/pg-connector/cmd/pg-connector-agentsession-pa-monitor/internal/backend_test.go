@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
@@ -30,6 +31,10 @@ func (f *fakeRunner) Info(_ context.Context, selector string) ([]byte, error) {
 }
 
 func (f *fakeRunner) Search(_ context.Context, _ string, _ string, _ scriptout.TimeRange) ([]byte, error) {
+	return nil, errors.New("not used by this test")
+}
+
+func (f *fakeRunner) Sessions(_ context.Context, _, _ time.Time) ([]byte, error) {
 	return nil, errors.New("not used by this test")
 }
 

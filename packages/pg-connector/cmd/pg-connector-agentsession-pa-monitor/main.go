@@ -4,6 +4,7 @@ import (
 	"os"
 
 	internal "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-agentsession-pa-monitor/internal"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/activity"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/agentsession"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/attention"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/search"
@@ -30,12 +31,20 @@ func newDispatchTable(backend *internal.Backend) scriptout.DispatchTable {
 	for op, handler := range search.NewDispatchTable(backend) {
 		table[op] = handler
 	}
+	for op, handler := range activity.NewDispatchTable(backend) {
+		table[op] = handler
+	}
 	return scriptout.AddCapabilities(table, schema.AgentSessionSchemaVersion, scriptout.CapabilitiesResponse{
 		ProtocolVersion: scriptout.ProtocolVersion,
 		SchemaVersions: map[string]int{
 			"agentsession": schema.AgentSessionSchemaVersion,
 			"attention":    schema.AttentionSchemaVersion,
 			"search":       schema.SearchSchemaVersion,
+			"activity":     schema.ActivitySchemaVersion,
+		},
+		// The activity kinds this backend emits.
+		Vocabulary: map[string]any{
+			"activity_kinds": internal.ActivityKinds,
 		},
 		Version: Version,
 	})
