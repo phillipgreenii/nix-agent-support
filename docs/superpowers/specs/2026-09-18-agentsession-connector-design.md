@@ -18,8 +18,11 @@ A new pg-connector capability, `agentsession`, backed by a new Tier-2 backend
 `pg-connector-agentsession-pa-monitor`, exposing live/recent Claude Code agent sessions (liveness,
 status, model, token/cost usage) sourced from pa-monitor. It participates in the two existing
 generic capabilities — `attention` (escalations: blocked/long-idle sessions, and account-level
-5h-block/7-day-week usage-limit hits) and `search` (transcript content search) — and requires three
-small, additive changes to pa-monitor's own CLI rather than any new pa-monitor domain logic.
+5h-block/7-day-week usage-limit hits) and `search` (transcript content search) — and requires four
+small, additive changes to pa-monitor's own CLI: three that add no new pa-monitor domain logic,
+plus a fourth, `pa-monitor sessions`, which is domain logic (a rollup) added to pa-monitor for the
+same reason (see "pa-monitor changes (Phase 1)" and the work-tracker design's section
+"Claude Code sessions: pa-monitor `sessions` history").
 
 Everything the connector needs from Claude session/transcript data flows through pa-monitor's CLI.
 The backend has no filesystem/Claude-domain knowledge of its own (operator decision, 2026-09-18):
@@ -44,8 +47,13 @@ drift if duplicated.
 
 ## pa-monitor changes (Phase 1)
 
-pa-monitor gains three additions, none of which add new domain logic — each is a JSON-formatting
-sibling of something the CLI already does, or a thin new library primitive:
+pa-monitor gains four additions. The first three add no new domain logic — each is a
+JSON-formatting sibling of something the CLI already does, or a thin new library primitive. The
+fourth, `pa-monitor sessions` (specified in the work-tracker design,
+`docs/superpowers/specs/2026-09-23-work-tracker-design.md`, section "Claude Code sessions:
+pa-monitor `sessions` history"), is domain logic (a rollup), placed in pa-monitor for the same
+reason this design gave: pa-monitor already owns the Claude session/transcript resolution logic,
+and duplicating it elsewhere would silently drift. The first three:
 
 1. **`--json` on `status`.** `runStatus` (`cmd/pa-monitor/cli.go:15`) already calls `GetState`
    (every directory → every session) and then, for every session found, calls `GetSessionInfo` to

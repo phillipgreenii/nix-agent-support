@@ -280,7 +280,7 @@ being "symmetric" while Jira/beads/GitHub Issues don't share a state vocabulary.
 `pg-connector config validate` fans out both `auth_status` and `capabilities` across every
 registered backend, reported through the same outcome-reporting envelope as §4.5.
 
-### 4.4 Cross-cutting capabilities: attention and search
+### 4.4 Cross-cutting capabilities: attention, search, and activity
 
 > **Implementation status: DEFERRED, not started (bead `pg2-2j5ac.11`, 2026-09-06).** This
 > section has zero landed code today — no subcommands, schemas, registry keys, severity enum,
@@ -313,6 +313,16 @@ the same wire protocol. Attention is a continuous "does this need my eyes" signa
 deliberately disjoint from a daily-planning ritual layered on top of it (§7.3 explains why) — a
 query returns everything that currently qualifies, full stop, with no snapshot memory and no
 cross-awareness of any consuming ritual.
+
+A third cross-cutting capability, `activity`, is defined by reference to the work-tracker design
+(`docs/superpowers/specs/2026-09-23-work-tracker-design.md`, section "The `activity` capability";
+decisions WT-D1 and WT-D2 in its "Decisions ledger"), which owns its schema, provider interface,
+dispatch table, registration, umbrella verb, and nix option. This design does not copy that shape,
+so the work-tracker design remains the single source of truth for it. `activity` follows the same
+registration-by-listing pattern as `attention` and `search` (WT-D2) but is **range-shaped and
+stateless**: its one wire op, `list_activity`, takes `{since, before}` in the op args and keeps no
+cursor, no ledger, and no cache entry. The section "Rejected alternative: canonical/shared store"
+(§8) is therefore unaffected.
 
 **Attention is stateless by design, with no acknowledge/hide/unhide mechanism anywhere in this
 capability, and that is intentional, not a gap.** Attention's whole job is signaling "this needs
@@ -825,8 +835,8 @@ independent CLI identity a human types directly.
 ### 5.1 Naming convention
 
 Every Tier-2/plugin binary matches `pg-connector-<type>-<backend>`, where `<type>` is always
-exactly the singular capability verb — `pr`, `issue`, `ci`, `scm`, `attention`, or `search` —
-drawn directly from the verb, not chosen per binary. (`thread` does, as
+exactly the singular capability verb — `pr`, `issue`, `ci`, `scm`, `attention`, `search`, or
+`activity` — drawn directly from the verb, not chosen per binary. (`thread` does, as
 `pg-connector-thread-slack` in the pg-desk design's phase 13, amended 2026-09-09; `note` would
 follow the identical rule if ever built — see §10.) This also fixes a plural/singular mismatch that existed
 in earlier naming sketches, since the type token is now mechanically derived rather than picked
@@ -1774,7 +1784,8 @@ add`/`resolve`) is its own top-level command, not nested under `review`, so the 
   keyed on its own environment variable rather than the `scm` type.
 - A separate bead (`pg2-uesze`) compares pg-pr's bead-splitting tool against the plan-decompose
   skill — filed, open, unrelated to this design's critical path.
-- `work-report`'s design (tracked separately, still pending its own operator sign-off) very likely
-  replaces this design's original work-activity-tracker section outright; that reconciliation is
-  not done. Until `work-report` lands, no packet should be cut for work-activity-tracker
-  specifically — everything else in this design is independent of that gate.
+- The work-activity-tracker thread: **closed (work-tracker design, 2026-09-23, WT-D15).** The
+  work-tracker design (`docs/superpowers/specs/2026-09-23-work-tracker-design.md`) is the
+  reconciliation of `work-report`'s design with this design's original work-activity-tracker
+  section. No packet is ever cut for work-activity-tracker; its retirement is WT-D15 in that
+  design's decisions ledger.
