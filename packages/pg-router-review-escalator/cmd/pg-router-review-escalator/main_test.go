@@ -130,6 +130,28 @@ func TestSubmitPostedClosesOpenEscalation(t *testing.T) {
 	}
 }
 
+func TestSubmitAppendAndNoChangeCloseOpenEscalation(t *testing.T) {
+	open := `{"entities":[{"id":"bd-3","metadata":{"review_escalation_kind":"pr","review_escalation_pr":"acme/api#5","review_escalation_key":"pr:acme/api#5"}}]}`
+	for _, status := range []string{"append", "no_change"} {
+		t.Run(status, func(t *testing.T) {
+			out := `{"result":{"status":"` + status + `","head_sha":"abc","review_id":"r1","state":"pending"}}`
+			h := &harness{s: &script{submit: adapters.Result{Stdout: []byte(out)}, openBeads: open}}
+			if code := h.run("submit", "acme/api#5"); code != exitOK {
+				t.Fatalf("exit = %d, stderr:\n%s", code, h.stderr.String())
+			}
+			if strings.Contains(h.stderr.String(), "unknown status") {
+				t.Errorf("status %s rejected: %q", status, h.stderr.String())
+			}
+			if !h.s.did("issue close bd-3") {
+				t.Errorf("escalation not closed: %q", h.s.calls)
+			}
+			if h.s.did("push") {
+				t.Errorf("a resolve must not notify")
+			}
+		})
+	}
+}
+
 func TestSubmitFailurePassesConnectorCodeThroughWithoutEscalating(t *testing.T) {
 	for _, tc := range []struct{ in, want int }{{4, 4}, {1, 1}, {9, 1}} {
 		h := &harness{s: &script{submit: adapters.Result{ExitCode: tc.in, Stdout: []byte(`{"error":{"code":"x","message":"y"}}`)}}}

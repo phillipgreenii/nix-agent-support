@@ -175,7 +175,7 @@ func New(t Tracker, n Notifier, now func() time.Time, cfg Config) *Escalator {
 //
 //   - blocked_human_pending raises (or bumps) exactly one escalation for the PR
 //     and sends a push notification, no more often than the re-notify interval;
-//   - posted, skipped and replaced close the PR's escalation.
+//   - posted, skipped, replaced, append and no_change close the PR's escalation.
 //
 // Handle never swallows a failure. The bead path and the notification path are
 // independent: a failure on one does not skip the other, and every failure is
@@ -184,7 +184,7 @@ func (e *Escalator) Handle(ctx context.Context, o Outcome) (Report, error) {
 	var rep Report
 	issues, listErr := e.tracker.ListOpen(ctx)
 	switch o.Status {
-	case StatusPosted, StatusSkipped, StatusReplaced:
+	case StatusPosted, StatusSkipped, StatusReplaced, StatusAppend, StatusNoChange:
 		if listErr != nil {
 			return rep, fmt.Errorf("tracker: list open escalations: %w", listErr)
 		}

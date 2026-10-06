@@ -17,13 +17,18 @@ import (
 	"strings"
 )
 
-// The four statuses of the pg-connector `pr review submit` contract (entity
-// change flow design 9.1, bead pg2-kftf9.13). Only StatusBlocked escalates;
-// the other three resolve an escalation.
+// The statuses of the pg-connector `pr review submit` contract (entity change
+// flow design 9.1, bead pg2-kftf9.13). Only StatusBlocked escalates; every
+// other status resolves an escalation. StatusAppend and StatusNoChange are the
+// create-or-append statuses (pending-review reuse design, rollout step 1):
+// they are tolerated exactly like StatusPosted, so the create-or-append tool
+// can ship without every review failing here.
 const (
 	StatusPosted   = "posted"
 	StatusSkipped  = "skipped"
 	StatusReplaced = "replaced"
+	StatusAppend   = "append"
+	StatusNoChange = "no_change"
 	StatusBlocked  = "blocked_human_pending"
 )
 
@@ -102,7 +107,7 @@ func ParseOutcome(pr string, raw []byte) (Outcome, error) {
 		return Outcome{}, fmt.Errorf("decode submit result: %w", err)
 	}
 	switch res.Status {
-	case StatusPosted, StatusSkipped, StatusReplaced, StatusBlocked:
+	case StatusPosted, StatusSkipped, StatusReplaced, StatusAppend, StatusNoChange, StatusBlocked:
 	case "":
 		return Outcome{}, fmt.Errorf("%w: the result carries no status", ErrNotAnOutcome)
 	default:

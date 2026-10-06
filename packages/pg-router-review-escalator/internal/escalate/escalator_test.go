@@ -277,7 +277,7 @@ func TestDifferentPRsGetSeparateBeads(t *testing.T) {
 }
 
 func TestAutoCloseOnPostedSkippedReplaced(t *testing.T) {
-	for _, status := range []string{StatusPosted, StatusSkipped, StatusReplaced} {
+	for _, status := range []string{StatusPosted, StatusSkipped, StatusReplaced, StatusAppend, StatusNoChange} {
 		t.Run(status, func(t *testing.T) {
 			r := newRig(t, Config{})
 			r.mustHandle(blocked("acme/api#1", ReasonHumanEdited))
@@ -686,6 +686,16 @@ func TestParseOutcome(t *testing.T) {
 			name: "bare posted", pr: "acme/api#1",
 			in:   `{"status":"posted","review_id":"R","head_sha":"abc"}`,
 			want: Outcome{PR: "acme/api#1", Status: StatusPosted, HeadSHA: "abc"},
+		},
+		{
+			name: "append is tolerated like posted", pr: "acme/api#1",
+			in:   `{"result":{"status":"append","head_sha":"abc","review_id":"r1","state":"pending"}}`,
+			want: Outcome{PR: "acme/api#1", Status: StatusAppend, HeadSHA: "abc"},
+		},
+		{
+			name: "no_change is tolerated like posted", pr: "acme/api#1",
+			in:   `{"result":{"status":"no_change","head_sha":"abc","review_id":"r1","state":"pending"}}`,
+			want: Outcome{PR: "acme/api#1", Status: StatusNoChange, HeadSHA: "abc"},
 		},
 		{
 			name: "detection_failed has no pending review", pr: "acme/api#1",
