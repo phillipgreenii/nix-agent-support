@@ -115,7 +115,9 @@ half.
   and using the same lookup as `doctor --router-config` (the smallest period among the router queries
   naming the type). When the interval is not supplied, the file is unreadable, or no router query
   names the type, that type has NO series: the metric reports no verdict and MUST NOT report a
-  violation.
+  violation. The deployment MUST pass `serve` the router config: the generic launchd module derives
+  the path from the pg-router daemon's own declarative config (the very file the router runs on)
+  and lets an operator override it; where no router daemon is configured, the metric stays absent.
 
 The Grafana rule `pg-desk-sweep-bound-violated` (`packages/pg-desk/grafana/alerting/alerts.yaml`,
 expression `max by (type, tier) (pg_desk_sweep_bound_violated)`, threshold `>= 1`, `for: 15m`,

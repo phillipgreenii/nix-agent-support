@@ -6123,6 +6123,29 @@
                     };
                   } { enable = true; };
 
+                  # pg2-t92xc: pg-router config wiring. The router daemon's config
+                  # exists only as the store path writeText renders from the enabled
+                  # user's pg-router.daemon.configText, so the default is derived from
+                  # it; an enabled user with the daemon DISABLED must not contribute.
+                  routerConfigText = "# example router config\n";
+                  routerHmUser = enable: {
+                    phillipgreenii.programs.pg-router.daemon = {
+                      inherit enable;
+                      configText = routerConfigText;
+                    };
+                  };
+                  darwinRouterDerived = evalDarwinWith { tester = routerHmUser true; } { enable = true; };
+                  darwinRouterDaemonOff = evalDarwinWith { tester = routerHmUser false; } { enable = true; };
+                  darwinRouterOverride = evalDarwinWith { tester = routerHmUser true; } {
+                    enable = true;
+                    routerConfig = "/var/tmp/custom/pg-router-config.toml";
+                  };
+                  # Context discarded: hasInfix builds a regex from the needle, which
+                  # may not carry a store-path string context.
+                  derivedRouterPath = builtins.unsafeDiscardStringContext (
+                    toString (pkgs.writeText "pg-router-daemon-config.toml" routerConfigText)
+                  );
+
                   hmDisabled = evalHM { enable = false; };
                   hmEnabled = evalHM {
                     enable = true;
@@ -6187,6 +6210,23 @@
                 # collapse them into one"].
                 assert lib.hasInfix "--port 9819"
                   darwinEnabledSoak.phillipgreenii.system.launchdServices.userAgents.pg-desk-serve.script;
+                # pg-router config path (pg2-t92xc): without a pg-router daemon
+                # anywhere there is nothing to point at, so NO --router-config flag
+                # (serve then emits no pg_desk_sweep_bound_violated series).
+                assert
+                  !lib.hasInfix "--router-config" darwinEnabledNoSoak.phillipgreenii.system.launchdServices.userAgents.pg-desk-serve.script;
+                assert
+                  !lib.hasInfix "--router-config" darwinRouterDaemonOff.phillipgreenii.system.launchdServices.userAgents.pg-desk-serve.script;
+                # Default: derived from the enabled pg-router daemon user's configText,
+                # to the byte-identical store path pg-router's own launchd service
+                # exports as PG_ROUTER_CONFIG.
+                assert lib.hasInfix "--router-config ${derivedRouterPath}"
+                  darwinRouterDerived.phillipgreenii.system.launchdServices.userAgents.pg-desk-serve.script;
+                # An explicit option value wins over the derived path.
+                assert lib.hasInfix "--router-config /var/tmp/custom/pg-router-config.toml"
+                  darwinRouterOverride.phillipgreenii.system.launchdServices.userAgents.pg-desk-serve.script;
+                assert
+                  !lib.hasInfix derivedRouterPath darwinRouterOverride.phillipgreenii.system.launchdServices.userAgents.pg-desk-serve.script;
                 # alertRuleFiles (pg2-02n5o): gated on this module's own
                 # cfg.enable (same gate as the LaunchAgent above), so absent
                 # when disabled and present once enabled. Path literal here

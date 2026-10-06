@@ -92,6 +92,33 @@ let
       # /tmp shape stateHome above uses when primaryUser is unresolved,
       # rather than passing null through to the logSources submodule.
       "/tmp/pg-desk-serve/pg-desk-serve.log";
+
+  # pg2-t92xc: the pg-router config `serve` reads (as a file, on every scrape)
+  # for the poll interval behind pg_desk_sweep_bound_violated{type,tier}.
+  # pg-router's daemon config is DECLARATIVE: it exists only as the store path
+  # pkgs.writeText renders from the enabled user's
+  # phillipgreenii.programs.pg-router.daemon.configText (darwin/modules/
+  # pg-router/default.nix; no .pg-router/config.toml or xdg file is written
+  # anywhere). writeText is content-addressed by (name, text), so rendering the
+  # SAME name and text here yields the byte-identical store path pg-router's
+  # own PG_ROUTER_CONFIG points at -- the file pg-router actually runs on, with
+  # no second copy to drift. It cannot go stale: the path is spelled into this
+  # service's wrapper text (via the --router-config flag below), so a router
+  # config change changes the wrapper hash and the next switch restarts serve
+  # onto the new path (same mechanism as pgDeskConfigSource above). The literal
+  # name below MUST stay in step with darwin/modules/pg-router/default.nix.
+  routerDaemonUsers = lib.filter (u: u.phillipgreenii.programs.pg-router.daemon.enable or false) (
+    lib.attrValues hmUsers
+  );
+  derivedRouterConfig =
+    if routerDaemonUsers != [ ] then
+      toString (
+        pkgs.writeText "pg-router-daemon-config.toml" (lib.head routerDaemonUsers)
+        .phillipgreenii.programs.pg-router.daemon.configText
+      )
+    else
+      null;
+  routerConfigPath = if cfg.routerConfig != null then cfg.routerConfig else derivedRouterConfig;
 in
 {
   # A generic darwin module running `pg-desk serve` as a launchd user agent
@@ -105,6 +132,27 @@ in
     enable = lib.mkEnableOption "pg-desk serve as a launchd user agent";
 
     package = lib.mkPackageOption pkgs "pg-desk" { };
+
+    routerConfig = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "/path/to/pg-router/config.toml";
+      description = ''
+        Path of the pg-router config, passed to `pg-desk serve --router-config`.
+        `serve` re-reads it as a file on every scrape to learn the router poll
+        interval behind the `pg_desk_sweep_bound_violated{type,tier}` metric
+        (and so the `pg-desk-sweep-bound-violated` alert). Without it the
+        metric emits no series and a violated sweep sizing bound never alerts.
+
+        When `null` (the default) the path is derived from the pg-router daemon
+        of an enabled home-manager user
+        (`phillipgreenii.programs.pg-router.daemon.configText`, rendered to the
+        same store path pg-router's own launchd service is pointed at). If no
+        user enables that daemon either, no flag is passed. Set this option
+        only to point at a config that lives somewhere else; use a stable path,
+        since the file is read on every scrape.
+      '';
+    };
 
     # The soak option (D18, D27): a SEPARATE mechanism from the config-
     # rendered `serve.addr` (home/programs/pg-desk's own option, defaulting
@@ -142,7 +190,11 @@ in
       system.launchdServices.userAgents.pg-desk-serve = {
         label = "com.phillipg.pg-desk-serve";
         script = ''
-          exec ${cfg.package}/bin/pg-desk serve${lib.optionalString cfg.soak.enable " --port ${toString cfg.soak.port}"}
+          exec ${cfg.package}/bin/pg-desk serve${lib.optionalString cfg.soak.enable " --port ${toString cfg.soak.port}"}${
+            lib.optionalString (
+              routerConfigPath != null
+            ) " --router-config ${lib.escapeShellArg routerConfigPath}"
+          }
         '';
         runAtLoad = true;
         keepAlive = true;
