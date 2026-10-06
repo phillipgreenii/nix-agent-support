@@ -314,8 +314,8 @@ in
       default = null;
       description = ''
         config.yaml's jira block (high_priority_values, incident_labels,
-        incident_issue_types), rendered verbatim. Unconsumed until Phase
-        13; carries no organization identifiers by construction (an opaque
+        incident_issue_types, in_progress_statuses), rendered verbatim;
+        in_progress_statuses defaults to "In Progress". Carries no organization identifiers by construction (an opaque
         passthrough of whatever this option is given).
       '';
     };

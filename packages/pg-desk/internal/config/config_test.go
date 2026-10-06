@@ -72,7 +72,7 @@ func TestConfigCoversAllSection78Keys(t *testing.T) {
 	}{
 		{"RepoConfig", reflect.TypeOf(RepoConfig{}), []string{"remote", "beads_dir"}},
 		{"AgentConfig", reflect.TypeOf(AgentConfig{}), []string{"login", "approval_regex", "policy"}},
-		{"JiraConfig", reflect.TypeOf(JiraConfig{}), []string{"high_priority_values", "incident_labels", "incident_issue_types"}},
+		{"JiraConfig", reflect.TypeOf(JiraConfig{}), []string{"high_priority_values", "incident_labels", "incident_issue_types", "in_progress_statuses"}},
 		{"UrgencyConfig", reflect.TypeOf(UrgencyConfig{}), []string{"labels", "keywords", "thresholds"}},
 		// sync.retry (bead pg2-xb6fs) postdates the section-7.8 table: the
 		// automatic-retry bounds for a recorded sync_error.
@@ -201,6 +201,9 @@ func TestLoadFile_FullExample(t *testing.T) {
 	}
 	if want := []string{"Incident"}; !reflect.DeepEqual(cfg.Jira.IncidentIssueTypes, want) {
 		t.Errorf("jira.incident_issue_types: got %v want %v", cfg.Jira.IncidentIssueTypes, want)
+	}
+	if want := []string{"In Progress", "Doing"}; !reflect.DeepEqual(cfg.Jira.InProgressStatuses, want) {
+		t.Errorf("jira.in_progress_statuses: got %v want %v", cfg.Jira.InProgressStatuses, want)
 	}
 
 	if want := []string{"fix", "bug"}; !reflect.DeepEqual(cfg.CategoryVocabulary["bugfix"], want) {
@@ -751,5 +754,25 @@ func TestLoadFile_AttentionBlock(t *testing.T) {
 	_, err = LoadFile(writeYAML(t, dir, base+"attention:\n  rules:\n    pr.own-ci-failing:\n      severity: urgent\n"))
 	if err == nil || !strings.Contains(err.Error(), "attention.rules.pr.own-ci-failing.severity") {
 		t.Errorf("a severity outside low|medium|high must be rejected naming the key, got %v", err)
+	}
+}
+
+func TestInProgressStatuses(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  *Config
+		want []string
+	}{
+		{"nil config", nil, DefaultInProgressStatuses},
+		{"no jira block", &Config{}, DefaultInProgressStatuses},
+		{"empty list takes the default", &Config{Jira: &JiraConfig{}}, DefaultInProgressStatuses},
+		{"configured list replaces the default", &Config{Jira: &JiraConfig{InProgressStatuses: []string{"Doing", "Review"}}}, []string{"Doing", "Review"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.cfg.InProgressStatuses(); !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("InProgressStatuses() = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

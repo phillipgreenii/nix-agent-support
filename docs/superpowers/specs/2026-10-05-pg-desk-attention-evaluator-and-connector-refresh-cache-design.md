@@ -404,10 +404,49 @@ that the rules above are written around:
 - **Jira-due and bead-due**: `schema.Issue.DueDate` exists, but the desk stores no `issue` rows
   (299 of 299 entity rows are `pr`) and has no due-date logic. These rules need `issue` entities
   hydrated by the generic entity pipeline, which the pg-desk inventory records as built but not
-  wired to a trigger for the operator's own issues.
+  wired to a trigger for the operator's own issues. The hydration, the facts and the projection
+  they need are now in place (see "Issue entities for attention rules" below); the rules
+  themselves are not.
 - **Time-based rules** are supported by the model (the clock is an input), but the first release
   ships none. A candidate set (a snooze that expires, severity escalation by waiting time) needs
   an operator decision on what it should do (Open questions, item 6).
+
+**Issue entities for attention rules** (bead `pg2-5l0x4.14`; implemented). The decisions, so a
+rule over issues does not reopen them:
+
+- **Trigger.** Configuration only. `watch.issue.queries` names the pg-connector queries whose
+  results are the operator's watched issues; the deployment supplies the query (for example "assigned
+  to me"), and nothing organization-specific lives here. On a migrated store the existing
+  `pg-desk issue changes` and `issue refresh` verbs already hydrate those entities through
+  `RunEntityChange`. On the version 1 store (before the cutover), `pg-desk run issue <KEY>` now also
+  hydrates the issue entity through `RunGenericEntity` when `watch.issue.queries` is non-empty
+  (it still re-interprets the linked PRs). `RunGenericEntity` skips the derived-link rebuild on a
+  version 1 store, because derived links exist only after the cutover. Answer to Open question 11
+  for issues: they are available before the cutover, without `suppress.*` or the change log.
+- **Facts: extend the show payload, do not ingest the activity stream** (the choice the bead
+  asked to be recorded). The activity stream carries only the operator's own happenings, so it
+  cannot say when the issue entered In Progress when someone else moved it, and it is a
+  range-shaped bulk call that pg-desk would have to filter per issue. `schema.Issue` gains two
+  additive facts (issue schema version 6 to 7): `status_changed_at` (when the issue entered its
+  current status: the latest transition into it by anyone, else the creation time) and
+  `operator_updated_at` (the later of the operator's latest comment and latest status
+  transition; other users and bots excluded). The Jira backend computes them with the operator
+  identity and author matching `list_activity` already uses. They are status-agnostic: the
+  connector does not decide what "In Progress" means.
+- **Cost bound.** `pjira issue` carries neither changelog nor comments, so the Jira backend makes
+  one extra key-scoped `pjira search --expand changelog,comments` call, only for an issue assigned
+  to the operator. Any failure there leaves both facts empty and `show` still answers.
+- **Status category is derived in pg-desk, from configuration.** `pjira` does not expose Jira's
+  status category, only the status name. `jira.in_progress_statuses` (default `In Progress`,
+  matched case-insensitively) lists the status values that mean in progress. The connector
+  capability change that would remove this (exposing the tracker's own category) belongs in `pjira`
+  and is not required.
+- **Unknown is not zero.** `interpret.IssueAttentionFacts.OperatorFactsKnown` is false when the
+  connector supplied no operator facts; a rule MUST NOT raise on it (`INV-ATTNEVAL-6`).
+- **Projection.** `attention.Project` also projects every active entity of a type other than `pr`
+  that has no interpretation row; `View.IssueFacts()` derives the facts from the stored entity,
+  the issue counterpart of `View.PRFacts()`. A `pr` entity still needs its interpretation row,
+  because a PR rule reads it.
 
 ### 4.4 What the plugin is, and how it respects the composition rules
 

@@ -212,6 +212,19 @@ type HydrationConfig struct {
 	MaxPerPoll *int `yaml:"max_per_poll,omitempty" json:"max_per_poll,omitempty"`
 }
 
+// DefaultInProgressStatuses is the status set jira.in_progress_statuses
+// defaults to: the classic default Jira workflow's in-progress status.
+var DefaultInProgressStatuses = []string{"In Progress"}
+
+// InProgressStatuses returns jira.in_progress_statuses, or
+// DefaultInProgressStatuses when none is configured. Safe on a nil Config.
+func (c *Config) InProgressStatuses() []string {
+	if c != nil && c.Jira != nil && len(c.Jira.InProgressStatuses) > 0 {
+		return c.Jira.InProgressStatuses
+	}
+	return DefaultInProgressStatuses
+}
+
 // WatchQueries returns the configured pg-connector query names for an entity
 // type ("pr", "issue" or "thread"); nil for a type with none or an unknown
 // type.
@@ -509,6 +522,12 @@ type JiraConfig struct {
 	HighPriorityValues []string `yaml:"high_priority_values,omitempty" json:"high_priority_values,omitempty"`
 	IncidentLabels     []string `yaml:"incident_labels,omitempty" json:"incident_labels,omitempty"`
 	IncidentIssueTypes []string `yaml:"incident_issue_types,omitempty" json:"incident_issue_types,omitempty"`
+	// InProgressStatuses names the tracker status values that mean "work is
+	// in progress" (matched case-insensitively). Jira's own status category
+	// is not exposed by the connector, so a deployment whose workflow names
+	// differ lists them here; empty means DefaultInProgressStatuses. Attention
+	// rules over issues read the derived category, never a status name.
+	InProgressStatuses []string `yaml:"in_progress_statuses,omitempty" json:"in_progress_statuses,omitempty"`
 }
 
 // UrgencyConfig configures urgency scoring. Thresholds maps an urgency

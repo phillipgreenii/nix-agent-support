@@ -393,7 +393,9 @@ func (b *Backend) Show(ctx context.Context, id string) (*schema.Issue, error) {
 	if decodeErr != nil {
 		return nil, scriptout.WrapError(scriptout.ErrUnavailable, "pjira: decode issue: "+decodeErr.Error())
 	}
-	return toSchemaIssue(iss, time.Now().UTC()), nil
+	out2 := toSchemaIssue(iss, time.Now().UTC())
+	b.enrichOperatorFacts(ctx, iss, out2)
+	return out2, nil
 }
 
 // pjiraCreateResult is `pjira create`'s own stdout shape (verified against

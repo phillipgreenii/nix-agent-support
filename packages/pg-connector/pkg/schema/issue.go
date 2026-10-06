@@ -63,7 +63,12 @@ import "encoding/json"
 // confirmed a real correctness blocker by pg2-2j5ac.48's finding S6), which
 // added the Owner field below — same "any field-shape change bumps the
 // version" precedent as every earlier bump on this constant.
-const IssueSchemaVersion = 6
+//
+// Bumped 6 -> 7 by bead pg2-5l0x4.14, which added the StatusChangedAt and
+// OperatorUpdatedAt facts below (time-based attention rules over the
+// operator's own assigned issues) — same "any field-shape change bumps the
+// version" precedent as every earlier bump on this constant.
+const IssueSchemaVersion = 7
 
 // Issue is the issue capability's shared JSON wire shape, returned by the
 // issue capability's "show" and "create" ops and carried by
@@ -185,6 +190,25 @@ type Issue struct {
 	// on Jira's native duedate field too, per this bead's own Contract).
 	// Empty when unset or the backend does not supply one.
 	DueDate string `json:"due_date,omitempty"`
+
+	// StatusChangedAt is when the issue entered its CURRENT status (RFC3339,
+	// UTC): the latest status transition into the current status, by anyone,
+	// else the issue's creation time. It is what a rule over "how long has
+	// this been In Progress" reads, and it is status-agnostic: the consumer,
+	// not the backend, decides which statuses count as In Progress. Empty
+	// when the backend does not supply one. The Jira backend fills it (with
+	// OperatorUpdatedAt) only for an issue assigned to the operator, because
+	// it costs one extra tracker call — added by bead pg2-5l0x4.14.
+	StatusChangedAt string `json:"status_changed_at,omitempty"`
+
+	// OperatorUpdatedAt is the latest time the OPERATOR (the identity the
+	// backend authenticates as) updated the issue (RFC3339, UTC): the later
+	// of the operator's most recent comment and most recent status
+	// transition. Other users and bots are excluded. Empty when the operator
+	// has not updated the issue, when the operator identity cannot be
+	// established, or when the backend does not supply it — added by bead
+	// pg2-5l0x4.14.
+	OperatorUpdatedAt string `json:"operator_updated_at,omitempty"`
 
 	// Metadata is a string-to-string map of backend-specific custom fields
 	// — deliberately typed map[string]string on the wire (binding

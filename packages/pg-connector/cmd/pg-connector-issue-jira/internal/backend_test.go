@@ -66,6 +66,8 @@ func TestBackend_Show_Success(t *testing.T) {
 			`"assignee":{"display_name":"Someone","email":"someone@example.com"}}`, nil
 	}}
 	b := New(fr)
+	// An assignee who is not the operator: Show must stay a single pjira call.
+	b.getenv = func(string) string { return "operator@example.com" }
 
 	got, err := b.Show(context.Background(), "PROJ-1")
 	if err != nil {

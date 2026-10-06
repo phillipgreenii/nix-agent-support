@@ -474,6 +474,8 @@ func (f failingReader) ListInterpretations() ([]store.Interpretation, error) {
 	return nil, f.err
 }
 
+func (f failingReader) ListEntities() ([]store.Entity, error) { return nil, f.err }
+
 func (f failingReader) GetEntity(string, string, string) (store.Entity, bool, error) {
 	return store.Entity{}, false, f.err
 }

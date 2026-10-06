@@ -69,6 +69,9 @@ func (s Severity) rank() int {
 type Reader interface {
 	RequireNewSchema() error
 	ListInterpretations() ([]store.Interpretation, error)
+	// ListEntities lets the projector reach an issue or thread entity that
+	// has no interpretation row.
+	ListEntities() ([]store.Entity, error)
 	GetEntity(repo, entityType, entityID string) (store.Entity, bool, error)
 	GetPRAnnotation(repo, entityType, entityID string) (store.Annotation, bool, error)
 	ListKVAnnotations(repo, entityType, entityID string) ([]store.KVAnnotation, error)
@@ -158,8 +161,9 @@ type Result struct {
 	Degraded bool
 	Items    []Item
 	Groups   []Group
-	// Traces is keyed by "<type>:<id>" and covers every entity with a stored
-	// interpretation row.
+	// Traces is keyed by "<type>:<id>" and covers every projected entity: one
+	// with a stored interpretation row, or a non-pr one with only a stored
+	// entity row.
 	Traces map[string]Trace
 }
 

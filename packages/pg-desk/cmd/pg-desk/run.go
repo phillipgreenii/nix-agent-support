@@ -194,14 +194,23 @@ func runEntity(cmd *cobra.Command, args []string) error {
 // re-interpreting more than one linked PR, every one is attempted (a
 // failure on one does not skip the rest); any failures are joined into a
 // single returned error.
+//
+// The one exception to "never gather" is hydrateJiraIssue (bead
+// pg2-5l0x4.14): when watch.issue.queries is configured, the ticket key itself
+// is also gathered and stored as an issue entity.
 func runJiraIssue(ctx context.Context, p *pipeline.Pipeline, cfg *config.Config, st *store.Store, ticketKey string, change gather.ChangeKind) error {
 	repo := runRepo(cfg)
+
+	var errs []error
+	if hydrateErr := hydrateJiraIssue(ctx, p, cfg, st, ticketKey, change); hydrateErr != nil {
+		errs = append(errs, fmt.Errorf("hydrate issue: %w", hydrateErr))
+	}
+
 	xrefs, err := st.ListXrefsByTo(repo, "issue", ticketKey)
 	if err != nil {
 		return fmt.Errorf("run issue %s: list xrefs: %w", ticketKey, err)
 	}
 
-	var errs []error
 	for _, x := range xrefs {
 		if runErr := p.RunInterpretOnly(ctx, entityTypePR, x.FromID, change); runErr != nil {
 			errs = append(errs, fmt.Errorf("re-interpret %s: %w", x.FromID, runErr))
@@ -211,6 +220,37 @@ func runJiraIssue(ctx context.Context, p *pipeline.Pipeline, cfg *config.Config,
 		return fmt.Errorf("run issue %s: %w", ticketKey, errors.Join(errs...))
 	}
 	return nil
+}
+
+// hydrateJiraIssue stores ticketKey as an issue entity (bead pg2-5l0x4.14) so
+// attention rules can read the issue itself, not only the PRs that mention it.
+// It runs the generic entity pipeline (gather `issue show`, interpret, persist
+// the entity and interpretation rows), which works on both store schema
+// versions, unlike `pg-desk issue changes`, which needs the migrated schema.
+//
+// It is config-driven: it does nothing unless watch.issue.queries names at
+// least one query, because that block is how a deployment says it wants issue
+// entities held, and `run issue` also fires for ticket keys that only appear in
+// PR text. The deployment's trigger therefore decides WHICH issues, and this
+// function never invents a query of its own.
+//
+// A `removed` change re-reads an issue the store already holds (so the row
+// reflects the status or assignee that took it out of the watched set) and is
+// a no-op for one it does not.
+func hydrateJiraIssue(ctx context.Context, p *pipeline.Pipeline, cfg *config.Config, st *store.Store, ticketKey string, change gather.ChangeKind) error {
+	if len(cfg.WatchQueries(entityTypeIssue)) == 0 {
+		return nil
+	}
+	if change == gather.ChangeRemoved {
+		_, known, err := st.GetEntity(runRepo(cfg), entityTypeIssue, ticketKey)
+		if err != nil {
+			return fmt.Errorf("check entity known: %w", err)
+		}
+		if !known {
+			return nil
+		}
+	}
+	return p.RunGenericEntity(ctx, entityTypeIssue, ticketKey, change)
 }
 
 // runRepo returns the single Phase-9 configured repository's remote, or ""

@@ -53,6 +53,7 @@ jira:
   high_priority_values: [Highest, High]
   incident_labels: [incident]
   incident_issue_types: [Incident]
+  in_progress_statuses: [In Progress, Doing]
 
 category_vocabulary:
   bugfix: [fix, bug]

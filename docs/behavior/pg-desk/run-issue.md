@@ -3,7 +3,8 @@
 `pg-desk run issue <id> --change added|changed|removed|sweep` (Phase 10, docket pg2-2j5ac.34, for
 the beads backend; Phase 13, docket `pg2-2j5ac.40`, for Jira) is the design-level rule (see
 [`pipeline-run.md`](pipeline-run.md)): an issue-type entity change re-runs stage 2 (interpret) for
-the PR(s) it is about, without a fresh gather and without re-running sync. This replaces `pg-pr
+the PR(s) it is about, without a fresh gather and without re-running sync (the one exception, a
+watched Jira issue also being held as an entity, is "Holding the issue itself" below). This replaces `pg-pr
 changes`'s beads-closing re-interpretation trigger, and its Jira half is the Jira-side
 counterpart of the same trigger.
 
@@ -52,6 +53,22 @@ A ticket key with no currently cross-referenced PR at all (nothing has linked on
 no-op — exit `0`, nothing to re-interpret — mirroring `--change removed`'s own "an id the store
 does not know is a no-op" convention. If more than one PR is linked, every one is attempted; a
 failure re-interpreting one does not skip the rest.
+
+## Holding the issue itself (Jira, watched)
+
+When `watch.issue.queries` names at least one query, a Jira-shaped `run issue` ALSO gathers the
+ticket key and stores it as an `issue` entity (the entity and interpretation rows, no derived
+links before the store is migrated), so attention rules can read the issue itself and not only the
+PRs that mention it. The entity carries the connector's status, assignee, when the issue entered its
+current status, and when the operator last updated it (the operator's own comments and transitions;
+other users and bots excluded). With `watch.issue.queries` empty, nothing is gathered and the
+paragraphs above hold unchanged.
+
+- The hydration runs before the linked PRs are re-interpreted. A hydration failure is reported in
+  the exit status but never stops the PR re-interpretation.
+- `--change removed` re-reads an issue the store already holds, so its row reflects what took it
+  out of the watched set, and is a no-op for one it does not hold.
+- The deployment's trigger decides which keys arrive here; this command never runs a query of its own.
 
 ## Resolution (bead -> PR)
 

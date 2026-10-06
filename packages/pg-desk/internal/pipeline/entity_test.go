@@ -172,3 +172,25 @@ func TestRunGenericEntity_PRHeadSHAMatchesPRPath(t *testing.T) {
 		t.Fatalf("PR path %+v vs generic %+v", viaPR, generic)
 	}
 }
+
+// A store that has not been cut over has no derived-link tables: hydration
+// still writes the entity and interpretation rows and skips the link rebuild,
+// so `run issue` can hold issue entities before the cutover.
+func TestRunGenericEntity_OldSchemaStoreWritesRowsAndSkipsLinks(t *testing.T) {
+	p := newGenericPipeline(t, nil, map[string]gather.EntityGatherer{
+		"issue": fakeEntityGatherer{result: issueResult(t)},
+	})
+	p.store = store.OpenForTest(t) // version 1
+	if err := p.store.RequireNewSchema(); !errors.Is(err, store.ErrOldSchema) {
+		t.Fatalf("precondition: want an old-schema store, got %v", err)
+	}
+	if err := p.RunGenericEntity(context.Background(), "issue", "i-1", gather.ChangeAdded); err != nil {
+		t.Fatalf("RunGenericEntity on an old-schema store: %v", err)
+	}
+	if _, found, err := p.store.GetEntity("acme/widgets", "issue", "i-1"); err != nil || !found {
+		t.Fatalf("GetEntity found=%v err=%v", found, err)
+	}
+	if _, found, err := p.store.GetInterpretation("acme/widgets", "issue", "i-1"); err != nil || !found {
+		t.Fatalf("GetInterpretation found=%v err=%v", found, err)
+	}
+}

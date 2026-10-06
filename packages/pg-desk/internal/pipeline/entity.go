@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -45,6 +46,15 @@ func (p *Pipeline) RunGenericEntity(ctx context.Context, entityType, entityID st
 	}
 	if _, err := p.persistRaw(entityType, entityID, result.Payload, result.AsOf, interp); err != nil {
 		return fmt.Errorf("pipeline: persist %s %s: %w", entityType, entityID, err)
+	}
+	// Derived links live only on the migrated schema, so a store that has not
+	// been cut over keeps the entity and interpretation rows written above and
+	// skips the link rebuild (bead pg2-5l0x4.14: `run issue` hydrates issue
+	// entities on the version 1 store).
+	if err := p.store.RequireNewSchema(); errors.Is(err, store.ErrOldSchema) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("pipeline: links %s %s: %w", entityType, entityID, err)
 	}
 	// Rebuild the entity's derived links (runs whether or not any decider
 	// subscribes). A removed or empty payload clears them.
