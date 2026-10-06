@@ -84,6 +84,7 @@ func runChanges(cmd *cobra.Command, entityType string, f changesFlags) error {
 		return errors.New("changes: --reset cannot be combined with --cached")
 	}
 	if !changes.FingerprintSupported(entityType) {
+		cmd.SilenceUsage = true
 		return fmt.Errorf("%w: pg-desk %s changes is not available because a %s list cannot be fingerprinted", changes.ErrUnsupportedType, entityType, entityType)
 	}
 	cfg, err := deskConfigLoad(cmd.Context())
