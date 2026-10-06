@@ -453,7 +453,7 @@ through `activity list`'s own `sources[]` rows, never through `auth status`/`con
   `since` is optional and inclusive; both are RFC3339 instants, so an item whose `occurred_at`
   equals `since` is in range and one equal to `before` is not. The range travels in the op's own
   args, never in the `config` channel. The result is `{items, truncated}`, wire schema version 1.
-  Each `ActivityItem` carries `id`, `kind`, `entity_type`, `entity_id`, `occurred_at`, `summary`,
+  Each activity item (`ActivityItem`) carries `id`, `kind`, `entity_type`, `entity_id`, `occurred_at`, `summary`,
   `as_of` and `stale`, plus an optional `approximate` marker (the source could not give the
   instant exactly), an optional `url` and `labels`, and an opaque `fields` map the umbrella
   passes through unread. The set of `kind` values is source-defined, and a new kind does not
@@ -461,7 +461,7 @@ through `activity list`'s own `sources[]` rows, never through `auth status`/`con
 - **Range-shaped and stateless.** An `activity` query is fully described by its range: there is
   no cursor, no delta ledger and no umbrella cache entry for it, so the same range queried twice
   is two independent queries.
-- **Aggregation.** `activity list` CONCATENATES every queried source's items in
+- **Aggregation.** `activity list` CONCATENATES every queried source's activity items in
   `activity.sources` configuration order and carries `source` on every row. It performs no merge,
   no dedup and no cap — unlike `attention list`'s dedup-and-rank (`INV-ATTN-1`). A source that
   answers `truncated: true` has that flag surfaced on that source's own `sources[]` row; a
