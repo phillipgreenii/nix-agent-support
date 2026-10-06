@@ -72,6 +72,10 @@ type ghProvider interface {
 	// mine-vs-team NeedsAttention predicate (bead pg2-7wqkr).
 	ViewerLogin(ctx context.Context) (string, error)
 	ReviewsWithCommit(ctx context.Context, repo string, number int) ([]api.Review, error)
+	// ListReviewsSubmitted is ListReviews plus each review's SubmittedAt (empty
+	// for a pending, unsubmitted review); it backs the pr.reviewed activity
+	// kind. A separate read so ListReviews' own output stays unchanged.
+	ListReviewsSubmitted(ctx context.Context, repo string, number int) ([]api.Review, error)
 	// DeleteReview/PostPendingReview back review_submit (SubmitReview,
 	// review_submit.go); finding the pending review is GetPendingReview's job.
 	DeleteReview(ctx context.Context, repo string, number int, reviewID int64) error

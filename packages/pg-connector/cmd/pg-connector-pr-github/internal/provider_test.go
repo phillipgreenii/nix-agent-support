@@ -17,11 +17,14 @@ import (
 // fakeGH is a minimal ghProvider double so provider.go's tests never spawn
 // a real `gh` subprocess.
 type fakeGH struct {
-	pr           *api.PR
-	comments     []api.Comment
-	reviews      []api.Review
-	getPRErr     error
-	commentsErr  error
+	pr          *api.PR
+	comments    []api.Comment
+	reviews     []api.Review
+	getPRErr    error
+	commentsErr error
+	// commentsFn answers ListComments per repo/number (list_activity's
+	// pr.commented kind); it takes precedence over comments/commentsErr.
+	commentsFn   func(ctx context.Context, repo string, number int) ([]api.Comment, error)
 	reviewsErr   error
 	checkAuthErr error
 
@@ -59,6 +62,9 @@ type fakeGH struct {
 	viewerLogin         string
 	viewerLoginErr      error
 	reviewsWithCommitFn func(ctx context.Context, repo string, number int) ([]api.Review, error)
+	// reviewsSubmittedFn backs ghProvider.ListReviewsSubmitted (list_activity's
+	// pr.reviewed kind).
+	reviewsSubmittedFn func(ctx context.Context, repo string, number int) ([]api.Review, error)
 
 	// review_submit seam (see review_submit_test.go). ops records the order
 	// of the lookup / delete / post calls (and the fake archiver's writes).
@@ -88,6 +94,9 @@ func (f *fakeGH) GetPR(ctx context.Context, repo string, number int) (*api.PR, e
 }
 
 func (f *fakeGH) ListComments(ctx context.Context, repo string, number int) ([]api.Comment, error) {
+	if f.commentsFn != nil {
+		return f.commentsFn(ctx, repo, number)
+	}
 	if f.commentsErr != nil {
 		return nil, f.commentsErr
 	}
@@ -164,6 +173,13 @@ func (f *fakeGH) ViewerLogin(ctx context.Context) (string, error) {
 		return f.viewerLogin, nil
 	}
 	return "me", nil
+}
+
+func (f *fakeGH) ListReviewsSubmitted(ctx context.Context, repo string, number int) ([]api.Review, error) {
+	if f.reviewsSubmittedFn != nil {
+		return f.reviewsSubmittedFn(ctx, repo, number)
+	}
+	return nil, nil
 }
 
 func (f *fakeGH) ReviewsWithCommit(ctx context.Context, repo string, number int) ([]api.Review, error) {

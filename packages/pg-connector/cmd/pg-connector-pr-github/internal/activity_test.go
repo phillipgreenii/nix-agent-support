@@ -38,6 +38,11 @@ func (a *activityFixture) gh() *fakeGH {
 	return &fakeGH{
 		viewerLogin: "me",
 		searchActivityFn: func(_ context.Context, query string, limit int) ([]api.PR, error) {
+			// The review/comment candidate searches (activity_review_test.go
+			// covers them) find nothing here and are not recorded.
+			if strings.Contains(query, "reviewed-by:") || strings.Contains(query, "commenter:") {
+				return nil, nil
+			}
 			a.mu.Lock()
 			defer a.mu.Unlock()
 			a.queries = append(a.queries, query)

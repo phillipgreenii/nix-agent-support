@@ -2544,3 +2544,51 @@ func TestSearchPRs_DoesNotRequestActivityFields(t *testing.T) {
 		t.Fatalf("plain search must not request activity fields: %s", joined)
 	}
 }
+
+// ----------------------------------------------------------------------
+// ListReviewsSubmitted tests
+// ----------------------------------------------------------------------
+
+func TestListReviewsSubmitted_CarriesSubmittedAtAndLeavesListReviewsAlone(t *testing.T) {
+	const withTimes = `{
+  "reviews": [
+    {"id": "PRR_a", "author": {"login": "alice"}, "state": "APPROVED", "body": "", "submittedAt": "2026-09-05T10:00:00Z"},
+    {"id": "PRR_b", "author": {"login": "alice"}, "state": "PENDING", "body": "draft", "submittedAt": ""}
+  ]
+}`
+	gh := newFakeGH()
+	gh.responses["pr view"] = []byte(withTimes)
+	p := NewWithRunner(gh)
+
+	got, err := p.ListReviewsSubmitted(context.Background(), "foo/bar", 42)
+	if err != nil {
+		t.Fatalf("ListReviewsSubmitted: %v", err)
+	}
+	if len(got) != 2 || got[0].SubmittedAt != "2026-09-05T10:00:00Z" || got[0].ID != "PRR_a" || got[0].State != "APPROVED" {
+		t.Fatalf("got %+v, want first review with its submitted_at", got)
+	}
+	if got[1].SubmittedAt != "" {
+		t.Errorf("pending review SubmittedAt = %q, want empty", got[1].SubmittedAt)
+	}
+
+	// ListReviews over the same payload must not surface the timestamp.
+	plain, err := p.ListReviews(context.Background(), "foo/bar", 42)
+	if err != nil {
+		t.Fatalf("ListReviews: %v", err)
+	}
+	for _, r := range plain {
+		if r.SubmittedAt != "" {
+			t.Errorf("ListReviews leaked SubmittedAt %q", r.SubmittedAt)
+		}
+	}
+}
+
+func TestListReviewsSubmitted_ValidatesInput(t *testing.T) {
+	p := NewWithRunner(newFakeGH())
+	if _, err := p.ListReviewsSubmitted(context.Background(), "no-slash", 1); err == nil {
+		t.Fatal("want error for bad repo")
+	}
+	if _, err := p.ListReviewsSubmitted(context.Background(), "a/b", 0); err == nil {
+		t.Fatal("want error for bad number")
+	}
+}

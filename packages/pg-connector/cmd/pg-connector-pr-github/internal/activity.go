@@ -25,6 +25,9 @@
 //	pr.opened:  title, author, draft
 //	pr.merged:  title, author, base
 //	pr.closed:  title, author
+//
+// pr.reviewed and pr.commented (repeatable kinds, activity_review.go) document
+// their own keys there.
 package internal
 
 import (
@@ -86,6 +89,13 @@ func (b *Backend) ListActivity(ctx context.Context, since, before time.Time) (*s
 	}
 	items = append(items, once...)
 	truncated = truncated || onceTrunc
+
+	rc, rcTrunc, err := b.collectReviewCommentKinds(ctx, viewer, since, before)
+	if err != nil {
+		return nil, err
+	}
+	items = append(items, rc...)
+	truncated = truncated || rcTrunc
 
 	return &schema.ActivityListResult{Items: items, Truncated: truncated}, nil
 }

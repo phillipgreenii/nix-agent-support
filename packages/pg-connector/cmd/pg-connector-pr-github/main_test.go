@@ -71,6 +71,10 @@ func (fakeGH) ReviewsWithCommit(ctx context.Context, repo string, number int) ([
 	return nil, nil
 }
 
+func (fakeGH) ListReviewsSubmitted(ctx context.Context, repo string, number int) ([]api.Review, error) {
+	return nil, nil
+}
+
 func (fakeGH) DeleteReview(ctx context.Context, repo string, number int, reviewID int64) error {
 	return nil
 }
@@ -311,6 +315,8 @@ func (activityGH) SearchPRsActivity(_ context.Context, query string, _ int) ([]a
 		return api.PR{Repo: "o/r", Number: n, Title: "t", Author: author, URL: "https://example.invalid/o/r/pull/1", CreatedAt: created, ClosedAt: closed}
 	}
 	switch {
+	case strings.Contains(query, "reviewed-by:"), strings.Contains(query, "commenter:"):
+		return nil, nil
 	case strings.Contains(query, "created:"):
 		return []api.PR{pr(1, "me", "2026-09-02T00:00:00Z", ""), pr(2, "other", "2026-09-02T00:00:00Z", "")}, nil
 	case strings.Contains(query, "merged:"):
@@ -357,7 +363,7 @@ func TestNewDispatchTable_DeclaresActivityCapability(t *testing.T) {
 	if got := resp.SchemaVersions["activity"]; got != schema.ActivitySchemaVersion {
 		t.Fatalf("schemaVersions[activity] = %d, want %d", got, schema.ActivitySchemaVersion)
 	}
-	want := []string{"pr.opened", "pr.merged", "pr.closed"}
+	want := []string{"pr.opened", "pr.merged", "pr.closed", "pr.reviewed", "pr.commented"}
 	kinds, ok := resp.Vocabulary["activity_kinds"]
 	if !ok {
 		t.Fatalf("vocabulary = %v, want activity_kinds", resp.Vocabulary)

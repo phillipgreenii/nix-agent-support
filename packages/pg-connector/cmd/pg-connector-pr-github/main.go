@@ -106,7 +106,7 @@ func newDispatchTable(backend *internal.Backend) scriptout.DispatchTable {
 		// The activity kinds this backend emits; capabilities.ops stays
 		// derived from the table above, never a hand-typed list.
 		Vocabulary: map[string]any{
-			"activity_kinds": internal.ActivityKindsOnce,
+			"activity_kinds": internal.ActivityKinds,
 		},
 		Version: Version,
 	})

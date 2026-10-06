@@ -1823,6 +1823,53 @@ func (p *Provider) ListReviews(ctx context.Context, repo string, number int) ([]
 	return out, nil
 }
 
+// ghReviewSubmittedEntry is ghReviewEntry plus submittedAt, the field
+// `gh pr view --json reviews` reports as empty/null for a pending review.
+type ghReviewSubmittedEntry struct {
+	ghReviewEntry
+	SubmittedAt string `json:"submittedAt"`
+}
+
+// ListReviewsSubmitted is ListReviews plus each review's SubmittedAt (RFC3339;
+// empty for a pending, unsubmitted review). It is a separate read so
+// ListReviews' own output is unchanged; the activity capability's pr.reviewed
+// kind dates each review by it.
+func (p *Provider) ListReviewsSubmitted(ctx context.Context, repo string, number int) ([]api.Review, error) {
+	if err := validateRepo(repo); err != nil {
+		return nil, err
+	}
+	if number <= 0 {
+		return nil, fmt.Errorf("github: invalid PR number %d", number)
+	}
+	raw, err := p.runRead(
+		ctx,
+		readOpts{},
+		"pr", "view", fmt.Sprintf("%d", number),
+		"--repo", repo,
+		"--json", "reviews",
+	)
+	if err != nil {
+		return nil, err
+	}
+	var envelope struct {
+		Reviews []ghReviewSubmittedEntry `json:"reviews"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return nil, fmt.Errorf("github: parse gh pr view reviews JSON: %w", err)
+	}
+	out := make([]api.Review, 0, len(envelope.Reviews))
+	for _, r := range envelope.Reviews {
+		out = append(out, api.Review{
+			ID:          r.ID,
+			Author:      r.Author.Login,
+			State:       r.State,
+			Body:        r.Body,
+			SubmittedAt: r.SubmittedAt,
+		})
+	}
+	return out, nil
+}
+
 // CheckAuth verifies the resolved token works with one cheap authenticated
 // GraphQL call. errors.Is(err, ErrGHAuthInvalid) distinguishes a bad token
 // from a transient/network failure.
