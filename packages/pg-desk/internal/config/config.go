@@ -39,6 +39,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -130,6 +131,11 @@ type Config struct {
 
 	// Links configures the read-only `pg-desk links` verb (bead pg2-apuyx).
 	Links LinksConfig `yaml:"links,omitempty" json:"links,omitempty"`
+
+	// Attention configures the read-time attention evaluator
+	// (docs/behavior/pg-desk/attention.md, "Configuration"). A missing block
+	// is valid: every rule kind then takes its built-in default.
+	Attention AttentionConfig `yaml:"attention,omitempty" json:"attention,omitempty"`
 
 	// Watch, Sweep, Hydration, ChangeLogRetentionRaw and
 	// ConsumerStaleAfterRaw are the entity-change-flow keys (design 9.10,
@@ -342,6 +348,63 @@ func validateChangeFlow(cfg *Config) error {
 	} {
 		if n.val != nil && *n.val <= 0 {
 			return fmt.Errorf("%s %d must be positive", n.key, *n.val)
+		}
+	}
+	return nil
+}
+
+// AttentionConfig is config.yaml's attention block. The set of valid rule
+// kinds is owned by internal/attention's registry, not by this package, so
+// an unknown key under Rules is rejected by attention.Resolve (which every
+// attention consumer calls right after loading the config); this package
+// validates only the value vocabularies it can know.
+type AttentionConfig struct {
+	// Rules maps a rule kind (for example "pr.own-ci-failing") to its tuning.
+	Rules map[string]AttentionRuleConfig `yaml:"rules,omitempty" json:"rules,omitempty"`
+	// Ordering configures the grouping and ordering stage. It is parsed here
+	// so a deployment may set it; the stage that consumes it is separate from
+	// the evaluator core.
+	Ordering AttentionOrderingConfig `yaml:"ordering,omitempty" json:"ordering,omitempty"`
+}
+
+// AttentionRuleConfig tunes one rule kind. A nil Enabled and an empty
+// Severity mean "the rule's built-in default".
+type AttentionRuleConfig struct {
+	Enabled  *bool  `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	Severity string `yaml:"severity,omitempty" json:"severity,omitempty"`
+}
+
+// AttentionOrderingConfig is the attention.ordering block.
+type AttentionOrderingConfig struct {
+	// Ties is attention.ordering.ties; empty means the documented default
+	// (severity descending, then group size descending, then entity id).
+	Ties string `yaml:"ties,omitempty" json:"ties,omitempty"`
+}
+
+// AttentionSeverities is the closed severity vocabulary of
+// attention.rules.<kind>.severity, lowest first.
+var AttentionSeverities = []string{"low", "medium", "high"}
+
+// validateAttention checks the value vocabularies of the attention block.
+func validateAttention(a AttentionConfig) error {
+	kinds := make([]string, 0, len(a.Rules))
+	for k := range a.Rules {
+		kinds = append(kinds, k)
+	}
+	sort.Strings(kinds)
+	for _, k := range kinds {
+		sev := a.Rules[k].Severity
+		if sev == "" {
+			continue
+		}
+		ok := false
+		for _, v := range AttentionSeverities {
+			if sev == v {
+				ok = true
+			}
+		}
+		if !ok {
+			return fmt.Errorf("attention.rules.%s.severity %q must be one of %s", k, sev, strings.Join(AttentionSeverities, ", "))
 		}
 	}
 	return nil
@@ -659,6 +722,9 @@ func finalize(cfg *Config) error {
 	}
 	if err := validateIssueURLTemplate(cfg.Links.IssueURLTemplate); err != nil {
 		return fmt.Errorf("links.issue_url_template: %w", err)
+	}
+	if err := validateAttention(cfg.Attention); err != nil {
+		return err
 	}
 	if cfg.Serve.Log != "" {
 		expanded, err := expandHome(cfg.Serve.Log)

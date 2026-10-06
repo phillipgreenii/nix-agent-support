@@ -50,6 +50,8 @@ func TestConfigCoversAllSection78Keys(t *testing.T) {
 		// links (bead pg2-apuyx) postdates the section-7.8 table: the
 		// read-only `links` verb's URL knobs.
 		"links",
+		// attention (bead pg2-5l0x4.2): the read-time attention evaluator's block.
+		"attention",
 		// Entity-change-flow keys (design 9.10).
 		"watch", "sweep", "hydration", "change_log_retention", "consumer_stale_after",
 	}
@@ -79,6 +81,9 @@ func TestConfigCoversAllSection78Keys(t *testing.T) {
 		{"ServeConfig", reflect.TypeOf(ServeConfig{}), []string{"addr", "log"}},
 		{"OpenConfig", reflect.TypeOf(OpenConfig{}), []string{"chrome_bin"}},
 		{"LinksConfig", reflect.TypeOf(LinksConfig{}), []string{"issue_url_template"}},
+		{"AttentionConfig", reflect.TypeOf(AttentionConfig{}), []string{"rules", "ordering"}},
+		{"AttentionRuleConfig", reflect.TypeOf(AttentionRuleConfig{}), []string{"enabled", "severity"}},
+		{"AttentionOrderingConfig", reflect.TypeOf(AttentionOrderingConfig{}), []string{"ties"}},
 		{"WatchConfig", reflect.TypeOf(WatchConfig{}), []string{"pr", "issue", "thread"}},
 		{"WatchTypeConfig", reflect.TypeOf(WatchTypeConfig{}), []string{"queries"}},
 		{"WatchThreadConfig", reflect.TypeOf(WatchThreadConfig{}), []string{"queries", "active_window"}},
@@ -715,5 +720,32 @@ watch:
 	}
 	if cfg.Sync.Mode != "off" || cfg.AgentTrackerBackend != "beads" || cfg.HeartbeatPeriod != "5m" {
 		t.Fatalf("legacy keys not preserved: %+v", cfg)
+	}
+}
+
+func TestLoadFile_AttentionBlock(t *testing.T) {
+	dir := t.TempDir()
+	base := "self_login: me\nrepos:\n  - remote: acme/api\n"
+
+	cfg, err := LoadFile(writeYAML(t, dir, base))
+	if err != nil {
+		t.Fatalf("a config with no attention block must load: %v", err)
+	}
+	if len(cfg.Attention.Rules) != 0 {
+		t.Errorf("no attention block must leave Rules empty, got %v", cfg.Attention.Rules)
+	}
+
+	cfg, err = LoadFile(writeYAML(t, dir, base+"attention:\n  rules:\n    pr.own-ci-failing:\n      enabled: false\n      severity: low\n"))
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	r := cfg.Attention.Rules["pr.own-ci-failing"]
+	if r.Enabled == nil || *r.Enabled || r.Severity != "low" {
+		t.Errorf("attention rule not parsed: %+v", r)
+	}
+
+	_, err = LoadFile(writeYAML(t, dir, base+"attention:\n  rules:\n    pr.own-ci-failing:\n      severity: urgent\n"))
+	if err == nil || !strings.Contains(err.Error(), "attention.rules.pr.own-ci-failing.severity") {
+		t.Errorf("a severity outside low|medium|high must be rejected naming the key, got %v", err)
 	}
 }
