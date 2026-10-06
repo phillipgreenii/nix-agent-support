@@ -140,10 +140,13 @@ func humanizeReviewPending(raw json.RawMessage) (string, error) {
 	if rv.Stale {
 		staleness = "STALE"
 	}
-	s := fmt.Sprintf("pending review %s (database id %d) at %s, head %s [%s], as of %s\n  body marked: %t  all marked: %t  digest: %s  comments: %d",
-		rv.ReviewID, rv.DatabaseID, rv.CommitSHA, r.HeadSHA, staleness, r.AsOf, rv.BodyMarked, rv.AllMarked, rv.DigestState, len(rv.Comments))
+	s := fmt.Sprintf("pending review %s (database id %d) at %s, head %s [%s], as of %s\n  comments: %d total, %d at head  reviewed head: %t  extra pending reviews: %d",
+		rv.ReviewID, rv.DatabaseID, rv.CommitSHA, r.HeadSHA, staleness, r.AsOf, rv.CommentsTotal, rv.CommentsAtHead, rv.ReviewedHead, rv.ExtraPendingReviews)
+	if la := rv.LastAppend; la != nil {
+		s += fmt.Sprintf("  last append: %s (+%d at %s)", la.At, la.Added, la.Head)
+	}
 	for _, c := range rv.Comments {
-		s += fmt.Sprintf("\n    - %s:%d marked=%t", c.Path, c.Line, c.Marked)
+		s += fmt.Sprintf("\n    - %s:%d at %s", c.Path, c.Line, c.OriginalCommit)
 	}
 	return s, nil
 }

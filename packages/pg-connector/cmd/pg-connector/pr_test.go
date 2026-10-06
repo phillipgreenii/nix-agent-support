@@ -739,8 +739,8 @@ func TestReviewSubmitInvalidArgumentExits1(t *testing.T) {
 }
 
 // reviewPendingRecordResp is a well-formed review_pending wire response for a
-// stale, partly-unmarked pending review.
-const reviewPendingRecordResp = `{"protocolVersion":1,"schemaVersion":4,"result":{"pending":true,"head_sha":"h2","as_of":"t","review":{"review_id":"PRR_1","database_id":7,"state":"pending","commit_sha":"h1","stale":true,"body":"b","body_marked":true,"comments":[{"id":"C1","path":"a.go","line":3,"body":"c","marked":false}],"all_marked":false}}}`
+// stale pending review with an append on record and one further pending review.
+const reviewPendingRecordResp = `{"protocolVersion":1,"schemaVersion":4,"result":{"pending":true,"head_sha":"h2","as_of":"t","review":{"review_id":"PRR_1","database_id":7,"state":"pending","commit_sha":"h1","stale":true,"body":"b","comments_total":1,"comments_at_head":0,"reviewed_head":false,"extra_pending_reviews":1,"last_append":{"at":"2026-01-01T00:00:00Z","added":3,"head":"h1"},"comments":[{"id":"C1","path":"a.go","line":3,"body":"c","original_commit":"h1"}]}}}`
 
 func TestReviewPendingPrintsRecordAndExits0(t *testing.T) {
 	writeOpAwareFakeBackend(t, "backend-rp-rec", map[string]string{"review_pending": reviewPendingRecordResp}, `{}`)
@@ -756,16 +756,25 @@ func TestReviewPendingPrintsRecordAndExits0(t *testing.T) {
 	var res struct {
 		Pending bool `json:"pending"`
 		Review  struct {
-			ReviewID  string `json:"review_id"`
-			CommitSHA string `json:"commit_sha"`
-			Stale     bool   `json:"stale"`
-			AllMarked bool   `json:"all_marked"`
+			ReviewID            string `json:"review_id"`
+			CommitSHA           string `json:"commit_sha"`
+			Stale               bool   `json:"stale"`
+			CommentsTotal       int    `json:"comments_total"`
+			CommentsAtHead      int    `json:"comments_at_head"`
+			ReviewedHead        bool   `json:"reviewed_head"`
+			ExtraPendingReviews int    `json:"extra_pending_reviews"`
+			LastAppend          struct {
+				Added int `json:"added"`
+			} `json:"last_append"`
+			AllMarked *bool `json:"all_marked"`
 		} `json:"review"`
 	}
 	if err := json.Unmarshal(resp.Result, &res); err != nil {
 		t.Fatal(err)
 	}
-	if !res.Pending || res.Review.ReviewID != "PRR_1" || res.Review.CommitSHA != "h1" || !res.Review.Stale || res.Review.AllMarked {
+	if !res.Pending || res.Review.ReviewID != "PRR_1" || res.Review.CommitSHA != "h1" || !res.Review.Stale ||
+		res.Review.CommentsTotal != 1 || res.Review.CommentsAtHead != 0 || res.Review.ReviewedHead ||
+		res.Review.ExtraPendingReviews != 1 || res.Review.LastAppend.Added != 3 || res.Review.AllMarked != nil {
 		t.Fatalf("result = %+v", res)
 	}
 }
@@ -821,7 +830,17 @@ func TestHumanizeReviewPending(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err = humanizeReviewPending(env.Result)
-	if err != nil || !strings.Contains(got, "STALE") || !strings.Contains(got, "a.go:3 marked=false") {
-		t.Fatalf("record: %q %v", got, err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"STALE", "1 total, 0 at head", "reviewed head: false", "extra pending reviews: 1", "last append: 2026-01-01T00:00:00Z (+3 at h1)", "a.go:3 at h1"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("record text missing %q: %q", want, got)
+		}
+	}
+	for _, gone := range []string{"marked", "digest"} {
+		if strings.Contains(got, gone) {
+			t.Errorf("record text still mentions %q: %q", gone, got)
+		}
 	}
 }

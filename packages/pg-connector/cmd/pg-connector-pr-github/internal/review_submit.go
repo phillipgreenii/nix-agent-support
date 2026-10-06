@@ -142,12 +142,12 @@ func blocked(req pr.ReviewSubmitRequest, reason, message string, ref *pr.Pending
 //     delete, the error says the old review was deleted and where it is
 //     archived.
 func (b *Backend) supersede(ctx context.Context, req pr.ReviewSubmitRequest, repo string, number int, comments []github.ReviewSubmitComment) (pr.ReviewSubmitResult, error) {
-	look, err := b.PendingReview(ctx, pr.PendingReviewRequest{ID: req.ID})
+	look, err := b.legacyPendingLookup(ctx, req.ID)
 	if err != nil {
 		msg := "the actor's pending review could not be determined (" + err.Error() + "); nothing was posted, deleted or submitted"
 		return blocked(req, pr.ReasonDetectionFailed, msg, nil, &pr.SupersedeOutcome{Attempted: true, Error: err.Error()}), nil
 	}
-	if !look.Pending || look.Review == nil {
+	if look.Review == nil {
 		rev, err := b.gh.PostPendingReview(ctx, repo, number, req.HeadSHA, req.Body, comments)
 		if err != nil {
 			return pr.ReviewSubmitResult{}, classifyReviewSubmitError(err, &pr.SupersedeOutcome{})
@@ -209,9 +209,92 @@ func (b *Backend) supersede(ctx context.Context, req pr.ReviewSubmitRequest, rep
 	return res, nil
 }
 
+// legacyMarker is the invisible marker pg-pr stamps on the review bodies and
+// comments it posts. pg-pr is still a live review path until its retirement,
+// so a pending review it left behind is agent-authored and MUST count as
+// marked to the guarded supersede; otherwise that guard would treat every such
+// review as human-edited. It is a literal copy: pg-pr's marker package is
+// Go-internal and not importable from this module.
+const legacyPGPRMarker = "<!-- pg-pr -->"
+
+// hasBotMarker reports whether text carries a bot-authorship marker: this
+// backend's plain marker, its digest-bearing body marker, or pg-pr's. Only the
+// guarded supersede below uses it; the review_pending record no longer does.
+func hasBotMarker(text string) bool {
+	return strings.Contains(text, github.BotMarker) ||
+		strings.Contains(text, github.DigestMarkerPrefix) ||
+		strings.Contains(text, legacyPGPRMarker)
+}
+
+// legacyPendingReview is the acting identity's single pending review in the
+// shape the guarded supersede reads: the marker and digest verdicts are
+// computed here, not carried on the review_pending record. It goes away with
+// the supersede path.
+type legacyPendingReview struct {
+	ReviewID    string
+	DatabaseID  int64
+	URL         string
+	CommitSHA   string
+	Body        string
+	Comments    []pr.SupersededComment
+	AllMarked   bool
+	DigestState string
+}
+
+// legacyLookup is the supersede guard's pending-review answer; a nil Review is
+// the explicit "none".
+type legacyLookup struct {
+	HeadSHA string
+	Review  *legacyPendingReview
+}
+
+// legacyPendingLookup reads the actor's pending review for the guarded
+// supersede. It keeps that path's behavior from before review_pending learned
+// to tolerate several pending reviews: more than one is a failed lookup here
+// (the supersede deletes a review, so it must be sure which one it means), and
+// it fails closed the same way review_pending does.
+func (b *Backend) legacyPendingLookup(ctx context.Context, id string) (legacyLookup, error) {
+	repo, number, err := parsePRID(id)
+	if err != nil {
+		return legacyLookup{}, scriptout.WrapError(scriptout.ErrInvalidArgument, err.Error())
+	}
+	data, err := b.gh.GetPendingReview(ctx, repo, number)
+	if err != nil {
+		return legacyLookup{}, classifyPendingReviewError(err)
+	}
+	if data == nil || data.HeadSHA == "" {
+		return legacyLookup{}, scriptout.WrapError(scriptout.ErrUnavailable,
+			fmt.Sprintf("review_pending: detection_failed: could not determine the current head of %s", id))
+	}
+	look := legacyLookup{HeadSHA: data.HeadSHA}
+	if len(data.Reviews) > 1 {
+		return legacyLookup{}, scriptout.WrapError(scriptout.ErrUnavailable,
+			fmt.Sprintf("review_pending: detection_failed: expected at most one pending review for the viewer, host reported %d", len(data.Reviews)))
+	}
+	rev := data.Lowest()
+	if rev == nil {
+		return look, nil
+	}
+	old := &legacyPendingReview{
+		ReviewID: rev.ID, DatabaseID: rev.DatabaseID, URL: rev.URL, CommitSHA: rev.CommitOID, Body: rev.Body,
+		Comments:  make([]pr.SupersededComment, 0, len(rev.Comments)),
+		AllMarked: hasBotMarker(rev.Body),
+	}
+	commentTexts := make([]string, 0, len(rev.Comments))
+	for _, c := range rev.Comments {
+		marked := hasBotMarker(c.Body)
+		old.AllMarked = old.AllMarked && marked
+		commentTexts = append(commentTexts, c.Body)
+		old.Comments = append(old.Comments, pr.SupersededComment{ID: c.ID, Path: c.Path, Line: c.Line, Body: c.Body, Marked: marked})
+	}
+	old.DigestState = string(github.VerifyDigest(rev.Body, commentTexts))
+	look.Review = old
+	return look, nil
+}
+
 // editedDetail returns "" when the pending review is provably unedited,
 // fully-marked agent content, else a short description of why it is not.
-func editedDetail(old *pr.PendingReview) string {
+func editedDetail(old *legacyPendingReview) string {
 	if !old.AllMarked {
 		return "the bot marker is missing from the body or a comment"
 	}
@@ -240,7 +323,7 @@ func reviewLabel(ref *pr.PendingReviewRef) string {
 // archiveReview persists the full pending review before it is deleted, and
 // returns where. A nil archiver (no location configured) is a failure: the
 // delete MUST NOT happen without an archive.
-func (b *Backend) archiveReview(repo string, number int, look pr.PendingReviewResult) (string, error) {
+func (b *Backend) archiveReview(repo string, number int, look legacyLookup) (string, error) {
 	if b.archiver == nil {
 		return "", errors.New("no archive location is configured")
 	}
@@ -270,11 +353,11 @@ func isLostDeleteRace(err error) bool {
 // and says what it found. It is informational: the caller reports
 // delete_refused whatever this finds, and never retries the delete.
 func (b *Backend) relistDetail(ctx context.Context, id, reviewID string) string {
-	again, err := b.PendingReview(ctx, pr.PendingReviewRequest{ID: id})
+	again, err := b.legacyPendingLookup(ctx, id)
 	switch {
 	case err != nil:
 		return "re-listing it afterwards failed (" + err.Error() + ")"
-	case !again.Pending || again.Review == nil:
+	case again.Review == nil:
 		return "re-listing shows it is no longer pending (it was submitted or deleted concurrently)"
 	case again.Review.ReviewID != reviewID:
 		return "re-listing shows a different pending review now exists"

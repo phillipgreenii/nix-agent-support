@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/github"
+	pgposted "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/posted"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/pr"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
@@ -15,22 +16,6 @@ import (
 // Backend implements pr.PendingReviewReader, so the review_pending op is
 // registered and listed in capabilities.ops for the GitHub backend.
 var _ pr.PendingReviewReader = (*Backend)(nil)
-
-// legacyPGPRMarker is the invisible marker pg-pr stamps on the review bodies
-// and comments it posts. pg-pr is still the live review path until its
-// retirement, so a pending review it left behind is agent-authored and MUST
-// count as marked here; otherwise the guarded supersede would treat every
-// such review as human-edited. It is a literal copy: pg-pr's marker package
-// is Go-internal and not importable from this module.
-const legacyPGPRMarker = "<!-- pg-pr -->"
-
-// hasBotMarker reports whether text carries a bot-authorship marker: this
-// backend's plain marker, its digest-bearing body marker, or pg-pr's.
-func hasBotMarker(text string) bool {
-	return strings.Contains(text, github.BotMarker) ||
-		strings.Contains(text, github.DigestMarkerPrefix) ||
-		strings.Contains(text, legacyPGPRMarker)
-}
 
 // PendingReview implements pr.PendingReviewReader (contract 9.1a): it
 // resolves the acting identity's PENDING review on req.ID to a structured
@@ -40,19 +25,29 @@ func hasBotMarker(text string) bool {
 // "lookup failed" (an error) are distinct outcomes: any condition that leaves
 // the answer uncertain is an error whose message begins
 // "review_pending: detection_failed:", so a caller can report reason
-// detection_failed without a new error code (INV-ERR-1 is a closed set).
+// detection_failed without a new error code (INV-ERR-1 is a closed set). More
+// than one pending review is NOT a failure.
 //
-// Staleness compares the REVIEW-level commit against the PR head read from
-// GraphQL headRefOid in the same query. A comment's own commit is never read:
-// it is not stable once the head advances (prerequisite P4). A review with no
-// commit is reported stale. Marker presence is reported for the body and for
-// each comment; it does not by itself prove the content is unedited (a
-// text-only edit keeps the marker). The record's DigestState does: it is the
-// result of checking the body's content digest, stamped at post time, against
-// the body and every comment as read (github.VerifyDigest), and only
-// "verified" proves the content unedited. A review with no digest (posted
-// before digests existed, by pg-pr, or by a human) is "missing", never
-// verified.
+// Which review is described. With several pending reviews the record
+// describes the one with the lowest database id: comments_total,
+// comments_at_head, the body searched for the live head's pg-section, and
+// commit_sha all belong to it, and extra_pending_reviews counts the others.
+// (Every pending review's review-level commit still counts towards
+// reviewed_head, because "any review of the viewer at the head" is a property
+// of the viewer, not of one review.)
+//
+// Head anchoring. A comment is on the live head when its originalCommit
+// equals it (never commit.oid, REST commit_id or the review-level commit: they
+// move or reflect where the review was created). reviewed_head is true when
+// the described review's body holds a pg-section for the live head
+// (pgposted.FindSection), or when any pending or submitted review of the
+// viewer has the live head as its review-level commit. stale is true iff a
+// pending review exists AND comments_at_head is 0 AND reviewed_head is false;
+// the connector, not the dashboard, owns that verdict.
+//
+// last_append comes from the posted-sidecar. A sidecar that is missing,
+// unconfigured or unreadable simply yields no last_append: it is local
+// bookkeeping and has no bearing on whether a review is pending.
 func (b *Backend) PendingReview(ctx context.Context, req pr.PendingReviewRequest) (pr.PendingReviewResult, error) {
 	repo, number, err := parsePRID(req.ID)
 	if err != nil {
@@ -70,35 +65,71 @@ func (b *Backend) PendingReview(ctx context.Context, req pr.PendingReviewRequest
 		HeadSHA: data.HeadSHA,
 		AsOf:    time.Now().UTC().Format(time.RFC3339),
 	}
-	if data.Review == nil {
+	rev := data.Lowest()
+	if rev == nil {
 		return res, nil
 	}
-	rev := data.Review
+	head := data.HeadSHA
 	out := &pr.PendingReview{
-		ReviewID:   rev.ID,
-		DatabaseID: rev.DatabaseID,
-		URL:        rev.URL,
-		State:      "pending",
-		CommitSHA:  rev.CommitOID,
-		Stale:      rev.CommitOID == "" || !strings.EqualFold(rev.CommitOID, data.HeadSHA),
-		Body:       rev.Body,
-		BodyMarked: hasBotMarker(rev.Body),
-		Comments:   make([]pr.PendingReviewComment, 0, len(rev.Comments)),
+		ReviewID:            rev.ID,
+		DatabaseID:          rev.DatabaseID,
+		URL:                 rev.URL,
+		State:               "pending",
+		CommitSHA:           rev.CommitOID,
+		Body:                rev.Body,
+		CommentsTotal:       len(rev.Comments),
+		ExtraPendingReviews: len(data.Reviews) - 1,
+		Comments:            make([]pr.PendingReviewComment, 0, len(rev.Comments)),
 	}
-	out.AllMarked = out.BodyMarked
-	commentTexts := make([]string, 0, len(rev.Comments))
 	for _, c := range rev.Comments {
-		marked := hasBotMarker(c.Body)
-		out.AllMarked = out.AllMarked && marked
-		commentTexts = append(commentTexts, c.Body)
+		if strings.EqualFold(c.OriginalCommitOID, head) {
+			out.CommentsAtHead++
+		}
 		out.Comments = append(out.Comments, pr.PendingReviewComment{
-			ID: c.ID, Path: c.Path, Line: c.Line, Body: c.Body, Marked: marked,
+			ID: c.ID, Path: c.Path, Line: c.Line, Body: c.Body, OriginalCommit: c.OriginalCommitOID,
 		})
 	}
-	out.DigestState = string(github.VerifyDigest(rev.Body, commentTexts))
+	out.ReviewedHead = reviewedHead(data, rev)
+	out.Stale = out.CommentsAtHead == 0 && !out.ReviewedHead
+	out.LastAppend = b.lastAppend(repo, number)
 	res.Pending = true
 	res.Review = out
 	return res, nil
+}
+
+// reviewedHead reports whether the live head has been reviewed: the described
+// review's body holds a section for it, or any pending or submitted review of
+// the viewer has it as its review-level commit.
+func reviewedHead(data *github.PendingReviewData, described *github.PendingReviewNode) bool {
+	head := data.HeadSHA
+	if _, _, ok := pgposted.FindSection(described.Body, head); ok {
+		return true
+	}
+	for _, r := range data.Reviews {
+		if r.CommitOID != "" && strings.EqualFold(r.CommitOID, head) {
+			return true
+		}
+	}
+	for _, r := range data.Submitted {
+		if r.CommitOID != "" && strings.EqualFold(r.CommitOID, head) {
+			return true
+		}
+	}
+	return false
+}
+
+// lastAppend reads the sidecar's last_append for repo#number, or nil when
+// there is none or the sidecar cannot be read.
+func (b *Backend) lastAppend(repo string, number int) *pr.LastAppend {
+	owner, name, ok := strings.Cut(repo, "/")
+	if !ok || b.posted.Dir == "" {
+		return nil
+	}
+	st, err := b.posted.Load(owner, name, number)
+	if err != nil || st.LastAppend == nil {
+		return nil
+	}
+	return &pr.LastAppend{At: st.LastAppend.At, Added: st.LastAppend.Added, Head: st.LastAppend.Head}
 }
 
 // classifyPendingReviewError maps a failed lookup onto INV-ERR-1 (auth ->

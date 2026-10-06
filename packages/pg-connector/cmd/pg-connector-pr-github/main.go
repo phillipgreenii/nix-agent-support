@@ -25,6 +25,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/archive"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/eventlog"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/github"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/posted"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/activity"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/attention"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/pr"
@@ -45,7 +46,7 @@ func main() {
 // store) and its op-dispatch table, then hands the table to the Tier-1
 // core's generic serve loop.
 func run() int {
-	backend := internal.New(github.New()).WithArchiver(archive.FromEnv(os.Getenv))
+	backend := internal.New(github.New()).WithArchiver(archive.FromEnv(os.Getenv)).WithPostedStore(posted.StoreFromEnv(os.Getenv))
 	return scriptout.ServeLoop(instrument(newDispatchTable(backend), os.Getenv))
 }
 

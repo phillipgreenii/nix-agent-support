@@ -123,7 +123,7 @@ func TestReviewSubmit_StatusFieldsWireShape(t *testing.T) {
 
 	rep := ReviewSubmitResult{Status: StatusReplaced, Superseded: &SupersededReview{
 		PendingReviewRef: PendingReviewRef{ReviewID: "r1", DatabaseID: 5, CommitSHA: "old"},
-		ArchivePath:      "/a.json", Body: "b", Comments: []PendingReviewComment{{ID: "c", Body: "x", Marked: true}},
+		ArchivePath:      "/a.json", Body: "b", Comments: []SupersededComment{{ID: "c", Body: "x", Marked: true}},
 	}}
 	raw, _ = json.Marshal(rep)
 	m = map[string]any{}

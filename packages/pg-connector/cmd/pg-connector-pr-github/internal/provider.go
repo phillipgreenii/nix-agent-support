@@ -25,6 +25,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/archive"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/eventlog"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/github"
+	pgposted "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/posted"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/attention"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/pr"
@@ -97,6 +98,10 @@ type Backend struct {
 	// is configured, in which case every supersede that would delete is
 	// refused as archive_failed.
 	archiver archive.Archiver
+	// posted reads the per-PR posted-sidecar review_pending takes last_append
+	// from. The zero Store has no directory, in which case no last_append is
+	// reported.
+	posted pgposted.Store
 }
 
 // New returns a Backend wrapping gh. Production wiring passes a
@@ -127,6 +132,13 @@ type retryGuardSetter interface {
 // archive.FromEnv; without it the guarded supersede never deletes.
 func (b *Backend) WithArchiver(a archive.Archiver) *Backend {
 	b.archiver = a
+	return b
+}
+
+// WithPostedStore sets where the per-PR posted-sidecar is read from, and
+// returns b. Production wiring passes posted.StoreFromEnv.
+func (b *Backend) WithPostedStore(s pgposted.Store) *Backend {
+	b.posted = s
 	return b
 }
 

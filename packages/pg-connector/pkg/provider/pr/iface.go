@@ -150,9 +150,21 @@ type PendingReviewRef struct {
 // ArchivePath is where the same content was persisted BEFORE the delete.
 type SupersededReview struct {
 	PendingReviewRef
-	ArchivePath string                 `json:"archive_path"`
-	Body        string                 `json:"body"`
-	Comments    []PendingReviewComment `json:"comments"`
+	ArchivePath string              `json:"archive_path"`
+	Body        string              `json:"body"`
+	Comments    []SupersededComment `json:"comments"`
+}
+
+// SupersededComment is one inline comment of a pending review that a replace
+// removed. It keeps the per-comment bot marker the replace guard read (Marked),
+// which the review_pending record no longer carries; it goes away with the
+// replace path itself.
+type SupersededComment struct {
+	ID     string `json:"id"`
+	Path   string `json:"path"`
+	Line   int    `json:"line"`
+	Body   string `json:"body"`
+	Marked bool   `json:"marked"`
 }
 
 // ReviewSubmitResult is the review_submit op's output (contract 9.1).
@@ -193,38 +205,65 @@ type PendingReviewRequest struct {
 }
 
 // PendingReviewComment is one inline comment of the acting identity's pending
-// review (contract 9.1a). Line is 0 when the host reports no line. Marked is
-// whether the comment body carries a bot-authorship marker.
+// review (contract 9.1a). Line is 0 when the host reports no line.
+// OriginalCommit is the commit the comment was made on, the only value that
+// says which head the comment belongs to.
 type PendingReviewComment struct {
-	ID     string `json:"id"`
-	Path   string `json:"path"`
-	Line   int    `json:"line"`
-	Body   string `json:"body"`
-	Marked bool   `json:"marked"`
+	ID             string `json:"id"`
+	Path           string `json:"path"`
+	Line           int    `json:"line"`
+	Body           string `json:"body"`
+	OriginalCommit string `json:"original_commit"`
+}
+
+// LastAppend is the most recent append to a PR's pending review, as the
+// backend's own record of it (not read from the host). Added is the number of
+// comments that append added; Head is the head it was made at.
+type LastAppend struct {
+	At    string `json:"at"`
+	Added int    `json:"added"`
+	Head  string `json:"head"`
 }
 
 // PendingReview is the structured record of the acting identity's PENDING
-// review on a PR (contract 9.1a). CommitSHA is the REVIEW-level anchored
-// commit, never a comment's commit. Stale is true when CommitSHA is not the
-// PR head the result reports (an empty CommitSHA is stale). AllMarked is true
-// only when the body and every comment carry the marker. URL is the review's
-// web URL when the host reports one.
+// review on a PR (contract 9.1a). When the identity has more than one pending
+// review, the record describes the one with the lowest database id and
+// ExtraPendingReviews counts the rest; every count below is over that review.
+//
+// CommitSHA is the REVIEW-level anchored commit: where the review was created,
+// never a comment's commit. A pending review is reused across heads, so
+// CommitSHA says nothing about which head the content is on.
+//
+//   - CommentsTotal is how many comments the review holds (paginated, none cut).
+//   - CommentsAtHead is how many of them were made at the live head (their
+//     original commit is the head).
+//   - ReviewedHead is true when the review body holds a pg-section for the live
+//     head, or any review of the identity, pending or submitted, has the live
+//     head as its review-level commit.
+//   - Stale is true only when CommentsAtHead is 0 AND ReviewedHead is false: a
+//     run that wrote only a body section, only replies, or created the review
+//     at the head is not stale; a review untouched since an older head is. The
+//     connector owns this verdict.
+//   - LastAppend comes from the backend's sidecar and is absent when nothing
+//     was ever appended (or the sidecar cannot be read).
+//
+// The marker-based fields of the previous record (body_marked, per-comment
+// marked, all_marked, digest_state) are gone; no consumer in this repo reads
+// them from this record.
 type PendingReview struct {
-	ReviewID   string                 `json:"review_id"`
-	DatabaseID int64                  `json:"database_id"`
-	URL        string                 `json:"url,omitempty"`
-	State      string                 `json:"state"`
-	CommitSHA  string                 `json:"commit_sha"`
-	Stale      bool                   `json:"stale"`
-	Body       string                 `json:"body"`
-	BodyMarked bool                   `json:"body_marked"`
-	Comments   []PendingReviewComment `json:"comments"`
-	AllMarked  bool                   `json:"all_marked"`
-	// DigestState is whether the review's content still matches the digest
-	// the backend stamped into the body marker when it posted: "verified",
-	// "missing", "unreadable" or "mismatch". Only "verified" proves the content
-	// unedited; every other value is NOT verified-unedited.
-	DigestState string `json:"digest_state"`
+	ReviewID            string                 `json:"review_id"`
+	DatabaseID          int64                  `json:"database_id"`
+	URL                 string                 `json:"url,omitempty"`
+	State               string                 `json:"state"`
+	CommitSHA           string                 `json:"commit_sha"`
+	Stale               bool                   `json:"stale"`
+	Body                string                 `json:"body"`
+	CommentsTotal       int                    `json:"comments_total"`
+	CommentsAtHead      int                    `json:"comments_at_head"`
+	ReviewedHead        bool                   `json:"reviewed_head"`
+	ExtraPendingReviews int                    `json:"extra_pending_reviews"`
+	LastAppend          *LastAppend            `json:"last_append,omitempty"`
+	Comments            []PendingReviewComment `json:"comments"`
 }
 
 // PendingReviewResult is the review_pending op's output (contract 9.1a).

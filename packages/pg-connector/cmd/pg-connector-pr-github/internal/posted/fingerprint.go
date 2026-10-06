@@ -30,6 +30,15 @@
 //	ErrCorrupt                                // Load error for an undecodable file
 //	EnvStateDir = "PG_CONNECTOR_PR_GITHUB_STATE_DIR"
 //
+// Body section (section.go):
+//
+//	SectionHeadLen                            // 12 hex characters
+//	SectionClose                              // "<!-- /pg-section -->"
+//	SectionOpen(head string) string           // "<!-- pg-section head=<sha12> -->"
+//	FindSection(body, head string) (start, end int, ok bool)
+//	                                          // body[start:end] is the whole section
+//	                                          // for head, delimiters included
+//
 // Classifier (classify.go):
 //
 //	type Verdict string: AlreadyPresent, Dismissed, ToWrite

@@ -42,7 +42,7 @@ func supersedeReq() pr.ReviewSubmitRequest {
 // lookupOf scripts a GetPendingReview answer around one pending review; the PR
 // head is the request's, deadbeef.
 func lookupOf(rev *github.PendingReviewNode) pendingReply {
-	return pendingReply{data: &github.PendingReviewData{HeadSHA: "deadbeef", Review: rev}}
+	return pendingReply{data: &github.PendingReviewData{HeadSHA: "deadbeef", Reviews: reviewsOf(rev)}}
 }
 
 // supersedeBackend wires a fakeGH (live head matching the request) and a fake
@@ -317,14 +317,14 @@ func TestSupersedeBlockedDeleteRefused(t *testing.T) {
 			non422, &pendingReply{data: &github.PendingReviewData{HeadSHA: "deadbeef"}}, 1, "no longer pending",
 		},
 		"422 but re-list still shows it pending": {
-			non422, &pendingReply{data: &github.PendingReviewData{HeadSHA: "deadbeef", Review: stalePending()}}, 1, "still pending",
+			non422, &pendingReply{data: &github.PendingReviewData{HeadSHA: "deadbeef", Reviews: reviewsOf(stalePending())}}, 1, "still pending",
 		},
 		"422 and a different pending review now exists": {
-			non422, &pendingReply{data: &github.PendingReviewData{HeadSHA: "deadbeef", Review: func() *github.PendingReviewNode {
+			non422, &pendingReply{data: &github.PendingReviewData{HeadSHA: "deadbeef", Reviews: reviewsOf(func() *github.PendingReviewNode {
 				r := stalePending()
 				r.ID = "PRR_other"
 				return r
-			}()}}, 1, "different pending review",
+			}())}}, 1, "different pending review",
 		},
 		"422 and the re-list itself fails": {
 			non422, &pendingReply{err: errors.New("boom")}, 1, "re-listing it afterwards failed",
@@ -472,5 +472,153 @@ func TestSubmitWithoutSupersedeNeverLooksUp(t *testing.T) {
 	}
 	if want := []string{"post"}; !reflect.DeepEqual(gh.ops, want) {
 		t.Errorf("ops = %v, want %v", gh.ops, want)
+	}
+}
+
+// The tests below cover legacyPendingLookup, the supersede guard's own reading
+// of the actor's pending review (marker and digest verdicts). They moved here
+// from the review_pending tests when that record dropped those fields.
+
+func TestLegacyLookupPartlyUnmarked(t *testing.T) {
+	cases := map[string]*github.PendingReviewNode{
+		"unmarked comment": {
+			ID: "R", Body: markedBody, CommitOID: "head1",
+			Comments: []github.PendingReviewComment{
+				{ID: "c1", Body: "ok " + github.BotMarker},
+				{ID: "c2", Body: "a human added this"},
+			},
+		},
+		"unmarked body": {
+			ID: "R", Body: "human wrote this", CommitOID: "head1",
+			Comments: []github.PendingReviewComment{{ID: "c1", Body: "ok " + github.BotMarker}},
+		},
+	}
+	for name, rev := range cases {
+		t.Run(name, func(t *testing.T) {
+			gh := &fakeGH{pendingData: &github.PendingReviewData{HeadSHA: "head1", Reviews: reviewsOf(rev)}}
+			res, err := New(gh).legacyPendingLookup(context.Background(), "foo/bar#42")
+			if err != nil {
+				t.Fatalf("legacyPendingLookup: %v", err)
+			}
+			if res.Review.AllMarked {
+				t.Fatalf("AllMarked must be false: %+v", res.Review)
+			}
+		})
+	}
+	// per-element flags are individually correct
+	gh := &fakeGH{pendingData: &github.PendingReviewData{HeadSHA: "head1", Reviews: reviewsOf(cases["unmarked comment"])}}
+	res, _ := New(gh).legacyPendingLookup(context.Background(), "foo/bar#42")
+	if !res.Review.Comments[0].Marked || res.Review.Comments[1].Marked {
+		t.Errorf("per-element marker flags wrong: %+v", res.Review)
+	}
+}
+
+func TestLegacyLookupLegacyPGPRMarkerCounts(t *testing.T) {
+	gh := &fakeGH{pendingData: &github.PendingReviewData{HeadSHA: "head1", Reviews: []github.PendingReviewNode{{
+		ID: "R", CommitOID: "head1", Body: legacyPGPRMarker + "\nbody",
+		Comments: []github.PendingReviewComment{{ID: "c1", Body: legacyPGPRMarker + "\nc"}},
+	}}}}
+	res, err := New(gh).legacyPendingLookup(context.Background(), "foo/bar#42")
+	if err != nil {
+		t.Fatalf("legacyPendingLookup: %v", err)
+	}
+	if !res.Review.AllMarked {
+		t.Fatalf("a pg-pr marker must count as marked: %+v", res.Review)
+	}
+}
+
+func TestLegacyLookupNoCommentsBodyMarkedIsAllMarked(t *testing.T) {
+	gh := &fakeGH{pendingData: &github.PendingReviewData{HeadSHA: "head1", Reviews: reviewsOf(pendingReviewAt("head1"))}}
+	res, err := New(gh).legacyPendingLookup(context.Background(), "foo/bar#42")
+	if err != nil {
+		t.Fatalf("legacyPendingLookup: %v", err)
+	}
+	if !res.Review.AllMarked || res.Review.Comments == nil || len(res.Review.Comments) != 0 {
+		t.Fatalf("a marked body with no comments is all-marked with an empty (non-nil) list: %+v", res.Review)
+	}
+}
+
+func TestLegacyLookupReportsURLAndDigestState(t *testing.T) {
+	gh := &fakeGH{pendingData: &github.PendingReviewData{HeadSHA: "head2", Reviews: reviewsOf(postedAsBackend("head1", "summary", "one", "two"))}}
+	res, err := New(gh).legacyPendingLookup(context.Background(), "foo/bar#42")
+	if err != nil {
+		t.Fatalf("legacyPendingLookup: %v", err)
+	}
+	r := res.Review
+	if r.URL != "https://example.invalid/pr/42#review-5001" {
+		t.Errorf("URL = %q", r.URL)
+	}
+	if r.DigestState != "verified" || !r.AllMarked {
+		t.Errorf("untouched backend content must be verified and fully marked: %+v", r)
+	}
+}
+
+// TestLegacyLookupDigestStateTable: the digest, not the marker, is what makes
+// content verified-unedited; a review with no digest is never verified.
+func TestLegacyLookupDigestStateTable(t *testing.T) {
+	mut := func(f func(*github.PendingReviewNode)) *github.PendingReviewNode {
+		r := postedAsBackend("head1", "summary", "one", "two")
+		f(r)
+		return r
+	}
+	cases := map[string]struct {
+		rev        *github.PendingReviewNode
+		wantDigest string
+		wantAll    bool
+	}{
+		"untouched": {postedAsBackend("head1", "summary", "one", "two"), "verified", true},
+		"CRLF-converted body and comments, text otherwise unchanged": {mut(func(r *github.PendingReviewNode) {
+			r.Body = strings.ReplaceAll(r.Body, "\n", "\r\n")
+			for i := range r.Comments {
+				r.Comments[i].Body = strings.ReplaceAll(r.Comments[i].Body, "\n", "\r\n")
+			}
+		}), "verified", true},
+		"marker-preserving comment text edit": {mut(func(r *github.PendingReviewNode) {
+			r.Comments[0].Body = strings.Replace(r.Comments[0].Body, "one", "ONE (edited)", 1)
+		}), "mismatch", true},
+		"marker removed from a comment": {mut(func(r *github.PendingReviewNode) {
+			r.Comments[1].Body = strings.Replace(r.Comments[1].Body, github.BotMarker, "", 1)
+		}), "mismatch", false},
+		"unmarked comment added": {mut(func(r *github.PendingReviewNode) {
+			r.Comments = append(r.Comments, github.PendingReviewComment{ID: "CX", Body: "a human added this"})
+		}), "mismatch", false},
+		"body text edited": {mut(func(r *github.PendingReviewNode) {
+			r.Body = strings.Replace(r.Body, "summary", "summary (edited)", 1)
+		}), "mismatch", true},
+		"posted before digests existed": {&github.PendingReviewNode{
+			ID: "R", DatabaseID: 1, CommitOID: "head1", Body: "x\n" + github.BotMarker,
+			Comments: []github.PendingReviewComment{{ID: "C", Body: "y " + github.BotMarker}},
+		}, "missing", true},
+		"left by pg-pr": {&github.PendingReviewNode{
+			ID: "R", DatabaseID: 1, CommitOID: "head1", Body: "x <!-- pg-pr -->",
+		}, "missing", true},
+		"damaged digest": {mut(func(r *github.PendingReviewNode) {
+			r.Body = strings.Replace(r.Body, github.DigestMarkerPrefix, github.DigestMarkerPrefix+"zz", 1)
+		}), "unreadable", true},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			gh := &fakeGH{pendingData: &github.PendingReviewData{HeadSHA: "head2", Reviews: reviewsOf(c.rev)}}
+			res, err := New(gh).legacyPendingLookup(context.Background(), "foo/bar#42")
+			if err != nil {
+				t.Fatalf("legacyPendingLookup: %v", err)
+			}
+			if res.Review.DigestState != c.wantDigest || res.Review.AllMarked != c.wantAll {
+				t.Errorf("digest_state=%q all_marked=%v, want %q / %v", res.Review.DigestState, res.Review.AllMarked, c.wantDigest, c.wantAll)
+			}
+		})
+	}
+}
+
+// TestLegacyLookupManyPendingReviewsIsAFailedLookup: unlike review_pending, the
+// supersede guard still refuses to act when it cannot tell which pending
+// review it would delete.
+func TestLegacyLookupManyPendingReviewsIsAFailedLookup(t *testing.T) {
+	one, two := stalePending(), stalePending()
+	two.DatabaseID = 5002
+	gh := &fakeGH{pendingData: &github.PendingReviewData{HeadSHA: "deadbeef", Reviews: []github.PendingReviewNode{*one, *two}}}
+	_, err := New(gh).legacyPendingLookup(context.Background(), "foo/bar#42")
+	if !errors.Is(err, scriptout.ErrUnavailable) || !strings.Contains(err.Error(), "detection_failed") {
+		t.Fatalf("err = %v, want unavailable detection_failed", err)
 	}
 }

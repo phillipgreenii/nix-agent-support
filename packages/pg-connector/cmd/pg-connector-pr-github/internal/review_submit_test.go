@@ -168,7 +168,7 @@ func TestReviewSubmitBotMarkerPresent(t *testing.T) {
 // PR's current head is invalid_argument naming the current head, and nothing
 // is posted or deleted (bead pg2-qr4sr).
 func TestReviewSubmitStaleHeadRejectedBeforePosting(t *testing.T) {
-	gh := &fakeGH{pr: &api.PR{HeadSHA: "cafef00d"}, pendingData: &github.PendingReviewData{HeadSHA: "cafef00d", Review: postedAsBackend("old", "s", "c")}}
+	gh := &fakeGH{pr: &api.PR{HeadSHA: "cafef00d"}, pendingData: &github.PendingReviewData{HeadSHA: "cafef00d", Reviews: reviewsOf(postedAsBackend("old", "s", "c"))}}
 	req := baseSubmitReq() // head_sha deadbeef
 	req.SupersedePending = true
 	_, err := New(gh).SubmitReview(context.Background(), req)

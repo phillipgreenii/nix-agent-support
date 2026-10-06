@@ -25,8 +25,9 @@ func TestReviewPending_DispatchRoundTrip(t *testing.T) {
 		Pending: true, HeadSHA: "h2", AsOf: "2026-01-01T00:00:00Z",
 		Review: &PendingReview{
 			ReviewID: "PRR_1", DatabaseID: 7, State: "pending", CommitSHA: "h1", Stale: true,
-			Body: "b", BodyMarked: true, AllMarked: false,
-			Comments: []PendingReviewComment{{ID: "C1", Path: "a.go", Line: 3, Body: "c", Marked: false}},
+			Body: "b", CommentsTotal: 1, CommentsAtHead: 0, ReviewedHead: false, ExtraPendingReviews: 2,
+			LastAppend: &LastAppend{At: "2026-01-01T00:00:00Z", Added: 3, Head: "h1"},
+			Comments:   []PendingReviewComment{{ID: "C1", Path: "a.go", Line: 3, Body: "c", OriginalCommit: "h1"}},
 		},
 	}}
 	entry, ok := NewDispatchTable(p)["review_pending"]
@@ -51,10 +52,25 @@ func TestReviewPending_DispatchRoundTrip(t *testing.T) {
 		}
 	}
 	rev := m["review"].(map[string]any)
-	for _, k := range []string{"review_id", "database_id", "state", "commit_sha", "stale", "body", "body_marked", "comments", "all_marked"} {
+	for _, k := range []string{
+		"review_id", "database_id", "state", "commit_sha", "stale", "body", "comments",
+		"comments_total", "comments_at_head", "reviewed_head", "extra_pending_reviews", "last_append",
+	} {
 		if _, ok := rev[k]; !ok {
 			t.Errorf("review missing key %q: %s", k, raw)
 		}
+	}
+	for _, k := range []string{"digest_state", "all_marked", "body_marked"} {
+		if _, ok := rev[k]; ok {
+			t.Errorf("review must not carry retired key %q: %s", k, raw)
+		}
+	}
+	la := rev["last_append"].(map[string]any)
+	if la["at"] != "2026-01-01T00:00:00Z" || la["added"] != float64(3) || la["head"] != "h1" {
+		t.Errorf("last_append = %v", la)
+	}
+	if c := rev["comments"].([]any)[0].(map[string]any); c["original_commit"] != "h1" || c["marked"] != nil {
+		t.Errorf("comment = %v", c)
 	}
 }
 
@@ -96,5 +112,16 @@ func TestReviewPending_CapabilitiesGating(t *testing.T) {
 				t.Fatalf("inTable=%v inOps=%v want %v", inTable, inOps, c.want)
 			}
 		})
+	}
+}
+
+// TestReviewPending_LastAppendOmittedWhenNever: a review nothing was ever
+// appended to carries no last_append key.
+func TestReviewPending_LastAppendOmittedWhenNever(t *testing.T) {
+	raw, _ := json.Marshal(PendingReview{ReviewID: "r", Comments: []PendingReviewComment{}})
+	var m map[string]any
+	_ = json.Unmarshal(raw, &m)
+	if _, ok := m["last_append"]; ok {
+		t.Errorf("last_append present with no append: %s", raw)
 	}
 }
