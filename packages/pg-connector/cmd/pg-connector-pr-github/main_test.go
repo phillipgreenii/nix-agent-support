@@ -37,6 +37,14 @@ func (fakeGH) ListReviews(ctx context.Context, repo string, number int) ([]api.R
 	return nil, nil
 }
 
+func (fakeGH) ListCommentsReport(ctx context.Context, repo string, number int) (*api.CommentsResult, error) {
+	return &api.CommentsResult{}, nil
+}
+
+func (fakeGH) ListReviewsReport(ctx context.Context, repo string, number int) (*api.ReviewsResult, error) {
+	return &api.ReviewsResult{}, nil
+}
+
 func (fakeGH) CheckAuth(ctx context.Context) error { return nil }
 
 func (fakeGH) SearchPRs(ctx context.Context, query string) ([]api.PR, error) {

@@ -41,6 +41,11 @@ type ghProvider interface {
 	GetPR(ctx context.Context, repo string, number int) (*api.PR, error)
 	ListComments(ctx context.Context, repo string, number int) ([]api.Comment, error)
 	ListReviews(ctx context.Context, repo string, number int) ([]api.Review, error)
+	// ListCommentsReport/ListReviewsReport are ListComments/ListReviews plus
+	// the truncation report of each paged, capped connection; Show uses them so
+	// a response never silently omits what a cap cut.
+	ListCommentsReport(ctx context.Context, repo string, number int) (*api.CommentsResult, error)
+	ListReviewsReport(ctx context.Context, repo string, number int) (*api.ReviewsResult, error)
 	CheckAuth(ctx context.Context) error
 	// SearchPRs runs one GitHub search-syntax query (design's
 	// "implement List" note) and returns every matched PR. Still used by
@@ -175,15 +180,21 @@ func (b *Backend) Show(ctx context.Context, id string) (*schema.PR, error) {
 	if err != nil {
 		return nil, classifyGHError(err)
 	}
-	comments, err := b.gh.ListComments(ctx, repo, number)
+	comments, err := b.gh.ListCommentsReport(ctx, repo, number)
 	if err != nil {
 		return nil, classifyGHError(err)
 	}
-	reviews, err := b.gh.ListReviews(ctx, repo, number)
+	reviews, err := b.gh.ListReviewsReport(ctx, repo, number)
 	if err != nil {
 		return nil, classifyGHError(err)
 	}
-	return toSchemaPR(id, ghPR, comments, reviews, time.Now().UTC()), nil
+	out := toSchemaPR(id, ghPR, comments.Comments, reviews.Reviews, time.Now().UTC())
+	out.Connections = &schema.PRConnections{
+		Reviews:  toSchemaConnectionReport(reviews.Report),
+		Threads:  toSchemaConnectionReport(comments.Threads),
+		Comments: toSchemaConnectionReport(comments.CommentsReport),
+	}
+	return out, nil
 }
 
 // CheckAuth implements pkg/provider.AuthChecker via internal/github's
@@ -984,7 +995,7 @@ func toSchemaPR(id string, in *api.PR, comments []api.Comment, reviews []api.Rev
 // is used as is. The show path cannot get it from GetPR (ghPR has no comments
 // field, so in.CommentCount is always 0 there); it counts the issue-endpoint
 // comments it is handed instead: entries with no thread and no path, which
-// are exactly the ones ListComments builds from the issue-comments endpoint.
+// are exactly the issue (conversation) comments ListComments returns.
 // len(out.Comments) is NOT that count: an inline review comment whose
 // review could not be joined (empty ReviewID) also lands in PR.Comments. A
 // non-nil empty slice (a PR with no comments at all) counts as 0.
@@ -1001,15 +1012,22 @@ func topLevelCommentCount(in *api.PR, comments []api.Comment) int {
 	return n
 }
 
+// toSchemaConnectionReport maps one api.ConnectionReport onto its wire shape.
+func toSchemaConnectionReport(r api.ConnectionReport) schema.PRConnectionReport {
+	return schema.PRConnectionReport{Truncated: r.Truncated, Total: r.Total, Returned: r.Returned}
+}
+
 // toSchemaComment maps one api.Comment onto its schema.PRComment shape.
 func toSchemaComment(c api.Comment) schema.PRComment {
 	return schema.PRComment{
-		ID:       c.ID,
-		Author:   c.Author,
-		Body:     c.Body,
-		Path:     c.Path,
-		Line:     c.Line,
-		ThreadID: c.ThreadID,
-		Resolved: c.Resolved,
+		ID:             c.ID,
+		Author:         c.Author,
+		Body:           c.Body,
+		Path:           c.Path,
+		Line:           c.Line,
+		ThreadID:       c.ThreadID,
+		ReviewThreadID: c.ReviewThreadID,
+		Resolved:       c.Resolved,
+		ThreadOutdated: c.ThreadIsOutdated,
 	}
 }

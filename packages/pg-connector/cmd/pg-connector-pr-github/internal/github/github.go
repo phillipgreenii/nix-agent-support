@@ -1339,163 +1339,18 @@ type ghIssueComment struct {
 	CreatedAt         string `json:"created_at"`
 }
 
-// ghReviewComment is the JSON shape returned by the pulls comments endpoint
-// (review-thread / inline file comments). PullRequestReviewID below is the
-// owning review's REST decimal id, NOT its GraphQL node id — ListComments
-// translates it via reviewNodeIDsByDatabaseID before setting
-// api.Comment.ReviewID [bug pg2-flaes].
-type ghReviewComment struct {
-	NodeID string `json:"node_id"`
-	Body   string `json:"body"`
-	User   struct {
-		Login string `json:"login"`
-	} `json:"user"`
-	Path                string `json:"path"`
-	Line                int    `json:"line"`
-	OriginalLine        int    `json:"original_line"`
-	PullRequestReviewID int64  `json:"pull_request_review_id"`
-	InReplyToID         int64  `json:"in_reply_to_id"`
-	AuthorAssociation   string `json:"author_association"`
-	CreatedAt           string `json:"created_at"`
-}
-
-// ListComments returns all PR comments (top-level + inline review-thread).
-// Top-level (issue) comments are tagged with empty Path/Line; inline
-// comments carry their Path / Line / ThreadID.
+// ListComments returns all PR comments (top-level + inline review-thread),
+// newest first. Top-level (issue) comments are tagged with empty
+// Path/Line/ThreadID; inline comments carry their Path / Line, their own node
+// id as ThreadID and their thread's real id as ReviewThreadID. Reads are
+// paged and capped; use ListCommentsReport to learn whether a cap cut the
+// result (see review_context.go).
 func (p *Provider) ListComments(ctx context.Context, repo string, number int) ([]api.Comment, error) {
-	if err := validateRepo(repo); err != nil {
+	r, err := p.ListCommentsReport(ctx, repo, number)
+	if err != nil {
 		return nil, err
 	}
-	if number <= 0 {
-		return nil, fmt.Errorf("github: invalid PR number %d", number)
-	}
-
-	out := make([]api.Comment, 0)
-
-	// 1. Top-level PR comments (the "issue" comment endpoint).
-	issueRaw, err := p.runRead(
-		ctx,
-		readOpts{allowEmpty: true},
-		"api",
-		fmt.Sprintf("repos/%s/issues/%d/comments", repo, number),
-		"--paginate",
-	)
-	if err != nil {
-		return nil, fmt.Errorf("github: list issue comments: %w", err)
-	}
-	if len(bytes.TrimSpace(issueRaw)) > 0 {
-		var ics []ghIssueComment
-		if err := json.Unmarshal(issueRaw, &ics); err != nil {
-			return nil, fmt.Errorf("github: parse issue-comments JSON: %w", err)
-		}
-		for _, c := range ics {
-			out = append(out, api.Comment{
-				ID:         c.NodeID,
-				Author:     c.User.Login,
-				AuthorRole: strings.ToLower(c.AuthorAssociation),
-				Body:       c.Body,
-				CreatedAt:  c.CreatedAt,
-			})
-		}
-	}
-
-	// 2. Inline / review-thread comments (the "pulls comments" endpoint).
-	reviewRaw, err := p.runRead(
-		ctx,
-		readOpts{allowEmpty: true},
-		"api",
-		fmt.Sprintf("repos/%s/pulls/%d/comments", repo, number),
-		"--paginate",
-	)
-	if err != nil {
-		return nil, fmt.Errorf("github: list review comments: %w", err)
-	}
-	if len(bytes.TrimSpace(reviewRaw)) > 0 {
-		var rcs []ghReviewComment
-		if err := json.Unmarshal(reviewRaw, &rcs); err != nil {
-			return nil, fmt.Errorf("github: parse review-comments JSON: %w", err)
-		}
-		// reviewNodeIDs maps each review's REST decimal id (pull_request_review_id,
-		// below) to its GraphQL node id. Lazily fetched at most once, and only
-		// when a comment actually needs it, via reviewNodeIDsByDatabaseID — see
-		// that function's doc comment for why this translation exists
-		// [bug pg2-flaes].
-		var reviewNodeIDs map[int64]string
-		for _, c := range rcs {
-			line := c.Line
-			if line == 0 {
-				line = c.OriginalLine
-			}
-			// ThreadID: NodeID for the root comment of a thread; for replies,
-			// gh exposes only `in_reply_to_id` (numeric). We use the NodeID
-			// uniformly — Phase 3 will refine when resolveThread mutation
-			// requires the actual review_thread node id.
-			var reviewID string
-			if c.PullRequestReviewID != 0 {
-				if reviewNodeIDs == nil {
-					reviewNodeIDs, err = p.reviewNodeIDsByDatabaseID(ctx, repo, number)
-					if err != nil {
-						return nil, err
-					}
-				}
-				reviewID = reviewNodeIDs[c.PullRequestReviewID]
-			}
-			out = append(out, api.Comment{
-				ID:         c.NodeID,
-				Author:     c.User.Login,
-				AuthorRole: strings.ToLower(c.AuthorAssociation),
-				Body:       c.Body,
-				Path:       c.Path,
-				Line:       line,
-				ThreadID:   c.NodeID,
-				CreatedAt:  c.CreatedAt,
-				ReviewID:   reviewID,
-			})
-		}
-	}
-
-	return out, nil
-}
-
-// reviewNodeIDsByDatabaseID maps each of the PR's reviews' REST decimal id
-// (aka GitHub's "database id", the same value ghReviewComment.PullRequestReviewID
-// carries) to that review's GraphQL node id (e.g. "PRR_kwDOKtdWE88AAAABL3blsA") —
-// the id space ListReviews/PostReview already put on api.Review.ID (from `gh pr
-// view --json reviews` and the POST reviews response's node_id, respectively).
-//
-// The pulls-comments endpoint (ListComments' review-comment source) only ever
-// exposes the decimal pull_request_review_id, never a node id for the owning
-// review, so ListComments calls this to translate before setting
-// api.Comment.ReviewID — otherwise the two ids never match and
-// provider.go's join silently drops every inline review comment
-// [bug pg2-flaes]. The `repos/<repo>/pulls/<number>/reviews` REST endpoint is
-// the one GitHub response that carries both id shapes for a review at once.
-func (p *Provider) reviewNodeIDsByDatabaseID(ctx context.Context, repo string, number int) (map[int64]string, error) {
-	raw, err := p.runRead(
-		ctx,
-		readOpts{allowEmpty: true},
-		"api",
-		fmt.Sprintf("repos/%s/pulls/%d/reviews", repo, number),
-		"--paginate",
-	)
-	if err != nil {
-		return nil, fmt.Errorf("github: list reviews for comment join: %w", err)
-	}
-	out := map[int64]string{}
-	if len(bytes.TrimSpace(raw)) == 0 {
-		return out, nil
-	}
-	var entries []struct {
-		ID     int64  `json:"id"`
-		NodeID string `json:"node_id"`
-	}
-	if err := json.Unmarshal(raw, &entries); err != nil {
-		return nil, fmt.Errorf("github: parse reviews JSON for comment join: %w", err)
-	}
-	for _, e := range entries {
-		out[e.ID] = e.NodeID
-	}
-	return out, nil
+	return r.Comments, nil
 }
 
 // AddComment posts a top-level PR comment via the gh CLI.
@@ -1785,40 +1640,39 @@ type ghReviewEntry struct {
 	Body  string `json:"body"`
 }
 
-// ListReviews fetches the review summaries for a PR. State is one of
-// APPROVED, CHANGES_REQUESTED, COMMENTED. Body is the review-summary text;
-// Comments is left empty — inline comments are fetched via ListComments.
+// ListReviews fetches the review summaries for a PR, newest first. State is
+// one of APPROVED, CHANGES_REQUESTED, COMMENTED, PENDING, DISMISSED. Body is
+// the review-summary text; Comments is left empty — inline comments are
+// fetched via ListComments. Reads are paged and capped; use ListReviewsReport
+// to learn whether the cap cut the result (see review_context.go).
 func (p *Provider) ListReviews(ctx context.Context, repo string, number int) ([]api.Review, error) {
-	if err := validateRepo(repo); err != nil {
-		return nil, err
-	}
-	if number <= 0 {
-		return nil, fmt.Errorf("github: invalid PR number %d", number)
-	}
-	raw, err := p.runRead(
-		ctx,
-		readOpts{},
-		"pr", "view", fmt.Sprintf("%d", number),
-		"--repo", repo,
-		"--json", "reviews",
-	)
+	r, err := p.ListReviewsReport(ctx, repo, number)
 	if err != nil {
 		return nil, err
 	}
-	var envelope struct {
-		Reviews []ghReviewEntry `json:"reviews"`
+	return r.Reviews, nil
+}
+
+// ReviewsWithCommit returns each review's author, state and the commit it was
+// submitted against (Body and ID are populated too, though ListAttention's
+// head-staleness predicate reads only the first three). A review whose commit
+// was since deleted (e.g. a force-pushed-away head) reports a null commit,
+// decoding as an empty CommitOID, which provider.go's reviewIsStale already
+// treats as "does not stand for the current head".
+//
+// The predicate needs the complete review set, so a PR with more reviews than
+// the read cap is an error here rather than a quietly partial answer.
+func (p *Provider) ReviewsWithCommit(ctx context.Context, repo string, number int) ([]api.Review, error) {
+	nodes, total, err := p.reviewsConnection(ctx, repo, number)
+	if err != nil {
+		return nil, err
 	}
-	if err := json.Unmarshal(raw, &envelope); err != nil {
-		return nil, fmt.Errorf("github: parse gh pr view reviews JSON: %w", err)
+	if total > len(nodes) {
+		return nil, fmt.Errorf("github: %s#%d has %d reviews, more than the %d this read returns", repo, number, total, len(nodes))
 	}
-	out := make([]api.Review, 0, len(envelope.Reviews))
-	for _, r := range envelope.Reviews {
-		out = append(out, api.Review{
-			ID:     r.ID,
-			Author: r.Author.Login,
-			State:  r.State,
-			Body:   r.Body,
-		})
+	out := make([]api.Review, 0, len(nodes))
+	for _, n := range nodes {
+		out = append(out, toAPIReview(n))
 	}
 	return out, nil
 }
@@ -1907,95 +1761,6 @@ func (p *Provider) ViewerLogin(ctx context.Context) (string, error) {
 	return resp.Data.Viewer.Login, nil
 }
 
-// reviewsWithCommitQuery fetches a PR's reviews together with the commit
-// SHA each was submitted against (GraphQL's own
-// PullRequestReview.commit.oid) — `gh pr view --json reviews`
-// (ListReviews's own call, ghReviewEntry above) exposes no such
-// sub-field, so ListAttention's own head-staleness check (bead pg2-7wqkr,
-// porting packages/pg-pr/internal/snapshot/attention.go's NeedsAttention
-// CONCEPT) needs this dedicated query instead, mirroring
-// ReplyToThread's/MinimizeComment's own existing ad-hoc "api graphql"
-// call style elsewhere in this file. A review whose commit was since
-// deleted (e.g. a force-pushed-away head) reports a null commit per
-// GitHub's own documented behavior, decoding here as an empty OID —
-// api.Review.CommitOID's own zero value, which ReviewsWithCommit's
-// caller (provider.go's reviewIsStale) already treats as "does not stand
-// for the current head" (conservatively correct, never a crash).
-const reviewsWithCommitQuery = `
-query($owner: String!, $name: String!, $number: Int!) {
-  repository(owner: $owner, name: $name) {
-    pullRequest(number: $number) {
-      reviews(first: 100) {
-        nodes {
-          state
-          commit { oid }
-          author { login }
-        }
-      }
-    }
-  }
-}
-`
-
-// ReviewsWithCommit runs reviewsWithCommitQuery for repo/number and
-// returns each review's author/state/commit-oid (Body/ID left unset —
-// ListAttention's own predicate never reads either).
-func (p *Provider) ReviewsWithCommit(ctx context.Context, repo string, number int) ([]api.Review, error) {
-	if err := validateRepo(repo); err != nil {
-		return nil, err
-	}
-	if number <= 0 {
-		return nil, fmt.Errorf("github: invalid PR number %d", number)
-	}
-	owner, name, ok := strings.Cut(repo, "/")
-	if !ok {
-		return nil, fmt.Errorf("github: repo %q is not in owner/name form", repo)
-	}
-	args := []string{
-		"api", "graphql",
-		"-F", "query=" + reviewsWithCommitQuery,
-		"-f", "owner=" + owner,
-		"-f", "name=" + name,
-		"-F", fmt.Sprintf("number=%d", number),
-	}
-	raw, err := p.runRead(ctx, readOpts{}, args...)
-	if err != nil {
-		return nil, err
-	}
-	var resp struct {
-		Data struct {
-			Repository struct {
-				PullRequest struct {
-					Reviews struct {
-						Nodes []struct {
-							State  string `json:"state"`
-							Commit struct {
-								OID string `json:"oid"`
-							} `json:"commit"`
-							Author struct {
-								Login string `json:"login"`
-							} `json:"author"`
-						} `json:"nodes"`
-					} `json:"reviews"`
-				} `json:"pullRequest"`
-			} `json:"repository"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(raw, &resp); err != nil {
-		return nil, fmt.Errorf("github: parse reviews-with-commit graphql response: %w", err)
-	}
-	nodes := resp.Data.Repository.PullRequest.Reviews.Nodes
-	out := make([]api.Review, 0, len(nodes))
-	for _, n := range nodes {
-		out = append(out, api.Review{
-			Author:    n.Author.Login,
-			State:     n.State,
-			CommitOID: n.Commit.OID,
-		})
-	}
-	return out, nil
-}
-
 // reviewThreadCountQuery fetches a PR's inline code-review comment thread
 // count (GraphQL's own PullRequest.reviewThreads.totalCount — distinct
 // from CommentCount's issue-level comments) — originally the 8th and
@@ -2008,7 +1773,7 @@ func (p *Provider) ReviewsWithCommit(ctx context.Context, repo string, number in
 // fingerprint.go's fingerprintQuery requests the identical
 // `reviewThreads { totalCount }` sub-selection with no pagination args),
 // narrowed here to a single PR via the same repository/pullRequest node
-// shape reviewsWithCommitQuery above already uses.
+// shape reviewsPageQuery (review_context.go) also uses.
 //
 // No longer called by internal/provider.go's List (bead pg2-aehpr:
 // List's per-matched-PR GetPR/ReviewThreadCount fan-out was replaced by

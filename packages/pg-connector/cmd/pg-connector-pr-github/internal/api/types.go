@@ -23,6 +23,14 @@ type Comment struct {
 	ThreadID   string `json:"thread_id,omitempty"`
 	Resolved   bool   `json:"resolved"`
 
+	// ReviewThreadID is the GraphQL node id (PRRT_...) of the review thread
+	// the comment belongs to, taken from reviewThreads.id; empty for a
+	// top-level (issue) comment. It is the value addPullRequestReviewThreadReply
+	// accepts. ThreadID above is a different value (the comment's own node id)
+	// that the thread-reply mutation rejects, and it keeps that meaning for its
+	// existing consumers.
+	ReviewThreadID string `json:"review_thread_id,omitempty"`
+
 	// StartLine is the FIRST line of a multi-line anchor, of which Line is then
 	// the LAST — GitHub's review-comment `start_line`/`line` pair (pg2-3c8mo).
 	//
@@ -68,15 +76,9 @@ type Comment struct {
 	//
 	// MUST be in the SAME id space as Review.ID below: both are GitHub's
 	// GraphQL node-id string (e.g. "PRR_kwDOKtdWE88AAAABL3blsA"), never the
-	// REST decimal id. GitHub's pulls-comments endpoint (this field's
-	// upstream source) only ever exposes the REST decimal
-	// pull_request_review_id, so internal/github's ListComments translates
-	// it to the matching review's GraphQL node id (via
-	// reviewNodeIDsByDatabaseID) before populating this field. Earlier, this
-	// field carried the untranslated decimal id while Review.ID carried the
-	// GraphQL node id (post the 2b93d895/pg2-6hkl5 crash fix) — the two
-	// never matched, so provider.go's join silently dropped every inline
-	// review comment instead of nesting it or falling back to PR.Comments
+	// REST decimal id. internal/github's ListComments reads it straight from
+	// the comment's pullRequestReview.id, so the two always match; a mismatch
+	// would make provider.go's join drop every inline review comment
 	// [bug pg2-flaes].
 	ReviewID string `json:"review_id,omitempty"`
 }
@@ -96,4 +98,34 @@ type Review struct {
 	CommitOID string `json:"commit_oid,omitempty"`
 	// SubmittedAt is the RFC3339 timestamp when the review was submitted.
 	SubmittedAt string `json:"submitted_at,omitempty"`
+}
+
+// ConnectionReport states how much of one GraphQL connection a read returned.
+// Truncated is true only when the connection held more items than the read's
+// cap let it fetch (Total > Returned); a connection of exactly the cap is
+// complete and reports Truncated false.
+type ConnectionReport struct {
+	Truncated bool `json:"truncated"`
+	Total     int  `json:"total"`
+	Returned  int  `json:"returned"`
+}
+
+// CommentsResult is the full comment context of a PR: its issue comments and
+// the comments of every review thread, newest first, plus a report for the
+// thread connection and for the comment set.
+type CommentsResult struct {
+	Comments []Comment
+	// Threads reports the reviewThreads connection.
+	Threads ConnectionReport
+	// CommentsReport covers every returned comment (issue comments and thread
+	// comments together); its Total counts only the threads that were fetched,
+	// so a truncated Threads report means the real total is higher.
+	CommentsReport ConnectionReport
+}
+
+// ReviewsResult is a PR's submitted and pending reviews, newest first, plus a
+// report for the reviews connection.
+type ReviewsResult struct {
+	Reviews []Review
+	Report  ConnectionReport
 }

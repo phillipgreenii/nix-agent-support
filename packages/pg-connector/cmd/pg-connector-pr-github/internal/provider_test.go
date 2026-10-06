@@ -24,9 +24,13 @@ type fakeGH struct {
 	commentsErr error
 	// commentsFn answers ListComments per repo/number (list_activity's
 	// pr.commented kind); it takes precedence over comments/commentsErr.
-	commentsFn   func(ctx context.Context, repo string, number int) ([]api.Comment, error)
-	reviewsErr   error
-	checkAuthErr error
+	commentsFn func(ctx context.Context, repo string, number int) ([]api.Comment, error)
+	// commentsReportFn/reviewsReport let a test supply the truncation reports
+	// Show copies onto the response; unset, both reports are zero.
+	commentsReportFn func(ctx context.Context, repo string, number int) (*api.CommentsResult, error)
+	reviewsReport    *api.ReviewsResult
+	reviewsErr       error
+	checkAuthErr     error
 
 	// getPRFn lets a test answer GetPR per repo/number instead of the
 	// single fixed pr/getPRErr above — needed once a test has more than
@@ -108,6 +112,28 @@ func (f *fakeGH) ListReviews(ctx context.Context, repo string, number int) ([]ap
 		return nil, f.reviewsErr
 	}
 	return f.reviews, nil
+}
+
+func (f *fakeGH) ListCommentsReport(ctx context.Context, repo string, number int) (*api.CommentsResult, error) {
+	if f.commentsReportFn != nil {
+		return f.commentsReportFn(ctx, repo, number)
+	}
+	cs, err := f.ListComments(ctx, repo, number)
+	if err != nil {
+		return nil, err
+	}
+	return &api.CommentsResult{Comments: cs}, nil
+}
+
+func (f *fakeGH) ListReviewsReport(ctx context.Context, repo string, number int) (*api.ReviewsResult, error) {
+	if f.reviewsReport != nil {
+		return f.reviewsReport, nil
+	}
+	rs, err := f.ListReviews(ctx, repo, number)
+	if err != nil {
+		return nil, err
+	}
+	return &api.ReviewsResult{Reviews: rs}, nil
 }
 
 func (f *fakeGH) CheckAuth(ctx context.Context) error {
@@ -227,6 +253,63 @@ func TestBackend_Show_MapsGHDataToSchemaPR(t *testing.T) {
 	}
 	if len(got.Reviews) != 1 || len(got.Reviews[0].Comments) != 1 || got.Reviews[0].Comments[0].ID != "c2" {
 		t.Fatalf("review-nested comments mismatch: %+v", got.Reviews)
+	}
+}
+
+// TestBackend_Show_CarriesReviewThreadIDFlagsAndConnectionReports proves Show
+// maps each inline comment's real review-thread id (distinct from the
+// unchanged thread_id) and its thread flags onto the wire shape, and copies
+// the per-connection truncation reports onto PR.Connections.
+func TestBackend_Show_CarriesReviewThreadIDFlagsAndConnectionReports(t *testing.T) {
+	gh := &fakeGH{
+		pr: &api.PR{Repo: "owner/repo", Number: 7, Title: "T", State: "open"},
+		commentsReportFn: func(context.Context, string, int) (*api.CommentsResult, error) {
+			return &api.CommentsResult{
+				Comments: []api.Comment{
+					{
+						ID: "RC_root", Author: "bob", Body: "inline", Path: "main.go", Line: 3,
+						ThreadID: "RC_root", ReviewThreadID: "PRRT_real", Resolved: true, ThreadIsOutdated: true,
+						ReviewID: "PRR_a",
+					},
+					{ID: "IC_1", Author: "ci-bot[bot]", Body: "conversation"},
+				},
+				Threads:        api.ConnectionReport{Truncated: true, Total: 1001, Returned: 1000},
+				CommentsReport: api.ConnectionReport{Total: 2, Returned: 2},
+			}, nil
+		},
+		reviewsReport: &api.ReviewsResult{
+			Reviews: []api.Review{{ID: "PRR_a", Author: "bob", State: "PENDING", Body: "draft"}},
+			Report:  api.ConnectionReport{Total: 1, Returned: 1},
+		},
+	}
+
+	got, err := newTestBackend(t, gh).Show(context.Background(), "owner/repo#7")
+	if err != nil {
+		t.Fatalf("Show: %v", err)
+	}
+	if len(got.Reviews) != 1 || len(got.Reviews[0].Comments) != 1 {
+		t.Fatalf("reviews = %+v, want the pending review carrying its inline comment", got.Reviews)
+	}
+	c := got.Reviews[0].Comments[0]
+	if c.ReviewThreadID != "PRRT_real" || c.ThreadID != "RC_root" || !c.Resolved || !c.ThreadOutdated {
+		t.Errorf("inline comment = %+v, want review_thread_id PRRT_real with thread_id unchanged and flags set", c)
+	}
+	if len(got.Comments) != 1 || got.Comments[0].ID != "IC_1" || got.Comments[0].ReviewThreadID != "" {
+		t.Errorf("top-level comments = %+v, want just IC_1 with no thread id", got.Comments)
+	}
+	if got.CommentCount != 1 {
+		t.Errorf("CommentCount = %d, want 1 (top-level only)", got.CommentCount)
+	}
+	if got.Connections == nil {
+		t.Fatal("Show must report its connections")
+	}
+	want := schema.PRConnections{
+		Reviews:  schema.PRConnectionReport{Total: 1, Returned: 1},
+		Threads:  schema.PRConnectionReport{Truncated: true, Total: 1001, Returned: 1000},
+		Comments: schema.PRConnectionReport{Total: 2, Returned: 2},
+	}
+	if *got.Connections != want {
+		t.Errorf("Connections = %+v, want %+v", *got.Connections, want)
 	}
 }
 

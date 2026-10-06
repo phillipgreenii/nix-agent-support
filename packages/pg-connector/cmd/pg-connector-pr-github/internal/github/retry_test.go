@@ -281,6 +281,13 @@ func TestRead_BackoffSleepCancelledStopsRetrying(t *testing.T) {
 	}
 }
 
+// emptyConnections answers every connection query of the review-context reads
+// (reviews, review threads, issue comments) with an empty page.
+const emptyConnections = `{"data":{"repository":{"pullRequest":{
+  "reviews":{"totalCount":0,"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[]},
+  "reviewThreads":{"totalCount":0,"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[]},
+  "comments":{"totalCount":0,"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[]}}}}}`
+
 func TestRead_AllReadOpsRetry(t *testing.T) {
 	type op struct {
 		name string
@@ -292,8 +299,8 @@ func TestRead_AllReadOpsRetry(t *testing.T) {
 		{"GetPR", `{"number":7}`, func(p *Provider) error { _, e := p.GetPR(ctx, "acme/widgets", 7); return e }},
 		{"GetFiles", `{"files":[]}`, func(p *Provider) error { _, e := p.GetFiles(ctx, "acme/widgets", 7); return e }},
 		{"GetCommits", `{"commits":[]}`, func(p *Provider) error { _, e := p.GetCommits(ctx, "acme/widgets", 7); return e }},
-		{"ListReviews", `{"reviews":[]}`, func(p *Provider) error { _, e := p.ListReviews(ctx, "acme/widgets", 7); return e }},
-		{"ListComments", `[]`, func(p *Provider) error { _, e := p.ListComments(ctx, "acme/widgets", 7); return e }},
+		{"ListReviews", emptyConnections, func(p *Provider) error { _, e := p.ListReviews(ctx, "acme/widgets", 7); return e }},
+		{"ListComments", emptyConnections, func(p *Provider) error { _, e := p.ListComments(ctx, "acme/widgets", 7); return e }},
 		{"SearchPRs", `[]`, func(p *Provider) error { _, e := p.SearchPRs(ctx, "is:open"); return e }},
 		{"ListMyPRs", `[]`, func(p *Provider) error { _, e := p.ListMyPRs(ctx, "acme/widgets"); return e }},
 		{"ReadRateLimit", okRateLimit, func(p *Provider) error { _, e := p.ReadRateLimit(ctx); return e }},
@@ -304,7 +311,7 @@ func TestRead_AllReadOpsRetry(t *testing.T) {
 			if err := o.run(retryProvider(gh, &fakeSleeper{})); err != nil {
 				t.Fatalf("%s: %v", o.name, err)
 			}
-			// ListComments issues two reads (issue + review comments); the first
+			// ListComments issues two reads (review threads, then issue comments); the first
 			// one fails once and is retried, the second succeeds first time.
 			want := 2
 			if o.name == "ListComments" {
@@ -314,18 +321,6 @@ func TestRead_AllReadOpsRetry(t *testing.T) {
 				t.Errorf("%s: gh calls = %d, want %d", o.name, len(gh.calls), want)
 			}
 		})
-	}
-}
-
-// ListComments' --paginate reads legitimately answer empty output (no
-// comments); that must not be mistaken for a truncated response.
-func TestRead_PaginatedEmptyOutputIsNotRetried(t *testing.T) {
-	gh := &scriptedGH{script: []scripted{okOut("")}}
-	if _, err := retryProvider(gh, &fakeSleeper{}).ListComments(context.Background(), "acme/widgets", 7); err != nil {
-		t.Fatalf("ListComments: %v", err)
-	}
-	if len(gh.calls) != 2 {
-		t.Errorf("gh calls = %d, want 2 (one per endpoint, no retry)", len(gh.calls))
 	}
 }
 

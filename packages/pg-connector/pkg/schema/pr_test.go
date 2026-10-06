@@ -90,12 +90,12 @@ func TestPR_CommentIDAndCommentIDAreStrings(t *testing.T) {
 }
 
 // TestPRSchemaVersion_IsCurrent pins PRSchemaVersion at its current value
-// (bead pg2-2j5ac.52.6.2 bumped 5 -> 6) so an accidental future edit that
+// (the review-context change to show bumped 6 -> 7) so an accidental future edit that
 // forgets to bump it alongside a new field-shape change is caught here
 // first.
 func TestPRSchemaVersion_IsCurrent(t *testing.T) {
-	if PRSchemaVersion != 6 {
-		t.Fatalf("PRSchemaVersion = %d, want 6", PRSchemaVersion)
+	if PRSchemaVersion != 7 {
+		t.Fatalf("PRSchemaVersion = %d, want 7", PRSchemaVersion)
 	}
 }
 
@@ -288,5 +288,55 @@ func TestPR_BaseSHA_JSONRoundTrip(t *testing.T) {
 	}
 	if strings.Contains(string(empty), "base_sha") {
 		t.Errorf("empty BaseSHA must be omitted: %s", empty)
+	}
+}
+
+// TestPR_ReviewContextFieldsRoundTrip pins the wire names of the review-thread
+// id, the thread flags and the per-connection truncation report that `show`
+// carries, and that a list-path PR (no report) omits `connections` entirely.
+func TestPR_ReviewContextFieldsRoundTrip(t *testing.T) {
+	in := PR{
+		ID: "pr-1",
+		Reviews: []PRReview{{
+			ID: "r1",
+			Comments: []PRComment{{
+				ID: "c2", ThreadID: "c2", ReviewThreadID: "PRRT_x", Resolved: true, ThreadOutdated: true,
+			}},
+		}},
+		Connections: &PRConnections{
+			Reviews:  PRConnectionReport{Total: 3, Returned: 3},
+			Threads:  PRConnectionReport{Truncated: true, Total: 1001, Returned: 1000},
+			Comments: PRConnectionReport{Total: 7, Returned: 7},
+		},
+	}
+	raw, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, want := range []string{
+		`"review_thread_id":"PRRT_x"`,
+		`"thread_outdated":true`,
+		`"thread_id":"c2"`,
+		`"threads":{"truncated":true,"total":1001,"returned":1000}`,
+		`"reviews":{"truncated":false,"total":3,"returned":3}`,
+	} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("wire form missing %s in %s", want, raw)
+		}
+	}
+	var out PR
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !reflect.DeepEqual(in, out) {
+		t.Errorf("round trip mismatch:\n in=%+v\nout=%+v", in, out)
+	}
+
+	listRaw, err := json.Marshal(PR{ID: "pr-2"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(listRaw), "connections") {
+		t.Errorf("a PR without a report must omit connections: %s", listRaw)
 	}
 }

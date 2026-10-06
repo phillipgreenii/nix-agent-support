@@ -69,7 +69,13 @@ import "encoding/json"
 // commit the PR's base branch points at). Additive and omitempty, so every
 // version-5 consumer keeps decoding unchanged; the bump follows this const's
 // own rule that ANY field-shape change bumps the version, additive or not.
-const PRSchemaVersion = 6
+//
+// Bumped 6 -> 7 by the review-context change to `show`, which added
+// PRComment.ReviewThreadID and ThreadOutdated and PR.Connections (the
+// per-connection truncated/total/returned report). Additive and omitempty, so
+// every version-6 consumer keeps decoding unchanged; the bump follows this
+// const's own rule that ANY field-shape change bumps the version.
+const PRSchemaVersion = 7
 
 // PR is the pr capability's shared JSON wire shape, returned by the pr
 // capability's "show" op and carried by pkg/provider/pr.Provider.Show
@@ -133,6 +139,14 @@ type PR struct {
 	// Reviews are the PR's review summaries, each carrying its own
 	// review-thread comments (see PRReview.Comments).
 	Reviews []PRReview `json:"reviews,omitempty"`
+	// Connections reports, for the show path only, how much of each of the PR's
+	// reviews, review-thread and comment connections the read returned. Each
+	// entry is {truncated, total, returned}: truncated is true only when the
+	// connection held more than the read's cap (100 per page, up to 1000
+	// reviews, 1000 threads and 1000 comments per PR) let it fetch, so a
+	// consumer MUST NOT treat the PR's reviews, threads or comments as complete
+	// while any entry says truncated. Nil on the list path.
+	Connections *PRConnections `json:"connections,omitempty"`
 
 	// The fields below (bead pg2-2j5ac.28.2) carry facts pg-desk/the
 	// dashboard needs on every "show" so it never has to fan out to a
@@ -211,6 +225,27 @@ type PR struct {
 	BaseSHA string `json:"base_sha,omitempty"`
 }
 
+// PRConnectionReport states how much of one connection a read returned.
+// Truncated is true only when Total exceeds Returned; a connection of exactly
+// the cap is complete and reports false.
+type PRConnectionReport struct {
+	Truncated bool `json:"truncated"`
+	Total     int  `json:"total"`
+	Returned  int  `json:"returned"`
+}
+
+// PRConnections is the per-connection truncation report of a show response,
+// placed at the top level of the PR as "connections":
+// connections.reviews, connections.threads and connections.comments. Comments
+// counts issue comments and review-thread comments together, and its Total
+// covers only the threads that were fetched, so a truncated Threads entry
+// means the real comment total is higher still.
+type PRConnections struct {
+	Reviews  PRConnectionReport `json:"reviews"`
+	Threads  PRConnectionReport `json:"threads"`
+	Comments PRConnectionReport `json:"comments"`
+}
+
 // PRComment is one PR-level or review-thread comment/finding. Both ID (on
 // PR itself, above) and CommentID are strings, carried over as-is from
 // pg-pr's existing api.Comment.ID string field.
@@ -221,7 +256,15 @@ type PRComment struct {
 	Path     string `json:"path,omitempty"`
 	Line     int    `json:"line,omitempty"`
 	ThreadID string `json:"thread_id,omitempty"`
-	Resolved bool   `json:"resolved"`
+	// ReviewThreadID is the real review-thread id (the node id of the thread,
+	// PRRT_ for GitHub) of an inline comment; empty for a top-level comment.
+	// It is the value a reply to the thread needs. ThreadID above is a
+	// different value (the comment's own id) and keeps its meaning.
+	ReviewThreadID string `json:"review_thread_id,omitempty"`
+	// Resolved is the resolved flag of the comment's review thread.
+	Resolved bool `json:"resolved"`
+	// ThreadOutdated is the outdated flag of the comment's review thread.
+	ThreadOutdated bool `json:"thread_outdated,omitempty"`
 }
 
 // PRReview is one PR review summary. Its own inline/review-thread comments
