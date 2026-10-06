@@ -390,6 +390,12 @@
           pg-desk = final.callPackage ./packages/pg-desk {
             inherit (goBuilders) mkGoApp;
           };
+          # work-report: sibling Go module shaped exactly like pg-desk (Pattern
+          # B, local `replace => ../pg-connector` for the test suite only);
+          # `pg-connector` resolves via callPackage against `final.pg-connector`.
+          work-report = final.callPackage ./packages/work-report {
+            inherit (goBuilders) mkGoApp;
+          };
           pa-monitor = final.callPackage ./packages/pa-monitor {
             inherit (goBuilders) mkGoApp;
           };
@@ -4079,6 +4085,21 @@
                 };
                 modRoot = "pg-desk";
                 gomod2nixToml = ./packages/pg-desk/gomod2nix.toml;
+              };
+
+              # work-report: whole-module Go test gate, same Pattern-B shape as
+              # pg-desk-go-tests above (go.mod `replace => ../pg-connector`).
+              work-report-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "work-report-go-tests";
+                src = lib.fileset.toSource {
+                  root = ./packages;
+                  fileset = lib.fileset.unions [
+                    ./packages/work-report
+                    ./packages/pg-connector
+                  ];
+                };
+                modRoot = "work-report";
+                gomod2nixToml = ./packages/work-report/gomod2nix.toml;
               };
 
               # pa-monitor — the largest suite (bead pg2-ymi3l, fast-follow to
@@ -9030,6 +9051,7 @@
               pg-rescue
               integrate-branch-support
               pg-desk
+              work-report
               claude-hook-router
               plugin-conformance-check
               ;
