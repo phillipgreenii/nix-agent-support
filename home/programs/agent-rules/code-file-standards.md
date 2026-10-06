@@ -60,8 +60,27 @@ setup() { gfh_setup "my-suite"; }
 teardown() { gfh_teardown; }
 ```
 
-- Tests MUST use `gfh_setup`/`gfh_teardown`. A second repository under one setup (a bare remote, a
-  clone) MUST come from `gfh_init_repo`.
+- Tests MUST use `gfh_setup`/`gfh_teardown`. A second repository under one setup MUST come from the
+  harness primitive for its kind, never a hand-rolled `git init`/`git clone`:
+  - `gfh_init_repo <path> <suite-name> [--no-identity]` for an additional working repository;
+  - `gfh_init_bare <path>` for a bare remote (branch `main`, hooks disabled);
+  - `gfh_clone <src> <dest> <suite-name> [--no-identity]` for a clone (hooks disabled even during
+    the clone).
+
+  Keep every `<path>`/`<dest>` under `GFH_WORK`.
+
+- `--no-identity` (on `gfh_init_repo`/`gfh_clone`) MUST be used by a test of code that has to
+  handle a repo where git cannot resolve an author: it sets `user.useConfigOnly=true` and no local
+  identity. A test MUST NOT export `GIT_AUTHOR_*`/`GIT_COMMITTER_*` or an identity after
+  `gfh_setup` when relying on it.
+- `gfh_reset_env` (called by `gfh_setup`) unsets every exported variable not on its allowlist. A
+  suite that needs one to survive (for example `SCRIPTS_DIR` or a nix-injected tool path) MUST
+  preserve it with `gfh_save_env VAR...` BEFORE `gfh_setup` and `gfh_restore_env` AFTER it, and MUST
+  NOT re-export any `GIT_*`-family variable that way. `gfh_save_env` replaces hand-rolled
+  copy-to-an-unexported-name-and-back code.
+- A vendored copy under a `test-support/` directory MAY lag the canonical copy and lack the
+  primitives above; a suite that needs one MUST re-vendor the canonical file rather than hand-roll
+  the fixture.
 
 Both libraries are hermetic BY CONSTRUCTION: the fixture lives under a temp root, `HOME` and the
 system git config are neutralised, and the environment is rebuilt from an allowlist rather than
