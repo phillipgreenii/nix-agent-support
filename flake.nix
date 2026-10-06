@@ -184,6 +184,17 @@
           pg-connector-scm-git = final.callPackage ./packages/pg-connector/pg-connector-scm-git.nix {
             inherit (goBuilders) mkGoApp;
           };
+          # pg-connector-activity-git: the activity capability's git commit
+          # Tier-2 backend (docket pg2-vfmp7.9) — a capability-only backend
+          # (list_activity only, registered under activity.sources, never a
+          # connector.<type> key) built by another mkGoApp call over the SAME
+          # packages/pg-connector module from
+          # packages/pg-connector/pg-connector-activity-git.nix.
+          pg-connector-activity-git =
+            final.callPackage ./packages/pg-connector/pg-connector-activity-git.nix
+              {
+                inherit (goBuilders) mkGoApp;
+              };
           # pg-connector-thread-slack: the thread capability's Tier-2
           # backend (Phase 13, bead pg2-2j5ac.40.3) — another mkGoApp call
           # over the SAME packages/pg-connector module (shared src +
@@ -9333,6 +9344,7 @@
               pg-connector-issue-beads
               pg-connector-issue-jira
               pg-connector-scm-git
+              pg-connector-activity-git
               pg-connector-thread-slack
               pg-connector-calendar-osx-bridge
               pg-connector-mail-osx-bridge

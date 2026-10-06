@@ -540,6 +540,7 @@ in
       pkgs.pg-connector-issue-beads
       pkgs.pg-connector-issue-jira
       pkgs.pg-connector-scm-git
+      pkgs.pg-connector-activity-git
       pkgs.pg-connector-thread-slack
       pkgs.pg-connector-calendar-osx-bridge
       pkgs.pg-connector-agentsession-pa-monitor
