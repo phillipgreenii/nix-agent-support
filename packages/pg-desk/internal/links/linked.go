@@ -41,19 +41,20 @@ type Linked struct {
 // Normalized relation of the legacy pr-to-issue ticket-key rows, which the
 // store marks relation "references" / origin "derived:legacy".
 const (
-	relationJira     = "jira"
-	legacyOrigin     = "derived:legacy"
-	legacyRelation   = "references"
-	legacyJiraSource = "pr"
-	legacyJiraTarget = "issue"
-	relationSelf     = "self"
-	relationWork     = "work"
-	relationParent   = "parent"
-	relationMentions = "mentions"
-	relationCI       = "ci"
-	entityTypePR     = "pr"
-	entityTypeIssue  = "issue"
-	entityTypeThread = "thread"
+	relationJira      = "jira"
+	legacyOrigin      = "derived:legacy"
+	legacyRelation    = "references"
+	legacyJiraSource  = "pr"
+	legacyJiraTarget  = "issue"
+	relationSelf      = "self"
+	relationWork      = "work"
+	relationParent    = "parent"
+	relationMentions  = "mentions"
+	relationCI        = "ci"
+	relationDependsOn = "depends_on"
+	entityTypePR      = "pr"
+	entityTypeIssue   = "issue"
+	entityTypeThread  = "thread"
 )
 
 // LinkedReader is the slice of the store ReadLinked needs. *store.Store

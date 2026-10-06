@@ -169,7 +169,7 @@ On the unmigrated store the grouping levels are limited:
 | Level                        | Unmigrated store                                                                  | Migrated store |
 | ---------------------------- | --------------------------------------------------------------------------------- | -------------- |
 | Jira issue (relation `jira`) | Available: the legacy PR-to-issue rows, read as `links.md` reads them (degraded). | Available.     |
-| PR stack                     | Available once the stack dependency source exists (see "Deferred").               | Available.     |
+| PR stack                     | Available once stack grouping is switched on (see "Deferred").                    | Available.     |
 | Work item (relation `work`)  | Not available: falls through to the singleton group.                              | Available.     |
 
 ## Verbs
@@ -251,9 +251,11 @@ absence for a defect.
 
 - **Suppress while a dependency is open.** A candidate raised because the entity itself is broken
   is suppressed while an entity it depends on is open, and fires once the last such dependency has
-  merged. It needs a PR-to-PR dependency source, derived at read time from the stored base and
-  head branches (stack) or recorded by an operator as an external `depends_on` link (migrated store
-  only). A shared issue is a group, never a dependency.
+  merged. The PR-to-PR dependency source it reads exists (derived at read time from the stored base
+  and head branches, the stack, or recorded by an operator as an external `depends_on` link on the
+  migrated store only; see "PR dependencies" in [`links.md`](links.md)), but neither this
+  suppression nor the PR stack grouping level reads it yet. A shared issue is a group, never a
+  dependency.
 - **Re-review after my approval.** Needs the commit each review was submitted against, which the
   connector's review record does not carry. Restoring it is an operator decision tracked outside
   this doc.

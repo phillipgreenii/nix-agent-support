@@ -37,11 +37,11 @@ flowchart LR
 
 ## Per-type links
 
-| Ref type | Links produced                                                                                                                                                  |
-| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pr`     | itself (`self`); one `build` link (`ci`) per failing CI run on the current head; each issue its text names (`jira`); each thread that mentions it (`mentions`). |
-| `issue`  | itself (`self`); the PR it tracks (`work`) or that names it (`jira`); its `parent`                                                                              |
-| `thread` | itself (`self`); the PRs it mentions (`mentions`)                                                                                                               |
+| Ref type | Links produced                                                                                                                                                                                        |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pr`     | itself (`self`); one `build` link (`ci`) per failing CI run on the current head; each PR it depends on (`depends_on`); each issue its text names (`jira`); each thread that mentions it (`mentions`). |
+| `issue`  | itself (`self`); the PR it tracks (`work`) or that names it (`jira`); its `parent`                                                                                                                    |
+| `thread` | itself (`self`); the PRs it mentions (`mentions`)                                                                                                                                                     |
 
 A `pr-ci` ref — the attention item for the operator's own open PR whose CI failed — is the same
 PR under another name: `pr-ci:<owner>/<repo>#<n>` resolves exactly as `pr:<owner>/<repo>#<n>`
@@ -68,6 +68,28 @@ template is configured, the URL stored with the issue's snapshot is used. Only i
 `ticket_patterns` are ever rendered through the template: a bead id never is. No tracker instance
 name appears in `pg-desk`.
 
+## PR dependencies
+
+A PR waits for another PR in one of two ways, and `pg-desk` reads both from the local store only
+(nothing is fetched and nothing is written):
+
+- **Stack.** PR A depends on PR B when A's base branch is B's head branch, in the same repository,
+  and B is open. It is derived each time it is read from the stored PR rows, so it is never older
+  than the store: a base PR that was stored after its dependent is found, and the edge ends the
+  moment B merges or closes. A PR whose head branch is its own base branch (a fork's default branch
+  proposed upstream) is never a stack base. It needs no migrated store.
+- **External.** An operator records `pg-desk pr link add <id> pr:<id> --relation depends_on`
+  (see "External links" below): the PR named first depends on the one named second. It exists only
+  on the migrated store; on an unmigrated store it contributes nothing and is not an error.
+
+Both feed one read, which merges the sources that claim the same edge. Each `depends_on` link of a
+`pr` ref points at a PR it depends on, and its `state` is that PR's stored state (`open`, `merged`
+or `closed`; absent when it has no stored row, which is NOT open). An external link keeps showing
+after its target merged, with `state` `merged`; a stack edge does not. A shared Jira issue is a
+group, never a dependency: three PRs on one issue are siblings. This is the data the attention
+evaluator's dependency suppression and stack grouping read (see [`attention.md`](attention.md));
+that behavior is separate and is described there.
+
 ## Invariants
 
 - **INV-LINKS-1.** The verb MUST be read-only and offline: it MUST NOT hydrate, MUST NOT call the
@@ -87,7 +109,8 @@ name appears in `pg-desk`.
 Cross-reference links with relations exist only on the migrated store. On an unmigrated store the
 verb MUST NOT fail: it degrades to the legacy PR-to-issue ticket-key links, answers them as
 relation `jira`, and reports `"degraded": true` at the top level. Every other link kind is absent
-until the store is migrated.
+until the store is migrated, except the build links and the stack `depends_on` links, which are
+read from the stored PR rows and so work on either schema.
 
 ## External links: `link add` and `link remove`
 

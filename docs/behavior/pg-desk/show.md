@@ -67,8 +67,15 @@ recorded from, so a link added on one entity appears in both entities' views. Ea
 No link carries who closed a work item and no rule may depend on it: `closed_by` does not exist in
 the contract.
 
+For a `pr`, `links[]` also lists each PR it depends on (relation `depends_on`; see "PR
+dependencies" in [`links.md`](links.md)). A stack dependency is derived at read time, so its
+`origins[]` is `derived:stack`; an operator-recorded one carries its `external:<actor>` origin, and
+the two merge into one entry when they name the same PR. `state`, `title` and `url` come from the
+stored snapshot as for any other link, so an open dependency is told from a merged one. On an
+unmigrated store only the stack dependencies appear.
+
 `show` and the read-only `pg-desk links` verb share the one linked-entity read; `pg-desk links`
-keeps its own output unchanged.
+adds the `depends_on` links to its own output and otherwise keeps it unchanged.
 
 ### CI runs (`pr` only)
 

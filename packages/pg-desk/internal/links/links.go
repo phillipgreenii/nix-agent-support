@@ -22,6 +22,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/cirun"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/dependency"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/ticketkey"
 )
@@ -82,6 +83,17 @@ type Deps struct {
 	// CheckInterpreters is config check_interpreters: the build links drop the
 	// runs these patterns exclude, exactly as the dashboard's CI rollup does.
 	CheckInterpreters []config.CheckInterpreterConfig
+	// Dependencies reads PR-to-PR dependencies. Nil builds one over Store and
+	// Repo on first use; a caller answering a batch MAY share one.
+	Dependencies *dependency.Resolver
+}
+
+// dependencies returns the Deps' resolver, creating it on first use.
+func (d *Deps) dependencies() *dependency.Resolver {
+	if d.Dependencies == nil {
+		d.Dependencies = dependency.NewResolver(d.Store, d.Repo)
+	}
+	return d.Dependencies
 }
 
 // Subject is what a Strategy is handed for one ref.
@@ -139,6 +151,7 @@ func ParseRef(ref string) (typ, id string, ok bool) {
 // error (INV-LINKS-2); only an unreadable store is.
 func Resolve(d Deps, refs []string) (Result, error) {
 	reg := NewRegistry()
+	d.dependencies() // one resolver (one entity-table read) for the whole batch
 	res := Result{SchemaVersion: SchemaVersion, Items: map[string]Item{}}
 	if err := d.Store.RequireNewSchema(); err != nil {
 		if !errors.Is(err, store.ErrOldSchema) {
@@ -265,14 +278,19 @@ func selfLink(kind, label, u string) []Link {
 type prStrategy struct{}
 
 // Links for a PR: itself; one build link per failing CI run on its current
-// head (relation ci); the issues its text names (relation jira); the threads
-// that mention it.
+// head (relation ci); the PRs it depends on (relation depends_on); the issues
+// its text names (relation jira); the threads that mention it.
 func (prStrategy) Links(d Deps, s Subject) ([]Link, error) {
 	var out []Link
 	if s.Entity != nil {
 		out = append(out, selfLink(KindPR, prLabel(s.ID), SnapshotURL(entityTypePR, s.Entity.Facts))...)
 		out = append(out, buildLinks(d, s.Entity)...)
 	}
+	deps, err := dependencyLinks(&d, s.ID)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, deps...)
 	prFacts := ""
 	if s.Entity != nil {
 		prFacts = s.Entity.Facts
@@ -292,6 +310,28 @@ func (prStrategy) Links(d Deps, s Subject) ([]Link, error) {
 			}
 			out = append(out, Link{Kind: KindThread, Relation: l.Relation, Label: "Thread", URL: u})
 		}
+	}
+	return out, nil
+}
+
+// dependencyLinks is the dependency producer of the pr strategy: one link per
+// PR the PR depends on, from every dependency source (stack, derived from the
+// stored branches; external, recorded by an operator). The link's state is the
+// dependency's stored state, so a consumer can tell an open dependency from a
+// merged one. Read from the store only, and available on the unmigrated store
+// for the stack source.
+func dependencyLinks(d *Deps, id string) ([]Link, error) {
+	edges, err := d.dependencies().DependenciesOf(entityTypePR, id)
+	if err != nil {
+		return nil, err
+	}
+	var out []Link
+	for _, e := range edges {
+		u, err := entityURL(*d, entityTypePR, e.ID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, Link{Kind: KindPR, Relation: relationDependsOn, Label: prLabel(e.ID), URL: u, State: e.State})
 	}
 	return out, nil
 }

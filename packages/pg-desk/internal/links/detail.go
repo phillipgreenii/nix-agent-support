@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
@@ -55,6 +56,22 @@ func ReadDetailed(d Deps, entityType, id string) (Detailed, error) {
 	linked, asOf, degraded, err := readLinkedAsOf(d.Store, d.Repo, entityType, id)
 	if err != nil {
 		return Detailed{}, err
+	}
+	// A derived dependency (the stack source) has no stored xref row, so it is
+	// added here with its origin; an external depends_on link is already in
+	// linked, with its actor, and is not repeated.
+	if entityType == entityTypePR {
+		edges, derr := d.dependencies().DependenciesOf(entityTypePR, id)
+		if derr != nil {
+			return Detailed{}, derr
+		}
+		for _, e := range edges {
+			for _, o := range e.Origins {
+				if strings.HasPrefix(o, "derived:") {
+					linked = append(linked, Linked{Direction: DirOut, Type: entityTypePR, ID: e.ID, Relation: relationDependsOn, Origins: []Origin{{Origin: o}}})
+				}
+			}
+		}
 	}
 	focusFacts := ""
 	if entityType == entityTypePR {
