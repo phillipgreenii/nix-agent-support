@@ -30,7 +30,13 @@ type Recorder struct {
 	callsPath string
 }
 
-const argSep = "\x1f"
+// argSep ends every recorded argument and callSep ends every recorded call; a
+// newline cannot be the call terminator because an argument (a bead body, say)
+// may contain one.
+const (
+	argSep  = "\x1f"
+	callSep = "\x1e"
+)
 
 // Install writes a fake pg-connector implementing routes, puts it first on
 // PATH for the rest of the test and returns a Recorder of its calls. A call
@@ -43,7 +49,7 @@ func Install(t *testing.T, routes ...Route) *Recorder {
 	var b strings.Builder
 	b.WriteString("#!/bin/sh\n")
 	fmt.Fprintf(&b, "for a in \"$@\"; do printf '%%s\\037' \"$a\"; done >> %s\n", quote(callsPath))
-	fmt.Fprintf(&b, "printf '\\n' >> %s\n", quote(callsPath))
+	fmt.Fprintf(&b, "printf '\\036' >> %s\n", quote(callsPath))
 	for _, r := range routes {
 		var cond []string
 		cond = append(cond, fmt.Sprintf("[ \"$#\" -ge %d ]", len(r.Match)))
@@ -77,7 +83,7 @@ func (r *Recorder) Calls() [][]string {
 		return nil
 	}
 	var out [][]string
-	for _, line := range strings.Split(string(raw), "\n") {
+	for _, line := range strings.Split(string(raw), callSep) {
 		if line == "" {
 			continue
 		}
