@@ -659,7 +659,7 @@ func TestEnsure_argv_includesLabels(t *testing.T) {
 		got = append(got, args)
 		return nil, nil, nil
 	}
-	meta := DispatchMeta("zr-1", "worker", time.Time{}, 0)
+	meta := DispatchMeta("zr-1", "worker", time.Time{}, 0, "")
 	if err := cli.Ensure(context.Background(), "s", "", "/r", nil, meta); err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}

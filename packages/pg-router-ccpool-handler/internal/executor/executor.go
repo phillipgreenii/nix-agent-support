@@ -38,6 +38,11 @@ import (
 type DispatchContext struct {
 	Role roles.Role
 	Item item.Item
+	// EventID is the id of the pg-router event being dispatched (empty when the
+	// caller has none). A redelivery of the same accepted event carries the same
+	// id; it is stamped on the session at launch and bounds duplicate absorption
+	// of a handler-closed settled row (bead pg2-uprw5, ADR 0082).
+	EventID string
 }
 
 // Executor dispatches one item for a role and reports the failure action it took.

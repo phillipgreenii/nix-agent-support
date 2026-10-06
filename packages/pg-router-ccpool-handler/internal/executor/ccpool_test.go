@@ -690,7 +690,7 @@ func TestFindSessionByName_deadRowTreatedAsAbsent(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{tc.sess}}}
 			e := newExec(cc, &dtest.ScriptBD{}, fastCfg())
-			if _, ok := e.findSessionByName(context.Background(), "pg-router-feedback-zr-c"); ok {
+			if _, ok := e.findSessionByName(context.Background(), "pg-router-feedback-zr-c", ""); ok {
 				t.Errorf("dead row must be treated as absent, not a real duplicate")
 			}
 		})
@@ -711,7 +711,7 @@ func TestFindSessionByName_liveMatchFound(t *testing.T) {
 			sess := ccpool.Session{ExternalID: "att-1", Name: "pg-router-feedback-zr-c", Live: true, State: state}
 			cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{sess}}}
 			e := newExec(cc, &dtest.ScriptBD{}, fastCfg())
-			got, ok := e.findSessionByName(context.Background(), "pg-router-feedback-zr-c")
+			got, ok := e.findSessionByName(context.Background(), "pg-router-feedback-zr-c", "")
 			if !ok || got.ExternalID != "att-1" {
 				t.Errorf("live in-flight session (state=%s) must be found as the duplicate; got=%v ok=%v", state, got, ok)
 			}
@@ -734,7 +734,7 @@ func TestFindSessionByName_settledWithoutExplicitClose_stillMatched(t *testing.T
 	sess := ccpool.Session{ExternalID: "att-1", Name: "pg-router-feedback-zr-c", Live: false, State: ccpool.StateIdle}
 	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{sess}}}
 	e := newExec(cc, &dtest.ScriptBD{}, fastCfg())
-	got, ok := e.findSessionByName(context.Background(), "pg-router-feedback-zr-c")
+	got, ok := e.findSessionByName(context.Background(), "pg-router-feedback-zr-c", "")
 	if !ok || got.ExternalID != "att-1" {
 		t.Errorf("a naturally-settled (never explicitly closed) row must still be matched; got=%v ok=%v", got, ok)
 	}
@@ -746,14 +746,103 @@ func TestFindSessionByName_settledWithoutExplicitClose_stillMatched(t *testing.T
 func TestFindSessionByName_handlerClosedSettledRow_stillMatched(t *testing.T) {
 	for _, state := range []ccpool.SessionState{ccpool.StateIdle, ccpool.StateErrored} {
 		t.Run(string(state), func(t *testing.T) {
-			sess := ccpool.Session{ExternalID: "att-1", Name: "pg-router-feedback-zr-c", Live: false, State: state, CloseReason: "handler"}
+			sess := ccpool.Session{
+				ExternalID: "att-1", Name: "pg-router-feedback-zr-c", Live: false, State: state, CloseReason: "handler",
+				Meta: map[string]string{ccpool.MetaKeyEventID: "evt-1"},
+			}
 			cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{sess}}}
 			e := newExec(cc, &dtest.ScriptBD{}, fastCfg())
-			got, ok := e.findSessionByName(context.Background(), "pg-router-feedback-zr-c")
+			got, ok := e.findSessionByName(context.Background(), "pg-router-feedback-zr-c", "evt-1")
 			if !ok || got.ExternalID != "att-1" {
-				t.Errorf("a handler-closed settled row must still be matched; got=%v ok=%v", got, ok)
+				t.Errorf("a handler-closed settled row of the SAME event must still be matched; got=%v ok=%v", got, ok)
 			}
 		})
+	}
+}
+
+// TestStaleSettledRow_cases pins the bound on absorbing a handler-closed
+// settled row (bead pg2-uprw5, ADR 0082): it is a duplicate only for a
+// redelivery of the SAME event. A dispatch with no event id applies no bound;
+// a row with no recorded event id cannot be proven a redelivery.
+func TestStaleSettledRow_cases(t *testing.T) {
+	withEvt := func(id string) map[string]string { return map[string]string{ccpool.MetaKeyEventID: id} }
+	cases := []struct {
+		name    string
+		sess    ccpool.Session
+		eventID string
+		want    bool
+	}{
+		{"same event: a crash-window redelivery", ccpool.Session{State: ccpool.StateIdle, CloseReason: "handler", Meta: withEvt("evt-1")}, "evt-1", false},
+		{"same event, errored row", ccpool.Session{State: ccpool.StateErrored, CloseReason: "handler", Meta: withEvt("evt-1")}, "evt-1", false},
+		{"different event: a legitimate re-dispatch", ccpool.Session{State: ccpool.StateIdle, CloseReason: "handler", Meta: withEvt("evt-1")}, "evt-2", true},
+		{"different event, errored row", ccpool.Session{State: ccpool.StateErrored, CloseReason: "handler", Meta: withEvt("evt-1")}, "evt-2", true},
+		{"row has no event id (older build): not provably a redelivery", ccpool.Session{State: ccpool.StateIdle, CloseReason: "handler"}, "evt-2", true},
+		{"this dispatch has no event id: no bound applies", ccpool.Session{State: ccpool.StateIdle, CloseReason: "handler", Meta: withEvt("evt-1")}, "", false},
+		{"no event id on either side: no bound applies", ccpool.Session{State: ccpool.StateIdle, CloseReason: "handler"}, "", false},
+		{"open settled row is judged by crashOrphaned alone", ccpool.Session{State: ccpool.StateIdle, Meta: withEvt("evt-1")}, "evt-2", false},
+		{"live row is never stale", ccpool.Session{Live: true, State: ccpool.StateIdle, Meta: withEvt("evt-1")}, "evt-2", false},
+		{"row closed by someone else is crashOrphaned's concern", ccpool.Session{State: ccpool.StateIdle, CloseReason: "idle_ttl", Meta: withEvt("evt-1")}, "evt-2", false},
+		{"handler-closed non-terminal row is crashOrphaned's concern", ccpool.Session{State: ccpool.StateWorking, CloseReason: "handler", Meta: withEvt("evt-1")}, "evt-2", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := staleSettledRow(tc.sess, tc.eventID); got != tc.want {
+				t.Errorf("staleSettledRow(%+v, %q) = %v, want %v", tc.sess, tc.eventID, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestFindSessionByName_handlerClosedRow_ofEarlierEventIsAbsent: a handler-
+// closed settled row stamped with a DIFFERENT event's id must be reported as
+// absent, so a legitimate re-dispatch (a reopened review) launches afresh
+// instead of being absorbed into the dead row (bead pg2-uprw5).
+func TestFindSessionByName_handlerClosedRow_ofEarlierEventIsAbsent(t *testing.T) {
+	sess := ccpool.Session{
+		ExternalID: "att-1", Name: "pg-router-feedback-zr-c", Live: false, State: ccpool.StateIdle, CloseReason: "handler",
+		Meta: map[string]string{ccpool.MetaKeyEventID: "evt-1"},
+	}
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{sess}}}
+	e := newExec(cc, &dtest.ScriptBD{}, fastCfg())
+	if got, ok := e.findSessionByName(context.Background(), "pg-router-feedback-zr-c", "evt-2"); ok {
+		t.Errorf("a handler-closed row of an earlier event must not be absorbed; got=%v", got)
+	}
+}
+
+// TestDispatch_reDispatchAfterHandlerClose_launchesFreshSession is the
+// dispatch-level form of the above (bead pg2-uprw5): the handler-closed
+// settled row of event evt-1 still exists when event evt-2 (a reopened review
+// for the same bead and role) dispatches. It must Ensure a fresh session,
+// stamped with evt-2, rather than absorb the dead row and fail with "session
+// exited before completing".
+func TestDispatch_reDispatchAfterHandlerClose_launchesFreshSession(t *testing.T) {
+	cfg := fastCfg()
+	cfg.WorktreeDir = t.TempDir()
+	role := feedbackRole(cfg)
+	display := role.DisplayName(cfg.SessionPrefix, "zr-c")
+	old := ccpool.Session{
+		ExternalID: "att-1", Name: display, Live: false, State: ccpool.StateIdle, CloseReason: "handler",
+		Meta: map[string]string{ccpool.MetaKeyEventID: "evt-1"},
+	}
+
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-c": {"in_progress", "closed"}}}
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{
+		{old}, // findSessionByName: only the earlier event's handler-closed row exists
+		{old, {ExternalID: "att-2", Name: display, Live: true, State: ccpool.StateWorking}},
+	}}
+	d := DispatchContext{Role: role, Item: item.Item{ID: "zr-c"}, EventID: "evt-2"}
+	deps := newExec(cc, bd, cfg).deps
+	deps.ExternalID = "att-2"
+	deps.Git = &dtest.NoopGit{}
+	deps.GitOpener = (&dtest.NoopGitOpener{}).Open
+	if _, err := (ccpoolExecutor{}).Dispatch(context.Background(), d, deps); err != nil {
+		t.Fatalf("re-dispatch should succeed (bead closed), got %v", err)
+	}
+	if got := cc.Ensured; len(got) != 1 || got[0] != "att-2" {
+		t.Errorf("a re-dispatch of a later event must launch a fresh session; Ensured=%v", got)
+	}
+	if got := cc.EnsuredMeta[ccpool.MetaKeyEventID]; got != "evt-2" {
+		t.Errorf("the fresh session must be stamped with its own event id; meta=%v", cc.EnsuredMeta)
 	}
 }
 
@@ -1621,9 +1710,14 @@ func TestDispatch_crashWindowRedelivery_absorbsIntoExistingSession(t *testing.T)
 		// By the time the redelivery lands the handler's own close has stamped the
 		// row (dtest.FakeCC.Close does not mutate it, so it is scripted here). The
 		// settled handler-closed row must still be absorbed (INV-EVT-2).
-		{{ExternalID: "att-1", Name: display, Live: false, State: ccpool.StateIdle, CloseReason: "handler"}},
+		{{
+			ExternalID: "att-1", Name: display, Live: false, State: ccpool.StateIdle, CloseReason: "handler",
+			Meta: map[string]string{ccpool.MetaKeyEventID: "evt-1"},
+		}},
 	}}
-	d := DispatchContext{Role: role, Item: item.Item{ID: "zr-c"}}
+	// The redelivery is the SAME event (same id), which is what bounds the
+	// absorption of a handler-closed row (pg2-uprw5).
+	d := DispatchContext{Role: role, Item: item.Item{ID: "zr-c"}, EventID: "evt-1"}
 
 	dispatch := func(externalID string) (report.Result, error) {
 		deps := newExec(cc, bd, cfg).deps

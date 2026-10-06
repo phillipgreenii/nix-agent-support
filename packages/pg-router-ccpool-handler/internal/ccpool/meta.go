@@ -28,6 +28,14 @@ const (
 	// absorbing: its work was abandoned, so a redelivered dispatch must launch
 	// afresh. Never a --label.
 	MetaKeyOrphanReclaimed = "pgrouter.orphan_reclaimed"
+	// MetaKeyEventID is the id of the pg-router event whose dispatch launched
+	// the session (bead pg2-uprw5, ADR 0082). A redelivery of the SAME accepted
+	// event carries the same id; a later, legitimate re-dispatch for the same
+	// bead and role (a reopened review) is a NEW event with a different id. It is
+	// what lets a dispatch tell a crash-window redelivery from a re-dispatch when
+	// deciding whether to absorb a handler-closed settled row. Absent when the
+	// dispatch carried no event id. Never a --label.
+	MetaKeyEventID = "pgrouter.event_id"
 )
 
 // PoolName is the owner value stamped on pgrouter.pool, identifying pg-router's sessions
@@ -41,12 +49,16 @@ const PoolName = "pg-router"
 // wait (EnsureTimeout) plus one TTL, so a session still launching is never
 // mistaken for an orphan; the handler shortens it to now+TTL on its first
 // refresh once Ensure succeeds. A zero now or a non-positive leaseTTL omits the
-// lease keys (the session is then never treated as an orphan).
-func DispatchMeta(beadID, role string, now time.Time, leaseTTL time.Duration) map[string]string {
+// lease keys (the session is then never treated as an orphan). A non-empty
+// eventID is stamped as MetaKeyEventID; an empty one omits the key.
+func DispatchMeta(beadID, role string, now time.Time, leaseTTL time.Duration, eventID string) map[string]string {
 	m := map[string]string{
 		MetaKeyBead: beadID,
 		MetaKeyRole: role,
 		MetaKeyPool: PoolName,
+	}
+	if eventID != "" {
+		m[MetaKeyEventID] = eventID
 	}
 	if !now.IsZero() && leaseTTL > 0 {
 		m[MetaKeyLaunchedAt] = FormatMetaTime(now)

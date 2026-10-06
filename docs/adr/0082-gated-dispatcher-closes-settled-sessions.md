@@ -1,6 +1,6 @@
 # A gated dispatcher closes the sessions it settles
 
-**Status**: Accepted (amends 0072)
+**Status**: Accepted (amends 0072); item 4 bounded by an event-id check (2026-10-06, bead `pg2-uprw5`)
 **Date**: 2026-10-05
 **Deciders**: Phillip Green II
 
@@ -43,7 +43,15 @@ The dispatch-time reconcile does not help: it closes only sessions whose bead is
    `handler` on its own settled row, duplicate absorption (`INV-EVT-2`) treats a row with close
    reason `handler` in state `idle` or `errored` as a settled duplicate to absorb, instead of
    launching a second session for an already-settled bead. Rows closed with `idle_ttl`,
-   `cap_eviction` or `operator`, and non-terminal dead rows, stay absent.
+   `cap_eviction` or `operator`, and non-terminal dead rows, stay absent. **Bounded by event
+   (2026-10-06, bead `pg2-uprw5`):** the launching dispatch stamps the id of the pg-router event it
+   serves on the session (`pgrouter.event_id`, written by `ccpool new --meta`). A handler-closed
+   settled row is absorbed only by a dispatch carrying that same event id, which is what a
+   crash-window redelivery of the accepted event does. A later dispatch for the same bead and role
+   is a new event with a different id (for example a review bead reopened after a head advance),
+   and launches a fresh session instead. A handler-closed row with no recorded event id (launched
+   by an older build) cannot be proven a redelivery and is not absorbed; a dispatch with no event
+   id applies no bound. Rows that are still open are judged as before.
 
 ## Consequences
 
@@ -51,10 +59,12 @@ The dispatch-time reconcile does not help: it closes only sessions whose bead is
   review pool is no longer blocked for 30 to 35 minutes by a finished review.
 - The row stays resumable only while its bead is open: once the bead is closed, the existing
   dispatch-time reconcile purges it at the next dispatch.
-- Known limitation: a handler-closed `idle` row for a bead that is later re-dispatched (for
-  example a review bead reopened after a head advance) matches the redelivery check by name and
-  is absorbed rather than relaunched, for as long as the row exists. Bounding that (for example
-  to rows whose bead is already complete) is a follow-up, not part of this decision.
+- Former limitation, resolved by bead `pg2-uprw5` (2026-10-06): a handler-closed `idle` row for a
+  bead that was later re-dispatched (for example a review bead reopened after a head advance)
+  matched the redelivery check by name and was absorbed rather than relaunched, for as long as the
+  row existed. Item 4 is now bounded by the event id, so only a redelivery of the same event is
+  absorbed. An unclosed settled row (a failed or deferred close) is still matched by name alone,
+  as before.
 - Orphaned sessions whose handler died (daemon restart, crash) are not covered here; they need a
   supervision step in the reconcile. Later note (2026-10-06): ADR 0083 adds that step, a
   supervision lease the handler keeps fresh and a role-scoped orphan reconcile that acts on an

@@ -113,12 +113,12 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 	// stable name; if so this dispatch is an already-in-flight duplicate, and
 	// absorbing it (rather than starting a second session for the same bead)
 	// closes register row INV-EVT-2 for real (ADR 0065's "Register" section).
-	if existing, ok := r.findSessionByName(ctx, display); ok {
+	if existing, ok := r.findSessionByName(ctx, display, d.EventID); ok {
 		// Take the per-session lock and refresh the supervision lease BEFORE
 		// waiting, so a concurrent orphan reconcile either already finished (the
 		// row is then closed and not absorbable: fall through to a fresh launch)
 		// or sees the fresh lease and stands down (INV-CCH-18).
-		existing, ok, err := r.takeOverForAbsorb(ctx, existing)
+		existing, ok, err := r.takeOverForAbsorb(ctx, existing, d.EventID)
 		if err != nil {
 			return report.Result{}, fmt.Errorf("absorb %s: %w", display, err)
 		}
@@ -210,7 +210,7 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 		"BEADS_DIR":      beadsDirFor(r.deps.Cfg.RepoRoot, cc) + "/.beads",
 		"WORKSPACE_ROOT": wt,
 	}
-	if err := r.deps.CC.Ensure(ctx, r.deps.ExternalID, display, wt, env, ccpool.DispatchMeta(d.Item.ID, d.Role.Name, r.deps.clock(), r.deps.Cfg.LeaseTTL)); err != nil {
+	if err := r.deps.CC.Ensure(ctx, r.deps.ExternalID, display, wt, env, ccpool.DispatchMeta(d.Item.ID, d.Role.Name, r.deps.clock(), r.deps.Cfg.LeaseTTL, d.EventID)); err != nil {
 		// Could not even create the session. The bead was never dispatched, so we
 		// do not flag/unclaim it on a transient hiccup. But a bead that fails to
 		// launch repeatedly is escalated (ADR 0015): stamp pool-launch-fail on the
@@ -739,13 +739,18 @@ func usesWorktreeIsolation(cfg roles.IsolationConfig) bool {
 // settled-session close (CloseReason set otherwise — nothing left to absorb)
 // counts as dead here. A settled row this handler closed itself (CloseReason
 // "handler", idle/errored; INV-CCH-17) is still a duplicate to absorb.
-func (r *ccpoolRun) findSessionByName(ctx context.Context, name string) (ccpool.Session, bool) {
+//
+// A handler-closed settled row is further bounded by the dispatching event
+// (pg2-uprw5, ADR 0082): it is a duplicate only for a redelivery of the SAME
+// event, never for a later re-dispatch of the same bead and role (see
+// staleSettledRow).
+func (r *ccpoolRun) findSessionByName(ctx context.Context, name, eventID string) (ccpool.Session, bool) {
 	sessions, err := r.deps.CC.List(ctx)
 	if err != nil {
 		return ccpool.Session{}, false
 	}
 	for _, s := range sessions {
-		if s.Name == name && !crashOrphaned(s) {
+		if s.Name == name && !crashOrphaned(s) && !staleSettledRow(s, eventID) {
 			return s, true
 		}
 	}
@@ -792,6 +797,38 @@ func crashOrphaned(s ccpool.Session) bool {
 		return !(s.CloseReason == "handler" && settled)
 	}
 	return !settled
+}
+
+// staleSettledRow reports whether s is a handler-closed settled row (the case
+// crashOrphaned deliberately keeps absorbable, ADR 0082) that belongs to an
+// EARLIER event than the one now being dispatched, so absorbing it would be
+// wrong (bead pg2-uprw5).
+//
+// A handler-closed idle/errored row is kept absorbable only so that a
+// crash-window redelivery of the SAME accepted event (INV-EVT-2) finds it and
+// does not launch a second session for already-settled work. A later,
+// legitimate re-dispatch for the same bead and role -- a review bead reopened
+// after a head advance -- is a NEW event, and absorbing it into the dead row
+// would report the old outcome and fail with "session exited before
+// completing". The two are told apart by the event id the launching dispatch
+// stamped on the row (ccpool.MetaKeyEventID):
+//
+//   - this dispatch carries no event id: no bound can be applied, so the row is
+//     not stale (the pre-pg2-uprw5 behavior);
+//   - the row carries no event id (launched by an older build, or by a dispatch
+//     with none): it cannot be proven a redelivery, so it IS stale;
+//   - otherwise it is stale exactly when the ids differ.
+//
+// Only a handler-closed settled row is ever stale here. Rows still open, or
+// closed by anyone else, are judged by crashOrphaned alone.
+func staleSettledRow(s ccpool.Session, eventID string) bool {
+	if eventID == "" || s.CloseReason != "handler" {
+		return false
+	}
+	if s.State != ccpool.StateIdle && s.State != ccpool.StateErrored {
+		return false
+	}
+	return s.Meta[ccpool.MetaKeyEventID] != eventID
 }
 
 // absorbDuplicate treats this dispatch as an already-in-flight duplicate of

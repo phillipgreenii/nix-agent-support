@@ -240,11 +240,15 @@ review`. The claim is still released (status open, assignee cleared) — the lab
   shutdown are exempt; the shutdown sweep owns that teardown. A session that is not yet quiet is
   left open and the deferral is logged. A failed close MUST NOT change the dispatch's outcome; it
   is logged and the session is left to `ccpool`'s idle timeout. A settled row closed this way is
-  still the duplicate a crash-window redelivery of the same dispatch absorbs (`INV-CCH-2`,
+  still the duplicate a crash-window redelivery of the same event absorbs (`INV-CCH-2`,
   `INV-EVT-2`) rather than a reason to launch a second session; a row closed by anyone else, or a
-  non-terminal dead row, is not. Operator ruling (Phillip, 2026-10-05, bead `pg2-58edz`), narrowing
+  non-terminal dead row, is not. The absorption is bounded by the event: the launching dispatch
+  stamps its event id on the session, and a handler-closed row is a duplicate only for a dispatch
+  carrying that same id. A later dispatch for the same bead and role with a different event id (a
+  review reopened after a head advance), or a row with no recorded event id, launches a fresh
+  session instead of being absorbed into the dead row. Operator ruling (Phillip, 2026-10-05, bead `pg2-58edz`), narrowing
   the purge-on-teardown of `phillipgreenii-nix-agent-support` ADR 0015 to a non-purge close; see
-  ADR 0082.
+  ADR 0082. The event bound on absorption is bead `pg2-uprw5`.
 - **`INV-CCH-18`** — a session the handler launched MUST NOT stay unsupervised once its handler is
   gone. While a handler is alive it MUST keep a supervision lease on its session: the lease is
   stamped when the session is launched (covering the whole launch wait, so a session still
