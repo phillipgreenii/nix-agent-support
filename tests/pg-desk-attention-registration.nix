@@ -1,4 +1,4 @@
-# Eval-level test for home/programs/pg-desk's `attention.plugin` option (bead
+# Eval-level test for home/programs/pg-desk's `attentionPlugin` option (bead
 # pg2-5l0x4.5). Evaluates the pg-desk and pg-connector modules together
 # (stubbing only home.packages and xdg.configFile, like
 # tests/pg-connector-home-render.nix) and returns, per scenario, what the
@@ -38,7 +38,11 @@ let
           phillipgreenii.programs.pg-desk = {
             enable = true;
             selfLogin = "example-login";
-            attention.plugin.enable = pluginEnable;
+            attentionPlugin.enable = pluginEnable;
+            # Set alongside the plugin option on purpose: `attention` (a leaf
+            # nullOr submodule) and the plugin option must be able to coexist
+            # in one evaluation (bead pg2-9yuqa).
+            attention.rules."pr.own-ci-failing".enabled = true;
           };
           phillipgreenii.programs.pg-connector = {
             enable = true;

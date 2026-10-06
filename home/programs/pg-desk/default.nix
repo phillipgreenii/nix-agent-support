@@ -534,14 +534,22 @@ in
       '';
     };
 
-    # attention.plugin (bead pg2-5l0x4.5): the `pg-desk-attention` plugin, a
+    # attentionPlugin (bead pg2-5l0x4.5): the `pg-desk-attention` plugin, a
     # scriptout-only `list_attention` backend that answers "which entities
     # need the operator now" from pg-desk's local store
     # (docs/behavior/pg-desk/attention.md). It is a separate binary, not a
     # subcommand of pg-desk, so enabling it both installs it and registers its
     # bare name in pg-connector's `attention.sources` — the umbrella knows the
     # plugin only as that registry entry (ADR 0077's runtime carve-out).
-    attention.plugin = {
+    #
+    # Deliberately a SIBLING of `attention`, not `attention.plugin` (bead
+    # pg2-9yuqa): `attention` above is a leaf `nullOr submodule` option, and Nix
+    # refuses to declare a leaf option and a nested option set at the same
+    # path. Nesting `plugin` inside that submodule instead would make setting
+    # `plugin.enable` flip `attention` from null to non-null and render an
+    # empty `attention:` block into config.yaml, which the null default exists
+    # to avoid. These options are module-level wiring, not config.yaml keys.
+    attentionPlugin = {
       enable = lib.mkEnableOption "the pg-desk-attention plugin: install it and register it in `phillipgreenii.programs.pg-connector.attention.sources`";
       package = lib.mkPackageOption pkgs "pg-desk-attention" { };
     };
@@ -567,7 +575,7 @@ in
     home.packages = [
       cfg.package
     ]
-    ++ lib.optional cfg.attention.plugin.enable cfg.attention.plugin.package;
+    ++ lib.optional cfg.attentionPlugin.enable cfg.attentionPlugin.package;
 
     # Registered LAST in config order: `pg-connector attention list` breaks a
     # dedup tie at equal severity in favor of the earliest source, so the
@@ -575,7 +583,7 @@ in
     # report. The option lives in home/programs/pg-connector, which
     # home/default.nix imports alongside this module; with pg-connector itself
     # disabled the entry renders nowhere.
-    phillipgreenii.programs.pg-connector.attention.sources = lib.mkIf cfg.attention.plugin.enable (
+    phillipgreenii.programs.pg-connector.attention.sources = lib.mkIf cfg.attentionPlugin.enable (
       lib.mkAfter [ "pg-desk-attention" ]
     );
 

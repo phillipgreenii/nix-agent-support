@@ -8636,7 +8636,7 @@
                   touch $out
                 '';
 
-              # home/programs/pg-desk's `attention.plugin` option (bead
+              # home/programs/pg-desk's `attentionPlugin` option (bead
               # pg2-5l0x4.5): enabling it installs pg-desk-attention and appends
               # its bare name LAST to pg-connector's attention.sources; off (the
               # default) it changes nothing. Pure module eval, no package build.
