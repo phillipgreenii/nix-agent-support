@@ -857,3 +857,61 @@ func TestRegistryCandidates_UsesPgPrDirectory(t *testing.T) {
 		t.Errorf("candidates[1] = %q", candidates[1])
 	}
 }
+
+func TestParseRegistry_RejectsCapabilityOnlyBackendUnderConnectorType(t *testing.T) {
+	cases := []struct {
+		name, yaml, key, binary string
+	}{
+		{"list-valued key", "connector:\n  pr:\n    - pg-connector-pr-github\n    - pg-connector-activity-git\n", "connector.pr", "pg-connector-activity-git"},
+		{"single-valued key", "connector:\n  scm: pg-connector-activity-git\n", "connector.scm", "pg-connector-activity-git"},
+		{"other activity-prefixed binary", "connector:\n  issue:\n    - pg-connector-activity-slack\n", "connector.issue", "pg-connector-activity-slack"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reg, err := parseRegistry([]byte(tc.yaml), "test.yaml")
+			if err == nil {
+				t.Fatalf("parseRegistry succeeded (reg=%+v); want rejection", reg)
+			}
+			msg := err.Error()
+			for _, want := range []string{tc.key, tc.binary, "activity.sources"} {
+				if !strings.Contains(msg, want) {
+					t.Errorf("error %q does not contain %q", msg, want)
+				}
+			}
+		})
+	}
+}
+
+func TestParseRegistry_AcceptsCapabilityOnlyBackendUnderActivitySources(t *testing.T) {
+	reg, err := parseRegistry([]byte(`
+connector:
+  pr:
+    - pg-connector-pr-github
+activity:
+  sources:
+    - pg-connector-activity-git
+attention:
+  sources:
+    - pg-connector-pr-github
+search:
+  sources:
+    - pg-connector-pr-github
+`), "test.yaml")
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+	got, err := reg.ActivitySources()
+	if err != nil {
+		t.Fatalf("ActivitySources: %v", err)
+	}
+	if len(got) != 1 || got[0] != "pg-connector-activity-git" {
+		t.Fatalf("ActivitySources = %+v", got)
+	}
+	// attention/search behavior is unchanged.
+	if att, err := reg.AttentionSources(); err != nil || len(att) != 1 {
+		t.Fatalf("AttentionSources = %+v, %v", att, err)
+	}
+	if sr, err := reg.SearchSources(); err != nil || len(sr) != 1 {
+		t.Fatalf("SearchSources = %+v, %v", sr, err)
+	}
+}

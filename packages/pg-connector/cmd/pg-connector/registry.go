@@ -183,6 +183,12 @@ func parseRegistry(data []byte, path string) (*Registry, error) {
 	if err := validateConnectorKeys(doc.Connector); err != nil {
 		return nil, fmt.Errorf("registry: parse %s: %w", path, err)
 	}
+	// A capability-only backend (pg-connector-activity-*) is registered only
+	// under activity.sources; reject it under any connector.<type> at load
+	// time so a bad config fails fast whichever accessor runs later.
+	if err := validateNoCapabilityOnlyBackends(doc.Connector); err != nil {
+		return nil, fmt.Errorf("registry: parse %s: %w", path, err)
+	}
 	reg := &Registry{raw: doc.Connector, backends: doc.Backends, state: doc.State}
 	if doc.Attention != nil {
 		reg.attentionSources = doc.Attention.Sources
@@ -215,6 +221,50 @@ func validateConnectorKeys(connector map[string]yaml.Node) error {
 	sort.Strings(unknown)
 	return fmt.Errorf("connector.%s: unknown key(s) under connector: — must be one of %s",
 		strings.Join(unknown, ", "), strings.Join(entityTypes, ", "))
+}
+
+// capabilityOnlyBackendPrefix is the binary-name prefix reserved for
+// capability-only backends: a backend that implements only list_activity,
+// has no auth_status, and is therefore not a fan-out member of any
+// connector.<type>. Such a binary belongs only under activity.sources.
+const capabilityOnlyBackendPrefix = "pg-connector-activity-"
+
+// validateNoCapabilityOnlyBackends rejects any binary whose name starts with
+// capabilityOnlyBackendPrefix (including pg-connector-activity-git) found
+// under a connector.<type> key, list-valued or single-valued alike. The error
+// names the offending key and binary. Values that do not decode as a list of
+// names or a single name are skipped here: List/Single report those shape
+// errors themselves when an accessor runs.
+func validateNoCapabilityOnlyBackends(connector map[string]yaml.Node) error {
+	keys := make([]string, 0, len(connector))
+	for k := range connector {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		node := connector[k]
+		var names []string
+		switch node.Kind {
+		case yaml.SequenceNode:
+			if err := node.Decode(&names); err != nil {
+				continue
+			}
+		case yaml.ScalarNode:
+			var single string
+			if err := node.Decode(&single); err != nil {
+				continue
+			}
+			names = []string{single}
+		default:
+			continue
+		}
+		for _, name := range names {
+			if strings.HasPrefix(name, capabilityOnlyBackendPrefix) {
+				return fmt.Errorf("connector.%s: backend %q is a capability-only backend and must be registered only under activity.sources, not under connector.<type>", k, name)
+			}
+		}
+	}
+	return nil
 }
 
 // validateBackendName rejects a registered backend name that cannot be a
@@ -441,8 +491,11 @@ func (r *Registry) SearchSources() ([]string, error) {
 // activity.sources key: the bare binary names invoked by the activity list
 // verb and by nothing else (they are not part of AllBackends). Absent
 // activity key (or nested sources: key) returns (nil, nil); an explicit
-// sources: [] is rejected. A binary MAY also appear under connector.<type>;
-// no cross-check is made.
+// sources: [] is rejected. A capability-only backend (any binary named
+// pg-connector-activity-*, e.g. pg-connector-activity-git) MUST appear only
+// here: parseRegistry rejects it under any connector.<type> key at load time,
+// so a registry that lists it there never loads. Other binaries MAY also
+// appear under connector.<type>; no cross-check is made for them.
 func (r *Registry) ActivitySources() ([]string, error) {
 	if r == nil {
 		return nil, nil
