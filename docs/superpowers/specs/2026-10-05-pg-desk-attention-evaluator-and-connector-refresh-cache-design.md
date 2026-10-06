@@ -318,8 +318,11 @@ applies, in this order:
    `docs/behavior/pg-desk/annotate.md`).
 3. A registered context suppressor claims it. The first context suppressor is
    `blocked-by-open-dependency` (section 8): a candidate raised because the entity itself is broken
-   (CI failing, conflict) is suppressed while any entity it depends on is still open and not
-   itself broken-and-actionable.
+   (CI failing, conflict) is suppressed while any entity it depends on is still open. The rule
+   deliberately does NOT ask whether that dependency is itself broken or actionable: doing so
+   would make suppression circular, because the dependency's own suppression would have to be
+   evaluated first (and a dependency cycle would never resolve). Any open dependency suppresses,
+   matching section 8 and `A7`.
 
 An entity with a surviving candidate yields exactly ONE item: the umbrella dedups by `{type, id}`
 (`INV-ATTN-1`), so two items for one PR would let one swallow the other, which is the reason the
