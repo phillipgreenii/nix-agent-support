@@ -13,6 +13,8 @@ import (
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/ccpool"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/usage"
 	"github.com/phillipgreenii/x/gitclient"
+	"github.com/phillipgreenii/x/gitfixture"
+	"github.com/phillipgreenii/x/gittest"
 )
 
 // wedgeSleepDuration matches the fixed sleep inside the wrapper script
@@ -95,66 +97,26 @@ func TestTerminal_unclaimsNotesNoHuman(t *testing.T) {
 	}
 }
 
-// fixtureGitEnv is a minimal, explicit environment for the git commands this
-// test file uses to BUILD and INSPECT fixtures: PATH plus a fixed test
-// identity, and nothing else from the ambient environment.
-//
-// HOME is pointed at its own fresh t.TempDir() rather than forwarded, unlike
-// production gitenv.Environ (which must forward the real HOME to keep
-// working against the operator's actual repos): this machine's real HOME
-// wires a global git hook that refuses a commit whose author identity looks
-// like a placeholder ("t"/"example.com"/...) -- exactly the identity these
-// fixtures use. GIT_CONFIG_NOSYSTEM/_GLOBAL/_SYSTEM back the isolation
-// belt-and-suspenders. This function is also deliberately the ONLY place in
-// this file GIT_-prefixed variables are set, and it never forwards ambient
-// ones -- including GIT_DIR/GIT_WORK_TREE the tests below set via t.Setenv
-// to simulate the leak -- so fixture setup/inspection cannot itself be
-// disturbed by the exact leak openGit/gitclient and OSGit.Run are being
-// checked against. Mirrors ccpool's gitfacet_test.go testGitEnv (pg2-aqpvr).
-func fixtureGitEnv(t *testing.T) []string {
+// initFixtureRepo creates a hermetic fixture repository from x/gittest
+// (temp root, fixture HOME, environment rebuilt from an allowlist, so a leaked
+// ambient GIT_DIR/GIT_WORK_TREE -- including the ones the tests below set via
+// t.Setenv to simulate the leak -- can never redirect fixture setup or
+// inspection), checked out on branch with one empty commit so HEAD resolves.
+// The repository lives at the returned Repo's Dir (symlink-resolved).
+func initFixtureRepo(t *testing.T, branch string) *gitfixture.Repo {
 	t.Helper()
-	return []string{
-		"PATH=" + os.Getenv("PATH"),
-		"HOME=" + t.TempDir(),
-		"GIT_CONFIG_NOSYSTEM=1",
-		"GIT_CONFIG_GLOBAL=/dev/null",
-		"GIT_CONFIG_SYSTEM=/dev/null",
-		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
-		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t",
-	}
-}
-
-func runFixtureGit(t *testing.T, dir string, args ...string) string {
-	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	cmd.Env = fixtureGitEnv(t)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git -C %s %v: %v\n%s", dir, args, err, out)
-	}
-	return string(out)
-}
-
-// initFixtureRepo creates a fresh git repo at a temp dir, checked out on
-// branch, with one empty commit so HEAD resolves.
-func initFixtureRepo(t *testing.T, branch string) string {
-	t.Helper()
-	dir := t.TempDir()
-	dir, err := filepath.EvalSymlinks(dir)
-	if err != nil {
+	fx := gittest.New(t, gitfixture.RepoOptions{Suite: "watchdog-terminal", InitialBranch: branch})
+	if _, err := fx.Commit(context.Background(), "init", nil); err != nil {
 		t.Fatal(err)
 	}
-	runFixtureGit(t, dir, "init", "-q", "-b", branch)
-	runFixtureGit(t, dir, "commit", "-q", "--allow-empty", "-m", "init")
-	return dir
+	return fx
 }
 
-// fixtureConfigGet reads a --local git config key, returning "" if unset.
-func fixtureConfigGet(t *testing.T, dir, key string) string {
+// fixtureConfigGet reads a --local git config key from the fixture repository,
+// returning "" if unset.
+func fixtureConfigGet(t *testing.T, fx *gitfixture.Repo, key string) string {
 	t.Helper()
-	cmd := exec.Command("git", "-C", dir, "config", "--local", "--get", key)
-	cmd.Env = fixtureGitEnv(t)
-	out, err := cmd.Output()
+	out, err := fx.Client.Run(context.Background(), "config", "--local", "--get", key)
 	if err != nil {
 		return ""
 	}
@@ -178,8 +140,9 @@ func TestGitClientToplevel_ignoresLeakedGitDir(t *testing.T) {
 		t.Skip("git not available")
 	}
 
-	target := initFixtureRepo(t, "target-branch")
-	leaked := initFixtureRepo(t, "leaked-branch")
+	targetFx := initFixtureRepo(t, "target-branch")
+	leakedFx := initFixtureRepo(t, "leaked-branch")
+	target, leaked := targetFx.Dir, leakedFx.Dir
 
 	t.Setenv("GIT_DIR", filepath.Join(leaked, ".git"))
 	t.Setenv("GIT_WORK_TREE", leaked)
@@ -220,8 +183,9 @@ func TestOSGitRun_ignoresLeakedGitDir(t *testing.T) {
 		t.Skip("git not available")
 	}
 
-	target := initFixtureRepo(t, "target-branch")
-	leaked := initFixtureRepo(t, "leaked-branch")
+	targetFx := initFixtureRepo(t, "target-branch")
+	leakedFx := initFixtureRepo(t, "leaked-branch")
+	target, leaked := targetFx.Dir, leakedFx.Dir
 
 	// Simulate the leak vector: GIT_DIR/GIT_WORK_TREE set in the ambient
 	// environment pointing at a DIFFERENT repository than the one OSGit.Run
@@ -234,10 +198,10 @@ func TestOSGitRun_ignoresLeakedGitDir(t *testing.T) {
 		t.Fatalf("OSGit.Run config: %v", err)
 	}
 
-	if got := fixtureConfigGet(t, target, "pgbh09g.marker"); got != "target-value" {
+	if got := fixtureConfigGet(t, targetFx, "pgbh09g.marker"); got != "target-value" {
 		t.Fatalf("target repo's config is missing the value OSGit.Run wrote (got %q) -- a leaked GIT_DIR/GIT_WORK_TREE may have redirected the write elsewhere", got)
 	}
-	if got := fixtureConfigGet(t, leaked, "pgbh09g.marker"); got != "" {
+	if got := fixtureConfigGet(t, leakedFx, "pgbh09g.marker"); got != "" {
 		t.Fatalf("leaked repo's config carries the marker (%q); OSGit.Run wrote into the LEAKED repository instead of the directory it was explicitly given (%s)", got, target)
 	}
 }
@@ -301,7 +265,7 @@ func TestSafeToReset_boundsWedgedToplevelProbe(t *testing.T) {
 	}
 	defer func() { openGit = restore }()
 
-	target := initFixtureRepo(t, "target-branch")
+	target := initFixtureRepo(t, "target-branch").Dir
 
 	start := time.Now()
 	got := safeToReset(context.Background(), target, "/does/not/exist", filepath.Dir(target))
@@ -342,7 +306,7 @@ func TestTerminal_boundsWedgedReset(t *testing.T) {
 	}
 	defer func() { openGit = restore }()
 
-	repo := initFixtureRepo(t, "wt-branch")
+	repo := initFixtureRepo(t, "wt-branch").Dir
 
 	cc := &fakeCC{list: []ccpool.Session{{ExternalID: "s", CWD: repo}}}
 	bd := &recBD{}

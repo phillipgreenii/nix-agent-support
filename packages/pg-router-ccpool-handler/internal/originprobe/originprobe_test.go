@@ -13,7 +13,8 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/config"
-	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/gitenv"
+	"github.com/phillipgreenii/x/gitfixture"
+	"github.com/phillipgreenii/x/gittest"
 )
 
 // clock is a settable fake time source.
@@ -365,11 +366,15 @@ func TestGitRunner_realLocalRemote(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(tmp, "gitconfig"))
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
-	work := filepath.Join(tmp, "work")
-	src := filepath.Join(tmp, "src")
-	mustGit(t, tmp, "init", "-q", work)
-	mustGit(t, tmp, "init", "-q", src)
-	mustGit(t, src, "-c", "user.name=t", "-c", "user.email=t@example.test", "commit", "--allow-empty", "-q", "-m", "init")
+	// Both repositories come from x/gittest: hermetic by construction (temp
+	// root, fixture HOME, allowlisted environment), so a leaked GIT_DIR from a
+	// commit hook cannot redirect fixture setup.
+	workFx := gittest.New(t, gitfixture.RepoOptions{Suite: "originprobe-work"})
+	srcFx := gittest.New(t, gitfixture.RepoOptions{Suite: "originprobe-src"})
+	if _, err := srcFx.Commit(context.Background(), "init", nil); err != nil {
+		t.Fatal(err)
+	}
+	work, src := workFx.Dir, srcFx.Dir
 
 	// The remote is a second local repository, so no network is involved.
 	w := config.WatchedOrigin{Key: "git.example.test/o/r", RepoRoot: work, Remote: src}
@@ -388,15 +393,5 @@ func TestGitRunner_realLocalRemote(t *testing.T) {
 	d := p.Check(context.Background(), bad)
 	if d.State.Class == OK || !d.Gated {
 		t.Fatalf("unreachable remote must gate at K=1: %+v", d)
-	}
-}
-
-func mustGit(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	// gitenv.Command drops a leaked GIT_DIR/GIT_WORK_TREE (a commit hook
-	// exports them), which would otherwise redirect this fixture setup.
-	cmd := gitenv.Command(context.Background(), dir, args...)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
 }
