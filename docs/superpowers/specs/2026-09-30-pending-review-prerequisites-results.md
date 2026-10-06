@@ -4,6 +4,12 @@
 - **Bead**: `pg2-kftf9.11` (experiment); design under test: `2026-09-29-pending-review-handling-investigation.md` (bead `pg2-kftf9.10`), section "Prerequisite proof plan".
 - **Verdict summary**: the technical mechanics the design relies on are PROVEN (P2, P4, P5, P7, P8 PASS; P1 and P3 PASS on the API-observable parts). The 2026-09-30 run left three gaps (G1 to G3) because they needed something that run was not authorized to use: a second GitHub identity (P1 part b), a human web-UI edit (P3 UI part), and fine-grained tokens (P6). All three were closed by the operator on 2026-10-02, and the outcomes are recorded under "Gap closure (2026-10-02)": G1 confirmed, G2 measured (and it produced two new design corrections), G3 closed by an operator decision that is NOT a measurement of fine-grained tokens.
 
+> **2026-10-06 note (bead `pg2-8qui6`):** the evidence below stays valid, but the design conclusions
+> drawn from it that favor delete-and-recreate (P5's "reuse is not the default", the commit-equality
+> stale guard, `delete_refused`) are superseded by create-or-append. The follow-up live proofs
+> (anchoring by `originalCommit`, replies, races, batching, pagination, force-push) are in
+> `2026-10-06-pending-review-reuse-design.md`, section "Evidence".
+
 ## Method and environment
 
 - Throwaway PRIVATE repository `pending-review-scratch` under the single authorized GitHub account, using the existing `gh` login (classic OAuth token, scopes `gist`, `read:org`, `repo`). No other account, org, repo, or host was touched. The PR author and the reviewer were the same identity (the same shape as the router worker, which posts under the operator's own account).

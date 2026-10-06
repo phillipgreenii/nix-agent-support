@@ -48,6 +48,18 @@ the code, and it changes none of S1 to S28. The operator's rulings it builds on 
 unremovable stale pending reviews MUST escalate quickly (2026-09-29) and "no further changes are to
 be made to pg-pr" (2026-10-03).
 
+**Amended 2026-10-06** (bead `pg2-8qui6`): the guarded supersede and the escalator host recorded in
+the two amendments of 2026-10-03 above are SUPERSEDED by create-or-append (operator rulings, Phillip,
+2026-10-05 and 2026-10-06; design `docs/superpowers/specs/2026-10-06-pending-review-reuse-design.md`).
+`review submit` reuses the acting identity's pending review, or creates one, and never deletes
+or replaces; its statuses are exactly `posted`, `append` and `no_change`, and `skipped`, `replaced` and
+`blocked_human_pending` are retired. With them go the archive-before-delete step, the content-digest
+guard (`digest_state`), the escalation, `pg-router-review-escalator` and the escalation filter. The
+`pr review pending` record (9.1a) gains per-head comment counts and loses `digest_state`, and pg-desk's
+`stale` becomes "nothing is anchored to the current head". It changes none of S1 to S28 beyond the
+in-place clarification of S27's example. The superseded text is kept below, marked, because the code
+it describes stays deployed until the implementation lands.
+
 **Amendment 2026-10-05** (design bead `pg2-ii38x`, operator rulings recorded on decision bead
 `pg2-32wg6`, in force): rows S29 through S35, in the section "Amendment 2026-10-05" before Related
 Decisions, change how the pull-through detects a change (a pg-desk-owned baseline written with the
@@ -231,9 +243,11 @@ This cluster records S4, S5, S6, S7, S19, S22, S27, S28.
 - **S27** — Each tool keeps its own exit-code scheme; the schemes are not bound together, and an
   adapter translates between what it calls and who calls it. `pg-connector pr review submit`
   follows pg-connector's own `INV-EXIT-1` Targeted scheme, unchanged: 0 = completed with a
-  well-formed result, including a `blocked_human_pending` outcome, which the JSON output's
-  `status` reports (rewritten in place 2026-10-03, bead `pg2-kftf9.13`; it used to name a review
-  that posted when the `supersede_pending` delete failed, a case the guarded supersede replaced);
+  well-formed result, including a `no_change` outcome, which the JSON output's `status` reports
+  (rewritten in place 2026-10-03, bead `pg2-kftf9.13`, and again 2026-10-06, bead `pg2-8qui6`: it
+  named `blocked_human_pending`, an outcome create-or-append retired, and before that a review that
+  posted when the `supersede_pending` delete failed); a run in which some comments did not land is
+  an error (exit 1), not a result;
   4 = `not_found`; 1 = any other error. The source adapter translates pg-desk's codes into
   pg-router's command-query contract instead of mirroring them: pg-desk 0 or 2 becomes exit 0,
   emitting every record, with `metadata.degraded_sources` carrying the degraded detail; pg-desk 3
@@ -426,8 +440,10 @@ This cluster records S9, S13, S14, S15, S16, S17, S20, S21, S24, S26.
 - Because no issue or thread decider ships on day one, pg-desk's issue and thread coverage is
   watched, hydrated and logged but never acted on until an operator configures a query/role pair
   for a decider of that type.
-- **The escalation of a blocked pending review is hosted outside the deciders, for now** (bead
-  `pg2-kftf9.15`, 2026-10-03). The bead left one point open: whether the escalation for a
+- **SUPERSEDED 2026-10-06 (bead `pg2-8qui6`): there is no blocked pending review to escalate any more,
+  so the escalator and this host decision are retired once the implementation lands.** Text kept for the
+  deployed state until then. **The escalation of a blocked pending review is hosted outside the
+  deciders, for now** (bead `pg2-kftf9.15`, 2026-10-03). The bead left one point open: whether the escalation for a
   `blocked_human_pending` outcome of `pg-connector pr review submit` is a pg-decider rule or a
   pg-router integration. It is a pg-router integration, the stdlib-only command binary
   `pg-router-review-escalator` (`packages/pg-router-review-escalator`), a leaf like

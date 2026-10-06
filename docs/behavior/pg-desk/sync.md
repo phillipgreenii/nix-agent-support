@@ -99,38 +99,35 @@ prompts that read these shapes, in the same change:
     should get its own bead instead is the open design question `pg2-b3tdu`; until it is ruled,
     this reopen-per-PR rule stands.)
   - The worker MUST close the bead once the review for its head is in place, that is when
-    `pg-connector pr review submit` (called through `pg-router-review-escalator submit`) reports
-    `posted`, `skipped` (reason `pending_review_exists_same_head`) or `replaced`. A same-head
-    review that is still an unsubmitted PENDING review counts as done: the bead MUST NOT stay
-    open waiting for a person to submit it, and a `skipped` result MUST NOT be handed back.
-  - A stale own PENDING review of an older head is cleared by the submit itself
-    (`supersede_pending`: archive, delete, repost; status `replaced`), so the worker needs no
-    "Human: unblock" bead. When the stale review cannot be removed (human-edited, delete refused,
-    detection failure) the status is `blocked_human_pending`: nothing is changed, the tool raises
-    the single deduplicated `human` + `human-focus-required` escalation for the PR, and the worker
-    records a comment and releases the bead ONCE (deferred, so it is not redispatched at once).
+    `pg-connector pr review submit` reports `posted`, `append` or `no_change`. A review that is
+    still an unsubmitted PENDING review counts as done: the bead MUST NOT stay open waiting for a
+    person to submit it, and a `no_change` result MUST NOT be handed back. Any error, including a
+    run in which some comments did not land, is handed back, and the retry converges because the
+    tool never repeats a comment it already posted.
+  - An existing own PENDING review, of any head, is REUSED by the submit itself: the new head's
+    comments are appended to it and are anchored to the new head, while the comments already in it
+    stay on the head they were made at. Nothing is deleted or replaced, so the worker needs no
+    "Human: unblock" bead and nothing is escalated. A stale comment staying on an older head is
+    accepted. The operator's own edits to the pending review are preserved, a comment the operator
+    deleted is not re-added, and the tool never submits the review.
   - The reopen on head advance MUST clear that deferral in the same `issue update`
     (`--clear-defer`; `pg2-vhs3e`). The deferral was set for the OLD head, and the tracker keeps
     `defer_until` across a reopen (verified on bd 1.2.2), so a reopen that left it in place would
     hide the NEW head from every ready query for up to the deferral (12 hours).
-  - While an open pending-review escalation covers the PR's current head the review request is
-    not dispatched at all. That is decided where review items are listed for dispatch
-    (`pg-router-source-pg-connector list --exclude-escalated-query`, see its behavior doc), not in
-    sync: sync keeps the single bead and only refreshes it.
   - When the PR is confirmed `merged` or `closed` (or gone), the closure cascade above closes the
     open `review-pr` bead with its anchor, so no `review-pr` bead stays open for a finished PR.
   - Delivery (operator ruling, Phillip, 2026-09-29, recorded on `pg2-kftf9.8`: no new
     dismiss/finalize command on `pg-pr`): this lifecycle is delivered by the CURRENT pg-desk sync
     (`ensureReviewRequest` reopen, plus the closure cascade) together with `pg-connector pr
-review submit` (`pg2-kftf9.13`), the escalator (`pg2-kftf9.15`) and the ZR review prompt
-    (`pg2-kftf9.17`). The replacement flow (`pg2-2j5ac.52`, rule `review.head-advanced`, decision
+review submit` (`pg2-kftf9.13`, whose replace behavior `pg2-8qui6` supersedes with create-or-append)
+    and the deployment's review prompt (`pg2-kftf9.17`). The replacement flow (`pg2-2j5ac.52`, rule `review.head-advanced`, decision
     S26) carries the same reopen-per-PR behavior forward unchanged ("as designed"), so no further
     behavior change is required of it for this lifecycle.
 - **Operator visibility** (`pg2-kftf9.18`) — `pg-desk pr show <id>` displays the PR's pending agent
-  review, the commit it is anchored to, whether it is stale relative to the head, and the id of any
-  open escalation bead for the PR ([`show.md`](show.md), "Pending review"). A failed lookup reads
-  `unknown`, never "no pending review". The display is an addition to the escalation, never a
-  substitute for it, and sync neither reads nor writes it.
+  review, how many of its comments are anchored to the current head, whether it is stale (no
+  review or comment exists for the current head) and the last append
+  ([`show.md`](show.md), "Pending review"). A failed lookup reads `unknown`, never "no pending
+  review". Sync neither reads nor writes it.
 - **Recorded losses (D15)** — draft auto-promotion, `wip on`'s upstream draft conversion, and
   pending reply posting are not performed by sync.
 

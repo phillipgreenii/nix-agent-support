@@ -45,7 +45,10 @@ flowchart LR
   issue-type equality; ANDed when both given), and prints one rawItem per surviving entity, with
   `metadata` copied from the entity's own metadata map as-is.
 
-  `--exclude-escalated-query <q>` (bead `pg2-vhs3e`) is for a review-request listing. It names a
+  `--exclude-escalated-query <q>` (bead `pg2-vhs3e`; RETIRING with the pending-review escalation,
+  bead `pg2-8qui6`: no pending review is ever blocked for a person any more, so nothing is left to
+  exclude, and the flag is removed after the review prompt stops depending on it) is for a
+  review-request listing. It names a
   second query on the same backend and beads dir that lists every OPEN pending-review escalation
   (all non-closed states, human-labeled ones included), and drops each listed item whose PR
   (`metadata.repo` + `#` + `metadata.pr_number`) an escalation covers, so a PR whose stale pending

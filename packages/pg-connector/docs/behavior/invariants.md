@@ -243,7 +243,7 @@ status`/`config validate`.
     (`INV-REG-2`), a bad flag).
 
   A targeted op that reports a well-formed outcome in its `result` body, including one that did
-  not do what was asked (for example `review submit`'s `blocked_human_pending`, where nothing was
+  not do what was asked (for example `review submit`'s `no_change`, where nothing needed to be
   posted), exits `0`: the outcome is distinguished by the body's `status`, never by the exit code,
   and a caller MUST read it.
 

@@ -859,6 +859,12 @@ meaning without a version bump of the containing contract (S11).
 
 ### 9.1 `pg-connector pr review submit <id>`
 
+> **SUPERSEDED 2026-10-06 (bead `pg2-8qui6`):** the guarded supersede, its statuses `skipped`,
+> `replaced` and `blocked_human_pending`, the archive and the digest guard described in this section
+> are replaced by create-or-append. The contract is now in
+> `docs/superpowers/specs/2026-10-06-pending-review-reuse-design.md` and the pg-connector
+> `docs/behavior/interfaces.md`. The text below describes the deployed behavior until that lands.
+
 > Amendment 2026-10-03 (bead `pg2-kftf9.13`). Placement: operator ruling (Phillip, 2026-10-03),
 > "no further changes are to be made to pg-pr, it is going away", so the guarded replace of a stale
 > pending review lands here, as an extension of `supersede_pending`, not in pg-pr's `postStaged`.
@@ -1023,6 +1029,12 @@ meaning without a version bump of the containing contract (S11).
   `blocked_human_pending`, do not retry on the same state: the review is a human's to resolve.
 
 ### 9.1a `pg-connector pr review pending <id>`
+
+> **AMENDED 2026-10-06 (bead `pg2-8qui6`):** the record loses `digest_state`, gains
+> `comments_total`, `comments_at_head`, `reviewed_head`, `extra_pending_reviews` and `last_append`,
+> tolerates more than one pending review and paginates comments, and its `stale` is "nothing is
+> anchored to the current head". See
+> `docs/superpowers/specs/2026-10-06-pending-review-reuse-design.md`, section 9.
 
 > Amendment 2026-10-03 (bead `pg2-kftf9.12`). Placement: operator ruling (Phillip, 2026-10-03),
 > "no further changes are to be made to pg-pr, it is going away", so the structured pending-review

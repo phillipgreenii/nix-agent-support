@@ -1,5 +1,14 @@
 # pg-router-review-escalator — behavior
 
+> **RETIRING (bead `pg2-8qui6`, operator rulings 2026-10-05 and 2026-10-06).** `review submit` no
+> longer deletes or replaces a pending review, so `blocked_human_pending` is retired and there is
+> nothing left to escalate. This package is removed once the create-or-append tool and the review
+> prompt have shipped (design `docs/superpowers/specs/2026-10-06-pending-review-reuse-design.md`,
+> section "Rollout"). Until then it MUST tolerate the new statuses `append` and `no_change`,
+> treating each like `posted` (both in outcome parsing and in the status switch that resolves an
+> open escalation), so the tool can ship first without failing every review. The text
+> below describes the deployed behavior.
+
 `pg-router-review-escalator` is the escalation path for unremovable pending reviews (bead
 `pg2-kftf9.15`, pending-review policy 5). When `pg-connector pr review submit` cannot remove a stale
 pending review it reports `status: blocked_human_pending` and exits 0 (the status contract of bead

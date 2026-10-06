@@ -85,27 +85,25 @@ not a degradation.
 The PR adapter of the generic entity seam (the `pr` gatherer that `refresh`, `changes` and `show
 --refresh` hydrate through) adds the PR's pending-agent-review state to its facts, after the inputs
 above. It is not gathered by the legacy `run`/`sync` path, whose facts are unchanged, and not on a
-`--change removed` re-read. Two reads, both through `pg-connector`:
+`--change removed` re-read. One read, through `pg-connector`:
 
 - **The pending review.** `pr review pending <id>`, the structured lookup of the acting identity's
   pending review (entity-change-flow design 9.1a), stored verbatim as `review_pending.result`
-  (`{"pending": false, ...}` or the record with its review-level commit and `stale` flag). There is
-  no second lookup implementation here: the commit, the head and the stale verdict are the
-  connector's.
-- **The open escalations.** `issue list --query pending-review-escalations` (the named query that
-  `pg-router-review-escalator` and `pg-router-source-pg-connector list --exclude-escalated-query`
-  also read, carrying the beads workspace variable like every `issue` exec). The beads whose
-  `review_escalation_key` is `pr:<owner/repo>#<n>` for this PR, or a `rollup:<reason>` bead whose
-  `review_escalation_prs` names it, are stored as `review_escalations.open` (`id`, `kind`, `head`).
+  (`{"pending": false, ...}` or the record with its review-level commit, `comments_total`,
+  `comments_at_head`, `extra_pending_reviews`, `last_append` and `stale` flag). There is no second
+  lookup implementation here: the counts, the head and the stale verdict are the connector's.
+  "Stale" means nothing is anchored to the current head (no comment made at it, no body section
+  for it, no review of the viewer at it); a review reused across heads keeps its old review-level
+  commit and is not stale for that reason alone. A stored record without `comments_at_head`
+  predates this and reads `unknown`.
 
-Neither read degrades the hydration. A degraded hydration writes nothing, so the previous snapshot
-(possibly "current" or "none") would keep standing as if it were fresh. A failed read is recorded
-in the facts instead (`review_pending.error`, `review_escalations.error`) and read back as
-`unknown`; see [`show.md`](show.md), "Pending review". A `not_found` answer, any other failure, a
-result that is not a pending-review record and, for the escalations, a degraded or unreadable list
-(it could be missing the covering bead) are all failures.
+The read does not degrade the hydration. A degraded hydration writes nothing, so the previous
+snapshot (possibly "current" or "none") would keep standing as if it were fresh. A failed read is
+recorded in the facts instead (`review_pending.error`) and read back as `unknown`; see
+[`show.md`](show.md), "Pending review". A `not_found` answer, any other failure and a result that
+is not a pending-review record are all failures.
 
-Both reads are read-only: gather posts, deletes and submits no review and writes no bead.
+The read is read-only: gather posts, deletes and submits no review and writes no bead.
 
 ## Exit codes, telemetry, and logs
 

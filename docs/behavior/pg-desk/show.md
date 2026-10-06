@@ -29,7 +29,7 @@ order:
 | `snapshot`    | The type's pg-connector schema value (`schema.PR`, `schema.Issue`, `schema.Thread`), as stored; `null` if none is stored.              |
 | `decorations` | `relationship`, `dispositions[]` of `{comment_id, computed, override}`, `urgency` (the level) and `category`.                          |
 | `annotations` | `hidden` as `{value, reason}`, `wip`, `suppress[]`, `force_review`, `force_review_sha`, `ready_to_land` and the `decider` map of maps. |
-| `review`      | A PR's pending agent review and its escalation, see below. Present for `pr` only, absent for `issue` and `thread`.                     |
+| `review`      | A PR's pending agent review, see below. Present for `pr` only, absent for `issue` and `thread`.                                        |
 | `links[]`     | Every link of the entity, see below.                                                                                                   |
 | `links_as_of` | The newest time any of the entity's links was last confirmed; `null` when it has none.                                                 |
 | `ci`          | A PR's CI runs for its head commit, see below. Present for `pr` only, last member; absent for `issue` and `thread`.                    |
@@ -100,33 +100,41 @@ section. The section carries the raw ingredients only; it computes no verdict (n
 
 ### Pending review (`pr` only)
 
-`review` reports, for the PR, whether the acting identity has a pending (unsubmitted) review, the
-commit it is anchored to, whether that is stale relative to the PR head, and the open escalation
-bead for the PR. It is read from the facts the PR's hydration stored; `show` looks nothing up
-itself (INV-SHOW-1), and the facts come from the `pg-connector pr review pending` record and the
-open-escalation query (see [`gather.md`](gather.md), "Pending-review state").
+`review` reports, for the PR, whether the acting identity has a pending (unsubmitted) review, how
+much of it is anchored to the current head, whether it is stale, and the last append to it. It is
+read from the facts the PR's hydration stored; `show` looks nothing up itself (INV-SHOW-1), and the
+facts come from the `pg-connector pr review pending` record (see [`gather.md`](gather.md),
+"Pending-review state").
 
-| Field                 | Meaning                                                                                                                     |
-| --------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `state`               | `none` (no pending review), `current` (anchored to the head), `stale` (anchored to an older commit) or `unknown`.           |
-| `pending`             | `true` or `false`; `null` when `state` is `unknown`.                                                                        |
-| `review_id`, `url`    | The pending review's id and web URL; only when there is a pending review.                                                   |
-| `anchored_commit`     | The review-level commit the pending review is anchored to; only when there is a pending review.                             |
-| `head_sha`            | The PR head the lookup compared it with.                                                                                    |
-| `stale`               | Whether the pending review is anchored to something other than the head; `null` without a pending review or when `unknown`. |
-| `error`               | Why `state` is `unknown`; absent otherwise.                                                                                 |
-| `escalation.state`    | `open` (at least one open escalation bead covers the PR), `none` or `unknown`.                                              |
-| `escalation.bead_ids` | The ids of the open escalation beads; empty unless `escalation.state` is `open`.                                            |
-| `escalation.error`    | Why `escalation.state` is `unknown`; absent otherwise.                                                                      |
+A pending review is REUSED across heads: new comments are appended to it, and comments made at an
+older head stay on that head. So the review-level commit is only where the review was created, and
+the state below is decided by what is anchored to the CURRENT head, never by that commit alone.
+
+| Field                   | Meaning                                                                                                                                                                                                                                          |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `state`                 | `none` (no pending review), `current` (something is anchored to the head), `stale` (nothing is anchored to the head) or `unknown`.                                                                                                               |
+| `pending`               | `true` or `false`; `null` when `state` is `unknown`.                                                                                                                                                                                             |
+| `review_id`, `url`      | The pending review's id and web URL; only when there is a pending review.                                                                                                                                                                        |
+| `anchored_commit`       | The review-level commit, where the review was created; only when there is a pending review.                                                                                                                                                      |
+| `head_sha`              | The PR head the lookup compared it with.                                                                                                                                                                                                         |
+| `comments_total`        | How many comments the pending review holds; only when there is a pending review.                                                                                                                                                                 |
+| `comments_at_head`      | How many of them were made at the current head (their original commit is the head); only when there is a pending review.                                                                                                                         |
+| `stale`                 | True only when a pending review exists, `comments_at_head` is 0, and nothing else is anchored to the head (no body section for it, no review of the viewer at it); `null` without a pending review or when `unknown`. The connector computes it. |
+| `last_append`           | When the tool last appended, and how many comments that append added; absent when nothing was ever appended.                                                                                                                                     |
+| `extra_pending_reviews` | How many further pending reviews the identity has on the PR beyond the one reported (normally 0; more than 0 is the wedge that blocks body updates).                                                                                             |
+| `error`                 | Why `state` is `unknown`; absent otherwise.                                                                                                                                                                                                      |
+
+Older-head content is expected and fine: a review whose comments are all on earlier heads is
+`stale` only because nothing is anchored to the current head, and one extended to the current head
+is `current` however old its review-level commit. A review created at the current head with only a
+body is `current`.
 
 A pending review that cannot be told apart from "none" is the failure this contract exists to
 prevent: a failed lookup is `state: unknown` with its reason in `error`, never `none`. So is a PR
-whose stored facts predate the lookup (the reason says to run `show --refresh`). The same holds
-independently for `escalation`: a failed escalation query is `unknown`, never `none`. The
-escalation covering the PR is either its own per-PR bead or a systemic roll-up bead that names it.
+whose stored facts predate the lookup, or predate the per-head counts (the reason says to run
+`show --refresh`): a record without `comments_at_head` is never read as `stale` or `current`.
 
-The view is an addition to the escalation raised by `pg-router-review-escalator`, never a
-substitute for it, and displaying it changes nothing (INV-SHOW-5).
+Displaying the view changes nothing (INV-SHOW-5).
 
 ## Human-readable output
 
@@ -135,7 +143,7 @@ $ pg-desk pr show acme/api#123
 pr acme/api#123  Add retry to client
 mine  open  ready  head=9f3c1e2  ci=failure  as_of=2026-09-29T14:03:10Z (fresh)
 annotations: hidden=no  wip=no  suppress=[fix-ci]
-review: pending=yes  commit=4b1d7aa  head=9f3c1e2  stale=yes  escalation=bd-77
+review: pending=yes  commit=4b1d7aa  head=9f3c1e2  comments=5 at_head=0  stale=yes  last_append=2h (+3)
 links: bd-1 (work, open)  C1/1.5 (references)
 ```
 
@@ -145,14 +153,16 @@ then `as_of=` with `(fresh)` or `(stale)`. Each link reads `id (relation[, state
 The `review:` line appears for a PR only. It reads, by state:
 
 ```text
-review: pending=no  escalation=none
-review: pending=yes  commit=9f3c1e2  head=9f3c1e2  stale=no  escalation=none
-review: pending=yes  commit=4b1d7aa  head=9f3c1e2  stale=yes  escalation=bd-77
-review: pending=unknown (<reason>)  escalation=none
-review: pending=no  escalation=unknown (<reason>)
+review: pending=no
+review: pending=yes  commit=9f3c1e2  head=9f3c1e2  comments=2 at_head=2  stale=no
+review: pending=yes  commit=4b1d7aa  head=9f3c1e2  comments=5 at_head=2  stale=no  last_append=5m (+2)
+review: pending=yes  commit=4b1d7aa  head=9f3c1e2  comments=5 at_head=0  stale=yes  last_append=2h (+3)
+review: pending=yes  commit=4b1d7aa  head=9f3c1e2  comments=5 at_head=2  stale=no  extra=1
+review: pending=unknown (<reason>)
 ```
 
-Commits are abbreviated to seven characters; several escalation ids are comma-separated.
+Commits are abbreviated to seven characters; `last_append` reads age then `(+N)` comments added;
+`extra=N` appears only when N is above 0.
 
 ## `--refresh`
 
@@ -179,9 +189,9 @@ If the entity's own hydration fails or degrades, the stored view is still printe
 - **INV-SHOW-4.** A failed or degraded `--refresh` of the entity MUST still print the stored view,
   marked stale, before exiting non-zero.
 - **INV-SHOW-5.** The `review` object MUST NOT report a failed or missing lookup as "no pending
-  review" or "no escalation": it MUST be `unknown`. Displaying it MUST NOT post, delete or submit
-  a review, create, update, comment on or close a bead, or send a notification; it is read from
-  stored facts, and `--refresh` hydrates through the same read-only lookups.
+  review": it MUST be `unknown`. Displaying it MUST NOT post, delete or submit a review, create,
+  update, comment on or close a bead, or send a notification; it is read from stored facts, and
+  `--refresh` hydrates through the same read-only lookups.
 
 - **INV-SHOW-6.** The `ci` section MUST be read-only stored data: it MUST NOT carry a computed
   verdict (such as a list of failing builds), and building it MUST NOT call the network or write to
