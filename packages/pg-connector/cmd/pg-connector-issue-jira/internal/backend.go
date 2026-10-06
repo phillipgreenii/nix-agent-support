@@ -178,14 +178,49 @@ type pjiraIssue struct {
 	// (listrange.go) and is deliberately not mapped onto schema.Issue, so an
 	// unranged list's output is unchanged.
 	Updated string `json:"updated,omitempty"`
+	// Created, Reporter, Changelog and Comments mirror pjira's model.go
+	// Issue fields of the same JSON keys (Changelog and Comments are
+	// populated only by `pjira search --expand changelog,comments`). They
+	// are decode-only: no existing op maps them onto schema.Issue, so
+	// Show/List/Search output is unchanged. Every timestamp (Created,
+	// pjiraChangelogEntry.At, pjiraComment.Created) is Jira's raw text,
+	// forwarded unchanged by pjira (e.g. "2026-01-03T00:00:00.000+0000", an
+	// offset with no colon, which is NOT strict RFC3339); it is kept as a
+	// string here and parsed later with parseJiraUpdated.
+	Created   string                `json:"created,omitempty"`
+	Reporter  *pjiraUser            `json:"reporter,omitempty"`
+	Changelog []pjiraChangelogEntry `json:"changelog,omitempty"`
+	Comments  []pjiraComment        `json:"comments,omitempty"`
 }
 
 // pjiraUser is pjira's own nested user shape (model.go's User), used here
-// only for Assignee.
+// for Assignee, Reporter and the changelog/comment authors.
 type pjiraUser struct {
 	Email       string `json:"email,omitempty"`
 	AccountID   string `json:"account_id,omitempty"`
 	DisplayName string `json:"display_name,omitempty"`
+}
+
+// pjiraChangelogEntry is pjira's ChangelogEntry (model.go): one status
+// transition (pjira drops every non-status changelog item). ID is the Jira
+// changelog-history id; At is Jira's raw timestamp text.
+type pjiraChangelogEntry struct {
+	ID     string    `json:"id"`
+	Field  string    `json:"field"`
+	From   string    `json:"from"`
+	To     string    `json:"to"`
+	Author pjiraUser `json:"author"`
+	At     string    `json:"at"`
+}
+
+// pjiraComment is pjira's Comment (model.go): one issue comment with its body
+// already flattened to plain text. ID is the Jira comment id; Created is
+// Jira's raw timestamp text.
+type pjiraComment struct {
+	ID      string    `json:"id"`
+	Author  pjiraUser `json:"author"`
+	Body    string    `json:"body"`
+	Created string    `json:"created"`
 }
 
 // pjiraSearchResult is `pjira search --jql <JQL>`'s own stdout shape

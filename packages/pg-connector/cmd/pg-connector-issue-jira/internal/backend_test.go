@@ -1126,3 +1126,105 @@ func TestClassifyPJIRAErrorMessage_AuthStatusNotKeyDigits(t *testing.T) {
 		})
 	}
 }
+
+// ----------------------------------------------------------------------
+// pjira activity decode fields (created, reporter, changelog, comments)
+// ----------------------------------------------------------------------
+
+// pjiraActivityIssueJSON is a pjira-shaped issue carrying the activity fields,
+// with Jira's raw non-RFC3339 "+0000" timestamp form that pjira forwards
+// unchanged.
+const pjiraActivityIssueJSON = `{"key":"PROJ-7","summary":"s","status":"Done","issuetype":"Task","labels":[],` +
+	`"url":"https://example.atlassian.net/browse/PROJ-7","created":"2026-01-01T00:00:00.000+0000",` +
+	`"reporter":{"email":"rep@example.com","account_id":"acc-r","display_name":"Rep"},` +
+	`"changelog":[{"id":"h-900","field":"status","from":"Open","to":"Done",` +
+	`"author":{"email":"h@example.com","account_id":"acc-h","display_name":"H"},"at":"2026-01-02T00:00:00.000+0000"}],` +
+	`"comments":[{"id":"c-501","author":{"email":"c@example.com","account_id":"acc-c","display_name":"C"},` +
+	`"body":"a note","created":"2026-01-03T00:00:00.000+0000"}]}`
+
+func assertActivityFields(t *testing.T, iss *pjiraIssue) {
+	t.Helper()
+	if iss.Created != "2026-01-01T00:00:00.000+0000" {
+		t.Fatalf("Created = %q, want raw +0000 text byte-for-byte", iss.Created)
+	}
+	if iss.Reporter == nil || *iss.Reporter != (pjiraUser{Email: "rep@example.com", AccountID: "acc-r", DisplayName: "Rep"}) {
+		t.Fatalf("Reporter = %+v", iss.Reporter)
+	}
+	if len(iss.Changelog) != 1 {
+		t.Fatalf("Changelog = %+v, want 1 entry", iss.Changelog)
+	}
+	wantCL := pjiraChangelogEntry{
+		ID: "h-900", Field: "status", From: "Open", To: "Done",
+		Author: pjiraUser{Email: "h@example.com", AccountID: "acc-h", DisplayName: "H"},
+		At:     "2026-01-02T00:00:00.000+0000",
+	}
+	if iss.Changelog[0] != wantCL {
+		t.Fatalf("Changelog[0] = %+v, want %+v", iss.Changelog[0], wantCL)
+	}
+	if len(iss.Comments) != 1 {
+		t.Fatalf("Comments = %+v, want 1 entry", iss.Comments)
+	}
+	wantC := pjiraComment{
+		ID:      "c-501",
+		Author:  pjiraUser{Email: "c@example.com", AccountID: "acc-c", DisplayName: "C"},
+		Body:    "a note",
+		Created: "2026-01-03T00:00:00.000+0000",
+	}
+	if iss.Comments[0] != wantC {
+		t.Fatalf("Comments[0] = %+v, want %+v", iss.Comments[0], wantC)
+	}
+}
+
+func TestDecodePJIRAIssue_ActivityFields(t *testing.T) {
+	iss, err := decodePJIRAIssue(pjiraActivityIssueJSON)
+	if err != nil {
+		t.Fatalf("decodePJIRAIssue: %v", err)
+	}
+	assertActivityFields(t, iss)
+}
+
+func TestDecodePJIRASearchResult_ActivityFields(t *testing.T) {
+	res, err := decodePJIRASearchResult(`{"items":[` + pjiraActivityIssueJSON + `],"truncated":false}`)
+	if err != nil {
+		t.Fatalf("decodePJIRASearchResult: %v", err)
+	}
+	if len(res.Items) != 1 {
+		t.Fatalf("Items = %d, want 1", len(res.Items))
+	}
+	assertActivityFields(t, &res.Items[0])
+}
+
+func TestDecodePJIRASearchResult_WithoutActivityFields(t *testing.T) {
+	res, err := decodePJIRASearchResult(`{"items":[{"key":"PROJ-1","summary":"a","status":"To Do"}],"truncated":false}`)
+	if err != nil {
+		t.Fatalf("decodePJIRASearchResult: %v", err)
+	}
+	it := res.Items[0]
+	if it.Key != "PROJ-1" || it.Created != "" || it.Reporter != nil || it.Changelog != nil || it.Comments != nil {
+		t.Fatalf("absent keys must decode to zero values, got %+v", it)
+	}
+}
+
+// TestBackend_Show_ActivityFieldsDoNotChangeOutput proves the extra decode
+// fields are invisible to the schema.Issue Show returns: the same issue with
+// and without them maps to an identical result.
+func TestBackend_Show_ActivityFieldsDoNotChangeOutput(t *testing.T) {
+	base := `{"key":"PROJ-7","summary":"s","status":"Done","issuetype":"Task","labels":[],` +
+		`"url":"https://example.atlassian.net/browse/PROJ-7"}`
+	show := func(raw string) *schema.Issue {
+		b := New(&fakeRunner{handle: func([]string) (string, error) { return raw, nil }})
+		got, err := b.Show(context.Background(), "PROJ-7")
+		if err != nil {
+			t.Fatalf("Show: %v", err)
+		}
+		return got
+	}
+	with, without := show(pjiraActivityIssueJSON), show(base)
+	// AsOf is stamped per call; compare with it cleared.
+	with.AsOf, without.AsOf = "", ""
+	jw, _ := json.Marshal(with)
+	jo, _ := json.Marshal(without)
+	if string(jw) != string(jo) {
+		t.Fatalf("Show output changed by activity fields:\n with:    %s\n without: %s", jw, jo)
+	}
+}
