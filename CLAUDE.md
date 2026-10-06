@@ -296,12 +296,16 @@ Verified against Claude Code 2.1.186:
   `claude-code` for a plugin with `defaultEnabled: true` whose hooks/skills invoke a bare PATH
   command MUST add (or verify it already has) an equivalent named cutover block for that plugin's
   program, not a bare, uncommented `phillipgreenii.programs.<x>.enable = true`.
-- **No mechanical check enforces this today** (confirmed by reading `flake.nix`'s full `checks.*`
-  set and every `home/programs/**` `assertions` block): `defaultEnabled` in `plugin.json` and a
-  program module's `enable` default are two independent, uncross-checked values. Until a check
-  exists, adding a new default-enabled plugin with a bare-command hook, or onboarding a machine to
-  an existing one, MUST be followed by `which <bare-command>` on that machine after
-  `pn workspace apply` — a clean build does not prove the command resolves.
+- **Mechanical check** (bead `tc-mxc0v`): `checks.<system>.test-claude-plugin-binary-default-parity`
+  in `flake.nix` fails for any `defaultEnabled: true` plugin whose `hooks/hooks.json` invokes a
+  bare PATH command unless the plugin is mapped (`pluginProgram`) to its `home/programs/<x>`
+  module AND that module's `enable` is not a plain `mkEnableOption`, or the plugin is listed in
+  `knownConsumerCutover` (today `claude-activity` and `claude-extended-tool-approver`, whose
+  consumers carry a named cutover block). A new default-enabled bare-command plugin therefore
+  MUST either default its program's `enable` to `claude-code.enable` (as `session-mode` does) or
+  be added to `knownConsumerCutover` deliberately. The check carries its own negative fixtures.
+  The check cannot prove a consumer machine enabled the program: after `pn workspace apply`,
+  still run `which <bare-command>` for a cutover-listed plugin.
 
 ---
 

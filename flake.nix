@@ -2696,6 +2696,115 @@
                   touch $out
                 '';
 
+              # Default-enabled plugin => default-enabled binary parity (bead
+              # tc-mxc0v; invariant documented in CLAUDE.md "Claude Code Rule /
+              # Skill / Plugin Delivery"). A plugin with `defaultEnabled: true`
+              # registers its hooks on EVERY claude-code consumer, while the
+              # program module that installs the binary the hook invokes (a BARE
+              # PATH command) may default `enable = false` -- the claude-activity
+              # breakage (2026-10-05, silent "command not found" every turn).
+              # The check fails for any default-enabled plugin whose
+              # hooks.json has a bare command unless (a) the plugin is mapped to
+              # its program module below and (b) that module's `enable` is not a
+              # plain `mkEnableOption` (false default). Plugins whose module
+              # DOES default false are tolerated only via the explicit
+              # `knownConsumerCutover` list (each must have a named cutover block
+              # in the consuming machine config); a new plugin is not tolerated.
+              # A built-in negative test runs the same scan over synthetic
+              # violating trees and requires it to FAIL.
+              test-claude-plugin-binary-default-parity =
+                let
+                  surface = lib.fileset.toSource {
+                    root = ./.;
+                    fileset = lib.fileset.unions [
+                      ./claude-marketplace
+                      ./home/programs
+                    ];
+                  };
+                  # plugin name -> program module dir under home/programs that
+                  # installs the binary its hooks invoke.
+                  pluginProgram = pkgs.writeText "plugin-program-map" ''
+                    claude-activity claude-activity
+                    claude-extended-tool-approver claude-extended-tool-approver
+                    pb session-mode
+                  '';
+                  # Modules that default `enable = false` today; consumers carry
+                  # a cutover block (homelab monorepod home-module.nix).
+                  knownConsumerCutover = pkgs.writeText "known-consumer-cutover" ''
+                    claude-activity
+                    claude-extended-tool-approver
+                  '';
+                in
+                pkgs.runCommand "test-claude-plugin-binary-default-parity" { nativeBuildInputs = [ pkgs.jq ]; } ''
+                  # scan <marketplace-dir> <programs-dir>; violations to stderr,
+                  # exit status = violation count (0 = ok).
+                  scan() {
+                    local mkt="$1" progs="$2" bad=0 scanned=0 pj name hooks cmds c prog
+                    for pj in "$mkt"/*/.claude-plugin/plugin.json; do
+                      [ -f "$pj" ] || continue
+                      name="$(basename "$(dirname "$(dirname "$pj")")")"
+                      [ "$(jq -r '.defaultEnabled // false' "$pj")" = true ] || continue
+                      hooks="$mkt/$name/hooks/hooks.json"
+                      [ -f "$hooks" ] || continue
+                      # bare = first word has no '/' and no '$' (not a path / plugin-root ref)
+                      cmds="$(jq -r '[.. | objects | select(.type? == "command") | .command | split(" ")[0]] | unique[]' "$hooks")"
+                      for c in $cmds; do
+                        case "$c" in */*|*'$'*) continue ;; esac
+                        scanned=$((scanned + 1))
+                        prog="$(awk -v n="$name" '$1 == n { print $2 }' ${pluginProgram})"
+                        if [ -z "$prog" ]; then
+                          echo "FAIL: default-enabled plugin '$name' invokes bare command '$c' but has no entry in pluginProgram (map it to the home/programs module that installs it)" >&2
+                          bad=$((bad + 1)); continue
+                        fi
+                        if [ ! -f "$progs/$prog/default.nix" ]; then
+                          echo "FAIL: plugin '$name': home/programs/$prog/default.nix missing" >&2
+                          bad=$((bad + 1)); continue
+                        fi
+                        if grep -qE '^[[:space:]]*enable = lib\.mkEnableOption' "$progs/$prog/default.nix"; then
+                          if ! grep -qxF "$name" ${knownConsumerCutover}; then
+                            echo "FAIL: plugin '$name' is defaultEnabled and invokes bare '$c', but home/programs/$prog enable defaults to false (mkEnableOption); default it to claude-code.enable or list it in knownConsumerCutover with a consumer cutover block" >&2
+                            bad=$((bad + 1))
+                          fi
+                        fi
+                      done
+                    done
+                    echo "scanned $scanned bare hook command(s)" >&2
+                    [ "$scanned" -gt 0 ] || { echo "FAIL: scan found no bare hook commands -- scan is broken" >&2; return 99; }
+                    return "$bad"
+                  }
+
+                  # Positive: the current tree passes.
+                  scan "${surface}/claude-marketplace" "${surface}/home/programs"
+
+                  # Negative 1: unmapped default-enabled plugin with a bare hook.
+                  fx="$PWD/fixture"
+                  mkdir -p "$fx/mkt/newplug/.claude-plugin" "$fx/mkt/newplug/hooks" "$fx/progs/newplug"
+                  echo '{"name":"newplug","defaultEnabled":true}' > "$fx/mkt/newplug/.claude-plugin/plugin.json"
+                  echo '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"newplug-bin"}]}]}}' > "$fx/mkt/newplug/hooks/hooks.json"
+                  echo 'enable = lib.mkEnableOption "x";' > "$fx/progs/newplug/default.nix"
+                  if scan "$fx/mkt" "$fx/progs" 2>neg.log; then
+                    echo "FAIL: negative fixture (unmapped violating plugin) was NOT flagged" >&2
+                    exit 1
+                  fi
+                  grep -q "no entry in pluginProgram" neg.log
+
+                  # Negative 2: mapped plugin whose module defaults enable=false
+                  # and is not in the cutover list.
+                  rm -rf "$fx"
+                  mkdir -p "$fx/mkt/pb/.claude-plugin" "$fx/mkt/pb/hooks" "$fx/progs/session-mode"
+                  echo '{"name":"pb","defaultEnabled":true}' > "$fx/mkt/pb/.claude-plugin/plugin.json"
+                  echo '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"session-mode x"}]}]}}' > "$fx/mkt/pb/hooks/hooks.json"
+                  echo 'enable = lib.mkEnableOption "x";' > "$fx/progs/session-mode/default.nix"
+                  if scan "$fx/mkt" "$fx/progs" 2>neg2.log; then
+                    echo "FAIL: negative fixture (default-false module) was NOT flagged" >&2
+                    exit 1
+                  fi
+                  grep -q "enable defaults to false" neg2.log
+
+                  echo "ok: current tree passes; violating fixtures are flagged"
+                  touch $out
+                '';
+
               # ── Full-module Go test gates (bead pg2-adhga; converged onto the
               # fleet builder by bead pg2-spwj9) ────────────────────────────────
               #
