@@ -25,10 +25,10 @@ func readGolden(t *testing.T, name string) []map[string]any {
 	return v
 }
 
-var wantMetadataKeys = []string{"degraded_sources", "entity_id", "entity_type", "kind", "origin", "seq", "version"}
+var wantMetadataKeys = []string{"degraded_sources", "entity_id", "entity_type", "kinds", "origin", "seq", "version"}
 
-// Golden: envelope fixture -> exact items array (one per (record, kind),
-// record order then kinds order; a record with no kinds yields nothing).
+// Golden: envelope fixture -> exact items array (one per entity, in order of
+// first record; a record with no kinds still yields its entity, kinds []).
 func TestEnvelopeToItemsGolden(t *testing.T) {
 	withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("envelope_degraded.json"), "GO_HELPER_EXIT=2")
 	stdout, stderr, code := runCLI(t, "widget", "--consumer", "router")
@@ -53,17 +53,16 @@ func TestEnvelopeToItemsGolden(t *testing.T) {
 	}
 }
 
-// A record whose kinds is empty yields zero items (one item per (record, kind)).
-func TestRecordWithNoKindsYieldsNoItem(t *testing.T) {
+// A record whose kinds is empty still yields its entity (one item per
+// distinct entity id) with an empty, non-null kinds list.
+func TestRecordWithNoKindsYieldsEntityWithEmptyKinds(t *testing.T) {
 	withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("envelope_degraded.json"), "GO_HELPER_EXIT=0")
 	stdout, _, code := runCLI(t, "widget", "--consumer", "router")
 	if code != 0 {
 		t.Fatalf("exit = %d", code)
 	}
-	for _, it := range mustItems(t, stdout) {
-		if it["id"] == "w-3" {
-			t.Errorf("record w-3 has no kinds and must yield no item, got %v", it)
-		}
+	if !strings.Contains(stdout, `"kinds":[]`) {
+		t.Errorf("want literal \"kinds\":[] in %q", stdout)
 	}
 }
 
@@ -125,7 +124,7 @@ func TestAdapterTranslatesPgDeskExitCodesForPgRouter(t *testing.T) {
 		}
 		items := mustItems(t, stdout)
 		if len(items) != 3 {
-			t.Fatalf("items = %d, want 3 (every record, every kind)", len(items))
+			t.Fatalf("items = %d, want 3 (every entity)", len(items))
 		}
 		for _, it := range items {
 			ds := it["metadata"].(map[string]any)["degraded_sources"].([]any)
@@ -248,5 +247,79 @@ func TestHelpStatesInvocationShape(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "pg-router-source-pg-desk <type> --consumer <name>") {
 		t.Errorf("--help lacks the invocation shape:\n%s", stdout)
+	}
+}
+
+// Every emitted item carries emit "<entity_type>.changed" (pg-router types an
+// event from emit, never from the item type).
+func TestEveryItemCarriesChangedEmit(t *testing.T) {
+	for _, name := range []string{"envelope_degraded.json", "envelope_all_ok.json", "envelope_coalesce.json"} {
+		withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture(name), "GO_HELPER_EXIT=0")
+		stdout, _, code := runCLI(t, "widget", "--consumer", "router")
+		if code != 0 {
+			t.Fatalf("%s: exit = %d", name, code)
+		}
+		items := mustItems(t, stdout)
+		if len(items) == 0 {
+			t.Fatalf("%s: no items", name)
+		}
+		for _, it := range items {
+			md := it["metadata"].(map[string]any)
+			if want := md["entity_type"].(string) + ".changed"; it["emit"] != want {
+				t.Errorf("%s: emit = %v, want %q", name, it["emit"], want)
+			}
+		}
+	}
+}
+
+// Two records for one entity (seq 4 kind ci; seq 7 kinds review, ci) coalesce
+// to ONE item with id <entity_id>@7, the coalesced kinds without duplicates in
+// order of first appearance, and the max-seq record's title, version and
+// origin (the implementer's documented choice: the latest state wins). Items
+// keep the order of each entity's first record.
+func TestSameEntityRecordsCoalesceIntoOneItemAtMaxSeq(t *testing.T) {
+	withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("envelope_coalesce.json"), "GO_HELPER_EXIT=0")
+	stdout, _, code := runCLI(t, "widget", "--consumer", "router")
+	if code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	items := mustItems(t, stdout)
+	if len(items) != 2 {
+		t.Fatalf("items = %d, want 2 (one per entity): %s", len(items), stdout)
+	}
+	first := items[0]
+	if first["id"] != "w-1@7" || first["emit"] != "widget.changed" || first["title"] != "Newer title" {
+		t.Errorf("first item = %v", first)
+	}
+	md := first["metadata"].(map[string]any)
+	if !reflect.DeepEqual(md["kinds"], []any{"ci", "review"}) {
+		t.Errorf("kinds = %#v, want [ci review]", md["kinds"])
+	}
+	if md["seq"] != float64(7) || md["version"] != float64(3) || md["origin"] != "annotate" {
+		t.Errorf("metadata = %v, want seq 7 version 3 origin annotate", md)
+	}
+	if items[1]["id"] != "w-2@5" {
+		t.Errorf("second item id = %v, want w-2@5", items[1]["id"])
+	}
+}
+
+// Two envelopes for the same entity with different max seq yield different
+// item ids, so a change landing while a run is in flight is a distinct event.
+func TestSameEntityDifferentMaxSeqYieldsDifferentIDs(t *testing.T) {
+	ids := map[string]bool{}
+	for _, name := range []string{"envelope_coalesce.json", "envelope_coalesce_later.json"} {
+		withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture(name), "GO_HELPER_EXIT=0")
+		stdout, _, code := runCLI(t, "widget", "--consumer", "router")
+		if code != 0 {
+			t.Fatalf("%s: exit = %d", name, code)
+		}
+		for _, it := range mustItems(t, stdout) {
+			if md := it["metadata"].(map[string]any); md["entity_id"] == "w-1" {
+				ids[it["id"].(string)] = true
+			}
+		}
+	}
+	if !reflect.DeepEqual(ids, map[string]bool{"w-1@7": true, "w-1@9": true}) {
+		t.Errorf("ids = %v, want w-1@7 and w-1@9", ids)
 	}
 }

@@ -1,0 +1,39 @@
+{
+  "contract": "pg-desk.changes/v1",
+  "type": "widget",
+  "consumer": "router",
+  "cursor": { "from": 3, "to": 8 },
+  "sources": [{ "query": "open-widgets", "status": "ok" }],
+  "records": [
+    {
+      "seq": 4,
+      "type": "widget",
+      "id": "w-1",
+      "title": "Older title",
+      "version": 2,
+      "kinds": ["ci"],
+      "origin": "poll",
+      "at": "2026-01-02T03:04:05Z"
+    },
+    {
+      "seq": 5,
+      "type": "widget",
+      "id": "w-2",
+      "title": "Other widget",
+      "version": 1,
+      "kinds": ["created"],
+      "origin": "poll",
+      "at": "2026-01-02T03:04:06Z"
+    },
+    {
+      "seq": 7,
+      "type": "widget",
+      "id": "w-1",
+      "title": "Newer title",
+      "version": 3,
+      "kinds": ["review", "ci"],
+      "origin": "annotate",
+      "at": "2026-01-02T03:04:07Z"
+    }
+  ]
+}

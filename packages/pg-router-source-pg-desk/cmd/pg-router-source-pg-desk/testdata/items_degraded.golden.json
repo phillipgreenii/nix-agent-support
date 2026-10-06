@@ -1,44 +1,47 @@
 [
   {
-    "id": "w-1",
-    "type": "widget.created",
+    "id": "w-1@11",
+    "emit": "widget.changed",
+    "type": "widget",
     "title": "First widget",
     "metadata": {
       "degraded_sources": ["stale-widgets"],
       "entity_id": "w-1",
       "entity_type": "widget",
-      "kind": "created",
+      "kinds": ["created", "reconcile"],
       "origin": "poll",
       "seq": 11,
       "version": 4
     }
   },
   {
-    "id": "w-1",
-    "type": "widget.reconcile",
-    "title": "First widget",
-    "metadata": {
-      "degraded_sources": ["stale-widgets"],
-      "entity_id": "w-1",
-      "entity_type": "widget",
-      "kind": "reconcile",
-      "origin": "poll",
-      "seq": 11,
-      "version": 4
-    }
-  },
-  {
-    "id": "w-2",
-    "type": "widget.updated",
+    "id": "w-2@12",
+    "emit": "widget.changed",
+    "type": "widget",
     "title": "Second widget",
     "metadata": {
       "degraded_sources": ["stale-widgets"],
       "entity_id": "w-2",
       "entity_type": "widget",
-      "kind": "updated",
+      "kinds": ["updated"],
       "origin": "annotate",
       "seq": 12,
       "version": 1
+    }
+  },
+  {
+    "id": "w-3@13",
+    "emit": "widget.changed",
+    "type": "widget",
+    "title": "Third widget",
+    "metadata": {
+      "degraded_sources": ["stale-widgets"],
+      "entity_id": "w-3",
+      "entity_type": "widget",
+      "kinds": [],
+      "origin": "poll",
+      "seq": 13,
+      "version": 7
     }
   }
 ]

@@ -35,9 +35,12 @@ type envRecord struct {
 	Origin  string      `json:"origin"`
 }
 
-// rawItem is pg-router's own per-record command-query source shape.
+// rawItem is pg-router's own per-record command-query source shape. Emit
+// names the event type pg-router mints for the item (pg-router types an event
+// from emit, defaulting to the query's first declared emit, never from Type).
 type rawItem struct {
 	ID       string         `json:"id"`
+	Emit     string         `json:"emit,omitempty"`
 	Type     string         `json:"type"`
 	Title    string         `json:"title"`
 	Metadata map[string]any `json:"metadata"`

@@ -1,0 +1,19 @@
+{
+  "contract": "pg-desk.changes/v1",
+  "type": "widget",
+  "consumer": "router",
+  "cursor": { "from": 8, "to": 9 },
+  "sources": [{ "query": "open-widgets", "status": "ok" }],
+  "records": [
+    {
+      "seq": 9,
+      "type": "widget",
+      "id": "w-1",
+      "title": "Newer title",
+      "version": 4,
+      "kinds": ["merge"],
+      "origin": "poll",
+      "at": "2026-01-02T03:05:00Z"
+    }
+  ]
+}

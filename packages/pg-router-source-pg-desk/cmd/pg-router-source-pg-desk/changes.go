@@ -12,9 +12,30 @@ import (
 // statusOK is the envelope source status that does not count as degraded.
 const statusOK = "ok"
 
-// itemsFromEnvelope maps a decoded envelope to pg-router items: one item
-// per (record, kind), in record order then kinds order. It adds no records,
-// drops none and decides nothing. The result is always non-nil.
+// changedSuffix is appended to the entity type to form the emit
+// ("<type>.changed"), the only event type the adapter produces.
+const changedSuffix = ".changed"
+
+// entityGroup accumulates one entity's records for one poll.
+type entityGroup struct {
+	id      string
+	typ     string
+	title   string
+	version json.Number
+	origin  string
+	seq     json.Number
+	seqVal  float64
+	kinds   []string
+	seen    map[string]bool
+}
+
+// itemsFromEnvelope maps a decoded envelope to pg-router items: ONE item per
+// distinct entity id, in the order of each entity's first record. The item
+// carries emit "<type>.changed", id "<entity_id>@<seq>" (seq = the maximum seq
+// among the poll's records for the entity) and the coalesced kinds (no
+// duplicates, order of first appearance). Title, version and origin come from
+// the maximum-seq record (the latest state of the entity). The result is
+// always non-nil.
 func itemsFromEnvelope(env envelope) ([]rawItem, error) {
 	degraded := make([]string, 0, len(env.Sources))
 	for _, s := range env.Sources {
@@ -22,7 +43,8 @@ func itemsFromEnvelope(env envelope) ([]rawItem, error) {
 			degraded = append(degraded, s.Query)
 		}
 	}
-	items := make([]rawItem, 0, len(env.Records))
+	var order []string
+	groups := make(map[string]*entityGroup)
 	for _, r := range env.Records {
 		seq, err := numberOrZero(r.Seq)
 		if err != nil {
@@ -32,22 +54,42 @@ func itemsFromEnvelope(env envelope) ([]rawItem, error) {
 		if err != nil {
 			return nil, fmt.Errorf("record %q: version: %w", r.ID, err)
 		}
-		for _, kind := range r.Kinds {
-			items = append(items, rawItem{
-				ID:    r.ID,
-				Type:  r.Type + "." + kind,
-				Title: r.Title,
-				Metadata: map[string]any{
-					"entity_type":      r.Type,
-					"entity_id":        r.ID,
-					"kind":             kind,
-					"seq":              seq,
-					"version":          version,
-					"origin":           r.Origin,
-					"degraded_sources": degraded,
-				},
-			})
+		seqVal, _ := strconv.ParseFloat(string(seq), 64)
+		g, ok := groups[r.ID]
+		if !ok {
+			g = &entityGroup{id: r.ID, typ: r.Type, seen: map[string]bool{}, kinds: []string{}}
+			groups[r.ID] = g
+			order = append(order, r.ID)
 		}
+		for _, kind := range r.Kinds {
+			if !g.seen[kind] {
+				g.seen[kind] = true
+				g.kinds = append(g.kinds, kind)
+			}
+		}
+		if g.seq == "" || seqVal > g.seqVal {
+			g.seq, g.seqVal = seq, seqVal
+			g.typ, g.title, g.version, g.origin = r.Type, r.Title, version, r.Origin
+		}
+	}
+	items := make([]rawItem, 0, len(order))
+	for _, id := range order {
+		g := groups[id]
+		items = append(items, rawItem{
+			ID:    g.id + "@" + string(g.seq),
+			Emit:  g.typ + changedSuffix,
+			Type:  g.typ,
+			Title: g.title,
+			Metadata: map[string]any{
+				"entity_type":      g.typ,
+				"entity_id":        g.id,
+				"kinds":            g.kinds,
+				"seq":              g.seq,
+				"version":          g.version,
+				"origin":           g.origin,
+				"degraded_sources": degraded,
+			},
+		})
 	}
 	return items, nil
 }
@@ -72,11 +114,15 @@ Invocation shape:
 
 It execs "pg-desk <type> changes --consumer <name> [--query Q] [--limit N] --json"
 (pg-desk on $PATH), decodes the pg-desk.changes/v1 envelope and prints one JSON
-array of items on stdout: one per (record, kind), {id, type "<type>.<kind>",
-title, metadata{entity_type, entity_id, kind, seq, version, origin,
-degraded_sources}}. --cached is never passed (it does not advance the cursor).
+array of items on stdout: ONE per changed entity per poll, {id
+"<entity_id>@<seq>" (seq = the maximum seq among the poll's records for the
+entity), emit "<type>.changed", type, title, metadata{entity_type, entity_id,
+kinds (every kind of every record for the entity, coalesced), seq, version,
+origin, degraded_sources}}. pg-router types the event from emit, so a query
+running this adapter MUST declare emit "<type>.changed". --cached is never
+passed (it does not advance the cursor).
 
-Exit codes (translated, not mirrored): pg-desk 0 or 2 -> 0 with every record
+Exit codes (translated, not mirrored): pg-desk 0 or 2 -> 0 with every entity
 emitted (degraded detail in metadata.degraded_sources); pg-desk 3, any other
 pg-desk exit code, an unparseable envelope, or pg-desk not startable -> 1 with
 nothing on stdout and the diagnostic on stderr.`
