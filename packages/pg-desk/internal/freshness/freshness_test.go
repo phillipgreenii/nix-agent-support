@@ -316,3 +316,208 @@ func TestBuildReport(t *testing.T) {
 		t.Errorf("empty report = %+v, %v; want no stale source and a non-nil sources", empty, err)
 	}
 }
+
+// seen is a ledger row whose pg-router consumer last polled it at t0+d.
+func seen(row LedgerRow, d time.Duration) LedgerRow {
+	row.Consumers = map[string]LedgerConsumer{"pg-router": {LastSeen: ts(d)}}
+	return row
+}
+
+func inst(row LedgerRow, instance string) LedgerRow {
+	row.Instance = instance
+	return row
+}
+
+func onlySource(t *testing.T, rows []Row, source string) Row {
+	t.Helper()
+	for _, r := range rows {
+		if r.Source == source {
+			return r
+		}
+	}
+	t.Fatalf("no %s row in %+v", source, rows)
+	return Row{}
+}
+
+func TestLedgerRowLastSeenIsTheNewestConsumer(t *testing.T) {
+	row := LedgerRow{Consumers: map[string]LedgerConsumer{
+		"a": {LastSeen: ts(-time.Hour)}, "b": {LastSeen: ts(-time.Minute)}, "c": {},
+	}}
+	if got := row.lastSeen(); got == nil || !got.Equal(t0.Add(-time.Minute)) {
+		t.Errorf("lastSeen = %v, want the newest consumer's", got)
+	}
+	if (LedgerRow{}).lastSeen() != nil {
+		t.Error("lastSeen of a row with no consumers must be nil")
+	}
+}
+
+func TestUpdateRecordsLastSeenMonotonically(t *testing.T) {
+	st := store.OpenForTest(t)
+	row := ledgerRow("b", "q", ts(-time.Minute))
+	mustUpdate(t, st, seen(row, -time.Minute))
+	mustUpdate(t, st, seen(row, -time.Hour)) // stale read
+	mustUpdate(t, st, row)                   // consumer info absent
+	kv, _ := st.ListMetaPrefix(MetaKeyPrefix)
+	var rec Record
+	if err := json.Unmarshal([]byte(kv["source_fetch.b.q"]), &rec); err != nil {
+		t.Fatal(err)
+	}
+	if rec.LastSeenAt == nil || !rec.LastSeenAt.Equal(t0.Add(-time.Minute)) {
+		t.Errorf("last_seen_at = %v, want the newest seen (-1m) kept", rec.LastSeenAt)
+	}
+}
+
+func TestSourcesGhostRowDoesNotKeepABackendStale(t *testing.T) {
+	st := store.OpenForTest(t)
+	b := "pg-connector-issue-beads"
+	mustUpdate(
+		t, st,
+		// live instance, fresh
+		seen(inst(ledgerRow(b, "work-beads", ts(-time.Minute)), "/live"), -time.Minute),
+		// ghosts: never succeeded, last polled well past AbandonedAfter ago
+		seen(ledgerRow(b, "work-beads", nil), -AbandonedAfter-time.Hour),
+		seen(inst(ledgerRow(b, "work-beads", nil), "/gone"), -AbandonedAfter-48*time.Hour),
+	)
+	r := onlySource(t, mustSources(t, st, nil, t0), b)
+	if r.Stale || r.AgeSeconds == nil || *r.AgeSeconds != 60 || r.LastSuccessAt == nil {
+		t.Errorf("row = %+v, want fresh at 60s with the ghosts ignored", r)
+	}
+}
+
+func TestSourcesGhostWithAnOldSuccessIsIgnoredToo(t *testing.T) {
+	st := store.OpenForTest(t)
+	mustUpdate(
+		t, st,
+		seen(inst(ledgerRow("b", "q", ts(-time.Minute)), "/live"), 0),
+		seen(inst(ledgerRow("b", "q", ts(-AbandonedAfter-24*time.Hour)), "/gone"), -AbandonedAfter-time.Hour),
+	)
+	r := onlySource(t, mustSources(t, st, nil, t0), "b")
+	if r.Stale {
+		t.Errorf("row = %+v, a retired instance's old success must not hold the backend stale", r)
+	}
+}
+
+func TestSourcesLiveRowThatNeverSucceededStaysStale(t *testing.T) {
+	st := store.OpenForTest(t)
+	// thread-slack's shape: polled a minute ago, every fetch failing.
+	row := seen(ledgerRow("pg-connector-thread-slack", "involving-me", nil), -time.Minute)
+	row.LastError = &LedgerError{At: t0.Add(-time.Minute), Code: "truncated"}
+	mustUpdate(t, st, row)
+	r := onlySource(t, mustSources(t, st, nil, t0), "pg-connector-thread-slack")
+	if !r.Stale || r.AgeSeconds != nil || r.LastSuccessAt != nil {
+		t.Errorf("row = %+v, want unknown and stale (INV-FRESH-4)", r)
+	}
+}
+
+func TestSourcesMixedBackendLiveFailureBeatsGhosts(t *testing.T) {
+	st := store.OpenForTest(t)
+	mustUpdate(
+		t, st,
+		seen(inst(ledgerRow("b", "q1", ts(-time.Minute)), "/live"), -time.Minute),
+		seen(inst(ledgerRow("b", "q2", nil), "/live"), -time.Minute), // live, never succeeded
+		seen(inst(ledgerRow("b", "q1", nil), "/gone"), -AbandonedAfter-time.Hour),
+	)
+	r := onlySource(t, mustSources(t, st, nil, t0), "b")
+	if !r.Stale || r.AgeSeconds != nil {
+		t.Errorf("row = %+v, want stale: the live never-succeeded row still counts", r)
+	}
+}
+
+func TestSourcesAbandonedBoundary(t *testing.T) {
+	for name, tc := range map[string]struct {
+		lastSeen  time.Duration
+		wantStale bool
+	}{
+		"exactly at the bound still counts": {-AbandonedAfter, true},
+		"past the bound is a ghost":         {-AbandonedAfter - time.Second, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			st := store.OpenForTest(t)
+			mustUpdate(
+				t, st,
+				seen(inst(ledgerRow("b", "q", ts(-time.Minute)), "/live"), 0),
+				seen(inst(ledgerRow("b", "q", nil), "/other"), tc.lastSeen),
+			)
+			if r := onlySource(t, mustSources(t, st, nil, t0), "b"); r.Stale != tc.wantStale {
+				t.Errorf("stale = %v, want %v (%+v)", r.Stale, tc.wantStale, r)
+			}
+		})
+	}
+}
+
+func TestSourcesAllAbandonedBackendStaysStale(t *testing.T) {
+	// Nothing polls the backend any more: it MUST NOT vanish or read fresh.
+	st := store.OpenForTest(t)
+	mustUpdate(
+		t, st,
+		seen(ledgerRow("b", "q", ts(-AbandonedAfter-time.Hour)), -AbandonedAfter-time.Hour),
+		seen(inst(ledgerRow("b", "q", nil), "/gone"), -AbandonedAfter-time.Hour),
+	)
+	r := onlySource(t, mustSources(t, st, nil, t0), "b")
+	if !r.Stale {
+		t.Errorf("row = %+v, want stale when every row is abandoned", r)
+	}
+}
+
+func TestSourcesUnknownLastSeenCountsAsLive(t *testing.T) {
+	// A record written before last_seen_at existed (or with no consumer) is
+	// not evidence of a ghost: fail closed.
+	st := store.OpenForTest(t)
+	mustUpdate(
+		t, st,
+		ledgerRow("b", "q", nil),
+		seen(inst(ledgerRow("b", "q", ts(-time.Minute)), "/live"), 0),
+	)
+	if r := onlySource(t, mustSources(t, st, nil, t0), "b"); !r.Stale || r.AgeSeconds != nil {
+		t.Errorf("row = %+v, want stale for the row with unknown last_seen", r)
+	}
+}
+
+// TestRealLedgerShapeClassifiesGhosts replays the trimmed live ledger
+// observed on 2026-10-06 (bead pg2-7nuby): six ghost rows (legacy no-instance
+// rows last seen 2026-09-23 and the retired /Volumes/ziprecruiter/monorepo
+// instance last seen 2026-09-25) beside live rows and the genuinely failing
+// thread-slack.
+func TestRealLedgerShapeClassifiesGhosts(t *testing.T) {
+	now := time.Date(2026, 10, 6, 22, 58, 0, 0, time.UTC)
+	rows, err := ParseLedgerShow([]byte(`[
+	{"type":"issue","backend":"pg-connector-issue-beads","query":"escalated-work","consumers":{"pg-router":{"cursor":12,"last_seen":"2026-09-23T15:21:30.248975-04:00"}},"refreshed_at":null,"last_error":null},
+	{"type":"issue","backend":"pg-connector-issue-beads","query":"escalated-work","instance":"/Users/phillipg/phillipg_mbp/phillipg-nix-ziprecruiter","consumers":{"pg-router":{"cursor":95,"last_seen":"2026-10-06T18:57:21.508035-04:00"}},"refreshed_at":"2026-10-06T18:57:21.505029-04:00","last_error":null},
+	{"type":"issue","backend":"pg-connector-issue-beads","query":"escalated-work","instance":"/Volumes/ziprecruiter/monorepo","consumers":{"pg-router":{"cursor":0,"last_seen":"2026-09-25T19:49:57.172894-04:00"}},"refreshed_at":null,"last_error":null},
+	{"type":"issue","backend":"pg-connector-issue-beads","query":"work-beads","consumers":{"pg-router":{"cursor":227,"last_seen":"2026-09-23T15:20:45.540411-04:00"}},"refreshed_at":null,"last_error":null},
+	{"type":"issue","backend":"pg-connector-issue-beads","query":"work-beads","instance":"/Volumes/gitrepos/ziprecruiter/pristine","consumers":{"pg-router":{"cursor":1683,"last_seen":"2026-10-06T18:53:43.268215-04:00"}},"refreshed_at":"2026-10-06T18:53:43.267417-04:00","last_error":null},
+	{"type":"issue","backend":"pg-connector-issue-beads","query":"work-beads","instance":"/Volumes/ziprecruiter/monorepo","consumers":{"pg-router":{"cursor":145,"last_seen":"2026-09-25T19:46:10.901807-04:00"}},"refreshed_at":null,"last_error":null},
+	{"type":"issue","backend":"pg-connector-issue-jira","query":"mine","consumers":{"pg-router":{"cursor":2,"last_seen":"2026-09-23T15:16:55.178002-04:00"}},"refreshed_at":null,"last_error":null},
+	{"type":"issue","backend":"pg-connector-issue-jira","query":"mine","instance":"/Volumes/gitrepos/ziprecruiter/pristine","consumers":{"pg-router":{"cursor":2,"last_seen":"2026-10-06T18:54:31.496072-04:00"}},"refreshed_at":"2026-10-06T18:54:31.479823-04:00","last_error":null},
+	{"type":"issue","backend":"pg-connector-issue-jira","query":"mine","instance":"/Volumes/ziprecruiter/monorepo","consumers":{"pg-router":{"cursor":1,"last_seen":"2026-09-25T19:47:42.819754-04:00"}},"refreshed_at":null,"last_error":null},
+	{"type":"pr","backend":"pg-connector-pr-github","query":"mine","consumers":{"pg-router":{"cursor":1240,"last_seen":"2026-10-06T18:56:33.936461-04:00"}},"refreshed_at":"2026-10-06T18:56:33.935982-04:00","last_error":null},
+	{"type":"thread","backend":"pg-connector-thread-slack","query":"involving-me","consumers":{"pg-router":{"cursor":0,"last_seen":"2026-10-06T18:38:23.611902-04:00"}},"refreshed_at":null,"last_error":{"at":"2026-10-06T18:38:23.605758-04:00","code":"truncated"}}
+	]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ghosts := 0
+	for _, r := range collapse(rows) {
+		if r.abandoned(now) {
+			ghosts++
+		}
+	}
+	if ghosts != 6 {
+		t.Errorf("classified %d ghost records, want the 6 known ghosts", ghosts)
+	}
+	st := store.OpenForTest(t)
+	mustUpdate(t, st, rows...)
+	got := mustSources(t, st, nil, now)
+	for _, src := range []string{"pg-connector-issue-beads", "pg-connector-issue-jira"} {
+		// Both heartbeat refreshed_at stamps are ~4 minutes old at "now".
+		if r := onlySource(t, got, src); r.Stale || r.LastSuccessAt == nil || r.AgeSeconds == nil {
+			t.Errorf("%s = %+v, want fresh with a success time", src, r)
+		}
+	}
+	if r := onlySource(t, got, "pg-connector-thread-slack"); !r.Stale || r.AgeSeconds != nil {
+		t.Errorf("thread-slack = %+v, want stale (fail closed)", r)
+	}
+	if r := onlySource(t, got, "pg-connector-pr-github"); r.Stale {
+		t.Errorf("pr-github = %+v, want fresh", r)
+	}
+}

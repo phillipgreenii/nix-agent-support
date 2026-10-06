@@ -15,7 +15,8 @@ two things that are easy to confuse with it:
 A **source** is a `(backend, query)` pair known to the connector's ledger. The user-visible unit
 is the backend: its **display label** defaults to the backend name without the `pg-connector-`
 prefix (for example `pr-github`), and its age is the OLDEST age among its queries, which is the
-conservative reading.
+conservative reading, judged over the queries something still polls (see
+[Abandoned rows](#abandoned-rows)).
 
 ```mermaid
 flowchart LR
@@ -46,8 +47,35 @@ conservatively: the older success wins.
   `meta.last_heartbeat` first. If `pg-connector ledger show` is missing, slow (30 seconds) or
   answers something undecodable, `heartbeat` names that on stderr, leaves the previously recorded
   source times to age, and still exits `0`. Only a store that cannot be written fails it.
+- **The last poll is recorded too.** Alongside the success and the error, each record carries
+  `last_seen_at`: the newest `last_seen` among the row's consumers in `ledger show` (the
+  `pg-router` consumer stamps it on every poll, successful or not). It is monotonic like the
+  success time, and absent when the ledger carries none.
 - **Reporting lag** is at most one heartbeat period (60 seconds by default), far below the
   threshold.
+
+## Abandoned rows
+
+The ledger keeps a row for every `(backend, query[, instance])` ever polled, so a retired
+instance or query leaves a **ghost**: a row that never succeeded (or last did long ago) and that no
+consumer polls any more. Left alone it would hold its backend stale for ever, even though every
+instance still polled is fresh.
+
+A recorded row is **abandoned** when its `last_seen_at` is OLDER than 7 days (exactly at the bound
+is not yet abandoned; `AbandonedAfter` in `internal/freshness`). A live consumer stamps `last_seen`
+every poll, so the bound is orders of magnitude past any live cadence and past a weekend or a long
+sleep, and it is deliberately far above the 15-minute stale threshold: that one judges a polled
+source, this one judges whether anything still polls it.
+
+- **A backend is judged by the rows that are not abandoned.** Abandoned rows are ignored, whether
+  or not they ever succeeded. Nothing is deleted from the ledger or the store; the rule is applied
+  on every read, so the indicator heals itself once a row has been unpolled for 7 days and heals
+  again, with no operator action, if something resumes polling it.
+- **A row polled recently that has never succeeded is NOT a ghost.** A connector that is live but
+  failing (for example `thread-slack`, every fetch truncated) keeps reading unknown and stale.
+- **A row with no known `last_seen_at` is not abandoned.** Absent evidence of a ghost, it counts.
+- **If every row of a backend is abandoned, they all count.** Nothing polls the backend any more,
+  and the indicator MUST NOT turn a dead poller into an all-clear or make the source vanish.
 
 ## Surfaces
 
@@ -103,10 +131,18 @@ anything.
 - **INV-FRESH-4.** A source with no recorded success MUST be reported with `age_seconds: null` and
   `stale: true` (fail closed), on the verb and on the dashboard, and MUST export no
   `pg_desk_source_age_seconds` series. A backend one of whose queries has no recorded success is
-  reported the same way.
+  reported the same way. This holds for a row something still polls; an abandoned row is handled
+  by INV-FRESH-6.
 - **INV-FRESH-5.** `pg_desk_dashboard_stale` and `pg_desk_dashboard_age_seconds` keep their meaning
   (pipeline liveness, from `meta.last_heartbeat`) and their polarity (`0` fresh, `1` stale). Their
   descriptions and [`serve.md`](serve.md) MUST say that they are liveness and not data age.
+
+- **INV-FRESH-6.** A ledger row that no consumer has polled for longer than 7 days (an abandoned
+  row) MUST NOT make its backend stale or unknown while the backend has any row that is not
+  abandoned, whether or not the abandoned row ever succeeded. A row polled within that window that
+  has no recorded success MUST still read unknown and stale (INV-FRESH-4). When every row of a
+  backend is abandoned they MUST all count. Applying the rule MUST NOT delete a ledger file or a
+  store row.
 
 ## Telemetry and logs
 

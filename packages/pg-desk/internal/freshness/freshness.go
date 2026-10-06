@@ -1,5 +1,5 @@
 // Package freshness implements pg-desk's per-source data-age contract
-// (docs/behavior/pg-desk/freshness.md, INV-FRESH-1 to INV-FRESH-5).
+// (docs/behavior/pg-desk/freshness.md, INV-FRESH-1 to INV-FRESH-6).
 //
 // The freshness of a source is the time of its last SUCCESSFUL origin fetch,
 // as the connector's ledger records it (`pg-connector ledger show`'s
@@ -13,6 +13,12 @@
 // unit is the backend, whose age is the OLDEST age among its queries (the
 // conservative reading). A backend with a query that has no recorded success
 // is reported with a null age and stale: true (INV-FRESH-4, fail closed).
+//
+// A ledger row is also a CLAIM that something still polls it: the pg-router
+// consumer stamps last_seen on every poll, successful or not. A row whose
+// every consumer was last seen longer than AbandonedAfter ago is a ghost (a
+// retired instance or query) and is not allowed to hold its backend stale
+// (INV-FRESH-6); a live row that has never succeeded still does.
 package freshness
 
 import (
@@ -37,6 +43,16 @@ const (
 	// SchemaVersion is the freshness report's schemaVersion; the report
 	// evolves additively only.
 	SchemaVersion = 1
+	// AbandonedAfter is how long a ledger row's newest consumer last_seen may
+	// lag before the row is treated as abandoned (a ghost) rather than as a
+	// source something still polls. A live consumer stamps last_seen every poll
+	// (seconds to minutes), so 7 days is orders of magnitude past any live
+	// cadence and far past a weekend, a holiday or a long machine sleep, yet a
+	// retired instance stops holding its backend stale within a week. It
+	// must stay well above freshness.source_stale_after (default 15m): the
+	// stale threshold judges a polled source, this one judges whether anything
+	// still polls it.
+	AbandonedAfter = 7 * 24 * time.Hour
 )
 
 // LedgerError mirrors the connector ledger's last_error: when a fetch
@@ -56,6 +72,25 @@ type LedgerRow struct {
 	Instance    string       `json:"instance,omitempty"`
 	RefreshedAt *time.Time   `json:"refreshed_at"`
 	LastError   *LedgerError `json:"last_error"`
+	// Consumers maps a consumer name (pg-router) to its cursor state; only
+	// last_seen is read.
+	Consumers map[string]LedgerConsumer `json:"consumers,omitempty"`
+}
+
+// LedgerConsumer is the part of a ledger row's per-consumer state the
+// freshness contract reads: when the consumer last polled the row.
+type LedgerConsumer struct {
+	LastSeen *time.Time `json:"last_seen"`
+}
+
+// lastSeen is the newest consumer last_seen on the row, or nil when no
+// consumer has one (never consumed, or an older ledger without the field).
+func (r LedgerRow) lastSeen() *time.Time {
+	var out *time.Time
+	for _, c := range r.Consumers {
+		out = laterTime(out, utc(c.LastSeen))
+	}
+	return out
 }
 
 // ParseLedgerShow decodes `pg-connector ledger show`'s JSON output (an array
@@ -75,6 +110,17 @@ type Record struct {
 	Instance      string       `json:"instance,omitempty"`
 	LastSuccessAt *time.Time   `json:"last_success_at"`
 	LastError     *LedgerError `json:"last_error"`
+	// LastSeenAt is when a consumer last polled this ledger row (newest
+	// across consumers); nil when unknown. It is what separates a live source
+	// from a ghost (INV-FRESH-6).
+	LastSeenAt *time.Time `json:"last_seen_at,omitempty"`
+}
+
+// abandoned reports whether no consumer has polled the record within
+// AbandonedAfter of now. An unknown last_seen is NOT abandoned: with no
+// evidence the row is a ghost, it keeps counting (fail closed).
+func (r Record) abandoned(now time.Time) bool {
+	return r.LastSeenAt != nil && now.Sub(*r.LastSeenAt) > AbandonedAfter
 }
 
 func (r Record) key() string {
@@ -88,7 +134,7 @@ func (r Record) key() string {
 // equal reports whether two records carry the same facts.
 func (r Record) equal(o Record) bool {
 	return r.Backend == o.Backend && r.Query == o.Query && r.Instance == o.Instance &&
-		sameTime(r.LastSuccessAt, o.LastSuccessAt) && sameError(r.LastError, o.LastError)
+		sameTime(r.LastSuccessAt, o.LastSuccessAt) && sameTime(r.LastSeenAt, o.LastSeenAt) && sameError(r.LastError, o.LastError)
 }
 
 func sameTime(a, b *time.Time) bool {
@@ -112,6 +158,7 @@ func Merge(stored, incoming Record) Record {
 	out := incoming
 	out.LastSuccessAt = laterTime(stored.LastSuccessAt, incoming.LastSuccessAt)
 	out.LastError = laterError(stored.LastError, incoming.LastError)
+	out.LastSeenAt = laterTime(stored.LastSeenAt, incoming.LastSeenAt)
 	return out
 }
 
@@ -153,6 +200,7 @@ func collapse(rows []LedgerRow) []Record {
 		rec := Record{
 			Backend: row.Backend, Query: row.Query, Instance: row.Instance,
 			LastSuccessAt: utc(row.RefreshedAt), LastError: utcError(row.LastError),
+			LastSeenAt: row.lastSeen(),
 		}
 		k := rec.key()
 		prev, seen := byKey[k]
@@ -167,6 +215,7 @@ func collapse(rows []LedgerRow) []Record {
 			prev.LastSuccessAt = rec.LastSuccessAt
 		}
 		prev.LastError = laterError(prev.LastError, rec.LastError)
+		prev.LastSeenAt = laterTime(prev.LastSeenAt, rec.LastSeenAt)
 		byKey[k] = prev
 	}
 	sort.Strings(order)
@@ -285,28 +334,34 @@ func Sources(st *store.Store, cfg *config.Config, now time.Time) ([]Row, error) 
 	if err != nil {
 		return nil, fmt.Errorf("freshness: %w", err)
 	}
-	// oldest success per backend; unknown wins.
-	type agg struct {
-		unknown bool
-		oldest  time.Time
-	}
-	byBackend := map[string]*agg{}
+	// Group the readable records by backend, then judge each backend by the
+	// rows something still polls (INV-FRESH-6).
+	byBackend := map[string][]Record{}
 	for _, raw := range kv {
 		var rec Record
 		if json.Unmarshal([]byte(raw), &rec) != nil || rec.Backend == "" {
 			continue // a malformed row MUST NOT take the indicator down
 		}
-		a := byBackend[rec.Backend]
-		if a == nil {
-			a = &agg{}
-			byBackend[rec.Backend] = a
-		}
-		if rec.LastSuccessAt == nil || rec.LastSuccessAt.IsZero() {
-			a.unknown = true
-			continue
-		}
-		if a.oldest.IsZero() || rec.LastSuccessAt.Before(a.oldest) {
-			a.oldest = rec.LastSuccessAt.UTC()
+		byBackend[rec.Backend] = append(byBackend[rec.Backend], rec)
+	}
+	// oldest success per backend; unknown wins.
+	type agg struct {
+		unknown bool
+		oldest  time.Time
+	}
+	aggs := map[string]*agg{}
+	for b, recs := range byBackend {
+		recs = liveRecords(recs, now)
+		a := &agg{}
+		aggs[b] = a
+		for _, rec := range recs {
+			if rec.LastSuccessAt == nil || rec.LastSuccessAt.IsZero() {
+				a.unknown = true
+				continue
+			}
+			if a.oldest.IsZero() || rec.LastSuccessAt.Before(a.oldest) {
+				a.oldest = rec.LastSuccessAt.UTC()
+			}
 		}
 	}
 	backends := make([]string, 0, len(byBackend))
@@ -316,7 +371,7 @@ func Sources(st *store.Store, cfg *config.Config, now time.Time) ([]Row, error) 
 	sort.Strings(backends)
 	rows := make([]Row, 0, len(backends))
 	for _, b := range backends {
-		a := byBackend[b]
+		a := aggs[b]
 		label, staleAfter := resolve(cfg, b)
 		row := Row{Source: b, Label: label, Stale: true}
 		if !a.unknown && !a.oldest.IsZero() {
@@ -328,6 +383,25 @@ func Sources(st *store.Store, cfg *config.Config, now time.Time) ([]Row, error) 
 		rows = append(rows, row)
 	}
 	return rows, nil
+}
+
+// liveRecords drops a backend's abandoned (ghost) records, keeping the ones
+// something still polls. When EVERY record of the backend is abandoned
+// nothing polls the backend any more, so the records are all kept and the
+// backend reads stale: dropping them would let a dead poller read as an
+// all-clear (or make the source vanish), which INV-FRESH-4's fail-closed rule
+// forbids.
+func liveRecords(recs []Record, now time.Time) []Record {
+	live := make([]Record, 0, len(recs))
+	for _, r := range recs {
+		if !r.abandoned(now) {
+			live = append(live, r)
+		}
+	}
+	if len(live) == 0 {
+		return recs
+	}
+	return live
 }
 
 // ageSeconds is the whole seconds since t; a future t (clock skew) is 0.
