@@ -6287,6 +6287,14 @@
                       window = "7d";
                     };
                     store.path = "/var/tmp/wr/store.db";
+                    kinds.narrative = {
+                      model = "example-model";
+                      systemPromptFile = "/var/tmp/wr/prompt.md";
+                    };
+                  };
+                  hmModelOnly = evalHM {
+                    enable = true;
+                    kinds.narrative.model = "example-model";
                   };
                   # The module option is read-only: defining it must fail to
                   # evaluate.
@@ -6333,12 +6341,13 @@
                     mkdir -p "$HOME"
                     defaults=${hmDefaults.xdg.configFile."work-report/config.yaml".source}
                     custom=${hmCustom.xdg.configFile."work-report/config.yaml".source}
+                    modelonly=${hmModelOnly.xdg.configFile."work-report/config.yaml".source}
 
                     # Defaults: only the schedule is rendered, with 1h / 48h.
                     grep -q '^schedule:' "$defaults"
                     grep -q 'interval: 1h' "$defaults"
                     grep -q 'window: 48h' "$defaults"
-                    ! grep -Eq 'timezone|sources|store:' "$defaults"
+                    ! grep -Eq 'timezone|sources|store:|kinds' "$defaults"
                     got=$(work-report config show --config "$defaults" --output json)
                     [ "$(jq -r .schedule.interval <<<"$got")" = 1h ]
                     [ "$(jq -r .schedule.window <<<"$got")" = 48h ]
@@ -6355,6 +6364,15 @@
                     [ "$(jq -c '.sources["source-one"].labels' <<<"$got")" = '["alpha"]' ]
                     [ "$(jq -r '.sources["source-two"].enable' <<<"$got")" = true ]
                     [ "$(jq -c '.sources["source-two"].labels' <<<"$got")" = '["beta","gamma"]' ]
+                    [ "$(jq -r .kinds.narrative.model <<<"$got")" = example-model ]
+                    [ "$(jq -r .kinds.narrative.systemPromptFile <<<"$got")" = /var/tmp/wr/prompt.md ]
+
+                    # Only the model set: the prompt file stays empty in config show.
+                    grep -q 'model: example-model' "$modelonly"
+                    ! grep -q 'systemPromptFile' "$modelonly"
+                    got=$(work-report config show --config "$modelonly" --output json)
+                    [ "$(jq -r .kinds.narrative.model <<<"$got")" = example-model ]
+                    [ "$(jq -r .kinds.narrative.systemPromptFile <<<"$got")" = "" ]
 
                     # pgRouterConfigText equals the CLI's own rendering for the
                     # same schedule.* values (defaults and custom).
