@@ -30,7 +30,7 @@ func TestExpectedDiffNamesRealScenariosAndCoversTheDocumentedExceptions(t *testi
 			ids[x.ID] = true
 		}
 	}
-	for _, id := range []string{"S13", "S14", "S15", "S16", "S19", "S24"} {
+	for _, id := range []string{"S13", "S14", "S15", "S16", "S19", "S24", "S26"} {
 		if !ids[id] {
 			t.Errorf("expected-diff lists no %s difference", id)
 		}

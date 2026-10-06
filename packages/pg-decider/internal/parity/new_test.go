@@ -29,6 +29,7 @@ var newWantActions = map[string][]rule{
 	"11-": {{"reopen", "anchor", "all.reopened"}},
 	"12-": {{"reopen", "review-pr", "review.head-advanced"}},
 	"13-": {{"update", "review-pr", "adoption"}, {"update", "process-feedback", "adoption"}},
+	"14-": {{"create", "process-feedback", "feedback.digest-changed"}},
 }
 
 var newWantAbsent = map[string][]rule{
@@ -38,6 +39,9 @@ var newWantAbsent = map[string][]rule{
 	// The legacy anchor has no repo or pr_number metadata, so nothing links it
 	// to the PR on the new side: it is neither adopted nor found.
 	"13-": {{"update", "anchor", "adoption"}},
+	// S26: the closed review request for the unchanged head is not reopened,
+	// and the one comment the closed cycle covered does not re-trigger it.
+	"14-": {{"reopen", "review-pr", "review.head-advanced"}, {"reopen", "process-feedback", "feedback.digest-changed"}},
 }
 
 func hasAction(p action.PlanResult, r rule) bool {
@@ -139,6 +143,6 @@ func TestRunNewIsHermetic(t *testing.T) {
 		}
 	}
 	assertRunArtifacts(t, env.TempDir, "new-", []string{
-		"pr show acme/api#110", "issue show bd-110a", "issue show bd-110r", "issue show bd-110f",
+		"pr show acme/api#110 --fresh", "issue show bd-110a --fresh", "issue show bd-110r --fresh", "issue show bd-110f --fresh",
 	})
 }

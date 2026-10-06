@@ -15,12 +15,12 @@ import (
 // The calls, read from internal/gather (the pre-cutover Gather and the generic
 // entity seam's pr and issue adapters) of the pg-desk binary:
 //
-//	pr show <id>                              the PR (exit 4 when unknown)
+//	pr show <id> [--fresh]                    the PR (exit 4 when unknown)
 //	pr files <id>, pr commits <id>            the PR's files and commits
 //	ci list <id>                              the CI runs (bare fan-out answer)
 //	issue list --query work-beads             every fixture bead (bare)
 //	issue list --query pending-review-escalations   none (bare)
-//	issue show <bead id>                      one bead (exit 4 when unknown)
+//	issue show <bead id> [--fresh]            one bead (exit 4 when unknown)
 //	issue deps <bead id> --full               no dependencies
 //	pr review pending <id>                    no pending review
 //
@@ -47,6 +47,7 @@ func fakeConnectorScript(fx *Fixture, callLog string) string {
 	for _, p := range fx.PRs {
 		id := entityID(p.Number)
 		emit("pr show "+id, wireEnvelope(fx.prShowJSON(p)))
+		emit("pr show "+id+" --fresh", wireEnvelope(fx.prShowJSON(p)))
 		emit("pr files "+id, wireEnvelope(fx.prFilesJSON(p)))
 		emit("pr commits "+id, wireEnvelope(fx.prCommitsJSON(p)))
 		emit("ci list "+id, fx.ciListJSON(p))
@@ -56,6 +57,7 @@ func fakeConnectorScript(fx *Fixture, callLog string) string {
 	sort.Slice(beads, func(i, j int) bool { return beads[i].ID < beads[j].ID })
 	for _, bd := range beads {
 		emit("issue show "+bd.ID, wireEnvelope(fx.issueShowJSON(bd)))
+		emit("issue show "+bd.ID+" --fresh", wireEnvelope(fx.issueShowJSON(bd)))
 		emit("issue deps "+bd.ID+" --full", wireEnvelope(fx.issueDepsJSON(bd)))
 	}
 	emit("issue list --query work-beads", fx.workBeadsJSON())

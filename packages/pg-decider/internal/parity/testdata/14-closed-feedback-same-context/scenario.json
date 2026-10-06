@@ -1,0 +1,65 @@
+{
+  "name": "14-closed-feedback-same-context",
+  "description": "My open PR with a CLOSED feedback cycle covering its first comment, a second comment no cycle covers, and a CLOSED review request for the unchanged head: the review request is not reopened, the covered comment does not re-trigger its cycle, and the new comment gets a fresh cycle however the old one was closed.",
+  "entities": ["acme/api#114"],
+  "prs": [
+    {
+      "number": 114,
+      "title": "Cache the lookup results",
+      "author": "phillipgreenii",
+      "comments": [
+        {
+          "id": "c1",
+          "author": "teammate",
+          "body": "Please document the eviction policy."
+        },
+        {
+          "id": "c2",
+          "author": "teammate",
+          "body": "The cache key should include the locale."
+        }
+      ]
+    }
+  ],
+  "beads": [
+    {
+      "id": "bd-114a",
+      "title": "acme/api#114: Cache the lookup results",
+      "metadata": {
+        "repo": "acme/api",
+        "pr_number": "114",
+        "state": "open",
+        "branch": "feature-114",
+        "base": "main",
+        "author": "phillipgreenii",
+        "draft": "false"
+      }
+    },
+    {
+      "id": "bd-114r",
+      "title": "review-pr: acme/api#114",
+      "state": "closed",
+      "parent": "bd-114a",
+      "metadata": {
+        "repo": "acme/api",
+        "pr_number": "114",
+        "branch": "feature-114",
+        "head_sha": "head0114",
+        "ownership": "mine"
+      }
+    },
+    {
+      "id": "bd-114f",
+      "title": "process-feedback: acme/api#114",
+      "state": "closed",
+      "parent": "bd-114a",
+      "labels": ["mine"],
+      "fbsum": ["c1"],
+      "metadata": {
+        "repo": "acme/api",
+        "pr_number": "114",
+        "branch": "feature-114"
+      }
+    }
+  ]
+}

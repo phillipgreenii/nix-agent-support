@@ -350,7 +350,7 @@ func (sb *sandbox) assertConnectorUsed(entities []string) error {
 	}
 	lines := strings.Split(string(log), "\n")
 	for _, e := range entities {
-		if !contains(lines, "pr show "+e) {
+		if !contains(lines, "pr show "+e) && !contains(lines, "pr show "+e+" --fresh") {
 			return fmt.Errorf("parity: the fake pg-connector was never asked for `pr show %s`; pg-desk reached a different pg-connector", e)
 		}
 	}

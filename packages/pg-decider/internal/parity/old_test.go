@@ -13,7 +13,7 @@ import (
 
 // oldWantKinds is, per scenario, the set of ledger kinds the OLD sync stage
 // leaves as planned (not-yet-applied) rows. A write that only adopts an existing
-// bead carries that bead's id and so is not a planned row: scenarios 09 to 13
+// bead carries that bead's id and so is not a planned row: scenarios 09 to 14
 // start from existing beads and plan nothing new.
 var oldWantKinds = map[string][]string{
 	"01-": {"anchor", "feedback-cycle", "review-request"},
@@ -29,6 +29,7 @@ var oldWantKinds = map[string][]string{
 	"11-": nil,
 	"12-": nil,
 	"13-": nil,
+	"14-": nil,
 }
 
 func wantFor[T any](t *testing.T, table map[string]T, name string) T {
@@ -111,7 +112,7 @@ func TestRunOldIsHermetic(t *testing.T) {
 			t.Errorf("%s was written to: %v", dir, entries)
 		}
 	}
-	assertRunArtifacts(t, env.TempDir, "old-", []string{"pr show acme/api#110", "issue list --query work-beads"})
+	assertRunArtifacts(t, env.TempDir, "old-", []string{"pr show acme/api#110 --fresh", "issue list --query work-beads"})
 }
 
 // assertRunArtifacts finds the single run directory under temp with the given

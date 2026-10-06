@@ -277,6 +277,48 @@
         "side": "old-only",
         "reason": "Operator ruling pg2-nbkps (Phillip, 2026-10-05), option (b) out of scope plus explained exception: the old sync adopts a legacy anchor by its <repo>#<n>: title prefix alone, and the new pipeline deliberately does not carry title-prefix adoption, because a work item links to its PR only through repo and pr_number metadata. Evidence: 0 of 1,401 live merge-request beads in the tracker lack repo/pr_number metadata (read-only scan 2026-10-05), and the legacy creator writes title and metadata in one call."
       }
+    ],
+    "14-closed-feedback-same-context": [
+      {
+        "id": "UNOBS",
+        "entity": "acme/api#114",
+        "kind": "anchor",
+        "op": "update",
+        "side": "new-only",
+        "reason": "anchor.backfill is same as current (spec 7.3): the anchor's drifted fields are refreshed with one update. The old side makes this write against an existing bead, which pg-desk show --json does not list (planned_sync_rows lists only rows without a bead id), so it is pinned here instead of observed."
+      },
+      {
+        "id": "S26",
+        "entity": "acme/api#114",
+        "kind": "process-feedback",
+        "op": "create",
+        "side": "new-only",
+        "reason": "feedback.digest-changed (S26): a closed cycle, however it was closed, never blocks feedback it did not cover; the unaddressed comment no earlier cycle covers gets a fresh cycle. Today the closed cycle is adopted as the PR's one cycle and no new one is created. Comments the closed cycle did cover, and the closed review request for the unchanged head, stay untouched on both sides."
+      },
+      {
+        "id": "S19",
+        "entity": "acme/api#114",
+        "kind": "anchor",
+        "op": "key-write",
+        "side": "new-only",
+        "reason": "Adoption writes the stable dedup_key onto the adopted bead (S19, spec 7.3 Adoption); the old adoption only links the bead and writes no dedup_key."
+      },
+      {
+        "id": "S19",
+        "entity": "acme/api#114",
+        "kind": "process-feedback",
+        "op": "key-write",
+        "side": "new-only",
+        "reason": "Adoption writes the stable dedup_key onto the adopted bead (S19, spec 7.3 Adoption); the old adoption only links the bead and writes no dedup_key."
+      },
+      {
+        "id": "S19",
+        "entity": "acme/api#114",
+        "kind": "review-pr",
+        "op": "key-write",
+        "side": "new-only",
+        "reason": "Adoption writes the stable dedup_key onto the adopted bead (S19, spec 7.3 Adoption); the old adoption only links the bead and writes no dedup_key."
+      }
     ]
   }
 }
