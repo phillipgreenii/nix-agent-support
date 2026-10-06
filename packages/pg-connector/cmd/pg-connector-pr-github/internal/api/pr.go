@@ -20,7 +20,12 @@ type PR struct {
 	// can compute how long ago a PR merged — its dashboard-retention window
 	// is measured from this instant, not from when the daemon noticed the
 	// merge (pg2-ew4kf).
-	MergedAt     string `json:"merged_at,omitempty"`
+	MergedAt string `json:"merged_at,omitempty"`
+	// CreatedAt/ClosedAt are the PR's own creation and close timestamps
+	// (RFC3339). Only SearchPRsActivity fills them (the activity capability's
+	// pr.opened and pr.closed kinds); every other path leaves them empty.
+	CreatedAt    string `json:"created_at,omitempty"`
+	ClosedAt     string `json:"closed_at,omitempty"`
 	Additions    int    `json:"additions,omitempty"`
 	Deletions    int    `json:"deletions,omitempty"`
 	ChangedFiles int    `json:"changed_files,omitempty"`

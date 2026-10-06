@@ -2487,3 +2487,60 @@ func TestDeleteReview_Argv(t *testing.T) {
 		t.Errorf("argv = %q", got)
 	}
 }
+
+// TestSearchPRsActivity_RequestsCreatedClosedAndLimit proves the activity
+// search asks gh for createdAt/closedAt and the caller's result limit, keeps
+// every flag before the "--" terminator, and decodes both timestamps.
+func TestSearchPRsActivity_RequestsCreatedClosedAndLimit(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["search prs"] = []byte(`[{
+	  "number": 9, "title": "t", "url": "https://github.com/owner/repo/pull/9",
+	  "state": "CLOSED", "isDraft": false, "author": {"login": "octocat"},
+	  "labels": [], "repository": {"nameWithOwner": "owner/repo"},
+	  "createdAt": "2026-09-01T08:00:00Z", "closedAt": "2026-09-02T09:30:00Z"
+	}]`)
+	p := NewWithRunner(gh)
+
+	prs, err := p.SearchPRsActivity(context.Background(), "author:octocat is:unmerged closed:2026-09-01T00:00:00Z..2026-10-01T00:00:00Z", 1000)
+	if err != nil {
+		t.Fatalf("SearchPRsActivity: %v", err)
+	}
+	if len(prs) != 1 || prs[0].CreatedAt != "2026-09-01T08:00:00Z" || prs[0].ClosedAt != "2026-09-02T09:30:00Z" {
+		t.Fatalf("unexpected PRs: %+v", prs)
+	}
+	last := gh.calls[len(gh.calls)-1]
+	joined := strings.Join(last, " ")
+	for _, want := range []string{"createdAt", "closedAt", "--limit 1000"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expected %q in gh args: %v", want, last)
+		}
+	}
+	dash := -1
+	for i, a := range last {
+		if a == "--" {
+			dash = i
+		}
+	}
+	if dash < 0 || last[dash+1] != "author:octocat" || last[dash+2] != "is:unmerged" {
+		t.Fatalf("qualifiers must follow --, one per argument: %v", last)
+	}
+	for _, a := range last[dash+1:] {
+		if strings.HasPrefix(a, "--") {
+			t.Fatalf("flag after --: %v", last)
+		}
+	}
+}
+
+// TestSearchPRs_DoesNotRequestActivityFields proves the plain search request
+// is unchanged: it never asks for createdAt/closedAt.
+func TestSearchPRs_DoesNotRequestActivityFields(t *testing.T) {
+	gh := newFakeGH()
+	p := NewWithRunner(gh)
+	if _, err := p.SearchPRs(context.Background(), "is:open"); err != nil {
+		t.Fatalf("SearchPRs: %v", err)
+	}
+	joined := strings.Join(gh.calls[len(gh.calls)-1], " ")
+	if strings.Contains(joined, "createdAt") || strings.Contains(joined, "closedAt") {
+		t.Fatalf("plain search must not request activity fields: %s", joined)
+	}
+}

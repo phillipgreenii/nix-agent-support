@@ -10,12 +10,15 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/eventlog"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/github"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout/conformance"
 )
 
 // fakeGH is a minimal double for internal.Backend's ghProvider seam, so
@@ -41,6 +44,10 @@ func (fakeGH) SearchPRs(ctx context.Context, query string) ([]api.PR, error) {
 }
 
 func (fakeGH) SearchPRsEnriched(ctx context.Context, query string) ([]api.PR, error) {
+	return nil, nil
+}
+
+func (fakeGH) SearchPRsActivity(ctx context.Context, query string, limit int) ([]api.PR, error) {
 	return nil, nil
 }
 
@@ -292,5 +299,109 @@ func TestNewDispatchTable_ListsReviewPending(t *testing.T) {
 	table := newDispatchTable(newTestBackend(t))
 	if _, ok := table["review_pending"]; !ok {
 		t.Fatalf("review_pending missing from dispatch table; ops = %v", table.Ops())
+	}
+}
+
+// activityGH extends fakeGH with a small activity fixture: the viewer's own PRs
+// plus another person's, one per search kind.
+type activityGH struct{ fakeGH }
+
+func (activityGH) SearchPRsActivity(_ context.Context, query string, _ int) ([]api.PR, error) {
+	pr := func(n int, author, created, closed string) api.PR {
+		return api.PR{Repo: "o/r", Number: n, Title: "t", Author: author, URL: "https://example.invalid/o/r/pull/1", CreatedAt: created, ClosedAt: closed}
+	}
+	switch {
+	case strings.Contains(query, "created:"):
+		return []api.PR{pr(1, "me", "2026-09-02T00:00:00Z", ""), pr(2, "other", "2026-09-02T00:00:00Z", "")}, nil
+	case strings.Contains(query, "merged:"):
+		return []api.PR{pr(1, "me", "2026-09-02T00:00:00Z", "2026-09-03T00:00:00Z")}, nil
+	case strings.Contains(query, "closed:"):
+		return []api.PR{pr(3, "me", "2026-09-01T00:00:00Z", "2026-09-04T00:00:00Z")}, nil
+	}
+	return nil, nil
+}
+
+func (activityGH) GetPR(_ context.Context, repo string, number int) (*api.PR, error) {
+	return &api.PR{Repo: repo, Number: number, Merged: true, MergedAt: "2026-09-03T00:00:00Z"}, nil
+}
+
+func capabilitiesOf(t *testing.T, table scriptout.DispatchTable) scriptout.CapabilitiesResponse {
+	t.Helper()
+	result, err := table[scriptout.OpCapabilities].Handle(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("capabilities Handle: %v", err)
+	}
+	resp, ok := result.(scriptout.CapabilitiesResponse)
+	if !ok {
+		t.Fatalf("result type = %T, want scriptout.CapabilitiesResponse", result)
+	}
+	return resp
+}
+
+// TestNewDispatchTable_DeclaresActivityCapability proves list_activity is
+// wired into this binary's own table and declared: ops derived from the table,
+// the activity schema version, and exactly the kinds this backend emits.
+func TestNewDispatchTable_DeclaresActivityCapability(t *testing.T) {
+	table := newDispatchTable(newTestBackend(t))
+	resp := capabilitiesOf(t, table)
+
+	hasOp := false
+	for _, op := range resp.Ops {
+		if op == "list_activity" {
+			hasOp = true
+		}
+	}
+	if !hasOp {
+		t.Fatalf("capabilities.ops = %v, want list_activity", resp.Ops)
+	}
+	if got := resp.SchemaVersions["activity"]; got != schema.ActivitySchemaVersion {
+		t.Fatalf("schemaVersions[activity] = %d, want %d", got, schema.ActivitySchemaVersion)
+	}
+	want := []string{"pr.opened", "pr.merged", "pr.closed"}
+	kinds, ok := resp.Vocabulary["activity_kinds"]
+	if !ok {
+		t.Fatalf("vocabulary = %v, want activity_kinds", resp.Vocabulary)
+	}
+	raw, _ := json.Marshal(kinds)
+	wantRaw, _ := json.Marshal(want)
+	if string(raw) != string(wantRaw) {
+		t.Fatalf("vocabulary.activity_kinds = %s, want %s", raw, wantRaw)
+	}
+}
+
+// TestNewDispatchTable_ListActivityConformance drives the production table
+// through the generic list_activity conformance case, then asserts the
+// content the generic case deliberately leaves to the backend.
+func TestNewDispatchTable_ListActivityConformance(t *testing.T) {
+	table := newDispatchTable(internal.New(activityGH{}))
+	backend := conformance.TableBackend{Table: table}
+	since := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	before := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+
+	for _, r := range conformance.RunListActivityCase(context.Background(), backend, since, before) {
+		if r.Err != nil {
+			t.Errorf("%s: %v", r.Name, r.Err)
+		}
+	}
+
+	res, err := conformance.InvokeListActivity(context.Background(), backend, since.Format(time.RFC3339), before.Format(time.RFC3339))
+	if err != nil || res.ErrorCode != "" {
+		t.Fatalf("InvokeListActivity: res=%+v err=%v", res, err)
+	}
+	var got schema.ActivityListResult
+	if err := json.Unmarshal(res.Result, &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	ids := map[string]bool{}
+	for _, it := range got.Items {
+		ids[it.ID] = true
+	}
+	for _, want := range []string{"o/r#1#pr.opened", "o/r#1#pr.merged", "o/r#3#pr.closed"} {
+		if !ids[want] {
+			t.Errorf("missing %q in %v", want, ids)
+		}
+	}
+	if len(ids) != 3 {
+		t.Errorf("ids = %v, want only the viewer's three items (other people's PR excluded)", ids)
 	}
 }

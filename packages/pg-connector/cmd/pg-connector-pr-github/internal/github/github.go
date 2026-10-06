@@ -42,6 +42,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"unicode"
@@ -616,6 +617,11 @@ type ghSearchPR struct {
 	// pg2-2j5ac.30.6) — see searchPRFields' own doc comment.
 	UpdatedAt     string `json:"updatedAt"`
 	CommentsCount int    `json:"commentsCount"`
+	// CreatedAt/ClosedAt are requested only by SearchPRsActivity
+	// (activitySearchFields); the plain search path never asks for them, so
+	// they stay empty there and existing callers see no change.
+	CreatedAt string `json:"createdAt"`
+	ClosedAt  string `json:"closedAt"`
 }
 
 func (p ghSearchPR) toAPI() api.PR {
@@ -630,6 +636,8 @@ func (p ghSearchPR) toAPI() api.PR {
 		Body:         p.Body,
 		UpdatedAt:    p.UpdatedAt,
 		CommentCount: p.CommentsCount,
+		CreatedAt:    p.CreatedAt,
+		ClosedAt:     p.ClosedAt,
 	}
 	for _, l := range p.Labels {
 		out.Labels = append(out.Labels, l.Name)
@@ -712,6 +720,40 @@ func (p *Provider) SearchPRs(ctx context.Context, query string) ([]api.PR, error
 		"search", "prs",
 		"--json", searchPRFields,
 		"--limit", "100",
+		"--",
+	}
+	args = append(args, splitSearchQualifiers(query)...)
+	raw, err := p.runRead(ctx, readOpts{}, args...)
+	if err != nil {
+		return nil, err
+	}
+	var results []ghSearchPR
+	if err := json.Unmarshal(raw, &results); err != nil {
+		return nil, fmt.Errorf("github: parse gh search prs JSON: %w", err)
+	}
+	out := make([]api.PR, 0, len(results))
+	for _, r := range results {
+		out = append(out, r.toAPI())
+	}
+	return out, nil
+}
+
+// activitySearchFields is the JSON field set SearchPRsActivity requests: the
+// identity fields plus createdAt and closedAt, which the activity capability's
+// pr.opened and pr.closed kinds take as their occurred_at. gh search prs has no
+// merged-at field at all, so a merge timestamp comes from GetPR instead.
+const activitySearchFields = "number,title,url,state,isDraft,author,labels,repository,createdAt,closedAt"
+
+// SearchPRsActivity runs one `gh search prs` call for the activity capability:
+// the same qualifier handling as SearchPRs, but it requests
+// activitySearchFields and a caller-chosen result limit (GitHub search caps
+// any query at 1000 results). A separate method rather than a change to
+// SearchPRs, so List/Search/ListAttention keep their exact request shape.
+func (p *Provider) SearchPRsActivity(ctx context.Context, query string, limit int) ([]api.PR, error) {
+	args := []string{
+		"search", "prs",
+		"--json", activitySearchFields,
+		"--limit", strconv.Itoa(limit),
 		"--",
 	}
 	args = append(args, splitSearchQualifiers(query)...)

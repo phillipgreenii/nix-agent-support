@@ -25,6 +25,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/archive"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/eventlog"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/github"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/activity"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/attention"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/pr"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/search"
@@ -71,8 +72,8 @@ func instrument(table scriptout.DispatchTable, getenv func(string) string) scrip
 // ops list that could drift from what the table actually dispatches (bead
 // pg2-fh2vh). Version is set to this binary's own ldflags-stamped build
 // var, so capabilities is now the wire exposure for the version this
-// binary otherwise had no way to report (bead pg2-a8uf2). This backend
-// declares no vocabulary (its category vocabulary was retired with
+// binary otherwise had no way to report (bead pg2-a8uf2). Its only
+// vocabulary is activity_kinds (its category vocabulary was retired with
 // categorize by bead pg2-2j5ac.28.7).
 func newDispatchTable(backend *internal.Backend) scriptout.DispatchTable {
 	table := pr.NewDispatchTable(backend)
@@ -88,12 +89,24 @@ func newDispatchTable(backend *internal.Backend) scriptout.DispatchTable {
 	for op, handler := range attention.NewDispatchTable(backend) {
 		table[op] = handler
 	}
+	// activity (list_activity, plus its own auth_status entry, identical in
+	// effect to the others) built by pkg/provider/activity.NewDispatchTable:
+	// this backend's own ListActivity, scoped to the authenticated viewer.
+	for op, handler := range activity.NewDispatchTable(backend) {
+		table[op] = handler
+	}
 	return scriptout.AddCapabilities(table, schema.PRSchemaVersion, scriptout.CapabilitiesResponse{
 		ProtocolVersion: scriptout.ProtocolVersion,
 		SchemaVersions: map[string]int{
 			"pr":        schema.PRSchemaVersion,
 			"search":    schema.SearchSchemaVersion,
 			"attention": schema.AttentionSchemaVersion,
+			"activity":  schema.ActivitySchemaVersion,
+		},
+		// The activity kinds this backend emits; capabilities.ops stays
+		// derived from the table above, never a hand-typed list.
+		Vocabulary: map[string]any{
+			"activity_kinds": internal.ActivityKindsOnce,
 		},
 		Version: Version,
 	})

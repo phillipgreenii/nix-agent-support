@@ -56,6 +56,10 @@ type ghProvider interface {
 	// instead of the old SearchPRs + per-matched-PR GetPR/ReviewThreadCount
 	// fan-out.
 	SearchPRsEnriched(ctx context.Context, query string) ([]api.PR, error)
+	// SearchPRsActivity runs one GitHub search-syntax query for the activity
+	// capability: the result carries createdAt/closedAt, and limit is the
+	// result cap (GitHub search caps any query at 1000).
+	SearchPRsActivity(ctx context.Context, query string, limit int) ([]api.PR, error)
 	// ReadRateLimit reads the GraphQL API's current rate-limit state —
 	// remainder and reset time (design's "Rate protection" bullet; reset
 	// added by bead pg2-ph0o4 for the backend's own event log).

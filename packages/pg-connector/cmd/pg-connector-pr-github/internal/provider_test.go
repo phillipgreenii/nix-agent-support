@@ -41,6 +41,8 @@ type fakeGH struct {
 	// List's own non-ids_only path only (bead pg2-aehpr).
 	searchFn         func(ctx context.Context, query string) ([]api.PR, error)
 	searchEnrichedFn func(ctx context.Context, query string) ([]api.PR, error)
+	// searchActivityFn backs ghProvider.SearchPRsActivity (list_activity).
+	searchActivityFn func(ctx context.Context, query string, limit int) ([]api.PR, error)
 	rateLimit        int
 	rateLimitResetAt string
 	rateLimitErr     error
@@ -113,6 +115,13 @@ func (f *fakeGH) SearchPRs(ctx context.Context, query string) ([]api.PR, error) 
 func (f *fakeGH) SearchPRsEnriched(ctx context.Context, query string) ([]api.PR, error) {
 	if f.searchEnrichedFn != nil {
 		return f.searchEnrichedFn(ctx, query)
+	}
+	return nil, nil
+}
+
+func (f *fakeGH) SearchPRsActivity(ctx context.Context, query string, limit int) ([]api.PR, error) {
+	if f.searchActivityFn != nil {
+		return f.searchActivityFn(ctx, query, limit)
 	}
 	return nil, nil
 }
