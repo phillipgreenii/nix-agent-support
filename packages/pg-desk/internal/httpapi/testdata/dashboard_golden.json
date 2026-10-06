@@ -71,5 +71,7 @@
       "entity_id": "303",
       "error": "sync timeout"
     }
-  ]
+  ],
+  "attention": null,
+  "attention_error": "no repository configured"
 }

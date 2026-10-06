@@ -29,7 +29,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/attention"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/interpret"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
@@ -231,6 +233,16 @@ type Payload struct {
 	LastSweepAt   string         `json:"last_sweep_at,omitempty"`
 	RunsFailed24h int            `json:"runs_failed_24h"`
 	Errors        []PayloadError `json:"errors"`
+
+	// Attention is the attention evaluator's groups (docs/behavior/pg-desk/
+	// attention.md, "The dashboard payload"): exactly Result.Groups of the
+	// attention.Evaluate call the pg-desk-attention plugin makes, in the
+	// evaluator's canonical order. It is [] when nothing needs the operator
+	// and null ONLY when the evaluation failed, in which case AttentionError
+	// says why: a failed evaluation MUST NOT read as "all clear"
+	// (INV-ATTNEVAL-6), and it MUST NOT take the five panels down with it.
+	Attention      []attention.Group `json:"attention"`
+	AttentionError string            `json:"attention_error,omitempty"`
 }
 
 // BuildPayload assembles the dashboard payload from the store, as of now.
@@ -322,7 +334,34 @@ func BuildPayload(st *store.Store, cfg *config.Config, now time.Time) (*Payload,
 		p.LastSweepAt = lastSweep
 	}
 
+	p.Attention, p.AttentionError = evaluateAttention(st, cfg, now)
+
 	return p, nil
+}
+
+// evaluateAttention runs the shared evaluator over the same store the panels
+// were read from, as of now, and returns its groups. It makes the SAME
+// attention.Evaluate call, on the same inputs (the first configured
+// repository, no PR-stack source), as the pg-desk-attention plugin, so the
+// two surfaces cannot disagree (INV-ATTNEVAL-2). A failure returns nil groups
+// and the reason; it never returns an empty list for a failed evaluation.
+func evaluateAttention(st *store.Store, cfg *config.Config, now time.Time) ([]attention.Group, string) {
+	if cfg == nil || len(cfg.Repos) == 0 {
+		return nil, "no repository configured"
+	}
+	res, err := attention.Evaluate(attention.Inputs{
+		Store:  st,
+		Repo:   cfg.Repos[0].Remote,
+		Config: cfg,
+		Clock:  interpret.FixedClock(now),
+	})
+	if err != nil {
+		return nil, err.Error()
+	}
+	if res.Groups == nil {
+		return []attention.Group{}, ""
+	}
+	return res.Groups, ""
 }
 
 // parseHeartbeatPeriod parses cfg.HeartbeatPeriod as a Go duration, falling

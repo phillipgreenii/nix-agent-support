@@ -23,6 +23,24 @@ serves `GET /api/v1/dashboard` with today's payload contract — the five named 
 two-heartbeat-period staleness bound `pg-pr` uses today, so a dead scheduler shows as stale within
 two heartbeat periods.
 
+### The `attention` field
+
+The payload also carries an additive `attention` field: the attention evaluator's groups
+([`attention.md`](attention.md), "The dashboard payload"). It is exactly the groups the
+`pg-desk-attention` plugin emits for the same store, computed by the same `Evaluate` call (the
+first configured repository, the same rules and configuration), so the dashboard and the menu bar
+cannot disagree (`INV-ATTNEVAL-2`). Each group is `{key, label, items[]}`, groups and the items
+inside them in the evaluator's canonical order; each item is `{type, id, summary, severity, rule,
+group}`, `type` and `id` being a valid ref for `pg-desk links`.
+
+- `attention` is `[]` when nothing needs the operator.
+- If the evaluation cannot run (no repository configured, an unknown rule kind in the `attention`
+  config block, an unreadable store), `attention` is `null` and the root field `attention_error`
+  carries the reason. `serve` MUST NOT send `[]` for a failed evaluation (`INV-ATTNEVAL-6`), and
+  MUST NOT fail the whole payload for it: the five panels, `hidden` and the freshness fields are
+  served as usual. `attention_error` is absent when the evaluation succeeded.
+- The five panel arrays and every existing root field are unchanged.
+
 ## Exit codes
 
 `serve` is a long-running process: it exits non-zero when it cannot open its config or its store

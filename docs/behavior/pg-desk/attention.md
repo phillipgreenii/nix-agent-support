@@ -225,7 +225,8 @@ protocol (one request on stdin, one response on stdout) and answers `list_attent
 
 `GET /api/v1/dashboard` gains an additive `attention` field carrying the same groups the plugin
 emits, computed by the same `Evaluate` call on the same store read as the panel arrays. Existing
-fields are unchanged. [`serve.md`](serve.md) is updated by the packet that adds the field.
+fields are unchanged. [`serve.md`](serve.md) describes the field, including how a failed
+evaluation is reported (`attention` is `null` with an `attention_error`, never `[]`).
 
 ## Invariants
 
