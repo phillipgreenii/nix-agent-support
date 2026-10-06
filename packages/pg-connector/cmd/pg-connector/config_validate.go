@@ -223,6 +223,52 @@ func checkSchemaVersions(resp *scriptout.CapabilitiesResponse) error {
 	return nil
 }
 
+// activityKindsVocabularyKey is the capabilities.Vocabulary key an
+// activity-source backend declares the activity kinds it can record under
+// (a JSON array of strings), the same extension seam as
+// searchAttributesVocabularyKey.
+const activityKindsVocabularyKey = "activity_kinds"
+
+// configValidateOutcome is "config validate"'s response envelope: the
+// shared fan-out outcome plus an additive, informational activity_kinds
+// array. ActivityKinds is omitted when empty, so a host with no
+// activity.sources registered (or none declaring kinds) emits output
+// byte-identical to a bare FanOutOutcome.
+type configValidateOutcome struct {
+	FanOutOutcome
+	ActivityKinds []string `json:"activity_kinds,omitempty"`
+}
+
+// activityKindsUnion returns the sorted, de-duplicated union of the
+// vocabulary.activity_kinds values the registered activity.sources
+// backends declare in their capabilities responses. It is informational
+// only: a registry error from ActivitySources, a source whose capabilities
+// call fails, or one declaring no activity_kinds, simply contributes
+// nothing. Returns nil when the union is empty.
+func activityKindsUnion(ctx context.Context, reg *Registry) []string {
+	sources, err := reg.ActivitySources()
+	if err != nil || len(sources) == 0 {
+		return nil
+	}
+	known := map[string]bool{}
+	for _, b := range sources {
+		resp, err := scriptout.InvokeCapabilities(ctx, b)
+		if err != nil || resp == nil {
+			continue
+		}
+		addVocabularyFieldNames(known, resp.Vocabulary[activityKindsVocabularyKey])
+	}
+	if len(known) == 0 {
+		return nil
+	}
+	kinds := make([]string, 0, len(known))
+	for k := range known {
+		kinds = append(kinds, k)
+	}
+	sort.Strings(kinds)
+	return kinds
+}
+
 func newConfigCmd() *cobra.Command {
 	configCmd := &cobra.Command{
 		Use:   "config",
@@ -246,9 +292,16 @@ func newConfigValidateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			outcome := FanOutConfigValidate(cmd.Context(), reg, backends)
+			outcome := configValidateOutcome{
+				FanOutOutcome: FanOutConfigValidate(cmd.Context(), reg, backends),
+				ActivityKinds: activityKindsUnion(cmd.Context(), reg),
+			}
 			return writeFanOutResult(cmd, outcome, outcome.ExitCode(), func() string {
-				return "config validate:\n" + formatSourcesTable(outcome.Sources)
+				out := "config validate:\n" + formatSourcesTable(outcome.Sources)
+				if len(outcome.ActivityKinds) > 0 {
+					out += "\n  activity kinds: " + strings.Join(outcome.ActivityKinds, ", ")
+				}
+				return out
 			})
 		},
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -339,5 +340,161 @@ backends:
 	}
 	if b.Count != 2 {
 		t.Fatalf("qc-backend-b count = %d, want 2 (query coverage must not contribute to count)", b.Count)
+	}
+}
+
+// writeActivityConfig writes a registry with one connector.pr backend plus
+// the given activity.sources list and points $PG_PR_CONFIG at it.
+func writeActivityConfig(t *testing.T, prBackend string, activitySources []string) {
+	t.Helper()
+	body := "connector:\n  pr:\n    - " + prBackend + "\n"
+	if len(activitySources) > 0 {
+		body += "activity:\n  sources:\n"
+		for _, s := range activitySources {
+			body += "    - " + s + "\n"
+		}
+	}
+	cfg := t.TempDir() + "/config.yaml"
+	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("PG_PR_CONFIG", cfg)
+}
+
+// writeHealthyPRBackend writes a fake connector.pr backend that passes both
+// config validate checks.
+func writeHealthyPRBackend(t *testing.T, name string) {
+	t.Helper()
+	writeOpAwareFakeBackend(t, name, map[string]string{
+		"auth_status":  `{"protocolVersion":1,"schemaVersion":1,"result":{"state":"OK"}}`,
+		"capabilities": fmt.Sprintf(`{"protocolVersion":1,"schemaVersions":{"pr":%d},"ops":["auth_status","capabilities"]}`, schema.PRSchemaVersion),
+	}, `{"protocolVersion":1,"error":{"code":"unknown_op","message":"unknown op"}}`)
+}
+
+func writeActivityKindsBackend(t *testing.T, name, vocabularyJSON string) {
+	t.Helper()
+	writeOpAwareFakeBackend(t, name, map[string]string{
+		"capabilities": `{"protocolVersion":1,"schemaVersions":{},"ops":["capabilities","list_activity"],"vocabulary":` + vocabularyJSON + `}`,
+	}, `{"protocolVersion":1,"error":{"code":"unknown_op","message":"unknown op"}}`)
+}
+
+func TestConfigValidate_ActivityKindsUnion_SortedDeduplicated(t *testing.T) {
+	writeHealthyPRBackend(t, "backend-pr-ok")
+	writeActivityKindsBackend(t, "act-one", `{"activity_kinds":["pr.opened","pr.merged"]}`)
+	writeActivityKindsBackend(t, "act-two", `{"activity_kinds":["pr.merged","pr.closed"]}`)
+	writeActivityConfig(t, "backend-pr-ok", []string{"act-one", "act-two"})
+
+	stdout, _, code := executePr(t, []string{"config", "validate"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	var got struct {
+		Sources       []SourceResult `json:"sources"`
+		ActivityKinds []string       `json:"activity_kinds"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
+		t.Fatalf("decode: %v (stdout=%s)", err, stdout)
+	}
+	want := []string{"pr.closed", "pr.merged", "pr.opened"}
+	if strings.Join(got.ActivityKinds, ",") != strings.Join(want, ",") {
+		t.Fatalf("activity_kinds = %v, want %v", got.ActivityKinds, want)
+	}
+	if len(got.Sources) != 1 || got.Sources[0].Source != "backend-pr-ok" {
+		t.Fatalf("sources = %+v, want only the connector backend row", got.Sources)
+	}
+
+	human, _, code := executePr(t, []string{"--output", "human", "config", "validate"})
+	if code != 0 {
+		t.Fatalf("human exit code = %d, want 0; stdout=%s", code, human)
+	}
+	if !strings.Contains(human, "activity kinds: pr.closed, pr.merged, pr.opened") {
+		t.Fatalf("human output = %q, want the sorted union line", human)
+	}
+}
+
+func TestConfigValidate_ActivityKinds_FailingOrSilentSourceContributesNothing(t *testing.T) {
+	writeHealthyPRBackend(t, "backend-pr-ok2")
+	writeActivityKindsBackend(t, "act-good", `{"activity_kinds":["pr.opened"]}`)
+	writeActivityKindsBackend(t, "act-silent", `{"search_attributes":["x"]}`)
+	writeFakeBackend(t, "act-broken", `{"protocolVersion":1,"error":{"code":"unauthenticated","message":"bad token"}}`)
+	writeActivityConfig(t, "backend-pr-ok2", []string{"act-good", "act-silent", "act-broken"})
+
+	stdout, _, code := executePr(t, []string{"config", "validate"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (activity source failure must not degrade); stdout=%s", code, stdout)
+	}
+	var got struct {
+		Sources       []SourceResult `json:"sources"`
+		ActivityKinds []string       `json:"activity_kinds"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
+		t.Fatalf("decode: %v (stdout=%s)", err, stdout)
+	}
+	if len(got.ActivityKinds) != 1 || got.ActivityKinds[0] != "pr.opened" {
+		t.Fatalf("activity_kinds = %v, want [pr.opened]", got.ActivityKinds)
+	}
+	if len(got.Sources) != 1 || got.Sources[0].Status != SourceSucceeded || got.Sources[0].Count != 2 {
+		t.Fatalf("sources = %+v, want one succeeded count=2 row", got.Sources)
+	}
+}
+
+func TestConfigValidate_ActivityKinds_NoKindsDeclaredOmitsOutput(t *testing.T) {
+	writeHealthyPRBackend(t, "backend-pr-ok3")
+	writeActivityKindsBackend(t, "act-silent2", `{}`)
+	writeActivityConfig(t, "backend-pr-ok3", []string{"act-silent2"})
+	withSource, _, code := executePr(t, []string{"config", "validate"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, withSource)
+	}
+	if strings.Contains(withSource, "activity_kinds") {
+		t.Fatalf("stdout = %s, want no activity_kinds key", withSource)
+	}
+	humanOut, _, _ := executePr(t, []string{"--output", "human", "config", "validate"})
+	if strings.Contains(humanOut, "activity kinds") {
+		t.Fatalf("human = %q, want no activity kinds line", humanOut)
+	}
+}
+
+func TestConfigValidate_ActivityKinds_NoActivitySourcesByteIdentical(t *testing.T) {
+	writeHealthyPRBackend(t, "backend-pr-ok4")
+	writeActivityConfig(t, "backend-pr-ok4", nil)
+	stdout, _, code := executePr(t, []string{"config", "validate"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	want := `{"sources":[{"source":"backend-pr-ok4","status":"succeeded","count":2}]}` + "\n"
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+	human, _, _ := executePr(t, []string{"--output", "human", "config", "validate"})
+	if wantH := "config validate:\n  backend-pr-ok4: succeeded count=2\n"; human != wantH {
+		t.Fatalf("human = %q, want %q", human, wantH)
+	}
+}
+
+func TestConfigValidate_ActivityKinds_InvalidActivitySourcesKeySkipsUnion(t *testing.T) {
+	writeHealthyPRBackend(t, "backend-pr-ok5")
+	cfg := t.TempDir() + "/config.yaml"
+	body := "connector:\n  pr:\n    - backend-pr-ok5\nactivity:\n  sources: []\n"
+	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("PG_PR_CONFIG", cfg)
+	// An explicitly-empty list is rejected by the registry; whatever the
+	// command does with that (it may fail to load at all), the union print
+	// itself must never panic or emit a kinds array.
+	reg := &Registry{activitySources: []string{}}
+	if got := activityKindsUnion(context.Background(), reg); got != nil {
+		t.Fatalf("activityKindsUnion = %v, want nil on an ActivitySources error", got)
+	}
+}
+
+func TestConfigShow_ActivitySources_InvokesNoBackend(t *testing.T) {
+	// No fake backend exists on PATH: config show must not try to exec the
+	// registered activity source.
+	writeActivityConfig(t, "backend-pr-absent", []string{"act-absent"})
+	_, _, code := executePr(t, []string{"config", "show"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (config show must never invoke a backend)", code)
 	}
 }
