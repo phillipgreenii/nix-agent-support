@@ -66,6 +66,20 @@ func TestFixtureEnvFromProcess(t *testing.T) {
 	}
 }
 
+func TestFixtureRequireBinaries(t *testing.T) {
+	for _, tc := range []struct {
+		val  string
+		want bool
+	}{{"", false}, {"0", false}, {"1", true}, {"true", true}} {
+		t.Run("value "+tc.val, func(t *testing.T) {
+			t.Setenv(envRequireBinaries, tc.val)
+			if got := RequireBinaries(); got != tc.want {
+				t.Errorf("RequireBinaries() with %s=%q = %v, want %v", envRequireBinaries, tc.val, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestFixtureEnvValidate(t *testing.T) {
 	good := fakeEnv(t)
 	if err := good.validate(); err != nil {

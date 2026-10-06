@@ -5,15 +5,21 @@ import (
 	"testing"
 )
 
-// realEnv returns an Env over the built binaries, or skips the test with an
-// explicit message when EnvFromProcess reports they were not provided, so a
-// plain `go test ./...` stays green.
+// realEnv returns an Env over the built binaries. When EnvFromProcess reports
+// they were not provided it skips the test with an explicit message, so a plain
+// `go test ./...` stays green, unless PG_DECIDER_PARITY_REQUIRE_BINARIES is set
+// (the nix check pg-decider-parity-gate does), in which case it FAILS: a gate
+// that cannot find its binaries must not pass by running nothing.
 func realEnv(t *testing.T) Env {
 	t.Helper()
 	env, ok := EnvFromProcess()
 	if !ok {
-		t.Skip("PG_DECIDER_PARITY_PG_DESK_BIN, PG_DECIDER_PARITY_PG_CONNECTOR_BIN and " +
-			"PG_DECIDER_PARITY_PG_DECIDER_BIN are not all set: skipping the test that runs the real binaries")
+		const msg = "PG_DECIDER_PARITY_PG_DESK_BIN, PG_DECIDER_PARITY_PG_CONNECTOR_BIN and " +
+			"PG_DECIDER_PARITY_PG_DECIDER_BIN are not all set"
+		if RequireBinaries() {
+			t.Fatalf("%s, and PG_DECIDER_PARITY_REQUIRE_BINARIES is set: the test that runs the real binaries cannot be skipped", msg)
+		}
+		t.Skip(msg + ": skipping the test that runs the real binaries")
 	}
 	env.TempDir = t.TempDir()
 	return env

@@ -3240,6 +3240,50 @@
                 gomod2nixToml = ./packages/pg-decider/gomod2nix.toml;
               };
 
+              # pg-decider old-vs-new parity gate (bead pg2-v3cti, follow-up of
+              # pg2-pyh1i). TestParityGate runs every synthetic scenario through
+              # the old sync (pg-desk, sync.mode = plan) and the new decider and
+              # diffs the plans against testdata/expected-diff.json. It needs the
+              # three BUILT binaries and used to skip silently without them (which
+              # is how the gate stayed broken at HEAD until pg2-pyh1i). This check
+              # builds them (the same pkgs.pg-desk / pkgs.pg-connector /
+              # pkgs.pg-decider the system ships), exports them as
+              # PG_DECIDER_PARITY_*_BIN, and sets PG_DECIDER_PARITY_REQUIRE_BINARIES
+              # so an unset binary FAILS the run instead of skipping it. It runs
+              # ONLY TestParityGate in internal/parity (the rest of the module is
+              # pg-decider-go-tests' job), and the buildPhase asserts that test
+              # really reported PASS, so a renamed or filtered-out test cannot make
+              # the check pass vacuously. The module's vendor env comes from
+              # mkGoTest; only the buildPhase is replaced.
+              pg-decider-parity-gate =
+                (pkgs._agentSupportGoBuilders.mkGoTest {
+                  pname = "pg-decider-parity-gate";
+                  src = lib.cleanSource ./packages/pg-decider; # matches default.nix
+                  gomod2nixToml = ./packages/pg-decider/gomod2nix.toml;
+                }).overrideAttrs
+                  (_: {
+                    PG_DECIDER_PARITY_PG_DESK_BIN = "${pkgs.pg-desk}/bin/pg-desk";
+                    PG_DECIDER_PARITY_PG_CONNECTOR_BIN = "${pkgs.pg-connector}/bin/pg-connector";
+                    PG_DECIDER_PARITY_PG_DECIDER_BIN = "${pkgs.pg-decider}/bin/pg-decider";
+                    PG_DECIDER_PARITY_REQUIRE_BINARIES = "1";
+                    buildPhase = ''
+                      runHook preBuild
+                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                      export GOFLAGS=''${GOFLAGS//-trimpath/}
+                      if ! go test -count=1 -v -run '^TestParityGate$' ./internal/parity/ > "$TMPDIR/parity-gate.log" 2>&1; then
+                        cat "$TMPDIR/parity-gate.log"
+                        echo "pg-decider-parity-gate: TestParityGate FAILED" >&2
+                        exit 1
+                      fi
+                      cat "$TMPDIR/parity-gate.log"
+                      if ! grep -q -- '^--- PASS: TestParityGate ' "$TMPDIR/parity-gate.log"; then
+                        echo "pg-decider-parity-gate: TestParityGate did not report PASS (skipped or not run)" >&2
+                        exit 1
+                      fi
+                      runHook postBuild
+                    '';
+                  });
+
               # pg-router-probe (docket pg2-93e5s, packet 1) — fixture-driven
               # unit/integration suite (fingerprinting, "nothing new"
               # dedup, snapshot robustness, the reentrant test-helper-process

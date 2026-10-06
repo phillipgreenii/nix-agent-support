@@ -5,7 +5,9 @@
 // explain is printed. It makes no live contact: all state is temporary.
 //
 // The three built binaries are named by PG_DECIDER_PARITY_PG_DESK_BIN,
-// PG_DECIDER_PARITY_PG_CONNECTOR_BIN and PG_DECIDER_PARITY_PG_DECIDER_BIN.
+// PG_DECIDER_PARITY_PG_CONNECTOR_BIN and PG_DECIDER_PARITY_PG_DECIDER_BIN. The
+// nix check checks.<system>.pg-decider-parity-gate builds them and runs the same
+// gate as a test (see the package README).
 //
 // Exit status: 0 when every scenario matches or differs only as listed, 1 when
 // any scenario has an unexplained difference, a listed exception that did not

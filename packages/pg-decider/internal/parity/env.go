@@ -17,7 +17,21 @@ const (
 	envPgDeskBin      = "PG_DECIDER_PARITY_PG_DESK_BIN"
 	envPgConnectorBin = "PG_DECIDER_PARITY_PG_CONNECTOR_BIN"
 	envPgDeciderBin   = "PG_DECIDER_PARITY_PG_DECIDER_BIN"
+
+	// envRequireBinaries, when set to anything but "" or "0", makes the tests
+	// that need the built binaries FAIL instead of skip when the three variables
+	// above are not all set. The nix check pg-decider-parity-gate sets it so a
+	// missing binary cannot turn the gate into a silent no-op.
+	envRequireBinaries = "PG_DECIDER_PARITY_REQUIRE_BINARIES"
 )
+
+// RequireBinaries reports whether PG_DECIDER_PARITY_REQUIRE_BINARIES asks for
+// unset binaries to be a failure rather than a skip. A plain `go test` leaves it
+// unset and keeps skipping.
+func RequireBinaries() bool {
+	v := os.Getenv(envRequireBinaries)
+	return v != "" && v != "0"
+}
 
 // Env names the three built binaries the runners exec and the directory all
 // run state lives under.
