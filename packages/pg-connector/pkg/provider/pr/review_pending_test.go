@@ -60,17 +60,28 @@ func TestReviewPending_DispatchRoundTrip(t *testing.T) {
 			t.Errorf("review missing key %q: %s", k, raw)
 		}
 	}
-	for _, k := range []string{"digest_state", "all_marked", "body_marked"} {
-		if _, ok := rev[k]; ok {
-			t.Errorf("review must not carry retired key %q: %s", k, raw)
+	for k := range rev {
+		switch k {
+		case "review_id", "database_id", "url", "state", "commit_sha", "stale", "body", "comments",
+			"comments_total", "comments_at_head", "reviewed_head", "extra_pending_reviews", "last_append":
+		default:
+			t.Errorf("review carries undocumented key %q: %s", k, raw)
 		}
 	}
 	la := rev["last_append"].(map[string]any)
 	if la["at"] != "2026-01-01T00:00:00Z" || la["added"] != float64(3) || la["head"] != "h1" {
 		t.Errorf("last_append = %v", la)
 	}
-	if c := rev["comments"].([]any)[0].(map[string]any); c["original_commit"] != "h1" || c["marked"] != nil {
+	c := rev["comments"].([]any)[0].(map[string]any)
+	if c["original_commit"] != "h1" {
 		t.Errorf("comment = %v", c)
+	}
+	for k := range c {
+		switch k {
+		case "id", "path", "line", "body", "original_commit":
+		default:
+			t.Errorf("comment carries undocumented key %q: %v", k, c)
+		}
 	}
 }
 

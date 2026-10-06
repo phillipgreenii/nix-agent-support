@@ -228,9 +228,8 @@ type LastAppend struct {
 //   - LastAppend comes from the backend's sidecar and is absent when nothing
 //     was ever appended (or the sidecar cannot be read).
 //
-// The marker-based fields of the previous record (body_marked, per-comment
-// marked, all_marked, digest_state) are gone; no consumer in this repo reads
-// them from this record.
+// The record carries no authorship-marker or digest fields: the backend
+// deletes nothing, so it has nothing to prove about a review's authorship.
 type PendingReview struct {
 	ReviewID            string                 `json:"review_id"`
 	DatabaseID          int64                  `json:"database_id"`

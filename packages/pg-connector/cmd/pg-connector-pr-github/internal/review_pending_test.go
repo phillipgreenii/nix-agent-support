@@ -42,12 +42,12 @@ func (f *fakeGH) GetPendingReview(ctx context.Context, repo string, number int) 
 
 func pendingReq() pr.PendingReviewRequest { return pr.PendingReviewRequest{ID: "foo/bar#42"} }
 
-// markedBody is a body carrying the backend's own marker.
-var markedBody = "finding\n" + github.BotMarker
+// reviewBody is the body the fixture reviews carry.
+const reviewBody = "finding"
 
 func pendingReviewAt(commit string, comments ...github.PendingReviewComment) *github.PendingReviewNode {
 	return &github.PendingReviewNode{
-		ID: "PRR_node", DatabaseID: 5001, CommitOID: commit, Body: markedBody, Comments: comments,
+		ID: "PRR_node", DatabaseID: 5001, CommitOID: commit, Body: reviewBody, Comments: comments,
 	}
 }
 
@@ -233,20 +233,38 @@ func TestReviewPendingLastAppendFromSidecar(t *testing.T) {
 }
 
 // The record carries none of the retired marker and digest fields on the wire.
-func TestReviewPendingRecordHasNoRetiredFields(t *testing.T) {
+func TestReviewPendingRecordCarriesExactlyTheDocumentedKeys(t *testing.T) {
 	res := lookupPending(t, &fakeGH{pendingData: &github.PendingReviewData{HeadSHA: "head1", Reviews: []github.PendingReviewNode{pendingRev(1, "head1", "s", pendingCmt("c", "head1"))}}})
 	raw, err := json.Marshal(res)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, gone := range []string{"digest_state", "all_marked", "body_marked", `"marked"`} {
-		if strings.Contains(string(raw), gone) {
-			t.Errorf("record still carries %s: %s", gone, raw)
+	var m struct {
+		Review map[string]any `json:"review"`
+	}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	allowed := map[string]bool{
+		"review_id": true, "database_id": true, "url": true, "state": true, "commit_sha": true,
+		"stale": true, "body": true, "comments": true, "comments_total": true, "comments_at_head": true,
+		"reviewed_head": true, "extra_pending_reviews": true, "last_append": true,
+	}
+	for k := range m.Review {
+		if !allowed[k] {
+			t.Errorf("record carries undocumented key %q: %s", k, raw)
 		}
 	}
-	for _, want := range []string{"comments_total", "comments_at_head", "reviewed_head", "extra_pending_reviews", `"stale"`} {
-		if !strings.Contains(string(raw), want) {
+	for _, want := range []string{"comments_total", "comments_at_head", "reviewed_head", "extra_pending_reviews", "stale"} {
+		if _, ok := m.Review[want]; !ok {
 			t.Errorf("record is missing %s: %s", want, raw)
+		}
+	}
+	for k := range m.Review["comments"].([]any)[0].(map[string]any) {
+		switch k {
+		case "id", "path", "line", "body", "original_commit":
+		default:
+			t.Errorf("comment carries undocumented key %q: %s", k, raw)
 		}
 	}
 }
@@ -310,23 +328,4 @@ func TestReviewPendingLookupFailureNeverReportsNone(t *testing.T) {
 	if err == nil || res.Pending || res.Review != nil {
 		t.Fatalf("want an error and no result; got %+v / %v", res, err)
 	}
-}
-
-// postedAsBackend returns a pending review whose body and comments are exactly
-// the text the backend would have posted (digest marker on the body, plain
-// marker on each comment), anchored at commit.
-func postedAsBackend(commit, body string, comments ...string) *github.PendingReviewNode {
-	rev := &github.PendingReviewNode{
-		ID: "PRR_node", DatabaseID: 5001, URL: "https://example.invalid/pr/42#review-5001", CommitOID: commit,
-	}
-	texts := make([]string, 0, len(comments))
-	for i, c := range comments {
-		t := github.StampBotMarker(c)
-		texts = append(texts, t)
-		rev.Comments = append(rev.Comments, github.PendingReviewComment{
-			ID: "C" + string(rune('1'+i)), DatabaseID: int64(i + 1), Path: "a.go", Line: i + 1, Body: t,
-		})
-	}
-	rev.Body = github.StampBodyWithDigest(body, texts)
-	return rev
 }

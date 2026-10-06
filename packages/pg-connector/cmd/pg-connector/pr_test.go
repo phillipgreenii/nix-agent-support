@@ -823,7 +823,6 @@ func TestReviewPendingPrintsRecordAndExits0(t *testing.T) {
 			LastAppend          struct {
 				Added int `json:"added"`
 			} `json:"last_append"`
-			AllMarked *bool `json:"all_marked"`
 		} `json:"review"`
 	}
 	if err := json.Unmarshal(resp.Result, &res); err != nil {
@@ -831,7 +830,7 @@ func TestReviewPendingPrintsRecordAndExits0(t *testing.T) {
 	}
 	if !res.Pending || res.Review.ReviewID != "PRR_1" || res.Review.CommitSHA != "h1" || !res.Review.Stale ||
 		res.Review.CommentsTotal != 1 || res.Review.CommentsAtHead != 0 || res.Review.ReviewedHead ||
-		res.Review.ExtraPendingReviews != 1 || res.Review.LastAppend.Added != 3 || res.Review.AllMarked != nil {
+		res.Review.ExtraPendingReviews != 1 || res.Review.LastAppend.Added != 3 {
 		t.Fatalf("result = %+v", res)
 	}
 }
@@ -893,11 +892,6 @@ func TestHumanizeReviewPending(t *testing.T) {
 	for _, want := range []string{"STALE", "1 total, 0 at head", "reviewed head: false", "extra pending reviews: 1", "last append: 2026-01-01T00:00:00Z (+3 at h1)", "a.go:3 at h1"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("record text missing %q: %q", want, got)
-		}
-	}
-	for _, gone := range []string{"marked", "digest"} {
-		if strings.Contains(got, gone) {
-			t.Errorf("record text still mentions %q: %q", gone, got)
 		}
 	}
 }

@@ -2127,66 +2127,6 @@ func TestSearchPRsEnriched_NeverFillsBaseSHA(t *testing.T) {
 	}
 }
 
-func TestPostPendingReview_PayloadAnchorsStampsAndCarriesSide(t *testing.T) {
-	gh := newFakeGH()
-	gh.responses["api repos/foo/bar/pulls/42/reviews"] = []byte(`{"node_id":"RV_kw","state":"PENDING"}`)
-	p := NewWithRunner(gh)
-
-	rev, err := p.PostPendingReview(context.Background(), "foo/bar", 42, "deadbeef", "top",
-		[]ReviewSubmitComment{
-			{Path: "a.go", Line: 3, Side: "LEFT", Body: "old line"},
-			{Path: "b.go", Line: 9, Body: "new line"},
-		})
-	if err != nil {
-		t.Fatalf("PostPendingReview: %v", err)
-	}
-	if rev.ID != "RV_kw" || rev.State != "pending" {
-		t.Fatalf("unexpected review: %+v", rev)
-	}
-	payload := decodeLastReviewPayload(t, gh)
-	if payload["commit_id"] != "deadbeef" {
-		t.Errorf("commit_id = %v", payload["commit_id"])
-	}
-	if _, has := payload["event"]; has {
-		t.Errorf("payload must carry no event (stays PENDING): %v", payload)
-	}
-	body, _ := payload["body"].(string)
-	if !strings.Contains(body, DigestMarkerPrefix) || !strings.HasPrefix(body, "top") {
-		t.Errorf("body not stamped with the digest marker: %q", body)
-	}
-	cs, _ := payload["comments"].([]any)
-	if len(cs) != 2 {
-		t.Fatalf("comments = %v", payload["comments"])
-	}
-	c0, c1 := cs[0].(map[string]any), cs[1].(map[string]any)
-	if c0["side"] != "LEFT" || c1["side"] != "RIGHT" {
-		t.Errorf("sides = %v / %v, want LEFT / RIGHT", c0["side"], c1["side"])
-	}
-	var texts []string
-	for i, c := range []map[string]any{c0, c1} {
-		b, _ := c["body"].(string)
-		if !strings.Contains(b, BotMarker) {
-			t.Errorf("comment %d not stamped: %q", i, b)
-		}
-		texts = append(texts, b)
-	}
-	// The digest stamped on the body verifies against exactly what was posted.
-	if got := VerifyDigest(body, texts); got != DigestVerified {
-		t.Errorf("digest of the posted payload = %q, want verified", got)
-	}
-}
-
-func TestDeleteReview_Argv(t *testing.T) {
-	gh := newFakeGH()
-	if err := NewWithRunner(gh).DeleteReview(context.Background(), "foo/bar", 42, 123); err != nil {
-		t.Fatalf("DeleteReview: %v", err)
-	}
-	got := strings.Join(gh.calls[len(gh.calls)-1], " ")
-	if got != "api repos/foo/bar/pulls/42/reviews/123 --method DELETE" {
-		t.Errorf("argv = %q", got)
-	}
-}
-
 // TestSearchPRsActivity_RequestsCreatedClosedAndLimit proves the activity
 // search asks gh for createdAt/closedAt and the caller's result limit, keeps
 // every flag before the "--" terminator, and decodes both timestamps.

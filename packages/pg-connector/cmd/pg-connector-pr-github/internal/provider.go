@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/api"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/archive"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/eventlog"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/github"
 	pgposted "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/posted"
@@ -96,9 +95,6 @@ type ghProvider interface {
 // Backend is pg-connector-pr-github's concrete pr.Provider implementation.
 type Backend struct {
 	gh ghProvider
-	// archiver is no longer used by review_submit, which never deletes a
-	// review; it stays wired until the archive package is retired.
-	archiver archive.Archiver
 	// posted reads the per-PR posted-sidecar review_pending takes last_append
 	// from. The zero Store has no directory, in which case no last_append is
 	// reported.
@@ -130,14 +126,6 @@ func New(gh ghProvider) *Backend {
 // read failures and accepts a check to run before each retry.
 type retryGuardSetter interface {
 	SetRetryGuard(func(ctx context.Context) error)
-}
-
-// WithArchiver sets the archiver and returns b. review_submit no longer
-// archives anything (it deletes nothing); the setter stays until the archive
-// package is retired. Production wiring passes archive.FromEnv.
-func (b *Backend) WithArchiver(a archive.Archiver) *Backend {
-	b.archiver = a
-	return b
 }
 
 // WithLocker sets the per-PR lock review_submit runs under, and returns b.
