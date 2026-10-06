@@ -121,6 +121,11 @@ func TestRead_TransientThenSuccess(t *testing.T) {
 		"gateway":     transient(errGateway),
 		"truncated":   okOut(`{"data":{"search":{"nodes":[{"num`),
 		"empty":       okOut(""),
+		"gh exit 1 truncated body": {err: &ghExecError{
+			msg:    "gh search prs: exit status 1: unexpected end of JSON input",
+			stderr: "unexpected end of JSON input",
+			err:    errors.New("exit status 1"),
+		}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			gh := &scriptedGH{script: []scripted{first, okOut(okSearch)}}
@@ -427,6 +432,7 @@ func TestIsTransientGHError(t *testing.T) {
 		"dial tcp 192.0.2.1:443: i/o timeout", "read tcp: connection reset by peer",
 		"net/http: TLS handshake timeout", "dial tcp: lookup api.github.com: no such host",
 		"Get \"https://api.github.com/graphql\": unexpected EOF",
+		"unexpected end of JSON input", "gh: exit status 1: Unexpected End of JSON Input",
 		"Post \"https://api.github.com/graphql\": context deadline exceeded (Client.Timeout exceeded while awaiting headers)",
 	}
 	for _, m := range yes {

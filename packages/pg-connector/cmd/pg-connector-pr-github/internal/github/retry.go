@@ -269,6 +269,7 @@ var transientMarkers = []string{
 	"tls handshake timeout",
 	"client.timeout exceeded",
 	"unexpected eof",
+	"unexpected end of json input",
 	"no such host",
 	"temporary failure in name resolution",
 	"http 502",
