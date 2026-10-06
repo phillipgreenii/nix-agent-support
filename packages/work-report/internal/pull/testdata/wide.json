@@ -1,0 +1,1356 @@
+{
+  "sources": [
+    {
+      "source": "backend-wide",
+      "status": "succeeded",
+      "count": 84,
+      "truncated": false
+    }
+  ],
+  "items": [
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-1-0",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c10",
+        "occurred_at": "2026-02-01T10:00:00Z",
+        "summary": "Wide item 1.0",
+        "fields": {
+          "n": 0
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-1-1",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c11",
+        "occurred_at": "2026-02-01T11:00:00Z",
+        "summary": "Wide item 1.1",
+        "fields": {
+          "n": 1
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-1-2",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c12",
+        "occurred_at": "2026-02-01T12:00:00Z",
+        "summary": "Wide item 1.2",
+        "fields": {
+          "n": 2
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-2-0",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c20",
+        "occurred_at": "2026-02-02T10:00:00Z",
+        "summary": "Wide item 2.0",
+        "fields": {
+          "n": 0
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-2-1",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c21",
+        "occurred_at": "2026-02-02T11:00:00Z",
+        "summary": "Wide item 2.1",
+        "fields": {
+          "n": 1
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-2-2",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c22",
+        "occurred_at": "2026-02-02T12:00:00Z",
+        "summary": "Wide item 2.2",
+        "fields": {
+          "n": 2
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-3-0",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c30",
+        "occurred_at": "2026-02-03T10:00:00Z",
+        "summary": "Wide item 3.0",
+        "fields": {
+          "n": 0
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-3-1",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c31",
+        "occurred_at": "2026-02-03T11:00:00Z",
+        "summary": "Wide item 3.1",
+        "fields": {
+          "n": 1
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-3-2",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c32",
+        "occurred_at": "2026-02-03T12:00:00Z",
+        "summary": "Wide item 3.2",
+        "fields": {
+          "n": 2
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-4-0",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c40",
+        "occurred_at": "2026-02-04T10:00:00Z",
+        "summary": "Wide item 4.0",
+        "fields": {
+          "n": 0
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-4-1",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c41",
+        "occurred_at": "2026-02-04T11:00:00Z",
+        "summary": "Wide item 4.1",
+        "fields": {
+          "n": 1
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-4-2",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c42",
+        "occurred_at": "2026-02-04T12:00:00Z",
+        "summary": "Wide item 4.2",
+        "fields": {
+          "n": 2
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-5-0",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c50",
+        "occurred_at": "2026-02-05T10:00:00Z",
+        "summary": "Wide item 5.0",
+        "fields": {
+          "n": 0
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-5-1",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c51",
+        "occurred_at": "2026-02-05T11:00:00Z",
+        "summary": "Wide item 5.1",
+        "fields": {
+          "n": 1
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-5-2",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c52",
+        "occurred_at": "2026-02-05T12:00:00Z",
+        "summary": "Wide item 5.2",
+        "fields": {
+          "n": 2
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-6-0",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c60",
+        "occurred_at": "2026-02-06T10:00:00Z",
+        "summary": "Wide item 6.0",
+        "fields": {
+          "n": 0
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-6-1",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c61",
+        "occurred_at": "2026-02-06T11:00:00Z",
+        "summary": "Wide item 6.1",
+        "fields": {
+          "n": 1
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-6-2",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c62",
+        "occurred_at": "2026-02-06T12:00:00Z",
+        "summary": "Wide item 6.2",
+        "fields": {
+          "n": 2
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-7-0",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c70",
+        "occurred_at": "2026-02-07T10:00:00Z",
+        "summary": "Wide item 7.0",
+        "fields": {
+          "n": 0
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-7-1",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c71",
+        "occurred_at": "2026-02-07T11:00:00Z",
+        "summary": "Wide item 7.1",
+        "fields": {
+          "n": 1
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-7-2",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c72",
+        "occurred_at": "2026-02-07T12:00:00Z",
+        "summary": "Wide item 7.2",
+        "fields": {
+          "n": 2
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-8-0",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c80",
+        "occurred_at": "2026-02-08T10:00:00Z",
+        "summary": "Wide item 8.0",
+        "fields": {
+          "n": 0
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-8-1",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c81",
+        "occurred_at": "2026-02-08T11:00:00Z",
+        "summary": "Wide item 8.1",
+        "fields": {
+          "n": 1
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-8-2",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c82",
+        "occurred_at": "2026-02-08T12:00:00Z",
+        "summary": "Wide item 8.2",
+        "fields": {
+          "n": 2
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-9-0",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c90",
+        "occurred_at": "2026-02-09T10:00:00Z",
+        "summary": "Wide item 9.0",
+        "fields": {
+          "n": 0
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-9-1",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c91",
+        "occurred_at": "2026-02-09T11:00:00Z",
+        "summary": "Wide item 9.1",
+        "fields": {
+          "n": 1
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-9-2",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c92",
+        "occurred_at": "2026-02-09T12:00:00Z",
+        "summary": "Wide item 9.2",
+        "fields": {
+          "n": 2
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-10-0",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c100",
+        "occurred_at": "2026-02-10T10:00:00Z",
+        "summary": "Wide item 10.0",
+        "fields": {
+          "n": 0
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-10-1",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c101",
+        "occurred_at": "2026-02-10T11:00:00Z",
+        "summary": "Wide item 10.1",
+        "fields": {
+          "n": 1
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-10-2",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c102",
+        "occurred_at": "2026-02-10T12:00:00Z",
+        "summary": "Wide item 10.2",
+        "fields": {
+          "n": 2
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-11-0",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c110",
+        "occurred_at": "2026-02-11T10:00:00Z",
+        "summary": "Wide item 11.0",
+        "fields": {
+          "n": 0
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-11-1",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c111",
+        "occurred_at": "2026-02-11T11:00:00Z",
+        "summary": "Wide item 11.1",
+        "fields": {
+          "n": 1
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-11-2",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c112",
+        "occurred_at": "2026-02-11T12:00:00Z",
+        "summary": "Wide item 11.2",
+        "fields": {
+          "n": 2
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-12-0",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c120",
+        "occurred_at": "2026-02-12T10:00:00Z",
+        "summary": "Wide item 12.0",
+        "fields": {
+          "n": 0
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-12-1",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c121",
+        "occurred_at": "2026-02-12T11:00:00Z",
+        "summary": "Wide item 12.1",
+        "fields": {
+          "n": 1
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-12-2",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c122",
+        "occurred_at": "2026-02-12T12:00:00Z",
+        "summary": "Wide item 12.2",
+        "fields": {
+          "n": 2
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-13-0",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c130",
+        "occurred_at": "2026-02-13T10:00:00Z",
+        "summary": "Wide item 13.0",
+        "fields": {
+          "n": 0
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-13-1",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c131",
+        "occurred_at": "2026-02-13T11:00:00Z",
+        "summary": "Wide item 13.1",
+        "fields": {
+          "n": 1
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-13-2",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c132",
+        "occurred_at": "2026-02-13T12:00:00Z",
+        "summary": "Wide item 13.2",
+        "fields": {
+          "n": 2
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-14-0",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c140",
+        "occurred_at": "2026-02-14T10:00:00Z",
+        "summary": "Wide item 14.0",
+        "fields": {
+          "n": 0
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-14-1",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c141",
+        "occurred_at": "2026-02-14T11:00:00Z",
+        "summary": "Wide item 14.1",
+        "fields": {
+          "n": 1
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-14-2",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c142",
+        "occurred_at": "2026-02-14T12:00:00Z",
+        "summary": "Wide item 14.2",
+        "fields": {
+          "n": 2
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-15-0",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c150",
+        "occurred_at": "2026-02-15T10:00:00Z",
+        "summary": "Wide item 15.0",
+        "fields": {
+          "n": 0
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-15-1",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c151",
+        "occurred_at": "2026-02-15T11:00:00Z",
+        "summary": "Wide item 15.1",
+        "fields": {
+          "n": 1
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-15-2",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c152",
+        "occurred_at": "2026-02-15T12:00:00Z",
+        "summary": "Wide item 15.2",
+        "fields": {
+          "n": 2
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-16-0",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c160",
+        "occurred_at": "2026-02-16T10:00:00Z",
+        "summary": "Wide item 16.0",
+        "fields": {
+          "n": 0
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-16-1",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c161",
+        "occurred_at": "2026-02-16T11:00:00Z",
+        "summary": "Wide item 16.1",
+        "fields": {
+          "n": 1
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-16-2",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c162",
+        "occurred_at": "2026-02-16T12:00:00Z",
+        "summary": "Wide item 16.2",
+        "fields": {
+          "n": 2
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-17-0",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c170",
+        "occurred_at": "2026-02-17T10:00:00Z",
+        "summary": "Wide item 17.0",
+        "fields": {
+          "n": 0
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-17-1",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c171",
+        "occurred_at": "2026-02-17T11:00:00Z",
+        "summary": "Wide item 17.1",
+        "fields": {
+          "n": 1
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-17-2",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c172",
+        "occurred_at": "2026-02-17T12:00:00Z",
+        "summary": "Wide item 17.2",
+        "fields": {
+          "n": 2
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-18-0",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c180",
+        "occurred_at": "2026-02-18T10:00:00Z",
+        "summary": "Wide item 18.0",
+        "fields": {
+          "n": 0
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-18-1",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c181",
+        "occurred_at": "2026-02-18T11:00:00Z",
+        "summary": "Wide item 18.1",
+        "fields": {
+          "n": 1
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-18-2",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c182",
+        "occurred_at": "2026-02-18T12:00:00Z",
+        "summary": "Wide item 18.2",
+        "fields": {
+          "n": 2
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-19-0",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c190",
+        "occurred_at": "2026-02-19T10:00:00Z",
+        "summary": "Wide item 19.0",
+        "fields": {
+          "n": 0
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-19-1",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c191",
+        "occurred_at": "2026-02-19T11:00:00Z",
+        "summary": "Wide item 19.1",
+        "fields": {
+          "n": 1
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-19-2",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c192",
+        "occurred_at": "2026-02-19T12:00:00Z",
+        "summary": "Wide item 19.2",
+        "fields": {
+          "n": 2
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-20-0",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c200",
+        "occurred_at": "2026-02-20T10:00:00Z",
+        "summary": "Wide item 20.0",
+        "fields": {
+          "n": 0
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-20-1",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c201",
+        "occurred_at": "2026-02-20T11:00:00Z",
+        "summary": "Wide item 20.1",
+        "fields": {
+          "n": 1
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-20-2",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c202",
+        "occurred_at": "2026-02-20T12:00:00Z",
+        "summary": "Wide item 20.2",
+        "fields": {
+          "n": 2
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-21-0",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c210",
+        "occurred_at": "2026-02-21T10:00:00Z",
+        "summary": "Wide item 21.0",
+        "fields": {
+          "n": 0
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-21-1",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c211",
+        "occurred_at": "2026-02-21T11:00:00Z",
+        "summary": "Wide item 21.1",
+        "fields": {
+          "n": 1
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-21-2",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c212",
+        "occurred_at": "2026-02-21T12:00:00Z",
+        "summary": "Wide item 21.2",
+        "fields": {
+          "n": 2
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-22-0",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c220",
+        "occurred_at": "2026-02-22T10:00:00Z",
+        "summary": "Wide item 22.0",
+        "fields": {
+          "n": 0
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-22-1",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c221",
+        "occurred_at": "2026-02-22T11:00:00Z",
+        "summary": "Wide item 22.1",
+        "fields": {
+          "n": 1
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-22-2",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c222",
+        "occurred_at": "2026-02-22T12:00:00Z",
+        "summary": "Wide item 22.2",
+        "fields": {
+          "n": 2
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-23-0",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c230",
+        "occurred_at": "2026-02-23T10:00:00Z",
+        "summary": "Wide item 23.0",
+        "fields": {
+          "n": 0
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-23-1",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c231",
+        "occurred_at": "2026-02-23T11:00:00Z",
+        "summary": "Wide item 23.1",
+        "fields": {
+          "n": 1
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-23-2",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c232",
+        "occurred_at": "2026-02-23T12:00:00Z",
+        "summary": "Wide item 23.2",
+        "fields": {
+          "n": 2
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-24-0",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c240",
+        "occurred_at": "2026-02-24T10:00:00Z",
+        "summary": "Wide item 24.0",
+        "fields": {
+          "n": 0
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-24-1",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c241",
+        "occurred_at": "2026-02-24T11:00:00Z",
+        "summary": "Wide item 24.1",
+        "fields": {
+          "n": 1
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-24-2",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c242",
+        "occurred_at": "2026-02-24T12:00:00Z",
+        "summary": "Wide item 24.2",
+        "fields": {
+          "n": 2
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-25-0",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c250",
+        "occurred_at": "2026-02-25T10:00:00Z",
+        "summary": "Wide item 25.0",
+        "fields": {
+          "n": 0
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-25-1",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c251",
+        "occurred_at": "2026-02-25T11:00:00Z",
+        "summary": "Wide item 25.1",
+        "fields": {
+          "n": 1
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-25-2",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c252",
+        "occurred_at": "2026-02-25T12:00:00Z",
+        "summary": "Wide item 25.2",
+        "fields": {
+          "n": 2
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-26-0",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c260",
+        "occurred_at": "2026-02-26T10:00:00Z",
+        "summary": "Wide item 26.0",
+        "fields": {
+          "n": 0
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-26-1",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c261",
+        "occurred_at": "2026-02-26T11:00:00Z",
+        "summary": "Wide item 26.1",
+        "fields": {
+          "n": 1
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-26-2",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c262",
+        "occurred_at": "2026-02-26T12:00:00Z",
+        "summary": "Wide item 26.2",
+        "fields": {
+          "n": 2
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-27-0",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c270",
+        "occurred_at": "2026-02-27T10:00:00Z",
+        "summary": "Wide item 27.0",
+        "fields": {
+          "n": 0
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-27-1",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c271",
+        "occurred_at": "2026-02-27T11:00:00Z",
+        "summary": "Wide item 27.1",
+        "fields": {
+          "n": 1
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-27-2",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c272",
+        "occurred_at": "2026-02-27T12:00:00Z",
+        "summary": "Wide item 27.2",
+        "fields": {
+          "n": 2
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-28-0",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c280",
+        "occurred_at": "2026-02-28T10:00:00Z",
+        "summary": "Wide item 28.0",
+        "fields": {
+          "n": 0
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-28-1",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c281",
+        "occurred_at": "2026-02-28T11:00:00Z",
+        "summary": "Wide item 28.1",
+        "fields": {
+          "n": 1
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    },
+    {
+      "source": "backend-wide",
+      "item": {
+        "id": "w-28-2",
+        "kind": "commit",
+        "entity_type": "commit",
+        "entity_id": "c282",
+        "occurred_at": "2026-02-28T12:00:00Z",
+        "summary": "Wide item 28.2",
+        "fields": {
+          "n": 2
+        },
+        "as_of": "2026-03-01T00:00:00Z",
+        "stale": false
+      }
+    }
+  ]
+}

@@ -22,6 +22,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -87,11 +88,28 @@ func newRootCmd() *cobra.Command {
 	return root
 }
 
+// exitError makes a verb exit with a specific process status. A verb whose
+// output was already written (pull's degraded outcome, for one) returns it
+// with an empty msg, so main exits with code without printing anything more.
+type exitError struct {
+	code int
+	msg  string
+}
+
+func (e *exitError) Error() string { return e.msg }
+
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
 	if err := newRootCmd().ExecuteContext(ctx); err != nil {
+		var ee *exitError
+		if errors.As(err, &ee) {
+			if ee.msg != "" {
+				fmt.Fprintln(os.Stderr, ee.msg)
+			}
+			os.Exit(ee.code)
+		}
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
