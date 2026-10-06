@@ -9,8 +9,10 @@ import (
 	"hash/fnv"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -88,13 +90,7 @@ type SessionRecord struct {
 // still resolves through it.
 func Sessions(projectsDir string, since, before time.Time) ([]SessionRecord, error) {
 	files := listTranscriptFiles(projectsDir)
-	var sums []*fileSummary
-	for _, p := range files {
-		s, ok := summarizeTranscript(p)
-		if ok {
-			sums = append(sums, s)
-		}
-	}
+	sums := summarizeAll(files)
 	if len(sums) == 0 {
 		return nil, nil
 	}
@@ -162,6 +158,40 @@ func Sessions(projectsDir string, since, before time.Time) ([]SessionRecord, err
 		return out[i].SessionID < out[j].SessionID
 	})
 	return out, nil
+}
+
+// summarizeAll summarizes every file, each in its own single pass, across a
+// bounded worker pool (a real projects tree is many GiB of JSON, so the
+// per-file work is CPU-bound and independent). Results keep the input order, so
+// the outcome is deterministic; files that yield no summary are dropped.
+func summarizeAll(files []string) []*fileSummary {
+	results := make([]*fileSummary, len(files))
+	workers := min(runtime.GOMAXPROCS(0), len(files))
+	var wg sync.WaitGroup
+	next := make(chan int)
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range next {
+				if s, ok := summarizeTranscript(files[i]); ok {
+					results[i] = s
+				}
+			}
+		}()
+	}
+	for i := range files {
+		next <- i
+	}
+	close(next)
+	wg.Wait()
+	var sums []*fileSummary
+	for _, s := range results {
+		if s != nil {
+			sums = append(sums, s)
+		}
+	}
+	return sums
 }
 
 // listTranscriptFiles returns every <projectsDir>/<slug>/<file>.jsonl path that
