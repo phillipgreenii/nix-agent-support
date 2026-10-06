@@ -632,6 +632,115 @@ attention:
 	}
 }
 
+func TestRegistry_ActivitySources_AbsentKeyReturnsNil(t *testing.T) {
+	reg, err := parseRegistry([]byte(`connector: {}`), "test.yaml")
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+	sources, err := reg.ActivitySources()
+	if err != nil || sources != nil {
+		t.Fatalf("ActivitySources() = %v, %v, want nil, nil", sources, err)
+	}
+}
+
+func TestRegistry_ActivitySources_NilRegistry(t *testing.T) {
+	var reg *Registry
+	sources, err := reg.ActivitySources()
+	if err != nil || sources != nil {
+		t.Fatalf("ActivitySources() = %v, %v, want nil, nil", sources, err)
+	}
+}
+
+func TestRegistry_ActivitySources_ExplicitlyEmptyListIsRejected(t *testing.T) {
+	reg, err := parseRegistry([]byte(`
+activity:
+  sources: []
+`), "test.yaml")
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+	_, err = reg.ActivitySources()
+	if err == nil {
+		t.Fatal("expected an error for an explicitly-empty activity.sources list")
+	}
+	if !strings.Contains(err.Error(), "activity.sources") {
+		t.Fatalf("error %q does not name activity.sources", err)
+	}
+}
+
+func TestRegistry_ActivitySources_RejectsInvalidEntries(t *testing.T) {
+	cases := map[string]string{
+		"path separator": `
+activity:
+  sources:
+    - ../evil
+`,
+		"empty name": `
+activity:
+  sources:
+    - ""
+`,
+		"duplicate": `
+activity:
+  sources:
+    - pg-connector-activity-git
+    - pg-connector-activity-git
+`,
+	}
+	for name, doc := range cases {
+		t.Run(name, func(t *testing.T) {
+			reg, err := parseRegistry([]byte(doc), "test.yaml")
+			if err != nil {
+				t.Fatalf("parseRegistry: %v", err)
+			}
+			if _, err := reg.ActivitySources(); err == nil {
+				t.Fatal("expected an error")
+			}
+		})
+	}
+}
+
+func TestRegistry_ActivitySources_OnlyKeyIsIndependentOfConnector(t *testing.T) {
+	reg, err := parseRegistry([]byte(`
+activity:
+  sources:
+    - x
+`), "test.yaml")
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+	sources, err := reg.ActivitySources()
+	if err != nil || len(sources) != 1 || sources[0] != "x" {
+		t.Fatalf("ActivitySources() = %v, %v", sources, err)
+	}
+	all, err := reg.AllBackends()
+	if err != nil || len(all) != 0 {
+		t.Fatalf("AllBackends() = %v, %v, want none", all, err)
+	}
+}
+
+func TestRegistry_ActivitySources_SharedNameWithConnectorTypeSucceeds(t *testing.T) {
+	reg, err := parseRegistry([]byte(`
+connector:
+  pr:
+    - pg-connector-pr-github
+activity:
+  sources:
+    - pg-connector-pr-github
+`), "test.yaml")
+	if err != nil {
+		t.Fatalf("parseRegistry: %v", err)
+	}
+	sources, err := reg.ActivitySources()
+	if err != nil || len(sources) != 1 || sources[0] != "pg-connector-pr-github" {
+		t.Fatalf("ActivitySources() = %v, %v", sources, err)
+	}
+	all, err := reg.AllBackends()
+	if err != nil || len(all) != 1 || all[0] != "pg-connector-pr-github" {
+		t.Fatalf("AllBackends() = %v, %v", all, err)
+	}
+}
+
 func TestRegistry_BackendConfig_ReturnsVerbatimBlock(t *testing.T) {
 	reg, err := parseRegistry([]byte(`
 connector:

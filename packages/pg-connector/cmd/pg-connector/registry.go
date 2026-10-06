@@ -45,6 +45,7 @@ type Registry struct {
 	raw              map[string]yaml.Node
 	attentionSources []string
 	searchSources    []string
+	activitySources  []string
 	backends         map[string]yaml.Node
 	state            map[string]yaml.Node
 }
@@ -53,6 +54,7 @@ type registryDoc struct {
 	Connector map[string]yaml.Node `yaml:"connector"`
 	Attention *sourcesDoc          `yaml:"attention"`
 	Search    *sourcesDoc          `yaml:"search"`
+	Activity  *sourcesDoc          `yaml:"activity"`
 	// Backends is the top-level backends.<binary> map (bead pg2-2j5ac.28.1,
 	// bead pg2-2j5ac.28.1) — each entry's own opaque config block, copied VERBATIM
 	// by Invoke into every wire request sent to that binary. It is a
@@ -70,7 +72,7 @@ type registryDoc struct {
 	State map[string]yaml.Node `yaml:"state"`
 }
 
-// sourcesDoc is the shape of the top-level attention:/search: mappings: a
+// sourcesDoc is the shape of the top-level attention:/search:/activity: mappings: a
 // mapping with a single nested sources: list key, siblings of connector:
 // rather than members of it.
 type sourcesDoc struct {
@@ -187,6 +189,9 @@ func parseRegistry(data []byte, path string) (*Registry, error) {
 	}
 	if doc.Search != nil {
 		reg.searchSources = doc.Search.Sources
+	}
+	if doc.Activity != nil {
+		reg.activitySources = doc.Activity.Sources
 	}
 	return reg, nil
 }
@@ -432,8 +437,21 @@ func (r *Registry) SearchSources() ([]string, error) {
 	return sourcesList("search.sources", r.searchSources)
 }
 
-// sourcesList is the shared validation behind AttentionSources and
-// SearchSources. sources == nil means the key (or its nested sources:
+// ActivitySources is AttentionSources's counterpart for the top-level
+// activity.sources key: the bare binary names invoked by the activity list
+// verb and by nothing else (they are not part of AllBackends). Absent
+// activity key (or nested sources: key) returns (nil, nil); an explicit
+// sources: [] is rejected. A binary MAY also appear under connector.<type>;
+// no cross-check is made.
+func (r *Registry) ActivitySources() ([]string, error) {
+	if r == nil {
+		return nil, nil
+	}
+	return sourcesList("activity.sources", r.activitySources)
+}
+
+// sourcesList is the shared validation behind AttentionSources,
+// SearchSources and ActivitySources. sources == nil means the key (or its nested sources:
 // sub-key) was absent, returning (nil, nil) unvalidated; a non-nil slice —
 // including a non-nil empty one from an explicit sources: [] — is
 // validated with validateBackendList, so an explicitly-present but empty
