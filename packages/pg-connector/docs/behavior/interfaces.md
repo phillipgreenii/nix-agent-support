@@ -345,13 +345,22 @@ per-consumer cursor positions.
   (the same `{id, ...}` shape a live read would have returned) instead of the bare `{id: ...}`
   envelope, whenever the umbrella's own entity cache still holds a live copy — the envelope, change
   kinds, and cursor semantics are otherwise UNCHANGED for every existing consumer.
+  Each non-`--cached` `changes` call also records the call's outcome on that backend's ledger as
+  a freshness stamp (`INV-LEDGER-FRESH-1`..`-3`): `refreshed_at` on a whole-query answer;
+  `last_error` `{at, code}` on a failure or a truncated answer. A `--cached` call, which asks no
+  origin, records neither (`INV-LEDGER-FRESH-2`). A failed call otherwise leaves its ledger exactly
+  as it was, so the stamp is the only thing a failure can write.
 - `pg-connector ledger show [--type] [--backend] [--query] [--consumer]` and
   `pg-connector ledger clear [--type] [--backend] [--query]` read or delete on-disk ledger file(s)
   directly, matched by a PARTIAL filter (an omitted flag matches any value in that field) — never
   dispatching to a backend, so neither has a `sources[]`/exit-code concept of its own; both always
-  exit `0`. `show` prints each matching ledger's cursor, entity-index size, version, and
-  consumer-position(s) (`--consumer` narrows which consumer's position is printed, without
-  narrowing which ledgers match); `clear` deletes the matching ledger file(s) entirely.
+  exit `0`. `show` prints each matching ledger's cursor, entity-index size, version,
+  `refreshed_at`, `last_error`, and consumer-position(s) (`--consumer` narrows which consumer's
+  position is printed, without narrowing which ledgers match); `refreshed_at` and `last_error` are
+  JSON `null` when absent (`INV-LEDGER-FRESH-4`), shown as `never` / `none` in human output, and
+  `last_error` is `{at, code}`. It is a local read with no network call, which is what lets a
+  consumer such as `pg-desk` read data age on every heartbeat at zero origin cost. `clear` deletes
+  the matching ledger file(s) entirely, stamps included.
 - `pg-connector cache show [--type] [--backend]` and `pg-connector cache clear [--type] [--backend]`
   (phase 14, bead `pg2-2j5ac.42.4`) are the same PARTIAL-filter inspection/reset pair as
   `ledger show`/`ledger clear`, applied to the umbrella entity cache (`cache.go`) instead of the

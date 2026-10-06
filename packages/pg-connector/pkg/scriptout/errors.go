@@ -95,6 +95,13 @@ func codeForError(err error) string {
 	return "unavailable"
 }
 
+// CodeForError is the exported form of codeForError: the wire-taxonomy
+// code for err, using the same classification a backend's own error
+// response uses. cmd/pg-connector records it as a ledger key's
+// last_error.code (bead pg2-ll4dw.1) so a recorded failure names the same
+// closed-set code a wire consumer would have seen.
+func CodeForError(err error) string { return codeForError(err) }
+
 // sentinelForCode maps a wire code back to its Go sentinel. An unrecognized
 // code (should not happen against a well-behaved backend, since the
 // taxonomy is closed) falls back to ErrUnavailable.

@@ -78,6 +78,37 @@ distinction come from the behavior-docs method
   per-backend opt-out MUST fail OPEN (caching stays enabled for that backend) rather than closed —
   an already-unavailable backend must not be made doubly unavailable by a second failed call.
 
+## Ledger freshness
+
+> Written by bead `pg2-ll4dw.1` (spec
+> `docs/superpowers/specs/2026-10-05-pg-desk-attention-evaluator-and-connector-refresh-cache-design.md`,
+> section 5, the `INV-FRESH-*` freshness contract this set's half realizes). Freshness is the time
+> of the last SUCCESSFUL origin fetch; the delta ledger is where the umbrella records it, per
+> `(type, backend, query)` key, so a consumer can read data age locally without a network call.
+
+- **`INV-LEDGER-FRESH-1`** <!-- uuid: d6ace83f-a679-4ea8-9cf6-05d637d209f7 --> — After each
+  completed origin fetch for a ledger key, the umbrella MUST record that fetch's outcome on that
+  key: on a whole-query answer it MUST record `refreshed_at`, the time of that fetch. A key with no
+  recorded success has no `refreshed_at` (unknown, never a default time).
+- **`INV-LEDGER-FRESH-2`** <!-- uuid: 872fc219-5a0a-4d44-9fd3-03466805a948 --> — An answer served
+  from the ledger or the entity cache without asking the origin (a `--cached` read, a cache
+  fallback) MUST NOT record `refreshed_at`, and MUST NOT record a failure. Otherwise a cache would
+  hide staleness behind a young timestamp.
+- **`INV-LEDGER-FRESH-3`** <!-- uuid: 74bc6e39-0f55-443d-88bc-c9b31c3889f3 --> — A fetch counts as
+  a success only when the origin answered for the whole query. A truncated or partial answer MUST
+  NOT record `refreshed_at`; it MUST record `last_error` with the code `truncated`. A failed fetch
+  MUST record `last_error` as `{at, code}`, where `code` is the wire error-taxonomy code of the
+  failure, and MUST leave the previous `refreshed_at` unchanged. A backend that does not implement
+  the query's `list` op at all (`unknown_op`) or does not define the query name
+  (`query_not_recognized`) is not a failed source, and neither records anything. A failed fetch
+  MUST NOT change the entity index, version counter, cursor, or any consumer position, and MUST NOT
+  persist a `--reset` made for that call. `last_error` is retained after a later success, so a
+  reader tells "failing since" from "recovered" by comparing `last_error.at` with `refreshed_at`.
+- **`INV-LEDGER-FRESH-4`** <!-- uuid: 5c1c53f6-58f1-41cb-b4eb-2c92da23a8b1 --> — `ledger show`
+  MUST report `refreshed_at` and `last_error` for every matching key, as JSON `null` when absent
+  (never omitted), so a consumer can distinguish "no success recorded" from a missing field. A
+  ledger written before these fields existed reads as no recorded success.
+
 ## Versioning
 
 - **`INV-VER-1`** <!-- uuid: a47b92f1-34ec-451e-93ca-0e41e2f2081d --> — Every wire response MUST

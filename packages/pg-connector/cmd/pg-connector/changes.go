@@ -73,14 +73,19 @@
 //     op (forwarding the ledger's own stored opaque cursor — this is the
 //     one caller in this module that ever supplies a non-null cursor to
 //     "list"; see this file's own update to docs/behavior/interfaces.md).
-//     On success, Evict(false) then save. On a query_not_recognized
+//     On success, Evict(false), stamp the freshness outcome
+//     (RecordFetchOutcome: refreshed_at, or last_error for a truncated
+//     answer; INV-LEDGER-FRESH-1/-3), then save. On a query_not_recognized
 //     failure, Evict(true) (rule 3 — wipes and deletes the file itself;
 //     no separate save). On any OTHER failure, per Refresh's own
 //     contract and design section 5.2 ("a backend that answers
 //     unavailable or any error leaves its file untouched for that
-//     refresh"), do neither Evict nor save, and do not advance this
-//     backend's consumer cursor. --cached skips this entire step,
-//     including Evict ("no eviction on a cache-only read").
+//     refresh"), do neither Evict nor save of the in-memory ledger, and
+//     do not advance this backend's consumer cursor; the one write is
+//     recordFailedFetch's last_error stamp on a fresh copy
+//     (INV-LEDGER-FRESH-3). --cached skips this entire step, including
+//     Evict ("no eviction on a cache-only read") and the freshness stamp
+//     (INV-LEDGER-FRESH-2).
 //  3. Compute this call's reported changes via mergeChanges (below),
 //     combining ChangesSince's catch-up list with this pass's own
 //     Refresh-classified full-body changes.
@@ -370,14 +375,23 @@ func fanOutChanges(ctx context.Context, reg *Registry, entityType string, backen
 					// just removed).
 					l.Evict(key, time.Now(), pruneAfter, true)
 				}
-				// Any other error (including "this backend doesn't
-				// implement list at all"): design section 5.2, "leaves
-				// its file untouched for that refresh" — no Evict, no
-				// save, no advance.
+				// Any other error: design section 5.2, "leaves its file
+				// untouched for that refresh" — no Evict, no advance, and
+				// the in-memory l (which may carry a --reset) is never
+				// saved. The ONE write is the freshness stamp
+				// (INV-LEDGER-FRESH-3), made against a fresh copy.
+				if !errors.Is(refreshErr, scriptout.ErrQueryNotRecognized) {
+					recordFailedFetch(key, refreshErr)
+				}
 				results = append(results, res)
 				continue
 			}
 			l.Evict(key, time.Now(), pruneAfter, false)
+			// INV-LEDGER-FRESH-1/-2: only here, after a completed
+			// non-cached origin answer, does the ledger learn a fetch
+			// happened. A truncated answer is recorded as a partial, not a
+			// success (INV-FRESH-3).
+			l.RecordFetchOutcome(time.Now(), truncated, nil)
 			if err := saveLedger(key, l); err != nil {
 				res.status = SourceDegraded
 				res.reason = err.Error()
@@ -394,6 +408,24 @@ func fanOutChanges(ctx context.Context, reg *Registry, entityType string, backen
 		results = append(results, res)
 	}
 	return results
+}
+
+// recordFailedFetch persists the freshness stamp for a failed origin fetch
+// (INV-LEDGER-FRESH-3). It re-reads key's ledger rather than reusing the
+// caller's in-memory copy, so a --reset applied in memory for a call that
+// then failed is never persisted, and writes nothing for an error that
+// is not a failure of a source (RecordFetchOutcome's own rule). The stamp
+// is best-effort: a failure to persist it MUST NOT replace the original
+// fetch error already reported on the sources[] row.
+func recordFailedFetch(key LedgerKey, fetchErr error) {
+	l, err := loadLedger(key)
+	if err != nil {
+		return
+	}
+	if !l.RecordFetchOutcome(time.Now(), false, fetchErr) {
+		return
+	}
+	_ = saveLedger(key, l)
 }
 
 // changesListFn builds a Ledger.Refresh listFn that invokes backend's own

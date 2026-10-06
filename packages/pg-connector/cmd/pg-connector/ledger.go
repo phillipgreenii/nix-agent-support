@@ -41,6 +41,8 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
 // LedgerKey identifies one persisted ledger file. Instance additionally
@@ -84,6 +86,73 @@ type Ledger struct {
 	Entries   map[string]LedgerEntry   `json:"entries"`          // keyed by entity id
 	Version   int64                    `json:"version"`          // current version counter
 	Consumers map[string]ConsumerState `json:"consumers"`        // keyed by consumer id
+
+	// RefreshedAt is the time of the last SUCCESSFUL origin fetch for this
+	// key (INV-LEDGER-FRESH-1): nil until one has completed. Written only by
+	// RecordFetchSuccess/RecordFetchOutcome, i.e. after a non-cached,
+	// non-truncated, error-free backend answer; a --cached read never
+	// touches it (INV-LEDGER-FRESH-2).
+	RefreshedAt *time.Time `json:"refreshed_at,omitempty"`
+	// LastError is the most recent failed (or partial) origin fetch, kept
+	// alongside RefreshedAt rather than clearing it, so a reader can tell
+	// "failing since" from "recovered" by comparing At against RefreshedAt
+	// (INV-LEDGER-FRESH-3). nil when none has been recorded.
+	LastError *LedgerError `json:"last_error,omitempty"`
+}
+
+// LedgerError is one recorded fetch failure: when it happened and a code
+// from the wire error taxonomy (or ledgerErrorTruncated for a partial
+// answer). It deliberately carries no message: the code is the stable,
+// low-cardinality part, and the full cause is already on the failed call's
+// own sources[] row.
+type LedgerError struct {
+	At   time.Time `json:"at"`
+	Code string    `json:"code"`
+}
+
+// ledgerErrorTruncated is LedgerError.Code for an origin answer that
+// arrived without error but did not cover the whole query (INV-FRESH-3).
+const ledgerErrorTruncated = "truncated"
+
+// RecordFetchSuccess stamps RefreshedAt = now. Callers MUST invoke it only
+// for a completed, whole-query origin answer; RecordFetchOutcome is the
+// classifying entry point.
+func (l *Ledger) RecordFetchSuccess(now time.Time) {
+	t := now
+	l.RefreshedAt = &t
+}
+
+// RecordFetchError records a failed or partial fetch as LastError, leaving
+// RefreshedAt untouched (a failure never moves the last success).
+func (l *Ledger) RecordFetchError(now time.Time, code string) {
+	l.LastError = &LedgerError{At: now, Code: code}
+}
+
+// RecordFetchOutcome classifies one completed origin fetch attempt and
+// records it (spec INV-FRESH-1..3):
+//   - fetchErr == nil and not truncated: success, stamp RefreshedAt.
+//   - fetchErr == nil and truncated: a partial answer is NOT a success
+//     (INV-FRESH-3); record LastError with code "truncated", no stamp.
+//   - ErrUnknownOp / ErrQueryNotRecognized: the backend is not a source for
+//     this query ("not applicable" / a name it does not define), so there
+//     is nothing to be fresh or stale about; record nothing.
+//   - any other error: record LastError with the wire code.
+//
+// It reports whether it changed the ledger (false only for the two
+// "not a source" errors). It is never called for a cache-served answer
+// (INV-FRESH-2).
+func (l *Ledger) RecordFetchOutcome(now time.Time, truncated bool, fetchErr error) bool {
+	switch {
+	case fetchErr == nil && !truncated:
+		l.RecordFetchSuccess(now)
+	case fetchErr == nil:
+		l.RecordFetchError(now, ledgerErrorTruncated)
+	case errors.Is(fetchErr, scriptout.ErrUnknownOp), errors.Is(fetchErr, scriptout.ErrQueryNotRecognized):
+		return false // not a failure of a source; record nothing
+	default:
+		l.RecordFetchError(now, scriptout.CodeForError(fetchErr))
+	}
+	return true
 }
 
 // ChangeKind mirrors the wire "change" field values.

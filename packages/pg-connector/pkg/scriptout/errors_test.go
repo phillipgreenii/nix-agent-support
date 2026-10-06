@@ -123,3 +123,12 @@ func TestExitCodeForCode_UnknownCodeReturnsZero(t *testing.T) {
 		t.Fatalf("ExitCodeForCode(unknown) = %d, want 0", got)
 	}
 }
+
+func TestCodeForError_ExportedMatchesWireClassification(t *testing.T) {
+	if got := CodeForError(WrapError(ErrUnauthenticated, "x")); got != "unauthenticated" {
+		t.Fatalf("CodeForError = %q, want unauthenticated", got)
+	}
+	if got := CodeForError(errors.New("plain")); got != "unavailable" {
+		t.Fatalf("CodeForError(plain) = %q, want the unavailable fallback", got)
+	}
+}

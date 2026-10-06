@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -77,6 +78,11 @@ type ledgerShowRow struct {
 	IndexSize int                      `json:"index_size"`
 	Version   int64                    `json:"version"`
 	Consumers map[string]ConsumerState `json:"consumers"`
+	// RefreshedAt/LastError are the freshness stamps (bead pg2-ll4dw.1).
+	// Both are emitted unconditionally, as null when absent, so a reader
+	// can tell "never succeeded" (INV-FRESH-4) from "field missing".
+	RefreshedAt *time.Time   `json:"refreshed_at"`
+	LastError   *LedgerError `json:"last_error"`
 }
 
 func newLedgerShowCmd() *cobra.Command {
@@ -125,6 +131,9 @@ func buildLedgerShowRow(k LedgerKey, l *Ledger, consumer string) ledgerShowRow {
 		IndexSize: len(l.Entries),
 		Version:   l.Version,
 		Consumers: make(map[string]ConsumerState),
+
+		RefreshedAt: l.RefreshedAt,
+		LastError:   l.LastError,
 	}
 	if consumer != "" {
 		if cs, ok := l.Consumers[consumer]; ok {
@@ -151,7 +160,7 @@ func humanizeLedgerShowRows(rows []ledgerShowRow) string {
 		if r.Instance != "" {
 			label += " (instance=" + r.Instance + ")"
 		}
-		fmt.Fprintf(&b, "%s: cursor=%s index_size=%d version=%d\n", label, cursorText(r.Cursor), r.IndexSize, r.Version)
+		fmt.Fprintf(&b, "%s: cursor=%s index_size=%d version=%d refreshed_at=%s last_error=%s\n", label, cursorText(r.Cursor), r.IndexSize, r.Version, refreshedAtText(r.RefreshedAt), lastErrorText(r.LastError))
 		if len(r.Consumers) == 0 {
 			b.WriteString("  consumers: (none)")
 			continue
@@ -162,6 +171,20 @@ func humanizeLedgerShowRows(rows []ledgerShowRow) string {
 		}
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+func refreshedAtText(t *time.Time) string {
+	if t == nil {
+		return "never"
+	}
+	return t.Format(time.RFC3339)
+}
+
+func lastErrorText(e *LedgerError) string {
+	if e == nil {
+		return "none"
+	}
+	return e.Code + "@" + e.At.Format(time.RFC3339)
 }
 
 func cursorText(cursor json.RawMessage) string {
