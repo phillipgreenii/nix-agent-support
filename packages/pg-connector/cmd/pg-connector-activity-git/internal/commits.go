@@ -42,13 +42,14 @@ func (b *Backend) logSkip(path, reason string) {
 }
 
 // collectCommits is the collector seam ListActivity calls: it reads every
-// configured repo_paths entry in order and concatenates the per-repo items.
-// Later packets add further repo sources here. Dedupe by id is NOT done here;
+// configured repo_paths entry in order, then every repo discovered under
+// repo_search_paths (see repoList), and concatenates the per-repo items.
+// Dedupe by id is NOT done here;
 // ListActivity does it over the final list.
 func (b *Backend) collectCommits(ctx context.Context, cfg Config, emails []string, since, before time.Time) ([]schema.ActivityItem, bool, error) {
 	asOf := b.now().UTC().Format(time.RFC3339)
 	items := []schema.ActivityItem{}
-	for _, repo := range cfg.RepoPaths {
+	for _, repo := range b.repoList(cfg) {
 		got, ok, err := b.collectRepoCommits(ctx, repo, cfg.IncludeMerges, emails, since, before, asOf)
 		if err != nil {
 			return nil, false, err

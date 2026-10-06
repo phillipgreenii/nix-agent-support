@@ -417,3 +417,109 @@ func (c configBackend) Invoke(ctx context.Context, request []byte) ([]byte, int,
 	}
 	return c.inner.Invoke(ctx, out)
 }
+
+// TestListActivity_RealRepo_SearchPathDiscovery builds, directly under one
+// search path: two git clones sharing an origin remote, a worktree checkout of
+// the first clone (its .git is a file, sharing the clone's repo_ident), a
+// worktree checkout of a separate repository (its .git is a file too), and a
+// plain directory; plus a repo nested two levels down and a nonexistent
+// search path.
+func TestListActivity_RealRepo_SearchPathDiscovery(t *testing.T) {
+	f := newGitFixture(t)
+	origin := populatedRepo(f)
+	other := populatedRepo(f)
+
+	search, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cloneA := filepath.Join(search, "a-clone")
+	cloneB := filepath.Join(search, "b-clone")
+	f.git(search, nil, "clone", origin, cloneA)
+	f.git(search, nil, "clone", origin, cloneB)
+	siblingWT := filepath.Join(search, "c-sibling-worktree")
+	f.git(cloneA, nil, "worktree", "add", "-b", "wt-branch", siblingWT)
+	foreignWT := filepath.Join(search, "d-foreign-worktree")
+	f.git(other, nil, "worktree", "add", "-b", "wt-foreign", foreignWT)
+	mkdirAll(t, filepath.Join(search, "e-plain"))
+	nested := filepath.Join(search, "f-group", "nested")
+	mkdirAll(t, nested)
+	f.git(nested, nil, "init", "-b", "main")
+	f.commit(nested, meEmail, "2026-09-17T10:00:00+00:00", "2026-09-17T10:00:00+00:00", "nested-commit")
+
+	for _, wt := range []string{siblingWT, foreignWT} {
+		if st, err := os.Stat(filepath.Join(wt, ".git")); err != nil || !st.Mode().IsRegular() {
+			t.Fatalf("%s: the worktree checkout's .git must be a file: %v", wt, err)
+		}
+	}
+
+	missing := filepath.Join(t.TempDir(), "gone")
+	var stderr bytes.Buffer
+	cfg := Config{
+		AuthorEmails:    []string{meEmail},
+		RepoSearchPaths: []string{missing, search},
+	}
+	res := listWith(t, realBackend(&stderr), cfg, rangeSince, rangeBefore)
+
+	seen := map[string]bool{}
+	byPath := map[string]int{}
+	for _, it := range res.Items {
+		if seen[it.ID] {
+			t.Errorf("duplicate id %q", it.ID)
+		}
+		seen[it.ID] = true
+		var raw struct {
+			RepoPath string    `json:"repo_path"`
+			Refs     *[]string `json:"refs"`
+		}
+		_ = json.Unmarshal(it.Fields, &raw)
+		byPath[raw.RepoPath]++
+		if it.Summary == "nested-commit" {
+			t.Error("a repo two levels down must not be discovered")
+		}
+		if len(it.Labels) == 0 || !strings.HasPrefix(it.Labels[0], "repo:") {
+			t.Errorf("%s: labels = %v, want repo: first", it.Summary, it.Labels)
+		}
+		if raw.Refs == nil || !strings.Contains(string(it.Fields), `"insertions"`) || !strings.Contains(string(it.Fields), `"deletions"`) {
+			t.Errorf("%s: fields lack refs or line counts: %s", it.Summary, it.Fields)
+		}
+		if it.Summary == "t-topic-only" && raw.RepoPath == foreignWT {
+			if !reflect.DeepEqual(it.Labels[1:], []string{"branch:topic"}) {
+				t.Errorf("t-topic-only labels = %v, want a branch:topic label", it.Labels)
+			}
+		}
+	}
+	// cloneA is read first; cloneB and the sibling worktree share its
+	// repo_ident and shas, so everything they hold collides on id and loses.
+	// The foreign worktree has its own ident and contributes its own commits.
+	for path, want := range map[string]int{cloneA: 5, cloneB: 0, siblingWT: 0, foreignWT: 6} {
+		if byPath[path] != want {
+			t.Errorf("%s contributed %d items, want %d", path, byPath[path], want)
+		}
+	}
+
+	lines := strings.Split(strings.TrimRight(stderr.String(), "\n"), "\n")
+	if len(lines) != 1 || !strings.Contains(lines[0], missing) {
+		t.Errorf("stderr = %q, want exactly one line naming the missing search path", stderr.String())
+	}
+}
+
+// TestListActivity_RealRepo_SearchPathSharedWithRepoPaths: a repo named both
+// in repo_paths and found under a search path is read once.
+func TestListActivity_RealRepo_SearchPathSharedWithRepoPaths(t *testing.T) {
+	f := newGitFixture(t)
+	search, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := filepath.Join(search, "r")
+	mkdirAll(t, repo)
+	f.git(repo, nil, "init", "-b", "main")
+	f.commit(repo, meEmail, "2026-09-05T10:00:00+00:00", "2026-09-05T10:00:00+00:00", "only-commit")
+
+	cfg := Config{AuthorEmails: []string{meEmail}, RepoPaths: []string{repo}, RepoSearchPaths: []string{search}}
+	res := listWith(t, realBackend(&bytes.Buffer{}), cfg, rangeSince, rangeBefore)
+	if got := subjects(res.Items); !reflect.DeepEqual(got, []string{"only-commit"}) {
+		t.Errorf("subjects = %v, want a single only-commit", got)
+	}
+}
