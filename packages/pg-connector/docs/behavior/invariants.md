@@ -78,6 +78,69 @@ distinction come from the behavior-docs method
   per-backend opt-out MUST fail OPEN (caching stays enabled for that backend) rather than closed —
   an already-unavailable backend must not be made doubly unavailable by a second failed call.
 
+## Cache policy: detail level, read-through, refresher
+
+> Written by bead `pg2-cw6b3.2` (spec
+> `docs/superpowers/specs/2026-10-05-pg-desk-attention-evaluator-and-connector-refresh-cache-design.md`,
+> section 6, "Direction 2: connector membership and refresh cache"). These rules extend
+> `INV-CACHE-1`; they apply to the `pr` and `issue` types only. The umbrella owns the policy, so a
+> backend stays stateless (`INV-STATE-1`) and a type adopts the policy by configuration.
+
+- **`INV-CACHE-2`** <!-- uuid: 07a8d39c-758b-4fd7-a74b-051f9dc9868e --> — Every cache entry MUST
+  record a level, `summary` (what `list` returns) or `detail` (what `show` returns). A `show`
+  read-through (`INV-CACHE-4`) and the `show` stale fallback MUST be satisfied only by a `detail`
+  entry, so a list summary is never served to a caller that asked for the full entity. A write of a
+  `summary` MUST NOT replace or downgrade the content of a live `detail` entry for the same id; a
+  write of a `detail` MUST replace any entry. An entry persisted before levels existed MUST be read
+  as `summary`.
+- **`INV-CACHE-3`** <!-- uuid: 001bf296-3510-4932-a944-fb3fef29ec8c --> — The `list` stale
+  fallback MUST be scoped to the requested query: it MUST serve only cached entities whose ids are
+  live members of that query's ledger index, and MUST serve nothing for a query whose ledger index
+  holds no live member. It MUST NOT serve every cached entity of a backend regardless of the query.
+- **`INV-CACHE-4`** <!-- uuid: 192b1938-cc33-4174-a375-076345b55aa4 --> — `pr show` and
+  `issue show` MUST be served from a live `detail` cache entry whose age is within `read_ttl`
+  without calling the backend, unless the caller passed `--fresh`. A read older than `read_ttl`
+  (or with no entry) MUST fetch from the origin under a single-flight lock keyed by the entity, so
+  concurrent readers of one entity collapse to one origin call: a reader that waited for the lock
+  MUST re-check the cache and serve what the lock holder just wrote instead of calling the origin
+  again. A failure to take the lock MUST fail open (the reader calls the origin itself) and MUST NOT
+  turn a read into a failure. `read_ttl` defaults to 120 seconds; a configured value of `0` or
+  `off` disables the read-through. An `unavailable` answer from the origin MUST still fall back to a
+  stale `detail` entry marked `stale` (`INV-CACHE-1`). A type or backend opted out of the cache
+  (`INV-CACHE-1`) MUST be neither read-through nor written.
+- **`INV-CACHE-5`** <!-- uuid: e96e5e10-0fb8-4ff4-b301-aac0b73da791 --> — A `show` answered by the
+  umbrella MUST carry two additive fields beside the entity: `served_from`, `origin` when the
+  answer was fetched from the origin by this call or `cache` when it came from a cache entry
+  (including the stale fallback), and `age_seconds`, the whole seconds since the entity's own
+  `as_of` (`0` for an origin answer). `--fresh` MUST bypass `read_ttl` and fetch from the origin;
+  it MUST NOT disable the stale fallback. A cache-served answer MUST NOT advance any freshness
+  stamp (`INV-LEDGER-FRESH-2`).
+- **`INV-CACHE-6`** <!-- uuid: d3116653-4bd4-4aaf-9e6e-a865c3c7aa64 --> — `changes` MUST NOT be
+  served from `read_ttl`: it is the thing that detects change, so it always asks the origin
+  (unless `--cached`). When `refresh_after` is configured for the type (the refresher mode, off by
+  default), `changes` MUST read membership with the ids-only `list`, MUST fetch a full entity only
+  for a member that is new to the ledger or whose `detail` entry is missing or older than
+  `refresh_after`, and MUST classify changes only among the entities it fetched, so a member whose
+  entry is young reports no change until it ages. Every entity it fetched MUST be written to the
+  cache as `detail`, only after the response has been written and flushed. A refresh pass in which
+  any fetch failed is not a whole-query answer: it MUST record `last_error` with the code
+  `truncated` and MUST NOT record `refreshed_at` (`INV-LEDGER-FRESH-3`), though the changes it did
+  classify are still reported. Outside the refresher mode, `changes` MUST write each entity it
+  listed to the cache as `summary`, after the response is flushed.
+- **`INV-CACHE-7`** <!-- uuid: bb80b573-8500-45f0-b65e-ea1f39e4abe3 --> — In the refresher mode, an
+  id that is in the ledger index but absent from a complete membership answer MUST be confirmed by
+  one read of the entity before it is reported `removed`. If the read returns the entity (for
+  example a PR that merged or closed), the `removed` row MUST carry that confirmed content. If the
+  read answers `not_found`, the removal is confirmed and the row carries the last cached content.
+  If the read fails any other way, the removal MUST be withheld: the id stays live in the ledger
+  and the next call confirms it again, and the pass counts as incomplete (`INV-CACHE-6`). A
+  truncated membership answer reports no removal at all (unchanged).
+- **`INV-CACHE-8`** <!-- uuid: eab5289c-7cb4-437c-abf4-42b2ee6b9889 --> — The cache policy above
+  MUST NOT change the `capabilities`-flag and `state:` opt-outs, the fail-open rule, the
+  `unavailable` stale fallback, or the existing `0`/`2`/`3`/`4` exit codes of `show`, `list` and
+  `changes`. A consumer that has just detected a change and needs the current entity MUST pass
+  `--fresh` to `show`, because a `detail` entry younger than `read_ttl` is otherwise served.
+
 ## Ledger freshness
 
 > Written by bead `pg2-ll4dw.1` (spec

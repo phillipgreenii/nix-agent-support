@@ -328,7 +328,10 @@ func (g *Gatherer) Gather(ctx context.Context, entityType, entityID string, chan
 		return Facts{}, fmt.Errorf("gather: change kind %q is not one of added/changed/removed/sweep", change)
 	}
 
-	prShowRaw, notFound, err := g.targetedCall(ctx, []string{"pr", "show", entityID}, nil)
+	// --fresh: a gather runs because a change was just detected, so it must
+	// see the origin's current entity, never a connector cache entry that is
+	// still within its read-through TTL.
+	prShowRaw, notFound, err := g.targetedCall(ctx, []string{"pr", "show", entityID, "--fresh"}, nil)
 
 	if change == ChangeRemoved {
 		return g.removedFacts(prShowRaw, notFound, err)

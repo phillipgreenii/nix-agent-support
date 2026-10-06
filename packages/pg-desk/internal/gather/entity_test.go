@@ -114,7 +114,7 @@ func TestIssueAdapter_ShowOnlyByDefault(t *testing.T) {
 		t.Fatalf("facts %+v err %v", f, err)
 	}
 	calls := readCalls(t, rec)
-	if len(calls) != 1 || calls[0] != "issue show bd-1" {
+	if len(calls) != 1 || calls[0] != "issue show bd-1 --fresh" {
 		t.Fatalf("calls %v", calls)
 	}
 }

@@ -218,6 +218,12 @@ type changesBackendResult struct {
 	truncated   bool
 	skipAdvance bool // true: step 5 (advance+save) must not run for this backend
 	entries     []changesEntry
+	// pass is non-nil only in the refresher mode (changes_refresher.go); it
+	// carries what the pass fetched and confirmed.
+	pass *refreshPass
+	// listed holds every entity the ordinary (non-refresher) list returned,
+	// for the post-flush summary-level cache write (INV-CACHE-6).
+	listed []json.RawMessage
 }
 
 // newChangesCmd builds the "changes" cobra command for entityType (pr or
@@ -290,6 +296,9 @@ func newChangesCmd(entityType string) *cobra.Command {
 		// its backend's own entity cache. Same post-flush position as
 		// step 5 above; order between the two is immaterial (they touch
 		// disjoint on-disk files).
+		// Cache writes (INV-CACHE-6) come first, so a confirmed removal's
+		// content is already cached when its tombstone is set.
+		commitCacheWrites(cmd.Context(), reg, entityType, results)
 		if commitErr := commitCacheTombstones(reg, entityType, results); commitErr != nil {
 			return commitErr
 		}
@@ -360,7 +369,15 @@ func fanOutChanges(ctx context.Context, reg *Registry, entityType string, backen
 			res.status = SourceSucceeded
 		} else {
 			var truncated bool
-			listFn := changesListFn(ctx, reg, b, query, &truncated)
+			var listFn func(json.RawMessage) ([]json.RawMessage, []string, json.RawMessage, bool, error)
+			if after, ok := refresherEnabled(ctx, reg, entityType, b); ok {
+				// Refresher mode (INV-CACHE-6, INV-CACHE-7): membership plus
+				// a fetch of only the new or aged members.
+				res.pass = &refreshPass{}
+				listFn = refresherListFn(ctx, reg, entityType, b, query, l, after, res.pass, &truncated)
+			} else {
+				listFn = changesListFn(ctx, reg, b, query, &truncated, &res.listed)
+			}
 			var refreshErr error
 			refreshChanges, refreshErr = l.Refresh(listFn)
 			if refreshErr != nil {
@@ -391,7 +408,10 @@ func fanOutChanges(ctx context.Context, reg *Registry, entityType string, backen
 			// non-cached origin answer, does the ledger learn a fetch
 			// happened. A truncated answer is recorded as a partial, not a
 			// success (INV-FRESH-3).
-			l.RecordFetchOutcome(time.Now(), truncated, nil)
+			// A refresher pass in which a fetch failed is partial too, however
+			// complete its membership was (INV-CACHE-6).
+			partial := truncated || (res.pass != nil && res.pass.incomplete)
+			l.RecordFetchOutcome(time.Now(), partial, nil)
 			if err := saveLedger(key, l); err != nil {
 				res.status = SourceDegraded
 				res.reason = err.Error()
@@ -399,11 +419,15 @@ func fanOutChanges(ctx context.Context, reg *Registry, entityType string, backen
 				results = append(results, res)
 				continue
 			}
-			res.truncated = truncated
+			res.truncated = partial
 			res.status = SourceSucceeded
 		}
 
-		res.entries = mergeChanges(b, l, consumerID, preCursor, refreshChanges, entityType, reg)
+		var confirmed map[string]json.RawMessage
+		if res.pass != nil {
+			confirmed = res.pass.confirmed
+		}
+		res.entries = mergeChanges(b, l, consumerID, preCursor, refreshChanges, entityType, reg, confirmed)
 		res.ledger = l
 		results = append(results, res)
 	}
@@ -437,7 +461,7 @@ func recordFailedFetch(key LedgerKey, fetchErr error) {
 // entity's content (mergeChanges below). *lastTruncated is set from this
 // call's own result so the caller can report it on the response's
 // sources[] row.
-func changesListFn(ctx context.Context, reg *Registry, backend, query string, lastTruncated *bool) func(json.RawMessage) ([]json.RawMessage, []string, json.RawMessage, bool, error) {
+func changesListFn(ctx context.Context, reg *Registry, backend, query string, lastTruncated *bool, listed *[]json.RawMessage) func(json.RawMessage) ([]json.RawMessage, []string, json.RawMessage, bool, error) {
 	return func(cursor json.RawMessage) ([]json.RawMessage, []string, json.RawMessage, bool, error) {
 		resp, err := invokeOne(ctx, reg, backend, "list", map[string]any{"query": query, "cursor": cursor, "ids_only": false})
 		if err != nil {
@@ -448,6 +472,7 @@ func changesListFn(ctx context.Context, reg *Registry, backend, query string, la
 			return nil, nil, nil, false, err
 		}
 		*lastTruncated = result.Truncated
+		*listed = result.Entities
 		return result.Entities, result.PresentIDs, result.Cursor, result.Truncated, nil
 	}
 }
@@ -489,7 +514,7 @@ func changesListFn(ctx context.Context, reg *Registry, backend, query string, la
 // by the ChangeRemoved branch below, to look up a removed id in that
 // backend's own entity cache — READ-ONLY, no cache write of any kind
 // happens in this function (see this file's own header comment for why).
-func mergeChanges(backend string, l *Ledger, consumerID string, preCursor int64, refreshChanges []LedgerChange, entityType string, reg *Registry) []changesEntry {
+func mergeChanges(backend string, l *Ledger, consumerID string, preCursor int64, refreshChanges []LedgerChange, entityType string, reg *Registry, confirmed map[string]json.RawMessage) []changesEntry {
 	full := make(map[string]LedgerChange, len(refreshChanges))
 	for _, c := range refreshChanges {
 		if c.Change == ChangeRemoved {
@@ -531,6 +556,12 @@ func mergeChanges(backend string, l *Ledger, consumerID string, preCursor int64,
 				if content, _, ok := cache.Get(id, resolveCacheMaxAge(reg), time.Now()); ok {
 					entity = content
 				}
+			}
+			// A removal the refresher confirmed with a read of the entity
+			// (a merged or closed PR) carries that confirmed content, which
+			// is newer than any cache copy (INV-CACHE-7).
+			if content, ok := confirmed[id]; ok {
+				entity = content
 			}
 			out = append(out, changesEntry{Change: ChangeRemoved, Source: backend, Entity: entity})
 			continue

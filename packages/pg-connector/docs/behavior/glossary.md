@@ -187,6 +187,26 @@ list`/`search` accept no such flag — see "Cross-cutting capabilities" above) t
   …) from the request's own `config` member alone, never from a local file/env it reads itself
   for that purpose (`INV-STATE-1`).
 
+## Entity cache policy
+
+- **Entity cache** — the umbrella-owned, on-disk copy of what a stateless backend already returned,
+  one file per `(type, backend)` (`INV-CACHE-1`). Each entry records a level.
+- **Level (`summary` / `detail`)** — what an entity cache entry holds: `summary` is what `list`
+  returns, `detail` is what `show` returns. Only `detail` satisfies a `show` (`INV-CACHE-2`).
+- **`read_ttl`** — the age within which `pr show` and `issue show` are served from a `detail`
+  entry without calling the backend (`cache_read_ttl`, default 120 seconds; `INV-CACHE-4`).
+- **Single flight** — the per-entity lock that collapses concurrent `show` readers of one entity
+  into one origin call (`INV-CACHE-4`).
+- **`served_from` / `age_seconds`** — the two additive fields a `show` answer carries: whether this
+  call fetched from the `origin` or served a `cache` entry, and the seconds since the entity's
+  own `as_of` (`INV-CACHE-5`).
+- **`--fresh`** — the `show` flag that skips `read_ttl` and asks the origin (`INV-CACHE-5`).
+- **Refresher** — `changes` run with `cache_refresh_after` set: it reads membership cheaply,
+  re-fetches only new or aged entities, confirms removals, and writes `detail` entries
+  (`INV-CACHE-6`, `INV-CACHE-7`).
+- **`refresh_after`** — the age past which the refresher re-fetches a tracked entity
+  (`cache_refresh_after`, no default; the refresher is off while it is unset).
+
 ## Outcome reporting and CLI exit codes
 
 - **pg-connector's own CLI exit code** — the exit code the `pg-connector` process itself returns to

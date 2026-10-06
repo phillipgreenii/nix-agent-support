@@ -49,12 +49,40 @@ import (
 // backend").
 type CacheKey struct{ Type, Backend string }
 
+// CacheLevel says how much of an entity a cache entry holds (INV-CACHE-2):
+// a summary is what a backend's list returns, a detail is what its show
+// returns. The two share one id key space, so the level is what keeps a
+// list summary from being served to a caller that asked for the full entity.
+type CacheLevel string
+
+const (
+	// CacheLevelSummary is list-level content. It is also how an entry
+	// persisted before levels existed reads: the conservative choice, since
+	// such an entry could have been written by either path.
+	CacheLevelSummary CacheLevel = "summary"
+	// CacheLevelDetail is show-level content, the only level that satisfies
+	// a show read-through or the show stale fallback.
+	CacheLevelDetail CacheLevel = "detail"
+)
+
 // CacheEntry is one entity's cached state.
 type CacheEntry struct {
 	Content    json.RawMessage `json:"content"`
 	AsOf       time.Time       `json:"as_of"`
 	LastAccess time.Time       `json:"last_access"`
 	RemovedAt  *time.Time      `json:"removed_at,omitempty"` // nil unless tombstoned
+	// Level is the level of Content; empty (an entry written before levels
+	// existed) reads as CacheLevelSummary.
+	Level CacheLevel `json:"level,omitempty"`
+}
+
+// level reports e's effective level, mapping the legacy empty value to
+// CacheLevelSummary.
+func (e CacheEntry) level() CacheLevel {
+	if e.Level == CacheLevelDetail {
+		return CacheLevelDetail
+	}
+	return CacheLevelSummary
 }
 
 // Cache is the full persisted state for one (type, backend). Entries is a
@@ -268,6 +296,20 @@ func (c *Cache) Get(id string, maxAge time.Duration, now time.Time) (content jso
 	return entry.Content, entry.AsOf, true
 }
 
+// GetDetail is Get restricted to a detail-level entry (INV-CACHE-2): it
+// reports ok=false for a summary-level entry however young it is, because a
+// summary must never be served to a caller that asked for the full entity.
+func (c *Cache) GetDetail(id string, maxAge time.Duration, now time.Time) (content json.RawMessage, asOf time.Time, ok bool) {
+	entry, exists := c.Entries[id]
+	if !exists || entry.RemovedAt != nil || entry.level() != CacheLevelDetail {
+		return nil, time.Time{}, false
+	}
+	if now.Sub(entry.AsOf) > maxAge {
+		return nil, time.Time{}, false
+	}
+	return entry.Content, entry.AsOf, true
+}
+
 // MarkAccessed updates id's LastAccess to now. No-op if id is absent.
 func (c *Cache) MarkAccessed(id string, now time.Time) {
 	entry, ok := c.Entries[id]
@@ -283,11 +325,32 @@ func (c *Cache) MarkAccessed(id string, now time.Time) {
 // and setting LastAccess to now. Put never evicts on its own -- eviction
 // is Evict's job, called separately, mirroring Ledger.Refresh/Evict's own
 // separation of concerns.
+//
+// Put stores summary-level content; PutLevel names the level explicitly.
 func (c *Cache) Put(id string, content json.RawMessage, asOf, now time.Time) {
+	c.PutLevel(id, content, asOf, now, CacheLevelSummary)
+}
+
+// PutLevel is Put with an explicit level (INV-CACHE-2). A detail write
+// always replaces the entry. A summary write NEVER replaces or downgrades a
+// live detail entry's content (the detail is a superset, and replacing it
+// would let a later show serve a summary): it only counts as an access. A
+// summary written over a tombstoned detail entry replaces it, because the
+// tombstoned content describes an entity that had left the query.
+func (c *Cache) PutLevel(id string, content json.RawMessage, asOf, now time.Time, level CacheLevel) {
 	if c.Entries == nil {
 		c.Entries = map[string]CacheEntry{}
 	}
-	c.Entries[id] = CacheEntry{Content: content, AsOf: asOf, LastAccess: now}
+	if existing, ok := c.Entries[id]; ok && level != CacheLevelDetail &&
+		existing.RemovedAt == nil && existing.level() == CacheLevelDetail {
+		existing.LastAccess = now
+		c.Entries[id] = existing
+		return
+	}
+	if level != CacheLevelDetail {
+		level = CacheLevelSummary
+	}
+	c.Entries[id] = CacheEntry{Content: content, AsOf: asOf, LastAccess: now, Level: level}
 }
 
 // Remove tombstones id: Content and AsOf are left exactly as they were

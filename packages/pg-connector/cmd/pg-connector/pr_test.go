@@ -488,7 +488,10 @@ func TestPrShowCacheFallback_ServesStaleOnBackendUnavailable(t *testing.T) {
 		"show": `{"protocolVersion":1,"schemaVersion":1,"error":{"code":"unavailable","message":"backend down"}}`,
 	}, `{"protocolVersion":1,"schemaVersions":{"pr":1},"ops":["capabilities","show"]}`)
 
-	stdout2, _, code2 := executePr(t, []string{"pr", "show", "pr-1"})
+	// --fresh skips the read-through (the live entry above is within
+	// read_ttl and would otherwise answer) so the unavailable stale fallback
+	// is what is exercised (INV-CACHE-5).
+	stdout2, _, code2 := executePr(t, []string{"pr", "show", "pr-1", "--fresh"})
 	if code2 != 0 {
 		t.Fatalf("cache-fallback show exit code = %d, want 0 (a stale-but-served read); stdout=%s", code2, stdout2)
 	}
@@ -536,6 +539,14 @@ func TestPrListCacheFallback_DegradedSourceServesStaleEntities(t *testing.T) {
 	t.Setenv("PG_PR_CONFIG", cfg)
 	t.Setenv("XDG_STATE_HOME", dir)
 
+	// The fallback is scoped to the query's ledger index (INV-CACHE-3), so the
+	// ledger must name o/r#1 as a live member of "mine".
+	if err := saveLedger(LedgerKey{Type: "pr", Backend: "backend-pr-list-cache-fallback", Query: "mine"}, &Ledger{
+		Entries: map[string]LedgerEntry{"o/r#1": {Hash: "h", VersionLastChanged: 1}},
+		Version: 1,
+	}); err != nil {
+		t.Fatalf("seed ledger: %v", err)
+	}
 	seedCache(t, CacheKey{Type: "pr", Backend: "backend-pr-list-cache-fallback"}, &Cache{Entries: map[string]CacheEntry{
 		"o/r#1": {
 			Content:    json.RawMessage(`{"id":"o/r#1","repo":"o/r","number":1,"title":"t","state":"open","branch":"b","base":"main","author":"a","url":"u","draft":false,"merged":false,"as_of":"2026-01-01T00:00:00Z","stale":false}`),

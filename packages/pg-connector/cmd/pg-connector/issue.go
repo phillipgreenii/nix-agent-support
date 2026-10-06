@@ -75,18 +75,17 @@ func newIssueShowCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 	}
 	backendFlag := addBackendFlag(cmd, "pin to exactly this backend, skipping the multi-instance try-each resolution policy")
+	freshFlag := cmd.Flags().Bool("fresh", false, "skip the cache read-through and ask the origin (the unavailable stale fallback still applies)")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		reg, err := LoadRegistry()
 		if err != nil {
 			return reportIssueTargetedOutcome(cmd, nil, err, humanizeIssueShow)
 		}
-		resp, backend, fromCache, dispatchErr := dispatchShowWithCache(cmd.Context(), reg, "issue", args[0], *backendFlag)
-		if dispatchErr == nil && !fromCache && resp != nil {
-			// Live success (not a cache-served read): keep this backend's
-			// cache current for the next unavailable window [design:
-			// docket design field, "Produces"].
-			putLiveEntity(cmd.Context(), reg, "issue", backend, resp.Result)
-		}
+		// dispatchShow is the read-through entry point: a detail cache entry
+		// within read_ttl answers with no backend call unless --fresh, a live
+		// success keeps the cache current, and the result carries served_from
+		// and age_seconds (INV-CACHE-4, INV-CACHE-5).
+		resp, dispatchErr := dispatchShow(cmd.Context(), reg, "issue", args[0], *backendFlag, *freshFlag)
 		return reportIssueTargetedOutcome(cmd, resp, dispatchErr, humanizeIssueShow)
 	}
 	return cmd
@@ -358,7 +357,7 @@ func fanOutIssueList(ctx context.Context, reg *Registry, backends []string, quer
 			// A bounded call never serves the cache fallback (see
 			// fanOutPRList): cached entries are not window-filtered.
 			if errors.Is(err, scriptout.ErrUnavailable) && bounds.IsZero() {
-				if entries, ids, ok := cacheFallbackEntities(ctx, reg, "issue", b); ok {
+				if entries, ids, ok := cacheFallbackEntities(ctx, reg, "issue", b, query); ok {
 					for _, raw := range entries {
 						var issue schema.Issue
 						if decErr := scriptout.Decode(raw, &issue); decErr == nil {

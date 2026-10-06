@@ -461,8 +461,8 @@ func TestGather_SixInputs_CalledWithRightArgsAndEnv(t *testing.T) {
 		}
 	}
 
-	if got := byVerb["pr show"].Args; strings.Join(got, " ") != "pr show PR1" {
-		t.Fatalf("pr show args = %v, want [pr show PR1]", got)
+	if got := byVerb["pr show"].Args; strings.Join(got, " ") != "pr show PR1 --fresh" {
+		t.Fatalf("pr show args = %v, want [pr show PR1 --fresh] (a gather follows a detected change, so it bypasses the connector read-through cache)", got)
 	}
 	if got := byVerb["pr files"].Args; strings.Join(got, " ") != "pr files PR1" {
 		t.Fatalf("pr files args = %v, want [pr files PR1]", got)

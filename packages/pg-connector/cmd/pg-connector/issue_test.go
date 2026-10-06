@@ -736,7 +736,9 @@ func TestIssueShowCacheFallback_ServesStaleOnBackendUnavailable(t *testing.T) {
 		"show": `{"protocolVersion":1,"schemaVersion":1,"error":{"code":"unavailable","message":"backend down"}}`,
 	}, `{"protocolVersion":1,"schemaVersions":{"issue":1},"ops":["capabilities","show"]}`)
 
-	stdout2, _, code2 := executePr(t, []string{"issue", "show", "issue-1"})
+	// --fresh skips the read-through so the stale fallback is what is
+	// exercised (INV-CACHE-5).
+	stdout2, _, code2 := executePr(t, []string{"issue", "show", "issue-1", "--fresh"})
 	if code2 != 0 {
 		t.Fatalf("cache-fallback show exit code = %d, want 0 (a stale-but-served read); stdout=%s", code2, stdout2)
 	}

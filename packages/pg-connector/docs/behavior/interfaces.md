@@ -389,15 +389,18 @@ instead of failing outright, per the design of record's section 5.6:
 - **`show`** (`cache_dispatch.go`'s `dispatchShowWithCache`) mirrors `DispatchTargeted`'s own
   try-each policy over every registered backend (or the pinned one), but on that backend's own
   `unavailable` answer, MUST first check whether caching applies to `(type, backend)` and, on a
-  live within-max-age cache hit, serve that content instead: the response's `as_of` becomes the
+  live within-max-age `detail`-level cache hit (`INV-CACHE-2`), serve that content instead: the
+  response's `as_of` becomes the
   CACHED as-of time and `stale` becomes `true`, and the call exits `0` — a stale-but-served read,
   never the targeted op's ordinary `unavailable` exit code for that read. A cache miss, an
   opted-out type/backend, or an expired entry falls through to today's unmodified behavior (the
   real error). A live success instead writes the returned entity into that backend's own cache, so
   it stays current for the next unavailable window.
 - **`list`** (`fanOutPRList`/`fanOutIssueList`, `pr.go`/`issue.go`) applies the same per-backend
-  fallback, but since list has no single id, falls back to EVERY live, within-max-age cached entry
-  for that `(type, backend)`. That backend's own `sources[]` row is marked `degraded` — never
+  fallback, but since list has no single id, falls back to every live, within-max-age cached entry
+  for that `(type, backend)` whose id is a live member of the REQUESTED query's ledger index, and
+  to nothing when that index holds no live member (`INV-CACHE-3`). That backend's own `sources[]`
+  row is marked `degraded` — never
   `succeeded` — with a `reason` noting the fallback: the design's own "served from cache" language
   describes what content the caller receives, not a claim that the live call itself did not fail,
   so the overall exit code still follows the EXISTING, unmodified fan-out scheme (`0`/`2`/`3`)
@@ -437,6 +440,54 @@ instead of failing outright, per the design of record's section 5.6:
   restoration is landed, replacing the "deferred to phase 14's entity cache" language it carried
   since bead `pg2-2j5ac.28.7` deleted `pg-connector-ci-github-actions`'s own backend-local run-list
   cache under D3.
+
+### Read-through, provenance and the refresher — the cache as a policy, not only a fallback
+
+Bead `pg2-cw6b3.2` turns the entity cache from a failure fallback into a read policy for `pr` and
+`issue` (`INV-CACHE-2`..`INV-CACHE-8`). Two `state:` keys, in the same registry file and with the
+same duration syntax (`<N>d` or a Go duration) as `cache_max_age`, tune it:
+
+| `state:` key          | Default               | Meaning                                                                                      |
+| --------------------- | --------------------- | -------------------------------------------------------------------------------------------- |
+| `cache_read_ttl`      | `120s`                | Age within which `show` is served from a `detail` entry; `0` or `off` disables read-through. |
+| `cache_refresh_after` | unset (refresher off) | Turns the `changes` refresher on and sets the age past which a tracked entity is re-fetched. |
+
+- **`show [--fresh]`** (`pr` and `issue`). Within `cache_read_ttl` of a `detail` entry's `as_of`,
+  the call is answered from the cache with no backend call at all. Otherwise it takes a
+  single-flight lock for that entity, re-checks the cache, and only then calls the origin, so
+  concurrent readers of one entity collapse to one origin call. The result carries `served_from`
+  (`origin` or `cache`) and `age_seconds` beside the entity. `--fresh` skips the read-through and
+  always asks the origin; it keeps the `unavailable` stale fallback, which reports
+  `served_from: cache` with `stale: true`. A consumer that has just detected a change and must see
+  the current entity (for example a hydration after a detected delta) MUST pass `--fresh`.
+- **`list`** keeps asking the origin every call (it is the membership and change-detection read),
+  and writes each returned entity to the cache at `summary` level. A `summary` never replaces a
+  `detail` entry's content.
+- **`changes`** never uses `cache_read_ttl`. With `cache_refresh_after` unset it behaves exactly
+  as before, plus a post-flush cache write of each listed entity at `summary` level. With it set
+  (the refresher), each backend is refreshed as follows:
+
+  ```mermaid
+  flowchart TD
+      A["ids-only list: membership"] --> B{"truncated?"}
+      B -->|"yes"| C["no removals this pass"]
+      B -->|"no"| D["ledger ids missing from membership"]
+      D --> E["one confirming show per missing id"]
+      E -->|"entity returned"| F["removed row carries the confirmed content"]
+      E -->|"not_found"| G["removed row carries last cached content"]
+      E -->|"other failure"| H["withhold the removal, retry next call"]
+      A --> I["members new to the ledger or with a missing or aged detail entry"]
+      I --> J["show each; classify added or changed among them only"]
+      J --> K["post-flush: write each fetched entity to the cache at detail level"]
+      H --> L["pass is incomplete: last_error truncated, no refreshed_at"]
+      J -->|"any fetch failed"| L
+  ```
+
+  A member whose `detail` entry is younger than `cache_refresh_after` is not re-fetched, so a
+  change to it is reported once it ages; that bound is the refresher's change latency for a change
+  that membership does not show. The refresher fetches an entity with the backend's own `show`, one
+  call per entity, because no batched fetch-by-ids op exists yet: turning it on spends one `show`
+  per new or aged member per pass, which is why it is opt-in.
 
 ### `attention`/`search` — the two cross-cutting, fan-out-only capabilities
 

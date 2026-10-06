@@ -55,8 +55,9 @@ func TestDispatchShowWithCache_LiveSuccessThenServedStaleOnUnavailable(t *testin
 	if backend != "backend-dsc-live" {
 		t.Fatalf("backend = %q, want backend-dsc-live", backend)
 	}
-	// Mirror what newPrShowCmd/newIssueShowCmd do on a live success.
-	putLiveEntity(ctx, reg, "pr", backend, resp.Result)
+	// Mirror what dispatchShow does on a live success: a show answer is
+	// written at detail level (INV-CACHE-2).
+	putLiveEntityLevel(ctx, reg, "pr", backend, resp.Result, CacheLevelDetail)
 
 	// Re-point the SAME registered backend name at a script now answering
 	// unavailable for "show" (a later writeOpAwareFakeBackend prepends a
@@ -113,7 +114,7 @@ func TestDispatchShowWithCache_OptedOutTypeFallsThroughToRawUnavailable(t *testi
 	// Pre-seed a cache entry that WOULD satisfy the fallback if caching
 	// were enabled for pr.
 	seedCache(t, CacheKey{Type: "pr", Backend: "backend-dsc-optout"}, &Cache{Entries: map[string]CacheEntry{
-		"pr-1": {Content: json.RawMessage(`{"id":"pr-1"}`), AsOf: time.Now(), LastAccess: time.Now()},
+		"pr-1": {Content: json.RawMessage(`{"id":"pr-1"}`), AsOf: time.Now(), LastAccess: time.Now(), Level: CacheLevelDetail},
 	}})
 
 	resp, _, fromCache, err := dispatchShowWithCache(context.Background(), reg, "pr", "pr-1", "")
@@ -178,7 +179,7 @@ func TestDispatchShowWithCache_ExpiredEntryFallsThroughToRawUnavailable(t *testi
 
 	// Default max-age is one hour; seed an entry well past it.
 	seedCache(t, CacheKey{Type: "pr", Backend: "backend-dsc-expired"}, &Cache{Entries: map[string]CacheEntry{
-		"pr-1": {Content: json.RawMessage(`{"id":"pr-1"}`), AsOf: time.Now().Add(-2 * time.Hour), LastAccess: time.Now()},
+		"pr-1": {Content: json.RawMessage(`{"id":"pr-1"}`), AsOf: time.Now().Add(-2 * time.Hour), LastAccess: time.Now(), Level: CacheLevelDetail},
 	}})
 
 	resp, _, fromCache, err := dispatchShowWithCache(context.Background(), reg, "pr", "pr-1", "")

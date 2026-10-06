@@ -88,7 +88,9 @@ func (a *issueGatherAdapter) GatherEntity(ctx context.Context, entityID string, 
 		return GatherResult{}, fmt.Errorf("gather: entity id is required")
 	}
 	env := a.g.issueBeadsDirEnv()
-	show, notFound, err := a.g.targetedCall(ctx, []string{"issue", "show", entityID}, env)
+	// --fresh: hydration follows a detected change, so it must not be served
+	// from a connector cache entry still within its read-through TTL.
+	show, notFound, err := a.g.targetedCall(ctx, []string{"issue", "show", entityID, "--fresh"}, env)
 	if notFound {
 		return GatherResult{RemovedState: "not_found"}, nil
 	}

@@ -150,7 +150,8 @@ func tryCacheFallback(ctx context.Context, reg *Registry, entityType, backend, i
 		return nil, false
 	}
 	now := time.Now()
-	content, asOf, ok := c.Get(id, resolveCacheMaxAge(reg), now)
+	// Detail only (INV-CACHE-2): a list summary must never answer a show.
+	content, asOf, ok := c.GetDetail(id, resolveCacheMaxAge(reg), now)
 	if !ok {
 		return nil, false
 	}
@@ -173,20 +174,27 @@ func tryCacheFallback(ctx context.Context, reg *Registry, entityType, backend, i
 // cacheFallbackEntities is tryCacheFallback's list-shaped counterpart
 // (fanOutPRList/fanOutIssueList's own list-fan-out helper): "list has no
 // single id" [design: docket design field, "Produces"], so on a backend
-// answering scriptout.ErrUnavailable, this falls back to EVERY live
-// (non-tombstoned), within-max-age cache entry currently cached for
-// (entityType, backend), each re-marshaled via markStale, in
-// deterministic (sorted-by-id) order. Returns (nil, nil, false) on any
-// opt-out, cache-load error, or zero live matching entries — the caller
-// falls through to reporting the real error unchanged in every one of
-// those cases, exactly like tryCacheFallback's own (nil, false)
-// convention.
-func cacheFallbackEntities(ctx context.Context, reg *Registry, entityType, backend string) ([]json.RawMessage, []string, bool) {
+// answering scriptout.ErrUnavailable, this falls back to every live
+// (non-tombstoned), within-max-age cache entry for (entityType, backend)
+// whose id is a live member of query's ledger index (INV-CACHE-3), each
+// re-marshaled via markStale, in deterministic (sorted-by-id) order. A query
+// whose ledger holds no live member serves nothing: the cache has no
+// per-query membership of its own, so serving every cached entity of the
+// backend would answer a different question than the one asked. Returns
+// (nil, nil, false) on any opt-out, cache-load error, or zero live matching
+// entries — the caller falls through to reporting the real error unchanged
+// in every one of those cases, exactly like tryCacheFallback's own
+// (nil, false) convention.
+func cacheFallbackEntities(ctx context.Context, reg *Registry, entityType, backend, query string) ([]json.RawMessage, []string, bool) {
 	enabled, err := cacheEnabled(ctx, reg, entityType, backend)
 	if err != nil || !enabled {
 		return nil, nil, false
 	}
 	if err := ensureCacheDirExists(); err != nil {
+		return nil, nil, false
+	}
+	members, ok := queryMembers(entityType, backend, query)
+	if !ok {
 		return nil, nil, false
 	}
 	key := CacheKey{Type: entityType, Backend: backend}
@@ -195,9 +203,11 @@ func cacheFallbackEntities(ctx context.Context, reg *Registry, entityType, backe
 		return nil, nil, false
 	}
 
-	allIDs := make([]string, 0, len(c.Entries))
-	for id := range c.Entries {
-		allIDs = append(allIDs, id)
+	allIDs := make([]string, 0, len(members))
+	for id := range members {
+		if _, cached := c.Entries[id]; cached {
+			allIDs = append(allIDs, id)
+		}
 	}
 	// Deterministic order, independent of Go's randomized map iteration
 	// order (mirrors ledger.go's Refresh own convention for its returned
@@ -266,12 +276,19 @@ type liveEntityMeta struct {
 }
 
 // putLiveEntity writes one live-fetched entity's own raw content into
-// (entityType, backend)'s cache, via putEntityCache below. A malformed
+// (entityType, backend)'s cache, via putEntityCacheLevel below. A malformed
 // content (missing id/as_of, or an unparsable as_of) is silently
 // skipped — this is a best-effort cache write on the caller's own success
 // path, never something that may turn a successful live read into a
 // reported failure [design: docket design field, "Binding decisions"].
 func putLiveEntity(ctx context.Context, reg *Registry, entityType, backend string, content json.RawMessage) {
+	putLiveEntityLevel(ctx, reg, entityType, backend, content, CacheLevelSummary)
+}
+
+// putLiveEntityLevel is putLiveEntity with an explicit level: a `show` answer
+// is written at CacheLevelDetail, a `list` entity at CacheLevelSummary
+// (INV-CACHE-2).
+func putLiveEntityLevel(ctx context.Context, reg *Registry, entityType, backend string, content json.RawMessage, level CacheLevel) {
 	if backend == "" {
 		return
 	}
@@ -283,10 +300,10 @@ func putLiveEntity(ctx context.Context, reg *Registry, entityType, backend strin
 	if err != nil {
 		return
 	}
-	putEntityCache(ctx, reg, entityType, backend, meta.ID, content, asOf)
+	putEntityCacheLevel(ctx, reg, entityType, backend, meta.ID, content, asOf, level)
 }
 
-// putEntityCache is show/list's own live-success cache write: Put the
+// putEntityCacheLevel is show/list's own live-success cache write: Put the
 // entity, then Evict(resolveCacheSizeCap(reg), cacheTombstoneRetention,
 // noConsumersTracked, now), then saveCache — see cacheTombstoneRetention's
 // own doc comment for why this path has no consumersPassed of its own.
@@ -302,7 +319,7 @@ func putLiveEntity(ctx context.Context, reg *Registry, entityType, backend strin
 // docket design field, "Binding decisions", "Put/Evict/saveCache on the
 // live-success path MUST happen only after the response has already been
 // computed for the caller"].
-func putEntityCache(ctx context.Context, reg *Registry, entityType, backend, id string, content json.RawMessage, asOf time.Time) {
+func putEntityCacheLevel(ctx context.Context, reg *Registry, entityType, backend, id string, content json.RawMessage, asOf time.Time, level CacheLevel) {
 	enabled, err := cacheEnabled(ctx, reg, entityType, backend)
 	if err != nil || !enabled {
 		return
@@ -316,7 +333,7 @@ func putEntityCache(ctx context.Context, reg *Registry, entityType, backend, id 
 		return
 	}
 	now := time.Now()
-	c.Put(id, content, asOf, now)
+	c.PutLevel(id, content, asOf, now, level)
 	c.Evict(resolveCacheSizeCap(reg), cacheTombstoneRetention, noConsumersTracked, now)
 	_ = saveCache(key, c)
 }
