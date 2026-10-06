@@ -123,6 +123,10 @@ sources:
     labels: [l2]
 store:
   path: /custom/s.db
+kinds:
+  narrative:
+    model: some-model
+    systemPromptFile: /tmp/p.md
 `)
 	out, err := runCLI(t, "--config", cfg, "--output", "json", "config", "show")
 	if err != nil {
@@ -141,6 +145,12 @@ store:
 		Store struct {
 			Path string `json:"path"`
 		} `json:"store"`
+		Kinds struct {
+			Narrative struct {
+				Model            string `json:"model"`
+				SystemPromptFile string `json:"systemPromptFile"`
+			} `json:"narrative"`
+		} `json:"kinds"`
 	}
 	dec := json.NewDecoder(strings.NewReader(out))
 	dec.DisallowUnknownFields()
@@ -161,6 +171,28 @@ store:
 	}
 	if got.Store.Path != "/custom/s.db" {
 		t.Errorf("store.path = %q", got.Store.Path)
+	}
+	if n := got.Kinds.Narrative; n.Model != "some-model" || n.SystemPromptFile != "/tmp/p.md" {
+		t.Errorf("kinds.narrative = %+v", n)
+	}
+}
+
+func TestConfigShowNarrativeUnsetIsEmptyStrings(t *testing.T) {
+	isolate(t)
+	out, err := runCLI(t, "--config", writeCfg(t, ""), "--output", "json", "config", "show")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatal(err)
+	}
+	n := got["kinds"].(map[string]any)["narrative"].(map[string]any)
+	if m, ok := n["model"]; !ok || m != "" {
+		t.Errorf("kinds.narrative.model = %v (present=%v), want empty string", m, ok)
+	}
+	if f, ok := n["systemPromptFile"]; !ok || f != "" {
+		t.Errorf("kinds.narrative.systemPromptFile = %v (present=%v), want empty string", f, ok)
 	}
 }
 
@@ -204,8 +236,21 @@ func TestConfigShowHuman(t *testing.T) {
 			t.Errorf("human output lacks %q:\n%s", want, out)
 		}
 	}
-	if strings.Contains(strings.ToLower(out), "narrative") {
-		t.Errorf("no narrative option is part of this phase:\n%s", out)
+	for _, want := range []string{"kinds.narrative.model: (unset)", "kinds.narrative.systemPromptFile: (unset)"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("human output lacks %q:\n%s", want, out)
+		}
+	}
+
+	cfg = writeCfg(t, "kinds:\n  narrative:\n    model: some-model\n    systemPromptFile: /tmp/p.md\n")
+	out, err = runCLI(t, "--config", cfg, "config", "show")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"kinds.narrative.model: some-model", "kinds.narrative.systemPromptFile: /tmp/p.md"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("human output lacks %q:\n%s", want, out)
+		}
 	}
 }
 

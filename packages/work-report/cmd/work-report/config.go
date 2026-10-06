@@ -98,6 +98,12 @@ type showJSON struct {
 	Store struct {
 		Path string `json:"path"`
 	} `json:"store"`
+	Kinds struct {
+		Narrative struct {
+			Model            string `json:"model"`
+			SystemPromptFile string `json:"systemPromptFile"`
+		} `json:"narrative"`
+	} `json:"kinds"`
 }
 
 // effectiveConfig renders cfg with the store path resolved against the --store
@@ -116,6 +122,8 @@ func effectiveConfig(cfg config.Config, storeFlag string) showJSON {
 	v.Schedule.Interval = cfg.Schedule.Interval
 	v.Schedule.Window = cfg.Schedule.Window
 	v.Store.Path = config.StorePath(cfg, storeFlag)
+	v.Kinds.Narrative.Model = cfg.Kinds.Narrative.Model
+	v.Kinds.Narrative.SystemPromptFile = cfg.Kinds.Narrative.SystemPromptFile
 	return v
 }
 
@@ -143,6 +151,14 @@ func newConfigShowCmd() *cobra.Command {
 	}
 }
 
+// orUnset renders an empty option value as "(unset)".
+func orUnset(s string) string {
+	if s == "" {
+		return "(unset)"
+	}
+	return s
+}
+
 func writeShowHuman(w io.Writer, v showJSON) error {
 	tz := v.Timezone
 	if tz == "" {
@@ -153,6 +169,8 @@ func writeShowHuman(w io.Writer, v showJSON) error {
 	fmt.Fprintf(&b, "schedule.interval: %s\n", v.Schedule.Interval)
 	fmt.Fprintf(&b, "schedule.window: %s\n", v.Schedule.Window)
 	fmt.Fprintf(&b, "store.path: %s\n", v.Store.Path)
+	fmt.Fprintf(&b, "kinds.narrative.model: %s\n", orUnset(v.Kinds.Narrative.Model))
+	fmt.Fprintf(&b, "kinds.narrative.systemPromptFile: %s\n", orUnset(v.Kinds.Narrative.SystemPromptFile))
 	if len(v.Sources) == 0 {
 		b.WriteString("sources: (none configured; every backend is enabled with no extra labels)\n")
 	} else {

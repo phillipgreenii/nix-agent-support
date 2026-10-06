@@ -134,8 +134,9 @@ func TestLoadUnknownKeyIsError(t *testing.T) {
 		{"top level", "bogus: 1\n", "bogus"},
 		{"nested", "schedule:\n  cadence: 1h\n", "cadence"},
 		{"source block", "sources:\n  b:\n    enabled: true\n", "enabled"},
-		// The narrative options are not part of this phase.
-		{"narrative kind", "kinds:\n  narrative:\n    model: m\n", "kinds"},
+		{"narrative unknown option", "kinds:\n  narrative:\n    bogus: 1\n", "bogus"},
+		{"unknown kind name", "kinds:\n  other:\n    model: m\n", "other"},
+		{"kinds unknown sibling", "kinds:\n  narrative:\n    model: m\n  baseline:\n    model: m\n", "baseline"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := Load(writeConfig(t, tc.body))
@@ -146,6 +147,28 @@ func TestLoadUnknownKeyIsError(t *testing.T) {
 				t.Errorf("error %q does not name key %q", err, tc.key)
 			}
 		})
+	}
+}
+
+func TestLoadNarrativeKindOptions(t *testing.T) {
+	c, err := Load(writeConfig(t, "kinds:\n  narrative:\n    model: some-model\n    systemPromptFile: /nonexistent/p.md\n"))
+	if err != nil {
+		t.Fatalf("a narrative config must load (the prompt file is not checked): %v", err)
+	}
+	if got := c.Kinds.Narrative; got.Model != "some-model" || got.SystemPromptFile != "/nonexistent/p.md" {
+		t.Errorf("kinds.narrative = %+v", got)
+	}
+}
+
+func TestLoadNarrativeOptionsAreOptional(t *testing.T) {
+	for _, body := range []string{"", "kinds:\n  narrative:\n    model: only-model\n", "kinds:\n  narrative:\n    systemPromptFile: /p.md\n"} {
+		c, err := Load(writeConfig(t, body))
+		if err != nil {
+			t.Fatalf("%q: %v", body, err)
+		}
+		if body == "" && (c.Kinds.Narrative != NarrativeCfg{}) {
+			t.Errorf("absent options must be empty, got %+v", c.Kinds.Narrative)
+		}
 	}
 }
 

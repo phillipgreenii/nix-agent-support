@@ -5,9 +5,12 @@
 // global --config flag). Its keys are exactly: timezone (string), sources (a
 // map from backend name to an object with enable (bool) and labels (list of
 // strings)), schedule (interval and window, strings) and store (path,
-// string). The decode is strict: an unknown key is an error naming the key.
-// The narrative-kind options belong to a later phase and are not accepted
-// here.
+// string), and kinds.narrative (the optional model and systemPromptFile
+// strings the narrative report kind reads). The decode is strict: an unknown
+// key, including any other key under kinds or kinds.narrative and any other
+// kind name, is an error naming the key. Neither narrative option is
+// validated here: a missing systemPromptFile surfaces at generation time and
+// an unset model is left unset.
 //
 // This package is the only place the other work-report packages read
 // configuration and the store path from; defaulting lives here and nowhere
@@ -51,6 +54,11 @@ type SourceCfg struct {
 	Labels []string
 }
 
+// NarrativeCfg holds the narrative report kind's optional settings. An empty
+// string means unset; the loader neither checks that SystemPromptFile exists
+// nor supplies a default Model.
+type NarrativeCfg struct{ Model, SystemPromptFile string }
+
 // Config is work-report's parsed configuration.
 type Config struct {
 	// Timezone is an IANA zone name; empty means the system zone.
@@ -60,6 +68,8 @@ type Config struct {
 	Sources  map[string]SourceCfg
 	Schedule struct{ Interval, Window string }
 	Store    struct{ Path string }
+	// Kinds holds per-report-kind settings.
+	Kinds struct{ Narrative NarrativeCfg }
 }
 
 // rawConfig is the on-disk YAML shape. It is separate from Config so the
@@ -75,6 +85,12 @@ type rawConfig struct {
 	Store struct {
 		Path string `yaml:"path"`
 	} `yaml:"store"`
+	Kinds struct {
+		Narrative struct {
+			Model            string `yaml:"model"`
+			SystemPromptFile string `yaml:"systemPromptFile"`
+		} `yaml:"narrative"`
+	} `yaml:"kinds"`
 }
 
 type rawSource struct {
@@ -130,6 +146,10 @@ func Load(path string) (Config, error) {
 	c.Schedule.Interval = raw.Schedule.Interval
 	c.Schedule.Window = raw.Schedule.Window
 	c.Store.Path = raw.Store.Path
+	c.Kinds.Narrative = NarrativeCfg{
+		Model:            raw.Kinds.Narrative.Model,
+		SystemPromptFile: raw.Kinds.Narrative.SystemPromptFile,
+	}
 	if len(raw.Sources) > 0 {
 		c.Sources = make(map[string]SourceCfg, len(raw.Sources))
 		for name, s := range raw.Sources {
