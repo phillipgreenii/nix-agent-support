@@ -46,12 +46,18 @@ See the [glossary](glossary.md), [actors](actors.md), [interfaces](interfaces.md
   one search query answered across every registered source grouped by where each result came
   from — both aggregated the same way regardless of how many sources are registered or which
   entity types they cover, without learning any source's own query language. _(→
-  `USECASE-CROSSCUT-FANOUT-CALL`; `INV-REG-3`, `INV-ATTN-1`, `INV-SEARCH-1`.)_
+  `USECASE-CROSSCUT-FANOUT-CALL`; `INV-REG-3`, `INV-ATTN-1`, `INV-ATTN-GROUP-1`, `INV-ATTN-CONTENT-1`,
+  `INV-SEARCH-1`.)_
 
 - **`STORY-OP-9`** <!-- uuid: 9aa838f2-a978-4842-a33d-3ec21dedc9e6 --> — read what is currently firing (and, for triage, what
   fired within a window) from every registered alert backend through the same umbrella, and tell
   "nothing is firing" apart from "I could not find out" without inspecting an empty list. _(→
   `USECASE-ALERT-READ`; `INV-ALERT-1`, `INV-ALERT-5`, `INV-ALERT-7`, `INV-OUT-1`.)_
+- **`STORY-OP-10`** <!-- uuid: bb3b0ee0-1e88-4311-8a0d-b7c8a8d34bec --> — learn that a connector is
+  unhealthy from that connector's own logs, metrics and alert rules, and learn what deserves my
+  attention from the attention feed, so the feed never fills with tool-health items or repeats a
+  fact an alert already raised. _(→ `USECASE-BACKEND-OBSERVABILITY`; `INV-ATTN-CONTENT-1`,
+  `INV-CONOBS-1`, `INV-CONOBS-2`, `INV-CONOBS-3`, `INV-CONOBS-4`.)_
 
 ## Journey
 
@@ -317,7 +323,8 @@ Extensions:
 **Intent:** call `attention list` or `search <query>` — the two capabilities with no targeted
 form at all — and get back every registered source's own contribution, aggregated per that
 capability's own rule, plus the ordinary fan-out exit code.
-_Requires:_ `INV-REG-3`, `INV-EXIT-1`, `INV-OUT-1`, `INV-ATTN-1`, `INV-ATTN-URL-1`, `INV-SEARCH-1`.
+_Requires:_ `INV-REG-3`, `INV-EXIT-1`, `INV-OUT-1`, `INV-ATTN-1`, `INV-ATTN-URL-1`, `INV-ATTN-GROUP-1`,
+`INV-ATTN-CONTENT-1`, `INV-CONOBS-4`, `INV-SEARCH-1`.
 _Includes:_ `USECASE-CHOOSE-OUTPUT`.
 
 **Flow.** The umbrella resolves the backend set from the capability's own top-level key
@@ -325,7 +332,8 @@ _Includes:_ `USECASE-CHOOSE-OUTPUT`.
 one `INTF-WIRE` request per registered source, building one `sources[]` row each exactly as
 `USECASE-FANOUT-CALL` does. It then aggregates the per-source raw items by that capability's own
 rule — `attention list` dedups by `{type, id}` and ranks by severity (`INV-ATTN-1`), passing each
-item's optional own-page `url` through unread and never defaulting it (`INV-ATTN-URL-1`); `search`
+item's optional own-page `url` and optional work-context `group` through unread and never
+defaulting either (`INV-ATTN-URL-1`, `INV-ATTN-GROUP-1`); `search`
 keeps every source's results in its own group, ordered by registration order, with no
 cross-source merge at all (`INV-SEARCH-1`) — and computes the SAME fan-out exit code
 `USECASE-FANOUT-CALL` does from the `sources[]` rows. Neither verb accepts `--backend` or
@@ -362,7 +370,7 @@ triage tool).
 plus an "incomplete" marker, or "unknown"; (2) a triage tool reads `alert list` and
 `alert history` and applies its own grouping policy; (3) either can tell none from unknown.
 _Requires:_ `INV-ALERT-1`, `INV-ALERT-2`, `INV-ALERT-3`, `INV-ALERT-5`, `INV-ALERT-7`,
-`INV-EXIT-1`, `INV-OUT-1`, `INV-ATTN-1`.
+`INV-EXIT-1`, `INV-OUT-1`, `INV-ATTN-1`, `INV-CONOBS-4`.
 _Includes:_ `USECASE-FANOUT-CALL`, `USECASE-CROSSCUT-FANOUT-CALL`.
 
 **Flow.** `alert list [--query NAME]` and `alert history --since T --until T [--query NAME]` fan out
@@ -379,6 +387,33 @@ flowchart TD
     row -->|"reachable, nothing firing"| none["succeeded, count 0: render none"]
     row -->|"reachable, firing"| some["succeeded: render items"]
     row -->|"unavailable or malformed"| unk["degraded: render unknown or incomplete"]
+```
+
+### `USECASE-BACKEND-OBSERVABILITY` — keep a backend's own health out of attention and in its own telemetry <!-- uuid: a4bd8e4a-e378-496e-8d6b-42bfd7f119b8 -->
+
+**Actor:** `ACTOR-OP`, acting as backend-implementer (see the [actors](actors.md) page).
+**Level:** subfunction.
+**Preconditions:** a backend, new or existing, for an external service.
+**Intent:** the operator learns that a connector is unhealthy (unauthenticated, unavailable, out
+of quota) from that connector's own logs, metrics and alert rules, and learns what deserves their
+attention (a meeting soon, an unread chat, a pull request awaiting their review) from
+`attention list`, without the two ever being mixed.
+_Requires:_ `INV-ATTN-CONTENT-1`, `INV-CONOBS-1`, `INV-CONOBS-2`, `INV-CONOBS-3`, `INV-CONOBS-4`.
+
+**Flow.** The backend writes its own rotating log/event stream, emits its own metrics where
+useful and declares its own alert rules; for an external service it tracks availability,
+authentication health and, where exposed, quota (`INV-CONOBS-1`, `INV-CONOBS-2`). Registering
+those with the observability stack is done per connector in the nix configuration, never in
+pg-connector's own configuration (`INV-CONOBS-3`). The backend's `list_attention` reports only
+interesting things in the data (`INV-ATTN-CONTENT-1`), and omits any fact an alert already raises
+(`INV-CONOBS-4`).
+
+```mermaid
+flowchart TD
+    health["connector health: auth, outage, quota"] --> own["backend's own log, metrics, alert rules"]
+    own --> nix["registered per connector in nix, not in pg-connector config"]
+    data["interesting data: meeting soon, unread chat, review requested"] --> attn["list_attention item"]
+    alertfact["a fact an alert already raises"] -. "MUST NOT also be an item" .-> attn
 ```
 
 ### `USECASE-CHOOSE-OUTPUT` — choose the CLI's presentation mode <!-- uuid: 632b7e23-25c8-43e2-9572-65f3547023bd -->

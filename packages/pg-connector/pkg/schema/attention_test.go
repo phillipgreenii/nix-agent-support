@@ -53,7 +53,7 @@ func TestAttentionItem_JSONShape_URL(t *testing.T) {
 }
 
 // TestAttentionItem_UnmarshalV1Item proves the additive bump: a version-1
-// item (no url key) still decodes, with URL left empty.
+// item (no url or group key) still decodes, with URL empty and Group nil.
 func TestAttentionItem_UnmarshalV1Item(t *testing.T) {
 	var out AttentionItem
 	if err := json.Unmarshal([]byte(`{"type":"pr","id":"pr-1","summary":"needs review","severity":"low"}`), &out); err != nil {
@@ -64,12 +64,90 @@ func TestAttentionItem_UnmarshalV1Item(t *testing.T) {
 	}
 }
 
-func TestAttentionSchemaVersion_BumpedForURL(t *testing.T) {
-	if AttentionSchemaVersion != 2 {
-		t.Fatalf("AttentionSchemaVersion = %d, want 2 (the additive url field)", AttentionSchemaVersion)
+// TestAttentionSchemaVersion_BumpedForGroup pins the one-bump-per-additive-
+// field convention: 2 added url, 3 adds group, and the version is
+// registered in CurrentSchemaVersions so skew is detectable (INV-VER-1).
+func TestAttentionSchemaVersion_BumpedForGroup(t *testing.T) {
+	if AttentionSchemaVersion != 3 {
+		t.Fatalf("AttentionSchemaVersion = %d, want 3 (the additive group field)", AttentionSchemaVersion)
 	}
-	if CurrentSchemaVersions["attention"] != AttentionSchemaVersion {
-		t.Fatalf("CurrentSchemaVersions[attention] = %d, want %d", CurrentSchemaVersions["attention"], AttentionSchemaVersion)
+	got, ok := CurrentSchemaVersions["attention"]
+	if !ok {
+		t.Fatal(`CurrentSchemaVersions has no "attention" entry`)
+	}
+	if got != AttentionSchemaVersion {
+		t.Fatalf("CurrentSchemaVersions[attention] = %d, want %d", got, AttentionSchemaVersion)
+	}
+}
+
+// TestAttentionItem_JSONShape_Group pins INV-ATTN-GROUP-1's wire half: group
+// is omitempty (an item with no group omits the key entirely, never
+// "group":null or "group":{}) and a set group is emitted as {key,label},
+// after url.
+func TestAttentionItem_JSONShape_Group(t *testing.T) {
+	raw, err := json.Marshal(AttentionItem{
+		Type: "pr", ID: "o/r#1", Summary: "needs review", Severity: SeverityHigh,
+		URL:   "https://example.invalid/o/r/pull/1",
+		Group: &AttentionGroup{Key: "issue:ABC-1", Label: "ABC-1: fix the thing"},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	want := `{"type":"pr","id":"o/r#1","summary":"needs review","severity":"high","url":"https://example.invalid/o/r/pull/1","group":{"key":"issue:ABC-1","label":"ABC-1: fix the thing"}}`
+	if string(raw) != want {
+		t.Fatalf("got %s, want %s", raw, want)
+	}
+
+	raw, err = json.Marshal(AttentionItem{Type: "pr", ID: "o/r#1", Summary: "needs review"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(raw), "group") {
+		t.Fatalf("nil Group must be omitted entirely, got %s", raw)
+	}
+}
+
+// TestAttentionItem_UnmarshalV2Item proves the additive bump from version 2:
+// a version-2 item (url, no group key) still decodes, with Group left nil.
+func TestAttentionItem_UnmarshalV2Item(t *testing.T) {
+	var out AttentionItem
+	if err := json.Unmarshal([]byte(`{"type":"pr","id":"pr-1","summary":"needs review","severity":"low","url":"https://example.invalid/1"}`), &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if out.Group != nil {
+		t.Fatalf("Group = %+v, want nil for a v2 item", out.Group)
+	}
+	if out.URL == "" {
+		t.Fatal("URL lost decoding a v2 item")
+	}
+}
+
+// TestAttentionItem_V2ConsumerIgnoresGroup proves the other direction of
+// additivity: a version-2 consumer, whose item shape has no group field,
+// decodes a version-3 item without error and without being disturbed by the
+// unknown key.
+func TestAttentionItem_V2ConsumerIgnoresGroup(t *testing.T) {
+	type attentionItemV2 struct {
+		Type     string `json:"type"`
+		ID       string `json:"id"`
+		Summary  string `json:"summary"`
+		Severity string `json:"severity,omitempty"`
+		URL      string `json:"url,omitempty"`
+	}
+	raw, err := json.Marshal(AttentionItem{
+		Type: "pr", ID: "o/r#1", Summary: "needs review", Severity: SeverityHigh,
+		URL:   "https://example.invalid/o/r/pull/1",
+		Group: &AttentionGroup{Key: "issue:ABC-1", Label: "ABC-1"},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var v2 attentionItemV2
+	if err := json.Unmarshal(raw, &v2); err != nil {
+		t.Fatalf("v2 consumer failed on a v3 item: %v", err)
+	}
+	if v2.Type != "pr" || v2.ID != "o/r#1" || v2.Severity != "high" || v2.URL != "https://example.invalid/o/r/pull/1" {
+		t.Fatalf("v2 consumer misread a v3 item: %+v", v2)
 	}
 }
 

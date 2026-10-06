@@ -225,6 +225,72 @@ func TestFanOutAttentionList_AttachesBackendConfig(t *testing.T) {
 	}
 }
 
+// TestMergeAttentionItems_GroupPassesThroughUnread pins INV-ATTN-GROUP-1's
+// umbrella half: the merge layer never defaults or synthesizes group. An item
+// keeps its source's group (or none), and a dedup group carries the winning
+// contributor's own group — the one the most-severe source reported, never a
+// loser's and never a combination.
+func TestMergeAttentionItems_GroupPassesThroughUnread(t *testing.T) {
+	perSource := map[string][]schema.AttentionItem{
+		"backend-a": {
+			{Type: "alert", ID: "x", Summary: "no group", Severity: schema.SeverityMedium},
+			{Type: "pr", ID: "o/r#1", Summary: "from a", Severity: schema.SeverityLow, Group: &schema.AttentionGroup{Key: "issue:LOSER-1", Label: "loser"}},
+			{Type: "pr", ID: "o/r#2", Summary: "group only on loser", Severity: schema.SeverityHigh},
+		},
+		"backend-b": {
+			{Type: "pr", ID: "o/r#1", Summary: "from b", Severity: schema.SeverityHigh, Group: &schema.AttentionGroup{Key: "issue:WIN-1", Label: "winner"}},
+			{Type: "pr", ID: "o/r#2", Summary: "lower severity, has group", Severity: schema.SeverityLow, Group: &schema.AttentionGroup{Key: "issue:ONLY-LOSER", Label: "only loser has one"}},
+		},
+	}
+	got := mergeAttentionItems(perSource, []string{"backend-a", "backend-b"})
+	if len(got) != 3 {
+		t.Fatalf("len(got) = %d, want 3: %+v", len(got), got)
+	}
+	byID := map[string]MergedAttentionItem{}
+	for _, it := range got {
+		byID[it.ID] = it
+	}
+	if byID["x"].Group != nil {
+		t.Fatalf("item with no source group gained %+v; the umbrella MUST NOT default group", byID["x"].Group)
+	}
+	if g := byID["o/r#1"].Group; g == nil || g.Key != "issue:WIN-1" || g.Label != "winner" {
+		t.Fatalf("deduped group = %+v, want the winning (most severe) contributor's own group", g)
+	}
+	if g := byID["o/r#2"].Group; g != nil {
+		t.Fatalf("deduped group = %+v, want nil: the winner reported none and a loser's group MUST NOT be borrowed", g)
+	}
+	raw, err := json.Marshal(byID["x"])
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(raw), `"group"`) {
+		t.Fatalf("item with no group must omit the key, got %s", raw)
+	}
+	raw, err = json.Marshal(byID["o/r#1"])
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(raw), `"group":{"key":"issue:WIN-1","label":"winner"}`) {
+		t.Fatalf("merged item dropped its group on the wire: %s", raw)
+	}
+}
+
+// TestHumanizeAttentionList_IgnoresGroup: humanizeAttentionList is unaffected
+// by the version-3 group (the human line is unchanged and renders no group).
+func TestHumanizeAttentionList_IgnoresGroup(t *testing.T) {
+	items := []MergedAttentionItem{{
+		AttentionItem: schema.AttentionItem{Type: "pr", ID: "o/r#1", Summary: "needs review", Severity: schema.SeverityHigh, Group: &schema.AttentionGroup{Key: "issue:ABC-1", Label: "ABC-1"}},
+		Via:           []string{"backend-a"},
+	}}
+	got := humanizeAttentionList(AttentionOutcome{Items: items})
+	if !strings.Contains(got, "[high] pr/o/r#1: needs review (via backend-a)") {
+		t.Fatalf("humanize output changed: %s", got)
+	}
+	if strings.Contains(got, "ABC-1") || strings.Contains(got, "group") {
+		t.Fatalf("humanize output MUST NOT render group (it is machine-readable only): %s", got)
+	}
+}
+
 // TestMergeAttentionItems_URLPassesThroughUnread pins INV-ATTN-URL-1's
 // umbrella half: the merge layer never defaults or synthesizes url. An item
 // keeps its source's url (or none), and a dedup group carries the winning
@@ -293,6 +359,25 @@ func TestRun_AttentionList_PassesURLThrough(t *testing.T) {
 	}
 	if strings.Count(stdout, `"url"`) != 1 {
 		t.Fatalf("exactly one item has a url, stdout=%s", stdout)
+	}
+}
+
+// TestRun_AttentionList_PassesGroupThrough drives the whole verb (fan-out,
+// merge, JSON output): a version-3 backend's group survives unread on the item
+// that has one, and an item with none emits no group key (INV-ATTN-GROUP-1).
+func TestRun_AttentionList_PassesGroupThrough(t *testing.T) {
+	writeFakeBackend(t, "backend-a", `{"protocolVersion":1,"schemaVersion":3,"result":[{"type":"pr","id":"1","summary":"a","severity":"high","group":{"key":"issue:ABC-1","label":"ABC-1: fix"}},{"type":"alert","id":"2","summary":"b","severity":"low"}]}`)
+	writeAttentionConfigFor(t, "backend-a")
+
+	stdout, _, code := executePr(t, []string{"attention", "list"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0, stdout=%s", code, stdout)
+	}
+	if !strings.Contains(stdout, `"group":{"key":"issue:ABC-1","label":"ABC-1: fix"}`) {
+		t.Fatalf("stdout dropped the item's group: %s", stdout)
+	}
+	if strings.Count(stdout, `"group"`) != 1 {
+		t.Fatalf("exactly one item has a group, stdout=%s", stdout)
 	}
 }
 

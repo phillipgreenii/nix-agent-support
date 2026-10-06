@@ -299,7 +299,21 @@ status`/`config validate`.
   caller, including `attention list`'s merge layer, which passes it through unread; a dedup
   group's `url` is the winning contributor's own (the same winner `INV-ATTN-1` selects for
   `summary`/`severity`). The `via`/`truncated`/`total_before_cap` aggregation fields remain the
-  only fields the merge layer adds; `url` is a per-source descriptive field and not one of them.
+  only fields the merge layer adds; `url` (like `group`, `INV-ATTN-GROUP-1`) is a per-source descriptive field and not one of them.
+- **`INV-ATTN-GROUP-1`** <!-- uuid: 823c2aff-c8fc-45e6-b41a-a95c4423ed17 --> — An attention item's optional `group` (attention
+  schema version 3) is the item's work-context group, an object `{key, label}`: `key` identifies
+  the group and, when the group is anchored on an entity, is itself a `<type>:<id>` ref
+  (`issue:ABC-1`, `pr:<owner>/<repo>#<n>`); `label` is the group's display name. A source with no
+  grouping MUST omit `group` entirely (never `null`, never an empty object). `group` is
+  descriptive only: it MUST NOT be defaulted or synthesized by any caller, including `attention
+list`'s merge layer, which passes it through unread. A dedup group's `group` is the winning
+  contributor's own (the same winner `INV-ATTN-1` selects for `summary`/`severity`/`url`): when
+  that winner carries none, the merged item carries none, and a losing contributor's `group` MUST
+  NOT be borrowed or combined. Adding `group` is additive: a version-2 consumer ignores the field,
+  and a version-3 consumer tolerates its absence. A consumer MUST NOT infer a group's size or
+  completeness from an `attention list` result, because `--cap N` truncates the item list
+  (`INV-ATTN-1`), not groups. The human (`--output human`) rendering of `attention list` is
+  unaffected by `group`.
 - **`INV-ATTN-CI-1`** <!-- uuid: c41da963-67b0-4d00-a040-a569dfc18795 --> — The PR backend's
   `list_attention` MUST emit exactly one "CI failing on my PR" item, `type` `pr-ci`, for each open,
   non-draft, unmerged PR authored by the viewing operator whose head-commit CI is failed, and none
@@ -546,6 +560,40 @@ status`, `config validate`) MUST report that backend's row as `disabled` with a 
   states: a listing that returns the same thing as an alert is removed. It does not apply to a
   `usage_limit`-blocked SESSION, which is a per-session fact no alert covers (`INV-AGS-1`), and no
   alert covers long-idle sessions either.
+
+## Attention content and connector observability
+
+> Operator ruling (Phillip, 2026-10-02, bead `pg2-m482k`): "attention should be based on
+> interesting things about the data. ie, meeting is soon, unread chat, reviewable pr which
+> requires my approval", and "any pg-connector listing which returns the same thing as an alert,
+> then we should remove that"; connectors "generate [their] own logs/events and register the logs
+> and alerts into otel separately", with the common part living in the nix configuration, not in
+> pg-connector. Written into this set by bead `pg2-5l0x4.3` (spec
+> `docs/superpowers/specs/2026-10-05-pg-desk-attention-evaluator-and-connector-refresh-cache-design.md`,
+> section 11), so the rules survive the bead that first recorded them.
+
+- **`INV-ATTN-CONTENT-1`** <!-- uuid: 98d97b59-eec2-41b9-806b-229b5139c42d --> — An attention item MUST be about something
+  interesting in the data the source reads (a meeting starting soon, an unread chat, a pull
+  request awaiting the operator's review), and MUST NOT be about the health of the tool or the
+  connector that produced it (an authentication failure, an outage, an exhausted quota). Tool
+  health is reported through the connector's own observability (`INV-CONOBS-1`), not through
+  `list_attention`.
+- **`INV-CONOBS-1`** <!-- uuid: c2201575-aee2-475a-bcb9-db6bb4f7d67c --> — Each backend MUST be treated as an ordinary custom
+  tool: it owns its own log/event path, emits rotating logs, emits metrics where useful, and
+  declares its own alert rules.
+- **`INV-CONOBS-2`** <!-- uuid: 46d6a22d-7f2a-4782-9f53-8f829861e09e --> — A backend for an external service MUST track the
+  service's availability and the health of its authentication, and its quota where the service
+  exposes one. This is an assumed capability of every such connector; retrofitting every existing
+  connector is NOT required now (see the realization-gap register in the [README](README.md)).
+- **`INV-CONOBS-3`** <!-- uuid: e7e93fe0-0bad-4c8c-8ca2-17594f77d49e --> — Registering a connector's observability (its log
+  source, its metrics target, its alert rule files) MUST be done per connector in the nix
+  configuration, separately from pg-connector's own configuration. What is shared across
+  connectors is the nix observability options, NOT pg-connector: the umbrella MUST NOT be bound to
+  any observability stack.
+- **`INV-CONOBS-4`** <!-- uuid: 667c798d-6b1c-43f4-ad95-fddba5888626 --> — An attention listing that duplicates an alert MUST be
+  removed: when an alert already raises a fact, a source's `list_attention` MUST NOT report the
+  same fact again. The `alert` backend's own `list_attention` (`INV-ALERT-7`) is the one path by
+  which an alert reaches attention. `INV-AGS-2` is this rule applied to agent-session usage caps.
 
 ## Goal
 

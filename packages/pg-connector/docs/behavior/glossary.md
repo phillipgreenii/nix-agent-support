@@ -70,8 +70,9 @@ system (GitHub, beads, local git, …) defines its own terms, out of this set's 
   issue, a CI run, …) — and it MAY be implemented either by a capability's own Tier-2 backend
   alongside its normal ops, or by a dedicated standalone plugin implementing nothing else.
 - **Attention item** — the attention capability's shared wire shape: `{type, id, summary}` plus
-  an optional `severity` and an optional `url` (the item's own page, never defaulted —
-  `INV-ATTN-URL-1`). Deliberately stateless — it MUST NOT gain any acknowledge/hide/unhide
+  an optional `severity`, an optional `url` (the item's own page, never defaulted —
+  `INV-ATTN-URL-1`) and an optional `group` (`{key, label}`, the item's work-context group, never
+  defaulted — `INV-ATTN-GROUP-1`). Deliberately stateless — it MUST NOT gain any acknowledge/hide/unhide
   field or method; resolving the underlying condition is how an item stops appearing, entirely
   out-of-band from this capability.
 - **Severity** — the attention capability's closed four-value enum (`low` | `medium` | `high` |

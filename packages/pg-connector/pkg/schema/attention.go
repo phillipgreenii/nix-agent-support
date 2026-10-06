@@ -26,20 +26,22 @@ package schema
 //
 // Version history: 1 = {type, id, summary, severity?}; 2 = adds the optional
 // url (additive: a v1 consumer ignores it, a v2 consumer tolerates its
-// absence).
-const AttentionSchemaVersion = 2
+// absence); 3 = adds the optional group {key, label} (additive: a v2
+// consumer ignores it, a v3 consumer tolerates its absence). One bump per
+// additive field.
+const AttentionSchemaVersion = 3
 
 // AttentionItem is the attention capability's shared JSON wire shape: a
 // single source's own list_attention response item is exactly this shape —
-// {type, id, summary} plus optional severity and url — carried by
+// {type, id, summary} plus optional severity, url and group — carried by
 // pkg/provider/attention.Provider.ListAttention. Tier 1's aggregated
 // pg-connector attention list output (built by the sibling aggregation
 // packet) is a strict superset that adds via/truncated/total_before_cap at
 // the merge/envelope layer; it is never a violation of this per-source
 // shape, and this type MUST NOT itself gain those fields. That
 // no-via/no-truncated/no-total_before_cap rule concerns AGGREGATION fields
-// only: it does not forbid per-item descriptive fields such as URL, which a
-// source fills and the umbrella passes through unread.
+// only: it does not forbid per-item descriptive fields such as URL and Group, which
+// a source fills and the umbrella passes through unread.
 type AttentionItem struct {
 	// Type identifies the kind of thing this item is about (e.g. a PR, a
 	// CI run, an issue) — a source-defined, generic string, not a closed
@@ -65,6 +67,29 @@ type AttentionItem struct {
 	// any caller of this package, including the umbrella's merge layer,
 	// which passes it through unread.
 	URL string `json:"url,omitempty"`
+
+	// Group is this item's work-context group (INV-ATTN-GROUP-1), added in
+	// attention schema version 3: a source that clusters its items (today
+	// only pg-desk's attention evaluator) fills it, and a source with no
+	// grouping omits the field entirely (omitempty; a nil pointer, never an
+	// empty object). It is DESCRIPTIVE ONLY: it MUST NOT be defaulted or
+	// synthesized by any caller of this package, including the umbrella's
+	// merge layer, which passes it through unread and keeps the winning
+	// contributor's own value, never merging groups across contributors.
+	Group *AttentionGroup `json:"group,omitempty"`
+}
+
+// AttentionGroup is the optional work-context group of an AttentionItem
+// (attention schema version 3). Key identifies the group and is the
+// consumer's grouping key; when the group is anchored on an entity it is
+// itself a "<type>:<id>" ref (e.g. "issue:ABC-1", "pr:<owner>/<repo>#<n>"),
+// so a consumer MAY resolve the group's related links with the same
+// "pg-desk links" call it already makes for the items. Label is the
+// human-readable display name. Neither field is validated by this package:
+// the group's meaning belongs to the source that fills it.
+type AttentionGroup struct {
+	Key   string `json:"key"`
+	Label string `json:"label"`
 }
 
 // Severity is the attention capability's closed string enum, with a
