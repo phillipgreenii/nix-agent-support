@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"regexp"
 	"strings"
@@ -1102,7 +1103,7 @@ func TestSearchPRsEnriched_QueryRequestsExpectedFields(t *testing.T) {
 	}
 	joined := strings.Join(gh.calls[0], " ")
 	for _, want := range []string{
-		"search(query: $q, type: ISSUE, first: 100, after: $after)",
+		fmt.Sprintf("search(query: $q, type: ISSUE, first: %d, after: $after)", searchBatchedPageSize),
 		"labels(first: 20)",
 		"statusCheckRollup",
 		"headRefOid",

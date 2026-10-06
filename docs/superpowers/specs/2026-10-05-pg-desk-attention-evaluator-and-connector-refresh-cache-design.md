@@ -795,7 +795,8 @@ The live ledger shows 72 ids for the whole team query across all six strings, so
 approaches the bound today, and a string that does overflow only pays one extra page
 (`hasNextPage`, already handled by `SearchPRsEnriched`). The 74 boundary is an observed
 property of GitHub's cost formula for this exact field set, not a documented constant. It MUST be a
-named constant with a unit test that pins the field set, and the `D7` verification MUST re-read
+named constant with a unit test that pins the field set (`searchBatchedPageSize` and
+`TestSearchBatchedQuery_PinnedFieldSet`, bead `pg2-cw6b3.9`), and the `D7` verification MUST re-read
 the cost to catch a formula change. Adding fields to the batched query can move the boundary.
 
 The 869 points per hour of other consumers remain an estimate and are the largest single line;
@@ -1268,9 +1269,15 @@ show` with a flock single-flight, `served_from` and `age_seconds`, `--fresh`, `c
   (open question 9).
 - **`D5` pr-github: fold the rate-limit read into the batched query** (`E3`; `agent-support`,
   `pg-connector`; P3; size S; blocked by `D1`). Read `rateLimit { remaining resetAt cost }` in the
-  same GraphQL document as the search so the separate 1-point guard probe disappears while the
-  reserve check (default 1000, `pg2-w977`) still gates the call. Include the own-PR CI contexts
-  with the per-PR fallback past 100 contexts only if `D1` shows the saving is real.
+  same GraphQL document as the search so the separate guard probe disappears while the reserve
+  check (default 1000, `pg2-w977`) still gates the call. This is a **latency and simplicity**
+  change, not a budget change: section 6.6 measures the guard probe as uncharged (0 points), so the
+  fold saves a process spawn and a round trip per tick and zero points. (The earlier wording here,
+  that "the 1-point probe disappears", was an overcount corrected by the `D1` spike.) The budget
+  lever is the page size, which is carried by bead `pg2-cw6b3.9`
+  (`searchBatchedPageSize = 74`). Include the own-PR CI contexts with the per-PR fallback past 100
+  contexts only if `D1` shows the saving is real (it measured 3 points per `first: 100` page
+  against 2, and nothing extra at `first: 25`, so re-measure at `first: 74` before adopting it).
 - **`D6` deployment: `pr-team` poll cadence 60 s to 120 s** (`E3`; labels `ziprecruiter`, `zm`;
   P2; size S; blocked by none). The cadence change from section 7, applied after the operator
   approves the parameter at spec review. Applying is an operator action.
@@ -1287,7 +1294,9 @@ show` with a flock single-flight, `served_from` and `age_seconds`, `--fresh`, `c
 - **`D7` verification: GraphQL budget against the 25 percent target** (`E3`; `agent-support`;
   P3; size S; blocked by `D2`, `D5`, `D6`). Gated on `pn:applied`: after the changes are applied,
   measure points per hour by source against the section 6.6 table and report the result against
-  1,250 per hour. Do not hold the implementation beads open for it.
+  1,250 per hour. Also re-read the cost of one
+  batched search page (`rateLimit(dryRun: true)` at `first: 74` and `first: 75`) to confirm the
+  74-node boundary behind `searchBatchedPageSize` still holds for the shipped field set. Do not hold the implementation beads open for it.
 
 ### Epic 4 task (retirement)
 

@@ -282,3 +282,35 @@ func TestSearchPRsEnriched_LogsCostSummedAcrossPages(t *testing.T) {
 		t.Errorf("serialized graphql_cost = %v, want 4", line["graphql_cost"])
 	}
 }
+
+// pinnedSearchBatchedQuery is the whole batched search document, whitespace
+// normalized, with its page size spelled out. It is the pin the 74-node page
+// size depends on: GraphQL cost follows the requested page size and steps from
+// 1 to 2 points at 75 for THIS field set (bead pg2-cw6b3.1 spike), so any
+// change to the document, including a new field, can move that boundary.
+const pinnedSearchBatchedQuery = `query($q: String!, $after: String) { rateLimit { cost remaining resetAt } search(query: $q, type: ISSUE, first: 74, after: $after) { pageInfo { hasNextPage endCursor } nodes { ... on PullRequest { id number title url state body isDraft updatedAt reviewDecision mergeable author { login } repository { nameWithOwner } labels(first: 20) { totalCount nodes { name } } comments { totalCount } reviews { totalCount } reviewThreads { totalCount } headRefOid commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } } } } }`
+
+// TestSearchBatchedPageSize pins the requested page size at 74, the largest
+// size that costs 1 point per page for this field set (75 costs 2).
+func TestSearchBatchedPageSize(t *testing.T) {
+	if searchBatchedPageSize != 74 {
+		t.Fatalf("searchBatchedPageSize = %d, want 74: the cost step from 1 to 2 points sits at 75 for this field set; re-measure with rateLimit(dryRun: true) before changing it", searchBatchedPageSize)
+	}
+	if want := "search(query: $q, type: ISSUE, first: 74, after: $after)"; !strings.Contains(searchBatchedQuery, want) {
+		t.Fatalf("searchBatchedQuery does not request %q", want)
+	}
+	if strings.Contains(searchBatchedQuery, "first: 100, after") {
+		t.Fatal("searchBatchedQuery must not request the search page at first: 100 (2 points per page)")
+	}
+}
+
+// TestSearchBatchedQuery_PinnedFieldSet fails on any change to the batched
+// search document, so a field added to it cannot ship without re-measuring
+// the cost boundary behind searchBatchedPageSize (and updating this pin).
+func TestSearchBatchedQuery_PinnedFieldSet(t *testing.T) {
+	got := strings.Join(strings.Fields(searchBatchedQuery), " ")
+	if got != pinnedSearchBatchedQuery {
+		t.Fatalf("searchBatchedQuery changed. The 74-node page size was measured for the pinned document only; "+
+			"re-measure the cost boundary (rateLimit(dryRun: true) at first:74 and first:75), then update searchBatchedPageSize and pinnedSearchBatchedQuery together.\n got: %s\nwant: %s", got, pinnedSearchBatchedQuery)
+	}
+}

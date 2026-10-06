@@ -774,6 +774,12 @@ func (p *Provider) SearchPRsActivity(ctx context.Context, query string, limit in
 	return out, nil
 }
 
+// searchBatchedPageSize is the first: argument of searchBatchedQuery's
+// search() connection: the largest requested size that costs 1 GraphQL point
+// per page for searchBatchedQuery's field set (75 or more costs 2). See
+// searchBatchedQuery's doc comment before changing it or the selection.
+const searchBatchedPageSize = 74
+
 // searchBatchedQuery is the batched GraphQL query SearchPRsEnriched issues
 // once per configured search string (bead pg2-aehpr, design doc
 // "pg-connector-pr-github: replace N+1 GraphQL fetch with one batched
@@ -785,7 +791,7 @@ func (p *Provider) SearchPRsActivity(ctx context.Context, query string, limit in
 //
 // reviewThreads { totalCount } and labels { totalCount } (bead pg2-x3h8c.2)
 // ARE requested: both are cheap scalar counts that add no points per page (the
-// measured cost stays 2 points per 100-PR page), and they let a new review
+// measured cost does not change at a given requested page size), and they let a new review
 // thread, or a label added past the first 20, change the list fingerprint.
 // The list still MUST NOT select reviewRequests (a nested first:N connection,
 // 3 points per page), mergeStateStatus (an expensive field that made the
@@ -823,7 +829,7 @@ func (p *Provider) SearchPRsActivity(ctx context.Context, query string, limit in
 // ghSearchPR.toAPI path already read the identical field).
 //
 // labels(first: 20) has no pagination of its own (unlike the outer
-// search(first: 100) connection, which SearchPRsEnriched below DOES
+// search(first: searchBatchedPageSize) connection, which SearchPRsEnriched below DOES
 // paginate) — this backend assumes no single matched PR carries more
 // than 20 labels, the design doc's own explicitly-sanctioned alternative
 // to implementing a second, nested pagination loop (design doc section 6,
@@ -831,10 +837,19 @@ func (p *Provider) SearchPRsActivity(ctx context.Context, query string, limit in
 // to a bound ... and document that assumption inline"). A PR with more
 // than 20 labels would silently lose the excess ones; this is a known,
 // documented limitation, not an oversight.
-const searchBatchedQuery = `
+//
+// The requested page size is searchBatchedPageSize, not GitHub's 100-node
+// maximum: GraphQL cost follows the REQUESTED size, and for exactly this
+// field set a page costs 1 point at first:74 and 2 points at first:75 or
+// more (bead pg2-cw6b3.1 spike, measured with rateLimit(dryRun: true)). Do not
+// raise the size, and re-measure before adding any field to the selection:
+// the 74 boundary is an observed property of GitHub's cost formula for this
+// field set, not a documented constant. TestSearchBatchedQuery_PinnedFieldSet
+// fails on any change to the document so that re-measurement is not skipped.
+var searchBatchedQuery = fmt.Sprintf(`
 query($q: String!, $after: String) {
   rateLimit { cost remaining resetAt }
-  search(query: $q, type: ISSUE, first: 100, after: $after) {
+  search(query: $q, type: ISSUE, first: %d, after: $after) {
     pageInfo { hasNextPage endCursor }
     nodes {
       ... on PullRequest {
@@ -852,7 +867,7 @@ query($q: String!, $after: String) {
     }
   }
 }
-`
+`, searchBatchedPageSize)
 
 // ghBatchedSearchNode is one `... on PullRequest` node in
 // searchBatchedQuery's own response shape. A node whose fragment did not
@@ -1038,7 +1053,9 @@ func (n ghBatchedSearchNode) headCommitStatusState() string {
 // API contract requires. A query that already contains "is:pr" is
 // harmless to double up (GitHub's search qualifiers are idempotent).
 //
-// Internally paginates past GitHub's 100-result-per-page search() bound
+// Internally paginates past the searchBatchedPageSize-result page of its search()
+// connection (GitHub allows at most 100 per page, but a page of 75 or more costs
+// twice as many points for this field set)
 // (design doc section 6's own MUST-cover pagination point) so callers
 // always see one query string's complete match set in a single return,
 // with no truncated:true signal needed — a genuine improvement over the
