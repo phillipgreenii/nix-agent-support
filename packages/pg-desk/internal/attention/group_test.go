@@ -156,12 +156,136 @@ func TestGroupLevelPrecedence(t *testing.T) {
 	}
 }
 
-func TestStackLevelIsOffWithoutAStackSource(t *testing.T) {
+func TestLonePRIsNotAStackWithTheDefaultSource(t *testing.T) {
+	// No Stacks input: Evaluate uses the store-backed dependency source, and a
+	// PR with no stack relation stays a singleton.
 	st := store.OpenNewSchemaForTest(t)
 	teamPR(t, st, 1)
 	res := evaluateWith(t, st, nil)
 	if it := mustItem(t, res, 1); it.Group != "pr:"+pid(1) {
-		t.Errorf("group = %q, want the singleton: no stack source is wired", it.Group)
+		t.Errorf("group = %q, want the singleton: PR #1 is in no stack", it.Group)
+	}
+}
+
+// putStackedPR seeds a team PR with head and base branches.
+func putStackedPR(t *testing.T, st *store.Store, n int, state, branch, base string) {
+	t.Helper()
+	put(t, st, prSpec{number: n, ownership: "team", panel: interpret.PanelTeamAwaitingMe, state: state, branch: branch, base: base})
+}
+
+// seedThreePRStack stores #1 (targets main), #2 (targets #1) and #3 (targets #2).
+func seedThreePRStack(t *testing.T, st *store.Store) {
+	t.Helper()
+	putStackedPR(t, st, 1, "open", "feat-a", "main")
+	putStackedPR(t, st, 2, "open", "feat-b", "feat-a")
+	putStackedPR(t, st, 3, "open", "feat-c", "feat-b")
+}
+
+func TestThreePRStackIsOneGroupNamedByItsRoot(t *testing.T) {
+	// Default source (no Stacks input): the dependency API, end to end from
+	// stored base and head branches.
+	st := store.OpenForTest(t) // the unmigrated store: stack grouping is available there too
+	seedThreePRStack(t, st)
+	res := evaluateWith(t, st, nil)
+	assertOneStackGroup(t, res)
+}
+
+func TestThreePRStackOnMigratedStore(t *testing.T) {
+	st := store.OpenNewSchemaForTest(t)
+	seedThreePRStack(t, st)
+	assertOneStackGroup(t, evaluateWith(t, st, nil))
+}
+
+func assertOneStackGroup(t *testing.T, res Result) {
+	t.Helper()
+	if got := groupKeys(res); len(got) != 1 || got[0] != "pr:"+pid(1) {
+		t.Fatalf("groups = %v, want the one stack group named by root pr:%s", got, pid(1))
+	}
+	g := res.Groups[0]
+	if g.Label != pid(1) {
+		t.Errorf("label = %q, want the root PR id %q", g.Label, pid(1))
+	}
+	if len(g.Items) != 3 {
+		t.Fatalf("group holds %d items, want 3", len(g.Items))
+	}
+	for n := 1; n <= 3; n++ {
+		if it := mustItem(t, res, n); it.Group != "pr:"+pid(1) {
+			t.Errorf("PR %d group = %q, want pr:%s", n, it.Group, pid(1))
+		}
+		if tr := res.Traces[Ref("pr", pid(n))]; tr.Group != "pr:"+pid(1) {
+			t.Errorf("PR %d trace group = %q", n, tr.Group)
+		}
+	}
+}
+
+func TestStackRegroupsWhenTheBaseMerges(t *testing.T) {
+	st := store.OpenNewSchemaForTest(t)
+	seedThreePRStack(t, st)
+	// The base PR merges: it is no longer open, so it leaves the stack and
+	// the remaining two re-form one named by their new bottom.
+	putStackedPR(t, st, 1, "merged", "feat-a", "main")
+	res := evaluateWith(t, st, nil)
+	for _, n := range []int{2, 3} {
+		if it := mustItem(t, res, n); it.Group != "pr:"+pid(2) {
+			t.Errorf("PR %d group = %q, want pr:%s", n, it.Group, pid(2))
+		}
+	}
+	if it, ok := itemFor(res, 1); ok && it.Group != "pr:"+pid(1) {
+		t.Errorf("merged PR #1 group = %q, want its own singleton", it.Group)
+	}
+}
+
+func TestJiraIssueBeatsTheDefaultStackSource(t *testing.T) {
+	st := store.OpenNewSchemaForTest(t)
+	seedThreePRStack(t, st)
+	link(t, st, "pr", pid(2), "issue", "ABC-5", "jira")
+	res := evaluateWith(t, st, nil)
+	want := map[int]string{1: "pr:" + pid(1), 2: "issue:ABC-5", 3: "pr:" + pid(1)}
+	for n, key := range want {
+		if it := mustItem(t, res, n); it.Group != key {
+			t.Errorf("PR %d group = %q, want %q", n, it.Group, key)
+		}
+	}
+}
+
+func TestStackBeatsTheWorkItem(t *testing.T) {
+	st := store.OpenNewSchemaForTest(t)
+	seedThreePRStack(t, st)
+	link(t, st, "issue", "bd-1", "pr", pid(3), "work")
+	res := evaluateWith(t, st, nil)
+	if it := mustItem(t, res, 3); it.Group != "pr:"+pid(1) {
+		t.Errorf("PR 3 group = %q, want the stack, which outranks the work item", it.Group)
+	}
+}
+
+func TestExternalDependsOnLinkGroupsPRsWithNoSharedBranch(t *testing.T) {
+	st := store.OpenNewSchemaForTest(t)
+	putStackedPR(t, st, 4, "open", "feat-d", "main")
+	putStackedPR(t, st, 7, "open", "feat-g", "main")
+	if err := st.AddExternalXref(store.XrefLink{
+		Repo: testRepo, FromType: "pr", FromID: pid(7), ToType: "pr", ToID: pid(4),
+		Relation: "depends_on", Actor: "alice", ActedAt: "2026-10-06T10:00:00Z",
+		FirstSeen: "2026-10-06T10:00:00Z", LastConfirmed: "2026-10-06T10:00:00Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	res := evaluateWith(t, st, nil)
+	for _, n := range []int{4, 7} {
+		if it := mustItem(t, res, n); it.Group != "pr:"+pid(4) {
+			t.Errorf("PR %d group = %q, want pr:%s", n, it.Group, pid(4))
+		}
+	}
+}
+
+func TestExplicitStackSourceOverridesTheDefault(t *testing.T) {
+	st := store.OpenNewSchemaForTest(t)
+	seedThreePRStack(t, st)
+	res := evaluateWith(t, st, fakeStacks{pid(2): pid(9)})
+	if it := mustItem(t, res, 2); it.Group != "pr:"+pid(9) {
+		t.Errorf("PR 2 group = %q, want the injected source's pr:%s", it.Group, pid(9))
+	}
+	if it := mustItem(t, res, 1); it.Group != "pr:"+pid(1) {
+		t.Errorf("PR 1 group = %q, want its singleton: the injected source does not know it", it.Group)
 	}
 }
 

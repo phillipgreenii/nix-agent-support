@@ -141,7 +141,8 @@ Each item belongs to the work context of its entity. The group key is the first 
 
 1. The issue the entity cross-references with relation `jira`. With several, the
    lexicographically smallest key, so the result is deterministic.
-2. Otherwise the PR stack: the connected component of the dependency graph, named by its root PR.
+2. Otherwise the PR stack: the connected component of the dependency graph, named by its root PR
+   (defined below).
 3. Otherwise the work item that tracks it (relation `work`).
 4. Otherwise a singleton group keyed by the entity.
 
@@ -165,13 +166,28 @@ A consumer MUST NOT infer a group's size or completeness from a capped feed: a c
 item list, not groups. The full groups are available from the dashboard payload and from
 `pg-desk attention list`.
 
+**The PR stack.** The stack of a PR is the connected component, over the dependency graph of
+"PR dependencies" in [`links.md`](links.md), that holds it. Edges are followed in both directions
+from every source registered there (the `stack` source on both schema versions, an external
+`depends_on` link on the migrated store), and only through open PRs: a merged or closed PR, or one
+with no stored row, is not part of any stack and does not join the PRs on either side of it. A PR
+with no open dependency and no open dependent is in no stack, so it falls through to the next level
+rather than forming a stack of one. The stack is named by its root PR: the member that depends on no
+other member (the base of the stack, the one that targets the default branch); when several members
+qualify, the one with the lexicographically smallest id, and when none does (a dependency cycle) the
+smallest id of all members. Every member of one stack therefore gets the same group key,
+`pr:<owner>/<repo>#<n>` of the root, and the group's label is that root's id. Because the graph is
+read at evaluation time, a stack regroups on the very next read after one of its PRs merges or its
+base changes. A stack level that cannot be read is an error, never an ungrouped result. The
+dashboard, `attention list` and the plugin all use this same source, so they cannot disagree.
+
 On the unmigrated store the grouping levels are limited:
 
-| Level                        | Unmigrated store                                                                  | Migrated store |
-| ---------------------------- | --------------------------------------------------------------------------------- | -------------- |
-| Jira issue (relation `jira`) | Available: the legacy PR-to-issue rows, read as `links.md` reads them (degraded). | Available.     |
-| PR stack                     | Available once stack grouping is switched on (see "Deferred").                    | Available.     |
-| Work item (relation `work`)  | Not available: falls through to the singleton group.                              | Available.     |
+| Level                        | Unmigrated store                                                                   | Migrated store |
+| ---------------------------- | ---------------------------------------------------------------------------------- | -------------- |
+| Jira issue (relation `jira`) | Available: the legacy PR-to-issue rows, read as `links.md` reads them (degraded).  | Available.     |
+| PR stack                     | Available: the `stack` dependency source reads only stored base and head branches. | Available.     |
+| Work item (relation `work`)  | Not available: falls through to the singleton group.                               | Available.     |
 
 ## Verbs
 
@@ -277,10 +293,6 @@ shared issue is a group, never a dependency: three PRs on one issue are siblings
 None of the following is part of the first release. Each is named so that no reader mistakes its
 absence for a defect.
 
-- **PR stack grouping.** The PR-to-PR dependency data (see "PR dependencies" in
-  [`links.md`](links.md)) exists and the dependency suppression above reads it, but the PR stack
-  grouping level does not read it yet, so a stack's items group by their issue or fall through to
-  the next level.
 - **Re-review after my approval.** Needs the commit each review was submitted against, which the
   connector's review record does not carry. Restoring it is an operator decision tracked outside
   this doc.

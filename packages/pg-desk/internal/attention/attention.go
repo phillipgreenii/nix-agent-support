@@ -88,8 +88,10 @@ type Inputs struct {
 	Repo   string
 	Config *config.Config
 	Clock  Clock
-	// Stacks names the PR stack of a PR. Nil switches the stack grouping
-	// level off (see group.go).
+	// Stacks names the PR stack of a PR. Nil means the store-backed default,
+	// dependency.StackSource over Store and Repo, so every caller groups by
+	// PR stack with no wiring and the surfaces cannot disagree
+	// (INV-ATTNEVAL-2); a caller sets it only to substitute another source.
 	Stacks StackSource
 }
 
@@ -221,6 +223,9 @@ func Evaluate(in Inputs) (Result, error) {
 	cfg := in.Config
 	if cfg == nil {
 		cfg = &config.Config{}
+	}
+	if in.Stacks == nil {
+		in.Stacks = dependency.NewStackSource(in.Store, in.Repo)
 	}
 	settings, err := Resolve(cfg.Attention)
 	if err != nil {

@@ -358,7 +358,7 @@ func BuildPayload(st *store.Store, cfg *config.Config, now time.Time) (*Payload,
 // evaluateAttention runs the shared evaluator over the same store the panels
 // were read from, as of now, and returns its groups. It makes the SAME
 // attention.Evaluate call, on the same inputs (the first configured
-// repository, no PR-stack source), as the pg-desk-attention plugin, so the
+// repository, the default store-backed PR-stack source), as the pg-desk-attention plugin, so the
 // two surfaces cannot disagree (INV-ATTNEVAL-2). A failure returns nil groups
 // and the reason; it never returns an empty list for a failed evaluation.
 func evaluateAttention(st *store.Store, cfg *config.Config, now time.Time) ([]attention.Group, string) {

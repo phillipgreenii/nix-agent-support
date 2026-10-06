@@ -36,9 +36,8 @@ const (
 )
 
 // StackSource names the PR stack an entity belongs to. It is the seam the
-// PR-to-PR dependency source plugs into (the "stack" level is switched on
-// once that source exists); a nil StackSource leaves the level off, so the
-// first release does not depend on it.
+// PR-to-PR dependency source plugs into: Evaluate defaults it to
+// dependency.StackSource over the store being read (Inputs.Stacks).
 type StackSource interface {
 	// StackRoot returns the entity id of the root PR of the stack the PR
 	// belongs to. ok is false when the PR is in no stack (a lone PR is not a
