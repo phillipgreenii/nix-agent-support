@@ -46,7 +46,8 @@ child rows. Beads a worker improvised under an anchor (for example "Human: unblo
 title shape; they reach the cascade only if the query is widened to every non-closed bead, and the
 `issue-beads-work` change feed that shares the query name would then fire `run issue` for beads
 that are not PR work, which it reports as an error, so such a deployment SHOULD give the feed its
-own narrower query.
+own narrower query. The union above is safe for that feed as is: every bead it lists carries an
+anchor, `process-feedback:` or `review-pr:` title, each of which `run issue` resolves to its PR.
 
 On every run (not just literally the first), before creating anything, sync classifies the work
 beads gather already fetched this run (`issue list --query work-beads`, matched to this PR) by
