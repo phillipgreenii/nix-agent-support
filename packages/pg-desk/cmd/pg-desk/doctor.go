@@ -185,6 +185,56 @@ func doctorStrandedCycles(ctx context.Context, cfg *config.Config, st *store.Sto
 	return stranded, nil
 }
 
+// doctorWorkBeadsReach is the pg2-6w396 guard that the deployed `work-beads`
+// query actually reaches the child beads sync adopts and cascades over. The
+// query is per-machine config, not code, and the design's own example listed
+// only `--type merge-request`, while cycle and review-request beads are
+// created as type task (internal/sync/rules.go): with such a query the
+// listing carries anchors and never a child, so adoption's crash-safety
+// fallback and the closure cascade over improvised children (pg2-kftf9.7)
+// silently depend on the ledger alone.
+//
+// It reads the same fan-out result as doctorStrandedCycles and counts the
+// anchors and the feedback-cycle / review-request beads in it. It reports
+// reached=false (a warning, never a gate) when the listing holds at least one
+// anchor and no child while the ledger holds at least one child row: pg-desk
+// has minted children, yet none appears among the open beads. That can also be
+// a tracker where every child is genuinely closed, which is why this is an
+// observability line and not a failure.
+func doctorWorkBeadsReach(ctx context.Context, cfg *config.Config, st *store.Store) (anchors, children, ledgerChildren int, reached bool, err error) {
+	raw, err := doctorFanOutIssueList(ctx, cfg)
+	if err != nil {
+		return 0, 0, 0, false, err
+	}
+	var fanOut doctorWorkBeadsFanOut
+	if err := json.Unmarshal(raw, &fanOut); err != nil {
+		return 0, 0, 0, false, fmt.Errorf("decode work-beads fan-out: %w", err)
+	}
+	for _, e := range fanOut.Entities {
+		kind, _, _, ok := sync.ClassifyBead(e.Title, e.Metadata)
+		if !ok {
+			continue
+		}
+		switch kind {
+		case sync.KindAnchor:
+			anchors++
+		case sync.KindFeedbackCycle, sync.KindReviewRequest:
+			children++
+		}
+	}
+	rows, err := st.ListLedger()
+	if err != nil {
+		return 0, 0, 0, false, fmt.Errorf("read ledger: %w", err)
+	}
+	for _, r := range rows {
+		if (r.Kind == sync.KindFeedbackCycle || r.Kind == sync.KindReviewRequest) && r.BeadID != "" {
+			ledgerChildren++
+		}
+	}
+	reached = !(anchors > 0 && children == 0 && ledgerChildren > 0)
+	return anchors, children, ledgerChildren, reached, nil
+}
+
 // doctorSyncErrors lists every interpretation row with a non-empty
 // sync_error as "entity: error [retry indicator]" (pg2-kftf9.5; the
 // indicator is bead pg2-xb6fs's, see describeSyncRetry).
@@ -320,7 +370,16 @@ func runDoctor(cmd *cobra.Command) error {
 		// unlike stranded cycles this IS a gate (exit 1) so an alert can
 		// hang off the doctor exit code.
 		syncErrs, syncErrCheck := doctorSyncErrors(st)
+		reachAnchors, reachChildren, reachLedger, reachOK, reachErr := doctorWorkBeadsReach(ctx, cfg, st)
 		_ = st.Close()
+		switch {
+		case reachErr != nil:
+			fmt.Fprintf(w, "work-beads reach: skipped (%v)\n", reachErr)
+		case !reachOK:
+			fmt.Fprintf(w, "work-beads reach: WARN (%d anchors and no feedback-cycle or review-request bead listed, though the ledger holds %d child rows; the work-beads query probably excludes type task, so adoption and the closure cascade see only the ledger: see sync.md)\n", reachAnchors, reachLedger)
+		default:
+			fmt.Fprintf(w, "work-beads reach: ok (%d anchors, %d child beads listed)\n", reachAnchors, reachChildren)
+		}
 		if syncErrCheck != nil {
 			fmt.Fprintf(w, "sync_error rows: FAIL (%v)\n", syncErrCheck)
 			failures = append(failures, "sync_error rows")

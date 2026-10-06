@@ -30,6 +30,24 @@ same input, which is what makes the parity check mechanical rather than a manual
 
 ## Adoption
 
+**The `work-beads` query is deployment config and MUST list the children (`pg2-6w396`).** Anchors
+are type `merge-request`, but feedback cycles and review requests are created as type `task`
+(`--issue-type task`), so a query of only `list --type merge-request --status open` returns no
+child at all: adoption by listing can never find a cycle or review request, the closure cascade
+below sees no child, and crash-safety rests on the ledger alone. The query MUST be a union that
+also lists the `process-feedback:` and `review-pr:` task beads, and MUST include `in_progress` (a
+claimed review request or cycle is not `open`), for example the list
+`list --type merge-request --status open,in_progress,blocked`,
+`list --type task --title-contains process-feedback: --status open,in_progress,blocked`,
+`list --type task --title-contains review-pr: --status open,in_progress,blocked`
+(`pg-connector-issue-beads` unions a list of expressions by id). `pg-desk doctor`'s
+`work-beads reach` line warns when the listing holds anchors and no child while the ledger holds
+child rows. Beads a worker improvised under an anchor (for example "Human: unblock ...") match no
+title shape; they reach the cascade only if the query is widened to every non-closed bead, and the
+`issue-beads-work` change feed that shares the query name would then fire `run issue` for beads
+that are not PR work, which it reports as an error, so such a deployment SHOULD give the feed its
+own narrower query.
+
 On every run (not just literally the first), before creating anything, sync classifies the work
 beads gather already fetched this run (`issue list --query work-beads`, matched to this PR) by
 title/metadata shape (anchor / feedback cycle / review request / none of those). A pre-existing

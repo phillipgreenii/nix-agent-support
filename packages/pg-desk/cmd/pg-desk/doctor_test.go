@@ -619,3 +619,81 @@ func TestDoctorReportsRepeatedDegradedHydrations(t *testing.T) {
 		t.Errorf("a single degraded hydration is not 'repeated':\n%s", stdout)
 	}
 }
+
+// reachFixtureFanOut lists one anchor and, when withChild, one open review
+// request for the same PR.
+func reachFixtureFanOut(withChild bool) string {
+	anchor := `{"id":"bd-1","title":"o/r#5: t","state":"open","metadata":{"repo":"o/r","pr_number":"5"}}`
+	if !withChild {
+		return `{"entities":[` + anchor + `]}`
+	}
+	return `{"entities":[` + anchor + `,{"id":"bd-1.2","title":"review-pr: o/r#5","state":"open","parent":"bd-1","metadata":{"repo":"o/r","pr_number":"5"}}]}`
+}
+
+func seedChildLedgerRow(t *testing.T, seed *store.Store) {
+	t.Helper()
+	if err := seed.UpsertLedger(store.LedgerEntry{
+		Repo: "o/r", EntityType: entityTypePR, EntityID: "o/r#5",
+		Kind: "review-request", BeadID: "bd-1.2",
+	}); err != nil {
+		t.Fatalf("seed ledger: %v", err)
+	}
+}
+
+// pg2-6w396: a work-beads listing that carries anchors but no child, while
+// the ledger holds a child row, means the deployed query excludes type task.
+// doctor warns and still exits 0 (an observability line, not a gate).
+func TestDoctorWorkBeadsReachWarnsWhenListingHasNoChildren(t *testing.T) {
+	seed, openFresh := openTestStore(t)
+	withOpenSeams(t, openTestConfig("o/r"), openFresh)
+	stubDoctorSeams(t, nil, nil, nil)
+	doctorFanOutIssueList = func(ctx context.Context, cfg *config.Config) ([]byte, error) {
+		return []byte(reachFixtureFanOut(false)), nil
+	}
+	seedChildLedgerRow(t, seed)
+
+	stdout, err := runDoctorCmd(t)
+	if err != nil {
+		t.Fatalf("doctor: %v, want a warning only", err)
+	}
+	if !strings.Contains(stdout, "work-beads reach: WARN (1 anchors") || !strings.Contains(stdout, "ledger holds 1 child rows") {
+		t.Errorf("stdout does not warn about the unreachable children: %s", stdout)
+	}
+}
+
+func TestDoctorWorkBeadsReachOkWhenListingHasChildren(t *testing.T) {
+	seed, openFresh := openTestStore(t)
+	withOpenSeams(t, openTestConfig("o/r"), openFresh)
+	stubDoctorSeams(t, nil, nil, nil)
+	doctorFanOutIssueList = func(ctx context.Context, cfg *config.Config) ([]byte, error) {
+		return []byte(reachFixtureFanOut(true)), nil
+	}
+	seedChildLedgerRow(t, seed)
+
+	stdout, err := runDoctorCmd(t)
+	if err != nil {
+		t.Fatalf("doctor: %v", err)
+	}
+	if !strings.Contains(stdout, "work-beads reach: ok (1 anchors, 1 child beads listed)") {
+		t.Errorf("stdout does not report the reachable children: %s", stdout)
+	}
+}
+
+// With no child row in the ledger there is nothing to contradict the
+// listing, so an anchor-only listing is not a warning.
+func TestDoctorWorkBeadsReachOkWhenLedgerHasNoChildren(t *testing.T) {
+	_, openFresh := openTestStore(t)
+	withOpenSeams(t, openTestConfig("o/r"), openFresh)
+	stubDoctorSeams(t, nil, nil, nil)
+	doctorFanOutIssueList = func(ctx context.Context, cfg *config.Config) ([]byte, error) {
+		return []byte(reachFixtureFanOut(false)), nil
+	}
+
+	stdout, err := runDoctorCmd(t)
+	if err != nil {
+		t.Fatalf("doctor: %v", err)
+	}
+	if !strings.Contains(stdout, "work-beads reach: ok (1 anchors, 0 child beads listed)") {
+		t.Errorf("stdout: %s", stdout)
+	}
+}

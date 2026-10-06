@@ -338,7 +338,12 @@ backends:
       mine: "assignee = currentUser() AND resolution = Unresolved"
   pg-connector-issue-beads:
     queries:
-      work-beads: "list --type merge-request --status open"
+      # MUST also reach the process-feedback: and review-pr: task beads (section 7.5; pg2-6w396):
+      # a merge-request-only filter lists no child, so adoption and the closure cascade never see one.
+      work-beads:
+        - "list --type merge-request --status open,in_progress,blocked"
+        - "list --type task --title-contains process-feedback: --status open,in_progress,blocked"
+        - "list --type task --title-contains review-pr: --status open,in_progress,blocked"
       feedback-ready: "ready --label mine --exclude-label human"
       worker-ready: "ready --label worker-ready --exclude-label human"
       review-ready: "ready --exclude-label human"
