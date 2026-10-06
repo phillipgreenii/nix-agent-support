@@ -7,7 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/interpret"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
@@ -34,21 +36,47 @@ func reviewFacts(n int, pending, escalations string) string {
 	return out + "}"
 }
 
+// reviewNowInstant is the fixed instant last_append ages are measured from.
+var reviewNowInstant = time.Date(2026, 9, 29, 16, 3, 10, 0, time.UTC)
+
+// fixReviewClock pins the clock the review line's age reads.
+func fixReviewClock(t *testing.T) {
+	t.Helper()
+	orig := reviewNow
+	t.Cleanup(func() { reviewNow = orig })
+	reviewNow = interpret.FixedClock(reviewNowInstant)
+}
+
+// pendingRecord is a stored review_pending fact for a pending review. extra
+// is spliced into the review object (e.g. last_append, extra_pending_reviews).
+func pendingRecordWith(commit string, total, atHead int, stale bool, extra string) string {
+	return fmt.Sprintf(`{"result":{"pending":true,"head_sha":%q,"as_of":"2026-09-29T14:03:10Z","review":{"review_id":"PRR_1","url":"https://code.example/o/r/pull/5#pullrequestreview-1","commit_sha":%q,"comments_total":%d,"comments_at_head":%d,"reviewed_head":false,"stale":%t%s}}}`,
+		reviewHead, commit, total, atHead, stale, extra)
+}
+
+// pendingRecord is a pending review with two comments, both at the head
+// unless it is stale (five comments, none at the head).
 func pendingRecord(commit string, stale bool) string {
-	return fmt.Sprintf(`{"result":{"pending":true,"head_sha":%q,"as_of":"2026-09-29T14:03:10Z","review":{"review_id":"PRR_1","url":"https://code.example/o/r/pull/5#pullrequestreview-1","commit_sha":%q,"stale":%t}}}`,
-		reviewHead, commit, stale)
+	if stale {
+		return pendingRecordWith(commit, 5, 0, true, "")
+	}
+	return pendingRecordWith(commit, 2, 2, false, "")
 }
 
 const (
-	pendingNoneRecord  = `{"result":{"pending":false,"head_sha":"` + reviewHead + `","as_of":"2026-09-29T14:03:10Z"}}`
-	noEscalations      = `{"open":[]}`
-	oneEscalation      = `{"open":[{"id":"esc-77","kind":"pr","head":"` + reviewHead + `"}]}`
-	lookupFailedFacts  = `{"error":"pg-connector [pr review pending o/r#15]: exit 1: unavailable: review_pending: detection_failed: more than one pending review"}`
-	queryFailedFacts   = `{"open":[],"error":"issue list --query pending-review-escalations: exit 1: query_not_recognized"}`
-	reviewViewAsOfLine = "as_of=2026-09-29T14:03:10Z (fresh)"
+	pendingNoneRecord = `{"result":{"pending":false,"head_sha":"` + reviewHead + `","as_of":"2026-09-29T14:03:10Z"}}`
+	noEscalations     = `{"open":[]}`
+	oneEscalation     = `{"open":[{"id":"esc-77","kind":"pr","head":"` + reviewHead + `"}]}`
+	// A record written before the per-head counts: no comments_at_head, so
+	// it can be neither stale nor current. It still carries the retired
+	// digest_state key.
+	legacyPendingRecord = `{"result":{"pending":true,"head_sha":"` + reviewHead + `","review":{"review_id":"PRR_1","commit_sha":"` + reviewOld + `","stale":true,"digest_state":"unmarked"}}}`
+	lookupFailedFacts   = `{"error":"pg-connector [pr review pending o/r#15]: exit 1: unavailable: review_pending: detection_failed: more than one pending review"}`
+	queryFailedFacts    = `{"open":[],"error":"issue list --query pending-review-escalations: exit 1: query_not_recognized"}`
+	reviewViewAsOfLine  = "as_of=2026-09-29T14:03:10Z (fresh)"
 )
 
-// the five states, one PR each.
+// the review states, one PR each.
 var reviewStateCases = []struct {
 	name     string
 	n        int
@@ -67,15 +95,45 @@ var reviewStateCases = []struct {
 	},
 	{
 		"current", 12, pendingRecord(reviewHead, false), noEscalations,
-		"review: pending=yes  commit=9f3c1e2  head=9f3c1e2  stale=no  escalation=none", "current", "true", "false", "none", "[]",
+		"review: pending=yes  commit=9f3c1e2  head=9f3c1e2  comments=2 at_head=2  stale=no  escalation=none", "current", "true", "false", "none", "[]",
 	},
 	{
 		"stale", 13, pendingRecord(reviewOld, true), noEscalations,
-		"review: pending=yes  commit=4b1d7aa  head=9f3c1e2  stale=yes  escalation=none", "stale", "true", "true", "none", "[]",
+		"review: pending=yes  commit=4b1d7aa  head=9f3c1e2  comments=5 at_head=0  stale=yes  escalation=none", "stale", "true", "true", "none", "[]",
 	},
 	{
 		"stale-with-open-escalation", 14, pendingRecord(reviewOld, true), oneEscalation,
-		"review: pending=yes  commit=4b1d7aa  head=9f3c1e2  stale=yes  escalation=esc-77", "stale", "true", "true", "open", `["esc-77"]`,
+		"review: pending=yes  commit=4b1d7aa  head=9f3c1e2  comments=5 at_head=0  stale=yes  escalation=esc-77", "stale", "true", "true", "open", `["esc-77"]`,
+	},
+	{
+		// The review was created at an older head and extended to this one
+		// 5 minutes ago: current, however old its review-level commit.
+		"current-extended-with-last-append", 16, pendingRecordWith(reviewOld, 5, 2, false, `,"last_append":{"at":"2026-09-29T15:58:10Z","added":2,"head":"`+reviewHead+`"}`), noEscalations,
+		"review: pending=yes  commit=4b1d7aa  head=9f3c1e2  comments=5 at_head=2  stale=no  last_append=5m (+2)  escalation=none", "current", "true", "false", "none", "[]",
+	},
+	{
+		"stale-with-last-append", 17, pendingRecordWith(reviewOld, 5, 0, true, `,"last_append":{"at":"2026-09-29T14:03:10Z","added":3,"head":"`+reviewOld+`"}`), noEscalations,
+		"review: pending=yes  commit=4b1d7aa  head=9f3c1e2  comments=5 at_head=0  stale=yes  last_append=2h (+3)  escalation=none", "stale", "true", "true", "none", "[]",
+	},
+	{
+		"current-with-extra-pending-reviews", 18, pendingRecordWith(reviewHead, 5, 2, false, `,"extra_pending_reviews":1`), noEscalations,
+		"review: pending=yes  commit=9f3c1e2  head=9f3c1e2  comments=5 at_head=2  stale=no  extra=1  escalation=none", "current", "true", "false", "none", "[]",
+	},
+	{
+		// The connector's verdict is shown, never recomputed: a different
+		// review-level commit does not make a stale: false record stale.
+		"verdict-not-recomputed-from-commits", 19, pendingRecordWith(reviewOld, 3, 1, false, ""), noEscalations,
+		"review: pending=yes  commit=4b1d7aa  head=9f3c1e2  comments=3 at_head=1  stale=no  escalation=none", "current", "true", "false", "none", "[]",
+	},
+	{
+		// ...and the same commit does not make a stale: true record current.
+		"verdict-not-recomputed-same-commit", 20, pendingRecordWith(reviewHead, 3, 0, true, ""), noEscalations,
+		"review: pending=yes  commit=9f3c1e2  head=9f3c1e2  comments=3 at_head=0  stale=yes  escalation=none", "stale", "true", "true", "none", "[]",
+	},
+	{
+		"legacy-record-without-comments-at-head", 22, legacyPendingRecord, oneEscalation,
+		"review: pending=unknown (the stored pending-review record predates the per-head comment counts; run show --refresh)  escalation=esc-77",
+		"unknown", "null", "null", "open", `["esc-77"]`,
 	},
 	{
 		"lookup-failed", 15, lookupFailedFacts, noEscalations,
@@ -86,13 +144,14 @@ var reviewStateCases = []struct {
 
 func seedReviewStates(t *testing.T) {
 	t.Helper()
+	fixReviewClock(t)
 	f := newViewFixture(t)
 	for _, c := range reviewStateCases {
 		f.entity("pr", fmt.Sprintf("o/r#%d", c.n), reviewFacts(c.n, c.pending, c.escal), "2026-09-29T14:03:10Z", reviewHead)
 	}
 }
 
-func TestTypedShowPendingReviewFiveStatesHuman(t *testing.T) {
+func TestTypedShowPendingReviewStatesHuman(t *testing.T) {
 	seedReviewStates(t)
 	for _, c := range reviewStateCases {
 		t.Run(c.name, func(t *testing.T) {
@@ -112,7 +171,7 @@ func TestTypedShowPendingReviewFiveStatesHuman(t *testing.T) {
 	}
 }
 
-func TestTypedShowPendingReviewFiveStatesJSON(t *testing.T) {
+func TestTypedShowPendingReviewStatesJSON(t *testing.T) {
 	seedReviewStates(t)
 	for _, c := range reviewStateCases {
 		t.Run(c.name, func(t *testing.T) {
@@ -142,11 +201,14 @@ func TestTypedShowPendingReviewFiveStatesJSON(t *testing.T) {
 			}
 			switch c.state {
 			case "current", "stale":
+				if get("comments_total") == "" || get("comments_at_head") == "" || get("extra_pending_reviews") == "" {
+					t.Errorf("a pending review must carry its comment counts and extra count: %s", out)
+				}
 				if get("anchored_commit") == "" || get("head_sha") != fmt.Sprintf("%q", reviewHead) || get("review_id") == "" {
 					t.Errorf("a pending review must carry its commit, the head and its id: %s", out)
 				}
 			case "unknown":
-				if get("error") == "" || !strings.Contains(get("error"), "detection_failed") {
+				if get("error") == "" || (c.name != "legacy-record-without-comments-at-head" && !strings.Contains(get("error"), "detection_failed")) {
 					t.Errorf("an unknown state must carry the reason: %s", out)
 				}
 			}
@@ -171,6 +233,7 @@ func TestTypedShowFailedLookupIsNeverNone(t *testing.T) {
 // are unknown too, never none.
 func TestTypedShowUnhydratedAndQueryFailureAreUnknown(t *testing.T) {
 	f := newViewFixture(t)
+	fixReviewClock(t)
 	f.entity("pr", "o/r#21", reviewFacts(21, pendingNoneRecord, queryFailedFacts), "2026-09-29T14:03:10Z", reviewHead)
 	out, _, err := runTypedShowCmd(t, "pr", "o/r#21")
 	if err != nil {
@@ -302,7 +365,7 @@ func TestTypedShowRefreshHydratesPendingReviewThroughTheConnector(t *testing.T) 
 		{
 			"stale-with-open-escalation", `{"protocolVersion":1,` + strings.TrimPrefix(pendingRecord(reviewOld, true), "{"), 0,
 			`{"entities":[{"id":"esc-77","metadata":{"review_escalation_key":"pr:o/r#5","review_escalation_head":"` + reviewHead + `"}}],"present_ids":[],"sources":[]}`,
-			"review: pending=yes  commit=4b1d7aa  head=9f3c1e2  stale=yes  escalation=esc-77",
+			"review: pending=yes  commit=4b1d7aa  head=9f3c1e2  comments=5 at_head=0  stale=yes  escalation=esc-77",
 		},
 		{
 			"lookup-failed", `{"protocolVersion":1,"error":{"code":"unavailable","message":"review_pending: detection_failed: truncated"}}`, 1, "",
@@ -331,5 +394,62 @@ func TestTypedShowRefreshHydratesPendingReviewThroughTheConnector(t *testing.T) 
 				}
 			}
 		})
+	}
+}
+
+// The view's JSON carries the connector's counts, last_append and extra count
+// as stored, and tolerates the retired digest_state and all_marked keys.
+func TestTypedShowReviewJSONFieldsAndRetiredKeys(t *testing.T) {
+	f := newViewFixture(t)
+	fixReviewClock(t)
+	rec := pendingRecordWith(reviewOld, 5, 2, false,
+		`,"extra_pending_reviews":2,"digest_state":"unmarked","all_marked":false,"last_append":{"at":"2026-09-29T15:58:10Z","added":2,"head":"`+reviewHead+`"}`)
+	f.entity("pr", "o/r#31", reviewFacts(31, rec, noEscalations), "2026-09-29T14:03:10Z", reviewHead)
+	out, _, err := runTypedShowCmd(t, "pr", "o/r#31", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var v struct {
+		Review struct {
+			State               string `json:"state"`
+			CommentsTotal       *int   `json:"comments_total"`
+			CommentsAtHead      *int   `json:"comments_at_head"`
+			Stale               *bool  `json:"stale"`
+			ExtraPendingReviews *int   `json:"extra_pending_reviews"`
+			LastAppend          *struct {
+				At    string `json:"at"`
+				Added int    `json:"added"`
+				Head  string `json:"head"`
+			} `json:"last_append"`
+		} `json:"review"`
+	}
+	if err := json.Unmarshal([]byte(out), &v); err != nil {
+		t.Fatal(err)
+	}
+	r := v.Review
+	if r.State != "current" || r.CommentsTotal == nil || *r.CommentsTotal != 5 || r.CommentsAtHead == nil || *r.CommentsAtHead != 2 ||
+		r.Stale == nil || *r.Stale || r.ExtraPendingReviews == nil || *r.ExtraPendingReviews != 2 ||
+		r.LastAppend == nil || r.LastAppend.At != "2026-09-29T15:58:10Z" || r.LastAppend.Added != 2 || r.LastAppend.Head != reviewHead {
+		t.Errorf("review = %s", out)
+	}
+	if strings.Contains(out, "digest_state") || strings.Contains(out, "all_marked") {
+		t.Errorf("retired keys leaked into the view:\n%s", out)
+	}
+}
+
+// A pending review's last_append age reads in the largest whole unit.
+func TestAppendAge(t *testing.T) {
+	now := reviewNowInstant
+	for at, want := range map[string]string{
+		"2026-09-29T16:02:40Z": "30s",
+		"2026-09-29T15:58:10Z": "5m",
+		"2026-09-29T14:03:10Z": "2h",
+		"2026-09-26T16:03:10Z": "3d",
+		"2026-09-29T17:00:00Z": "0s", // in the future
+		"not-a-time":           "?",
+	} {
+		if got := appendAge(at, now); got != want {
+			t.Errorf("appendAge(%q) = %q, want %q", at, got, want)
+		}
 	}
 }
