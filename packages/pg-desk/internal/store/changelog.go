@@ -62,6 +62,9 @@ func (s *Store) WriteEntityWithLog(e Entity, expectedVersion int64, kinds []stri
 type entityState struct {
 	hydratedAt string
 	active     bool
+	// listFP, when non-nil, is written to list_fp in the same statement;
+	// nil leaves list_fp untouched.
+	listFP *string
 }
 
 // WriteEntityStateWithLog is WriteEntityWithLog that additionally sets
@@ -75,8 +78,20 @@ func (s *Store) WriteEntityStateWithLog(e Entity, expectedVersion int64, hydrate
 	return s.writeEntity(e, expectedVersion, &entityState{hydratedAt: hydratedAt, active: active}, kinds, origin, at)
 }
 
+// WriteEntityStateWithLogFP is WriteEntityStateWithLog that additionally sets
+// list_fp (the list fingerprint the caller observed at this hydration) in the
+// same UPDATE/INSERT and transaction when listFP is non-nil, so it commits or
+// rolls back together with the snapshot, the version bump, hydrated_at,
+// active and the change_log row. A nil listFP leaves list_fp untouched. The
+// store never computes the fingerprint. Same compare-and-set, same
+// ErrVersionConflict and ConflictCount behavior, new schema only.
+func (s *Store) WriteEntityStateWithLogFP(e Entity, expectedVersion int64, hydratedAt string, active bool, listFP *string, kinds []string, origin, at string) (int64, error) {
+	return s.writeEntity(e, expectedVersion, &entityState{hydratedAt: hydratedAt, active: active, listFP: listFP}, kinds, origin, at)
+}
+
 // SetBetweenBumpAndAppendHook installs fn as a fault-injection seam run
-// inside WriteEntityWithLog's and WriteEntityStateWithLog's transaction after
+// inside WriteEntityWithLog's, WriteEntityStateWithLog's and
+// WriteEntityStateWithLogFP's transaction after
 // the entity write and before the change_log append; a non-nil return aborts
 // and rolls back the write. Passing nil clears it. Test use only.
 func (s *Store) SetBetweenBumpAndAppendHook(fn func() error) { s.betweenBumpAndAppend = fn }
@@ -108,6 +123,12 @@ func (s *Store) writeEntity(e Entity, expectedVersion int64, state *entityState,
 		updateArgs = append(updateArgs, nullableString(state.hydratedAt), activeInt)
 		insertCols += `, hydrated_at, active`
 		insertArgs = append(insertArgs, nullableString(state.hydratedAt), activeInt)
+		if state.listFP != nil {
+			updateSQL += `, list_fp = ?`
+			updateArgs = append(updateArgs, *state.listFP)
+			insertCols += `, list_fp`
+			insertArgs = append(insertArgs, *state.listFP)
+		}
 	}
 	updateSQL += ` WHERE repo = ? AND entity_type = ? AND entity_id = ? AND version = ?`
 	updateArgs = append(updateArgs, e.Repo, e.EntityType, e.EntityID, expectedVersion)

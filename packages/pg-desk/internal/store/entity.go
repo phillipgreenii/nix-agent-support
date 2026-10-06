@@ -45,6 +45,12 @@ type Entity struct {
 	// UpsertEntity and WriteEntityWithLog ignore it, so no existing caller
 	// can deactivate an entity by accident. WriteEntityStateWithLog sets it.
 	Inactive bool
+
+	// ListFP is the list fingerprint observed at the last successful
+	// hydration ("" when the column is NULL, and always "" on an old-schema
+	// store). Populated by reads; UpsertEntity and WriteEntityWithLog ignore
+	// it. WriteEntityStateWithLogFP sets it.
+	ListFP string
 }
 
 // UpsertEntity inserts or replaces the entity row keyed by
@@ -74,7 +80,7 @@ func (s *Store) GetEntity(repo, entityType, entityID string) (entity Entity, fou
 	if err != nil {
 		return Entity{}, false, err
 	}
-	var headSHA, hydratedAt sql.NullString
+	var headSHA, hydratedAt, listFP sql.NullString
 	var active int
 	row := s.sql.QueryRow(
 		`SELECT repo, entity_type, entity_id, facts, as_of, stale, content_hash, head_sha, `+cols+`
@@ -82,7 +88,7 @@ func (s *Store) GetEntity(repo, entityType, entityID string) (entity Entity, fou
 		repo, entityType, entityID,
 	)
 	if err := row.Scan(&entity.Repo, &entity.EntityType, &entity.EntityID, &entity.Facts,
-		&entity.AsOf, &entity.Stale, &entity.ContentHash, &headSHA, &entity.Version, &hydratedAt, &active); err != nil {
+		&entity.AsOf, &entity.Stale, &entity.ContentHash, &headSHA, &entity.Version, &hydratedAt, &active, &listFP); err != nil {
 		if err == sql.ErrNoRows {
 			return Entity{}, false, nil
 		}
@@ -91,6 +97,7 @@ func (s *Store) GetEntity(repo, entityType, entityID string) (entity Entity, fou
 	entity.HeadSHA = headSHA.String
 	entity.HydratedAt = hydratedAt.String
 	entity.Inactive = active == 0
+	entity.ListFP = listFP.String
 	return entity, true, nil
 }
 
@@ -131,14 +138,15 @@ func (s *Store) ListEntities() ([]Entity, error) {
 	var out []Entity
 	for rows.Next() {
 		var e Entity
-		var headSHA, hydratedAt sql.NullString
+		var headSHA, hydratedAt, listFP sql.NullString
 		var active int
-		if err := rows.Scan(&e.Repo, &e.EntityType, &e.EntityID, &e.Facts, &e.AsOf, &e.Stale, &e.ContentHash, &headSHA, &e.Version, &hydratedAt, &active); err != nil {
+		if err := rows.Scan(&e.Repo, &e.EntityType, &e.EntityID, &e.Facts, &e.AsOf, &e.Stale, &e.ContentHash, &headSHA, &e.Version, &hydratedAt, &active, &listFP); err != nil {
 			return nil, fmt.Errorf("store: scan entity row: %w", err)
 		}
 		e.HeadSHA = headSHA.String
 		e.HydratedAt = hydratedAt.String
 		e.Inactive = active == 0
+		e.ListFP = listFP.String
 		out = append(out, e)
 	}
 	if err := rows.Err(); err != nil {
@@ -148,18 +156,18 @@ func (s *Store) ListEntities() ([]Entity, error) {
 }
 
 // entityNewColumns returns the SELECT expressions for the new-schema entity
-// columns, in the order version, hydrated_at, active: the real columns on the
-// new schema, the constants 0, NULL, 1 on the old one (which has none of
-// them). Called before the query is issued, never while a result set is open.
+// columns, in the order version, hydrated_at, active, list_fp: the real
+// columns on the new schema, the constants 0, NULL, 1, NULL on the old one
+// (which has none of them). Called before the query is issued, never while a result set is open.
 func (s *Store) entityNewColumns() (string, error) {
 	isNew, err := s.isNewSchema()
 	if err != nil {
 		return "", err
 	}
 	if isNew {
-		return "version, hydrated_at, active", nil
+		return "version, hydrated_at, active, list_fp", nil
 	}
-	return "0, NULL, 1", nil
+	return "0, NULL, 1, NULL", nil
 }
 
 // nullableString maps an empty Go string to a SQL NULL, so optional

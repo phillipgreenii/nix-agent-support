@@ -16,8 +16,9 @@ import (
 //
 // What it does, in one transaction:
 //
-//   - entity gains version (INTEGER NOT NULL DEFAULT 0), hydrated_at and
-//     active (INTEGER NOT NULL DEFAULT 1);
+//   - entity gains version (INTEGER NOT NULL DEFAULT 0), hydrated_at,
+//     active (INTEGER NOT NULL DEFAULT 1) and list_fp (nullable TEXT, the
+//     list fingerprint at the last successful hydration);
 //   - interpretation loses sync_error;
 //   - change_log (append-only, one row per change record) and consumer
 //     (one cursor per named consumer of a type) are created;
@@ -45,6 +46,10 @@ var cutoverStatements = []string{
 	`ALTER TABLE entity ADD COLUMN version INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE entity ADD COLUMN hydrated_at TEXT`,
 	`ALTER TABLE entity ADD COLUMN active INTEGER NOT NULL DEFAULT 1`,
+	// list_fp: the list fingerprint observed at the last successful
+	// hydration. NULL (read back as "") means no baseline: such a row is
+	// treated as changed once.
+	`ALTER TABLE entity ADD COLUMN list_fp TEXT`,
 
 	// interpretation: sync_error was written only by the old sync stage.
 	`ALTER TABLE interpretation DROP COLUMN sync_error`,

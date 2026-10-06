@@ -102,8 +102,13 @@ can print it.
 
 The cutover makes these changes, and no others:
 
-- **`entity`** gains `version` (integer, not null, default 0), `hydrated_at` (nullable text) and
-  `active` (integer, not null, default 1). Existing rows take the defaults.
+- **`entity`** gains `version` (integer, not null, default 0), `hydrated_at` (nullable text),
+  `active` (integer, not null, default 1) and `list_fp` (nullable text). Existing rows take the
+  defaults; `list_fp` is NULL. `list_fp` is the list fingerprint the caller observed at the entity's
+  last SUCCESSFUL hydration, the baseline against which a later list fingerprint is compared. A row
+  with no `list_fp` (NULL, which reads back as the empty string: a migrated row, or a row created
+  by `--reset`) has no baseline and is therefore treated as changed once. The store only stores the
+  value; it never computes or recomputes a fingerprint.
 - **`interpretation`** loses `sync_error`. On version 2 a write that carries a sync error is an
   error, not a silent drop.
 - **`change_log`** is new and append-only: `seq` (integer, autoincrementing primary key), `repo`,
@@ -149,8 +154,13 @@ the reserved keys above; those belong to the work that uses these tables.
 - A first write (expected version 0) inserts the row with version 1. A row the cutover left at
   version 0 is updated in place. When two first writers race for an absent entity, exactly one
   wins and the other gets the version conflict.
+- A hydration write MAY carry the observed list fingerprint. When it does, `list_fp` is set in the
+  same statement and transaction as the snapshot, the version bump, `hydrated_at`, `active` and the
+  `change_log` row, so a failed write or a lost version race leaves `list_fp` unchanged along with
+  everything else. When the write carries no fingerprint, the stored `list_fp` MUST be preserved.
 - Every lost race is counted; the count is exposed for the observability metric.
-- Reads return the entity with its version. On a version-1 store the version reads as 0.
+- Reads return the entity with its version and its `list_fp` (the empty string when NULL and on a
+  version-1 store). On a version-1 store the version reads as 0.
 - `change_log` is append-only. Helpers read it after a given `seq` for one entity type (ascending
   by `seq`, limited) and per entity (newest first, limited). A caller that must append inside its
   own transaction uses the same append primitive.

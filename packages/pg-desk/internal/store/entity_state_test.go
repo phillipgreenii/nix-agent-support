@@ -51,7 +51,7 @@ func TestEntityReads_DefaultsOnOldSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, found, err := s.GetEntity(clRepo, clType, clID)
-	if err != nil || !found || got.HydratedAt != "" || got.Inactive {
+	if err != nil || !found || got.HydratedAt != "" || got.Inactive || got.ListFP != "" {
 		t.Fatalf("old-schema read = (%+v, %v, %v)", got, found, err)
 	}
 	list, err := s.ListEntities()
@@ -281,5 +281,134 @@ func TestAppendEntityChange_AbsentEntityAndOldSchema(t *testing.T) {
 	old := OpenForTest(t)
 	if _, err := old.AppendEntityChange(clRepo, clType, clID, []string{"x"}, "o", "t"); !errors.Is(err, ErrOldSchema) {
 		t.Fatalf("old-schema err = %v, want ErrOldSchema", err)
+	}
+}
+
+func strp(s string) *string { return &s }
+
+func TestWriteEntityStateWithLogFP_WritesListFPWithEverythingElse(t *testing.T) {
+	s := OpenNewSchemaForTest(t)
+
+	// Insert path: list_fp is set on a brand-new row.
+	if v, err := s.WriteEntityStateWithLogFP(clEntity("a"), 0, "2026-09-10T00:00:00Z", true, strp("fp-1"), []string{"created"}, "sync", "t1"); err != nil || v != 1 {
+		t.Fatalf("insert = (%d, %v)", v, err)
+	}
+	got, _, _ := s.GetEntity(clRepo, clType, clID)
+	if got.ListFP != "fp-1" || got.Version != 1 || got.Facts != "a" {
+		t.Fatalf("after insert = %+v", got)
+	}
+
+	// Update path: list_fp, snapshot, version, hydrated_at and change_log
+	// all change together.
+	if v, err := s.WriteEntityStateWithLogFP(clEntity("b"), 1, hydratedStamp, true, strp("fp-2"), []string{"facts_changed"}, "sync", "t2"); err != nil || v != 2 {
+		t.Fatalf("update = (%d, %v)", v, err)
+	}
+	got, _, _ = s.GetEntity(clRepo, clType, clID)
+	if got.ListFP != "fp-2" || got.Version != 2 || got.Facts != "b" || got.HydratedAt != hydratedStamp {
+		t.Fatalf("after update = %+v", got)
+	}
+	if n := changeCount(t, s); n != 2 {
+		t.Fatalf("change_log rows = %d, want 2", n)
+	}
+	list, err := s.ListEntities()
+	if err != nil || len(list) != 1 || list[0].ListFP != "fp-2" {
+		t.Fatalf("list = (%+v, %v)", list, err)
+	}
+}
+
+func TestWriteEntityStateWithLogFP_FailedWriteLeavesEverythingUnchanged(t *testing.T) {
+	s := OpenNewSchemaForTest(t)
+	if _, err := s.WriteEntityStateWithLogFP(clEntity("a"), 0, "2026-09-10T00:00:00Z", true, strp("fp-1"), []string{"created"}, "sync", "t1"); err != nil {
+		t.Fatal(err)
+	}
+
+	boom := errors.New("injected failure")
+	s.SetBetweenBumpAndAppendHook(func() error { return boom })
+	_, err := s.WriteEntityStateWithLogFP(clEntity("b"), 1, hydratedStamp, false, strp("fp-2"), []string{"x"}, "sync", "t2")
+	s.SetBetweenBumpAndAppendHook(nil)
+	if !errors.Is(err, boom) || errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("err = %v, want injected failure and not a conflict", err)
+	}
+	got, _, _ := s.GetEntity(clRepo, clType, clID)
+	if got.ListFP != "fp-1" || got.Version != 1 || got.Facts != "a" || got.HydratedAt != "2026-09-10T00:00:00Z" || got.Inactive {
+		t.Fatalf("entity after failed write = %+v, want everything rolled back", got)
+	}
+	if n := changeCount(t, s); n != 1 {
+		t.Fatalf("change_log rows = %d, want 1", n)
+	}
+
+	// Insert path rolls back too: no row, so no list_fp.
+	s.SetBetweenBumpAndAppendHook(func() error { return boom })
+	other := Entity{Repo: clRepo, EntityType: clType, EntityID: "acme/widgets#8", Facts: "z"}
+	_, err = s.WriteEntityStateWithLogFP(other, 0, hydratedStamp, true, strp("fp-z"), []string{"x"}, "sync", "t3")
+	s.SetBetweenBumpAndAppendHook(nil)
+	if !errors.Is(err, boom) {
+		t.Fatalf("insert err = %v, want injected failure", err)
+	}
+	if _, found, _ := s.GetEntity(clRepo, clType, "acme/widgets#8"); found {
+		t.Fatalf("entity row survived a failed insert")
+	}
+}
+
+func TestWriteEntityStateWithLogFP_LostCompareAndSetLeavesListFPUnchanged(t *testing.T) {
+	s := OpenNewSchemaForTest(t)
+	if _, err := s.WriteEntityStateWithLogFP(clEntity("a"), 0, hydratedStamp, true, strp("fp-1"), []string{"created"}, "sync", "t1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.WriteEntityStateWithLogFP(clEntity("b"), 1, hydratedStamp, true, strp("fp-2"), []string{"x"}, "sync", "t2"); err != nil {
+		t.Fatal(err)
+	}
+	_, err := s.WriteEntityStateWithLogFP(clEntity("stale"), 1, hydratedStamp, true, strp("fp-stale"), []string{"x"}, "sync", "t3")
+	if !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("err = %v, want ErrVersionConflict", err)
+	}
+	if s.ConflictCount() != 1 {
+		t.Fatalf("ConflictCount = %d, want 1", s.ConflictCount())
+	}
+	got, _, _ := s.GetEntity(clRepo, clType, clID)
+	if got.ListFP != "fp-2" || got.Version != 2 || got.Facts != "b" {
+		t.Fatalf("after lost CAS = %+v, want list_fp fp-2 untouched", got)
+	}
+}
+
+func TestWriteEntityStateWithLogFP_NilListFPPreservesStoredValue(t *testing.T) {
+	s := OpenNewSchemaForTest(t)
+	if _, err := s.WriteEntityStateWithLogFP(clEntity("a"), 0, hydratedStamp, true, strp("fp-1"), []string{"created"}, "sync", "t1"); err != nil {
+		t.Fatal(err)
+	}
+	// nil via the FP method, via the plain state method, and via the
+	// snapshot-only writer: list_fp survives all three.
+	if _, err := s.WriteEntityStateWithLogFP(clEntity("b"), 1, hydratedStamp, true, nil, []string{"x"}, "sync", "t2"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.WriteEntityStateWithLog(clEntity("c"), 2, hydratedStamp, true, []string{"x"}, "sync", "t3"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.WriteEntityWithLog(clEntity("d"), 3, []string{"x"}, "sync", "t4"); err != nil {
+		t.Fatal(err)
+	}
+	got, _, _ := s.GetEntity(clRepo, clType, clID)
+	if got.ListFP != "fp-1" || got.Version != 4 || got.Facts != "d" {
+		t.Fatalf("after nil-FP writes = %+v, want list_fp fp-1 preserved", got)
+	}
+
+	// An empty (non-nil) fingerprint is an explicit write, not a no-op.
+	if _, err := s.WriteEntityStateWithLogFP(clEntity("e"), 4, hydratedStamp, true, strp(""), []string{"x"}, "sync", "t5"); err != nil {
+		t.Fatal(err)
+	}
+	got, _, _ = s.GetEntity(clRepo, clType, clID)
+	if got.ListFP != "" {
+		t.Fatalf("ListFP = %q after explicit empty write, want \"\"", got.ListFP)
+	}
+}
+
+func TestWriteEntityStateWithLogFP_RefusesOldSchema(t *testing.T) {
+	s := OpenForTest(t)
+	if _, err := s.WriteEntityStateWithLogFP(clEntity("a"), 0, hydratedStamp, true, strp("fp"), []string{"x"}, "sync", "t1"); err == nil {
+		t.Fatal("old-schema FP write succeeded, want refusal")
+	}
+	got, found, err := s.GetEntity(clRepo, clType, clID)
+	if err != nil || found || got.ListFP != "" {
+		t.Fatalf("old-schema read = (%+v, %v, %v)", got, found, err)
 	}
 }

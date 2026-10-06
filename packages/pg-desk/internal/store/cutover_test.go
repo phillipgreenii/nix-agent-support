@@ -346,6 +346,10 @@ func TestMigrationAddsEntityColumns(t *testing.T) {
 	if !ok || active.Type != "INTEGER" || !active.NotNull || active.Default.String != "1" {
 		t.Errorf("entity.active = %+v (present=%v), want INTEGER NOT NULL DEFAULT 1", active, ok)
 	}
+	listFP, ok := column(t, s, "entity", "list_fp")
+	if !ok || listFP.Type != "TEXT" || listFP.NotNull {
+		t.Errorf("entity.list_fp = %+v (present=%v), want nullable TEXT", listFP, ok)
+	}
 
 	if _, ok := column(t, s, "interpretation", "sync_error"); ok {
 		t.Errorf("interpretation.sync_error still present after cutover")
@@ -471,6 +475,11 @@ func TestMigrateFromSyntheticPreMigrationDB(t *testing.T) {
 	}
 	if version != 0 || hydrated.Valid || active != 1 {
 		t.Errorf("new entity columns = (%d, %v, %d), want (0, NULL, 1)", version, hydrated, active)
+	}
+	for _, e := range entities {
+		if e.ListFP != "" {
+			t.Errorf("entity %s ListFP = %q after cutover, want \"\"", e.EntityID, e.ListFP)
+		}
 	}
 
 	// interpretation rows survive, sync_error is gone.
