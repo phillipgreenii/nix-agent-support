@@ -55,17 +55,22 @@ type Config struct {
 	IncludeMerges   bool     `json:"include_merges"`
 }
 
-// Options configures New. Later packets add fields (the git runner) rather
-// than change New's signature.
+// Options configures New. Later packets add fields rather than change New's
+// signature.
 type Options struct {
 	// Stderr receives one line per skipped configured path. Nil means
 	// os.Stderr.
 	Stderr io.Writer
+	// Runner execs git. Nil means NewExecRunner().
+	Runner Runner
 }
 
 // Backend implements activity.Provider.
 type Backend struct {
 	stderr io.Writer
+	runner Runner
+	// now is the pull-time clock (as_of); a field so tests can pin it.
+	now func() time.Time
 	// collect is the commit collector. It defaults to collectCommits and is
 	// a field only so in-package tests can observe the decoded Config.
 	collect func(ctx context.Context, cfg Config, emails []string, since, before time.Time) ([]schema.ActivityItem, bool, error)
@@ -77,7 +82,11 @@ func New(opts Options) *Backend {
 	if stderr == nil {
 		stderr = os.Stderr
 	}
-	b := &Backend{stderr: stderr}
+	runner := opts.Runner
+	if runner == nil {
+		runner = NewExecRunner()
+	}
+	b := &Backend{stderr: stderr, runner: runner, now: time.Now}
 	b.collect = b.collectCommits
 	return b
 }
@@ -112,11 +121,23 @@ func (b *Backend) ListActivity(ctx context.Context, since, before time.Time) (*s
 	if err != nil {
 		return nil, err
 	}
-	return &schema.ActivityListResult{Items: items, Truncated: truncated}, nil
+	return &schema.ActivityListResult{Items: dedupeByID(items), Truncated: truncated}, nil
 }
 
-// collectCommits is the collector seam: later packets fill in reading commits
-// from the configured repos. For now it returns an empty, well-formed result.
-func (b *Backend) collectCommits(_ context.Context, _ Config, _ []string, _, _ time.Time) (items []schema.ActivityItem, truncated bool, err error) {
-	return []schema.ActivityItem{}, false, nil
+// dedupeByID drops every item whose id already appeared earlier in items, so
+// the first occurrence (configured path order) wins. Two clones or worktrees
+// of one repository share repo_ident and shas, so their items collide on id
+// while differing in repo_path. It runs over the FINAL concatenated list of
+// every repo the call reads, so repos added by later packets are covered.
+func dedupeByID(items []schema.ActivityItem) []schema.ActivityItem {
+	seen := make(map[string]bool, len(items))
+	out := make([]schema.ActivityItem, 0, len(items))
+	for _, it := range items {
+		if seen[it.ID] {
+			continue
+		}
+		seen[it.ID] = true
+		out = append(out, it)
+	}
+	return out
 }

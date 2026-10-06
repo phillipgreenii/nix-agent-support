@@ -27,7 +27,7 @@ func main() {
 // run builds this backend and hands its dispatch table to the Tier-1 core's
 // generic serve loop.
 func run() int {
-	backend := internal.New(internal.Options{})
+	backend := internal.New(internal.Options{Runner: internal.NewExecRunner()})
 	return scriptout.ServeLoop(newDispatchTable(backend))
 }
 
