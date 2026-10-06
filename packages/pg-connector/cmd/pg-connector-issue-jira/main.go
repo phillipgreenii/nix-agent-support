@@ -19,6 +19,7 @@ import (
 
 	internal "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/eventlog"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/activity"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/attention"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/issue"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/search"
@@ -79,6 +80,13 @@ func newDispatchTable(backend *internal.Backend) scriptout.DispatchTable {
 	for op, handler := range attention.NewDispatchTable(backend) {
 		table[op] = handler
 	}
+	// activity (list_activity, plus its own auth_status entry, identical in
+	// effect to the others) built by pkg/provider/activity.NewDispatchTable:
+	// this backend's own ListActivity, scoped to the operator's own identity
+	// (see internal/activity.go).
+	for op, handler := range activity.NewDispatchTable(backend) {
+		table[op] = handler
+	}
 	return scriptout.AddCapabilities(table, schema.IssueSchemaVersion, capabilitiesBase())
 }
 
@@ -94,10 +102,14 @@ func capabilitiesBase() scriptout.CapabilitiesResponse {
 			"issue":     schema.IssueSchemaVersion,
 			"search":    schema.SearchSchemaVersion,
 			"attention": schema.AttentionSchemaVersion,
+			"activity":  schema.ActivitySchemaVersion,
 		},
 		Vocabulary: map[string]any{
 			"state":    internal.Vocabulary,
 			"priority": internal.PriorityVocabulary,
+			// The activity kinds this backend emits; capabilities.ops stays
+			// derived from the table, never a hand-typed list.
+			"activity_kinds": internal.ActivityKinds,
 		},
 		Version: Version,
 	}

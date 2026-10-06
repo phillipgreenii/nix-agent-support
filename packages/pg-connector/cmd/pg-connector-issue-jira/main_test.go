@@ -6,10 +6,14 @@ import (
 	"io"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout/conformance"
 )
 
 // fakeRunner is a minimal double for internal.Runner, so this file's
@@ -189,5 +193,109 @@ func TestServeLoop_ShowRoundTripsThroughStdinStdout(t *testing.T) {
 	}
 	if iss.ID != "PROJ-1" || iss.Title != "hello" {
 		t.Fatalf("result = %+v", iss)
+	}
+}
+
+// activityFakeRunner answers the one activity search with an operator-created
+// issue and an issue created by someone else.
+func activityFakeRunner() *fakeRunner {
+	return &fakeRunner{handle: func(args []string) (string, error) {
+		if args[0] == "auth-status" {
+			return "OK\n", nil
+		}
+		return `{"truncated":false,"items":[` +
+			`{"key":"PROJ-1","summary":"mine","project":"PROJ","created":"2026-09-05T10:00:00.000+0000","reporter":{"email":"operator@example.com"}},` +
+			`{"key":"PROJ-2","summary":"theirs","project":"PROJ","created":"2026-09-05T10:00:00.000+0000","reporter":{"email":"other@example.com"}}]}`, nil
+	}}
+}
+
+// TestNewDispatchTable_DeclaresActivityCapability proves list_activity is
+// wired into this binary's own table and declared: ops derived from the table
+// (list_activity and auth_status), the activity schema version, and exactly the
+// kinds this backend emits.
+func TestNewDispatchTable_DeclaresActivityCapability(t *testing.T) {
+	resp := capabilitiesResponse(t, newDispatchTable(newTestBackend()))
+
+	ops := map[string]bool{}
+	for _, op := range resp.Ops {
+		ops[op] = true
+	}
+	for _, want := range []string{"list_activity", scriptout.OpAuthStatus} {
+		if !ops[want] {
+			t.Errorf("capabilities.ops = %v, want %q", resp.Ops, want)
+		}
+	}
+	if got := resp.SchemaVersions["activity"]; got != schema.ActivitySchemaVersion {
+		t.Fatalf("schemaVersions[activity] = %d, want %d", got, schema.ActivitySchemaVersion)
+	}
+	kinds, ok := resp.Vocabulary["activity_kinds"]
+	if !ok {
+		t.Fatalf("vocabulary = %v, want activity_kinds", resp.Vocabulary)
+	}
+	raw, _ := json.Marshal(kinds)
+	if string(raw) != `["issue.created"]` {
+		t.Fatalf("vocabulary.activity_kinds = %s, want [\"issue.created\"]", raw)
+	}
+}
+
+func capabilitiesResponse(t *testing.T, table scriptout.DispatchTable) scriptout.CapabilitiesResponse {
+	t.Helper()
+	result, err := table[scriptout.OpCapabilities].Handle(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("capabilities Handle: %v", err)
+	}
+	resp, ok := result.(scriptout.CapabilitiesResponse)
+	if !ok {
+		t.Fatalf("result type = %T, want scriptout.CapabilitiesResponse", result)
+	}
+	return resp
+}
+
+// TestNewDispatchTable_ListActivityConformance drives the production table
+// (with a fake pjira runner) through the generic list_activity conformance
+// case, then asserts the content the generic case leaves to the backend. The
+// operator identity comes from JIRA_EMAIL, set with t.Setenv because the
+// backend's getenv field is unexported.
+func TestNewDispatchTable_ListActivityConformance(t *testing.T) {
+	t.Setenv("JIRA_EMAIL", "operator@example.com")
+	backend := conformance.TableBackend{Table: newDispatchTable(internal.New(activityFakeRunner()))}
+	since := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	before := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+
+	for _, r := range conformance.RunListActivityCase(context.Background(), backend, since, before) {
+		if r.Err != nil {
+			t.Errorf("%s: %v", r.Name, r.Err)
+		}
+	}
+
+	res, err := conformance.InvokeListActivity(context.Background(), backend, since.Format(time.RFC3339), before.Format(time.RFC3339))
+	if err != nil || res.ErrorCode != "" {
+		t.Fatalf("InvokeListActivity: res=%+v err=%v", res, err)
+	}
+	var got schema.ActivityListResult
+	if err := json.Unmarshal(res.Result, &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got.Items) != 1 || got.Items[0].ID != "PROJ-1#issue.created" {
+		t.Fatalf("items = %+v, want only the operator's own PROJ-1#issue.created", got.Items)
+	}
+}
+
+// TestNewDispatchTable_ListActivityUnavailableWithoutIdentity proves the wire
+// answer when no operator identity can be established: code unavailable, the
+// message naming what is missing, and no items.
+func TestNewDispatchTable_ListActivityUnavailableWithoutIdentity(t *testing.T) {
+	t.Setenv("JIRA_EMAIL", "")
+	fr := &fakeRunner{handle: func([]string) (string, error) { return `{"items":[],"truncated":false}`, nil }}
+	backend := conformance.TableBackend{Table: newDispatchTable(internal.New(fr))}
+	res, err := conformance.InvokeListActivity(context.Background(), backend, "2026-09-01T00:00:00Z", "2026-10-01T00:00:00Z")
+	if err != nil {
+		t.Fatalf("InvokeListActivity: %v", err)
+	}
+	if res.ErrorCode != "unavailable" {
+		t.Fatalf("error code = %q, want unavailable", res.ErrorCode)
+	}
+	if len(res.Result) != 0 && !strings.Contains(string(res.Result), "null") {
+		t.Errorf("result = %s, want no items", res.Result)
 	}
 }
