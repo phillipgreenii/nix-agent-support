@@ -105,3 +105,10 @@ hydration:
 
 change_log_retention: 14d
 consumer_stale_after: 7d
+
+freshness:
+  source_stale_after: 15m
+  sources:
+    pr-github:
+      label: PRs
+      stale_after: 30m

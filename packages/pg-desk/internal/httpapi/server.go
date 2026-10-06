@@ -31,6 +31,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/attention"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/freshness"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/interpret"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
@@ -229,6 +230,14 @@ type Payload struct {
 	// the live pg-pr defect where hidden rows stayed in the panel arrays.
 	Hidden []Row `json:"hidden"`
 
+	// Sources is the per-source data age (docs/behavior/pg-desk/freshness.md):
+	// one row per connector backend with the time of its last SUCCESSFUL
+	// origin fetch, never a per-row as_of. It is additive and always non-nil.
+	// It is distinct from the pipeline-liveness fields above (generated_at,
+	// age_seconds, stale), which describe meta.last_heartbeat and keep their
+	// meaning and polarity (INV-FRESH-5).
+	Sources []freshness.Row `json:"sources"`
+
 	LastRunAt     string         `json:"last_run_at,omitempty"`
 	LastSweepAt   string         `json:"last_sweep_at,omitempty"`
 	RunsFailed24h int            `json:"runs_failed_24h"`
@@ -262,6 +271,7 @@ func BuildPayload(st *store.Store, cfg *config.Config, now time.Time) (*Payload,
 		MineAwaitingTeam:  []Row{},
 		Hidden:            []Row{},
 		Errors:            []PayloadError{},
+		Sources:           []freshness.Row{},
 	}
 
 	panels := map[string]*[]Row{
@@ -333,6 +343,12 @@ func BuildPayload(st *store.Store, cfg *config.Config, now time.Time) (*Payload,
 	} else if found {
 		p.LastSweepAt = lastSweep
 	}
+
+	sources, err := freshness.Sources(st, cfg, now)
+	if err != nil {
+		return nil, fmt.Errorf("httpapi: build payload: %w", err)
+	}
+	p.Sources = sources
 
 	p.Attention, p.AttentionError = evaluateAttention(st, cfg, now)
 

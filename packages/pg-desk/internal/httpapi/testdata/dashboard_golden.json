@@ -73,5 +73,6 @@
     }
   ],
   "attention": null,
-  "attention_error": "no repository configured"
+  "attention_error": "no repository configured",
+  "sources": []
 }

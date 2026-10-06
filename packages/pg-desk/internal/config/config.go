@@ -139,6 +139,11 @@ type Config struct {
 	// Links configures the read-only `pg-desk links` verb (bead pg2-apuyx).
 	Links LinksConfig `yaml:"links,omitempty" json:"links,omitempty"`
 
+	// Freshness configures the per-source data-age contract
+	// (docs/behavior/pg-desk/freshness.md). A missing block is valid: the
+	// default threshold and label apply to every source.
+	Freshness FreshnessConfig `yaml:"freshness,omitempty" json:"freshness,omitempty"`
+
 	// Attention configures the read-time attention evaluator
 	// (docs/behavior/pg-desk/attention.md, "Configuration"). A missing block
 	// is valid: every rule kind then takes its built-in default.
@@ -794,6 +799,9 @@ func finalize(cfg *Config) error {
 	if err := validateAttention(cfg.Attention); err != nil {
 		return err
 	}
+	if err := validateFreshness(cfg.Freshness); err != nil {
+		return err
+	}
 	if cfg.Serve.Log != "" {
 		expanded, err := expandHome(cfg.Serve.Log)
 		if err != nil {
@@ -854,3 +862,71 @@ func expandHome(p string) (string, error) {
 	}
 	return p, nil
 }
+
+// DefaultSourceStaleAfter is freshness.source_stale_after's default: 15
+// minutes, several consecutive failed polls past a healthy 60 to 120 second
+// refresh and below the 30-minute pr-sweep cycle (docs/behavior/pg-desk/
+// freshness.md, "Threshold"). It is a distinct key from the top-level
+// stale_after, which no production code reads.
+const DefaultSourceStaleAfter = 15 * time.Minute
+
+// FreshnessConfig is config.yaml's freshness block.
+type FreshnessConfig struct {
+	// SourceStaleAfter is how old a source's last successful origin fetch may
+	// be before the source is reported stale (a duration such as "15m");
+	// empty means DefaultSourceStaleAfter.
+	SourceStaleAfter string `yaml:"source_stale_after,omitempty" json:"source_stale_after,omitempty"`
+	// Sources overrides one source's display label and threshold. A key is
+	// the connector backend name (for example "pg-connector-pr-github") or
+	// that name without its "pg-connector-" prefix.
+	Sources map[string]FreshnessSourceConfig `yaml:"sources,omitempty" json:"sources,omitempty"`
+}
+
+// FreshnessSourceConfig is one entry of freshness.sources.
+type FreshnessSourceConfig struct {
+	// Label is the display label; empty means the backend name without its
+	// "pg-connector-" prefix.
+	Label string `yaml:"label,omitempty" json:"label,omitempty"`
+	// StaleAfter overrides freshness.source_stale_after for this source (a
+	// duration such as "30m"); empty means the global threshold.
+	StaleAfter string `yaml:"stale_after,omitempty" json:"stale_after,omitempty"`
+}
+
+// SourceStaleAfter returns freshness.source_stale_after (default 15m). Safe
+// on a nil Config.
+func (c *Config) SourceStaleAfter() time.Duration {
+	if c == nil {
+		return DefaultSourceStaleAfter
+	}
+	return durationOrDefault(c.Freshness.SourceStaleAfter, DefaultSourceStaleAfter)
+}
+
+// validateFreshness checks that every configured threshold is a positive
+// duration, naming the offending key.
+func validateFreshness(f FreshnessConfig) error {
+	if strings.TrimSpace(f.SourceStaleAfter) != "" {
+		if _, err := parseDayDuration(f.SourceStaleAfter); err != nil {
+			return fmt.Errorf("freshness.source_stale_after: %w", err)
+		}
+	}
+	names := make([]string, 0, len(f.Sources))
+	for n := range f.Sources {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		if strings.TrimSpace(n) == "" {
+			return errors.New("freshness.sources: source name must not be empty")
+		}
+		if v := f.Sources[n].StaleAfter; strings.TrimSpace(v) != "" {
+			if _, err := parseDayDuration(v); err != nil {
+				return fmt.Errorf("freshness.sources.%s.stale_after: %w", n, err)
+			}
+		}
+	}
+	return nil
+}
+
+// ParseDuration parses a config duration: time.ParseDuration plus a day
+// component ("7d", "1d12h"). The result MUST be positive.
+func ParseDuration(v string) (time.Duration, error) { return parseDayDuration(v) }

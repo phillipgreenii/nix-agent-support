@@ -26,7 +26,7 @@ In scope: `store` and its schema, `gather`, `interpret`, `sync` (all three modes
 stored entity), `serve` (behind the soak option only), `open`, `hide`/`unhide`/`wip`,
 `feedback list`/`feedback set`, `show`, `links` (a read-only batch lookup of cross-reference
 links, see [`links.md`](links.md), which also holds the `<type> link add|remove` external-link
-verbs), `<type> consumer list|forget` (see [`consumer.md`](consumer.md)), `<type> changes` (see [`changes.md`](changes.md)), `<type> refresh` (see [`refresh.md`](refresh.md)), `attention list`/`attention explain` and the `pg-desk-attention` plugin (see [`attention.md`](attention.md)), the typed `<type> show` composite view (see [`show.md`](show.md)), `status`, `doctor`, `heartbeat`/`heartbeat-item`, and
+verbs), `<type> consumer list|forget` (see [`consumer.md`](consumer.md)), `<type> changes` (see [`changes.md`](changes.md)), `<type> refresh` (see [`refresh.md`](refresh.md)), `attention list`/`attention explain` and the `pg-desk-attention` plugin (see [`attention.md`](attention.md)), `freshness` (the per-source data age, see [`freshness.md`](freshness.md)), the typed `<type> show` composite view (see [`show.md`](show.md)), `status`, `doctor`, `heartbeat`/`heartbeat-item`, and
 `import-pg-pr-annotations`, and the annotation verbs `<type> annotate|suppress|unsuppress`,
 `pr force-review` and the typed `hide`/`unhide`/`wip`/`pr feedback` forms (see
 [`annotate.md`](annotate.md)).
@@ -74,6 +74,7 @@ back here — not the full list.
 | [`changes.md`](changes.md)                                   | `pg-desk <type> changes` — list-and-diff change feed, envelope, cursor, exit codes                                                 |
 | [`refresh.md`](refresh.md)                                   | `pg-desk <type> refresh` — targeted single-entity hydration, change kind, exit codes                                               |
 | [`attention.md`](attention.md)                               | `pg-desk attention list`/`explain` and the `pg-desk-attention` plugin — the read-time attention evaluator, its rules, grouping     |
+| [`freshness.md`](freshness.md)                               | `pg-desk freshness`, the dashboard `sources[]` and `pg_desk_source_age_seconds` — per-source data age, the staleness threshold     |
 | [`operator-commands.md`](operator-commands.md)               | `show`, `status`, `sweep`, `doctor`, `heartbeat`, `heartbeat-item`                                                                 |
 | [`import-pg-pr-annotations.md`](import-pg-pr-annotations.md) | The one-shot pg-pr cutover tool                                                                                                    |
 
@@ -90,7 +91,8 @@ before Phase 12 deletes the Ops board. The short version, detailed per doc above
   OpenTelemetry.
 - **Prometheus:** only `serve` exposes anything, now a real catalog on the same `/metrics` route
   (`pg_desk_liveness`, `pg_desk_dashboard_age_seconds`, `pg_desk_dashboard_stale`,
-  `pg_desk_dropped`, `pg_desk_sync_errors_total`), replacing the earlier minimal
+  `pg_desk_dropped`, `pg_desk_sync_errors_total`, and `pg_desk_source_age_seconds{source}`, the
+  per-source data age, see [`freshness.md`](freshness.md)), replacing the earlier minimal
   scrape-keeps-green stub — see [`serve.md`](serve.md)'s "Telemetry and logs".
 - **Logs:** `run` logs structured JSON to stderr (pg-router captures it) and adds a three-stage
   timeline under `--verbose`, folding sync's own outcome (whether it ran, and any `sync_error`)

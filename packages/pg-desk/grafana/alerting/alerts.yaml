@@ -12,7 +12,10 @@
 # snapshot rather than processing a queue like pg-router does.
 # pg_desk_dashboard_stale / pg_desk_dashboard_age_seconds are the closest
 # analog: a persistently stale snapshot IS pg-desk's version of an
-# unprocessed backlog that never drains.
+# unprocessed backlog that never drains. They are PIPELINE LIVENESS (the age
+# of meta.last_heartbeat, i.e. whether the desk-heartbeat role is still
+# running), NOT data age; the age of each source's last successful origin
+# fetch is pg_desk_source_age_seconds{source}, on which no rule is shipped.
 #
 # Folder "pg-desk" converges by TITLE with the existing pg-desk dashboards'
 # own dashboardProviders folder (phillipgreenii-nix-support-apps
@@ -77,8 +80,9 @@ groups:
                     type: lt
                     params: [1]
 
-      # Backlog-equivalent: pg_desk_dashboard_stale is pg-desk's own
-      # explicit 0=fresh/1=stale flag (design doc section 8;
+      # Pipeline-liveness backlog-equivalent: pg_desk_dashboard_stale is
+      # pg-desk's own explicit 0=fresh/1=stale flag over meta.last_heartbeat (it
+      # is NOT data age, see pg_desk_source_age_seconds) (design doc section 8;
       # staleAfterSeconds = syncIntervalSeconds * boundIntervals -- see
       # pg-desk-metrics.json's "Stale" panel description for the exact
       # polarity, which is pinned and deliberately the OPPOSITE of a

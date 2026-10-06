@@ -189,3 +189,35 @@ func TestOldestAnchorCheckAgeGauge(t *testing.T) {
 		t.Fatalf("MetricOldestAnchorCheckAge (empty) = %d, want 0", got)
 	}
 }
+
+// TestSourceAgeIsPerSourceAndOmitsUnknown pins pg_desk_source_age_seconds:
+// one series per source with a known age, and NO series for an unknown one
+// (the snapshot omits it), so a never-fetched source never reads as age 0.
+func TestSourceAgeIsPerSourceAndOmitsUnknown(t *testing.T) {
+	h := newHarness(t)
+	h.snap = Snapshot{SourceAges: []SourceAge{
+		{Source: "pg-connector-pr-github", Seconds: 120},
+		{Source: "pg-connector-issue-jira", Seconds: 2400},
+	}}
+	g, ok := findMetric(t, h.collect(t), MetricSourceAge).Data.(metricdata.Gauge[int64])
+	if !ok {
+		t.Fatal("MetricSourceAge is not an int64 gauge")
+	}
+	got := map[string]int64{}
+	for _, dp := range g.DataPoints {
+		v, _ := dp.Attributes.Value(attribute.Key("source"))
+		got[v.AsString()] = dp.Value
+	}
+	if len(got) != 2 || got["pg-connector-pr-github"] != 120 || got["pg-connector-issue-jira"] != 2400 {
+		t.Fatalf("MetricSourceAge = %v, want one series per known source", got)
+	}
+
+	h.snap = Snapshot{}
+	for _, sm := range h.collect(t).ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if g, ok := m.Data.(metricdata.Gauge[int64]); ok && m.Name == MetricSourceAge && len(g.DataPoints) != 0 {
+				t.Fatalf("MetricSourceAge exported %d series with no known source", len(g.DataPoints))
+			}
+		}
+	}
+}

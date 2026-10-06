@@ -9,6 +9,12 @@
 // directly-scraped Prometheus exposition endpoint — no OTLP push involved
 // for metrics.
 //
+// pg_desk_dashboard_age_seconds and pg_desk_dashboard_stale report PIPELINE
+// LIVENESS: the age of meta.last_heartbeat, i.e. whether the heartbeat that
+// refreshes this snapshot is still running. They say nothing about how old
+// the data behind the snapshot is; that is pg_desk_source_age_seconds{source},
+// the age of each source's last successful origin fetch (INV-FRESH-5).
+//
 // pg_desk_dashboard_stale's value mapping is pinned explicitly here, not
 // left to be inferred by analogy: 0 = fresh, 1 = stale. This is the
 // OPPOSITE polarity from a presence-style gauge (where 1 is the GOOD
@@ -37,10 +43,12 @@ const (
 	// pg-router's own dispatch loop has.
 	MetricLiveness = "pg_desk_liveness"
 	// MetricDashboardAge promotes the /api/v1/dashboard payload's
-	// age_seconds field so it is alertable, not just displayed.
+	// age_seconds field so it is alertable, not just displayed. It is
+	// pipeline liveness (the age of meta.last_heartbeat), not data age.
 	MetricDashboardAge = "pg_desk_dashboard_age_seconds"
-	// MetricDashboardStale promotes the payload's stale field. See the
-	// package doc for its pinned polarity: 0 = fresh, 1 = stale.
+	// MetricDashboardStale promotes the payload's stale field: pipeline
+	// liveness (meta.last_heartbeat older than two heartbeat periods), not data
+	// age. See the package doc for its pinned polarity: 0 = fresh, 1 = stale.
 	MetricDashboardStale = "pg_desk_dashboard_stale"
 	// MetricDropped promotes the payload's dropped_count — a point-in-time
 	// count, hence a gauge, not a counter (matches the My Work dashboard's
@@ -83,6 +91,11 @@ const (
 	// unchanged check no longer touches the anchor bead, so this is how a
 	// stalled sync stays detectable.
 	MetricOldestAnchorCheckAge = "pg_desk_oldest_anchor_check_age_seconds"
+	// MetricSourceAge is the age in seconds of each source's last SUCCESSFUL
+	// origin fetch, per source (the connector backend). A source with no
+	// recorded success exports NO series: it is never exported as 0, which
+	// would read as freshly fetched.
+	MetricSourceAge = "pg_desk_source_age_seconds"
 )
 
 // Snapshot is the subset of the /api/v1/dashboard payload the metrics
@@ -104,6 +117,15 @@ type Snapshot struct {
 	SyncErrorExhaustedRows int
 	// OldestAnchorCheckAgeSeconds backs MetricOldestAnchorCheckAge.
 	OldestAnchorCheckAgeSeconds int
+	// SourceAges backs MetricSourceAge: one entry per source with a known
+	// age; sources with an unknown age are omitted.
+	SourceAges []SourceAge
+}
+
+// SourceAge is one source's age for MetricSourceAge.
+type SourceAge struct {
+	Source  string
+	Seconds int
 }
 
 // SnapshotFunc supplies the current dashboard snapshot at collect time.
@@ -134,7 +156,7 @@ func New(mp metric.MeterProvider, snapshotFn SnapshotFunc) (*Emitter, error) {
 
 	if _, err := m.Int64ObservableGauge(
 		MetricDashboardAge,
-		metric.WithDescription("age, in seconds, of the /api/v1/dashboard payload's generated_at (promotes that payload's age_seconds field)"),
+		metric.WithDescription("pipeline liveness: age, in seconds, of the /api/v1/dashboard payload's generated_at, i.e. of meta.last_heartbeat (promotes that payload's age_seconds field); NOT the age of the data, see pg_desk_source_age_seconds"),
 		metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
 			snap, err := snapshotFn()
 			if err != nil {
@@ -149,7 +171,7 @@ func New(mp metric.MeterProvider, snapshotFn SnapshotFunc) (*Emitter, error) {
 
 	if _, err := m.Int64ObservableGauge(
 		MetricDashboardStale,
-		metric.WithDescription("0 = fresh, 1 = stale (promotes the /api/v1/dashboard payload's stale field; explicit polarity, opposite of a presence-style gauge — see package doc)"),
+		metric.WithDescription("pipeline liveness: 0 = fresh, 1 = stale, where stale means meta.last_heartbeat is older than two heartbeat periods (promotes the /api/v1/dashboard payload's stale field; explicit polarity, opposite of a presence-style gauge, see package doc); NOT the age of the data, see pg_desk_source_age_seconds"),
 		metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
 			snap, err := snapshotFn()
 			if err != nil {
@@ -206,6 +228,23 @@ func New(mp metric.MeterProvider, snapshotFn SnapshotFunc) (*Emitter, error) {
 		); err != nil {
 			return nil, err
 		}
+	}
+
+	if _, err := m.Int64ObservableGauge(
+		MetricSourceAge,
+		metric.WithDescription("age, in seconds, of each source's last successful origin fetch (the connector ledger's refreshed_at), per source; a source with no recorded success exports no series"),
+		metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
+			snap, err := snapshotFn()
+			if err != nil {
+				return err
+			}
+			for _, s := range snap.SourceAges {
+				o.Observe(int64(s.Seconds), metric.WithAttributes(attribute.String("source", s.Source)))
+			}
+			return nil
+		}),
+	); err != nil {
+		return nil, err
 	}
 
 	syncErrors, err := m.Int64Counter(

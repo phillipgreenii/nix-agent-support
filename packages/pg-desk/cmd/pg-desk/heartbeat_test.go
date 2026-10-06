@@ -25,6 +25,7 @@ func runNamedCmd(t *testing.T, name string) (stdout string, err error) {
 func TestHeartbeatUpdatesLastHeartbeat(t *testing.T) {
 	st, openFresh := openTestStore(t)
 	withOpenSeams(t, openTestConfig("o/r"), openFresh)
+	withHeartbeatLedger(t, "[]", nil) // never read a real ledger from a test
 
 	origNow := heartbeatNow
 	t.Cleanup(func() { heartbeatNow = origNow })

@@ -12,6 +12,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/changes"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/freshness"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/metrics"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/sync"
@@ -79,6 +80,7 @@ func newMetricsHandler(st *store.Store, cfg *config.Config) (http.Handler, error
 			SyncErrorExhaustedRows:    exhausted,
 
 			OldestAnchorCheckAgeSeconds: anchorCheckAge,
+			SourceAges:                  sourceAges(payload.Sources),
 		}, nil
 	}
 
@@ -98,6 +100,19 @@ func newMetricsHandler(st *store.Store, cfg *config.Config) (http.Handler, error
 	}
 
 	return promhttp.HandlerFor(registry, promhttp.HandlerOpts{}), nil
+}
+
+// sourceAges projects the payload's sources[] to the gauge's input: a
+// source with no recorded success (null age) is omitted, so it exports no
+// series rather than a misleading 0.
+func sourceAges(rows []freshness.Row) []metrics.SourceAge {
+	var out []metrics.SourceAge
+	for _, r := range rows {
+		if r.AgeSeconds != nil {
+			out = append(out, metrics.SourceAge{Source: r.Source, Seconds: *r.AgeSeconds})
+		}
+	}
+	return out
 }
 
 // syncErrorStats counts interpretation rows with a non-empty sync_error and

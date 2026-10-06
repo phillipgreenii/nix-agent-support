@@ -19,9 +19,13 @@ serves `GET /api/v1/dashboard` with today's payload contract — the five named 
 `mine_awaiting_team`) and the root fields `generated_at`, `age_seconds`, `stale`, `stale_after_seconds`,
 `sync_interval_seconds`, `dropped_count` — plus the fields this phase adds: a `hidden` array,
 `last_run_at`, `last_sweep_at`, `runs_failed_24h`, `errors[]`, and per-row `degraded`,
-`sync_error`, and `ready_to_promote`. Freshness derives from `meta.last_heartbeat` with the same
+`sync_error`, and `ready_to_promote`. It also carries an additive `sources[]` — the per-source data age (see [`freshness.md`](freshness.md)): one row per
+connector source with `source`, `label`, `last_success_at`, `age_seconds` (both `null` for a source
+with no recorded success) and `stale`. The payload's own `generated_at`, `age_seconds` and `stale`
+are PIPELINE LIVENESS, not data age: they derive from `meta.last_heartbeat` with the same
 two-heartbeat-period staleness bound `pg-pr` uses today, so a dead scheduler shows as stale within
-two heartbeat periods.
+two heartbeat periods, whatever the sources say. A stale source never flips them, and a stale
+heartbeat says nothing about how old the data behind it is (`INV-FRESH-5`).
 
 ### The `attention` field
 
@@ -51,11 +55,15 @@ at startup, and `0` on a clean shutdown. No other exit code is assigned to it in
 `serve` exposes a real Prometheus metrics catalog on `/metrics` (same route, same
 503-until-ready gate as `/api/v1/dashboard`): `pg_desk_liveness` (1 while `serve` answers a
 scrape), `pg_desk_dashboard_age_seconds` and `pg_desk_dashboard_stale` (promoted from the
-dashboard payload's own `age_seconds`/`stale` fields — `stale` is `0 = fresh`, `1 = stale`, the
-opposite polarity from a presence-style gauge), `pg_desk_dropped` (promoted from
+dashboard payload's own `age_seconds`/`stale` fields — pipeline LIVENESS, the age of
+`meta.last_heartbeat`, not the age of the data; `stale` is `0 = fresh`, `1 = stale`, the
+opposite polarity from a presence-style gauge, and a stale source does not flip it), `pg_desk_dropped` (promoted from
 `dropped_count`, a point-in-time gauge, matching this payload's own field), and
 `pg_desk_sync_errors_total` (a counter, by repo — registered and exposed but with no live call
-site wired here, since `serve` never itself runs sync). Five gauges are read from the shared
+site wired here, since `serve` never itself runs sync). `pg_desk_source_age_seconds{source}` is the
+DATA age: the seconds since each source's last successful origin fetch, one series per source with
+a recorded success and none for a source without one (never exported as `0`; see
+[`freshness.md`](freshness.md)). Five further gauges are read from the shared
 store at scrape time, so they do reflect failures `run` recorded: `pg_desk_sync_error_rows` (rows
 with a recorded `sync_error`), `pg_desk_oldest_sync_error_age_seconds`, and — splitting those rows
 by their automatic-retry state (bead `pg2-xb6fs`, see [`sync.md`](sync.md)'s "Automatic retry")

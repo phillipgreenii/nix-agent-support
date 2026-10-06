@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"unicode/utf8"
 )
 
 // Well-known meta keys, per the design doc's section 7.6 ("meta: schema
@@ -49,4 +50,31 @@ func (s *Store) GetMeta(key string) (value string, found bool, err error) {
 		return "", false, fmt.Errorf("store: get meta %q: %w", key, err)
 	}
 	return value, true, nil
+}
+
+// ListMetaPrefix returns every meta row whose key starts with prefix, keyed
+// by the full key. An empty result is an empty (non-nil) map, not an error.
+// The prefix is matched literally (no LIKE wildcards), so a key containing
+// "%" or "_" cannot widen the match.
+func (s *Store) ListMetaPrefix(prefix string) (map[string]string, error) {
+	rows, err := s.sql.Query(
+		`SELECT key, value FROM meta WHERE substr(key, 1, ?) = ? ORDER BY key`,
+		utf8.RuneCountInString(prefix), prefix,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("store: list meta prefix %q: %w", prefix, err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]string{}
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			return nil, fmt.Errorf("store: list meta prefix %q: %w", prefix, err)
+		}
+		out[k] = v
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list meta prefix %q: %w", prefix, err)
+	}
+	return out, nil
 }

@@ -1,4 +1,4 @@
-# pg-desk — show, status, sweep, reconcile, doctor, heartbeat, heartbeat-item
+# pg-desk — show, status, sweep, reconcile, doctor, heartbeat, heartbeat-item, freshness
 
 ## show
 
@@ -179,11 +179,25 @@ unresolvable watched query, a stalled consumer, a violated sweep bound and an un
 
 ## heartbeat / heartbeat-item
 
-`pg-desk heartbeat` stamps `meta.last_heartbeat`. `pg-desk heartbeat-item` prints the single
-pr-pool item the `desk-heartbeat` query emits, carrying a timestamp id.
+`pg-desk heartbeat` stamps `meta.last_heartbeat` and then records each connector source's last
+successful fetch time, copied from `pg-connector ledger show` (a local read), under the `meta`
+keys `source_fetch.*` (see [`freshness.md`](freshness.md)). The liveness stamp is written first
+and never depends on the connector: when `pg-connector ledger show` is missing, slow or
+undecodable, `heartbeat` says so on stderr, keeps the previously recorded times, and still exits
+`0`. `pg-desk heartbeat-item` prints the single pr-pool item the `desk-heartbeat` query emits,
+carrying a timestamp id.
 
 Exit codes: `0` on success; `1` when the store cannot be written (`heartbeat`) or read
 (`heartbeat-item`).
+
+## freshness
+
+`pg-desk freshness --json` prints the per-source data age as one JSON document, from the store
+only (no network, no connector call, no write): `schemaVersion`, `now`, `stale_after_seconds`,
+`any_stale` and `sources[]` of `source`, `label`, `last_success_at`, `age_seconds` and `stale`.
+The contract, the invariants and the configuration are in [`freshness.md`](freshness.md).
+
+Exit codes: `0` whenever the store is readable; `1` when it is not.
 
 ## Telemetry and logs
 

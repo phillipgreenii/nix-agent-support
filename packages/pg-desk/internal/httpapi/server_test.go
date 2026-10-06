@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/freshness"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
@@ -485,5 +486,124 @@ func TestSyncRetryStats(t *testing.T) {
 	}
 	if retrying != 2 || exhausted != 2 {
 		t.Fatalf("syncRetryStats = (%d, %d), want (2, 2)", retrying, exhausted)
+	}
+}
+
+// freshnessFixture seeds the minimum a served dashboard needs plus three
+// recorded sources: one fresh, one stale, one that never succeeded.
+func freshnessFixture(t *testing.T) (*store.Store, time.Time) {
+	t.Helper()
+	s := store.OpenForTest(t)
+	mustUpsertInterpretation(t, s, store.Interpretation{
+		Repo: "acme/widgets", EntityType: "pull_request", EntityID: "1",
+		Panel: PanelMineAwaitingMe, AsOf: "2026-09-16T12:00:00Z",
+	})
+	now := time.Date(2026, 9, 16, 12, 0, 30, 0, time.UTC)
+	mustSetMeta(t, s, store.MetaKeyLastHeartbeat, "2026-09-16T12:00:00Z")
+	at := func(d time.Duration) *time.Time { u := now.Add(d); return &u }
+	if err := freshness.Update(s, []freshness.LedgerRow{
+		{Type: "pr", Backend: "pg-connector-pr-github", Query: "mine", RefreshedAt: at(-2 * time.Minute)},
+		{Type: "issue", Backend: "pg-connector-issue-jira", Query: "mine", RefreshedAt: at(-40 * time.Minute)},
+		{Type: "thread", Backend: "pg-connector-thread-slack", Query: "mine"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	setClock(t, now)
+	return s, now
+}
+
+// TestDashboardSourcesAreAdditiveAndSeparateFromLiveness pins INV-FRESH-5:
+// sources[] is added, the pipeline-liveness fields keep their meaning (here
+// the heartbeat is fresh while a source is stale), and each row carries the
+// freshness row shape.
+func TestDashboardSourcesAreAdditiveAndSeparateFromLiveness(t *testing.T) {
+	s, _ := freshnessFixture(t)
+	handler, err := NewHandler(s, testConfig())
+	if err != nil {
+		t.Fatalf("NewHandler: %v", err)
+	}
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/v1/dashboard", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d; body: %s", rr.Code, rr.Body.String())
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	// Existing fields are unchanged.
+	for _, k := range []string{"generated_at", "age_seconds", "stale", "stale_after_seconds", "sync_interval_seconds", "dropped_count", "hidden", "errors"} {
+		if _, ok := raw[k]; !ok {
+			t.Errorf("existing field %q vanished from the payload", k)
+		}
+	}
+	if raw["stale"] != false || raw["age_seconds"] != float64(30) {
+		t.Errorf("liveness stale=%v age_seconds=%v, want false/30 (a stale SOURCE must not flip pipeline liveness)", raw["stale"], raw["age_seconds"])
+	}
+
+	var payload Payload
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Sources) != 3 {
+		t.Fatalf("sources = %+v, want 3", payload.Sources)
+	}
+	by := map[string]freshness.Row{}
+	for _, r := range payload.Sources {
+		by[r.Label] = r
+	}
+	if r := by["pr-github"]; r.Stale || *r.AgeSeconds != 120 {
+		t.Errorf("pr-github = %+v", r)
+	}
+	if r := by["issue-jira"]; !r.Stale || *r.AgeSeconds != 2400 {
+		t.Errorf("issue-jira = %+v", r)
+	}
+	if r := by["thread-slack"]; !r.Stale || r.AgeSeconds != nil || r.LastSuccessAt != nil {
+		t.Errorf("thread-slack = %+v, want unknown and stale", r)
+	}
+}
+
+func TestDashboardSourcesIsEmptyArrayWhenNothingRecorded(t *testing.T) {
+	s := store.OpenForTest(t)
+	mustUpsertInterpretation(t, s, store.Interpretation{
+		Repo: "acme/widgets", EntityType: "pull_request", EntityID: "1",
+		Panel: PanelMineAwaitingMe, AsOf: "2026-09-16T12:00:00Z",
+	})
+	mustSetMeta(t, s, store.MetaKeyLastHeartbeat, "2026-09-16T12:00:00Z")
+	setClock(t, time.Date(2026, 9, 16, 12, 0, 30, 0, time.UTC))
+	p, err := BuildPayload(s, testConfig(), nowUTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(p)
+	if !strings.Contains(string(b), `"sources":[]`) {
+		t.Errorf("payload = %s, want sources serialized as []", b)
+	}
+}
+
+// TestMetricsSourceAgeSeriesPerKnownSource is the metric's scrape-level
+// contract: a series per source with a known age, none for the unknown one,
+// and pg_desk_dashboard_stale untouched by a stale source.
+func TestMetricsSourceAgeSeriesPerKnownSource(t *testing.T) {
+	s, _ := freshnessFixture(t)
+	handler, err := NewHandler(s, testConfig())
+	if err != nil {
+		t.Fatalf("NewHandler: %v", err)
+	}
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	body := rr.Body.String()
+	for _, want := range []string{
+		"# TYPE pg_desk_source_age_seconds gauge",
+		`pg_desk_source_age_seconds{source="pg-connector-pr-github"} 120`,
+		`pg_desk_source_age_seconds{source="pg-connector-issue-jira"} 2400`,
+		"pg_desk_dashboard_stale 0",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q; full body:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "thread-slack") {
+		t.Errorf("a source with no recorded success exported a series:\n%s", body)
 	}
 }

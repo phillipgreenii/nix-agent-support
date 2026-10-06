@@ -264,7 +264,7 @@ absence for a defect.
 - **Further time-based rules** (a snooze that expires, escalation by waiting time). The evaluator
   takes the clock as an input, and `issue.stale-in-progress` is the first rule to use it.
 - **Freshness of the underlying data.** How old the data behind an item is, per source, is a
-  separate contract and is not an attention item.
+  separate contract and is not an attention item (see [`freshness.md`](freshness.md)).
 
 ## Telemetry and logs
 

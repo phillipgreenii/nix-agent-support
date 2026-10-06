@@ -52,6 +52,8 @@ func TestConfigCoversAllSection78Keys(t *testing.T) {
 		"links",
 		// attention (bead pg2-5l0x4.2): the read-time attention evaluator's block.
 		"attention",
+		// freshness (bead pg2-ll4dw.2): the per-source data-age contract.
+		"freshness",
 		// Entity-change-flow keys (design 9.10).
 		"watch", "sweep", "hydration", "change_log_retention", "consumer_stale_after",
 	}
@@ -81,6 +83,8 @@ func TestConfigCoversAllSection78Keys(t *testing.T) {
 		{"ServeConfig", reflect.TypeOf(ServeConfig{}), []string{"addr", "log"}},
 		{"OpenConfig", reflect.TypeOf(OpenConfig{}), []string{"chrome_bin"}},
 		{"LinksConfig", reflect.TypeOf(LinksConfig{}), []string{"issue_url_template"}},
+		{"FreshnessConfig", reflect.TypeOf(FreshnessConfig{}), []string{"source_stale_after", "sources"}},
+		{"FreshnessSourceConfig", reflect.TypeOf(FreshnessSourceConfig{}), []string{"label", "stale_after"}},
 		{"AttentionConfig", reflect.TypeOf(AttentionConfig{}), []string{"rules", "ordering"}},
 		{"AttentionRuleConfig", reflect.TypeOf(AttentionRuleConfig{}), []string{"enabled", "severity", "stale_after_days"}},
 		{"AttentionOrderingConfig", reflect.TypeOf(AttentionOrderingConfig{}), []string{"ties"}},
@@ -277,6 +281,10 @@ func TestLoadFile_FullExample(t *testing.T) {
 		cfg.ReconcileAge() != 30*time.Minute ||
 		cfg.ChangeLogRetention() != 14*24*time.Hour || cfg.ConsumerStaleAfter() != 7*24*time.Hour {
 		t.Errorf("change-flow scalars not parsed: %+v", cfg)
+	}
+
+	if cfg.SourceStaleAfter() != 15*time.Minute || cfg.Freshness.Sources["pr-github"].Label != "PRs" || cfg.Freshness.Sources["pr-github"].StaleAfter != "30m" {
+		t.Errorf("freshness block not parsed: %+v", cfg.Freshness)
 	}
 
 	if cfg.Path != examplePath {
@@ -796,6 +804,54 @@ func TestInProgressStatuses(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := tc.cfg.InProgressStatuses(); !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("InProgressStatuses() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFreshnessKeys_DefaultsAndExplicit(t *testing.T) {
+	dir := t.TempDir()
+	cfg, err := LoadFile(writeYAML(t, dir, changeFlowBase))
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	if got := cfg.SourceStaleAfter(); got != 15*time.Minute {
+		t.Errorf("default SourceStaleAfter = %v, want 15m", got)
+	}
+	var nilCfg *Config
+	if got := nilCfg.SourceStaleAfter(); got != DefaultSourceStaleAfter {
+		t.Errorf("nil Config SourceStaleAfter = %v, want the default", got)
+	}
+
+	cfg, err = LoadFile(writeYAML(t, t.TempDir(), changeFlowBase+`freshness:
+  source_stale_after: 1h
+  sources:
+    pr-github:
+      label: PRs
+      stale_after: 30m
+`))
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	if got := cfg.SourceStaleAfter(); got != time.Hour {
+		t.Errorf("SourceStaleAfter = %v, want 1h", got)
+	}
+	if got := cfg.Freshness.Sources["pr-github"]; got.Label != "PRs" || got.StaleAfter != "30m" {
+		t.Errorf("sources[pr-github] = %+v", got)
+	}
+}
+
+func TestFreshnessKeys_InvalidFail(t *testing.T) {
+	for name, tc := range map[string]struct{ block, key string }{
+		"unparseable threshold": {"freshness:\n  source_stale_after: soon\n", "freshness.source_stale_after"},
+		"zero threshold":        {"freshness:\n  source_stale_after: 0s\n", "freshness.source_stale_after"},
+		"negative threshold":    {"freshness:\n  source_stale_after: -5m\n", "freshness.source_stale_after"},
+		"bad per-source":        {"freshness:\n  sources:\n    pr-github:\n      stale_after: later\n", "freshness.sources.pr-github.stale_after"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := LoadFile(writeYAML(t, t.TempDir(), changeFlowBase+tc.block))
+			if err == nil || !strings.Contains(err.Error(), tc.key) {
+				t.Fatalf("LoadFile: err = %v, want an error naming %s", err, tc.key)
 			}
 		})
 	}
