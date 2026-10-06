@@ -45,6 +45,7 @@ mkGoApp {
       ./pkg/provider/agentsession
       ./pkg/provider/attention
       ./pkg/provider/search
+      ./pkg/provider/activity
       ./cmd/pg-connector-agentsession-pa-monitor
     ];
   };

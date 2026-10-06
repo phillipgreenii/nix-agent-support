@@ -46,6 +46,7 @@ mkGoApp {
       ./pkg/provider/iface.go
       ./pkg/provider/issue
       ./pkg/provider/attention
+      ./pkg/provider/activity
       ./cmd/pg-connector-issue-beads
     ];
   };
