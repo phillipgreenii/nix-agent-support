@@ -6068,6 +6068,23 @@
                     selfLogin = "phillipgreenii";
                     repos = [ { remote = "phillipgreenii/example-repo"; } ];
                   };
+                  # areaLabels (bead pg2-lvoye): rendered as config.yaml's area_labels.
+                  hmAreaLabels = evalHM {
+                    enable = true;
+                    selfLogin = "phillipgreenii";
+                    repos = [ { remote = "phillipgreenii/example-repo"; } ];
+                    areaLabels = [
+                      {
+                        pattern = "^feat\\(svc/alpha\\)";
+                        labels = [ "alpha" ];
+                      }
+                      {
+                        pattern = "PROJ-[0-9]+";
+                        field = "branch";
+                        labels = [ "proj" ];
+                      }
+                    ];
+                  };
                 in
                 # Darwin module: no consumer input required to evaluate
                 # (default enable = false, no launchd entry registered).
@@ -6135,7 +6152,16 @@
                 # rendered.
                 assert lib.elem pkgs.pg-desk hmEnabled.home.packages;
                 assert hmEnabled.xdg.configFile ? "pg-desk/config.yaml";
-                pkgs.runCommand "test-pg-desk-module-ok" { } "touch $out";
+                pkgs.runCommand "test-pg-desk-module-ok" { } ''
+                  # area_labels absent by default, rendered when set (field defaults to title).
+                  ! grep -q area_labels ${hmEnabled.xdg.configFile."pg-desk/config.yaml".source}
+                  f=${hmAreaLabels.xdg.configFile."pg-desk/config.yaml".source}
+                  grep -q '^area_labels:' "$f"
+                  grep -q 'field: title' "$f"
+                  grep -q 'field: branch' "$f"
+                  grep -q 'PROJ-\[0-9\]+' "$f"
+                  touch $out
+                '';
 
               # INTRA-evaluator mechanical coverage (bead pg2-hvlyj.14, plan
               # item 5.2): drive the behavior-docs-intra-conformance skill's

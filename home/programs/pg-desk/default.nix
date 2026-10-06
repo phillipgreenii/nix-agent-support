@@ -73,6 +73,7 @@ let
   // lib.optionalAttrs (cfg.reviewExemptChecks != [ ]) {
     review_exempt_checks = cfg.reviewExemptChecks;
   }
+  // lib.optionalAttrs (cfg.areaLabels != [ ]) { area_labels = cfg.areaLabels; }
   // lib.optionalAttrs (cfg.ciOnlyAttemptsThreshold != null) {
     ci_only_attempts_threshold = cfg.ciOnlyAttemptsThreshold;
   }
@@ -235,6 +236,39 @@ in
         this list, the PR is treated as reviewable while its CI state still
         reads failed. A failed run whose job results were not fetched is
         never exempt. Empty (the default) exempts nothing.
+      '';
+    };
+
+    areaLabels = lib.mkOption {
+      type = lib.types.listOf (
+        lib.types.submodule {
+          options = {
+            pattern = lib.mkOption {
+              type = lib.types.str;
+              description = "Go (RE2) regexp searched in the PR field.";
+            };
+            field = lib.mkOption {
+              type = lib.types.enum [
+                "title"
+                "branch"
+              ];
+              default = "title";
+              description = "PR field the pattern is searched in.";
+            };
+            labels = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              description = "Labels added to a matching PR's merge-request bead and its children.";
+            };
+          };
+        }
+      );
+      default = [ ];
+      description = ''
+        config.yaml's area_labels: rules deriving area labels for the
+        merge-request bead from the PR title or branch; its review-pr and
+        process-feedback children copy them. Sync only ever adds these
+        labels. Empty (the default) labels nothing. The vocabulary is
+        deployment-specific and supplied by the consuming flake.
       '';
     };
 
