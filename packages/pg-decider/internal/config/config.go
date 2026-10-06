@@ -51,6 +51,10 @@ type Config struct {
 	// EscalateAfter is the consecutive-failure threshold; nil means 3 and an
 	// explicit value below 1 makes Load fail. Read it through K.
 	EscalateAfter *int `json:"escalate_after,omitempty"`
+	// AreaLabels are rules deriving area labels for a PR's merge-request
+	// anchor and its review-pr / process-feedback children from the PR title
+	// or branch. Empty (the default) labels nothing. See AreaLabelRule.
+	AreaLabels []AreaLabelRule `json:"area_labels,omitempty"`
 }
 
 // K is the effective escalation threshold.
@@ -87,6 +91,9 @@ func Load() (*Config, error) {
 	}
 	if c.EscalateAfter != nil && *c.EscalateAfter < 1 {
 		return nil, fmt.Errorf("config: escalate_after in %q is %d; it must be at least 1", path, *c.EscalateAfter)
+	}
+	if err := validateAreaLabels(c.AreaLabels); err != nil {
+		return nil, fmt.Errorf("config: %q: %w", path, err)
 	}
 	return &c, nil
 }

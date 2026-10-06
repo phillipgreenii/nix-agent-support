@@ -73,7 +73,7 @@ The invariants of this set are numbered `INV-DECIDER-<n>` across the docs, in RF
 
 - `INV-DECIDER-1` to `INV-DECIDER-6` are in [`work-items.md`](work-items.md).
 - `INV-DECIDER-7` to `INV-DECIDER-20` are in [`plan-and-apply.md`](plan-and-apply.md).
-- `INV-DECIDER-21` to `INV-DECIDER-23` are in [`config.md`](config.md).
+- `INV-DECIDER-21` to `INV-DECIDER-24` are in [`config.md`](config.md).
 
 ## Scope
 

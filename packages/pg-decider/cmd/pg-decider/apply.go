@@ -12,6 +12,7 @@ import (
 
 	"github.com/phillipgreenii/pg-decider/internal/action"
 	"github.com/phillipgreenii/pg-decider/internal/apply"
+	"github.com/phillipgreenii/pg-decider/internal/arealabels"
 	"github.com/phillipgreenii/pg-decider/internal/audit"
 	"github.com/phillipgreenii/pg-decider/internal/config"
 	"github.com/phillipgreenii/pg-decider/internal/decide"
@@ -61,7 +62,7 @@ var applyFn = func(ctx context.Context, out, errOut io.Writer, typ, id string, i
 		fmt.Fprintf(errOut, "pg-decider: %v\n", err)
 		return exitcode.Failure
 	}
-	plan := decideFn(v, typ)
+	plan := arealabels.Apply(decideFn(v, typ), v, cfg)
 	res := apply.Run(ctx, apply.Input{
 		Type: typ, ID: id, View: v, Actions: plan.Actions, Item: it, Hooks: applyHooks(v, typ, id),
 		Env: apply.Env{Command: applyCommand, Config: cfg, Clock: time.Now, Stderr: errOut},

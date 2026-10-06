@@ -12,14 +12,23 @@ The configuration is one JSON file whose path is named by the environment variab
 - When it names a file that is missing or is not valid JSON, `apply` exits `1` with a message
   naming the path, before it writes anything.
 - Unknown keys are tolerated, so a deployment MAY carry a key a later version of the decider reads.
-- Only `apply` loads the file. `plan` writes nothing and reads no configuration.
+- `apply` loads the file for every key. `plan` writes nothing and reads the file only for
+  `area_labels`, so the plan it prints shows the labels `apply` would write; a file that is named
+  but unusable makes `plan` exit `1`.
 
 ```json
 {
   "agent_tracker_backend": "beads",
   "beads_dir": "/path/to/beads",
   "actor": "pg-decider",
-  "escalate_after": 3
+  "escalate_after": 3,
+  "area_labels": [
+    {
+      "pattern": "^[a-z]+\\(widgets/api\\)",
+      "labels": ["widgets-api", "widgets"]
+    },
+    { "pattern": "(?i)PROJ-[0-9]+", "field": "branch", "labels": ["proj"] }
+  ]
 }
 ```
 
@@ -33,6 +42,33 @@ The configuration is one JSON file whose path is named by the environment variab
 | `escalate_after`        | integer | `3`          | K: the number of consecutive failing runs of a rule after which the failure is escalated to a person                             |
 
 `escalate_after` MUST be at least `1`; an explicit smaller value makes `apply` exit `1`.
+
+### Area labels
+
+| Key           | Type  | Default | Effect                                                                       |
+| ------------- | ----- | ------- | ---------------------------------------------------------------------------- |
+| `area_labels` | array | empty   | Rules that derive area labels for a PR's anchor and its children (see below) |
+
+Each rule is an object with a `pattern` (a Go RE2 regular expression, searched unanchored), an
+optional `field` (`title`, the default, or `branch`) naming the PR field the pattern is searched
+in, and `labels` (at least one non-blank label). A PR's area label set is the union of the labels
+of every rule whose pattern matches. Which labels exist is deployment configuration; the decider
+names none. A rule with an empty or uncompilable pattern, an unknown `field` or no labels makes the
+file invalid.
+
+The area label set is applied as follows:
+
+- The anchor is created with the set.
+- A `review-pr` or `process-feedback` item is created with the set plus every label named by some
+  rule that its anchor already carries, so a label an operator put on the anchor flows to its
+  children.
+- An existing anchor, `review-pr` or `process-feedback` item gains the labels it is missing on its
+  next write of any kind (the writes the rules already call for); no write is created only to add a
+  label.
+- A label is only ever added, never removed: labels added by hand, and an area label later removed
+  by hand, are never fought over.
+
+With no `area_labels`, the decider adds nothing and its plans are unchanged.
 
 ### Settings copied from pg-desk's `sync:` block
 
@@ -62,3 +98,7 @@ configuration.
 - **INV-DECIDER-23.** An absent `escalate_after` MUST mean `3`, an absent `actor` MUST mean
   `pg-decider`, and an absent `agent_tracker_backend` or `beads_dir` MUST pass nothing to the
   connector rather than an empty value.
+- **INV-DECIDER-24.** The decider MUST add the labels of `area_labels` rules only to the anchor and
+  to `review-pr` and `process-feedback` items, MUST NOT remove a label for this reason, MUST NOT
+  create a write whose only purpose is to add one, and with no `area_labels` configured MUST emit
+  exactly the plan it would emit without the key.
