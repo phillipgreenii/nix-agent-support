@@ -1,0 +1,171 @@
+# promtool unit tests for the pg-router-pool-full-idle alert (pg2-owccx). Run by the
+# flake check test-pg-router-alert-rules, which generates rules.yml next to this file:
+# the Grafana rule's refId A wrapped as `alert: <uid>` with `expr: (<A>) > 0`, the
+# rule's `for: 15m` and labels, plus a recording rule `wrapped:<uid with _>` over the
+# same expression (so a case can count instances).
+#
+# Time model: promtool's clock starts at 0 and every series has a 1m interval. A
+# demand series is a counter that advances by 1 every minute (one at-capacity decline
+# per minute), so increase(...[15m]) is above 0 from the first evaluations. The
+# condition then needs `for: 15m`, so it is pending until about 16m: not firing at 10m
+# (t=600s) and firing at 20m (t=1200s).
+#
+# Series shapes mirror the exporters: ccpool_pool_capacity{pool, dim} is emitted per
+# pool with dim=free; ccpool_session_states{pool, state, live} carries a zero bucket
+# for every state, so a pool with no active session still reports starting/ready/working
+# as 0 and its held slots under state=idle. The windows modelled below follow the
+# 2026-10-05 review-pool stall: an idle hold WITH demand fires; a working session
+# holding the slot (no idle) does not; an idle hold WITHOUT demand does not.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: idle session holds the full review pool while review declines are waiting, firing at 20m but not at 10m
+    interval: 1m
+    input_series:
+      - series: pg_router_failures_total{class="declined",reason="at-capacity",role="review"}
+        values: "0+1x40"
+      - series: ccpool_pool_capacity{pool="pg-router-ccpool-review",dim="free"}
+        values: "0x40"
+      - series: ccpool_session_states{pool="pg-router-ccpool-review",state="idle",live="true"}
+        values: "1x40"
+      - series: ccpool_session_states{pool="pg-router-ccpool-review",state="starting",live="true"}
+        values: "0x40"
+      - series: ccpool_session_states{pool="pg-router-ccpool-review",state="ready",live="true"}
+        values: "0x40"
+      - series: ccpool_session_states{pool="pg-router-ccpool-review",state="working",live="true"}
+        values: "0x40"
+    alert_rule_test:
+      - eval_time: 600s
+        alertname: pg-router-pool-full-idle
+        exp_alerts: []
+      - eval_time: 1200s
+        alertname: pg-router-pool-full-idle
+        exp_alerts:
+          - exp_labels:
+              pool: pg-router-ccpool-review
+              role: review
+              severity: warning
+
+  - name: a working session holding the slot does not fire even with demand
+    interval: 1m
+    input_series:
+      - series: pg_router_failures_total{class="declined",reason="at-capacity",role="review"}
+        values: "0+1x40"
+      - series: ccpool_pool_capacity{pool="pg-router-ccpool-review",dim="free"}
+        values: "0x40"
+      - series: ccpool_session_states{pool="pg-router-ccpool-review",state="idle",live="true"}
+        values: "0x40"
+      - series: ccpool_session_states{pool="pg-router-ccpool-review",state="working",live="true"}
+        values: "1x40"
+    alert_rule_test:
+      - eval_time: 1200s
+        alertname: pg-router-pool-full-idle
+        exp_alerts: []
+      - eval_time: 2400s
+        alertname: pg-router-pool-full-idle
+        exp_alerts: []
+
+  - name: an idle hold with no demand does not fire
+    interval: 1m
+    input_series:
+      # The decline counter stopped advancing before the window: no increase.
+      - series: pg_router_failures_total{class="declined",reason="at-capacity",role="review"}
+        values: "5x40"
+      - series: ccpool_pool_capacity{pool="pg-router-ccpool-review",dim="free"}
+        values: "0x40"
+      - series: ccpool_session_states{pool="pg-router-ccpool-review",state="idle",live="true"}
+        values: "1x40"
+      - series: ccpool_session_states{pool="pg-router-ccpool-review",state="working",live="true"}
+        values: "0x40"
+    promql_expr_test:
+      - expr: count(wrapped:pg_router_pool_full_idle)
+        eval_time: 1200s
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 1200s
+        alertname: pg-router-pool-full-idle
+        exp_alerts: []
+
+  - name: a triager decline maps to the shared handler pool pg-router-ccpool
+    interval: 1m
+    input_series:
+      - series: pg_router_failures_total{class="declined",reason="at-capacity",role="pg2-split-triager"}
+        values: "0+1x40"
+      - series: ccpool_pool_capacity{pool="pg-router-ccpool",dim="free"}
+        values: "0x40"
+      - series: ccpool_session_states{pool="pg-router-ccpool",state="idle",live="true"}
+        values: "6x40"
+      - series: ccpool_session_states{pool="pg-router-ccpool",state="working",live="true"}
+        values: "0x40"
+      # A different, free pool must not be matched by the triager mapping.
+      - series: ccpool_pool_capacity{pool="pg-router-ccpool-review",dim="free"}
+        values: "1x40"
+      - series: ccpool_session_states{pool="pg-router-ccpool-review",state="working",live="true"}
+        values: "0x40"
+    promql_expr_test:
+      - expr: count(wrapped:pg_router_pool_full_idle)
+        eval_time: 1200s
+        exp_samples:
+          - labels: "{}"
+            value: 1
+    alert_rule_test:
+      - eval_time: 1200s
+        alertname: pg-router-pool-full-idle
+        exp_alerts:
+          - exp_labels:
+              pool: pg-router-ccpool
+              role: pg2-split-triager
+              severity: warning
+
+  - name: a command role decline never invents a pool and a free pool never fires
+    interval: 1m
+    input_series:
+      # desk-pr has no pool: the explicit mapping drops it, even though a pool whose
+      # name a catch-all mapping would invent is full and idle.
+      - series: pg_router_failures_total{class="declined",reason="at-capacity",role="desk-pr"}
+        values: "0+1x40"
+      - series: ccpool_pool_capacity{pool="pg-router-ccpool-desk-pr",dim="free"}
+        values: "0x40"
+      - series: ccpool_session_states{pool="pg-router-ccpool-desk-pr",state="idle",live="true"}
+        values: "1x40"
+      # Worker demand but a free slot: no fire.
+      - series: pg_router_failures_total{class="declined",reason="at-capacity",role="worker"}
+        values: "0+1x40"
+      - series: ccpool_pool_capacity{pool="pg-router-ccpool-worker",dim="free"}
+        values: "1x40"
+      - series: ccpool_session_states{pool="pg-router-ccpool-worker",state="idle",live="true"}
+        values: "2x40"
+      - series: ccpool_session_states{pool="pg-router-ccpool-worker",state="working",live="true"}
+        values: "0x40"
+    alert_rule_test:
+      - eval_time: 1200s
+        alertname: pg-router-pool-full-idle
+        exp_alerts: []
+
+  - name: the alert resolves when a session starts working or demand stops (live-evidence windows)
+    interval: 1m
+    input_series:
+      # Demand for the first 30m, then none. The slot is idle for the first 25m, then
+      # a session starts working (as the review lane does once reaped and relaunched).
+      - series: pg_router_failures_total{class="declined",reason="at-capacity",role="feedback"}
+        values: "0+1x30 30x30"
+      - series: ccpool_pool_capacity{pool="pg-router-ccpool-feedback",dim="free"}
+        values: "0x60"
+      - series: ccpool_session_states{pool="pg-router-ccpool-feedback",state="idle",live="true"}
+        values: "1x60"
+      - series: ccpool_session_states{pool="pg-router-ccpool-feedback",state="working",live="true"}
+        values: "0x25 1x35"
+    alert_rule_test:
+      - eval_time: 1200s
+        alertname: pg-router-pool-full-idle
+        exp_alerts:
+          - exp_labels:
+              pool: pg-router-ccpool-feedback
+              role: feedback
+              severity: warning
+      - eval_time: 3000s
+        alertname: pg-router-pool-full-idle
+        exp_alerts: []

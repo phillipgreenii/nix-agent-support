@@ -3307,6 +3307,30 @@
                     touch "$out"
                   '';
 
+              # pg-router: the PromQL behaviour of its Grafana alert rules (pg2-owccx).
+              # refId A of each rule listed in packages/pg-router/check-alert-rules.sh is
+              # wrapped as a Prometheus alert and the cases under
+              # grafana/alerting/rule-tests/ run under `promtool test rules`. The
+              # Grafana-only fields (for, noDataState, annotations) are pinned by the Go
+              # tests in internal/alertrules, run by pg-router-go-tests.
+              test-pg-router-alert-rules =
+                pkgs.runCommand "test-pg-router-alert-rules"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bash
+                      pkgs.jq
+                      pkgs.yq-go
+                      pkgs.prometheus.cli
+                      pkgs.coreutils
+                    ];
+                  }
+                  ''
+                    bash ${./packages/pg-router/check-alert-rules.sh} \
+                      ${./packages/pg-router/grafana/alerting/alerts.yaml} \
+                      ${./packages/pg-router/grafana/alerting/rule-tests}
+                    touch "$out"
+                  '';
+
               # darwin/modules/beads-exporter: evaluated standalone against stubs of the
               # launchd and observability surfaces (declared in other flakes), with
               # synthetic databases alpha and beta. Proves the gate (observability off,
