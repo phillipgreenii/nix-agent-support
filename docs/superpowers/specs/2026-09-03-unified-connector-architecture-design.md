@@ -428,6 +428,24 @@ system it already talks to. Where a backend genuinely has no independent path to
 store), that is a real design gap — it MUST be raised as an open question here, not papered over
 with a subprocess shortcut.
 
+**A third implementer kind: the capability-only backend.** The two kinds above are the kinds that
+exist for `attention` and `search`, and the standalone kind's "never talk to a system directly"
+rule exists because a standalone plugin sits above entity-type backends that already own every
+system it could need. A capability-only backend is different: it is the sole client of a system
+for which `pg-connector` has no entity type or capability at all (the first instance is local git
+commit history; the existing `scm` capability and `pg-connector-scm-git` backend expose worktrees
+and branches only, not commits), so composing `pg-connector` verbs is impossible and direct access
+is its normal Tier-2 posture. The rule: **a capability-only backend MAY talk directly to a system
+for which no `connector.<type>` backend exists; it is a Tier-2 backend under §5 (Tier 2 — backend
+implementation binaries), named `pg-connector-<capability>-<flavor>`, and it is bound by every
+Tier-2 rule (backend isolation, and no exec of `pg-connector` or a sibling backend).** It MUST
+implement only its capability's op (for `activity`, `list_activity`), and it MUST be registered
+only under its capability's `<capability>.sources` key (for `activity`, `activity.sources`), never
+under any `connector.<type>` key. The standalone kind's direct-access prohibition above is
+unchanged and does not apply to it. The work-tracker design
+(`docs/superpowers/specs/2026-09-23-work-tracker-design.md`, decision WT-D3) owns the
+`pg-connector-activity-git` instance.
+
 Registration is two always-list-valued keys, independent of `connector.<type>`:
 
 ```
@@ -845,6 +863,10 @@ freely.
 ZR-specificity is encoded consistently inside the `<backend>` slot for every such binary, generic
 or not, so no binary's org-specificity is a guess from its name — including
 `pg-connector-ci-zr-captains-log`, renamed from its ZR-specific predecessor to carry that marker.
+
+`pg-connector-activity-git` is the first instance of the `activity` type token: a capability-only
+backend (§4.4) that reads local git commit history directly and is registered only under
+`activity.sources`.
 
 The umbrella's own name, `pg-connector`, was chosen over `pg`/`pg-sync`/`pg-gateway`/`pg-bridge`/
 `pg-relay` — a bare `pg` would collide with this workspace's existing personal-tool `pg-` prefix
