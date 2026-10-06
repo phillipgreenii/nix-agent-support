@@ -22,6 +22,7 @@ import (
 	"os"
 
 	internal "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-beads/internal"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/activity"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/attention"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/issue"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
@@ -64,6 +65,13 @@ func newDispatchTable(backend *internal.Backend) scriptout.DispatchTable {
 	for op, handler := range attention.NewDispatchTable(backend) {
 		table[op] = handler
 	}
+	// activity (list_activity) built by pkg/provider/activity.NewDispatchTable:
+	// this backend's own ListActivity, scoped to the operator through the
+	// host-configured activity_actors list. Backend is not a
+	// provider.AuthChecker, so the activity table adds no auth_status entry.
+	for op, handler := range activity.NewDispatchTable(backend) {
+		table[op] = handler
+	}
 	return scriptout.AddCapabilities(table, schema.IssueSchemaVersion, capabilitiesBase(backend))
 }
 
@@ -88,13 +96,16 @@ func capabilitiesBase(backend *internal.Backend) scriptout.CapabilitiesResponse 
 	vocabulary := map[string]any{
 		"state":    internal.Vocabulary,
 		"priority": internal.PriorityVocabulary,
+		// The activity kinds this backend emits; capabilities.ops stays
+		// derived from the table, never a hand-typed list.
+		"activity_kinds": internal.ActivityKinds,
 	}
 	if dir, err := backend.Workspace(); err == nil && dir != "" {
 		vocabulary["workspace_dir"] = dir
 	}
 	return scriptout.CapabilitiesResponse{
 		ProtocolVersion: scriptout.ProtocolVersion,
-		SchemaVersions:  map[string]int{"issue": schema.IssueSchemaVersion, "attention": schema.AttentionSchemaVersion},
+		SchemaVersions:  map[string]int{"issue": schema.IssueSchemaVersion, "attention": schema.AttentionSchemaVersion, "activity": schema.ActivitySchemaVersion},
 		Vocabulary:      vocabulary,
 		Version:         Version,
 	}

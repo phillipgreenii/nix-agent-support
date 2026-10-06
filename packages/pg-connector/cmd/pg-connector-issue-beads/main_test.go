@@ -6,10 +6,14 @@ import (
 	"io"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-beads/internal"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout/conformance"
 )
 
 // fakeRunner is a minimal double for internal.Runner, so this file's
@@ -216,5 +220,122 @@ func TestServeLoop_ShowRoundTripsThroughStdinStdout(t *testing.T) {
 	}
 	if iss.ID != "tp-1" || iss.Title != "hello" {
 		t.Fatalf("result = %+v", iss)
+	}
+}
+
+// TestNewDispatchTable_DeclaresActivityCapability proves list_activity is
+// wired into this binary's own table and declared: ops derived from the table
+// (without auth_status, since Backend is no AuthChecker), the activity schema
+// version, and exactly the kinds this backend emits.
+func TestNewDispatchTable_DeclaresActivityCapability(t *testing.T) {
+	table := newDispatchTable(newTestBackend())
+	result, err := table[scriptout.OpCapabilities].Handle(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("capabilities Handle: %v", err)
+	}
+	resp, ok := result.(scriptout.CapabilitiesResponse)
+	if !ok {
+		t.Fatalf("result type = %T, want scriptout.CapabilitiesResponse", result)
+	}
+	hasOp := false
+	for _, op := range resp.Ops {
+		if op == "list_activity" {
+			hasOp = true
+		}
+		if op == scriptout.OpAuthStatus {
+			t.Errorf("ops must not claim %q: Backend is not a provider.AuthChecker", op)
+		}
+	}
+	if !hasOp {
+		t.Fatalf("capabilities.ops = %v, want list_activity", resp.Ops)
+	}
+	if got := resp.SchemaVersions["activity"]; got != schema.ActivitySchemaVersion {
+		t.Fatalf("schemaVersions[activity] = %d, want %d", got, schema.ActivitySchemaVersion)
+	}
+	raw, _ := json.Marshal(resp.Vocabulary["activity_kinds"])
+	if string(raw) != `["issue.created"]` {
+		t.Fatalf("vocabulary.activity_kinds = %s, want [\"issue.created\"]", raw)
+	}
+}
+
+// configInjectingBackend wraps a conformance.Backend and adds the host's
+// per-backend config block to every request, as the umbrella does for the
+// static backends.<name> block: conformance.ListActivityRequest sends none.
+type configInjectingBackend struct {
+	inner  conformance.Backend
+	config string
+}
+
+func (c configInjectingBackend) Invoke(ctx context.Context, request []byte) ([]byte, int, error) {
+	var req map[string]json.RawMessage
+	if err := json.Unmarshal(request, &req); err != nil {
+		return nil, 0, err
+	}
+	req["config"] = json.RawMessage(c.config)
+	out, err := json.Marshal(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	return c.inner.Invoke(ctx, out)
+}
+
+// TestNewDispatchTable_ListActivityConformance drives the production table
+// through the generic list_activity conformance case, then asserts the
+// content the generic case deliberately leaves to the backend.
+func TestNewDispatchTable_ListActivityConformance(t *testing.T) {
+	runner := &fakeRunner{handle: func(args []string) (string, error) {
+		return `{"data":[
+			{"id":"tp-1","title":"mine","status":"open","priority":2,"issue_type":"task","created_by":"me","created_at":"2026-09-05T00:00:00Z"},
+			{"id":"tp-2","title":"theirs","status":"open","priority":2,"issue_type":"task","created_by":"someone-else","created_at":"2026-09-06T00:00:00Z"},
+			{"id":"tp-3","title":"mine too","status":"closed","priority":1,"issue_type":"bug","created_by":"my-agent","created_at":"2026-09-07T00:00:00Z"}
+		],"schema_version":1}`, nil
+	}}
+	table := newDispatchTable(internal.New(runner))
+	backend := configInjectingBackend{
+		inner:  conformance.TableBackend{Table: table},
+		config: `{"activity_actors":["me","my-agent"]}`,
+	}
+	since := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	before := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+
+	for _, s := range []time.Time{since, {}} {
+		results := conformance.RunListActivityCase(context.Background(), backend, s, before)
+		if len(results) != 5 {
+			t.Fatalf("sub-cases = %d, want 5", len(results))
+		}
+		for _, r := range results {
+			if r.Err != nil {
+				t.Errorf("%s (since=%v): %v", r.Name, s, r.Err)
+			}
+			if r.Skipped {
+				t.Errorf("%s (since=%v) skipped: %s", r.Name, s, r.SkipReason)
+			}
+		}
+	}
+
+	res, err := conformance.InvokeListActivity(context.Background(), backend, since.Format(time.RFC3339), before.Format(time.RFC3339))
+	if err != nil || res.ErrorCode != "" {
+		t.Fatalf("InvokeListActivity: res=%+v err=%v", res, err)
+	}
+	var got schema.ActivityListResult
+	if err := json.Unmarshal(res.Result, &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	var ids []string
+	for _, it := range got.Items {
+		ids = append(ids, it.ID)
+	}
+	if want := "tp-1#issue.created,tp-3#issue.created"; strings.Join(ids, ",") != want {
+		t.Errorf("ids = %v, want %s (other people's bead excluded)", ids, want)
+	}
+
+	// Without activity_actors the wire answer is unavailable naming the key.
+	bare := conformance.TableBackend{Table: table}
+	res, err = conformance.InvokeListActivity(context.Background(), bare, since.Format(time.RFC3339), before.Format(time.RFC3339))
+	if err != nil {
+		t.Fatalf("InvokeListActivity (no config): %v", err)
+	}
+	if res.ErrorCode != "unavailable" {
+		t.Errorf("no-config error code = %q, want unavailable", res.ErrorCode)
 	}
 }
