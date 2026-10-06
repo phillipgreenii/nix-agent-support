@@ -783,6 +783,12 @@ func (r *ccpoolRun) findSessionByName(ctx context.Context, name, eventID string)
 //     (starting/ready/working/needs_input) while not live never reached
 //     either hook: its tmux pane died mid-flight -- a genuine crash.
 func crashOrphaned(s ccpool.Session) bool {
+	// A row whose two-phase teardown is still pending (INV-CCH-20) is ABSENT
+	// whatever its liveness or close reason: the handler decided to discard it, and
+	// the purge_pending retry (not an absorbing dispatch) finishes the job.
+	if s.PurgePending() {
+		return true
+	}
 	if s.Live {
 		return false
 	}

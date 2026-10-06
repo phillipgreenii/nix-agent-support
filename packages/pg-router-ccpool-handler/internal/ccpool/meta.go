@@ -1,6 +1,9 @@
 package ccpool
 
-import "time"
+import (
+	"strconv"
+	"time"
+)
 
 // pg-router's session-metadata key namespace. Keys are PREFIXED (pgrouter.*) because
 // they live in a KV store shared with ccpool and any other consumer; the prefix
@@ -36,6 +39,16 @@ const (
 	// deciding whether to absorb a handler-closed settled row. Absent when the
 	// dispatch carried no event id. Never a --label.
 	MetaKeyEventID = "pgrouter.event_id"
+	// MetaKeyPurgePending marks a session whose teardown is two-phase and not yet
+	// finished (bead pg2-kqegi, INV-CCH-20): the handler has closed the row
+	// (non-purge) but not yet removed its per-bead worktree, and will purge the
+	// row only once the worktree is removed or confirmed gone. While the marker
+	// is present the row is neither a duplicate to absorb nor an orphan to
+	// reclaim; only the purge_pending retry handles it. Never a --label.
+	MetaKeyPurgePending = "pgrouter.purge_pending"
+	// MetaKeyPurgeAttempts counts the purge_pending retries made for a row (a
+	// decimal integer), for the retry's own log line. Never a --label.
+	MetaKeyPurgeAttempts = "pgrouter.purge_attempts"
 )
 
 // PoolName is the owner value stamped on pgrouter.pool, identifying pg-router's sessions
@@ -90,3 +103,17 @@ func (s Session) LeaseUntil() (time.Time, bool) { return ParseMetaTime(s.Meta[Me
 // LaunchedAt returns the instant the dispatch launched the session; ok is
 // false when the session carries no (parseable) launch time.
 func (s Session) LaunchedAt() (time.Time, bool) { return ParseMetaTime(s.Meta[MetaKeyLaunchedAt]) }
+
+// PurgePending reports whether the session carries the two-phase-teardown
+// marker (MetaKeyPurgePending): its row is kept until its worktree is gone.
+func (s Session) PurgePending() bool { return s.Meta[MetaKeyPurgePending] != "" }
+
+// PurgeAttempts returns how many purge_pending retries have been made for the
+// session (0 when absent or malformed).
+func (s Session) PurgeAttempts() int {
+	n, err := strconv.Atoi(s.Meta[MetaKeyPurgeAttempts])
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
+}

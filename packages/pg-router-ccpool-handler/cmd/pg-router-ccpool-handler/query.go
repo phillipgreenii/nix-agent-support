@@ -127,7 +127,7 @@ func runQuery(args []string) int {
 	// TestLiveQuery's own case) must stay a pure, side-effect-free stub
 	// reply, never touching a real ccpool/bd. Best effort: logged, never
 	// turned into a query failure.
-	if closed := reconcileClosedBeadSessions(ctx, ccpool.NewCLIRunner(cfg), gitWorktreeOpener, br, cfg.SessionPrefix, cfg.RepoRoot, newTranscriptQuietCheck(cfg.WorktreeQuietWindow, nil, nil)); closed > 0 {
+	if closed := reconcileClosedBeadSessions(ctx, ccpool.NewCLIRunner(cfg), gitWorktreeOpener, br, cfg.SessionPrefix, cfg.RepoRoot, cfg.WorktreeDir, newTranscriptQuietCheck(cfg.WorktreeQuietWindow, nil, nil)); closed > 0 {
 		slog.Info("query: reconciled sessions with closed beads", "closed", closed)
 	}
 	events, err := queryBeadsReady(ctx, br, qf)

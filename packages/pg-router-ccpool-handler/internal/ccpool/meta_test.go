@@ -99,3 +99,22 @@ func TestEnsure_neverLabelsLeaseKeys(t *testing.T) {
 		}
 	}
 }
+
+// TestPurgePendingAccessors covers the two-phase-teardown marker readers
+// (bead pg2-kqegi, INV-CCH-20).
+func TestPurgePendingAccessors(t *testing.T) {
+	var none Session
+	if none.PurgePending() || none.PurgeAttempts() != 0 {
+		t.Errorf("a session with no meta is not purge_pending and has 0 attempts")
+	}
+	marked := Session{Meta: map[string]string{MetaKeyPurgePending: "1", MetaKeyPurgeAttempts: "4"}}
+	if !marked.PurgePending() || marked.PurgeAttempts() != 4 {
+		t.Errorf("marked = (%v, %d), want (true, 4)", marked.PurgePending(), marked.PurgeAttempts())
+	}
+	for _, bad := range []string{"", "x", "-3"} {
+		s := Session{Meta: map[string]string{MetaKeyPurgeAttempts: bad}}
+		if s.PurgeAttempts() != 0 {
+			t.Errorf("PurgeAttempts(%q) = %d, want 0", bad, s.PurgeAttempts())
+		}
+	}
+}

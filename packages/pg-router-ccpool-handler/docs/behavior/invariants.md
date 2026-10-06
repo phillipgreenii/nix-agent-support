@@ -322,3 +322,24 @@ review`. The claim is still released (status open, assignee cleared) — the lab
   there, and its worktree follows it; a leaseless one is bounded by `ccpool`'s idle timeout, after
   which this invariant reclaims its worktree). Follow-up to bead `pg2-w3usi`; bead `pg2-ganjb`;
   see ADR 0084.
+
+- **`INV-CCH-20`** — a session's pool record MUST NOT be deleted until its per-bead worktree has
+  been removed or confirmed gone; an interrupted removal MUST be retried by the next reconcile of
+  the same pool; until then the record MUST NOT be treated as a duplicate to absorb. The handler
+  therefore tears a session in a per-bead linked worktree down in two phases: it closes the record
+  without purging, removes the worktree (from the repository root) and its anchor branch, and only
+  then purges the record. A worktree directory that no longer exists, or one under the worktree
+  directory that git no longer knows as a worktree, counts as gone (the husk is deleted and git's
+  stale registrations pruned). A session whose working directory is not such a worktree (no
+  isolation, or an unrelated path) is purged in one step, as is a session whose worktree another
+  live session of the pool still uses (`INV-CCH-15`; any state, since a redispatch for the bead
+  reuses the directory). A failed or interrupted removal leaves the record in place. Each
+  dispatch-time reconcile of the pool MUST first retry at most one such record, whether or not its
+  session is still live (a live one that is not `starting`, `ready` or `working` is closed again
+  first), and that record MUST be neither closed again as a closed-bead session (`INV-CCH-14`'s
+  dispatch-time reconcile) nor reclaimed as an orphan (`INV-CCH-18`) in the same pass. The
+  default pool's record is also retried by the next shutdown sweep. Bound: the next same-pool
+  dispatch, or for the default pool also the next shutdown; a record with no transcript can be
+  pruned by the pool's own reaper first. Not covered, accepted: the retry removes one worktree
+  per dispatch, so a backlog drains over several dispatches. Bead `pg2-kqegi`; closes the gap in
+  which a purge-first teardown left a half-removed worktree no record led to (`pg2-me0t1`).

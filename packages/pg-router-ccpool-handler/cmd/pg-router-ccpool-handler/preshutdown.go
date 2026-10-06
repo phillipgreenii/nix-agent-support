@@ -84,14 +84,14 @@ func runPreShutdown(args []string) int {
 		return conformance.ExitError
 	}
 
-	return servePreShutdown(ccpool.NewCLIRunner(cfg), gitWorktreeOpener, beads.NewCLIRunnerForRepo(cfg.RepoRoot, ""), cfg.SessionPrefix, cfg.RepoRoot, os.Stdin, os.Stdout)
+	return servePreShutdown(ccpool.NewCLIRunner(cfg), gitWorktreeOpener, beads.NewCLIRunnerForRepo(cfg.RepoRoot, ""), cfg.SessionPrefix, cfg.RepoRoot, cfg.WorktreeDir, os.Stdin, os.Stdout)
 }
 
 // servePreShutdown is runPreShutdown's testable core, factored out so a test
 // can drive it against a fake ccpool.Runner and capture its reply without
 // touching a real ccpool binary or os.Stdin/os.Stdout — mirrors
 // conformance.Participant.Serve's own (stdin, stdout) shape.
-func servePreShutdown(cc ccpool.Runner, open worktree.Opener, br beads.Runner, sessionPrefix, repoRoot string, stdin io.Reader, stdout io.Writer) int {
+func servePreShutdown(cc ccpool.Runner, open worktree.Opener, br beads.Runner, sessionPrefix, repoRoot, worktreeDir string, stdin io.Reader, stdout io.Writer) int {
 	raw, err := io.ReadAll(stdin)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "preShutdown: read request from stdin:", err)
@@ -109,7 +109,7 @@ func servePreShutdown(cc ccpool.Runner, open worktree.Opener, br beads.Runner, s
 	var req lifecycleRequest
 	_ = json.Unmarshal(raw, &req)
 
-	closed := teardownAllSessions(context.Background(), cc, open, br, sessionPrefix, repoRoot)
+	closed := teardownAllSessions(context.Background(), cc, open, br, sessionPrefix, repoRoot, worktreeDir)
 	slog.Info("preShutdown: teardown", "closed", closed)
 
 	writeReply(stdout, map[string]any{
@@ -181,6 +181,12 @@ func servePreShutdown(cc ccpool.Runner, open worktree.Opener, br beads.Runner, s
 //     its launch time. Until then the session runs unsupervised; an orphan is
 //     handled only when its OWN role next dispatches.
 //
+// Two-phase teardown (bead pg2-kqegi, INV-CCH-20): a session in a per-bead
+// linked worktree is purged only after its worktree is removed (closeSession). A
+// row an earlier pass or process left marked purge_pending (an interrupted
+// removal) is finished by this sweep too (retryPurgePending, purgepending.go),
+// which is the default pool's second bound next to the dispatch-time reconcile.
+//
 // This is the once-per-process-lifetime sweep half of this module's
 // INTF-CCH-CCPOOL boundary crossing (docs/behavior/interfaces.md) — not
 // scoped to one dispatch, unlike internal/ccpool's own per-dispatch
@@ -191,7 +197,7 @@ func servePreShutdown(cc ccpool.Runner, open worktree.Opener, br beads.Runner, s
 // an import (Go's internal-package visibility rule; docs/adr/0065's
 // Addendum), since that package no longer exists in this module. No longer
 // verbatim: pg2-hwt7v added the spare-active rule above.
-func teardownAllSessions(ctx context.Context, cc ccpool.Runner, open worktree.Opener, br beads.Runner, prefix, repoRoot string) (closed int) {
+func teardownAllSessions(ctx context.Context, cc ccpool.Runner, open worktree.Opener, br beads.Runner, prefix, repoRoot, worktreeDir string) (closed int) {
 	sessions, err := cc.List(ctx)
 	if err != nil {
 		slog.Warn("preShutdown: teardown list failed", "err", err)
@@ -201,7 +207,15 @@ func teardownAllSessions(ctx context.Context, cc ccpool.Runner, open worktree.Op
 		if !strings.HasPrefix(s.ExternalID, prefix) {
 			continue
 		}
-		if closeUnlessNeedsInput(ctx, cc, open, br, repoRoot, s, worktreeHeldBySparedPeer(sessions, s)) {
+		if s.PurgePending() {
+			// A two-phase teardown an earlier pass or process left unfinished
+			// (INV-CCH-20): finish it here instead of re-deciding the session.
+			if purged, _ := retryPurgePending(ctx, cc, open, repoRoot, worktreeDir, nil, sessions, s); purged {
+				closed++
+			}
+			continue
+		}
+		if closeUnlessNeedsInput(ctx, cc, open, br, repoRoot, worktreeDir, s, worktreeHeldBySparedPeer(sessions, s)) {
 			closed++
 		}
 	}
@@ -283,7 +297,7 @@ func worktreeHeldBySparedPeer(sessions []ccpool.Session, s ccpool.Session) bool 
 // once-per-shutdown sweep, which reconciles a closed-bead session's
 // StateIdle/StateNeedsInput row while the daemon is still up, rather than
 // leaving it to leak until the next shutdown.
-func closeUnlessNeedsInput(ctx context.Context, cc ccpool.Runner, open worktree.Opener, br beads.Runner, repoRoot string, s ccpool.Session, keepWorktree bool) bool {
+func closeUnlessNeedsInput(ctx context.Context, cc ccpool.Runner, open worktree.Opener, br beads.Runner, repoRoot, worktreeDir string, s ccpool.Session, keepWorktree bool) bool {
 	if sparedAtShutdown(s.State) {
 		slog.Info("preShutdown: teardown sparing actively working session (left alive, worktree untouched)",
 			"session", s.ExternalID, "state", string(s.State), "cwd", s.CWD)
@@ -294,10 +308,13 @@ func closeUnlessNeedsInput(ctx context.Context, cc ccpool.Runner, open worktree.
 			"session", s.ExternalID, "attach", "ccpool attach "+s.ExternalID)
 		return false
 	}
-	return closeSession(ctx, cc, open, repoRoot, s, keepWorktree)
+	return closeSession(ctx, cc, open, repoRoot, worktreeDir, s, keepWorktree)
 }
 
-// closeSessionAndWorktree purges s via cc.Close(purge=true), then
+// closeSessionAndWorktree tears s down: for a per-bead linked worktree it runs
+// the two-phase teardown (closeSession's doc, INV-CCH-20: non-purge close,
+// worktree removal, THEN purge); for any other CWD it purges via
+// cc.Close(purge=true) and then
 // best-effort removes s's own working directory (ccpool.Session.CWD) as a
 // linked git worktree via open/gitclient.WorktreeManager.RemoveWorktree —
 // and, once that removal actually succeeds, deletes s's own
@@ -319,8 +336,11 @@ func closeUnlessNeedsInput(ctx context.Context, cc ccpool.Runner, open worktree.
 // naturally never fires for either of those isolation types either — only a
 // genuine "worktree" isolation session ever has a pg-router/<beadID> anchor
 // branch to delete in the first place.
-// Returns true iff cc.Close succeeded (the session was actually purged); a
-// worktree-removal or branch-delete failure never changes that.
+// Single-phase: returns true iff cc.Close succeeded (the session was actually
+// purged); a worktree-removal or branch-delete failure never changes that.
+// Two-phase: returns true iff the row was purged, which requires the worktree to
+// have been removed or confirmed gone; a failed removal returns false and leaves
+// the row, marked, for the next reconcile (the one deliberate difference).
 //
 // The branch-delete step is bead pg2-ci75j's own fix, applied here at this
 // THIRD call site by pg2-tpa18: ci75j's own acceptance criterion named only
@@ -330,15 +350,51 @@ func closeUnlessNeedsInput(ctx context.Context, cc ccpool.Runner, open worktree.
 // touching the branch it was created on, so every session purged through
 // this function orphaned its pg-router/<beadID> anchor branch forever until
 // now.
-func closeSessionAndWorktree(ctx context.Context, cc ccpool.Runner, open worktree.Opener, repoRoot string, s ccpool.Session) bool {
-	return closeSession(ctx, cc, open, repoRoot, s, false)
+func closeSessionAndWorktree(ctx context.Context, cc ccpool.Runner, open worktree.Opener, repoRoot, worktreeDir string, s ccpool.Session) bool {
+	return closeSession(ctx, cc, open, repoRoot, worktreeDir, s, false)
 }
 
 // closeSession is closeSessionAndWorktree with an explicit keepWorktree
 // switch (pg2-u3t04): when true the session is still purged but its
 // worktree and anchor branch are left in place because another live session
 // still uses the same directory.
-func closeSession(ctx context.Context, cc ccpool.Runner, open worktree.Opener, repoRoot string, s ccpool.Session, keepWorktree bool) bool {
+//
+// A per-bead linked worktree (s.CWD under worktreeDir and not the repo root,
+// twoPhaseEligible) is torn down in TWO phases (bead pg2-kqegi, INV-CCH-20):
+// purge_pending marker -> non-purge close -> worktree removal (from the repo
+// root) -> anchor-branch delete -> purge. The purge is last so an interruption
+// (daemon-restart drain timeout, a crash, a slow removal of a huge checkout)
+// leaves a row the next reconcile can find (retryPurgePending); purging first
+// stranded a half-removed worktree no row led to (the original pg2-me0t1
+// leak). Every other CWD ("none"/"path"/"workforest" isolation, an empty
+// worktreeDir) and keepWorktree=true keep the single-phase purge with no
+// marker.
+func closeSession(ctx context.Context, cc ccpool.Runner, open worktree.Opener, repoRoot, worktreeDir string, s ccpool.Session, keepWorktree bool) bool {
+	if keepWorktree || !twoPhaseEligible(s, repoRoot, worktreeDir) {
+		return closeSinglePhase(ctx, cc, open, repoRoot, s, keepWorktree)
+	}
+	// The marker goes on BEFORE the non-purge close: a handler-closed idle row
+	// WITHOUT it is a settled duplicate that a redelivered dispatch absorbs
+	// (INV-CCH-17), which would be wrong for a row about to be discarded. If the
+	// marker cannot be written, fall back to today's ordering.
+	if err := cc.SetMeta(ctx, s.ExternalID, ccpool.MetaKeyPurgePending, purgeMarkerValue); err != nil {
+		slog.Warn("teardown: could not mark the row purge_pending; falling back to single-phase purge",
+			"session", s.ExternalID, "cwd", s.CWD, "err", err)
+		return closeSinglePhase(ctx, cc, open, repoRoot, s, keepWorktree)
+	}
+	if err := cc.Close(ctx, s.ExternalID, false); err != nil {
+		// The row stays open and marked; the next reconcile retries it.
+		slog.Warn("teardown: close failed", "session", s.ExternalID, "err", err)
+		return false
+	}
+	slog.Info("teardown: purge deferred until worktree removed (purge_pending)",
+		"session", s.ExternalID, "cwd", s.CWD)
+	return finishPurge(ctx, cc, open, repoRoot, worktreeDir, s, false)
+}
+
+// closeSinglePhase is the pre-pg2-kqegi teardown: purge the row first, then
+// best-effort remove the worktree (unless keepWorktree) and its anchor branch.
+func closeSinglePhase(ctx context.Context, cc ccpool.Runner, open worktree.Opener, repoRoot string, s ccpool.Session, keepWorktree bool) bool {
 	if err := cc.Close(ctx, s.ExternalID, true); err != nil {
 		slog.Warn("teardown: close failed", "session", s.ExternalID, "err", err)
 		return false

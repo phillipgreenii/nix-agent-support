@@ -658,6 +658,8 @@ func TestCrashOrphaned_cases(t *testing.T) {
 		{"live and idle", ccpool.Session{Live: true, State: ccpool.StateIdle}, false},
 		{"orphan-reclaimed idle row is abandoned work, not a duplicate (INV-CCH-18)", ccpool.Session{Live: false, State: ccpool.StateIdle, CloseReason: "handler", Meta: map[string]string{ccpool.MetaKeyOrphanReclaimed: "2026-10-06T12:00:00Z"}}, true},
 		{"orphan-reclaimed marker on a still-live row is ignored", ccpool.Session{Live: true, State: ccpool.StateIdle, Meta: map[string]string{ccpool.MetaKeyOrphanReclaimed: "2026-10-06T12:00:00Z"}}, false},
+		{"purge_pending handler-closed settled idle row is never absorbed (INV-CCH-20)", ccpool.Session{Live: false, State: ccpool.StateIdle, CloseReason: "handler", Meta: map[string]string{ccpool.MetaKeyPurgePending: "1"}}, true},
+		{"purge_pending still-live row is absent too (its non-purge close failed)", ccpool.Session{Live: true, State: ccpool.StateIdle, Meta: map[string]string{ccpool.MetaKeyPurgePending: "1"}}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -685,6 +687,7 @@ func TestFindSessionByName_deadRowTreatedAsAbsent(t *testing.T) {
 		{"closed by waitDone's death-branch Close of a non-terminal row", ccpool.Session{Name: "pg-router-feedback-zr-c", Live: false, State: ccpool.StateWorking, CloseReason: "handler"}},
 		{"already closed by ccpool (idle_ttl, idle state)", ccpool.Session{Name: "pg-router-feedback-zr-c", Live: false, State: ccpool.StateIdle, CloseReason: "idle_ttl"}},
 		{"already closed by ccpool (errored state)", ccpool.Session{Name: "pg-router-feedback-zr-c", Live: false, State: ccpool.StateErrored, CloseReason: "cap_eviction"}},
+		{"purge_pending handler-closed settled row (INV-CCH-20): the redelivered event must launch afresh", ccpool.Session{Name: "pg-router-feedback-zr-c", Live: false, State: ccpool.StateIdle, CloseReason: "handler", Meta: map[string]string{ccpool.MetaKeyPurgePending: "1", ccpool.MetaKeyEventID: "evt-1"}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

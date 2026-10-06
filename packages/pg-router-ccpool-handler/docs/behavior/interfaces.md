@@ -54,6 +54,12 @@ treatment of its own named boundaries (its `INTF-BRIDGE` — example only, not a
   whole run and, before checking capacity, sweeps the worktree directory for leaked per-bead
   worktrees no session row leads to, removing a worktree and its anchor branch only under the
   guards of `INV-CCH-19`.
+  A session in a per-bead linked worktree is torn down in two phases (`INV-CCH-20`): this module
+  closes it without purging, removes the worktree and its anchor branch, and only then purges the
+  record, so a removal interrupted midway leaves a record the next reconcile of the same pool
+  retries (one per dispatch; for the default pool, the shutdown sweep too) rather than a worktree
+  no record leads to. While such a teardown is unfinished, the record is never treated as a
+  duplicate to absorb. This marking is a `ccpool` metadata write, never a `ccpool` label.
 - **`INTF-CCH-BEADS`** <!-- uuid: 01dd79ce-ffbc-4234-9d6e-e7125561694f --> — this module's
   beads-backed source querying `bd` for events, and a handler session's completion policy writing
   a result back to `bd`. **Counterparty:** `bd` (boundary). **Initiator:** this module.

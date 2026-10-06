@@ -113,8 +113,11 @@ const (
 
 // Runner is the full ccpool capability surface pg-router needs. Sessions are
 // addressed by external_id; Ensure also passes an optional display name (--name).
-// Close takes purge: pg-router always purges (it never resumes — continuity lives
-// in bd). Cancel is present only as a chunk-B seam (90/100% budget cancels).
+// Close takes purge: pg-router purges (it never resumes — continuity lives in
+// bd), except that a per-bead worktree session is torn down in two phases
+// (bead pg2-kqegi, INV-CCH-20): a non-purge Close first, the purge only once the
+// worktree is removed, so an interrupted removal never strands a worktree no row
+// leads to. Cancel is present only as a chunk-B seam (90/100% budget cancels).
 type Runner interface {
 	Ensure(ctx context.Context, externalID, name, cwd string, env, meta map[string]string) error
 	Send(ctx context.Context, externalID, prompt string, mode SendMode) error

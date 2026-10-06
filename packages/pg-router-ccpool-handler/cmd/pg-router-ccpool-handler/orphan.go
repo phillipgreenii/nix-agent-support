@@ -126,6 +126,14 @@ func isOrphanOf(s ccpool.Session, role roles.Role, prefix string, now time.Time)
 	if !strings.HasPrefix(s.ExternalID, prefix) || s.CloseReason != "" {
 		return false
 	}
+	// EXCLUSIVITY (bead pg2-kqegi, INV-CCH-20): a row carrying purge_pending is
+	// owned by the purge_pending retry (reconcile.go), never by this pass. Handling
+	// it here too would double-handle one row in a single pass, and the orphan
+	// reclaim's own SetMeta/Close(false) would race the retry's. Keep this check
+	// first; crashOrphaned (internal/executor) treats the same rows as absent.
+	if s.PurgePending() {
+		return false
+	}
 	if s.Meta[ccpool.MetaKeyPool] != ccpool.PoolName || s.Meta[ccpool.MetaKeyRole] != role.Name {
 		return false
 	}

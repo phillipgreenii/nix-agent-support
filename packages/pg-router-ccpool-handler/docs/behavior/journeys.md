@@ -12,7 +12,8 @@ Realization gaps; these are the stories Task 5.2 onward realizes.
   want a registered handler participant to run an agent session on my behalf through `ccpool` (or
   a bare configured command), so pg-router itself never needs to know how to drive an agent.
   _(→ `USECASE-CCH-DISPATCH`; `INV-CCH-2`, `INV-CCH-3`, `INV-CCH-4`, `INV-CCH-5`,
-  `INV-CCH-9`, `INV-CCH-10`, `INV-CCH-14`, `INV-CCH-17`, `INV-CCH-18`, `INV-CCH-19`.)_
+  `INV-CCH-9`, `INV-CCH-10`, `INV-CCH-14`, `INV-CCH-15`, `INV-CCH-17`, `INV-CCH-18`, `INV-CCH-19`,
+  `INV-CCH-20`.)_
 - **`STORY-CCH-QUERY`** <!-- uuid: 661a1b2c-4243-42b3-8fcc-607e8ec7e4af --> — As pg-router's core, I
   want a registered source to query beads for events on my behalf, so pg-router itself never needs
   to know beads' query language. _(→ `USECASE-CCH-QUERY`; `INV-CCH-1`, `INV-CCH-4`, `INV-CCH-5`.)_
@@ -25,7 +26,7 @@ Realization gaps; these are the stories Task 5.2 onward realizes.
 **Level:** user-goal.
 **Preconditions:** this module is registered with a reachable core (`phillipgreenii-nix-agent-support`
 ADR 0036 — this module never starts a core).
-_Requires:_ `INTF-HANDLER`, `INV-CCH-2`, `INV-CCH-3`, `INV-CCH-14`, `INV-CCH-17`, `INV-CCH-18`, `INV-CCH-19`.
+_Requires:_ `INTF-HANDLER`, `INV-CCH-2`, `INV-CCH-3`, `INV-CCH-14`, `INV-CCH-15`, `INV-CCH-17`, `INV-CCH-18`, `INV-CCH-19`, `INV-CCH-20`.
 _Includes:_ `INTF-CCH-CCPOOL` or a configured command, per the role's own backing kind.
 
 1. The core dispatches one event under one tracking id to a bound role.
@@ -64,6 +65,14 @@ Extensions:
   live session row, and is not held by a live dispatch. Anything else is kept and logged. Every
   dispatch of a worktree-isolation role holds a shared lock on its bead's worktree from before it
   creates the worktree until it returns, which is how a live dispatch is told from a dead one.
+- 2f. An earlier teardown of a session in a per-bead worktree was interrupted (a restart, a crash,
+  a slow removal) after the session was closed but before its worktree was gone, so its pool
+  record was kept (`INV-CCH-20`). Before checking capacity this module retries one such record: it
+  removes the worktree and its anchor branch from the repository root (or, if the directory is
+  already gone or git no longer knows it, deletes the husk and prunes), and then purges the
+  record. If another live session still uses the worktree (`INV-CCH-15`), the record is purged and
+  the worktree is left for that session. A failed retry leaves the record for the next dispatch.
+  Until then the record is neither absorbed as a settled duplicate nor reclaimed as an orphan.
 - 3a. The session hits a post-accept failure (`retryable`, `resource-limit`, `critical`): this
   module surfaces it on its own logs/metrics or as a new event, never as anything but the opaque
   completion outcome the core already stores (`INV-CCH-3`).

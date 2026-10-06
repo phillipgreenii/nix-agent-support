@@ -55,6 +55,12 @@ import (
 // for this handler's roles, which is how the original zr-50s7h.2 incident
 // (bursty review/feedback dispatch) surfaced in the first place.
 //
+// Two-phase teardown (bead pg2-kqegi, INV-CCH-20): a closed-bead session in a
+// per-bead linked worktree is purged only AFTER its worktree is removed
+// (closeSession), and this pass first retries one row whose earlier teardown was
+// interrupted (retryPurgePending, purgepending.go). worktreeDir is the handler's
+// cfg.WorktreeDir; empty keeps every teardown single-phase.
+//
 // Reuses closeSessionAndWorktree and beadAlreadyClosed (preshutdown.go) for
 // the actual purge (worktree removal AND its own pg-router/<beadID> anchor
 // branch delete, bead pg2-ci75j via pg2-tpa18) and the bead-status check
@@ -76,14 +82,37 @@ import (
 // transcript or subagent transcripts were written within the configured
 // window is skipped this sweep (idle-with-running-subagents, pg2-9fwft) and
 // retried by the next one. nil disables the guard.
-func reconcileClosedBeadSessions(ctx context.Context, cc ccpool.Runner, open worktree.Opener, br beads.Runner, prefix, repoRoot string, quiet quietCheck) (closed int) {
+func reconcileClosedBeadSessions(ctx context.Context, cc ccpool.Runner, open worktree.Opener, br beads.Runner, prefix, repoRoot, worktreeDir string, quiet quietCheck) (closed int) {
 	sessions, err := cc.List(ctx)
 	if err != nil {
 		slog.Warn("reconcile: list failed", "err", err)
 		return 0
 	}
+	// Purge_pending retry (bead pg2-kqegi, INV-CCH-20), FIRST and from the same
+	// snapshot: finish at most ONE unfinished two-phase teardown per pass (the
+	// removal of a 100k-file checkout can take minutes, and this runs in the
+	// dispatch path). A row skipped by a guard (mid-turn, transcript active) is not
+	// an attempt, so the next marked row gets the slot.
+	for _, s := range sessions {
+		if !strings.HasPrefix(s.ExternalID, prefix) || !s.PurgePending() {
+			continue
+		}
+		purged, attempted := retryPurgePending(ctx, cc, open, repoRoot, worktreeDir, quiet, sessions, s)
+		if purged {
+			closed++
+		}
+		if attempted {
+			break
+		}
+	}
 	for _, s := range sessions {
 		if !strings.HasPrefix(s.ExternalID, prefix) {
+			continue
+		}
+		// EXCLUSIVITY (INV-CCH-20): a marked row was handled above (or is left to a
+		// later pass); this branch must never touch it, or one row would be closed
+		// twice in a single pass.
+		if s.PurgePending() {
 			continue
 		}
 		if !reconcilableState(s.State) {
@@ -96,7 +125,7 @@ func reconcileClosedBeadSessions(ctx context.Context, cc ccpool.Runner, open wor
 			slog.Info("reconcile: session transcript still active; deferring", "session", s.ExternalID)
 			continue
 		}
-		if closeSession(ctx, cc, open, repoRoot, s, worktreeInUseByPeer(sessions, s)) {
+		if closeSession(ctx, cc, open, repoRoot, worktreeDir, s, worktreeInUseByPeer(sessions, s)) {
 			closed++
 		}
 	}
