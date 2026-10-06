@@ -874,10 +874,13 @@ state,isDraft` must show OPEN and draft (cwd cannot be assumed); record
    single repo, `pn-workspace-rules:cleanup-workforest` for a set — now teardown
    through the guarded `wtdone` script (bead `pg2-hpurf`) rather than a bare
    `git worktree remove`/`branch -d`. This is a NEW failure mode this command must
-   recognize: teardown can now refuse (non-zero, naming PIDs) if a live process is
-   still anchored inside the isolation worktree — e.g. this session's own shell
-   left standing in it, or a peer session's — not only for the pre-existing
-   dirty/unmerged reasons. Treat that refusal the same as any other CLEANUP
+   recognize: teardown can now refuse (non-zero, naming PIDs) if a process on `wtdone`'s
+   blocking allow-list (`claude`, `git`, shells, `python*`, editors, `go`, `nix`;
+   override via `WTDONE_BLOCKING_COMMANDS`) is still anchored inside the isolation
+   worktree — e.g. this session's own shell left standing in it, or a peer
+   session's — not only for the pre-existing dirty/unmerged reasons. Anchored
+   processes under other names (a language server, `caffeinate`) are ignored and
+   do not block. Treat that refusal the same as any other CLEANUP
    failure: do not force it; leave the worktree/branch in place and, if it recurs,
    route to STUCK.
 

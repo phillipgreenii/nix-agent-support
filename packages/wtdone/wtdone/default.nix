@@ -6,7 +6,7 @@
 mkBashScript {
   name = "wtdone";
   src = ./.;
-  description = "Guarded worktree teardown -- lsof liveness guard, fsmonitor stop, worktree remove, plain branch -d, prune";
+  description = "Guarded worktree teardown -- lsof liveness guard (blocks only on an allow-list of process names), fsmonitor stop, worktree remove, plain branch -d, prune";
   runtimeDeps = [
     pkgs.git
     pkgs.lsof

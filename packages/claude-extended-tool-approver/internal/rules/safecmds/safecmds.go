@@ -125,8 +125,9 @@ var alwaysSafe = map[string]bool{
 	//   - wtdone (see packages/wtdone/wtdone/wtdone.md) is honestly NOT
 	//     trivial: it removes a git worktree from disk and runs a non-force
 	//     `git branch -d` (never `-D`). It is safe-listed anyway because both
-	//     effects are liveness-guarded (it refuses outright if a process is
-	//     still anchored inside the worktree via `lsof`) and bounded to what
+	//     effects are liveness-guarded (it refuses outright if a process on its
+	//     blocking allow-list is still anchored inside the worktree via
+	//     `lsof`; other anchored processes are ignored) and bounded to what
 	//     a plain, non-force branch delete allows — the same "agent-initiated,
 	//     low-risk, and reversible enough" bar claudetools.go's EnterWorktree
 	//     comment states for its own real-side-effect entry, not the stronger

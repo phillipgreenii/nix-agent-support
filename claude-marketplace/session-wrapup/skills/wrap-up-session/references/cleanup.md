@@ -45,7 +45,9 @@ leftover admin: run `pn workspace workforest prune`, and
 branch was somehow left behind (it shouldn't be) delete it defensively with
 `wtdone <branch> --cc <that repo's canonical clone>` (bead `pg2-hpurf`) rather than a
 bare `git branch -d` — it gets the same plain `-d` (never `-D`) refusal, plus a
-liveness guard and worktree/prune handling for free if a worktree somehow still
+liveness guard (it refuses only for an anchored process on its blocking
+allow-list — shells, `claude`, `git`, `python*`, editors, `go`, `nix` — and
+ignores other anchored processes) and worktree/prune handling for free if a worktree somehow still
 exists too; it is a no-op past the branch delete when none does. Don't undo or
 second-guess `integrate-branch`'s retirement.
 

@@ -1,8 +1,11 @@
 # shellcheck shell=bash
 # wtdone - guarded worktree teardown (bead pg2-hpurf): the paired
 # counterpart to wtnew. Given a bead id or branch name, refuses to touch
-# anything if a live process is still anchored inside the associated
-# worktree (lsof), then stops its fsmonitor daemon, removes the worktree,
+# anything if a process on the blocking allow-list (claude, git, shells,
+# python, editors, go, nix -- see wtdone.bash; override via the
+# WTDONE_BLOCKING_COMMANDS env var) is still anchored inside the associated
+# worktree (lsof) -- processes anchored there under any OTHER name are
+# reported and ignored -- then stops its fsmonitor daemon, removes the worktree,
 # deletes the branch with a PLAIN `git branch -d` (never `-D` -- an unmerged
 # branch is refused, never force-discarded), prunes worktree admin, and
 # prints the landed sha plus the canonical clone's remaining worktrees.
@@ -26,9 +29,12 @@ wtdone: Guarded worktree teardown -- the paired counterpart to wtnew
 Usage: wtdone <bead-or-branch> [OPTIONS]
 
 Given a bead id or branch name, performs, in order:
-  1. Liveness guard: refuse (and list the offending PIDs/commands) if any
-     live process has its working directory anchored inside the associated
-     worktree.
+  1. Liveness guard: refuse (and list the offending PIDs/commands) if a
+     process whose name is on the blocking allow-list has its working
+     directory anchored inside the associated worktree. Anchored processes
+     NOT on the list (a language server, caffeinate, ...) never block; each
+     is reported on stderr as "ignoring anchored process" and the teardown
+     proceeds.
   2. Best-effort `git fsmonitor--daemon stop` on that worktree.
   3. `git worktree remove` (refuses a dirty/untracked worktree -- git's own
      behavior; never forced).
@@ -56,6 +62,26 @@ Options:
                          caller's own shell.
   -h, --help            Show this help message
   -v, --version         Show version information
+
+Environment:
+  WTDONE_BLOCKING_COMMANDS  Space-separated process names that block removal
+                         (only processes whose name is on the list block).
+                         Default: claude git bash zsh sh python* vim nvim
+                         emacs go nix. An entry ending in * is a
+                         case-insensitive prefix match; names are compared
+                         case-insensitively after stripping one leading "."
+                         and one trailing "-wrapped" (lsof reports a
+                         nix-wrapped claude as .claude-wrapped). A custom
+                         value REPLACES the default; unset or empty means the
+                         default. There is deliberately no command-line flag.
+
+Accepted limits of the allow-list (fail-open by design):
+  - An anchored process under a name that is not on the list is ignored.
+  - The caller's own shell is still the caller's job: tear down your OWN
+    worktree from the canonical clone (cd there first). On Linux, a shebang
+    script's process name is the script's filename (not on the list), so a
+    script-named process anchored in the worktree is ignored there; on macOS
+    it shows as its interpreter (bash, python, ...).
 
 Report bugs to: <https://github.com/phillipgreenii/phillipgreenii-nix-agent-support/issues>
 HELP
@@ -112,11 +138,23 @@ branch="$NAME"
 wt="$(wtdone_find_worktree "$cc" "$branch")"
 
 if [[ -n $wt ]]; then
-  # Step 1: liveness guard. Refuse before anything else is touched.
+  # Step 1: liveness guard. Refuse before anything else is touched -- but
+  # only for an anchored process on the blocking allow-list; every other
+  # anchored process is reported and ignored (on the refuse path too).
   anchored="$(wtdone_anchored_processes "$wt")"
+  blocking_rows=""
   if [[ -n $anchored ]]; then
+    while read -r verdict apid aname; do
+      if [[ $verdict == block ]]; then
+        blocking_rows+="  $aname (pid $apid)"$'\n'
+      elif [[ $verdict == ignore ]]; then
+        echo "wtdone: ignoring anchored process $aname (pid $apid): not in the blocking list" >&2
+      fi
+    done < <(wtdone_classify_anchored <<<"$anchored")
+  fi
+  if [[ -n $blocking_rows ]]; then
     echo "wtdone: refusing to remove '$wt' -- live process(es) are anchored inside it:" >&2
-    echo "$anchored" >&2
+    printf '%s' "$blocking_rows" >&2
     exit 1
   fi
 

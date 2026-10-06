@@ -162,32 +162,203 @@ add_worktree() {
   [ "$status" -eq 0 ]
 }
 
-@test "refuse-when-anchored: a live process cwd'd inside the worktree blocks removal, PID listed, nothing touched" {
+# start_anchor <dir>: start an ANCHOR_PID `bash` whose cwd is <dir> and which
+# runs `sleep` as a CHILD (deliberately not exec'd, so bash itself keeps the
+# cwd and is on the allow-list while the child sleep is anchored too and is
+# not). The TERM trap also stops the child, so teardown leaves nothing behind.
+# Bounded poll until lsof sees BOTH processes (10 attempts, 0.2s apart).
+start_anchor() {
+  bash -c 'trap "kill \$child 2>/dev/null; exit 0" TERM; cd "$1" || exit 1; sleep 60 & child=$!; wait' _ "$1" 3>&- &
+  ANCHOR_PID=$!
+  local _ n
+  for _ in $(seq 1 10); do
+    n="$(lsof -a -d cwd +D "$1" -F p 2>/dev/null | grep -c '^p' || true)"
+    [[ $n -ge 2 ]] && break
+    sleep 0.2
+  done
+}
+
+# anchored_child_name <dir> <not-pid>: the command name lsof reports for the
+# anchored process in <dir> that is NOT <not-pid> (the sleep child). Looked up
+# rather than hard-coded because the name is the kernel COMM name: `sleep` on
+# Linux, but a multi-call coreutils binary can show up under another name on
+# macOS.
+anchored_child_name() {
+  local line pid="" name=""
+  while IFS= read -r line; do
+    case "$line" in
+    p*) pid="${line#p}" ;;
+    c*)
+      name="${line#c}"
+      if [[ $pid != "$2" ]]; then
+        echo "$pid $name"
+        return 0
+      fi
+      ;;
+    *) ;;
+    esac
+  done < <(lsof -a -d cwd +D "$1" +c 0 -F pc 2>/dev/null)
+  return 1
+}
+
+# fake_lsof_records <pid> <name>...: put a fake `lsof` on PATH printing one
+# `-F pcn` record per <pid> <name> pair (see the lib suite's identical helper).
+fake_lsof_records() {
+  local fakebin="$GFH_ROOT/fakebin"
+  mkdir -p "$fakebin"
+  export FAKE_LSOF_OUT="$GFH_ROOT/lsof-out"
+  : >"$FAKE_LSOF_OUT"
+  while [[ $# -ge 2 ]]; do
+    printf 'p%s\nc%s\nfcwd\nn/some/worktree\n' "$1" "$2" >>"$FAKE_LSOF_OUT"
+    shift 2
+  done
+  printf '#!/usr/bin/env bash\ncat "$FAKE_LSOF_OUT"\n' >"$fakebin/lsof"
+  chmod +x "$fakebin/lsof"
+  PATH="$fakebin:$PATH"
+}
+
+@test "refuse-when-anchored: an allow-listed process (bash) cwd'd inside the worktree blocks removal, PID listed, ignored child reported, nothing touched" {
   add_worktree feature
   git -C "$TEST_DIR" merge -q --ff-only feature
 
-  bash -c 'cd "$1" && exec sleep 60' _ "$WT_DIR/wt" &
-  ANCHOR_PID=$!
+  start_anchor "$WT_DIR/wt"
+  local child child_pid child_name
+  child="$(anchored_child_name "$WT_DIR/wt" "$ANCHOR_PID")"
+  child_pid="${child%% *}"
+  child_name="${child#* }"
 
-  # Bounded poll: give the child a moment to actually chdir+exec before
-  # asserting lsof can see it (not an open-ended wait -- 10 attempts, 0.2s
-  # apart, ~2s worst case).
+  run bash "$BIN" feature
+  kill "$ANCHOR_PID" 2>/dev/null || true
+  wait "$ANCHOR_PID" 2>/dev/null || true
+  local anchor_pid_val="$ANCHOR_PID"
+  ANCHOR_PID=""
+
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "anchored" ]]
+  # the blocking row names the bash holder; no header row is ever printed
+  [[ "$output" == *"(pid $anchor_pid_val)"* ]]
+  [[ "$output" != *COMMAND* ]]
+  # the child sleep is anchored too but off the list: reported, not blocking
+  [[ "$output" == *"wtdone: ignoring anchored process $child_name (pid $child_pid): not in the blocking list"* ]]
+  # the bash holder itself is never reported as ignored
+  local saved_output="$output"
+  run grep "ignoring anchored process .*(pid $anchor_pid_val)" <<<"$saved_output"
+  [ "$status" -ne 0 ]
+  [ -e "$WT_DIR/wt" ]
+  run git -C "$TEST_DIR" rev-parse --verify --quiet refs/heads/feature
+  [ "$status" -eq 0 ]
+}
+
+@test "all-ignored: a real anchored process that is off the allow-list does not block; one ignoring line, worktree removed" {
+  add_worktree feature
+  git -C "$TEST_DIR" merge -q --ff-only feature
+
+  # exec: the anchored process IS the sleep (ANCHOR_PID), not a bash.
+  bash -c 'cd "$1" && exec sleep 60' _ "$WT_DIR/wt" 3>&- &
+  ANCHOR_PID=$!
   local _
   for _ in $(seq 1 10); do
     [[ -n "$(lsof -a -d cwd +D "$WT_DIR/wt" 2>/dev/null)" ]] && break
     sleep 0.2
   done
+  local child_name
+  child_name="$(anchored_child_name "$WT_DIR/wt" "none" | cut -d' ' -f2-)"
 
   run bash "$BIN" feature
-  kill "$ANCHOR_PID" 2>/dev/null || true
-  wait "$ANCHOR_PID" 2>/dev/null || true
-  ANCHOR_PID=""
-
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"wtdone: ignoring anchored process $child_name (pid $ANCHOR_PID): not in the blocking list"* ]]
+  [ "$(grep -c 'ignoring anchored process' <<<"$output")" -eq 1 ]
+  [[ "$output" != *COMMAND* ]]
+  [ ! -e "$WT_DIR/wt" ]
+  run git -C "$TEST_DIR" rev-parse --verify --quiet refs/heads/feature
   [ "$status" -ne 0 ]
+}
+
+@test "the caller's own shell cwd'd inside the worktree (a shell is on the allow-list) still refuses" {
+  add_worktree feature
+  git -C "$TEST_DIR" merge -q --ff-only feature
+
+  run bash -c 'cd "$1" && bash "$2" feature --cc "$3"' _ "$WT_DIR/wt" "$BIN" "$TEST_DIR"
+  [ "$status" -eq 1 ]
   [[ "$output" =~ "anchored" ]]
   [ -e "$WT_DIR/wt" ]
   run git -C "$TEST_DIR" rev-parse --verify --quiet refs/heads/feature
   [ "$status" -eq 0 ]
+}
+
+@test "nothing anchored: unchanged behavior, exit 0, no ignoring line" {
+  add_worktree feature
+  git -C "$TEST_DIR" merge -q --ff-only feature
+  run bash "$BIN" feature
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"ignoring anchored process"* ]]
+  [ ! -e "$WT_DIR/wt" ]
+}
+
+@test "fake lsof, all off the list: exit 0, worktree removed, one ignoring line per process (names with spaces whole), no COMMAND header" {
+  add_worktree feature
+  git -C "$TEST_DIR" merge -q --ff-only feature
+  fake_lsof_records 11 node 12 caffeinate 13 "Google Chrome Helper (Renderer)"
+
+  run bash "$BIN" feature
+  [ "$status" -eq 0 ]
+  [ "$(grep -c 'ignoring anchored process' <<<"$output")" -eq 3 ]
+  [[ "$output" == *"wtdone: ignoring anchored process node (pid 11): not in the blocking list"* ]]
+  [[ "$output" == *"wtdone: ignoring anchored process caffeinate (pid 12): not in the blocking list"* ]]
+  [[ "$output" == *"wtdone: ignoring anchored process Google Chrome Helper (Renderer) (pid 13): not in the blocking list"* ]]
+  [[ "$output" != *COMMAND* ]]
+  [ ! -e "$WT_DIR/wt" ]
+}
+
+@test "fake lsof, mixed: a nix-wrapped claude blocks (exit 1, only blocking rows), ignored rows still reported, nothing removed" {
+  add_worktree feature
+  git -C "$TEST_DIR" merge -q --ff-only feature
+  fake_lsof_records 21 node 22 .claude-wrapped
+
+  run bash "$BIN" feature
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "anchored" ]]
+  [[ "$output" == *"wtdone: ignoring anchored process node (pid 21): not in the blocking list"* ]]
+  [[ "$output" == *".claude-wrapped (pid 22)"* ]]
+  # blocking rows only: node appears solely in its ignoring line
+  [ "$(grep -c 'node' <<<"$output")" -eq 1 ]
+  [[ "$output" != *COMMAND* ]]
+  [ -e "$WT_DIR/wt" ]
+  run git -C "$TEST_DIR" rev-parse --verify --quiet refs/heads/feature
+  [ "$status" -eq 0 ]
+}
+
+@test "WTDONE_BLOCKING_COMMANDS: a custom value replaces the default list (node now blocks, claude no longer does)" {
+  add_worktree feature
+  git -C "$TEST_DIR" merge -q --ff-only feature
+  fake_lsof_records 31 node 32 claude
+
+  run env WTDONE_BLOCKING_COMMANDS="node" bash "$BIN" feature
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"node (pid 31)"* ]]
+  [[ "$output" == *"wtdone: ignoring anchored process claude (pid 32): not in the blocking list"* ]]
+  [ -e "$WT_DIR/wt" ]
+}
+
+@test "WTDONE_BLOCKING_COMMANDS: empty means the default list, not 'block nothing'" {
+  add_worktree feature
+  git -C "$TEST_DIR" merge -q --ff-only feature
+  fake_lsof_records 41 claude
+
+  run env WTDONE_BLOCKING_COMMANDS="" bash "$BIN" feature
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "anchored" ]]
+  [ -e "$WT_DIR/wt" ]
+}
+
+@test "--help documents the allow-list, its default entries, the env override and the accepted limits" {
+  run bash "$BIN" --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"WTDONE_BLOCKING_COMMANDS"* ]]
+  [[ "$output" == *"claude git bash zsh sh python* vim nvim"* ]]
+  [[ "$output" == *"only processes whose name is on the list block"* ]]
+  [[ "$output" == *"ignored"* ]]
+  [[ "$output" == *"shebang"* ]]
 }
 
 @test "a dirty (untracked) worktree is refused by git worktree remove itself -- never forced" {

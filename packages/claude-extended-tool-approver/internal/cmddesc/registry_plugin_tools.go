@@ -93,8 +93,10 @@ var integrateBranchSupportSchema = CommandSchema{
 // ---- wtdone (packages/wtdone) -------------------------------------------
 
 // wtdoneSchema: `wtdone <bead-or-branch> [--cc <canonical-dir>]` — guarded
-// worktree teardown: a liveness guard (refuses while a process is anchored in
-// the worktree), then `git worktree remove` (never forced; refuses a dirty
+// worktree teardown: a liveness guard (refuses while a process on its blocking
+// allow-list is anchored in the worktree; the list is configured by the
+// WTDONE_BLOCKING_COMMANDS environment variable, deliberately NOT a flag, so
+// this schema models only --cc, -h and -v -- see ADR 0073), then `git worktree remove` (never forced; refuses a dirty
 // worktree) and `git branch -d` (never -D). The worktree path is resolved
 // from the branch INSIDE the tool, so no path operand exists to model.
 // Ported from the old engine's safecmds alwaysSafe entry (pg2-hel4i): "safe-

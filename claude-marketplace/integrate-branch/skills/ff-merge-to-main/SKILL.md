@@ -480,10 +480,15 @@ cd "$CC"                # leave <WT> before tearing it down
 wtdone "$FB" --cc "$CC"
 ```
 
-`wtdone` refuses (non-zero exit, naming the offending PIDs) if any live
-process is still anchored inside `<WT>` — most likely this handler's own
-shell if step 0 was skipped, or a peer session that isolated the same
-worktree — leaving `<WT>` and `<FB>` untouched. Otherwise it stops `<WT>`'s
+`wtdone` refuses (non-zero exit, naming the offending PIDs) if a process
+whose name is on its blocking allow-list (by default `claude`, `git`, shells,
+`python*`, `vim`/`nvim`/`emacs`, `go`, `nix`; override via the
+`WTDONE_BLOCKING_COMMANDS` environment variable) is still anchored inside
+`<WT>` — most likely this handler's own shell if step 0 was skipped, or a peer
+session that isolated the same worktree — leaving `<WT>` and `<FB>` untouched.
+A process anchored there under any other name (a language server, `caffeinate`,
+…) is reported on stderr as `ignoring anchored process` and does NOT block.
+Otherwise it stops `<WT>`'s
 fsmonitor daemon (best-effort — it may be absent), removes `<WT>`, deletes
 `<FB>` with a plain `git branch -d` (never `-D` — an unmerged branch is
 refused, never force-discarded), prunes worktree admin, and prints the landed
@@ -674,8 +679,9 @@ this machine; ask the operator to run pn workspace apply`), which the outcome
   is on the handler, not the guard.
 - FF-4 MUST delegate the removal, branch deletion, and prune to `wtdone "$FB"
 --cc "$CC"` rather than hand-rolling `git worktree remove` / `git branch -d` /
-  `git worktree prune` — it folds in the liveness guard (refuse if a live
-  process is anchored inside `<WT>`), stops `<WT>`'s `git fsmonitor--daemon`
+  `git worktree prune` — it folds in the liveness guard (refuse if a process
+  on `wtdone`'s blocking allow-list is anchored inside `<WT>`; anchored
+  processes under other names are ignored), stops `<WT>`'s `git fsmonitor--daemon`
   best-effort immediately before removal (the daemon is keyed by worktree path
   and is NOT torn down by the removal itself, so skipping this orphans it), and
   never escalates an unmerged branch's `-d` to `-D`.
