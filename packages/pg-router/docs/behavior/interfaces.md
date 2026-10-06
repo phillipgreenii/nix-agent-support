@@ -498,10 +498,13 @@ sequenceDiagram
   and, alongside those eight, the **throughput**, **backlog**, **liveness** and **dispatch-latency**
   metrics an observer watches to tell a busy system from a stalled one (`STORY-OBS-1`):
   **throughput** is a counter per `type` **and** `role` (the accepting handler role); **dispatch
-  latency** is a histogram, in milliseconds from the event's enqueue to its accept, per `outcome`
-  **and** `role`, with the bucket boundaries 100, 250, 500, 1000, 2500, 5000, 10000, 30000, 60000,
+  latency** is a histogram, in milliseconds from the event's enqueue to its accept, per `outcome`,
+  `role` **and** entity `type`, with the bucket boundaries 100, 250, 500, 1000, 2500, 5000, 10000, 30000, 60000,
   120000, 300000, 600000, 1200000, 1800000 and 3600000 (an event re-offered for longer than an hour
-  falls in the overflow bucket). `role` is config-bounded on both (`DEC-OBS-5`).
+  falls in the overflow bucket). `role` is config-bounded on both (`DEC-OBS-5`); dispatch
+  latency's `type` is the **entity** type (the event type's prefix before the first `.`, so
+  `pr.changed` is `pr`), bounded by configuration, with one fallback value `other` for a type that
+  cannot be reduced (`DEC-OBS-6`).
 
 - **Emission.** Observability covers **metrics and logs** (traces are a later concern). Both the
   **emission transport** and the concrete backend behind it (a scrape target, a log store) are

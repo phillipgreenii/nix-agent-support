@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -193,7 +194,7 @@ func TestCatalogHasTenMembers(t *testing.T) {
 	emitter.RecordThroughput("t", "r")
 	emitter.OnSourceFailure("src", errors.New("boom"))
 	emitter.OnDeduped("t")
-	emitter.RecordDispatchLatency(12.5, "accepted", "r")
+	emitter.RecordDispatchLatency(12.5, "accepted", "r", "t")
 	if _, err := q.Enqueue(eventqueue.Event{ID: "e1", Type: "t", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
@@ -430,7 +431,7 @@ func TestRecordThroughputPerType(t *testing.T) {
 // binding decision specifies.
 func TestRecordDispatchLatency_HistogramWithBuckets(t *testing.T) {
 	h := newHarness(t)
-	h.emitter.RecordDispatchLatency(42, "accepted", "worker-a")
+	h.emitter.RecordDispatchLatency(42, "accepted", "worker-a", "pr.changed")
 	m := findMetric(t, h.collect(t), MetricDispatchLatency)
 	if m.Unit != "ms" {
 		t.Fatalf("dispatch_latency unit = %q, want ms", m.Unit)
@@ -451,6 +452,61 @@ func TestRecordDispatchLatency_HistogramWithBuckets(t *testing.T) {
 	}
 	if v, ok := hist.DataPoints[0].Attributes.Value(attribute.Key("outcome")); !ok || v.AsString() != "accepted" {
 		t.Fatalf("dispatch_latency outcome label = %+v, want accepted", hist.DataPoints[0].Attributes)
+	}
+	if v, ok := hist.DataPoints[0].Attributes.Value(attribute.Key("type")); !ok || v.AsString() != "pr" {
+		t.Fatalf("dispatch_latency type label = %+v, want pr (entity type of pr.changed)", hist.DataPoints[0].Attributes)
+	}
+	if got := hist.DataPoints[0].Attributes.Len(); got != 3 {
+		t.Fatalf("dispatch_latency has %d labels (%+v), want exactly outcome, role, type", got, hist.DataPoints[0].Attributes)
+	}
+}
+
+// EntityType reduces an event type to its entity prefix and maps anything that
+// is not a short lowercase identifier to the one fixed fallback, bounding the
+// dispatch-latency "type" label (bead pg2-sve9v).
+func TestEntityType(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"pr.changed", "pr"},
+		{"pr.reconcile", "pr"},
+		{"issue.changed", "issue"},
+		{"thread.changed", "thread"},
+		{"bead", "bead"},
+		{"review-requested", "review-requested"},
+		{"", UnknownEntityType},
+		{".changed", UnknownEntityType},
+		{"PR.changed", UnknownEntityType},
+		{"1pr.changed", UnknownEntityType},
+		{"pr id 42.changed", UnknownEntityType},
+		{strings.Repeat("a", 33) + ".changed", UnknownEntityType},
+		{strings.Repeat("a", 32) + ".changed", strings.Repeat("a", 32)},
+	}
+	for _, c := range cases {
+		if got := EntityType(c.in); got != c.want {
+			t.Errorf("EntityType(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// Distinct verbs of one entity share one latency series, and an unparseable
+// event type lands in the single fallback series: the label's cardinality is
+// the number of entity types, not event types or ids.
+func TestRecordDispatchLatency_TypeLabelBounded(t *testing.T) {
+	h := newHarness(t)
+	h.emitter.RecordDispatchLatency(1, "accepted", "w", "pr.changed")
+	h.emitter.RecordDispatchLatency(1, "accepted", "w", "pr.new")
+	h.emitter.RecordDispatchLatency(1, "accepted", "w", "issue.changed")
+	h.emitter.RecordDispatchLatency(1, "accepted", "w", "")
+	h.emitter.RecordDispatchLatency(1, "accepted", "w", "weird type!.x")
+	m := findMetric(t, h.collect(t), MetricDispatchLatency)
+	hist := m.Data.(metricdata.Histogram[float64])
+	got := map[string]uint64{}
+	for _, dp := range hist.DataPoints {
+		v, _ := dp.Attributes.Value(attribute.Key("type"))
+		got[v.AsString()] += dp.Count
+	}
+	want := map[string]uint64{"pr": 2, "issue": 1, UnknownEntityType: 2}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("dispatch_latency counts by type = %v, want %v", got, want)
 	}
 }
 
@@ -701,6 +757,9 @@ func TestDispatchLatencyThroughQueue_RecordsElapsedSinceEnqueue(t *testing.T) {
 	}
 	if v, present := dp.Attributes.Value(attribute.Key("role")); !present || v.AsString() != "accepting" {
 		t.Fatalf("dispatch_latency role label = %+v, want \"accepting\" (OnAccept's listener id)", dp.Attributes)
+	}
+	if v, present := dp.Attributes.Value(attribute.Key("type")); !present || v.AsString() != "review-requested" {
+		t.Fatalf("dispatch_latency type label = %+v, want \"review-requested\" (OnEnqueue's event type, reduced to its entity type)", dp.Attributes)
 	}
 	if dp.Sum != 250 {
 		t.Fatalf("dispatch_latency sum = %v ms, want 250 (elapsed since OnEnqueue)", dp.Sum)

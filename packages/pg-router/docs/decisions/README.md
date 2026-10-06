@@ -72,6 +72,8 @@ docs cite. An entry that overlaps an existing repository ADR MUST **cite** it, n
   pause is not a failure), and a restart resets it.
 - [`DEC-OBS-5`](observability.md) — `role` labels every delivery-side failure class, throughput and
   dispatch latency (config-bounded), and the latency buckets now span 100 ms to 1 hour.
+- [`DEC-OBS-6`](observability.md) — dispatch latency also carries a bounded entity `type` label (the
+  event type's prefix before the first `.`; unparseable values map to `other`).
 - [`DEC-RETRY-1`](retry.md) — exponential-backoff-with-a-cap shape, and its default values, for
   both the handler retry cadence and the pull-source failure backoff.
 - [`DEC-WIRE-1`](wire.md) — the default transport is a CLI invocation carrying JSON, with coarse exit

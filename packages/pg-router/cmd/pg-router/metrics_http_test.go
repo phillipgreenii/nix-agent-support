@@ -98,7 +98,7 @@ func TestStartMetricsServer_CatalogSurvivesUTF8EscapingNegotiation(t *testing.T)
 	emitter.OnSourceSucceeded("srcA")
 	emitter.OnDeduped("review-requested")
 	emitter.RecordThroughput("review-requested", "worker-a")
-	emitter.RecordDispatchLatency(12.5, "accepted", "worker-a")
+	emitter.RecordDispatchLatency(12.5, "accepted", "worker-a", "review-requested")
 	emitter.OnUnconsumedExpired("review-requested")
 	emitter.OnUnknownTypeRejected("review-requested")
 

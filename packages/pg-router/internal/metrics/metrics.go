@@ -790,7 +790,7 @@ func (e *Emitter) OnAccept(eventID, listenerID string) {
 	// (int64): that would floor 0.6ms to 0 and 4.9ms to 4, biasing every
 	// sample low against the histogram's own sub-10ms buckets.
 	elapsedMS := float64(e.now().Sub(p.enqueuedAt)) / float64(time.Millisecond)
-	e.RecordDispatchLatency(elapsedMS, "accepted", listenerID)
+	e.RecordDispatchLatency(elapsedMS, "accepted", listenerID, p.typ)
 }
 
 // OnUnconsumedExpired increments the unconsumed-expired counter for the event's
@@ -1092,8 +1092,9 @@ func (e *Emitter) RecordThroughput(evtType, role string) {
 
 // RecordDispatchLatency records the elapsed time, in milliseconds, from an
 // event's enqueue to a settling dispatch outcome (STORY-OBS-1) — the
-// catalog's one histogram, labeled by outcome and role (the accepting
-// listener's role name, bead pg2-nimab). Exported for direct/test use;
+// catalog's one histogram, labeled by outcome, role (the accepting
+// listener's role name, bead pg2-nimab) and type (the event's entity type,
+// EntityType(evtType), bead pg2-sve9v). Exported for direct/test use;
 // its production call site is OnAccept (see RecordThroughput's doc for the
 // shared pending-map mechanics), which always passes "accepted" today — the
 // one outcome OnAccept can observe. A future outcome (e.g. a final,
@@ -1103,11 +1104,62 @@ func (e *Emitter) RecordThroughput(evtType, role string) {
 // that settles the pair) — deliberately deferred (operator decision,
 // 2026-09-18); labeling from the start means adding it later is a new call
 // site, not another signature break.
-func (e *Emitter) RecordDispatchLatency(ms float64, outcome, role string) {
+//
+// evtType is the RAW event type (e.g. "pr.changed"); this method reduces it
+// with EntityType, so callers never pass a pre-reduced value and the label's
+// bound is enforced in one place.
+func (e *Emitter) RecordDispatchLatency(ms float64, outcome, role, evtType string) {
 	e.dispatchLatency.Record(context.Background(), ms, metric.WithAttributes(
 		attribute.String("outcome", outcome),
 		attribute.String("role", role),
+		attribute.String("type", EntityType(evtType)),
 	))
+}
+
+// UnknownEntityType is the fixed fallback value of the dispatch-latency
+// histogram's "type" label for an event type EntityType cannot reduce to an
+// entity type (empty, a leading ".", or a prefix that is not a short
+// lowercase identifier).
+const UnknownEntityType = "other"
+
+// maxEntityTypeLen caps the length of an entity-type label value. Real
+// entity types are short words ("pr", "issue", "thread"); anything longer is
+// not one.
+const maxEntityTypeLen = 32
+
+// EntityType reduces an event type to the entity type that is the
+// dispatch-latency histogram's "type" label: the segment before the first
+// ".", so "pr.changed" -> "pr", "pr.reconcile" -> "pr". An event type with
+// no "." is its own entity type ("bead" -> "bead").
+//
+// Cardinality bound (bead pg2-sve9v): the label's value set is fixed by
+// configuration, never by event traffic, for three reasons. (1) Event types
+// are config-bounded: core.Ingest rejects any type no configured binding
+// declares, so the set of types is declared in configuration. (2) Reducing to the
+// first segment collapses the per-entity verbs (pr.new, pr.changed,
+// pr.reconcile, ...) into one value per entity, so the set is at most the
+// number of distinct entity prefixes in the config (pr, issue, thread, ...),
+// no ids. (3) As a defence against a type that is not a short lowercase
+// identifier (a restored durable-queue row from an older config, a malformed
+// type), anything not matching [a-z][a-z0-9_-]* of at most maxEntityTypeLen
+// bytes maps to the single fallback UnknownEntityType rather than becoming a
+// new series. The raw, per-verb type stays available, unreduced, on the
+// throughput counter's own "type" label.
+func EntityType(evtType string) string {
+	seg, _, _ := strings.Cut(evtType, ".")
+	if seg == "" || len(seg) > maxEntityTypeLen {
+		return UnknownEntityType
+	}
+	for i := 0; i < len(seg); i++ {
+		c := seg[i]
+		switch {
+		case c >= 'a' && c <= 'z':
+		case i > 0 && (c >= '0' && c <= '9' || c == '_' || c == '-'):
+		default:
+			return UnknownEntityType
+		}
+	}
+	return seg
 }
 
 // Reader is a value-read-back handle over the catalog's current counter

@@ -168,3 +168,28 @@ synchronous run, so the old 1 ms to 5 s boundaries left every real sample in the
 The boundaries are now 100, 250, 500, 1000, 2500, 5000, 10000, 30000, 60000, 120000, 300000, 600000,
 1200000, 1800000 and 3600000 ms; the overflow bucket covers a re-offered event older than an hour.
 While old and new `le` sets coexist in one rate window, quantiles are skewed for that window.
+
+### `DEC-OBS-6` — dispatch latency carries a bounded entity `type` label <!-- uuid: 8ba393ee-8e17-4a2d-b623-6e92336ac6c7 -->
+
+**Decided** (operator ruling D10, Phillip, 2026-10-05, design `2026-10-05-fast-per-type-change-check-design.md`
+Q9; bead `pg2-sve9v`, follow-up to `pg2-nimab`). The `dispatch-latency` histogram gains a `type`
+label, so the wait of one entity's change events (`pr.changed` and its siblings) can be read as a
+standing metric. Its labels are now `outcome`, `role` and `type`. `INTF-MON`'s catalog states the
+shape; `INV-OBS-1` is unchanged (a label dimension, never a class).
+
+**Value.** The entity type: the event type's segment before the first `.` (`pr.changed` -> `pr`,
+`pr.reconcile` -> `pr`, `issue.changed` -> `issue`); an event type with no `.` is its own value. The
+per-verb type stays available, unreduced, on `throughput`'s own `type` label, so the two metrics'
+`type` labels are deliberately different grains.
+
+**Bounds.** Cardinality is fixed by configuration, never by traffic or ids. Event types are
+config-bounded (the core rejects a type no binding declares), reducing to the entity prefix
+collapses the per-verb types into one value per entity, and a value that is not a short
+(at most 32 bytes) lowercase identifier (`[a-z][a-z0-9_-]*`), such as an empty type, a leading `.` or a
+type restored from an older config, maps to the single fallback value `other` instead of minting a
+new series. No event id, session or bead becomes a label.
+
+**Dashboards and alerts.** Adding a label to a histogram does not break a selector or aggregation
+that does not match on it: the observed consumers (the pg-router dashboard's p50/p95 panels)
+aggregate with `sum by (le)`. A query that groups by `outcome` or `role` alone is likewise
+unaffected; only a rule that expects exactly one series per (`outcome`, `role`) would change.
