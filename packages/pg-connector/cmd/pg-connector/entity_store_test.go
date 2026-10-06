@@ -23,6 +23,13 @@ import (
 // code — a future Thread-kind field/store (phase 13) is recognized by
 // this same heuristic even though no Thread type exists anywhere in
 // pkg/schema yet.
+//
+// "activity" was added by the work-tracker program's activity/dispatch
+// packet (bead pg2-vfmp7.1.2): no Tier-1 store may join activity ids with
+// another kind's ids. entityKindOf lowercases an identifier and strips a
+// trailing "s", so the schema's ActivityItem type (and an ActivityItems
+// field) only matches via the "activityitem" alias, same precedent as
+// "cirun" for ci.
 var entityKindTokens = map[string]string{
 	"pr":           "pr",
 	"issue":        "issue",
@@ -33,6 +40,8 @@ var entityKindTokens = map[string]string{
 	"branch":       "scm",
 	"thread":       "thread",
 	"agentsession": "agentsession",
+	"activity":     "activity",
+	"activityitem": "activity",
 }
 
 // entityKindOf heuristically maps a Go identifier (a struct field name, or
@@ -413,5 +422,69 @@ type storeFile struct {
 	}
 	if len(violations) != 0 {
 		t.Fatalf("evaluateEntityStoreIsolation flagged a single-entity-kind store: %v", violations)
+	}
+}
+
+// TestNoCrossConnectorEntityStore_DetectsActivityCombinedStore proves the
+// activity kind is wired into the guard: a store keyed by activity ids
+// (a map of schema.ActivityItem values) together with another kind's ids
+// is flagged. The map field is named neutrally so detection can only come
+// from the ActivityItem value-type alias. Written to a temp directory.
+func TestNoCrossConnectorEntityStore_DetectsActivityCombinedStore(t *testing.T) {
+	dir := t.TempDir()
+	src := `package internal
+
+type ActivityItem struct {
+	ID string ` + "`json:\"id\"`" + `
+}
+
+type prState struct {
+	Category string ` + "`json:\"category,omitempty\"`" + `
+}
+
+type storeFile struct {
+	Seen  map[string]ActivityItem ` + "`json:\"seen\"`" + `
+	PRs   map[string]prState      ` + "`json:\"prs\"`" + `
+}
+`
+	writeCompositionFixture(t, dir, "store.go", src)
+
+	violations, err := evaluateEntityStoreIsolation(dir)
+	if err != nil {
+		t.Fatalf("evaluateEntityStoreIsolation: %v", err)
+	}
+	found := false
+	for _, v := range violations {
+		if strings.Contains(v, "storeFile") && strings.Contains(v, "activity") && strings.Contains(v, "pr") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("violations did not identify storeFile combining activity and pr: %v", violations)
+	}
+}
+
+// TestNoCrossConnectorEntityStore_AllowsSingleActivityStore guards the
+// opposite failure mode: a store keyed only by activity ids is legal.
+func TestNoCrossConnectorEntityStore_AllowsSingleActivityStore(t *testing.T) {
+	dir := t.TempDir()
+	src := `package internal
+
+type ActivityItem struct {
+	ID string ` + "`json:\"id\"`" + `
+}
+
+type storeFile struct {
+	Seen map[string]ActivityItem ` + "`json:\"seen\"`" + `
+}
+`
+	writeCompositionFixture(t, dir, "store.go", src)
+
+	violations, err := evaluateEntityStoreIsolation(dir)
+	if err != nil {
+		t.Fatalf("evaluateEntityStoreIsolation: %v", err)
+	}
+	if len(violations) != 0 {
+		t.Fatalf("flagged a single-kind activity store: %v", violations)
 	}
 }
