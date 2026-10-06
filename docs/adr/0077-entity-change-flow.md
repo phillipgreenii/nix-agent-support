@@ -68,6 +68,14 @@ cadence, the event shape the adapter emits, and which fields the cheap list may 
 S6, S8 and S12 in place; each rewritten row says so and keeps the earlier wording's gist. The design
 is `docs/superpowers/specs/2026-10-05-fast-per-type-change-check-design.md`.
 
+**Amended 2026-10-05** (ADR 0081, bead `pg2-5l0x4.1`): the Ownership split gains one statement: pg-desk
+owns entity attention (whether a PR, issue or thread needs the operator now), evaluated at read
+time, and a connector's attention is limited to data it alone can see. Its dependency-direction
+sentence is read with ADR 0081's runtime-versus-compile-time carve-out: the umbrella may exec a
+pg-desk-owned plugin that its `attention.sources` registry names, because that is configuration,
+while code-level dependency stays pg-desk to pg-connector only. No decision-log row is added and
+S1 to S35 are unchanged.
+
 **Approval and provenance.** The operator (Phillip) approved the design and its implementation plan
 on 2026-09-29 ("if good, consider it approved and continue", recorded on bead `pg2-2j5ac.51`). The
 generic entity pipeline design that this flow governs where the two overlap (bead `pg2-2j5ac.46`)
@@ -166,6 +174,10 @@ per-type rules, `plan`, `apply` and the work-item contract, and keep no cache of
 Dependency direction is one-way: deciders depend on pg-desk and pg-connector; pg-desk depends on
 pg-connector; pg-router reaches pg-desk only through the source adapter and reaches deciders only
 by routing; pg-desk depends on neither pg-router nor deciders. The flow MUST NOT depend on pg-pr.
+Entity attention is owned by pg-desk, and a connector's attention is limited to data it alone can
+see (ADR 0081). The one-way direction above is compile-time and code-level; a registry entry in the
+umbrella's `attention.sources` that names a pg-desk-owned plugin binary is runtime configuration,
+not a dependency of pg-connector on pg-desk (ADR 0081's carve-out).
 
 ### Consequences
 
