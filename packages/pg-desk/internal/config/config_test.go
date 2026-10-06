@@ -82,7 +82,7 @@ func TestConfigCoversAllSection78Keys(t *testing.T) {
 		{"OpenConfig", reflect.TypeOf(OpenConfig{}), []string{"chrome_bin"}},
 		{"LinksConfig", reflect.TypeOf(LinksConfig{}), []string{"issue_url_template"}},
 		{"AttentionConfig", reflect.TypeOf(AttentionConfig{}), []string{"rules", "ordering"}},
-		{"AttentionRuleConfig", reflect.TypeOf(AttentionRuleConfig{}), []string{"enabled", "severity"}},
+		{"AttentionRuleConfig", reflect.TypeOf(AttentionRuleConfig{}), []string{"enabled", "severity", "stale_after_days"}},
 		{"AttentionOrderingConfig", reflect.TypeOf(AttentionOrderingConfig{}), []string{"ties"}},
 		{"WatchConfig", reflect.TypeOf(WatchConfig{}), []string{"pr", "issue", "thread"}},
 		{"WatchTypeConfig", reflect.TypeOf(WatchTypeConfig{}), []string{"queries"}},
@@ -754,6 +754,20 @@ func TestLoadFile_AttentionBlock(t *testing.T) {
 	_, err = LoadFile(writeYAML(t, dir, base+"attention:\n  rules:\n    pr.own-ci-failing:\n      severity: urgent\n"))
 	if err == nil || !strings.Contains(err.Error(), "attention.rules.pr.own-ci-failing.severity") {
 		t.Errorf("a severity outside low|medium|high must be rejected naming the key, got %v", err)
+	}
+
+	cfg, err = LoadFile(writeYAML(t, dir, base+"attention:\n  rules:\n    issue.stale-in-progress:\n      stale_after_days: 10\n"))
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	if d := cfg.Attention.Rules["issue.stale-in-progress"].StaleAfterDays; d == nil || *d != 10 {
+		t.Errorf("stale_after_days not parsed: %v", d)
+	}
+	for _, bad := range []string{"0", "-3"} {
+		_, err = LoadFile(writeYAML(t, dir, base+"attention:\n  rules:\n    issue.stale-in-progress:\n      stale_after_days: "+bad+"\n"))
+		if err == nil || !strings.Contains(err.Error(), "attention.rules.issue.stale-in-progress.stale_after_days") {
+			t.Errorf("stale_after_days %s must be rejected naming the key, got %v", bad, err)
+		}
 	}
 }
 

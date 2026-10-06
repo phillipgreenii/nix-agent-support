@@ -390,6 +390,12 @@ type AttentionConfig struct {
 type AttentionRuleConfig struct {
 	Enabled  *bool  `yaml:"enabled,omitempty" json:"enabled,omitempty"`
 	Severity string `yaml:"severity,omitempty" json:"severity,omitempty"`
+	// StaleAfterDays is the threshold, in calendar days, of a time-based rule
+	// (for example issue.stale-in-progress): the rule raises once the
+	// triggering age reaches it. Nil means the rule's built-in default. It is
+	// valid only on a rule kind that has the parameter (attention.Resolve
+	// rejects it elsewhere) and MUST be positive.
+	StaleAfterDays *int `yaml:"stale_after_days,omitempty" json:"stale_after_days,omitempty"`
 }
 
 // AttentionTiesDefault is the one tie rule the evaluator implements for
@@ -428,6 +434,9 @@ func validateAttention(a AttentionConfig) error {
 	}
 	sort.Strings(kinds)
 	for _, k := range kinds {
+		if d := a.Rules[k].StaleAfterDays; d != nil && *d <= 0 {
+			return fmt.Errorf("attention.rules.%s.stale_after_days %d must be positive", k, *d)
+		}
 		sev := a.Rules[k].Severity
 		if sev == "" {
 			continue

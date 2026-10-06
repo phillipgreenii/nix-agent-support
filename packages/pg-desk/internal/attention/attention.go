@@ -227,14 +227,16 @@ func Evaluate(in Inputs) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	now := in.Clock.Now().UTC()
 	byRef := make(map[string]*View, len(views))
 	for _, v := range views {
+		v.Now = now
 		byRef[v.Ref()] = v
 	}
 	chain := suppressorChain()
 
 	res := Result{
-		Now:      in.Clock.Now().UTC(),
+		Now:      now,
 		Degraded: degraded,
 		Items:    []Item{},
 		Groups:   []Group{},

@@ -407,9 +407,10 @@ that the rules above are written around:
   wired to a trigger for the operator's own issues. The hydration, the facts and the projection
   they need are now in place (see "Issue entities for attention rules" below); the rules
   themselves are not.
-- **Time-based rules** are supported by the model (the clock is an input), but the first release
-  ships none. A candidate set (a snooze that expires, severity escalation by waiting time) needs
-  an operator decision on what it should do (Open questions, item 6).
+- **Time-based rules** are supported by the model (the clock is an input). The first release
+  shipped none; the first one is `issue.stale-in-progress` (see "The stale In Progress rule"
+  below). Other candidates (a snooze that expires, severity escalation by waiting time) still need
+  an operator decision on what they should do (Open questions, item 6).
 
 **Issue entities for attention rules** (bead `pg2-5l0x4.14`; implemented). The decisions, so a
 rule over issues does not reopen them:
@@ -447,6 +448,33 @@ rule over issues does not reopen them:
   that has no interpretation row; `View.IssueFacts()` derives the facts from the stored entity,
   the issue counterpart of `View.PRFacts()`. A `pr` entity still needs its interpretation row,
   because a PR rule reads it.
+
+**The stale In Progress rule** (bead `pg2-5l0x4.13`; implemented). The first time-based rule, over
+the issue entities above.
+
+| Rule kind                 | Raises when                                                                                          | Reads                                     | Default severity | Parameter                                            |
+| ------------------------- | ---------------------------------------------------------------------------------------------------- | ----------------------------------------- | ---------------- | ---------------------------------------------------- |
+| `issue.stale-in-progress` | Assigned to the operator, In Progress, and the operator's last update is at least the threshold old. | `IssueAttentionFacts`, the injected clock | `medium`         | `attention.rules.<kind>.stale_after_days`, default 7 |
+
+- **The clock reaches a rule through the view.** `View.Now` is set by `Evaluate` from the injected
+  clock before any rule runs; `Rule.Raise` keeps its signature. A view projected without an
+  evaluation has a zero `Now`, and a time-based rule then raises nothing.
+- **A per-rule parameter is typed, not free-form.** `AttentionRuleConfig.StaleAfterDays` resolves to
+  `RuleSettings.StaleAfter`. A rule opts in by implementing `DefaultStaleAfter()`; `Resolve`
+  rejects the key on a kind that does not, and the config loader rejects a non-positive value. The
+  home-manager option is `attention.rules.<kind>.staleAfterDays`.
+- **The age is measured from the later of the operator's last update and the In Progress entry.**
+  This is the sketch the projection test carried, kept deliberately: an issue another person moved
+  into In Progress two days ago is not "twenty days without an update", and an issue the operator
+  never touched is measured from its In Progress entry, as the bead specifies.
+- **Assignment is the connector's.** The connector supplies the operator facts only for an issue
+  assigned to the operator, so `OperatorFactsKnown` is also the assignment test; the rule
+  additionally requires a non-empty assignee. Reassignment clears the item on the next hydration.
+- **Gap, upstream of this repo.** `pjira` keeps only status items of the changelog, so "any other
+  changelog entry by the operator" (a field edit) cannot count as an update; only comments and
+  status transitions do. Extending that needs `pjira` to expose the other changelog fields.
+- **Link.** The item is `{type: issue, id: <key>}`, so `pg-desk links issue:<key>` gives the
+  issue's page to the menu bar and the dashboard; the summary does not repeat the key.
 
 ### 4.4 What the plugin is, and how it respects the composition rules
 

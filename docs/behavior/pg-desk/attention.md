@@ -89,20 +89,48 @@ reason so that severity and summary say why.
 - **One exclusion list.** The CI rule uses the same `check_interpreters` patterns as the CI
   rollup and the build links. There is no separate attention-only exclusion setting.
 
+### Issue rules
+
+An `issue` entity needs no interpretation row: it is projected from its stored facts, and its
+rules read those facts and the injected clock. Which statuses mean "In Progress" comes from
+configuration (`jira.in_progress_statuses`, matched case-insensitively), not from the tracker.
+
+| Rule kind                 | Raises when                                                                                                                                                                                                                    | Default severity |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------- |
+| `issue.stale-in-progress` | An issue assigned to the operator is In Progress and the operator has not updated it for at least the threshold (default 7 calendar days). The summary says how many whole days it has been, and the item is the issue itself. | `medium`         |
+
+- **What counts as an update by the operator.** The operator's own comment or status transition.
+  An update by anyone else, or by a bot, never resets the clock.
+- **Where the age is measured from.** The later of the operator's last update and the moment the
+  issue entered In Progress. An issue the operator never updated is therefore measured from its
+  In Progress entry, and an issue someone else only recently moved into In Progress is not
+  reported as long neglected.
+- **Unknown is not zero.** An issue not assigned to the operator, or one whose operator facts the
+  connector could not supply, never raises (INV-ATTNEVAL-6). Reassigning the issue, moving it out
+  of In Progress, or the operator updating it clears the item on the next evaluation, because the
+  rule is computed at every read against the stored facts and the clock.
+- **One item.** The item's `{type, id}` is `{issue, <key>}`, a valid ref for
+  [`links.md`](links.md), which gives the menu bar and the dashboard the issue's page.
+- **Known gap.** The connector's changelog carries status transitions only, so an operator edit of
+  some other field does not count as an update.
+
 ## Configuration
 
 The `attention` block of the `pg-desk` configuration (the same file `serve` and the plugin read,
 so they share one source of truth):
 
-| Key                               | Default                                                         |
-| --------------------------------- | --------------------------------------------------------------- |
-| `attention.rules.<kind>.enabled`  | `true` for all three initial kinds                              |
-| `attention.rules.<kind>.severity` | as in the rule table                                            |
-| `attention.ordering.ties`         | severity descending, then group size descending, then entity id |
+| Key                                       | Default                                                         |
+| ----------------------------------------- | --------------------------------------------------------------- |
+| `attention.rules.<kind>.enabled`          | `true` for every kind                                           |
+| `attention.rules.<kind>.severity`         | as in the rule table                                            |
+| `attention.rules.<kind>.stale_after_days` | `7` for `issue.stale-in-progress`, the only kind that has it    |
+| `attention.ordering.ties`                 | severity descending, then group size descending, then entity id |
 
 `attention.ordering.ties` admits only its default (leaving it unset is the same): any other value is
 a configuration error at load, so a deployment cannot believe it re-ordered the feed when it did
-not. An unknown rule kind in the block is a configuration error at load. A missing kind takes its
+not. An unknown rule kind in the block is a configuration error at load, and so is
+`stale_after_days` that is not a positive whole number, or that names a kind without that
+parameter. A missing kind takes its
 built-in default, so a deployment with no `attention` block works. The home-manager module renders
 this block from `phillipgreenii.programs.pg-desk.attention`.
 
@@ -228,9 +256,10 @@ absence for a defect.
 - **Re-review after my approval.** Needs the commit each review was submitted against, which the
   connector's review record does not carry. Restoring it is an operator decision tracked outside
   this doc.
-- **Issue due dates** for Jira issues and beads, which need `issue` entities hydrated in the store.
-- **Time-based rules** (a snooze that expires, escalation by waiting time). The evaluator takes
-  the clock as an input, so they are possible, and the first release ships none.
+- **Issue due dates** for Jira issues and beads. `issue` entities are now hydrated in the store
+  (see "Issue rules"); the due-date rule itself is not yet written.
+- **Further time-based rules** (a snooze that expires, escalation by waiting time). The evaluator
+  takes the clock as an input, and `issue.stale-in-progress` is the first rule to use it.
 - **Freshness of the underlying data.** How old the data behind an item is, per source, is a
   separate contract and is not an attention item.
 

@@ -55,7 +55,7 @@ let
 
   # attention (bead pg2-xaqag): rendered only when the option is set. Within
   # the block each rule kind keeps only the keys that were given (a null
-  # enabled/severity falls through to the rule's built-in default), and
+  # enabled/severity/staleAfterDays falls through to the rule's built-in default), and
   # ordering is rendered only when ties is set.
   renderedAttention =
     if cfg.attention == null then
@@ -66,6 +66,7 @@ let
           _: r:
           lib.filterAttrs (_: v: v != null) {
             inherit (r) enabled severity;
+            stale_after_days = r.staleAfterDays;
           }
         ) cfg.attention.rules;
         renderedOrdering = lib.filterAttrs (_: v: v != null) {
@@ -498,6 +499,17 @@ in
                       );
                       default = null;
                       description = "config.yaml's attention.rules.<kind>.severity. Null keeps the rule's built-in default severity.";
+                    };
+                    staleAfterDays = lib.mkOption {
+                      type = lib.types.nullOr lib.types.ints.positive;
+                      default = null;
+                      description = ''
+                        config.yaml's attention.rules.<kind>.stale_after_days: the
+                        threshold, in calendar days, of a time-based rule such as
+                        `issue.stale-in-progress`. Null keeps the rule's built-in
+                        default (7). pg-desk rejects it on a rule kind that has no
+                        such parameter.
+                      '';
                     };
                   };
                 }

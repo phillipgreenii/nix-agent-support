@@ -30,6 +30,11 @@ type View struct {
 	Degraded bool
 	// AsOf is the interpretation's as-of time (zero when unparsable).
 	AsOf time.Time
+	// Now is the injected clock's reading, set by Evaluate before any rule
+	// runs; it is the clock input of a time-based rule. Zero when the view
+	// was projected without an evaluation, and a time-based rule then raises
+	// nothing.
+	Now time.Time
 
 	// Entity is the stored entity row; nil when the entity has none.
 	Entity *store.Entity

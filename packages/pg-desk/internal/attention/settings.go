@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 )
@@ -15,6 +16,18 @@ type RuleSettings struct {
 	// SeverityConfigured is true when the configuration set the severity
 	// explicitly (a rule MAY otherwise vary its default by cause).
 	SeverityConfigured bool
+	// StaleAfter is the threshold of a time-based rule (a rule that has a
+	// DefaultStaleAfter): the configured attention.rules.<kind>.stale_after_days
+	// in days, else the rule's default. Zero for a rule with no such
+	// parameter.
+	StaleAfter time.Duration
+}
+
+// staleAfterRule is implemented by a time-based rule whose threshold is
+// tunable through attention.rules.<kind>.stale_after_days.
+type staleAfterRule interface {
+	// DefaultStaleAfter is the threshold used when the configuration sets none.
+	DefaultStaleAfter() time.Duration
 }
 
 // Settings is the resolved attention configuration: one entry per registered
@@ -48,6 +61,10 @@ func Resolve(c config.AttentionConfig) (Settings, error) {
 	out := Settings{Rules: make(map[string]RuleSettings, len(known))}
 	for kind, r := range known {
 		rs := RuleSettings{Enabled: true, Severity: r.DefaultSeverity()}
+		sa, hasStaleAfter := r.(staleAfterRule)
+		if hasStaleAfter {
+			rs.StaleAfter = sa.DefaultStaleAfter()
+		}
 		if cfg, ok := c.Rules[kind]; ok {
 			if cfg.Enabled != nil {
 				rs.Enabled = *cfg.Enabled
@@ -56,8 +73,26 @@ func Resolve(c config.AttentionConfig) (Settings, error) {
 				rs.Severity = Severity(cfg.Severity)
 				rs.SeverityConfigured = true
 			}
+			if cfg.StaleAfterDays != nil {
+				if !hasStaleAfter {
+					return Settings{}, fmt.Errorf("attention.rules.%s.stale_after_days: this rule kind has no such parameter (rules with it: %s)", kind, strings.Join(staleAfterKinds(known), ", "))
+				}
+				rs.StaleAfter = time.Duration(*cfg.StaleAfterDays) * 24 * time.Hour
+			}
 		}
 		out.Rules[kind] = rs
 	}
 	return out, nil
+}
+
+// staleAfterKinds lists, sorted, the rule kinds that take stale_after_days.
+func staleAfterKinds(known map[string]Rule) []string {
+	var out []string
+	for k, r := range known {
+		if _, ok := r.(staleAfterRule); ok {
+			out = append(out, k)
+		}
+	}
+	sort.Strings(out)
+	return out
 }

@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/interpret"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
@@ -101,64 +100,6 @@ func TestProjectSkipsInactiveEntityOnlyIssue(t *testing.T) {
 	}
 }
 
-// staleInProgress is a pure predicate of the shape the stale-issue rule will
-// have: it reads only the view's issue facts and the injected clock. It exists
-// to prove the projection makes such a rule possible without a PR
-// interpretation row; it is not a registered rule.
-func staleInProgress(v *View, now time.Time, threshold time.Duration) bool {
-	f, ok := v.IssueFacts()
-	if !ok || f.StatusCategory != interpret.IssueStatusCategoryInProgress || !f.OperatorFactsKnown {
-		return false
-	}
-	since := f.InProgressSince
-	if f.OperatorUpdatedAt.After(since) {
-		since = f.OperatorUpdatedAt
-	}
-	return now.Sub(since) >= threshold
-}
-
-func TestIssueFactsDriveAPureTimeRuleWithAnInjectedClock(t *testing.T) {
-	const week = 7 * 24 * time.Hour
-	facts := func(state, changed, operator string) string {
-		s := `{"issue_show":{"state":"` + state + `"`
-		if changed != "" {
-			s += `,"status_changed_at":"` + changed + `"`
-		}
-		if operator != "" {
-			s += `,"operator_updated_at":"` + operator + `"`
-		}
-		return s + `}}`
-	}
-	tests := []struct {
-		name  string
-		facts string
-		now   time.Time
-		want  bool
-	}{
-		{"in progress 8 days, never updated by the operator", facts("In Progress", "2026-09-28T12:00:00Z", ""), fixedNow, true},
-		{"in progress 6 days", facts("In Progress", "2026-09-30T12:00:00Z", ""), fixedNow, false},
-		{"exactly the threshold", facts("In Progress", "2026-09-29T12:00:00Z", ""), fixedNow, true},
-		{"old entry but a recent operator update", facts("In Progress", "2026-09-01T12:00:00Z", "2026-10-05T12:00:00Z"), fixedNow, false},
-		{"old operator update, long in progress", facts("In Progress", "2026-09-01T12:00:00Z", "2026-09-10T12:00:00Z"), fixedNow, true},
-		{"not in progress", facts("To Do", "2026-09-01T12:00:00Z", ""), fixedNow, false},
-		{"operator facts unknown never raises", facts("In Progress", "", ""), fixedNow, false},
-		{"the clock is an input: same facts, earlier now", facts("In Progress", "2026-09-28T12:00:00Z", ""), fixedNow.Add(-3 * 24 * time.Hour), false},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			st := store.OpenNewSchemaForTest(t)
-			putIssue(t, st, "K-1", tc.facts)
-			views, err := Project(st, testRepo, &config.Config{Repos: []config.RepoConfig{{Remote: testRepo}}})
-			if err != nil || len(views) != 1 {
-				t.Fatalf("Project: views=%d err=%v", len(views), err)
-			}
-			if got := staleInProgress(views[0], tc.now, week); got != tc.want {
-				t.Errorf("staleInProgress = %v, want %v", got, tc.want)
-			}
-		})
-	}
-}
-
 func TestViewIssueFactsIsNotAvailableForOtherTypesOrBadFacts(t *testing.T) {
 	st := store.OpenNewSchemaForTest(t)
 	putIssue(t, st, "K-1", `not json`)
@@ -179,7 +120,7 @@ func TestIssueEntitiesRaiseNothingFromPRRules(t *testing.T) {
 	putIssue(t, st, "K-1", `{"issue_show":{"state":"In Progress"}}`)
 	res := evaluate(t, st, baseConfig())
 	if len(res.Items) != 0 {
-		t.Errorf("items = %+v, want none: no registered rule applies to an issue yet", res.Items)
+		t.Errorf("items = %+v, want none: this issue carries no operator facts and no PR rule applies to an issue", res.Items)
 	}
 	tr, ok := res.Traces[Ref("issue", "K-1")]
 	if !ok {

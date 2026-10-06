@@ -293,7 +293,7 @@ func TestAttentionExplain(t *testing.T) {
 	}
 
 	d = run("pr:acme/api#2")
-	if d.Listed || !d.Held || len(d.Candidates) != 0 || len(d.NotRaised) != 3 {
+	if d.Listed || !d.Held || len(d.Candidates) != 0 || len(d.NotRaised) != 4 {
 		t.Errorf("an unlisted entity must say which rules did not apply: %+v", d)
 	}
 	for _, n := range d.NotRaised {
