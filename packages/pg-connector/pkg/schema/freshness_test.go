@@ -31,6 +31,7 @@ var freshnessBearingEntities = []any{
 	PR{},
 	CIRun{},
 	Issue{},
+	ActivityItem{},
 }
 
 func TestFreshnessBearingEntities_AllCarryAsOfAndStale(t *testing.T) {

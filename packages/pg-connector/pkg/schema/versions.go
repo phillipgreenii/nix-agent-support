@@ -38,4 +38,5 @@ var CurrentSchemaVersions = map[string]int{
 	"mail":         MailSchemaVersion,
 	"alert":        AlertSchemaVersion,
 	"agentsession": AgentSessionSchemaVersion,
+	"activity":     ActivitySchemaVersion,
 }
