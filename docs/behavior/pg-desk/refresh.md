@@ -4,7 +4,7 @@
 through the entity-change pipeline: it reads the entity from pg-connector, classifies the change
 against the previous snapshot, writes the snapshot and appends one `change_log` record, all in one
 transaction (entity-change-flow design 6.9, 9.12). It is the operator's targeted counterpart of the
-pull-through `changes` verb. The old top-level `run` verb is unchanged and stays until the cutover
+list-and-diff `changes` verb. The old top-level `run` verb is unchanged and stays until the cutover
 phase deletes it.
 
 ## Behavior

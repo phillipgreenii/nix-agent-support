@@ -1,18 +1,20 @@
 # pg-desk — changes
 
 `pg-desk <type> changes --consumer NAME [--query Q] [--cached] [--reset] [--limit N] [--json]`, for
-`<type>` one of `pr`, `issue`, `thread`, is the pull-through change feed: it keeps the watched set
-fresh by asking pg-connector what changed, hydrates and classifies each reported entity, and hands
-the caller the change-log records past its cursor as the `pg-desk.changes/v1` envelope
-(entity-change-flow design 6.2, 9.2, 9.3). Besides the pull-through core it keeps the watched set
+`<type>` one of `pr`, `issue`, is the list-and-diff change feed: it lists each watched query with
+pg-connector's fingerprints, compares them with the fingerprints it stored at each entity's last
+hydration, hydrates and classifies only the entities that differ, and hands the caller the
+change-log records past its cursor as the `pg-desk.changes/v1` envelope (entity-change-flow design
+6.2, 9.2, 9.3). Besides the list-and-diff core it keeps the watched set
 honest: an entity that dropped out of every watched query becomes removed, an entity terminal in
 its source system stops being active, a rolling sweep re-hydrates the active entities by age, and
 a per-poll hydration budget bounds the detail reads (design 6.1, 8.4, 8.5).
 
 ```mermaid
 flowchart LR
-    CLI["pg-desk type changes"] -->|"per watched query"| PC["pg-connector type changes"]
-    PC -->|"added / changed ids"| H["hydrate + classify"]
+    CLI["pg-desk type changes"] -->|"per watched query"| PC["pg-connector type list --fingerprints"]
+    PC -->|"listing + fingerprints"| D["diff against stored list fingerprint"]
+    D -->|"added / changed ids"| H["hydrate + classify"]
     H -->|"one transaction per entity"| LOG[("change_log")]
     LOG -->|"records past the cursor"| OUT["envelope on stdout"]
     OUT -->|"after the flush"| ADV["advance cursor"]
@@ -20,14 +22,39 @@ flowchart LR
 
 ## Behavior
 
-- **Pull-through (default).** For each watched query of `<type>` (`watch.<type>.queries`), pg-desk
-  runs `pg-connector <type> changes --query <q> --consumer pg-desk --output json` (the consumer
-  name is pg-connector's own ledger cursor and is unrelated to `--consumer`). Every entity
-  reported `added` or `changed` is hydrated through the entity pipeline with origin `pg-connector`,
-  classified and logged; an entity reported by several queries is hydrated once per call. Entries
-  reported `removed` are never hydrated: they feed the watched-set membership below. Hydration and
+- **List-and-diff (default).** For each watched query of `<type>` (`watch.<type>.queries`),
+  pg-desk runs `pg-connector <type> list --query <q> --fingerprints --output json`: the whole
+  current listing of the query with one opaque fingerprint per entity. There is no cursor and no
+  connector-side consumer, so the call is stateless on the connector. pg-desk compares each listed
+  entity's fingerprint with the list fingerprint it stored the last time it hydrated that entity
+  (`entity.list_fp`): an entity with no row, or an inactive row, is **added**; an active row whose
+  stored fingerprint differs is **changed**; otherwise it is unchanged and costs nothing. The
+  comparison is always list against list, never against a hydrated payload: the list path lacks
+  data the detail read has, and search results lag, so a cross-path comparison would report a
+  change every tick. An entity the connector marks `stale` in a listing is ignored for change
+  detection there. A row with an empty stored fingerprint (written by `--reset` or the cutover
+  backfill) is changed once, which costs one re-hydration and no records of its own. Every added or
+  changed entity is hydrated through the entity pipeline with origin `pg-connector`, classified
+  and logged; an entity listed by several queries is hydrated once per call. Hydration and
   classification run for every watched entity whether or not any decider subscribes to its type or
   kind.
+- **One transaction, the observed fingerprint.** The entity's snapshot, `hydrated_at`, `active`,
+  its change-log rows and its stored list fingerprint are written in ONE transaction, and the
+  fingerprint is the one observed in THIS call's listing, not one derived afterwards. A change that
+  lands while the entity is being hydrated is therefore found on the next call, because the stored
+  value is the older observed one. A hydration that fails, is degraded, or loses a compare-and-set
+  writes nothing, so the entity is still different on the next call. Reads that do not come from a
+  listing (`--reset`, the sweep, a confirmation read) write no fingerprint and leave the stored one
+  as it was.
+- **Order and cap.** Within `hydration.max_per_poll` the changed entities are hydrated first,
+  oldest mismatch first (never hydrated counts as oldest), then the added ones by id. What the cap
+  leaves is found again by the next call's diff; nothing is queued and nothing is dropped.
+- **No retry state.** pg-desk runs no timer, backoff or retry loop and keeps no retry counter or
+  deferral queue: the next scheduled call (pg-router's schedule) is the only retry, and an entity
+  that keeps failing is retried on every call with no give-up.
+- **Unsupported types.** An entity type whose list cannot be fingerprinted (`thread`: a Slack list
+  has no stable per-entity fingerprint) is refused by `pg-desk thread changes` with a clear error
+  and exit `1`, with or without `--cached`, before any connector call.
 - **Records.** After hydration the call returns the change-log records of `<type>` past `NAME`'s
   cursor, ascending by `seq`, at most `--limit N` of them (`0`, the default, means all). A record
   is `seq`, `type`, `id` (pg-desk's canonical entity id), `title` (display only), `version`,
@@ -40,7 +67,7 @@ flowchart LR
   for different consumers or types do not contend. A plain call advances `NAME`'s own cursor
   exactly like a real pg-router poll, so running it by hand under a real consumer name is not a
   peek.
-- **`--cached`.** Returns the records a real call would, without calling pg-connector, hydrating,
+- **`--cached`.** Returns the records a real call would, without listing through pg-connector, hydrating,
   registering the consumer, touching its `seen_at` or advancing its cursor; `sources` is empty.
   It works with no watched query configured and on an unregistered consumer (cursor `0`).
 - **`--reset`.** Replays every ACTIVE entity of the type as `reconcile` with origin `reset`: each
@@ -64,8 +91,10 @@ flowchart LR
   non-stale consumer has passed are deleted, and a stale consumer no longer holds them back.
 - **`sources`.** The envelope has one row per consulted watched query: `ok`; `degraded` when a
   pg-connector backend row of that query was neither `succeeded` nor `disabled` (disabled counts as
-  healthy), when a hydration of an entity that query reported failed or was degraded, or when the
-  hydration budget deferred work (reason `hydration_budget`), with the reasons joined by `; `; `failed` when the pg-connector call itself failed or could not be started.
+  healthy), when the listing was truncated (reason `list_truncated`), when a hydration of an entity
+  that query listed failed or was degraded, or when the hydration budget left work for the next
+  call (reason `hydration_budget`), with the reasons joined by `; `; `failed` when the pg-connector
+  call itself failed or could not be started.
 - **Text form.** One line per record, the history layout prefixed by the entity —
   `<type> <id>  <seq>  <at>  <kinds joined by ", ">  origin=<origin>` — then one `source <query>:
 <status>[ (<reason>)]` line per query and a final `cursor <from> -> <to>` line. `--json` (or
@@ -79,18 +108,23 @@ An entity is **active** while BOTH hold (design 6.1): it is non-terminal in its 
 AND at least one currently watched query still returns it. Only active entities are swept or
 replayed by `--reset`.
 
-- **Watched-set membership -> `removed`.** pg-connector reports membership change per query, so
-  pg-desk keeps, per watched query, the ids that query currently returns (store `meta` keys
-  `change_flow.watchset.<type>.<query>`, no schema change): `added`/`changed` put an id in the
-  set, `removed` takes it out. When a query reports an entity `removed` and NO configured query's
-  set still holds it, the entity becomes inactive and one `removed` record (origin `pg-connector`)
-  is logged. An entity another query still returns stays active. A removal for an entity the store
-  does not hold, or that is already inactive, writes nothing. A query whose pg-connector backend
-  rows are degraded contributes no removals, and a failed query contributes nothing at all.
+- **Watched-set membership -> `removed`.** pg-desk keeps, per watched query, the ids that query
+  listed at its last complete listing (store `meta` keys `change_flow.watchset.<type>.<query>`, no
+  schema change). A **complete** listing is one where at least one pg-connector backend succeeded,
+  none is degraded (`disabled` counts as healthy) and nothing was truncated; it rewrites the
+  query's set to exactly the listed ids. A degraded or truncated listing only ever ADDS its listed
+  ids and never removes any, and a failed query contributes nothing at all. A **removal
+  candidate** is an id that was in a query's persisted set, is absent from that query's complete
+  listing, and is held by no other configured query: the other-query test reads the persisted set
+  of EVERY configured query, not only the queries run in this call (`--query Q` runs one). A
+  candidate becomes inactive and one `removed` record (origin `pg-connector`) is logged, and the
+  id leaves the persisted sets only AFTER that succeeded, so a failed deactivation keeps it in the
+  set and it is found again on the next call. An entity another query still lists stays active. A
+  removal for an entity the store does not hold, or that is already inactive, writes nothing.
   `removed` says nothing about the source state: a removed entity's own state is unknown until a
-  watched query returns it again, when it becomes active with a `reconcile` record (first
-  observation after a gap). The same absence in a targeted `refresh <id>` fails loudly instead
-  (that half belongs to `refresh`).
+  watched query lists it again, when it is added and becomes active with a `reconcile` record
+  (first observation after a gap). The same absence in a targeted `refresh <id>` fails loudly
+  instead (that half belongs to `refresh`).
 - **Source-terminal deactivation.** After every successful hydration (added/changed, sweep or
   reset) an entity that is terminal in its source system (closed or merged PR, issue in a terminal
   state, thread with no reply inside `watch.thread.active_window`) is set inactive through a
@@ -118,16 +152,14 @@ added/changed entities first, then the sweep batch, so a tight budget starves th
 `--reset` replays are exempt (see `--reset`).
 
 - When the budget runs out, or the backend answers degraded three hydrations in a row, the
-  remaining hydrations are deferred to the next poll, never retried inline. Every watched query
-  that reported a deferred entity is marked `degraded` with reason `hydration_budget` (or
-  `hydration_backend_degraded`); when only sweep work, or an entity carried over from an earlier
-  poll, was deferred, every watched-query row of the type is marked. The call exits `2`.
-- pg-connector moves its own ledger past an entity it reported, so a deferred added/changed entity
-  would never be reported again. pg-desk therefore queues it in `meta`
-  (`change_flow.deferred.<type>`) and hydrates the queue first on the next poll. A hydration that
-  FAILED is queued the same way and retried up to 5 polls before it is dropped with a warning (the
-  failure stays visible through the persisted degraded set). Sweep work needs no queue: the entity
-  stays due.
+  remaining hydrations are left for the next call, never retried inline. Every watched query that
+  listed a left-over entity is marked `degraded` with reason `hydration_budget` (or
+  `hydration_backend_degraded`); when only sweep work was left, every watched-query row of the type
+  is marked. The call exits `2`.
+- Nothing is queued. A left-over added/changed entity still differs from its stored fingerprint, so
+  the next call's diff finds it again in the same order; a hydration that FAILED wrote nothing and
+  is found the same way, on every call, with no counter and no give-up. Sweep work needs no queue
+  either: the entity stays due.
 - A budget-exhausted poll keeps the consumer cursor semantics unchanged: it advances only after the
   flush, over the records actually delivered.
 
@@ -147,12 +179,12 @@ NOT read it as proof that a comment was added.
 | `2`  | Partial: at least one watched query or hydration failed or degraded. The envelope still carries the records, and the cursor advanced past what was delivered.                     |
 | `3`  | Total failure: every watched query failed. The envelope is printed with `failed` sources and no records; nothing was logged and the cursor did not move (`seen_at` is still set). |
 
-- A degraded or failed source never yields `removed`/`closed` for an entity it failed to list; the
-  entity stays as it was and is retried on a later poll.
-- A detail read failing for one entity keeps that entity's previous snapshot, logs nothing for it
-  and marks the reporting query's source `degraded` (exit `2`). pg-connector has already moved its
-  own ledger cursor past that entity, so pg-desk queues the hydration for the next poll (see the
-  hydration budget); an entity already stored is also re-read by the rolling sweep.
+- A degraded, truncated or failed source never yields `removed`/`closed` for an entity it failed to
+  list; the entity stays as it was and is retried on a later poll.
+- A detail read failing for one entity keeps that entity's previous snapshot and stored
+  fingerprint, logs nothing for it and marks the listing query's source `degraded` (exit `2`). The
+  entity still differs on the next call, so it is hydrated again then (see the hydration budget);
+  an entity already stored is also re-read by the rolling sweep.
 - Each hydration is counted in the store's `meta` table (`change_flow.hydrations.<type>`,
   `change_flow.hydration_failures.<type>`, `change_flow.occ_retries.<type>`, and the per-entity
   `change_flow.degraded.<type>` set) for `status`, `doctor` and `/metrics`; an entity degraded in
@@ -172,13 +204,20 @@ NOT read it as proof that a comment was added.
   `closed` record.
 - **INV-CHANGES-4.** The first observation of an entity MUST yield only `reconcile`.
 - **INV-CHANGES-5.** The only binary this verb execs is `pg-connector`, through the gather
-  package's single exec chokepoint.
-- **INV-CHANGES-6.** A `removed` record MUST be logged only when no configured, successfully and
-  non-degradedly listed watched query still returns the entity.
+  package's single exec chokepoint; it calls `<type> list --fingerprints` and never `<type>
+changes`.
+- **INV-CHANGES-6.** A `removed` record MUST be logged only when no configured watched query still
+  holds the entity: every configured query's persisted set is consulted, and only a complete
+  (succeeded, non-truncated) listing may take an id out of its query's set.
 - **INV-CHANGES-7.** An inactive entity MUST NOT be swept or replayed by `--reset`.
 - **INV-CHANGES-8.** A call MUST NOT start more than `hydration.max_per_poll` added/changed plus
   sweep hydrations (a `--reset` replay is exempt); changed/added work MUST be served before sweep
   work.
+- **INV-CHANGES-9.** An entity's stored list fingerprint MUST be written only in the transaction
+  that writes its snapshot, MUST be the fingerprint observed in the listing that triggered the
+  hydration, and MUST be left unchanged by every failed, degraded or lost hydration.
+- **INV-CHANGES-10.** pg-desk MUST NOT keep a retry counter, a deferral queue or a timer for the
+  list-and-diff flow; the next scheduled call is the only retry.
 
 ## Telemetry and logs
 

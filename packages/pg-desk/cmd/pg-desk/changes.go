@@ -35,22 +35,29 @@ type changesFlags struct {
 }
 
 // newChangesCmd builds `pg-desk <type> changes --consumer NAME [--query Q]
-// [--cached] [--reset] [--limit N]`: the pull-through change feed [design
+// [--cached] [--reset] [--limit N]`: the list-and-diff change feed [design
 // 6.2, 9.2]. It is a typed verb with no old-schema counterpart, so it
 // refuses an old-schema store.
 func newChangesCmd(entityType string) *cobra.Command {
 	var f changesFlags
 	c := &cobra.Command{
 		Use:   "changes",
-		Short: fmt.Sprintf("Pull %s changes through pg-connector, then list the change records past a consumer's cursor", entityType),
-		Long: fmt.Sprintf(`Pull-through (default): for each watched query of the type, run
-pg-connector %[1]s changes, hydrate every entity it reports added or changed,
-classify and log the change, then print the pg-desk.changes/v1 envelope of the
-records past NAME's cursor and advance that cursor once the output is flushed.
+		Short: fmt.Sprintf("List-and-diff %s changes through pg-connector, then list the change records past a consumer's cursor", entityType),
+		Long: fmt.Sprintf(`List-and-diff (default): for each watched query of the type, run
+pg-connector %[1]s list --fingerprints (no cursor: the whole current listing),
+compare each listed entity's fingerprint with the one stored at its last
+hydration, hydrate only the entities that are new or differ (within
+hydration.max_per_poll), classify and log the change, then print the
+pg-desk.changes/v1 envelope of the records past NAME's cursor and advance that
+cursor once the output is flushed. A hydration that fails writes nothing, so
+the entity is simply found different again on the next call: there is no retry
+queue and no give-up.
 
 A plain call (without --cached) advances NAME's own cursor exactly like a real
 pg-router poll: to inspect without moving anything use --cached or
-"pg-desk %[1]s history <id>".`, entityType),
+"pg-desk %[1]s history <id>".
+
+Entity types whose list cannot be fingerprinted (thread) are refused.`, entityType),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runChanges(cmd, entityType, f)
@@ -75,6 +82,9 @@ func runChanges(cmd *cobra.Command, entityType string, f changesFlags) error {
 	}
 	if f.cached && f.reset {
 		return errors.New("changes: --reset cannot be combined with --cached")
+	}
+	if !changes.FingerprintSupported(entityType) {
+		return fmt.Errorf("%w: pg-desk %s changes is not available because a %s list cannot be fingerprinted", changes.ErrUnsupportedType, entityType, entityType)
 	}
 	cfg, err := deskConfigLoad(cmd.Context())
 	if err != nil {

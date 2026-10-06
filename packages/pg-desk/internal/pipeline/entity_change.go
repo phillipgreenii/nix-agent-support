@@ -48,6 +48,13 @@ type EntityChangeOptions struct {
 	// ForceReconcile makes the old snapshot count as unobserved even when a
 	// row exists (--reset, a new watched query: first observation).
 	ForceReconcile bool
+	// ListFP, when non-nil, is the list fingerprint observed in THIS tick's
+	// listing of the entity; it is written to list_fp in the same transaction
+	// as the snapshot, hydrated_at, active and change_log rows, so it commits
+	// or rolls back with them. Nil (a read that did not come from a list: the
+	// removal confirmation read, --reset, the remote sweep) leaves list_fp
+	// untouched. The pipeline never derives it from the hydrated payload.
+	ListFP *string
 
 	// beforeWrite, when set, runs once per compare-and-set attempt after the
 	// old snapshot is read and before the write (a test seam for a
@@ -236,10 +243,10 @@ func (p *Pipeline) RunEntityChange(ctx context.Context, entityType, entityID str
 		if opts.beforeWrite != nil {
 			opts.beforeWrite(attempt)
 		}
-		v, err := p.store.WriteEntityStateWithLog(store.Entity{
+		v, err := p.store.WriteEntityStateWithLogFP(store.Entity{
 			Repo: repo, EntityType: entityType, EntityID: entityID,
 			Facts: string(factsJSON), AsOf: asOf, ContentHash: newSnap.ContentHash, HeadSHA: headSHA,
-		}, expected, at, true, kinds, origin, at)
+		}, expected, at, true, opts.ListFP, kinds, origin, at)
 		if err == nil {
 			res.Kinds, res.Version, res.Written = kinds, v, true
 			break

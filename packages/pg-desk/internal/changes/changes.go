@@ -15,11 +15,6 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
-// PullThroughConsumer is the consumer name pg-desk presents to pg-connector
-// when it pulls changes through: pg-connector keeps its own per-consumer
-// ledger cursor, independent of the pg-desk change_log consumers [design 6.2].
-const PullThroughConsumer = "pg-desk"
-
 // Hydration origins [design 9.3].
 const (
 	OriginPGConnector = "pg-connector"
@@ -31,11 +26,27 @@ const (
 // (exit 3, design 9.12).
 var ErrTotalFailure = errors.New("changes: every watched query failed")
 
-// Lister lists the changes pg-connector reports for one watched query.
-// *gather.Gatherer satisfies it.
+// Lister lists one watched query's complete current listing with the
+// connector's per-entity fingerprints (no cursor, no consumer: every call
+// returns the whole state of the query). *gather.Gatherer satisfies it.
 type Lister interface {
-	ListChanges(ctx context.Context, entityType, query, consumer string) (gather.ListChangesResult, error)
+	ListFingerprints(ctx context.Context, entityType, query string) (gather.ListFingerprintsResult, error)
 }
+
+// FingerprintSupported reports whether pg-connector can fingerprint the
+// entities of entityType in a listing. A type without support (thread: a Slack
+// list cannot be fingerprinted) has no list-and-diff changes flow.
+func FingerprintSupported(entityType string) bool {
+	switch entityType {
+	case "pr", "issue":
+		return true
+	}
+	return false
+}
+
+// ErrUnsupportedType is wrapped by Run's error when the entity type has no
+// fingerprint support; nothing was called or written.
+var ErrUnsupportedType = errors.New("changes: entity type has no list fingerprint support")
 
 // Hydrator hydrates one entity, classifies the change and logs it.
 // *pipeline.Pipeline satisfies it.
@@ -59,7 +70,7 @@ type Options struct {
 	Limit int
 }
 
-// Engine runs the pull-through `changes` flow. Zero Now means time.Now; a
+// Engine runs the list-and-diff `changes` flow. Zero Now means time.Now; a
 // nil Warn discards non-fatal diagnostics.
 type Engine struct {
 	Cfg      *config.Config
@@ -103,6 +114,9 @@ func SelectQueries(cfg *config.Config, entityType, query string) ([]string, erro
 // failed Run still emits an envelope (failed sources, no records, cursor
 // unchanged) and returns an error wrapping ErrTotalFailure.
 func (e *Engine) Run(ctx context.Context, opts Options, emit func(Envelope) error) (Outcome, error) {
+	if !FingerprintSupported(opts.EntityType) {
+		return Outcome{}, fmt.Errorf("%w: %s changes is not available (its list cannot be fingerprinted)", ErrUnsupportedType, opts.EntityType)
+	}
 	if opts.Cached && opts.Reset {
 		return Outcome{}, errors.New("changes: --reset cannot be combined with --cached")
 	}
@@ -119,14 +133,14 @@ func (e *Engine) Run(ctx context.Context, opts Options, emit func(Envelope) erro
 		return Outcome{}, fmt.Errorf("changes: %w", err)
 	}
 
-	// Phase A: list every watched query.
+	// Phase A: list every watched query, whole and fingerprinted.
 	runs := make([]queryRun, 0, len(queries))
 	failedQueries := 0
 	for _, q := range queries {
 		if err := ctx.Err(); err != nil {
 			return Outcome{}, fmt.Errorf("changes: %w", err)
 		}
-		res, lerr := e.Lister.ListChanges(ctx, opts.EntityType, q, PullThroughConsumer)
+		res, lerr := e.Lister.ListFingerprints(ctx, opts.EntityType, q)
 		if lerr != nil {
 			failedQueries++
 		}
@@ -138,7 +152,7 @@ func (e *Engine) Run(ctx context.Context, opts Options, emit func(Envelope) erro
 
 	if !total {
 		// Phase A2: watched-set membership. An entity no configured query
-		// returns any more becomes removed/inactive [design 6.1].
+		// lists any more becomes removed/inactive [design 6.1].
 		st.side = append(st.side, e.applyMembership(opts.EntityType, runs)...)
 
 		// Phase B: --reset replays every active entity as reconcile. The
@@ -153,7 +167,7 @@ func (e *Engine) Run(ctx context.Context, opts Options, emit func(Envelope) erro
 				if err := ctx.Err(); err != nil {
 					return Outcome{}, fmt.Errorf("changes: %w", err)
 				}
-				herr := e.hydrate(ctx, opts.EntityType, id, gather.ChangeChanged, OriginReset, true)
+				herr := e.hydrate(ctx, opts.EntityType, id, gather.ChangeChanged, OriginReset, true, nil)
 				st.hydrated[id] = herr
 				if herr != nil {
 					st.side = append(st.side, fmt.Sprintf("reset %s: %s", id, firstErrLine(herr.Error())))
@@ -161,12 +175,12 @@ func (e *Engine) Run(ctx context.Context, opts Options, emit func(Envelope) erro
 			}
 		}
 
-		// Phase C: hydrate what the queries reported added/changed (plus any
-		// entity an earlier poll had to defer), then the rolling sweep, all
-		// within hydration.max_per_poll with changed/added served first
-		// [design 8.4, 8.5].
+		// Phase C: hydrate what the list diff found added or changed, then the
+		// rolling sweep, all within hydration.max_per_poll with changed/added
+		// served first [design 8.4, 8.5]. Nothing is queued: what the cap or a
+		// failure leaves is found again by the next tick's diff.
 		bud := &budget{left: e.Cfg.HydrationMaxPerPoll()}
-		queued, err := e.hydratePending(ctx, opts, runs, st, bud)
+		queued, err := e.hydrateListed(ctx, opts, runs, st, bud)
 		if err != nil {
 			return Outcome{}, err
 		}
@@ -182,6 +196,9 @@ func (e *Engine) Run(ctx context.Context, opts Options, emit func(Envelope) erro
 			continue
 		}
 		reasons := degradedBackendReasons(r.res.Sources)
+		if r.res.Truncated {
+			reasons = appendUnique(reasons, ReasonListTruncated)
+		}
 		reasons = appendUnique(reasons, st.notes[r.query]...)
 		reasons = appendUnique(reasons, st.all...)
 		if len(reasons) > 0 {
@@ -310,12 +327,15 @@ func (e *Engine) envelope(opts Options, from int64, sources []Source, rows []sto
 }
 
 // hydrate runs one entity through the pipeline and records the outcome. It
-// returns the failure (error or degraded note) or nil.
-func (e *Engine) hydrate(ctx context.Context, entityType, id string, change gather.ChangeKind, origin string, forceReconcile bool) error {
+// returns the failure (error or degraded note) or nil. listFP is the list
+// fingerprint observed this tick for a hydration driven by a listed entity,
+// nil for every read that did not come from a list (reset replay, sweep).
+func (e *Engine) hydrate(ctx context.Context, entityType, id string, change gather.ChangeKind, origin string, forceReconcile bool, listFP *string) error {
 	res, err := e.Hydrator.RunEntityChange(ctx, entityType, id, change, pipeline.EntityChangeOptions{
 		Origin:             origin,
 		ThreadActiveWindow: e.Cfg.ThreadActiveWindow(),
 		ForceReconcile:     forceReconcile,
+		ListFP:             listFP,
 	})
 	RecordHydration(e.Store, entityType, id, res, err)
 	if err != nil {

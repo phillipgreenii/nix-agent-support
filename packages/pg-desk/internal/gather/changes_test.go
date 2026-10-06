@@ -103,3 +103,84 @@ func TestListChangesRequiresArguments(t *testing.T) {
 		}
 	}
 }
+
+const listWirePR = `{"entities":[{"id":"<owner>/<repo>#1","title":"First","stale":false},{"id":"<owner>/<repo>#2","title":"Second","stale":true}],` +
+	`"present_ids":["<owner>/<repo>#1","<owner>/<repo>#2"],` +
+	`"sources":[{"source":"gh","status":"succeeded","count":2},{"source":"gh2","status":"degraded","count":0,"reason":"rate_limited"},{"source":"gh3","status":"disabled","count":0}],` +
+	`"truncated":true,"fingerprints":{"<owner>/<repo>#1":"fp-1","<owner>/<repo>#2":"fp-2"}}`
+
+func TestListFingerprintsDecodesEntitiesSourcesAndFingerprints(t *testing.T) {
+	rec := entityFactory(t, "pr list=0:"+listWirePR)
+	g := NewGatherer(testConfig(""), nil)
+	got, err := g.ListFingerprints(context.Background(), "pr", "mine")
+	if err != nil {
+		t.Fatalf("ListFingerprints: %v", err)
+	}
+	wantEntities := []ListedEntity{
+		{ID: "<owner>/<repo>#1", Title: "First"},
+		{ID: "<owner>/<repo>#2", Title: "Second", Stale: true},
+	}
+	if len(got.Entities) != 2 || got.Entities[0] != wantEntities[0] || got.Entities[1] != wantEntities[1] {
+		t.Errorf("entities = %+v", got.Entities)
+	}
+	if got.Fingerprints["<owner>/<repo>#1"] != "fp-1" || got.Fingerprints["<owner>/<repo>#2"] != "fp-2" {
+		t.Errorf("fingerprints = %v", got.Fingerprints)
+	}
+	if !got.Truncated {
+		t.Error("truncated flag lost")
+	}
+	if len(got.Sources) != 3 || got.Sources[1] != (ListChangesSource{Backend: "gh2", Status: "degraded", Reason: "rate_limited"}) {
+		t.Errorf("sources = %+v", got.Sources)
+	}
+	calls := readCalls(t, rec)
+	if len(calls) != 1 || !strings.HasSuffix(calls[0], "pr list --query mine --fingerprints --output json") {
+		t.Errorf("exec args = %v (no cursor, no consumer)", calls)
+	}
+	for _, c := range calls {
+		if strings.Contains(c, "--consumer") || strings.Contains(c, " changes ") {
+			t.Errorf("call must not use the ledger: %s", c)
+		}
+	}
+}
+
+func TestListFingerprintsExit2ReturnsPartialResultAndAbsentMapIsEmpty(t *testing.T) {
+	entityFactory(t, `issue list=2:{"entities":[],"sources":[{"source":"b","status":"degraded","count":0}],"truncated":false}`)
+	g := NewGatherer(testConfig(""), nil)
+	got, err := g.ListFingerprints(context.Background(), "issue", "open")
+	if err != nil {
+		t.Fatalf("exit 2 must return the partial result, got error %v", err)
+	}
+	if got.Fingerprints == nil || len(got.Fingerprints) != 0 || len(got.Sources) != 1 {
+		t.Errorf("result = %+v", got)
+	}
+}
+
+func TestListFingerprintsErrors(t *testing.T) {
+	for name, behavior := range map[string]string{
+		"exit 3 total failure": `pr list=3:{"error":{"code":"backend_down","message":"all down"}}`,
+		"exit 1 bad query":     `pr list=1:{"error":{"code":"query_not_recognized","message":"no such query"}}`,
+		"undecodable stdout":   `pr list=0:not json`,
+		"entity without id":    `pr list=0:{"entities":[{"title":"t"}],"sources":[]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			entityFactory(t, behavior)
+			g := NewGatherer(testConfig(""), nil)
+			if _, err := g.ListFingerprints(context.Background(), "pr", "mine"); err == nil {
+				t.Fatal("want an error")
+			}
+		})
+	}
+}
+
+func TestListFingerprintsCannotStartAndRequiresArguments(t *testing.T) {
+	g := NewGatherer(testConfig(""), nil)
+	for _, c := range [][2]string{{"", "q"}, {"pr", ""}} {
+		if _, err := g.ListFingerprints(context.Background(), c[0], c[1]); err == nil {
+			t.Errorf("%v: want an error", c)
+		}
+	}
+	t.Setenv("PATH", t.TempDir())
+	if _, err := g.ListFingerprints(context.Background(), "pr", "mine"); err == nil {
+		t.Fatal("want an error when pg-connector cannot be started")
+	}
+}

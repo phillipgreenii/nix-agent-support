@@ -71,7 +71,7 @@ back here — not the full list.
 | [`history.md`](history.md)                                   | `pg-desk pr`/`issue`/`thread` groups and `<type> history`                                                                          |
 | [`links.md`](links.md)                                       | `pg-desk links` — read-only batch lookup of PR/issue/thread/build cross-reference links; `<type> link add`/`remove` external links |
 | [`consumer.md`](consumer.md)                                 | `pg-desk <type> consumer list`/`forget` — change-log consumer lifecycle                                                            |
-| [`changes.md`](changes.md)                                   | `pg-desk <type> changes` — pull-through change feed, envelope, cursor, exit codes                                                  |
+| [`changes.md`](changes.md)                                   | `pg-desk <type> changes` — list-and-diff change feed, envelope, cursor, exit codes                                                 |
 | [`refresh.md`](refresh.md)                                   | `pg-desk <type> refresh` — targeted single-entity hydration, change kind, exit codes                                               |
 | [`attention.md`](attention.md)                               | `pg-desk attention list`/`explain` and the `pg-desk-attention` plugin — the read-time attention evaluator, its rules, grouping     |
 | [`operator-commands.md`](operator-commands.md)               | `show`, `status`, `sweep`, `doctor`, `heartbeat`, `heartbeat-item`                                                                 |

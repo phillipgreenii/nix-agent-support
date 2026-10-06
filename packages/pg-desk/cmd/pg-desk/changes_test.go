@@ -27,14 +27,19 @@ const freshHydratedAt = "2026-10-01T11:00:00Z"
 
 // changesFixture is a new-schema store, a config watching the named queries
 // of one entity type, and a fake pg-connector on PATH driven by files in dir:
-// <type>-changes-<query>.json (+ .exit) answers `<type> changes --query q`,
-// show-<id>.json answers `<type> show <id>`, and calls.log records every call.
+// <type>-list-<query>.json (+ .exit) answers `<type> list --query q
+// --fingerprints`, show-<id>.json answers `<type> show <id>`, and calls.log
+// records every call.
 type changesFixture struct {
 	t    *testing.T
 	typ  string
 	cfg  *config.Config
 	seed *store.Store
 	dir  string
+	// fps is the fingerprint each id is currently listed with; bumps counts
+	// how often listing marked an id changed.
+	fps   map[string]string
+	bumps int
 }
 
 func newChangesFixture(t *testing.T, typ string, queries ...string) *changesFixture {
@@ -59,13 +64,13 @@ func newChangesFixture(t *testing.T, typ string, queries ...string) *changesFixt
 	dir := t.TempDir()
 	installFakePGConnector(t, fmt.Sprintf(`D=%q
 t="$1"; v="$2"
-if [ "$v" = changes ]; then
+if [ "$v" = list ]; then
   q=""; prev=""
   for a in "$@"; do if [ "$prev" = "--query" ]; then q="$a"; fi; prev="$a"; done
-  echo "$t changes $q" >> "$D/calls.log"
+  echo "$t list $q" >> "$D/calls.log"
   code=0
-  if [ -f "$D/$t-changes-$q.exit" ]; then code=$(cat "$D/$t-changes-$q.exit"); fi
-  if [ -f "$D/$t-changes-$q.json" ]; then cat "$D/$t-changes-$q.json"; fi
+  if [ -f "$D/$t-list-$q.exit" ]; then code=$(cat "$D/$t-list-$q.exit"); fi
+  if [ -f "$D/$t-list-$q.json" ]; then cat "$D/$t-list-$q.json"; fi
   exit "$code"
 fi
 if [ "$v" = show ]; then
@@ -76,23 +81,38 @@ if [ "$v" = show ]; then
   exit 1
 fi
 exit 99`, dir))
-	return &changesFixture{t: t, typ: typ, cfg: cfg, seed: seed, dir: dir}
+	return &changesFixture{t: t, typ: typ, cfg: cfg, seed: seed, dir: dir, fps: map[string]string{}}
 }
 
-// listing sets what `<type> changes --query q` answers: exit code and one
-// change per (kind, id), with the given backend rows.
+// listing sets what `<type> list --query q --fingerprints` answers: the exit
+// code, the backend rows and one listed entity per (kind, id). Kind "added"
+// lists the id with its current fingerprint (stable across calls, so a repeat
+// is unchanged); "changed" lists it with a NEW fingerprint; "removed" lists
+// nothing (an entity that left the query is simply absent from its listing).
 func (f *changesFixture) listing(query string, exit int, sources string, changes ...[2]string) {
 	f.t.Helper()
-	var entries []string
+	var entities, fps []string
 	for _, c := range changes {
-		entries = append(entries, fmt.Sprintf(`{"change":%q,"source":"b","entity":{"id":%q,"title":"title of %s"}}`, c[0], c[1], c[1]))
+		kind, id := c[0], c[1]
+		if kind == "removed" {
+			continue
+		}
+		if kind == "changed" {
+			f.bumps++
+			f.fps[id] = fmt.Sprintf("fp-%s-v%d", id, f.bumps)
+		} else if f.fps[id] == "" {
+			f.fps[id] = "fp-" + id
+		}
+		entities = append(entities, fmt.Sprintf(`{"id":%q,"title":"title of %s","stale":false}`, id, id))
+		fps = append(fps, fmt.Sprintf(`%q:%q`, id, f.fps[id]))
 	}
-	body := fmt.Sprintf(`{"sources":[%s],"changes":[%s]}`, sources, strings.Join(entries, ","))
-	f.write(fmt.Sprintf("%s-changes-%s.json", f.typ, query), body)
-	f.write(fmt.Sprintf("%s-changes-%s.exit", f.typ, query), fmt.Sprint(exit))
+	body := fmt.Sprintf(`{"entities":[%s],"present_ids":[],"sources":[%s],"truncated":false,"fingerprints":{%s}}`,
+		strings.Join(entities, ","), sources, strings.Join(fps, ","))
+	f.write(fmt.Sprintf("%s-list-%s.json", f.typ, query), body)
+	f.write(fmt.Sprintf("%s-list-%s.exit", f.typ, query), fmt.Sprint(exit))
 }
 
-const okSource = `{"backend":"b","status":"succeeded"}`
+const okSource = `{"source":"b","status":"succeeded","count":0}`
 
 func (f *changesFixture) write(name, body string) {
 	f.t.Helper()
@@ -184,7 +204,7 @@ func TestChangesIsRegisteredUnderEveryTypeGroup(t *testing.T) {
 	}
 }
 
-func TestChangesPullThroughHydratesLogsAndAdvances(t *testing.T) {
+func TestChangesListAndDiffHydratesLogsAndAdvances(t *testing.T) {
 	f := newChangesFixture(t, "issue", "open")
 	f.listing("open", 0, okSource, [2]string{"added", "bd-1"}, [2]string{"changed", "bd-2"}, [2]string{"removed", "bd-9"})
 	f.showIssue("bd-1", "2026-09-30T00:00:00Z")
@@ -211,7 +231,7 @@ func TestChangesPullThroughHydratesLogsAndAdvances(t *testing.T) {
 	// pg-connector is asked once per watched query, as the pg-desk consumer,
 	// and the removed entry is not hydrated.
 	calls := f.calls()
-	if calls[0] != "issue changes open" || len(calls) != 3 {
+	if calls[0] != "issue list open" || len(calls) != 3 {
 		t.Errorf("connector calls = %v", calls)
 	}
 	c, ok := f.consumer("router")
@@ -219,11 +239,20 @@ func TestChangesPullThroughHydratesLogsAndAdvances(t *testing.T) {
 		t.Errorf("cursor = %+v, envelope cursor %+v", c, env.Cursor)
 	}
 
-	// A second call with nothing new delivers nothing and keeps the cursor.
-	f.listing("open", 0, okSource)
+	// A second call with an unchanged listing delivers nothing and keeps the
+	// cursor: the stored list fingerprints equal the listed ones.
+	f.listing("open", 0, okSource, [2]string{"added", "bd-1"}, [2]string{"added", "bd-2"})
+	callsBefore := len(f.calls())
 	again, err := f.envOf("--consumer", "router")
 	if err != nil || len(again.Records) != 0 || again.Cursor.From != env.Cursor.To || again.Cursor.To != env.Cursor.To {
 		t.Errorf("second call = %+v, %v", again, err)
+	}
+	if got := f.calls()[callsBefore:]; len(got) != 1 || got[0] != "issue list open" {
+		t.Errorf("an unchanged tick must only list, got %v", got)
+	}
+	// Whatever the fingerprints, nothing is ever queued for a later tick.
+	if _, found, _ := f.seed.GetMeta("change_flow.deferred.issue"); found {
+		t.Error("a deferral queue was persisted")
 	}
 }
 
@@ -275,13 +304,31 @@ func TestChangesCachedIsUnaffectedByMissingWatchConfig(t *testing.T) {
 }
 
 func TestChangesRealCallWithNoWatchedQueriesIsAUsageError(t *testing.T) {
-	f := newChangesFixture(t, "thread")
-	_, _, err := runChangesCmd(t, "thread", "--consumer", "router")
-	if err == nil || !strings.Contains(err.Error(), "watch.thread.queries") || exitCodeFor(err) != 1 {
-		t.Fatalf("err = %v (exit %d), want exit 1 naming watch.thread.queries", err, exitCodeFor(err))
+	f := newChangesFixture(t, "issue")
+	_, _, err := runChangesCmd(t, "issue", "--consumer", "router")
+	if err == nil || !strings.Contains(err.Error(), "watch.issue.queries") || exitCodeFor(err) != 1 {
+		t.Fatalf("err = %v (exit %d), want exit 1 naming watch.issue.queries", err, exitCodeFor(err))
 	}
 	if len(f.calls()) != 0 {
 		t.Errorf("pg-connector was called: %v", f.calls())
+	}
+}
+
+// A thread list cannot be fingerprinted, so its changes verb is refused with a
+// clear error before any connector call, with or without --cached.
+func TestChangesRefusesThreadWithoutCallingTheConnector(t *testing.T) {
+	f := newChangesFixture(t, "thread", "mentions")
+	for _, args := range [][]string{{"--consumer", "router"}, {"--consumer", "router", "--cached"}} {
+		_, _, err := runChangesCmd(t, "thread", args...)
+		if !errors.Is(err, changes.ErrUnsupportedType) || !strings.Contains(err.Error(), "cannot be fingerprinted") || exitCodeFor(err) != 1 {
+			t.Fatalf("%v: err = %v (exit %d)", args, err, exitCodeFor(err))
+		}
+	}
+	if len(f.calls()) != 0 {
+		t.Errorf("pg-connector was called: %v", f.calls())
+	}
+	if _, ok := f.consumer("router"); ok {
+		t.Error("a refused call registered the consumer")
 	}
 }
 
@@ -304,7 +351,7 @@ func TestChangesQueryRestrictsTheCall(t *testing.T) {
 	if err != nil || len(env.Sources) != 1 || env.Sources[0].Query != "mine" {
 		t.Fatalf("env = %+v, %v", env, err)
 	}
-	if calls := f.calls(); len(calls) != 1 || calls[0] != "issue changes mine" {
+	if calls := f.calls(); len(calls) != 1 || calls[0] != "issue list mine" {
 		t.Errorf("calls = %v", calls)
 	}
 }
@@ -339,7 +386,7 @@ func TestChangesResetReplaysActiveEntities(t *testing.T) {
 	if _, err := f.seed.WriteEntityStateWithLog(ent, ent.Version, "2026-09-30T01:00:00Z", false, []string{"removed"}, "sweep", "2026-09-30T01:00:00Z"); err != nil {
 		t.Fatal(err)
 	}
-	f.listing("open", 0, okSource)
+	f.listing("open", 0, okSource, [2]string{"added", "bd-1"}, [2]string{"added", "bd-2"})
 	if _, err := f.envOf("--consumer", "router"); err != nil { // consume the removed record
 		t.Fatal(err)
 	}
@@ -369,7 +416,7 @@ func TestChangesExit2OnPartialFailure(t *testing.T) {
 	// "down" fails outright (exit 3 from pg-connector).
 	f.listing("down", 3, "")
 	// "partial": pg-connector exit 2 with one degraded backend; its entity hydrates.
-	f.listing("partial", 2, `{"backend":"b1","status":"succeeded"},{"backend":"b2","status":"degraded","reason":"rate_limited"},{"backend":"b3","status":"disabled"}`, [2]string{"changed", "bd-2"})
+	f.listing("partial", 2, `{"source":"b1","status":"succeeded"},{"source":"b2","status":"degraded","reason":"rate_limited"},{"source":"b3","status":"disabled"}`, [2]string{"changed", "bd-2"})
 	f.showIssue("bd-2", "2026-09-30T00:00:00Z")
 	// "brokenhydrate": its entity cannot be read.
 	f.listing("brokenhydrate", 0, okSource, [2]string{"added", "bd-3"})
@@ -633,7 +680,7 @@ func TestChangesTextRendering(t *testing.T) {
 	f := newChangesFixture(t, "issue", "open", "mine")
 	f.listing("open", 0, okSource, [2]string{"added", "bd-1"})
 	f.showIssue("bd-1", "2026-09-30T00:00:00Z")
-	f.listing("mine", 2, `{"backend":"b","status":"degraded","reason":"rate_limited"}`)
+	f.listing("mine", 2, `{"source":"b","status":"degraded","reason":"rate_limited"}`)
 	out, _, err := runChangesCmd(t, "issue", "--consumer", "router")
 	if exitCodeFor(err) != exitPartial {
 		t.Fatalf("err = %v", err)
@@ -757,9 +804,9 @@ func TestChangesDroppedEntityBecomesInactive(t *testing.T) {
 	}
 
 	// bd-1 drops out of its only query; bd-2 drops out of "a" but "b" still
-	// returns it, so only bd-1 leaves the watched set.
-	f.listing("a", 0, okSource, [2]string{"removed", "bd-1"}, [2]string{"removed", "bd-2"})
-	f.listing("b", 0, okSource)
+	// lists it, so only bd-1 leaves the watched set.
+	f.listing("a", 0, okSource)
+	f.listing("b", 0, okSource, [2]string{"added", "bd-2"})
 	env, err := f.envOf("--consumer", "router")
 	if err != nil {
 		t.Fatal(err)
@@ -768,15 +815,14 @@ func TestChangesDroppedEntityBecomesInactive(t *testing.T) {
 		t.Errorf("bd-1 records = %+v, want exactly one removed", got)
 	}
 	if got := recordsOf(env, "bd-2"); len(got) != 0 {
-		t.Errorf("bd-2 is still returned by query b, got %+v", got)
+		t.Errorf("bd-2 is still listed by query b, got %+v", got)
 	}
 	if !f.entity("bd-1").Inactive || f.entity("bd-2").Inactive {
 		t.Errorf("bd-1 inactive=%v bd-2 inactive=%v, want true/false", f.entity("bd-1").Inactive, f.entity("bd-2").Inactive)
 	}
 
 	// Once the last query drops bd-2 it is removed too; a repeat is a no-op.
-	f.listing("a", 0, okSource)
-	f.listing("b", 0, okSource, [2]string{"removed", "bd-2"})
+	f.listing("b", 0, okSource)
 	env, err = f.envOf("--consumer", "router")
 	if err != nil || len(recordsOf(env, "bd-2")) != 1 || !f.entity("bd-2").Inactive {
 		t.Fatalf("bd-2: env=%+v err=%v", env, err)
@@ -784,10 +830,6 @@ func TestChangesDroppedEntityBecomesInactive(t *testing.T) {
 	again, err := f.envOf("--consumer", "router")
 	if err != nil || len(again.Records) != 0 {
 		t.Errorf("an unchanged view must write nothing, got %+v, %v", again, err)
-	}
-	f.listing("b", 0, okSource, [2]string{"removed", "bd-2"})
-	if again, err = f.envOf("--consumer", "router"); err != nil || len(again.Records) != 0 {
-		t.Errorf("removing an already inactive entity must write nothing, got %+v, %v", again, err)
 	}
 }
 
@@ -798,7 +840,7 @@ func TestChangesReturningEntityGetsReconcile(t *testing.T) {
 	if _, err := f.envOf("--consumer", "router"); err != nil {
 		t.Fatal(err)
 	}
-	f.listing("a", 0, okSource, [2]string{"removed", "bd-1"})
+	f.listing("a", 0, okSource)
 	if _, err := f.envOf("--consumer", "router"); err != nil {
 		t.Fatal(err)
 	}
@@ -827,7 +869,7 @@ func TestChangesDegradedSourceYieldsNoRemoved(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	f.listing("a", 2, `{"backend":"b","status":"degraded","reason":"rate_limited"}`, [2]string{"removed", "bd-1"})
+	f.listing("a", 2, `{"source":"b","status":"degraded","reason":"rate_limited"}`)
 	env, err := f.envOf("--consumer", "router")
 	if exitCodeFor(err) != exitPartial {
 		t.Fatalf("err = %v, want exit %d", err, exitPartial)
@@ -872,7 +914,8 @@ func TestChangesSourceTerminalEntityBecomesInactive(t *testing.T) {
 		t.Error("a closed issue must become inactive")
 	}
 
-	// The sweep leaves it alone from now on.
+	// The sweep leaves it alone from now on (and the listing no longer holds
+	// it, so the persisted membership drops it: already inactive, a no-op).
 	f.listing("a", 0, okSource)
 	before := len(f.shows())
 	if env, err = f.envOf("--consumer", "router"); err != nil || len(env.Records) != 0 || len(f.shows()) != before {
@@ -893,7 +936,7 @@ func TestSweepUnchangedEntityGetsExactlyOneReconcile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	f.listing("a", 0, okSource)
+	f.listing("a", 0, okSource, [2]string{"added", "bd-1"})
 	env, err := f.envOf("--consumer", "router")
 	if err != nil {
 		t.Fatal(err)
@@ -1004,9 +1047,9 @@ func TestBudgetExhaustionMarksSourceDegradedAndKeepsCursor(t *testing.T) {
 		t.Errorf("cursor = %+v, envelope %+v", c, env.Cursor)
 	}
 
-	// The next poll hydrates the deferred entity even though pg-connector
-	// does not report it again.
-	f.listing("a", 0, okSource)
+	// The next poll finds the entity the cap left over, the same way: its row
+	// is missing while the unchanged bd-1 matches its stored fingerprint.
+	f.listing("a", 0, okSource, [2]string{"added", "bd-1"}, [2]string{"added", "bd-2"})
 	next, err := f.envOf("--consumer", "router")
 	if err != nil {
 		t.Fatalf("next poll: %v", err)

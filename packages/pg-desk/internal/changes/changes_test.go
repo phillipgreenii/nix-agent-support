@@ -13,13 +13,21 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
+// fakeLister answers every ListFingerprints call with one fixed result.
 type fakeLister struct {
-	res gather.ListChangesResult
+	res gather.ListFingerprintsResult
 	err error
 }
 
-func (f fakeLister) ListChanges(context.Context, string, string, string) (gather.ListChangesResult, error) {
+func (f fakeLister) ListFingerprints(context.Context, string, string) (gather.ListFingerprintsResult, error) {
 	return f.res, f.err
+}
+
+// queryLister answers per watched query and counts the calls it receives.
+type queryLister map[string]fakeLister
+
+func (q queryLister) ListFingerprints(_ context.Context, _, query string) (gather.ListFingerprintsResult, error) {
+	return q[query].res, q[query].err
 }
 
 type fakeHydrator struct{ calls []string }
@@ -43,7 +51,7 @@ func seededEngine(t *testing.T) (*Engine, *store.Store) {
 	cfg.Watch.Issue.Queries = []string{"open"}
 	return &Engine{
 		Cfg: cfg, Store: st, Hydrator: &fakeHydrator{},
-		Lister: fakeLister{res: gather.ListChangesResult{Changes: []gather.ListedChange{{Change: gather.ChangeRemoved, EntityID: "bd-9"}}}},
+		Lister: fakeLister{res: okListing()},
 		Now:    func() time.Time { return time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC) },
 	}, st
 }
@@ -84,10 +92,10 @@ func TestRunDoesNotAdvanceCursorWhenTheFlushFails(t *testing.T) {
 	}
 }
 
-// Connector `removed` entries are never hydrated; one for an entity the store
-// does not hold (bd-9) writes nothing. The seeded entities were hydrated
-// within sweep.max_age, so the sweep leaves them alone too.
-func TestRunIgnoresConnectorRemovedEntries(t *testing.T) {
+// A quiet listing (nothing listed, nothing persisted) hydrates nothing and
+// writes nothing: the seeded entities were hydrated within sweep.max_age, so
+// the sweep leaves them alone too.
+func TestRunQuietListingHydratesNothing(t *testing.T) {
 	e, _ := seededEngine(t)
 	h := e.Hydrator.(*fakeHydrator)
 	if _, err := e.Run(context.Background(), Options{EntityType: "issue", Consumer: "router"}, func(Envelope) error { return nil }); err != nil {
@@ -113,62 +121,4 @@ func TestSelectQueries(t *testing.T) {
 	if _, err := SelectQueries(cfg, "issue", ""); err == nil || !strings.Contains(err.Error(), "watch.issue.queries") {
 		t.Errorf("no queries: %v", err)
 	}
-}
-
-// A watched query that fails to list contributes no membership and no
-// removal: only a successful, non-degraded listing may drop an entity.
-func TestRunRemovalIgnoresAFailedQuery(t *testing.T) {
-	e, st := seededEngine(t)
-	e.Cfg.Watch.Issue.Queries = []string{"open", "mine"}
-	e.Lister = queryLister{
-		"open": {res: gather.ListChangesResult{Changes: []gather.ListedChange{{Change: gather.ChangeRemoved, EntityID: "bd-1"}}}},
-		"mine": {err: errors.New("boom")},
-	}
-	if _, err := e.Run(context.Background(), Options{EntityType: "issue", Consumer: "router"}, func(Envelope) error { return nil }); err != nil {
-		t.Fatal(err)
-	}
-	// "open" listed bd-1 removed and nothing else holds it: removed.
-	ent, _, _ := st.GetEntity("o/r", "issue", "bd-1")
-	if !ent.Inactive {
-		t.Error("bd-1 should be removed: the only successful query dropped it")
-	}
-}
-
-// An entity another configured query still holds survives one query's removal.
-func TestRunRemovalNeedsEveryQueryToDropTheEntity(t *testing.T) {
-	e, st := seededEngine(t)
-	e.Cfg.Watch.Issue.Queries = []string{"open", "mine"}
-	e.Lister = queryLister{
-		"open": {res: gather.ListChangesResult{Changes: []gather.ListedChange{{Change: gather.ChangeChanged, EntityID: "bd-1"}}}},
-		"mine": {res: gather.ListChangesResult{Changes: []gather.ListedChange{{Change: gather.ChangeChanged, EntityID: "bd-1"}}}},
-	}
-	run := func() {
-		t.Helper()
-		if _, err := e.Run(context.Background(), Options{EntityType: "issue", Consumer: "router"}, func(Envelope) error { return nil }); err != nil {
-			t.Fatal(err)
-		}
-	}
-	run()
-	e.Lister = queryLister{
-		"open": {res: gather.ListChangesResult{Changes: []gather.ListedChange{{Change: gather.ChangeRemoved, EntityID: "bd-1"}}}},
-		"mine": {},
-	}
-	run()
-	if ent, _, _ := st.GetEntity("o/r", "issue", "bd-1"); ent.Inactive {
-		t.Error("bd-1 is still held by query mine")
-	}
-	e.Lister = queryLister{
-		"open": {},
-		"mine": {res: gather.ListChangesResult{Changes: []gather.ListedChange{{Change: gather.ChangeRemoved, EntityID: "bd-1"}}}},
-	}
-	run()
-	if ent, _, _ := st.GetEntity("o/r", "issue", "bd-1"); !ent.Inactive {
-		t.Error("bd-1 should be removed once both queries dropped it")
-	}
-}
-
-type queryLister map[string]fakeLister
-
-func (q queryLister) ListChanges(_ context.Context, _, query, _ string) (gather.ListChangesResult, error) {
-	return q[query].res, q[query].err
 }
