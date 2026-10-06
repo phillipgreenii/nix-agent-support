@@ -28,6 +28,9 @@ func TestPgConnector_IssueGrantedVerbs_Approve(t *testing.T) {
 	cmds := []string{
 		"pg-connector issue show pg2-itxtv",
 		"pg-connector issue show pg2-itxtv --backend pg-connector-issue-beads",
+		// --fresh is a no-value bool (bead pg2-e2h4q; pg-desk gather passes it).
+		"pg-connector issue show pg2-itxtv --fresh",
+		"pg-connector issue show --fresh pg2-itxtv",
 		"pg-connector issue comment pg2-itxtv --body hi",
 		"pg-connector issue update pg2-itxtv --add-label human",
 		"pg-connector issue close pg2-itxtv",

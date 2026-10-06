@@ -6519,6 +6519,25 @@
     "notes": "pg2-cjfpy (operator ruling 2026-10-04: every command a plugin skill instructs is auto-approved). Instructed by the daily-focus plugin (close.md 3)."
   },
   {
+    "case": "zr_pg_connector_pr_show_fresh",
+    "tags": ["zr-plugin", "pg2-e2h4q"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pg-connector pr show owner/name#12 --fresh"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-e2h4q: --fresh is a no-value bool on pg-connector pr show (pg-desk gather, pg2-cw6b3.2); it must not read as an unknown flag."
+  },
+  {
     "case": "zr_plugin_df_jira_refs",
     "tags": ["zr-plugin", "pg2-cjfpy.4", "daily-focus"],
     "tool_input": {

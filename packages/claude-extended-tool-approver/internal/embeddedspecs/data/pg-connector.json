@@ -178,6 +178,18 @@
                   "source": "pg-connector pr show --help: \"--backend string pin to exactly this backend, skipping the multi-instance try-each resolution policy\""
                 }
               },
+              "--fresh": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pg-connector pr show --help: \"--fresh skip the cache read-through and ask the origin (the unavailable stale fallback still applies)\" (no-value bool flag; packages/pg-connector/cmd/pg-connector/pr.go)"
+                }
+              },
               "--help": {
                 "arity": "none",
                 "operand": {

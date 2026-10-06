@@ -1,6 +1,9 @@
 package cmddesc
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 // TestZiprecruiterSchemasAreFailClosedData is the data-only proof for
 // pg2-cjfpy.4: every schema it registers is a plain value with a Provenance,
@@ -189,4 +192,27 @@ func TestGhSchemaIsSingleAndFoldsBothSiblings(t *testing.T) {
 		}
 	}
 	walk("gh", gh)
+}
+
+// TestPgConnectorPrShowListsFreshAsNoValueBool pins bead pg2-e2h4q:
+// pg-desk's gather calls `pg-connector pr show <id> --fresh` (pg2-cw6b3.2),
+// and --fresh is a Cobra Bool flag (no value), so the schema MUST list it as
+// an arity-none inert flag. An unlisted flag is fail-closed
+// (UnknownFlagInsufficient) and would defer the call.
+func TestPgConnectorPrShowListsFreshAsNoValueBool(t *testing.T) {
+	pg, ok := DefaultRegistry().Lookup("pg-connector")
+	if !ok {
+		t.Fatal("pg-connector not registered")
+	}
+	show := pg.Subcommands["pr"].Subcommands["show"]
+	spec, ok := show.Flags["--fresh"]
+	if !ok {
+		t.Fatal("pg-connector pr show: --fresh not listed")
+	}
+	if !reflect.DeepEqual(spec, inert) {
+		t.Errorf("pg-connector pr show --fresh must be an inert no-value flag, got %+v", spec)
+	}
+	if show.UnknownFlag != UnknownFlagInsufficient {
+		t.Error("pg-connector pr show must stay fail-closed for unlisted flags")
+	}
 }

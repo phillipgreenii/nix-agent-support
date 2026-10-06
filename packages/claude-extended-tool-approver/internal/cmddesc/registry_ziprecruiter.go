@@ -369,6 +369,10 @@ var zrPgConnectorSchema = CommandSchema{
 					Flags: map[string]FlagSpec{
 						"-h": inert, "--help": inert,
 						"--backend": literal1, "--output": literal1,
+						// --fresh is a no-value bool (skip the read_ttl cache
+						// read-through and ask the origin; pg2-cw6b3.2's
+						// pg-desk gather passes it, bead pg2-e2h4q).
+						"--fresh": inert,
 					},
 					Positionals:     PositionalSpec{Leading: []OperandRole{Literal}},
 					ImplicitEffects: []ImplicitEffect{zrReadsGitHub},
