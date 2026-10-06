@@ -226,20 +226,21 @@ func TestListActivity_RealRepo_ItemShape(t *testing.T) {
 		if _, err := time.Parse(time.RFC3339, it.OccurredAt); err != nil {
 			t.Errorf("%s: occurred_at %q is not RFC3339: %v", it.Summary, it.OccurredAt, err)
 		}
-		var raw map[string]string
+		var raw map[string]any
 		if err := json.Unmarshal(it.Fields, &raw); err != nil {
 			t.Fatalf("%s: fields: %v", it.Summary, err)
 		}
+		sha, _ := raw["sha"].(string)
 		if it.Kind != "commit" || it.EntityType != "commit" {
 			t.Errorf("%s: kind/entity_type = %q/%q", it.Summary, it.Kind, it.EntityType)
 		}
-		if want := ident + "@" + raw["sha"]; it.EntityID != want || it.ID != want {
+		if want := ident + "@" + sha; it.EntityID != want || it.ID != want {
 			t.Errorf("%s: id/entity_id = %q/%q, want %q", it.Summary, it.ID, it.EntityID, want)
 		}
-		if !reflect.DeepEqual(it.Labels, []string{"repo:" + ident}) {
-			t.Errorf("%s: labels = %v", it.Summary, it.Labels)
+		if len(it.Labels) == 0 || it.Labels[0] != "repo:"+ident {
+			t.Errorf("%s: labels = %v, want repo:%s first", it.Summary, it.Labels, ident)
 		}
-		if raw["repo_path"] != repo || raw["author_email"] != meEmail || len(raw["sha"]) != 40 {
+		if raw["repo_path"] != repo || raw["author_email"] != meEmail || len(sha) != 40 {
 			t.Errorf("%s: fields = %v", it.Summary, raw)
 		}
 		if it.AsOf != "2026-10-06T12:00:00Z" || it.Stale {
@@ -280,9 +281,11 @@ func TestListActivity_RealRepo_ClonesDedupeAndTopicOnlyOnce(t *testing.T) {
 			t.Errorf("duplicate id %q", it.ID)
 		}
 		seen[it.ID] = true
-		var raw map[string]string
+		var raw struct {
+			RepoPath string `json:"repo_path"`
+		}
 		_ = json.Unmarshal(it.Fields, &raw)
-		byPath[raw["repo_path"]]++
+		byPath[raw.RepoPath]++
 	}
 	// Clones only carry main (the topic branch is remote-tracking there);
 	// cloneB's items all collide with cloneA's and lose, and the repeated

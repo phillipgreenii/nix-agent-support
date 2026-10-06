@@ -63,6 +63,10 @@ func TestCollect_ExactEmailAndRangeDecidedHere(t *testing.T) {
 		case "log":
 			logArgs = args
 			return log, nil
+		case "for-each-ref":
+			return "refs/heads/main", nil
+		case "diff-tree":
+			return "", nil
 		}
 		return "", errors.New("exit status 1") // no origin remote
 	}}

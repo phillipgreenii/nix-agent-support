@@ -112,10 +112,20 @@ func (b *Backend) collectRepoCommits(ctx context.Context, repo string, includeMe
 		if !c.when.Before(before) {
 			continue
 		}
-		fields, _ := json.Marshal(map[string]string{
+		det, err := enrichCommit(ctx, b.runner, repo, c.sha)
+		if err != nil {
+			return nil, false, fmt.Errorf("pg-connector-activity-git: enrich commit of %s: %w", repo, err)
+		}
+		labels := []string{"repo:" + ident}
+		if det.branch != "" {
+			labels = append(labels, "branch:"+det.branch)
+		}
+		fields, _ := json.Marshal(map[string]any{
 			"sha":          c.sha,
 			"repo_path":    repo,
 			"author_email": c.email,
+			"insertions":   det.insertions,
+			"deletions":    det.deletions,
 		})
 		entityID := ident + "@" + c.sha
 		items = append(items, schema.ActivityItem{
@@ -125,7 +135,7 @@ func (b *Backend) collectRepoCommits(ctx context.Context, repo string, includeMe
 			EntityID:   entityID,
 			OccurredAt: c.when.Format(time.RFC3339),
 			Summary:    c.subject,
-			Labels:     []string{"repo:" + ident},
+			Labels:     labels,
 			Fields:     fields,
 			AsOf:       asOf,
 			Stale:      false,
