@@ -23,8 +23,8 @@ const (
 // Example (scope-style titles and ticket-key branches):
 //
 //	area_labels:
-//	  - pattern: '^[a-z]+\(finance/netsuite_tasks\)'
-//	    labels: [netsuite-tasks, netsuite]
+//	  - pattern: '^[a-z]+\(widgets/api\)'
+//	    labels: [widgets-api, widgets]
 //	  - pattern: '(?i)PROJ-[0-9]+'
 //	    field: branch
 //	    labels: [proj]
