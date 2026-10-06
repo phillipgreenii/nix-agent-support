@@ -209,16 +209,15 @@ func roleByName(o *Orchestrator, name string) roles.Role {
 func feedbackRole(o *Orchestrator) roles.Role { return roleByName(o, "feedback") }
 func workerRole(o *Orchestrator) roles.Role   { return roleByName(o, "worker") }
 
-func fastCfg() config.Config {
+func fastCfg(t testing.TB) config.Config {
+	t.Helper()
 	c := config.Default()
 	c.MaxWait = 50 * time.Millisecond
 	c.PollInterval = time.Millisecond
 	// SAFETY: never the real ~/.local/state worktree dir — keep worktree.Ensure's
-	// MkdirAll inside an isolated throwaway path. os.MkdirTemp is used (not
-	// t.TempDir) to preserve fastCfg's no-arg signature; the OS reaps it.
-	if d, err := os.MkdirTemp("", "pg-router-orch-wt-"); err == nil {
-		c.WorktreeDir = d
-	}
+	// MkdirAll inside an isolated throwaway path. t.TempDir is removed
+	// automatically when the test (and its subtests) finish.
+	c.WorktreeDir = t.TempDir()
 	return c
 }
 
@@ -247,7 +246,7 @@ func newTestQueue(t *testing.T) *eventqueue.Queue {
 // Dispatch call, exactly the per-handler serial FIFO DEC-EVENT-2 describes,
 // with no core-tracked cap involved.
 func TestProduceTick_thenDispatch_matchesBuiltinRoles(t *testing.T) {
-	cfg := fastCfg()
+	cfg := fastCfg(t)
 	feedbackEvts := []event.Event{event.NewItemEvent("feedback.ready", "t", item.Item{ID: "zr-c", Type: "task", Title: "process-feedback: x"})}
 	workerEvts := []event.Event{
 		event.NewItemEvent("work.ready", "t", item.Item{ID: "zr-w1"}),
@@ -293,7 +292,7 @@ func TestProduceTick_thenDispatch_matchesBuiltinRoles(t *testing.T) {
 // cmd/pg-router's sourceReportsFor now relies on so a source's LastTick
 // survives a later pass that cadence-gates it off (see LastTick's own doc).
 func TestOrchestrator_LastTick_mergesForwardWithoutErasingPriorEntries(t *testing.T) {
-	cfg := fastCfg()
+	cfg := fastCfg(t)
 	o := newOrch(cfg, testQuerySet(nil, nil))
 	ctx := context.Background()
 	q := newTestQueue(t)
@@ -350,7 +349,7 @@ func TestOrchestrator_LastTick_mergesForwardWithoutErasingPriorEntries(t *testin
 // roleListener.Offer -> workOne/emitResult -- never reads or writes
 // o.lastTick).
 func TestOrchestrator_LastTick_hasNoRaceWithConcurrentKickInFlightOffer(t *testing.T) {
-	cfg := fastCfg()
+	cfg := fastCfg(t)
 	workerEvts := []event.Event{event.NewItemEvent("work.ready", "t", item.Item{ID: "zr-w1"})}
 	// Deliberately NOT testQuerySet (which leaves worker-source's trigger at
 	// its zero value, falling back to cfg.PollInterval -- 1ms under
@@ -514,7 +513,7 @@ func TestRoleListenerOffer_CtxCancellationUnwindsStuckSubprocessOfferWithinBound
 	role := roles.Role{Name: "worker", Enabled: true, Binds: []string{"work.ready"}}
 	o := &Orchestrator{
 		Reg: roles.RoleSet{role},
-		Cfg: fastCfg(),
+		Cfg: fastCfg(t),
 		Handler: wireclient.New(func(roles.Role, string) ([]string, error) {
 			return []string{script}, nil
 		}),
@@ -581,7 +580,7 @@ func TestRoleListenerOffer_CtxCancellationUnwindsStuckSubprocessOfferWithinBound
 // many matching events are queued — there is no core-tracked number gating
 // this, only the queue's own per-listener cursor (INV-CONC-1 / DEC-EVENT-2).
 func TestNewListener_perHandlerSerialFIFO_onePerDispatchCall(t *testing.T) {
-	cfg := fastCfg()
+	cfg := fastCfg(t)
 	o := newOrch(cfg, testQuerySet(nil, nil))
 	handler := o.Handler.(*fakeHandler)
 	ctx := context.Background()
@@ -612,7 +611,7 @@ func TestNewListener_perHandlerSerialFIFO_onePerDispatchCall(t *testing.T) {
 // its own equivalent test coverage) — it just sends the event to
 // o.Handler.Dispatch for d.Role and returns its error unmodified.
 func TestWorkOne_dispatchesToWireClientForRole(t *testing.T) {
-	cfg := fastCfg()
+	cfg := fastCfg(t)
 	o := newOrch(cfg, testQuerySet(nil, nil))
 	handler := o.Handler.(*fakeHandler)
 	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
@@ -633,7 +632,7 @@ func TestWorkOne_dispatchesToWireClientForRole(t *testing.T) {
 // created/closed/handed-back branching are docket pg2-oju6w's Task 5.5's
 // job, not this one's.
 func TestWorkOne_propagatesDispatchError(t *testing.T) {
-	cfg := fastCfg()
+	cfg := fastCfg(t)
 	o := newOrch(cfg, testQuerySet(nil, nil))
 	o.Handler = &fakeHandler{err: fmt.Errorf("boom")}
 	d := discover.DispatchContext{Role: workerRole(o), Item: item.Item{ID: "zr-w"}}
@@ -663,7 +662,7 @@ func TestWorkOne_propagatesDispatchError(t *testing.T) {
 // dispatch's "dispatch" record must carry level "warn" (not "info") and an
 // "error" field holding dispatchErr's message.
 func TestRunOne_launchFailureSurfacesRealErrorInEventLog(t *testing.T) {
-	cfg := fastCfg()
+	cfg := fastCfg(t)
 	logPath := filepath.Join(t.TempDir(), "events.jsonl")
 	lw, err := eventlog.New(logPath)
 	if err != nil {
@@ -707,7 +706,7 @@ func TestRunOne_launchFailureSurfacesRealErrorInEventLog(t *testing.T) {
 // the event log, unchanged. (Before Task 5.5 this locked a bead-status-based
 // closed/handed-back branch in buildResult itself; that branch is gone.)
 func TestNewListener_mixedOutcomesAcrossPasses(t *testing.T) {
-	cfg := fastCfg()
+	cfg := fastCfg(t)
 	o := newOrch(cfg, testQuerySet(nil, nil))
 	o.Handler = &fakeHandler{repliesByItem: map[string]wireclient.Reply{
 		"zr-ok":  {Outcome: "closed"},
@@ -759,7 +758,7 @@ func TestNewListener_mixedOutcomesAcrossPasses(t *testing.T) {
 // JSON body as a bogus verb), and an empty {"actions":[]} must log no
 // actions at all.
 func TestNewListener_structuredOutcomeRelaysHandlerVerbs(t *testing.T) {
-	cfg := fastCfg()
+	cfg := fastCfg(t)
 	o := newOrch(cfg, testQuerySet(nil, nil))
 	o.Handler = &fakeHandler{repliesByItem: map[string]wireclient.Reply{
 		"zr-real":  {Outcome: `{"actions":[{"verb":"closed","refs":[{"type":"bead","id":"zr-real"}]}]}`},

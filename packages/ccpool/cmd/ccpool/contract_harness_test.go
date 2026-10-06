@@ -20,6 +20,7 @@ import (
 // already-built (e.g. installed) binary so the suite can test the shipped ccpool.
 var (
 	builtBin  string
+	builtDir  string // temp dir holding builtBin; removed by TestMain
 	buildOnce sync.Once
 	buildErr  error
 )
@@ -32,7 +33,11 @@ func TestMain(m *testing.M) {
 			os.Exit(0) // skip cleanly, not a failure
 		}
 	}
-	os.Exit(m.Run())
+	code := m.Run()
+	if builtDir != "" {
+		_ = os.RemoveAll(builtDir)
+	}
+	os.Exit(code)
 }
 
 // ccpoolBin returns the path to the binary under test, building it once.
@@ -47,6 +52,7 @@ func ccpoolBin(t *testing.T) string {
 			buildErr = err
 			return
 		}
+		builtDir = dir
 		bin := filepath.Join(dir, "ccpool")
 		if out, e := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); e != nil {
 			buildErr = fmt.Errorf("build ccpool: %v\n%s", e, out)

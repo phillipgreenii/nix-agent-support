@@ -75,7 +75,7 @@ func TestRoleListener_RetryBackoff_builtinKeepsPoolCadence(t *testing.T) {
 // executor, so this asserts on the fake's own recorded call instead of
 // cc.Sent.
 func TestRoleListener_OfferAlwaysAccepts(t *testing.T) {
-	cfg := fastCfg()
+	cfg := fastCfg(t)
 	o := newOrch(cfg, testQuerySet(nil, nil))
 	handler := o.Handler.(*fakeHandler)
 	ctx := context.Background()
@@ -103,7 +103,7 @@ func TestRoleListener_OfferAlwaysAccepts(t *testing.T) {
 // in-process executor.ErrBusy) must make Offer report a pre-accept
 // DeclineBusy rather than treating the dispatch as completed.
 func TestListenerOffer_HandlerBusyMapsToDeclineBusy(t *testing.T) {
-	cfg := fastCfg()
+	cfg := fastCfg(t)
 	o := newOrch(cfg, testQuerySet(nil, nil))
 	o.Handler = &fakeHandler{err: wireclient.ErrBusy}
 	role := roles.Role{Name: "cmdrole", Binds: []string{"work-ready"}}
@@ -126,7 +126,7 @@ func TestListenerOffer_HandlerBusyMapsToDeclineBusy(t *testing.T) {
 // (TestListenerOffer_HandlerBusyMapsToDeclineBusy) — this package interprets
 // nothing about what the reason string means.
 func TestListenerOffer_HandlerBusyWithReasonForwardsDeclineDetail(t *testing.T) {
-	cfg := fastCfg()
+	cfg := fastCfg(t)
 	o := newOrch(cfg, testQuerySet(nil, nil))
 	o.Handler = &fakeHandler{err: &wireclient.BusyDecline{Reason: "capacity-unknown"}}
 	role := roles.Role{Name: "cmdrole", Binds: []string{"work-ready"}}
@@ -147,7 +147,7 @@ func TestListenerOffer_HandlerBusyWithReasonForwardsDeclineDetail(t *testing.T) 
 // must make Offer decline BEFORE doing any dispatch work at all (no wire
 // dispatch sent), never reaching the handler.
 func TestListenerOffer_UnavailableSelfStatusDeclines(t *testing.T) {
-	cfg := fastCfg()
+	cfg := fastCfg(t)
 	o := newOrch(cfg, testQuerySet(nil, nil))
 	handler := o.Handler.(*fakeHandler)
 	role := workerRole(o)
@@ -201,7 +201,7 @@ func (f *fakeHandlerFailureObserver) OnHandlerFailure(eventID, evtType, listener
 // case. Offer must still report Accepted: true (ADR 0056's "always reports
 // acceptance" is unchanged by this bead).
 func TestRoleListener_Offer_NonBusyHandlerErrorNotifiesHandlerFailureObserver(t *testing.T) {
-	cfg := fastCfg()
+	cfg := fastCfg(t)
 	o := newOrch(cfg, testQuerySet(nil, nil))
 	dispatchErr := fmt.Errorf(`wireclient: role "review" exited 1: bead zr-w1: session exited before completing`)
 	o.Handler = &fakeHandler{err: dispatchErr}
@@ -232,7 +232,7 @@ func TestRoleListener_Offer_NonBusyHandlerErrorNotifiesHandlerFailureObserver(t 
 // role name that produced the failure, so pg-router can attribute a handler
 // failure to the listener that dispatched it.
 func TestRoleListener_Offer_HandlerFailurePassesListenerID(t *testing.T) {
-	cfg := fastCfg()
+	cfg := fastCfg(t)
 	o := newOrch(cfg, testQuerySet(nil, nil))
 	o.Handler = &fakeHandler{err: fmt.Errorf("boom")}
 	obs := &fakeHandlerFailureObserver{}
@@ -259,7 +259,7 @@ func TestRoleListener_Offer_HandlerFailurePassesListenerID(t *testing.T) {
 // eventqueue.Observer.OnDeclined path, so notifying HandlerFailureObserver
 // too would double-count it under a second class.
 func TestRoleListener_Offer_BusyHandlerErrorDoesNotNotifyHandlerFailureObserver(t *testing.T) {
-	cfg := fastCfg()
+	cfg := fastCfg(t)
 	o := newOrch(cfg, testQuerySet(nil, nil))
 	o.Handler = &fakeHandler{err: wireclient.ErrBusy}
 	obs := &fakeHandlerFailureObserver{}
@@ -286,7 +286,7 @@ func TestRoleListener_Offer_BusyHandlerErrorDoesNotNotifyHandlerFailureObserver(
 // role listener built with no HandlerFailureObserver configured must not
 // panic on a non-busy handler error.
 func TestRoleListener_Offer_NoHandlerFailureObserverIsSafe(t *testing.T) {
-	cfg := fastCfg()
+	cfg := fastCfg(t)
 	o := newOrch(cfg, testQuerySet(nil, nil))
 	o.Handler = &fakeHandler{err: fmt.Errorf("boom")}
 	// o.HandlerFailureObserver deliberately left nil.
@@ -310,7 +310,7 @@ func TestRoleListener_Offer_NoHandlerFailureObserverIsSafe(t *testing.T) {
 // detect at all as of docket pg2-oju6w's Task 5.4 (ResourceLimitObserver's
 // own doc comment) — must not panic on an ordinary successful dispatch.
 func TestRoleListener_Offer_NoResourceLimitObserverIsSafe(t *testing.T) {
-	cfg := fastCfg()
+	cfg := fastCfg(t)
 	o := newOrch(cfg, testQuerySet(nil, nil))
 	// o.ResourceLimitObserver deliberately left nil.
 
@@ -328,7 +328,7 @@ func TestRoleListener_Offer_NoResourceLimitObserverIsSafe(t *testing.T) {
 // pg2-irowq: the handler error itself is forwarded to the observer so the
 // metrics layer can classify it (e.g. the "session budget exceeded" sentinel).
 func TestRoleListener_Offer_ForwardsHandlerErrorToObserver(t *testing.T) {
-	cfg := fastCfg()
+	cfg := fastCfg(t)
 	o := newOrch(cfg, testQuerySet(nil, nil))
 	dispatchErr := fmt.Errorf(`wireclient: role "worker" exited 1: session budget exceeded: role=worker`)
 	o.Handler = &fakeHandler{err: dispatchErr}
@@ -365,7 +365,7 @@ type listenerCtxKey struct{}
 // pg2-euh4f): runRun hands the listener a dispatch context decoupled from the
 // signal context, and cancelling THAT context is what unsticks a handler.
 func TestRoleListener_Offer_UsesInjectedContext(t *testing.T) {
-	o := newOrch(fastCfg(), testQuerySet(nil, nil))
+	o := newOrch(fastCfg(t), testQuerySet(nil, nil))
 	h := &ctxCapturingHandler{}
 	o.Handler = h
 	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), listenerCtxKey{}, "injected"))

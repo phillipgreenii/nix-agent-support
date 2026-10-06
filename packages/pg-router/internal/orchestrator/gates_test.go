@@ -33,7 +33,7 @@ func gatedOrch(t *testing.T, workerExempt []string) (*Orchestrator, *fakeHandler
 		Name:  "ticker",
 		Query: query.TimerQuery{Meta: query.Meta{EmitTypes: []string{timerTick}}},
 	})
-	o := newOrch(fastCfg(), sources)
+	o := newOrch(fastCfg(t), sources)
 	o.Reg = append(o.Reg, roles.Role{Name: "tick-listener", Enabled: true, Binds: []string{timerTick}})
 	o.Reg[1].NonBlockingGates = workerExempt
 	o.Bindings = core.NewBindings(o.Reg.DeclaredBindTypes()...)
@@ -150,7 +150,7 @@ func TestDispatch_gatedListenerBlockedExemptListenerRuns(t *testing.T) {
 
 // roleListener exposes the role's registration-time exemptions to the queue.
 func TestRoleListener_declaresRoleNonBlockingGates(t *testing.T) {
-	o := newOrch(fastCfg(), nil)
+	o := newOrch(fastCfg(t), nil)
 	role := roles.Role{Name: "r", Enabled: true, Binds: []string{"e"}, NonBlockingGates: []string{"X", "Y"}}
 	ge, ok := o.NewListener(context.Background(), role).(eventqueue.GateExempter)
 	if !ok {
@@ -174,7 +174,7 @@ func TestDispatch_diskWatchdogStillRunsWhileLowDiskUsageIsActive(t *testing.T) {
 		Name:  "disk-check-tick",
 		Query: query.TimerQuery{Meta: query.Meta{EmitTypes: []string{diskTick}}},
 	})
-	o := newOrch(fastCfg(), sources)
+	o := newOrch(fastCfg(t), sources)
 	o.Reg = roles.RoleSet{
 		{Name: "feedback", Enabled: true, Binds: []string{"feedback.ready"}},
 		{Name: "disk-watchdog", Enabled: true, Binds: []string{diskTick}, NonBlockingGates: []string{"LOW_DISK_USAGE"}},

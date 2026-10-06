@@ -176,11 +176,24 @@ func TestAttributionLogWrittenForRepresentativeMultiDelegateCall(t *testing.T) {
 
 // --- Cross-process data isolation -------------------------------------------
 
+// routerBinDir is the temp dir buildRouterBinaryOnce builds into ("" until the
+// first build); TestMain removes it so repeated runs leave nothing in $TMPDIR.
+var routerBinDir string
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if routerBinDir != "" {
+		_ = os.RemoveAll(routerBinDir)
+	}
+	os.Exit(code)
+}
+
 var buildRouterBinaryOnce = sync.OnceValues(func() (string, error) {
 	dir, err := os.MkdirTemp("", "claude-hook-router-test-bin-")
 	if err != nil {
 		return "", err
 	}
+	routerBinDir = dir
 	binPath := filepath.Join(dir, "claude-hook-router")
 	cmd := exec.Command("go", "build", "-o", binPath, ".")
 	cmd.Dir = "."

@@ -17,7 +17,15 @@ import (
 	"github.com/phillipgreenii/pg-rescue/internal/testenv"
 )
 
-func TestMain(m *testing.M) { os.Exit(testenv.Run(m)) }
+func TestMain(m *testing.M) {
+	code := testenv.Run(m)
+	// binary() builds into a dir under $TMPDIR on first use; remove it so
+	// repeated runs leave nothing behind.
+	if buildDir != "" {
+		_ = os.RemoveAll(buildDir)
+	}
+	os.Exit(code)
+}
 
 const flakeLockHandler = "pg-rescue-flake-lock-conflict"
 
