@@ -47,6 +47,29 @@ let
     max_backoff = cfg.sync.retry.maxBackoff;
   };
 
+  # Entity-change-flow keys (watch, sweep, hydration, change_log_retention,
+  # consumer_stale_after): each key, and each block, only when the module was
+  # given something for it, so an existing consumer's config.yaml is
+  # byte-identical. The names are the loader's own
+  # (packages/pg-desk/internal/config/config.go).
+  renderedWatchThread = lib.filterAttrs (_: v: v != null && v != [ ]) {
+    queries = cfg.watch.thread.queries;
+    active_window = cfg.watch.thread.activeWindow;
+  };
+  renderedWatch = lib.filterAttrs (_: v: v != { }) {
+    pr = lib.optionalAttrs (cfg.watch.pr.queries != [ ]) { queries = cfg.watch.pr.queries; };
+    issue = lib.optionalAttrs (cfg.watch.issue.queries != [ ]) { queries = cfg.watch.issue.queries; };
+    thread = renderedWatchThread;
+  };
+  renderedSweep = lib.filterAttrs (_: v: v != null) {
+    max_age = cfg.sweep.maxAge;
+    max_per_poll = cfg.sweep.maxPerPoll;
+    reconcile_age = cfg.sweep.reconcileAge;
+  };
+  renderedHydration = lib.filterAttrs (_: v: v != null) {
+    max_per_poll = cfg.hydration.maxPerPoll;
+  };
+
   # The only attention.ordering.ties value pg-desk's config loader accepts
   # (besides unset). MUST equal AttentionTiesDefault in
   # packages/pg-desk/internal/config/config.go; test-pg-desk-module greps that
@@ -130,6 +153,15 @@ let
   // lib.optionalAttrs (renderedServe != { }) { serve = renderedServe; }
   // lib.optionalAttrs (renderedOpen != { }) { open = renderedOpen; }
   // lib.optionalAttrs (renderedLinks != { }) { links = renderedLinks; }
+  // lib.optionalAttrs (renderedWatch != { }) { watch = renderedWatch; }
+  // lib.optionalAttrs (renderedSweep != { }) { sweep = renderedSweep; }
+  // lib.optionalAttrs (renderedHydration != { }) { hydration = renderedHydration; }
+  // lib.optionalAttrs (cfg.changeLogRetention != null) {
+    change_log_retention = cfg.changeLogRetention;
+  }
+  // lib.optionalAttrs (cfg.consumerStaleAfter != null) {
+    consumer_stale_after = cfg.consumerStaleAfter;
+  }
   // lib.optionalAttrs (renderedAttention != null && renderedAttention != { }) {
     attention = renderedAttention;
   };
@@ -440,6 +472,114 @@ in
           '';
         };
       };
+    };
+
+    # Entity-change-flow keys (watch, sweep, hydration, change_log_retention,
+    # consumer_stale_after). All optional: an unset or empty option renders
+    # nothing, so pg-desk's own defaults apply. Duration values are the
+    # loader's duration strings (a Go time.ParseDuration string with an
+    # optional day component, such as "7d", "6h" or "30m").
+    watch = {
+      pr.queries = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+        description = ''
+          config.yaml's watch.pr.queries: the named pg-connector queries whose
+          results form the watched set of pull requests. Empty (the default)
+          renders no watch.pr block.
+        '';
+      };
+      issue.queries = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+        description = ''
+          config.yaml's watch.issue.queries: the named pg-connector queries
+          whose results form the watched set of issues. Empty (the default)
+          renders no watch.issue block.
+        '';
+      };
+      thread = {
+        queries = lib.mkOption {
+          type = lib.types.listOf lib.types.str;
+          default = [ ];
+          description = ''
+            config.yaml's watch.thread.queries: the named pg-connector
+            queries whose results form the watched set of threads. Empty (the
+            default) renders no watch.thread.queries key.
+          '';
+        };
+        activeWindow = lib.mkOption {
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+          description = ''
+            config.yaml's watch.thread.active_window (a duration such as
+            "7d"): how long a thread stays active after its last activity.
+            Null uses pg-desk's default, "7d".
+          '';
+        };
+      };
+    };
+
+    sweep = {
+      maxAge = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = ''
+          config.yaml's sweep.max_age (a duration such as "6h"): how stale a
+          row may be before the sweep re-hydrates it. Null uses pg-desk's
+          default, "6h".
+        '';
+      };
+      maxPerPoll = lib.mkOption {
+        type = lib.types.nullOr lib.types.ints.positive;
+        default = null;
+        description = ''
+          config.yaml's sweep.max_per_poll: the cap on sweep re-hydrations per
+          poll (and on the local reconcile tier's re-emits per poll). Positive
+          only: pg-desk rejects an explicit 0, so none is renderable. Null
+          uses pg-desk's default, 20.
+        '';
+      };
+      reconcileAge = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = ''
+          config.yaml's sweep.reconcile_age (a duration such as "30m"): how
+          old an active entity's latest change_log row may be before the local
+          reconcile tier re-emits a reconcile record for it. Null uses
+          pg-desk's default, "30m".
+        '';
+      };
+    };
+
+    hydration = {
+      maxPerPoll = lib.mkOption {
+        type = lib.types.nullOr lib.types.ints.positive;
+        default = null;
+        description = ''
+          config.yaml's hydration.max_per_poll: the cap on hydrations per
+          poll. Positive only: pg-desk rejects an explicit 0, so none is
+          renderable. Null uses pg-desk's default, 50.
+        '';
+      };
+    };
+
+    changeLogRetention = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      description = ''
+        config.yaml's change_log_retention (a duration such as "14d"): how
+        long change_log rows are kept. Null uses the store's own default.
+      '';
+    };
+    consumerStaleAfter = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      description = ''
+        config.yaml's consumer_stale_after (a duration such as "7d"): how long
+        a change_log consumer may go without advancing before it is treated as
+        stale. Null uses the store's own default.
+      '';
     };
 
     heartbeatPeriod = lib.mkOption {

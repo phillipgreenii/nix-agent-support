@@ -6465,6 +6465,60 @@
                     attention = { };
                   };
 
+                  # Entity-change-flow keys (watch, sweep, hydration,
+                  # change_log_retention, consumer_stale_after): absent by
+                  # default (hmEnabled), rendered under the loader's key names
+                  # when set. Synthetic query names and values only.
+                  hmChangeFlow = evalHM {
+                    enable = true;
+                    selfLogin = "phillipgreenii";
+                    repos = [ { remote = "phillipgreenii/example-repo"; } ];
+                    watch = {
+                      pr.queries = [
+                        "example-pr-query-a"
+                        "example-pr-query-b"
+                      ];
+                      issue.queries = [ "example-issue-query" ];
+                      thread = {
+                        queries = [ "example-thread-query" ];
+                        activeWindow = "5d";
+                      };
+                    };
+                    sweep = {
+                      maxAge = "4h";
+                      maxPerPoll = 7;
+                      reconcileAge = "15m";
+                    };
+                    hydration.maxPerPoll = 9;
+                    changeLogRetention = "21d";
+                    consumerStaleAfter = "3d";
+                  };
+                  # A single key set renders only its own block: the other
+                  # entity types, and the unset siblings, stay absent.
+                  hmChangeFlowPartial = evalHM {
+                    enable = true;
+                    selfLogin = "phillipgreenii";
+                    repos = [ { remote = "phillipgreenii/example-repo"; } ];
+                    watch.issue.queries = [ "example-issue-query" ];
+                  };
+                  # The loader rejects an explicit 0 for max_per_poll, so the
+                  # options must not admit one: evaluating the rendered file's
+                  # derivation must throw.
+                  maxPerPollZeroRejected =
+                    override:
+                    let
+                      rendered =
+                        (evalHM (
+                          {
+                            enable = true;
+                            selfLogin = "phillipgreenii";
+                            repos = [ { remote = "phillipgreenii/example-repo"; } ];
+                          }
+                          // override
+                        )).xdg.configFile."pg-desk/config.yaml".source.drvPath;
+                    in
+                    !(builtins.tryEval rendered).success;
+
                   hmAreaLabels = evalHM {
                     enable = true;
                     selfLogin = "phillipgreenii";
@@ -6565,6 +6619,10 @@
                 # rendered.
                 assert lib.elem pkgs.pg-desk hmEnabled.home.packages;
                 assert hmEnabled.xdg.configFile ? "pg-desk/config.yaml";
+                # Entity-change-flow keys: the zero-int rejection is evaluated here
+                # (a throw cannot be grepped for in the rendered file).
+                assert maxPerPollZeroRejected { sweep.maxPerPoll = 0; };
+                assert maxPerPollZeroRejected { hydration.maxPerPoll = 0; };
                 pkgs.runCommand "test-pg-desk-module-ok" { } ''
                   # area_labels absent by default, rendered when set (field defaults to title).
                   ! grep -q area_labels ${hmEnabled.xdg.configFile."pg-desk/config.yaml".source}
@@ -6597,6 +6655,34 @@
                   grep -q '^    ties: severity descending, then group size descending, then entity id$' "$a"
                   # the enum's single value must equal the Go loader's AttentionTiesDefault
                   grep -qF 'const AttentionTiesDefault = "severity descending, then group size descending, then entity id"' ${./packages/pg-desk/internal/config/config.go}
+                  # Entity-change-flow keys: none rendered by default.
+                  d=${hmEnabled.xdg.configFile."pg-desk/config.yaml".source}
+                  ! grep -qE '^(watch|sweep|hydration|change_log_retention|consumer_stale_after):' "$d"
+                  ! grep -q 'max_per_poll' "$d"
+                  # Rendered under the loader's key names when set.
+                  w=${hmChangeFlow.xdg.configFile."pg-desk/config.yaml".source}
+                  grep -q '^watch:' "$w"
+                  sed -n '/^  pr:/,/^  [a-z]/p' "$w" | grep -q 'example-pr-query-a'
+                  sed -n '/^  pr:/,/^  [a-z]/p' "$w" | grep -q 'example-pr-query-b'
+                  sed -n '/^  issue:/,/^  [a-z]/p' "$w" | grep -q 'example-issue-query'
+                  sed -n '/^  thread:/,/^[a-z]/p' "$w" | grep -q 'example-thread-query'
+                  grep -q '^    active_window: 5d$' "$w"
+                  grep -q '^sweep:' "$w"
+                  grep -q '^  max_age: 4h$' "$w"
+                  grep -q '^  max_per_poll: 7$' "$w"
+                  grep -q '^  reconcile_age: 15m$' "$w"
+                  grep -q '^hydration:' "$w"
+                  grep -q '^  max_per_poll: 9$' "$w"
+                  grep -q '^change_log_retention: 21d$' "$w"
+                  grep -q '^consumer_stale_after: 3d$' "$w"
+                  # A partial setting renders only its own block.
+                  p=${hmChangeFlowPartial.xdg.configFile."pg-desk/config.yaml".source}
+                  grep -q '^watch:' "$p"
+                  grep -q '^  issue:' "$p"
+                  ! grep -qE '^  (pr|thread):' "$p"
+                  ! grep -qE '^(sweep|hydration|change_log_retention|consumer_stale_after):' "$p"
+                  ! grep -q 'active_window' "$p"
+
                   touch $out
                 '';
 
