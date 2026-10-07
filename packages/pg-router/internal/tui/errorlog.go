@@ -7,7 +7,6 @@
 package tui
 
 import (
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -15,8 +14,16 @@ import (
 	"sync"
 )
 
+// DefaultErrorLogMaxBytes bounds the live log file (bead pg2-yqbht): a write
+// that would push it past this size first rotates it to <name>.1 (replacing
+// any previous .1), so at most two files exist and the total stays near
+// 2*max. The TUI is an interactive process, not a launchd agent, so no
+// shared rotator covers its log.
+const DefaultErrorLogMaxBytes int64 = 4 << 20
+
 // ErrorLogger writes append-mode lines to <CacheDir>/<FileName>, opening
-// the file lazily on first use. Safe for concurrent use. When CacheDir is
+// the file lazily on first use and size-capping it (see
+// DefaultErrorLogMaxBytes). Safe for concurrent use. When CacheDir is
 // empty, LogString silently drops the line.
 type ErrorLogger struct {
 	CacheDir string
@@ -26,9 +33,13 @@ type ErrorLogger struct {
 	// "tui-errors.log", so the default branch is inherited, never actually
 	// exercised, by this package's own production wiring.
 	FileName string
+	// MaxBytes caps the live file before it is rotated to <name>.1; zero
+	// means DefaultErrorLogMaxBytes.
+	MaxBytes int64
 
 	mu   sync.Mutex
-	file io.WriteCloser
+	file *os.File
+	size int64
 }
 
 // LogString appends a single newline-terminated line to the log file. The
@@ -41,22 +52,49 @@ func (e *ErrorLogger) LogString(msg string) {
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	name := e.FileName
+	if name == "" {
+		name = "signal-errors.log"
+	}
+	path := filepath.Join(e.CacheDir, name)
+	limit := e.MaxBytes
+	if limit <= 0 {
+		limit = DefaultErrorLogMaxBytes
+	}
+	line := msg + "\n"
 	if e.file == nil {
 		if err := os.MkdirAll(e.CacheDir, 0o755); err != nil {
 			return
 		}
-		name := e.FileName
-		if name == "" {
-			name = "signal-errors.log"
-		}
-		f, err := os.OpenFile(filepath.Join(e.CacheDir, name),
-			os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-		if err != nil {
+		if !e.open(path) {
 			return
 		}
-		e.file = f
 	}
-	fmt.Fprintln(e.file, msg)
+	if e.size > 0 && e.size+int64(len(line)) > limit {
+		_ = e.file.Close()
+		e.file = nil
+		_ = os.Rename(path, path+".1")
+		if !e.open(path) {
+			return
+		}
+	}
+	n, _ := e.file.WriteString(line)
+	e.size += int64(n)
+}
+
+// open opens path for appending and records its current size. It reports
+// false (leaving e.file nil) on failure.
+func (e *ErrorLogger) open(path string) bool {
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return false
+	}
+	e.size = 0
+	if fi, err := f.Stat(); err == nil {
+		e.size = fi.Size()
+	}
+	e.file = f
+	return true
 }
 
 // errorLogPath returns the path an ErrorLogger{CacheDir: cacheDir,
