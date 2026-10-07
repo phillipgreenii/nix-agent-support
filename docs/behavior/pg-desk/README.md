@@ -26,7 +26,7 @@ In scope: `store` and its schema, `gather`, `interpret`, `sync` (all three modes
 stored entity), `serve` (behind the soak option only), `open`, `hide`/`unhide`/`wip`,
 `feedback list`/`feedback set`, `show`, `links` (a read-only batch lookup of cross-reference
 links, see [`links.md`](links.md), which also holds the `<type> link add|remove` external-link
-verbs), `<type> consumer list|forget` (see [`consumer.md`](consumer.md)), `<type> changes` (see [`changes.md`](changes.md)), `<type> refresh` (see [`refresh.md`](refresh.md)), `attention list`/`attention explain` and the `pg-desk-attention` plugin (see [`attention.md`](attention.md)), `freshness` (the per-source data age, see [`freshness.md`](freshness.md)), the typed `<type> show` composite view (see [`show.md`](show.md)), `status`, `doctor`, `heartbeat`/`heartbeat-item`, and
+verbs), `<type> consumer list|forget` (see [`consumer.md`](consumer.md)), `<type> changes` (see [`changes.md`](changes.md)), `<type> refresh` (see [`refresh.md`](refresh.md)), `pg-desk-shadow` (the one-off shadow-compare measurement tool, see [`shadow-compare.md`](shadow-compare.md)), `attention list`/`attention explain` and the `pg-desk-attention` plugin (see [`attention.md`](attention.md)), `freshness` (the per-source data age, see [`freshness.md`](freshness.md)), the typed `<type> show` composite view (see [`show.md`](show.md)), `status`, `doctor`, `heartbeat`/`heartbeat-item`, and
 `import-pg-pr-annotations`, and the annotation verbs `<type> annotate|suppress|unsuppress`,
 `pr force-review`, `pr head-check` (see [`operator-commands.md`](operator-commands.md)) and the typed `hide`/`unhide`/`wip`/`pr feedback` forms (see
 [`annotate.md`](annotate.md)).
@@ -73,6 +73,7 @@ back here — not the full list.
 | [`consumer.md`](consumer.md)                                 | `pg-desk <type> consumer list`/`forget` — change-log consumer lifecycle                                                            |
 | [`changes.md`](changes.md)                                   | `pg-desk <type> changes` — list-and-diff change feed, envelope, cursor, exit codes                                                 |
 | [`refresh.md`](refresh.md)                                   | `pg-desk <type> refresh` — targeted single-entity hydration, change kind, exit codes                                               |
+| [`shadow-compare.md`](shadow-compare.md)                     | `pg-desk-shadow` — the side-by-side comparison of the fingerprint change detection against the live change flow (phase A)          |
 | [`attention.md`](attention.md)                               | `pg-desk attention list`/`explain` and the `pg-desk-attention` plugin — the read-time attention evaluator, its rules, grouping     |
 | [`freshness.md`](freshness.md)                               | `pg-desk freshness`, the dashboard `sources[]` and `pg_desk_source_age_seconds` — per-source data age, the staleness threshold     |
 | [`operator-commands.md`](operator-commands.md)               | `show`, `status`, `sweep`, `doctor`, `heartbeat`, `heartbeat-item`                                                                 |
