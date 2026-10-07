@@ -284,7 +284,7 @@ func TestSettledClose_skips(t *testing.T) {
 			cc := newSettleCC("sess-1", fixedState(ccpool.StateIdle))
 			tc.mutate(cc)
 			r := settledRun(cc, fastCfg())
-			r.closeSettledSession(context.Background(), "zr-w", "sess-1", nil, quietResult{})
+			r.closeSettledSession(context.Background(), &roles.CCPoolConfig{}, "zr-w", "sess-1", nil, quietResult{})
 			if len(cc.Closed) != 0 {
 				t.Errorf("must not close; Closed=%v", cc.Closed)
 			}
@@ -296,7 +296,7 @@ func TestSettledClose_closesOnlyItsOwnRow(t *testing.T) {
 	// Two rows idle; only name's own may be closed.
 	cc := &twoRowCC{FakeCC: &dtest.FakeCC{}}
 	r := settledRun(cc, fastCfg())
-	r.closeSettledSession(context.Background(), "zr-w", "mine", nil, quietResult{})
+	r.closeSettledSession(context.Background(), &roles.CCPoolConfig{}, "zr-w", "mine", nil, quietResult{})
 	if len(cc.Closed) != 1 || cc.Closed[0] != "mine" {
 		t.Errorf("must close only its own row; Closed=%v", cc.Closed)
 	}
@@ -316,7 +316,7 @@ func TestSettledClose_skipsOnCancellation(t *testing.T) {
 		cc := newSettleCC("sess-1", fixedState(ccpool.StateIdle))
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		settledRun(cc, fastCfg()).closeSettledSession(ctx, "zr-w", "sess-1", nil, quietResult{})
+		settledRun(cc, fastCfg()).closeSettledSession(ctx, &roles.CCPoolConfig{}, "zr-w", "sess-1", nil, quietResult{})
 		if len(cc.Closed) != 0 {
 			t.Errorf("a cancelled ctx (daemon shutdown) must not close; Closed=%v", cc.Closed)
 		}
@@ -324,7 +324,7 @@ func TestSettledClose_skipsOnCancellation(t *testing.T) {
 	for _, werr := range []error{context.Canceled, context.DeadlineExceeded} {
 		t.Run(werr.Error(), func(t *testing.T) {
 			cc := newSettleCC("sess-1", fixedState(ccpool.StateIdle))
-			settledRun(cc, fastCfg()).closeSettledSession(context.Background(), "zr-w", "sess-1", werr, quietResult{})
+			settledRun(cc, fastCfg()).closeSettledSession(context.Background(), &roles.CCPoolConfig{}, "zr-w", "sess-1", werr, quietResult{})
 			if len(cc.Closed) != 0 {
 				t.Errorf("a cancellation werr must not close; Closed=%v", cc.Closed)
 			}
@@ -335,7 +335,7 @@ func TestSettledClose_skipsOnCancellation(t *testing.T) {
 func TestSettledClose_listErrorSkips(t *testing.T) {
 	cc := &dtest.FakeCC{ListErr: errors.New("ccpool list: transient")}
 	r := settledRun(cc, fastCfg())
-	r.closeSettledSession(context.Background(), "zr-w", "sess-1", nil, quietResult{checked: true, quiet: true})
+	r.closeSettledSession(context.Background(), &roles.CCPoolConfig{}, "zr-w", "sess-1", nil, quietResult{checked: true, quiet: true})
 	if len(cc.Closed) != 0 {
 		t.Errorf("unreadable row => can't tell => no close; Closed=%v", cc.Closed)
 	}

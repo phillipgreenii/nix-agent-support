@@ -434,7 +434,7 @@ func budgetUnlimited(b budget.Budget) bool {
 func (r *ccpoolRun) finishWait(ctx context.Context, cc *roles.CCPoolConfig, d DispatchContext, name, wt string, werr error) (report.Result, error) {
 	r.recordDispatchFailure(d, name, werr)
 	q := r.cleanupWorktree(ctx, cc, name, d.Item.ID, wt)
-	r.closeSettledSession(ctx, d.Item.ID, name, werr, q)
+	r.closeSettledSession(ctx, cc, d.Item.ID, name, werr, q)
 	if werr == nil {
 		// A successful completion resets the eviction strike counter so
 		// escalateEviction's two-strike count stays CONSECUTIVE, not lifetime
@@ -507,9 +507,9 @@ func (r *ccpoolRun) cleanupWorktree(ctx context.Context, cc *roles.CCPoolConfig,
 			"session", name, "worktree", wt)
 		return quietResult{}
 	}
-	if !r.waitSessionQuiet(ctx, name) {
+	if !r.waitSessionQuiet(ctx, name, r.quietWindow(cc)) {
 		slog.Warn("dispatch: worktree cleanup deferred -- session or its subagents still active (left for next sweep)",
-			"session", name, "worktree", wt, "quietWindow", r.deps.Cfg.WorktreeQuietWindow)
+			"session", name, "worktree", wt, "quietWindow", r.quietWindow(cc))
 		return quietResult{checked: true, quiet: false}
 	}
 	q := quietResult{checked: true, quiet: true}
@@ -561,12 +561,12 @@ const closeSettledSessionTimeout = time.Minute
 //
 // A close failure is best effort: WARN and continue; werr and the dispatch
 // result are never changed. Every close logs INFO.
-func (r *ccpoolRun) closeSettledSession(ctx context.Context, beadID, name string, werr error, q quietResult) {
+func (r *ccpoolRun) closeSettledSession(ctx context.Context, cc *roles.CCPoolConfig, beadID, name string, werr error, q quietResult) {
 	if ctx.Err() != nil || errors.Is(werr, context.Canceled) || errors.Is(werr, context.DeadlineExceeded) {
 		return
 	}
 	if !q.checked {
-		q.quiet = r.waitSessionQuiet(ctx, name)
+		q.quiet = r.waitSessionQuiet(ctx, name, r.quietWindow(cc))
 	}
 	if ctx.Err() != nil {
 		return // cancelled while waiting for quiet

@@ -418,3 +418,41 @@ review`. The claim is still released (status open, assignee cleared) — the lab
   re-dispatch after a session that died mid-review, leaving its pending review for the human. Bead
   `pg2-5x29j`; found by the 2026-10-07 router health review (about 11 of 50 sessions in 72 hours
   had nothing worth reviewing).
+
+- **`INV-CCH-23`** — the quiet window `INV-CCH-15` and `INV-CCH-17` wait for (neither the session
+  nor its Agent-tool subagents have written for that long, before the worktree is removed and the
+  settled session closed) is a handler-wide default of 2 minutes, and a role MAY override it for
+  its own dispatches only. A role that does not set the override MUST behave exactly as before. The
+  override MUST be a positive duration, MUST be at least two poll intervals (20 seconds at the
+  default 10 second poll, because the check samples once per poll and a window under two samples
+  can pass between two writes of a subagent that is merely between tool calls), and MUST NOT
+  exceed the handler's bound on how long it waits for quiet (a longer window could never be
+  satisfied before the wait gives up and leaves the worktree in place); a role config that says
+  otherwise MUST be rejected at dispatch, before any session is launched. An explicit zero or
+  negative override is rejected, not read as "disable the check". A handler-wide window of zero or
+  less (the check disabled) is an operator switch no role override re-enables. The override
+  applies to the dispatch-time cleanup and close of that role's own dispatches; the closed-bead
+  reconcile and the default-pool stale-session pass act on sessions of every role and keep the
+  handler-wide window. **Why.** While a finished session sits idle and unclosed it still counts
+  against the pool's `max_sessions`, because capacity counts every live session that is not
+  `needs_input`; the handler closes the session only after the quiet window and the worktree
+  removal. Measured 2026-10-07 over 23 review dispatches (handler log against the pool event
+  log): last `working` to `idle` until the session was closed took a median of 206 seconds
+  (minimum 150, maximum 614), about 23 percent of the session's slot hold, of which the 120 second
+  window is the bulk and the worktree removal most of the rest (a full monorepo worktree takes
+  about 30 to 65 seconds to remove; the close itself follows within a median of 2 seconds). In a
+  `max_sessions = 1` pool no other review can start in that span. **Trade-off (straggler
+  subagents).** The window is a heuristic, not a proof: a transcript is written when a message or
+  tool call completes, so a subagent inside one long generation or one long tool call (a
+  multi-minute test run) writes nothing for that span and looks quiet once the window passes. A
+  shorter window shortens the span a silent subagent is tolerated, so it raises the chance of
+  removing a worktree, or closing the session, under a subagent that is still working. The
+  consequence is bounded: removal is non-force (git refuses a dirty tree), the close does not
+  purge, and this only arises after the role's own bead has completed. The default stays at 2
+  minutes for a role that fans out subagents (code review fan-out); a role that finishes in one
+  flat pass with few or no subagents, such as review, MAY shorten it (20 to 30 seconds is the
+  intended range). The window is not shortened by default because the risk is invisible until a
+  worktree is removed under a live subagent. Not covered, accepted: the worktree removal time
+  still holds the slot after the window (a handler could close the session before removing the
+  worktree, which this invariant does not change). Bead `pg2-uyahp`, follow-up of `pg2-hh32y`
+  item 3 and `pg2-vlk1f`; see ADR 0082.

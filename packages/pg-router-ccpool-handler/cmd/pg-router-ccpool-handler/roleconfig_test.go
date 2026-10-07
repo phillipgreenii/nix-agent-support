@@ -388,3 +388,41 @@ func TestLoadRole_rejectsInvalidPrefetch(t *testing.T) {
 		})
 	}
 }
+
+// TestLoadRole_worktreeQuietWindow (bead pg2-uyahp, INV-CCH-23): absent => 0
+// (no override: the handler default applies), a duration string => that value,
+// a malformed, zero, or negative value is rejected.
+func TestLoadRole_worktreeQuietWindow(t *testing.T) {
+	mk := func(extra string) string {
+		return `{"name":"review","type":"ccpool","ccpool":{"actor":"a","completion":"close-only","onFailure":"unclaim","onDispatchFail":"unclaim","promptBody":"p"` + extra + `}}`
+	}
+	for _, tc := range []struct {
+		name, extra string
+		want        time.Duration
+		wantErr     bool
+	}{
+		{"absent is no override", "", 0, false},
+		{"empty string is no override", `,"worktreeQuietWindow":""`, 0, false},
+		{"30s", `,"worktreeQuietWindow":"30s"`, 30 * time.Second, false},
+		{"1m30s", `,"worktreeQuietWindow":"1m30s"`, 90 * time.Second, false},
+		{"malformed rejected", `,"worktreeQuietWindow":"soon"`, 0, true},
+		{"zero rejected", `,"worktreeQuietWindow":"0s"`, 0, true},
+		{"negative rejected", `,"worktreeQuietWindow":"-5s"`, 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			role, err := loadRole(mustWriteRoleFile(t, mk(tc.extra)))
+			if tc.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "worktreeQuietWindow") {
+					t.Fatalf("err = %v, want a worktreeQuietWindow error", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := role.CCPool.WorktreeQuietWindow; got != tc.want {
+				t.Errorf("WorktreeQuietWindow = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

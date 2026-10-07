@@ -77,6 +77,14 @@ The dispatch-time reconcile does not help: it closes only sessions whose bead is
   supervision step in the reconcile. Later note (2026-10-06): ADR 0083 adds that step, a
   supervision lease the handler keeps fresh and a role-scoped orphan reconcile that acts on an
   expired one.
+- Later note (2026-10-07, bead `pg2-uyahp`): the slot stays counted from the last `working` to
+  `idle` transition until the close, which waits for the quiet window and the worktree removal.
+  Measured over 23 review dispatches that gap was a median of 206 seconds (about 23 percent of a
+  session's slot hold). A role may therefore override the quiet window for its own dispatches
+  (`INV-CCH-23`); the default and every role that does not set it stay at 2 minutes. The
+  trade-off is the straggler-subagent risk (a subagent silent for longer than the window is
+  mistaken for finished), which is why the override is per role and opt-in rather than a shorter
+  default.
 - Rejected: leaving the slot to `idle_ttl` and shortening it. It also shortens the life of
   sessions that are legitimately idle between turns, and adds no signal that the dispatch is
   finished.

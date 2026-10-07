@@ -348,6 +348,12 @@ let
               };
             };
           }
+          // lib.optionalAttrs (roleCfg.ccpool.worktreeQuietWindow != null) {
+            # worktreeQuietWindow (bead pg2-uyahp, INV-CCH-23): omitted when null, so
+            # a role that never sets it decodes to "no override" (the handler-wide
+            # 2m default applies, unchanged behavior).
+            inherit (roleCfg.ccpool) worktreeQuietWindow;
+          }
           // lib.optionalAttrs (roleCfg.ccpool.beadsDir != "") {
             # beadsDir (bead pg2-2grpj): omitted when unset, like poolDir.
             inherit (roleCfg.ccpool) beadsDir;
@@ -610,6 +616,24 @@ let
                   bead before unclaiming it, and comments `budget stop <n> of <threshold>
                   (session <id>)`. Budgets are NEVER changed by it. `0` disables the
                   record entirely (kill switch).
+                '';
+              };
+              worktreeQuietWindow = lib.mkOption {
+                type = lib.types.nullOr lib.types.str;
+                default = null;
+                example = "30s";
+                description = ''
+                  Per-role override of the worktree quiet window
+                  (`roles.CCPoolConfig.WorktreeQuietWindow`, bead pg2-uyahp, INV-CCH-23): how
+                  long the finished session and its Agent-tool subagents' transcripts must
+                  show no write before the handler removes the worktree and closes the
+                  settled session. Until then the idle session still counts against the
+                  pool's `max_sessions`. A Go duration string (e.g. `"30s"`). `null` (the
+                  default) keeps the handler-wide 2m window, unchanged. Must be at least
+                  2 x the handler poll interval (20s by default) and at most the handler
+                  wait bound (10m). A shorter window frees the slot sooner but risks
+                  mistaking a silent-but-running subagent for a finished one, so set it
+                  only on a role with few subagents (review).
                 '';
               };
               isolation = lib.mkOption {

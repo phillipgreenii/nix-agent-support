@@ -83,6 +83,14 @@ type roleFile struct {
 		// pg2-6akgz): per-bead budget-stop threshold. Absent => defaultBudgetStopEscalateAfter
 		// (3); 0 => disabled (kill switch). A pointer distinguishes absent from 0.
 		BudgetStopEscalateAfter *int `json:"budgetStopEscalateAfter"`
+		// WorktreeQuietWindow (bead pg2-uyahp, INV-CCH-23): per-role override of
+		// the handler-wide worktree quiet window, a time.ParseDuration string
+		// ("30s"). Absent/"" => no override (the handler default applies). An
+		// explicit zero or negative value is rejected (it would read as "disable
+		// the check"). The bounds that depend on the handler Config
+		// (pollInterval, worktreeQuietMax) are checked at dispatch, where both
+		// are loaded (config.Config.ValidateQuietWindowOverride).
+		WorktreeQuietWindow string `json:"worktreeQuietWindow"`
 	} `json:"ccpool,omitempty"`
 	Command *struct {
 		Argv []string `json:"argv"`
@@ -139,6 +147,16 @@ func loadRole(path string) (roles.Role, error) {
 		if stopAfter < 0 {
 			return roles.Role{}, fmt.Errorf("role config %s: budgetStopEscalateAfter %d must be >= 0", path, stopAfter)
 		}
+		var quietWindow time.Duration
+		if rf.CCPool.WorktreeQuietWindow != "" {
+			quietWindow, err = time.ParseDuration(rf.CCPool.WorktreeQuietWindow)
+			if err != nil {
+				return roles.Role{}, fmt.Errorf("role config %s: parse worktreeQuietWindow %q: %w", path, rf.CCPool.WorktreeQuietWindow, err)
+			}
+			if quietWindow <= 0 {
+				return roles.Role{}, fmt.Errorf("role config %s: worktreeQuietWindow %q must be > 0 (omit it to use the handler default)", path, rf.CCPool.WorktreeQuietWindow)
+			}
+		}
 		// isolation.prefetch (bead pg2-hh32y) checks a commit out inside the
 		// worktree this handler created, so it is valid ONLY with the
 		// worktree strategy, and its templates must parse.
@@ -164,6 +182,7 @@ func loadRole(path string) (roles.Role, error) {
 			BeadsDir:  rf.CCPool.BeadsDir,
 
 			BudgetStopEscalateAfter: stopAfter,
+			WorktreeQuietWindow:     quietWindow,
 		}
 	case "command":
 		if rf.Command == nil {

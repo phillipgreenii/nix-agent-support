@@ -13,6 +13,7 @@ package roles
 
 import (
 	"text/template"
+	"time"
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/budget"
 )
@@ -67,6 +68,19 @@ type CCPoolConfig struct {
 	// the role config; the loader defaults an absent value to 3. Budgets are
 	// never changed by it.
 	BudgetStopEscalateAfter int
+	// WorktreeQuietWindow (bead pg2-uyahp, INV-CCH-23) overrides, for THIS role
+	// only, how long a finished dispatch's session and its Agent-tool
+	// subagents' transcripts must be quiet before the handler removes the
+	// worktree and closes the settled session (config.Config.WorktreeQuietWindow
+	// is the handler-wide default, 2m). 0 (the zero value, an absent key) means
+	// "use the handler-wide value", so a role that never sets it is unchanged.
+	// While the session is idle but not yet closed it still counts against the
+	// pool's max_sessions, so a shorter window returns the slot sooner; the
+	// cost is a higher chance of mistaking a silent-but-running subagent for a
+	// finished one (see executor.waitSessionQuiet). Validated at load: > 0, at
+	// least config.QuietWindowOverrideMinPolls x PollInterval, and no more than
+	// WorktreeQuietMax.
+	WorktreeQuietWindow time.Duration
 }
 
 // IsolationConfig selects how a ccpool role's WORKSPACE_ROOT is prepared before

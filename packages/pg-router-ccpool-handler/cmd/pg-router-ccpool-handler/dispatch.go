@@ -151,6 +151,12 @@ func runDispatch(args []string) int {
 		fmt.Fprintln(os.Stderr, "dispatch:", err)
 		return conformance.ExitError
 	}
+	if role.CCPool != nil {
+		if err := cfg.ValidateQuietWindowOverride(role.CCPool.WorktreeQuietWindow); err != nil {
+			fmt.Fprintf(os.Stderr, "dispatch: role %s: %v\n", role.Name, err)
+			return conformance.ExitError
+		}
+	}
 	overlayBudgetThresholds(role, cfg)
 
 	dctx := executor.DispatchContext{Role: role, Item: itemFromPayload(req.Event.Payload), EventID: req.Event.ID}

@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 // TestValidate_permissionMode proves this module's own Config.Validate()
 // rejects an invalid claude --permission-mode value (docket pg2-oju6w Task
@@ -95,5 +98,38 @@ func TestValidate_leaseTTL(t *testing.T) {
 	c.PollInterval = 30 * 1e9 // 30s => 10x = 5m > the 2m default
 	if err := c.Validate(); err == nil {
 		t.Error("a PollInterval whose 10x exceeds the TTL must be rejected")
+	}
+}
+
+// bead pg2-uyahp, INV-CCH-23: the per-role worktree quiet-window override.
+func TestValidateQuietWindowOverride(t *testing.T) {
+	c := Default() // poll 10s, window 2m, quiet max 10m
+	for _, tc := range []struct {
+		name    string
+		window  time.Duration
+		wantErr bool
+	}{
+		{"zero is no override", 0, false},
+		{"negative rejected", -time.Second, true},
+		{"below two polls rejected", 19 * time.Second, true},
+		{"exactly two polls accepted", 20 * time.Second, false},
+		{"typical review value accepted", 30 * time.Second, false},
+		{"longer than the default accepted", 5 * time.Minute, false},
+		{"exactly the wait bound accepted", 10 * time.Minute, false},
+		{"beyond the wait bound rejected", 10*time.Minute + time.Second, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := c.ValidateQuietWindowOverride(tc.window)
+			if (err != nil) != tc.wantErr {
+				t.Errorf("ValidateQuietWindowOverride(%v) err = %v, wantErr %v", tc.window, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+// The default is unchanged by the override feature.
+func TestDefault_quietWindowStaysTwoMinutes(t *testing.T) {
+	if got := Default().WorktreeQuietWindow; got != 2*time.Minute {
+		t.Errorf("default WorktreeQuietWindow = %v, want 2m", got)
 	}
 }

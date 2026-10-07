@@ -58,7 +58,9 @@ type Config struct {
 	// write activity before cleanupWorktree may remove its worktree
 	// (pg2-9fwft: Agent-tool child subagents are invisible to the pool but
 	// keep writing their transcripts). <= 0 disables the check (legacy
-	// remove-immediately behavior).
+	// remove-immediately behavior). This is the handler-wide default; a role may
+	// override it for its own dispatches (roles.CCPoolConfig.WorktreeQuietWindow,
+	// INV-CCH-23), except that <= 0 here stays an operator disable no role undoes.
 	WorktreeQuietWindow time.Duration
 	// WorktreeQuietMax bounds how long cleanupWorktree waits for the quiet
 	// window; on expiry the worktree is LEFT in place (fail soft, for a later
@@ -338,6 +340,36 @@ func Default() Config {
 // accepts: the lease is refreshed once per poll, so a TTL below this many polls
 // could expire on a live handler after a couple of slow or failed refreshes.
 const LeaseTTLMinPolls = 10
+
+// QuietWindowOverrideMinPolls is the smallest per-role worktree quiet-window
+// override, in PollInterval units, ValidateQuietWindowOverride accepts. The
+// check polls once per PollInterval, so a window under two polls could pass on
+// a single sample taken between two writes of a subagent that is merely
+// between tool calls. Two polls (20s at the 10s default) is the floor for the
+// lowest-risk case, a role with few subagents.
+const QuietWindowOverrideMinPolls = 2
+
+// ValidateQuietWindowOverride checks a role's WorktreeQuietWindow override
+// (bead pg2-uyahp, INV-CCH-23) against this Config. 0 means "no override" and
+// is always valid. A non-zero value MUST be positive, at least
+// QuietWindowOverrideMinPolls x PollInterval, and no more than
+// WorktreeQuietMax (a longer window could never be satisfied before the wait
+// gives up and leaves the worktree in place).
+func (c Config) ValidateQuietWindowOverride(window time.Duration) error {
+	if window == 0 {
+		return nil
+	}
+	if window < 0 {
+		return fmt.Errorf("worktreeQuietWindow %v: must be > 0 (omit it to use the handler default %v)", window, c.WorktreeQuietWindow)
+	}
+	if min := QuietWindowOverrideMinPolls * c.PollInterval; window < min {
+		return fmt.Errorf("worktreeQuietWindow %v: must be >= %d x pollInterval (%v)", window, QuietWindowOverrideMinPolls, min)
+	}
+	if c.WorktreeQuietMax > 0 && window > c.WorktreeQuietMax {
+		return fmt.Errorf("worktreeQuietWindow %v: must be <= worktreeQuietMax (%v)", window, c.WorktreeQuietMax)
+	}
+	return nil
+}
 
 // validateLease enforces LeaseTTL >= LeaseTTLMinPolls x PollInterval (bead
 // pg2-g2u9m). A zero PollInterval is not this check's concern (it is not a

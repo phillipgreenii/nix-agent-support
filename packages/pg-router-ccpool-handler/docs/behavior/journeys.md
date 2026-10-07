@@ -13,7 +13,7 @@ Realization gaps; these are the stories Task 5.2 onward realizes.
   a bare configured command), so pg-router itself never needs to know how to drive an agent.
   _(→ `USECASE-CCH-DISPATCH`; `INV-CCH-2`, `INV-CCH-3`, `INV-CCH-4`, `INV-CCH-5`,
   `INV-CCH-9`, `INV-CCH-10`, `INV-CCH-14`, `INV-CCH-15`, `INV-CCH-17`, `INV-CCH-18`, `INV-CCH-19`,
-  `INV-CCH-20`, `INV-CCH-21`, `INV-CCH-22`.)_
+  `INV-CCH-20`, `INV-CCH-21`, `INV-CCH-22`, `INV-CCH-23`.)_
 - **`STORY-CCH-QUERY`** <!-- uuid: 661a1b2c-4243-42b3-8fcc-607e8ec7e4af --> — As pg-router's core, I
   want a registered source to query beads for events on my behalf, so pg-router itself never needs
   to know beads' query language. _(→ `USECASE-CCH-QUERY`; `INV-CCH-1`, `INV-CCH-4`, `INV-CCH-5`.)_
@@ -26,7 +26,7 @@ Realization gaps; these are the stories Task 5.2 onward realizes.
 **Level:** user-goal.
 **Preconditions:** this module is registered with a reachable core (`phillipgreenii-nix-agent-support`
 ADR 0036 — this module never starts a core).
-_Requires:_ `INTF-HANDLER`, `INV-CCH-2`, `INV-CCH-3`, `INV-CCH-14`, `INV-CCH-15`, `INV-CCH-17`, `INV-CCH-18`, `INV-CCH-19`, `INV-CCH-20`, `INV-CCH-21`, `INV-CCH-22`.
+_Requires:_ `INTF-HANDLER`, `INV-CCH-2`, `INV-CCH-3`, `INV-CCH-14`, `INV-CCH-15`, `INV-CCH-17`, `INV-CCH-18`, `INV-CCH-19`, `INV-CCH-20`, `INV-CCH-21`, `INV-CCH-22`, `INV-CCH-23`.
 _Includes:_ `INTF-CCH-CCPOOL` or a configured command, per the role's own backing kind.
 
 1. The core dispatches one event under one tracking id to a bound role.
@@ -38,7 +38,8 @@ _Includes:_ `INTF-CCH-CCPOOL` or a configured command, per the role's own backin
    session on its own, later.
    3b. The session's turn has ended: this module closes it, non-purge (`INV-CCH-17`), once it is
    quiet and no one else has closed it, so the pool's slot is free again before `ccpool`'s idle
-   timeout.
+   timeout. How long it waits for quiet is
+   the handler-wide window unless the role overrides it (`INV-CCH-23`).
 
 Extensions:
 
