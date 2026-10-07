@@ -236,3 +236,13 @@ list`/`search` accept no such flag — see "Cross-cutting capabilities" above) t
   machine-readable envelope) or `human` (a readable rendering of the same already-decoded result),
   selected by the explicit `--output` flag and validated before any backend is dispatched
   (`INV-OUT-2`). Distinct from, and never a substitute for, the wire protocol's own JSON shape.
+
+## Review heads
+
+- **Live head** — the commit the PR's branch points at right now, as read during the call
+  (`review_submit`'s result `live_head_sha`, `review_pending`'s `head_sha`). It moves whenever
+  the PR's author pushes.
+- **Saved-at head** — the commit a review's content was written against and is recorded at:
+  `review_submit`'s request `head_sha`, echoed in the result's `head_sha`. Normally the live
+  head; when the PR moved on while the review was being written it is an earlier commit of the
+  PR and the result's `head_moved` is true (`INV-REVHEAD-1`, `INV-REVHEAD-2`, `INV-REVHEAD-3`).

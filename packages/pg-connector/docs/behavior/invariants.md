@@ -680,6 +680,55 @@ status`, `config validate`) MUST report that backend's row as `disabled` with a 
   same fact again. The `alert` backend's own `list_attention` (`INV-ALERT-7`) is the one path by
   which an alert reaches attention. `INV-AGS-2` is this rule applied to agent-session usage caps.
 
+## Review head handling
+
+> `review_submit` puts a finished review into the acting identity's pending review. A review is
+> written against one commit of the PR (its **saved-at head**, see the glossary) while the PR
+> keeps its own **live head**; the two can differ because the PR moved while the review was being
+> written. These rules say which saved-at heads are accepted, where the content is anchored, and
+> what follows from saving at a head that is no longer live.
+
+- **`INV-REVHEAD-1`** <!-- uuid: f7a85793-e163-4b9a-87ac-a494cd2b0f54 --> — `review_submit`'s
+  `head_sha` MUST be a full 40-character sha, compared case-insensitively; an abbreviated sha MUST
+  be `invalid_argument` and MUST NOT be expanded. A `head_sha` equal to the PR's live head MUST
+  behave exactly as a request for the live head always did. A `head_sha` that is not the live head
+  MUST be accepted only when it is one of the PR's own commits; a sha that is not MUST be
+  `invalid_argument`, its message MUST name both the requested sha and the live head, and nothing
+  MUST be written. When the PR's commit list could not be read in full and the sha is not in the
+  part that was read, the answer MUST be `unavailable` (fail closed), never `invalid_argument`:
+  the sha may be among the commits not read.
+- **`INV-REVHEAD-2`** <!-- uuid: 17bba3a6-c9ba-4ab7-ad75-6bf5674d6215 --> — A `review_submit`
+  whose `head_sha` is not the live head MUST save its content at `head_sha` and MUST NOT anchor
+  anything at the live head:
+  - each new-point comment's `line` MUST be resolved in the diff the PR showed at `head_sha`
+    (`RIGHT` against new-file numbering over context and added lines, `LEFT` against old-file
+    numbering over context and removed lines), and the comment MUST be recorded against
+    `head_sha` even when the pending review it joins was started at another commit;
+  - a comment whose line is not in that diff, or whose file has no diff to read (too large,
+    binary, rename without content change), MUST fail by itself as `anchor_rejected` through the
+    ordinary per-comment failure reporting, and MUST NOT abort the run or the comments that can be
+    anchored; a reply (`thread_id`) is unaffected, because it joins an existing thread;
+  - when there is no pending review it MUST be created at `head_sha`, and when a body is written
+    its section MUST be the one for `head_sha`, followed by a plain line that states the saved-at
+    head and the live head at the time of saving, so an operator submitting the review can tell a
+    mix of comments anchored at different commits apart.
+- **`INV-REVHEAD-3`** <!-- uuid: 1e9fd060-0f51-4ec2-8cbf-ffbc339d3045 --> — The consequences of
+  saving at a head that is no longer live:
+  - the result's `head_sha` MUST be the saved-at head, `head_moved` MUST say whether it differs
+    from the live head, and `live_head_sha` MUST be the live head read during the run;
+    `status` keeps its three values and their meaning (`posted`, `append`, `no_change`);
+  - a review so saved MUST count as stale for the live head in `review_pending` (it holds no
+    comment at the live head and no section for it), so the live head is still seen as needing its
+    own review;
+  - a comment's identity for replay MUST be computed from
+    the line the request carried, so replaying the identical request is idempotent
+    (`already_present`). The converse is a KNOWN LIMIT: a later review at the live head that
+    restates the same finding at the shifted line is a different comment and is written again; the
+    mitigation is to show the later reviewer the comments already on the PR, not backend logic;
+  - a request that saves at an earlier head MUST carry at most 20 comments (more is
+    `invalid_argument`, nothing written), a lower bound than the live-head cap, because it needs
+    extra reads inside the same 30s exec timeout that bounds a whole call.
+
 ## Goal
 
 - **`GOAL-MIN-1`** <!-- uuid: 5cc7f9a5-54a9-4bb9-93a6-09179abc65e8 --> — Keep the umbrella

@@ -59,6 +59,11 @@ See the [glossary](glossary.md), [actors](actors.md), [interfaces](interfaces.md
   attention from the attention feed, so the feed never fills with tool-health items or repeats a
   fact an alert already raised. _(→ `USECASE-BACKEND-OBSERVABILITY`; `INV-ATTN-CONTENT-1`,
   `INV-CONOBS-1`, `INV-CONOBS-2`, `INV-CONOBS-3`, `INV-CONOBS-4`.)_
+- **`STORY-OP-11`** <!-- uuid: 8635a83d-372a-4e1f-934a-cf0de20865da --> — save a finished review
+  at the commit I reviewed even though the PR has since moved on, so the comments sit on the lines I
+  actually read and a later review of the new head is still seen as needed, and be told plainly
+  when the commit I name is not one the PR has. _(→ `USECASE-TARGETED-CALL`; `INV-REVHEAD-1`,
+  `INV-REVHEAD-2`, `INV-REVHEAD-3`.)_
 
 ## Journey
 
@@ -458,3 +463,25 @@ flowchart TD
   envelope come back" — or should `INTF-WIRE` widen its own exit-code scheme to satisfy that
   convention directly? Unresolved as of this writing; not blocking, since every consumer today
   already reads the JSON body rather than branching on the wire-level exit code.
+
+- **`OQ-REVHEAD-1`** <!-- uuid: 61b91b5b-82ce-4904-bbba-a8036d1e02a7 --> — Is the host operation
+  that appends a comment to a pending review at an explicit commit, by diff position (the one
+  `INV-REVHEAD-2` relies on, as opposed to the line-and-side one used for the live head),
+  deprecated or scheduled for removal in the host's schema? Not settled: no schema description or
+  introspection result is available offline, so the schema version was NOT checked. A scratch-repo
+  spike (2026-10-07) showed it accepted, anchoring the comment at the named commit and re-mapping
+  its current line, and the anchoring surviving submission of the review. To settle in live
+  verification: introspect the operation's and its input fields' deprecation state and record the
+  schema date here.
+- **`OQ-REVHEAD-2`** <!-- uuid: 0b3c7e52-9a4d-4f18-8e6b-5d2c1a7f9e30 --> — A pending review that
+  was started at a THIRD commit (neither the live head nor `head_sha`), then appended to with the
+  explicit commit `head_sha`: does each comment stay anchored at `head_sha`? The spike covered a
+  review started at `head_sha` itself, and showed that one review can hold comments at two commits.
+  Intended (`INV-REVHEAD-2`) and implemented as "yes"; not observed.
+- **`OQ-REVHEAD-3`** <!-- uuid: c4d8a1f6-3e07-4b92-a5d0-7f1e8b2c6a49 --> — Positions are computed
+  from the difference between the base branch's CURRENT tip and `head_sha`, because that is what
+  the host's compare read offers; the host's own diff view may use the commit the PR diverged
+  from. For an advanced base, a renamed file (a `LEFT` comment named by the old path is sent under
+  the new path), and a second file in the same diff, whether the two agree is not observed. Until
+  settled, an advanced base or a rename MAY refuse a comment (`anchor_rejected`) or shift it; the
+  backend does not detect a shifted comment. To settle in live verification.
