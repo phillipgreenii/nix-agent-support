@@ -895,7 +895,9 @@ under the target before any read-through saving.
 - **Slack.** The thread list is one LLM call per query expression, always truncated, and cannot be
   fingerprinted (finding F-5 of the fast per-type change check design). A stable membership
   index does not exist for it, so adoption starts with a verification task and, at most, TTL
-  read-through for `thread show` and `thread list` results. That is why the Slack bead is
+  read-through for `thread show` and `thread list` results. (Verification outcome, bead
+  `pg2-cw6b3.7`, 2026-10-07: not adopted; see
+  `2026-10-07-slack-ttl-read-through-verification-finding.md`.) That is why the Slack bead is
   conditional on its verification.
 
 ## 7. Small parameters for operator veto
