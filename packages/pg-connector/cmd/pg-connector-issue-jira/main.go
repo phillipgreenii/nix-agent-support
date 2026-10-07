@@ -20,7 +20,6 @@ import (
 	internal "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/eventlog"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/activity"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/attention"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/issue"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/search"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
@@ -71,15 +70,6 @@ func newDispatchTable(backend *internal.Backend) scriptout.DispatchTable {
 	for op, handler := range search.NewDispatchTable(backend) {
 		table[op] = handler
 	}
-	// attention (list_attention, plus its own auth_status entry --
-	// functionally identical to issue's/search's, since all three
-	// type-assert the same backend; harmless to overwrite) built by
-	// pkg/provider/attention.NewDispatchTable (bead pg2-7wqkr: this
-	// backend's own ListAttention against Jira's duedate field via
-	// pjira).
-	for op, handler := range attention.NewDispatchTable(backend) {
-		table[op] = handler
-	}
 	// activity (list_activity, plus its own auth_status entry, identical in
 	// effect to the others) built by pkg/provider/activity.NewDispatchTable:
 	// this backend's own ListActivity, scoped to the operator's own identity
@@ -99,10 +89,9 @@ func capabilitiesBase() scriptout.CapabilitiesResponse {
 	return scriptout.CapabilitiesResponse{
 		ProtocolVersion: scriptout.ProtocolVersion,
 		SchemaVersions: map[string]int{
-			"issue":     schema.IssueSchemaVersion,
-			"search":    schema.SearchSchemaVersion,
-			"attention": schema.AttentionSchemaVersion,
-			"activity":  schema.ActivitySchemaVersion,
+			"issue":    schema.IssueSchemaVersion,
+			"search":   schema.SearchSchemaVersion,
+			"activity": schema.ActivitySchemaVersion,
 		},
 		Vocabulary: map[string]any{
 			"state":    internal.Vocabulary,

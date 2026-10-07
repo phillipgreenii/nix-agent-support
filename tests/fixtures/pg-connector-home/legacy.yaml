@@ -3,9 +3,6 @@ attention:
     - pg-connector-issue-beads
     - pg-connector-pr-github
 backends:
-  pg-connector-issue-beads:
-    attention_exclude: no-attention
-    attention_threshold: 72h
   pg-connector-pr-github:
     example_key: example-value
 configSchemaVersion: 2

@@ -81,10 +81,6 @@ func (fakeGH) ViewerLogin(ctx context.Context) (string, error) {
 	return "me", nil
 }
 
-func (fakeGH) ReviewsWithCommit(ctx context.Context, repo string, number int) ([]api.Review, error) {
-	return nil, nil
-}
-
 func (fakeGH) ListReviewsSubmitted(ctx context.Context, repo string, number int) ([]api.Review, error) {
 	return nil, nil
 }

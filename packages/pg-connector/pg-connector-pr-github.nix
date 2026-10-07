@@ -26,11 +26,8 @@ mkGoApp {
   # (not its schemas/ or conformance/ subpackages — those are pulled in only by
   # pg-connector's own Tier-1 conformance suite and pkg/scriptout's own tests, not
   # by this binary), pkg/provider's root iface.go plus its own pkg/provider/pr,
-  # pkg/provider/search, AND pkg/provider/attention capability subpackages
-  # (search added by bead pg2-8hcnx; attention added by bead pg2-7wqkr: this
-  # binary now also wires pkg/provider/attention.NewDispatchTable to answer the
-  # "list_attention" op, porting the mine-vs-team NeedsAttention CONCEPT from
-  # packages/pg-pr/internal/snapshot/attention.go), and its own
+  # pkg/provider/search capability subpackages
+  # (search added by bead pg2-8hcnx), and its own
   # cmd/pg-connector-pr-github/ tree (main.go, internal/** — including
   # internal/api, internal/gitenv, internal/vcs, internal/github and their
   # testdata). None of the other 3 backends' cmd/pg-connector-*/ trees are
@@ -61,7 +58,6 @@ mkGoApp {
       ./pkg/provider/iface.go
       ./pkg/provider/pr
       ./pkg/provider/search
-      ./pkg/provider/attention
       # list_activity capability: internal/activity.go and main.go import
       # pkg/provider/activity (dispatch table + iface).
       ./pkg/provider/activity

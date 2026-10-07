@@ -408,22 +408,13 @@ list`'s merge layer, which passes it through unread. A dedup group's `group` is 
   completeness from an `attention list` result, because `--cap N` truncates the item list
   (`INV-ATTN-1`), not groups. The human (`--output human`) rendering of `attention list` is
   unaffected by `group`.
-- **`INV-ATTN-CI-1`** <!-- uuid: c41da963-67b0-4d00-a040-a569dfc18795 --> — The PR backend's
-  `list_attention` MUST emit exactly one "CI failing on my PR" item, `type` `pr-ci`, for each open,
-  non-draft, unmerged PR authored by the viewing operator whose head-commit CI is failed, and none
-  for a PR whose CI is passing, pending, or absent, nor for a draft, closed, merged, or
-  other-author PR. The item's `id` MUST be the PR id (`<owner>/<repo>#<n>`, the same id the
-  review-needed `pr` item carries), its `summary` MUST begin `ci-failing-on-my-pr:` (distinct from
-  the review-needed reasons), its `url` MUST be the PR's own page (`INV-ATTN-URL-1`; no build or
-  Jira link is synthesized), and its `severity` MUST be `high`. It MUST use a `type` other than `pr`,
-  because `attention list` dedups by `{type, id}` (`INV-ATTN-1`) and one PR can need review and have
-  failing CI at once. "Failed" is any failed head-commit check (a failed check run, a
-  cancelled/timed-out/action-required/stale conclusion, or a failed or errored commit status) that
-  the backend's optional `ci_exclude` patterns (regular expressions matched against a check's name
-  and workflow name) do not drop; a failed `build-test-validate`-style job is NOT exempt, because
-  the reviewability exception concerns reviewing OTHERS' PRs, not hiding a broken build on one's
-  own. Operators SHOULD configure `ci_exclude` with the same patterns the CI rollup's check
-  exclusions use, so the menu and the dashboard agree on what counts as failing.
+  > **Entity attention is not a connector concern.** Whether a pull request, an issue or a thread
+  > needs the operator is decided by `pg-desk`'s evaluator, not by the entity backends. The former
+  > "CI failing on my PR" item (`type` `pr-ci`) is now the `pg-desk` rule `pr.own-ci-failing` (see
+  > `docs/behavior/pg-desk/attention.md`), and the PR, Jira and beads backends no longer report entity
+  > attention: each answers `list_attention` with `unknown_op`, which `attention list` treats as "not
+  > applicable" for that source rather than a failure. `INV-ATTN-1` and `INV-ATTN-URL-1` continue to
+  > govern every item that does reach the feed.
 - **`INV-SEARCH-1`** <!-- uuid: a9fdaa89-5b51-4d5f-8a2b-3d72a36a0326 --> — `search`'s aggregation
   MUST NOT merge or dedup across sources at all — unlike `attention list`'s `INV-ATTN-1`, each
   queried source's own results stay grouped under that source, in that source's own returned

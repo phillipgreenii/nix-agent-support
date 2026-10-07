@@ -15,7 +15,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,7 +25,6 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/github"
 	pgposted "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/posted"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/attention"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/pr"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/search"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
@@ -50,8 +48,7 @@ type ghProvider interface {
 	// SearchPRs runs one GitHub search-syntax query (design's
 	// "implement List" note) and returns every matched PR. Still used by
 	// List's own ids_only path (unchanged by bead pg2-aehpr's batched-query
-	// rewrite — see List's own doc comment), by Search, and by
-	// ListAttention.
+	// rewrite — see List's own doc comment) and by Search.
 	SearchPRs(ctx context.Context, query string) ([]api.PR, error)
 	// SearchPRsEnriched runs one batched `gh api graphql` query per call
 	// (bead pg2-aehpr, design doc "pg-connector-pr-github: replace N+1
@@ -78,10 +75,9 @@ type ghProvider interface {
 	// pg2-2j5ac.28.2's PR-facts design bullet).
 	GetFiles(ctx context.Context, repo string, number int) ([]api.File, error)
 	GetCommits(ctx context.Context, repo string, number int) ([]api.Commit, error)
-	// ViewerLogin/ReviewsWithCommit back ListAttention's own ported
-	// mine-vs-team NeedsAttention predicate (bead pg2-7wqkr).
+	// ViewerLogin resolves the authenticated viewer, whom the activity
+	// capability scopes to.
 	ViewerLogin(ctx context.Context) (string, error)
-	ReviewsWithCommit(ctx context.Context, repo string, number int) ([]api.Review, error)
 	// ListReviewsSubmitted is ListReviews plus each review's SubmittedAt (empty
 	// for a pending, unsubmitted review); it backs the pr.reviewed activity
 	// kind. A separate read so ListReviews' own output stays unchanged.
@@ -117,7 +113,7 @@ type Backend struct {
 // A gh that retries transient read failures (a *github.Provider) is handed the
 // GraphQL rate-limit reserve check as its retry guard, so a retry is never
 // issued once the budget has dropped below config.rate_reserve_points: the
-// reserve is checked once before the first attempt (List/Search/ListAttention)
+// reserve is checked once before the first attempt (List/Search)
 // and again before every retry (bead pg2-daktd).
 func New(gh ghProvider) *Backend {
 	b := &Backend{gh: gh}
@@ -156,7 +152,6 @@ var (
 	_ pr.Provider          = (*Backend)(nil)
 	_ search.Provider      = (*Backend)(nil)
 	_ provider.AuthChecker = (*Backend)(nil)
-	_ attention.Provider   = (*Backend)(nil)
 )
 
 // formatPRID formats repo/number into this backend's id convention:
@@ -245,8 +240,7 @@ func rateReservePoints(config json.RawMessage) int {
 	return *cfg.RateReservePoints
 }
 
-// checkRateReserve is the shared "Rate protection" gate List, Search and
-// ListAttention each run before their first search: it reads the GraphQL
+// checkRateReserve is the shared "Rate protection" gate List and Search each run before their first search: it reads the GraphQL
 // rate-limit state, records it on the call's event (eventlog.RecordRateLimit,
 // bead pg2-ph0o4 — the budget dipping under the reserve is what starved
 // pg-desk's My Work panel, and this is the one place every guarded call
@@ -460,227 +454,18 @@ func (b *Backend) Search(ctx context.Context, query string, _ []string) ([]schem
 	return out, nil
 }
 
-// Attention reason strings this backend's own list_attention response
-// carries in AttentionItem.Summary — port the CONCEPT of (not a
-// dependency on) packages/pg-pr/internal/snapshot/attention.go's own
-// AttentionReasonUnreviewed/AttentionReasonReReview constants (bead
-// pg2-7wqkr's design).
-const (
-	attentionReasonUnreviewed = "unreviewed-by-me"
-	attentionReasonReReview   = "re-review-after-my-approval"
-)
-
-// CI-failing attention (bead pg2-fnqqi, design
-// docs/superpowers/specs/2026-10-02-menubar-cross-reference-links-design.md
-// Q1 option C): ListAttention also emits one item per OPERATOR-AUTHORED open,
-// non-draft PR whose head-commit CI is failed, so a broken build shows up as
-// its own attention item.
-const (
-	// attentionTypeCIFailing is the item `type` of a CI-failing item. It is
-	// deliberately distinct from the review-needed item's "pr": `attention
-	// list` dedups by {type, id} (INV-ATTN-1), so sharing "pr" would let one
-	// of the two items for the same PR (same id <owner>/<repo>#<n>) swallow
-	// the other.
-	attentionTypeCIFailing = "pr-ci"
-	// attentionReasonCIFailing is the Summary prefix, distinct from the
-	// review-needed reasons above.
-	attentionReasonCIFailing = "ci-failing-on-my-pr"
-	// attentionSeverityCIFailing is the severity mapping chosen for a
-	// CI-failing item: high. A broken build on the operator's own PR blocks
-	// their own work and is theirs to fix, so it outranks the review-needed
-	// items (which carry no severity and rank as medium) while staying below
-	// critical, which is left to genuine outages (alerts).
-	attentionSeverityCIFailing = schema.SeverityHigh
-	// ownOpenPRsQuery is the GitHub search the CI-failing scan runs. It is
-	// built in rather than configured: "my open PRs" has one meaning and the
-	// scan is stateless (D3), exactly like ViewerLogin above.
-	ownOpenPRsQuery = "is:open author:@me archived:false"
-)
-
-// ciExcludeConfig is the optional {"ci_exclude": [...]} key of this backend's
-// per-backend config: regular expressions matched against each check's name
-// and workflow name; a matching check is left out of the CI-failing decision.
-// Operators SHOULD set it to the same patterns pg-desk's check_interpreters
-// carry, so the menu bar and the dashboard agree on what counts (INV-LINKS-4).
-// An unset key excludes nothing, and a pattern that does not compile is
-// skipped, never an error (mirroring pg-desk's cirun.CompileExcluder).
-type ciExcludeConfig struct {
-	CIExclude []string `json:"ci_exclude"`
-}
-
-// ciExcluderFrom compiles config's ci_exclude patterns into a predicate over a
-// check name.
-func ciExcluderFrom(config json.RawMessage) func(name string) bool {
-	var cfg ciExcludeConfig
-	if len(config) > 0 {
-		_ = scriptout.Decode(config, &cfg)
-	}
-	var pats []*regexp.Regexp
-	for _, p := range cfg.CIExclude {
-		re, err := regexp.Compile(p)
-		if err != nil {
-			continue
-		}
-		pats = append(pats, re)
-	}
-	return func(name string) bool {
-		if name == "" {
-			return false
-		}
-		for _, re := range pats {
-			if re.MatchString(name) {
-				return true
-			}
-		}
-		return false
-	}
-}
-
-// ciFailingForPR reports whether pr is an operator-authored, open, non-draft,
-// unmerged PR with at least one failed head-commit check that excluded does
-// not drop. A PR whose only checks are passing, pending, or excluded yields
-// false. Unlike a review of someone else's PR (pg2-p2ojd's reviewability
-// exception for a failed build-test-validate job), nothing is exempt by
-// default here: a broken build on one's own PR is still broken. An empty
-// State is tolerated (treated as open) so a search-shaped PR is not rejected;
-// gh pr view always reports one.
-func ciFailingForPR(pr api.PR, self string, excluded func(name string) bool) bool {
-	if pr.Merged || pr.Draft {
-		return false
-	}
-	if st := strings.ToLower(pr.State); st != "" && st != "open" {
-		return false
-	}
-	if self == "" || !strings.EqualFold(pr.Author, self) {
-		return false
-	}
-	for _, c := range pr.Checks {
-		if c.Outcome != api.CheckFailure {
-			continue
-		}
-		if excluded(c.Name) || excluded(c.Workflow) {
-			continue
-		}
-		return true
-	}
-	return false
-}
-
-// attentionQueryConfig is the {"attention_query": ...} shape this
-// backend's own list_attention op reads from its per-backend opaque
-// config block (bead pg2-7wqkr) — a GitHub search-syntax query, or list of
-// queries (reusing schema.QueryExpr's existing single-string-or-list-of-
-// strings normalization, the SAME shape List's own config.queries values
-// already carry), identifying the TEAM PRs needsAttentionForPR scans.
-// Unlike the beads/jira backends' attention_threshold/attention_exclude,
-// this backend's own attention config carries no threshold/exclude of its
-// own: PR attention is not deadline-based (design: "reuse the mine-vs-
-// team NeedsAttention criteria ... not deadline-based"), and the
-// mine-vs-team predicate itself already IS the filter.
-type attentionQueryConfig struct {
-	AttentionQuery schema.QueryExpr `json:"attention_query"`
-}
-
-// attentionQueryFrom resolves config's own attention_query key, nil when
-// config is empty, fails to decode, or the key is simply unset —
-// ListAttention treats nil as "nothing configured to scan," never an
-// error (this backend has no safe way to invent a default GitHub search
-// query, unlike config.queries' own caller-named resolution: list_attention
-// takes no wire args at all, so there is no caller-supplied name to
-// resolve here in the first place).
-func attentionQueryFrom(config json.RawMessage) schema.QueryExpr {
-	if len(config) == 0 {
-		return nil
-	}
-	var cfg attentionQueryConfig
-	if err := scriptout.Decode(config, &cfg); err != nil {
-		return nil
-	}
-	return cfg.AttentionQuery
-}
-
-// reviewIsStale reports whether review no longer stands for head — ports
-// packages/pg-pr/internal/snapshot/attention.go's store.Approval.IsStale
-// CONCEPT (dismissed, OR submitted against a commit other than the
-// current head) over this backend's own live-fetched fields
-// (ghProvider.ReviewsWithCommit's CommitOID) rather than pg-pr's persisted
-// per-approver store rows. An empty CommitOID (GitHub returns a null
-// commit when the reviewed commit was since force-pushed away) is
-// conservatively treated as stale — it can never match a real head SHA.
-func reviewIsStale(r api.Review, head string) bool {
-	if strings.EqualFold(r.State, "DISMISSED") {
-		return true
-	}
-	return r.CommitOID == "" || r.CommitOID != head
-}
-
-// needsAttentionForPR ports packages/pg-pr/internal/snapshot/attention.go's
-// NeedsAttention predicate CONCEPT as a fresh implementation over this
-// backend's own live-fetched inputs (bead pg2-7wqkr) — never a dependency
-// on the pg-pr package. reviews is collapsed to the LATEST review per
-// author first: gh's GraphQL reviews(first: N) query returns every review
-// EVENT in chronological order (oldest first), while pg-pr's own
-// store.Approval is UNIQUE per (pr, approver) — a single current-state
-// row, not full history — so keeping only the last-seen entry per author
-// reproduces that same "one current row per approver" shape. The state
-// machine itself is unchanged from attention.go's own doc comment:
-//   - a merge conflict dampens the whole PR off the hook.
-//   - a teammate approval that currently stands (not stale) takes it off
-//     my plate.
-//   - MY OWN review of the current head takes it off my plate REGARDLESS
-//     of its state — "having looked at this head at all" — unlike a
-//     teammate's non-approval state, which does NOT close the team edge.
-//   - otherwise: re-review (I have a review, but it's stale) or
-//     first-review (I have none at all).
-func needsAttentionForPR(reviews []api.Review, self, head string, hasConflict bool) (need bool, reason string) {
-	if hasConflict {
-		return false, ""
-	}
-	latest := make(map[string]api.Review, len(reviews))
-	for _, r := range reviews {
-		if r.Author == "" {
-			continue
-		}
-		latest[r.Author] = r
-	}
-	var mine *api.Review
-	for author, r := range latest {
-		if self != "" && author == self {
-			rr := r
-			mine = &rr
-			continue
-		}
-		if strings.EqualFold(r.State, "APPROVED") && !reviewIsStale(r, head) {
-			return false, ""
-		}
-	}
-	if mine != nil {
-		if !reviewIsStale(*mine, head) {
-			return false, ""
-		}
-		return true, attentionReasonReReview
-	}
-	return true, attentionReasonUnreviewed
-}
-
-// listAttentionMaxWorkers bounds how many concurrent `gh` subprocesses
-// ListAttention spawns for its per-query SearchPRs fan-out and its
-// per-candidate GetPR/ReviewsWithCommit fan-out (bead pg2-zutee: the prior
-// fully-sequential implementation summed 30-40+ `gh` exec round trips past
-// scriptout's own 30s DefaultExecTimeout — packages/pg-connector/pkg/
-// scriptout/limits.go — for a realistic 6-query attention_query surfacing
-// dozens of candidates). 8 is a modest bound: enough concurrency to bring
-// a few dozen candidate-pair calls comfortably under the 30s budget,
-// without spawning so many `gh` processes/TLS handshakes at once that it
-// looks like a burst against a single GitHub token (this is a fan-out
-// WITHIN one backend's own external-service calls, not the umbrella's
-// own deliberately-serial cross-BACKEND fan-out — cmd/pg-connector/ci.go's
-// fanOutCIList doc comment, cited by limits.go, is about that other,
-// unrelated layer).
-const listAttentionMaxWorkers = 8
+// maxParallelWorkers bounds how many concurrent `gh` subprocesses one fan-out
+// (parallelMap) spawns. 8 is a modest bound: enough concurrency to bring a few
+// dozen per-PR calls comfortably under scriptout's own 30s DefaultExecTimeout
+// (packages/pg-connector/pkg/scriptout/limits.go), without spawning so many
+// `gh` processes/TLS handshakes at once that it looks like a burst against a
+// single GitHub token (this is a fan-out WITHIN one backend's own
+// external-service calls, not the umbrella's own deliberately-serial
+// cross-BACKEND fan-out).
+const maxParallelWorkers = 8
 
 // parallelMap runs fn(items[i]) for every i using a bounded pool of at
-// most listAttentionMaxWorkers goroutines (or len(items), if smaller),
+// most maxParallelWorkers goroutines (or len(items), if smaller),
 // preserving items' order in the returned slice — so a caller that
 // dedupes/aggregates over the results in order sees the exact same
 // sequence a purely-sequential loop would have produced. Every fn call
@@ -695,7 +480,7 @@ func parallelMap[T, R any](ctx context.Context, items []T, fn func(ctx context.C
 	if len(items) == 0 {
 		return nil, nil
 	}
-	workers := listAttentionMaxWorkers
+	workers := maxParallelWorkers
 	if workers > len(items) {
 		workers = len(items)
 	}
@@ -722,152 +507,6 @@ func parallelMap[T, R any](ctx context.Context, items []T, fn func(ctx context.C
 		}
 	}
 	return results, nil
-}
-
-// ListAttention implements the attention capability's attention.Provider
-// against GitHub (bead pg2-7wqkr): scans this backend's own configured
-// attention_query candidate PRs (attentionQueryFrom) via the same
-// ghProvider.SearchPRs List/Search already use, then applies
-// needsAttentionForPR's ported mine-vs-team predicate to each, resolving
-// "self" via a fresh ViewerLogin GraphQL call every time (statelessness,
-// D3 — this backend keeps no local self_login configuration of its own
-// the way pg-pr's sync layer does). The same rate-limit reserve check
-// List/Search already apply is applied once here, up front, since this op
-// issues 1 (viewer) + 1-per-query (search) + 2-per-candidate (GetPR,
-// ReviewsWithCommit) GraphQL/REST calls — considerably more than a single
-// List call. RateLimitRemaining/ViewerLogin are each already called
-// exactly once (not once per query), so bead pg2-zutee's own "cache
-// once instead of once per query" suggestion for those two calls is
-// already satisfied here; the per-query SearchPRs and per-candidate
-// GetPR/ReviewsWithCommit fan-outs below (parallelMap) are what that bead
-// actually found running sequentially.
-//
-// After the review-needed scan it appends the CI-failing scan
-// (listCIFailingAttention, bead pg2-fnqqi): +1 search for the operator's own
-// open PRs and +1 GetPR per non-draft one. That scan runs even with no
-// attention_query configured, so an empty config no longer short-circuits to
-// an empty list.
-func (b *Backend) ListAttention(ctx context.Context) ([]schema.AttentionItem, error) {
-	query := attentionQueryFrom(scriptout.ConfigFromContext(ctx))
-	if err := b.checkRateReserve(ctx); err != nil {
-		return nil, err
-	}
-	self, err := b.gh.ViewerLogin(ctx)
-	if err != nil {
-		return nil, classifyGHError(err)
-	}
-
-	searchResults, err := parallelMap(ctx, query, func(ctx context.Context, q string) ([]api.PR, error) {
-		return b.gh.SearchPRs(ctx, q)
-	})
-	if err != nil {
-		return nil, classifyGHError(err)
-	}
-
-	seen := make(map[string]bool)
-	var candidates []api.PR
-	for _, prs := range searchResults {
-		for i := range prs {
-			c := prs[i]
-			id := formatPRID(c.Repo, c.Number)
-			if seen[id] {
-				continue
-			}
-			seen[id] = true
-			candidates = append(candidates, c)
-		}
-	}
-
-	perCandidate, err := parallelMap(ctx, candidates, func(ctx context.Context, c api.PR) (*schema.AttentionItem, error) {
-		full, err := b.gh.GetPR(ctx, c.Repo, c.Number)
-		if err != nil {
-			return nil, err
-		}
-		reviews, err := b.gh.ReviewsWithCommit(ctx, c.Repo, c.Number)
-		if err != nil {
-			return nil, err
-		}
-		need, reason := needsAttentionForPR(reviews, self, full.HeadSHA, full.HasConflict())
-		if !need {
-			return nil, nil
-		}
-		return &schema.AttentionItem{
-			Type:    "pr",
-			ID:      formatPRID(full.Repo, full.Number),
-			Summary: fmt.Sprintf("%s: %s", reason, full.Title),
-			// The PR's own page (INV-ATTN-URL-1); omitted when GitHub
-			// returned none.
-			URL: full.URL,
-		}, nil
-	})
-	if err != nil {
-		return nil, classifyGHError(err)
-	}
-
-	items := make([]schema.AttentionItem, 0, len(perCandidate))
-	for _, item := range perCandidate {
-		if item != nil {
-			items = append(items, *item)
-		}
-	}
-
-	ciItems, err := b.listCIFailingAttention(ctx, self)
-	if err != nil {
-		return nil, err
-	}
-	return append(items, ciItems...), nil
-}
-
-// listCIFailingAttention emits one CI-failing item per operator-authored open
-// PR whose head-commit CI is failed (bead pg2-fnqqi; see ciFailingForPR). The
-// scan runs whether or not attention_query is configured: the operator's own
-// PRs are not "team PRs", and ownOpenPRsQuery needs no configuration. Each
-// item has the stable id <owner>/<repo>#<n>, the PR's own url (INV-ATTN-URL-1;
-// no cross-entity link is synthesized), and attentionSeverityCIFailing.
-func (b *Backend) listCIFailingAttention(ctx context.Context, self string) ([]schema.AttentionItem, error) {
-	candidates, err := b.gh.SearchPRs(ctx, ownOpenPRsQuery)
-	if err != nil {
-		return nil, classifyGHError(err)
-	}
-	excluded := ciExcluderFrom(scriptout.ConfigFromContext(ctx))
-
-	seen := make(map[string]bool, len(candidates))
-	var open []api.PR
-	for _, c := range candidates {
-		id := formatPRID(c.Repo, c.Number)
-		if c.Draft || seen[id] {
-			continue
-		}
-		seen[id] = true
-		open = append(open, c)
-	}
-
-	perCandidate, err := parallelMap(ctx, open, func(ctx context.Context, c api.PR) (*schema.AttentionItem, error) {
-		full, err := b.gh.GetPR(ctx, c.Repo, c.Number)
-		if err != nil {
-			return nil, err
-		}
-		if !ciFailingForPR(*full, self, excluded) {
-			return nil, nil
-		}
-		return &schema.AttentionItem{
-			Type:     attentionTypeCIFailing,
-			ID:       formatPRID(full.Repo, full.Number),
-			Summary:  fmt.Sprintf("%s: %s", attentionReasonCIFailing, full.Title),
-			Severity: attentionSeverityCIFailing,
-			URL:      full.URL,
-		}, nil
-	})
-	if err != nil {
-		return nil, classifyGHError(err)
-	}
-	var items []schema.AttentionItem
-	for _, item := range perCandidate {
-		if item != nil {
-			items = append(items, *item)
-		}
-	}
-	return items, nil
 }
 
 // Files implements pr.Provider.Files: fetches id's changed-file list from

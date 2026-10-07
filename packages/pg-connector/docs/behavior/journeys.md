@@ -42,8 +42,9 @@ See the [glossary](glossary.md), [actors](actors.md), [interfaces](interfaces.md
   I name a query no backend recognizes. _(→ `USECASE-NAMED-QUERY-CALL`; `INV-WIRE-3`,
   `INV-STATE-1`, `INV-ERR-3`.)_
 - **`STORY-OP-8`** <!-- uuid: 4fe4ecd0-7cca-49a3-b15e-9b9b20d78d5f --> — get one deduped,
-  severity-ranked view of everything needing my attention across every registered source, and
-  one search query answered across every registered source grouped by where each result came
+  severity-ranked view of everything my registered attention sources raise (a source decides
+  for itself what it contributes, so an entity backend need not contribute entity attention),
+  and one search query answered across every registered source grouped by where each result came
   from — both aggregated the same way regardless of how many sources are registered or which
   entity types they cover, without learning any source's own query language. _(→
   `USECASE-CROSSCUT-FANOUT-CALL`; `INV-REG-3`, `INV-ATTN-1`, `INV-ATTN-GROUP-1`, `INV-ATTN-CONTENT-1`,

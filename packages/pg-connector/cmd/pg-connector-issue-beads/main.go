@@ -23,7 +23,6 @@ import (
 
 	internal "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-beads/internal"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/activity"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/attention"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/issue"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
@@ -48,10 +47,8 @@ func run() int {
 
 // newDispatchTable builds the issue capability's table (show/create/
 // comment/transition) via the sibling "generic issue entity/capability"
-// packet's NewDispatchTable, then merges in the attention capability's
-// table (list_attention, bead pg2-7wqkr: this backend's own ListAttention
-// against bd's --due/--overdue fields) built by
-// pkg/provider/attention.NewDispatchTable, then adds this backend's own
+// packet's NewDispatchTable, then merges in the activity capability's
+// table (list_activity), then adds this backend's own
 // capabilities entry via scriptout.AddCapabilities — the concrete backing
 // for that sibling packet's vocabulary.state check, which cites this
 // backend's capabilities response but does not itself populate it
@@ -62,9 +59,6 @@ func run() int {
 // pg2-fh2vh).
 func newDispatchTable(backend *internal.Backend) scriptout.DispatchTable {
 	table := issue.NewDispatchTable(backend)
-	for op, handler := range attention.NewDispatchTable(backend) {
-		table[op] = handler
-	}
 	// activity (list_activity) built by pkg/provider/activity.NewDispatchTable:
 	// this backend's own ListActivity, scoped to the operator through the
 	// host-configured activity_actors list. Backend is not a
@@ -105,7 +99,7 @@ func capabilitiesBase(backend *internal.Backend) scriptout.CapabilitiesResponse 
 	}
 	return scriptout.CapabilitiesResponse{
 		ProtocolVersion: scriptout.ProtocolVersion,
-		SchemaVersions:  map[string]int{"issue": schema.IssueSchemaVersion, "attention": schema.AttentionSchemaVersion, "activity": schema.ActivitySchemaVersion},
+		SchemaVersions:  map[string]int{"issue": schema.IssueSchemaVersion, "activity": schema.ActivitySchemaVersion},
 		Vocabulary:      vocabulary,
 		Version:         Version,
 	}

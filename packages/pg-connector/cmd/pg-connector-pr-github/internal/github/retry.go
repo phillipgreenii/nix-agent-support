@@ -37,7 +37,7 @@ import (
 // remaining time (the op's whole-call deadline, scriptout.DefaultExecTimeout):
 // the loop never extends the caller's wall-clock bound.
 //
-// Rate-limit reserve. List/Search/ListAttention check the GraphQL rate-limit
+// Rate-limit reserve. List/Search check the GraphQL rate-limit
 // reserve ONCE before searching (Backend.checkRateReserve). A retry is more
 // GraphQL spend after that check, so the Backend installs that same check as
 // the Provider's retry guard (SetRetryGuard) and it runs before EVERY retry;

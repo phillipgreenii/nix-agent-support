@@ -69,7 +69,7 @@ const (
 // required fields), service, version, pid, op, duration_ms and the wire
 // taxonomy error_code/error. The graphql_* fields are present only on calls
 // that read the GraphQL rate limit (every call guarded by the rate reserve:
-// list, search, list_attention).
+// list, search).
 type Event struct {
 	evlog.Base
 
@@ -116,7 +116,7 @@ type rateLimitReading struct {
 
 // recorder collects what a handler learned while running that the wrapper
 // cannot see from outside. It is shared by the handler's goroutines
-// (ListAttention fans out), hence the mutex.
+// (list_activity fans out), hence the mutex.
 type recorder struct {
 	mu   sync.Mutex
 	rate *rateLimitReading

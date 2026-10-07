@@ -138,7 +138,7 @@ groups:
                     params: [0]
 
       # (c) Quota: the GraphQL budget is under rate_reserve_points. While it
-      # is, list/search/list_attention refuse to run (see checkRateReserve in
+      # is, list/search refuse to run (see checkRateReserve in
       # provider.go), which is what emptied pg-desk's My Work panel. graphql_
       # headroom is remaining minus the reserve in force, so this reads the
       # live reserve (raising it, e.g. to force this alert, takes effect
@@ -155,7 +155,7 @@ groups:
           severity: warning
         annotations:
           summary: "pg-connector-pr-github: GitHub GraphQL budget has been below the rate reserve for over 10 minutes"
-          description: 'Every GraphQL rate-limit reading pg-connector-pr-github took in the last 5 minutes was below rate_reserve_points, for over 10 minutes, so list/search/list_attention are refusing to run and the pull-request panels are starved. See graphql_remaining, graphql_reset_at (when the budget replenishes) and graphql_reserve with {service_name="pg-connector-pr-github"} | json | graphql_headroom != "". Find the heavy caller or lower the polling rate.'
+          description: 'Every GraphQL rate-limit reading pg-connector-pr-github took in the last 5 minutes was below rate_reserve_points, for over 10 minutes, so list/search are refusing to run and the pull-request panels are starved. See graphql_remaining, graphql_reset_at (when the budget replenishes) and graphql_reserve with {service_name="pg-connector-pr-github"} | json | graphql_headroom != "". Find the heavy caller or lower the polling rate.'
         data:
           - refId: A
             relativeTimeRange:

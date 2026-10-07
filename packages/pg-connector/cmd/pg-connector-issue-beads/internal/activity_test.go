@@ -44,7 +44,7 @@ func TestListActivity_EmptyOrMissingActorsIsUnavailableBeforeAnyBdCall(t *testin
 		"no config":    context.Background(),
 		"empty list":   actCtx(),
 		"blank actors": actCtx("", "  "),
-		"wrong key":    scriptout.WithConfig(context.Background(), json.RawMessage(`{"attention_exclude":"x"}`)),
+		"wrong key":    scriptout.WithConfig(context.Background(), json.RawMessage(`{"unrelated_key":"x"}`)),
 		"bad json":     scriptout.WithConfig(context.Background(), json.RawMessage(`not json`)),
 	}
 	for name, ctx := range cases {

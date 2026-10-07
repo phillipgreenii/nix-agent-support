@@ -324,8 +324,7 @@ func TestGetPR_ParsesMergeableAndMergeStateStatus(t *testing.T) {
 	}
 }
 
-// TestGetPR_ParsesPerCheckOutcomes pins the per-check view ListAttention's
-// CI-failing predicate reads (bead pg2-fnqqi): names (CheckRun name, workflow
+// TestGetPR_ParsesPerCheckOutcomes pins the per-check view (bead pg2-fnqqi): names (CheckRun name, workflow
 // name, StatusContext context) and outcomes classified by the same rule the
 // rollup folds.
 func TestGetPR_ParsesPerCheckOutcomes(t *testing.T) {

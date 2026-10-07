@@ -511,9 +511,10 @@ Unlike `pr`/`issue`/`ci`/`scm`, `attention` and `search` are not tied to one ent
 register under their own top-level keys — `attention.sources`/`search.sources` — siblings of,
 never nested under, `connector.<type>` (`INV-REG-3`). Both are **fan-out-only**: there is no
 targeted form, no id argument, and neither `list_attention` nor `search` accepts a `--backend` pin
-flag or has a `backends.<binary>` config block attached (unlike every `pr`/`issue`/`ci`/`scm`
-verb, which all gained both via bead pg2-2j5ac.28.1) — `pg-connector attention list` and
-`pg-connector search <query>` always query every registered source. Neither participates in
+flag — `pg-connector attention list` and `pg-connector search <query>` always query every
+registered source. Each source still receives its own `backends.<binary>` config block with the
+request (the umbrella passes it to every fanned-out call), exactly as the `pr`/`issue`/`ci`/`scm`
+verbs do (bead pg2-2j5ac.28.1). Neither participates in
 `auth status`'s or `config validate`'s own fan-out either, since both resolve their backend set
 from `connector.<type>` via `AllBackends` — a backend registered ONLY under
 `attention.sources`/`search.sources` is invisible to those two commands; its health is reported
@@ -521,27 +522,30 @@ solely through its own verb's `sources[]` rows (`INV-REG-3`).
 
 A backend implementer builds one of these the same way as any other capability — implement the
 small `attention.Provider`/`search.Provider` Go interface and answer the matching op — but may do
-so either as a capability's own Tier-2 backend (e.g. an issue backend that ALSO implements
-`ListAttention` alongside its normal `issue` ops) or as a dedicated **standalone plugin**
-implementing nothing else. The design names the latter shape explicitly and states it MUST
-compose `pg-connector`'s own verbs rather than talk to an external system directly — a
-combination this set flags rather than resolves: no concrete standalone `attention`/`search`
+so either as a capability's own Tier-2 backend (e.g. an alert backend that ALSO implements
+`ListAttention` alongside its normal `alert` ops) or as a dedicated **standalone plugin**
+implementing nothing else. A standalone plugin takes one of two shapes. A plugin that needs
+data the umbrella alone can supply MUST compose `pg-connector`'s own verbs rather than talk to
+an external system directly — a combination this set flags rather than resolves: no such
 plugin has landed yet to exercise it against the mechanical composition-boundary guard
 (`INV-COMP-1`), whose regex-based check today would flag ANY `pg-connector`-named binary
 executing `pg-connector`, standalone plugin or not (tracked in the [README](README.md)'s
-realization-gap register).
+realization-gap register). A **local-store** plugin instead reads only a local store of its own
+and execs nothing and opens no network connection, so it neither composes `pg-connector`'s verbs
+nor talks to an external system; `pg-desk`'s entity-attention plugin is the one such plugin. The
+umbrella knows it only as a bare name in `attention.sources`, like every other source, and holds no
+compiled-in knowledge of it.
 
 - **`list_attention`** — aggregated by `attention list` via dedup-and-rank, never plain
   concatenation like `ci list`'s own fan-out (`INV-ATTN-1`); an optional `--cap N` truncates the
   already-merged list. Each item MAY carry a `url` — its own page, filled by a source that has one
-  (an alert backend from the alert's URL, the PR backend from the PR URL, the Jira backend from the
-  issue URL) and omitted by one that does not (the beads and agent-session backends); the umbrella
-  passes it through unread and never defaults it (`INV-ATTN-URL-1`). Each item MAY also carry a `group` — `{key, label}`, its work-context group (attention schema version 3), filled only by a source that clusters its items and omitted by every other; the umbrella passes it through unread, never defaults it, and a dedup group keeps the winning contributor's own (`INV-ATTN-GROUP-1`); `attention list`'s human rendering ignores it. The attention capability's
-  schema version is 3 (additive over 2, which was additive over 1). The PR backend reports two kinds of item: `pr`
-  (review-needed, severity omitted) and `pr-ci` ("CI failing on my PR", severity `high`), the
-  latter for each of the operator's own open, non-draft PRs whose head-commit CI has failed,
-  under the stable id `<owner>/<repo>#<n>` and the PR's own `url` (`INV-ATTN-CI-1`). A new item
-  type is a new value of the source-defined `type` string and does not change the schema version.
+  (an alert backend from the alert's URL) and omitted by one that does not (the agent-session
+  backend); the umbrella passes it through unread and never defaults it (`INV-ATTN-URL-1`). Each item MAY also carry a `group` — `{key, label}`, its work-context group (attention schema version 3), filled only by a source that clusters its items and omitted by every other; the umbrella passes it through unread, never defaults it, and a dedup group keeps the winning contributor's own (`INV-ATTN-GROUP-1`); `attention list`'s human rendering ignores it. The attention capability's
+  schema version is 3 (additive over 2, which was additive over 1). A backend that does not answer
+  the op — the PR, Jira and beads entity backends, whose entity attention is evaluated by `pg-desk`
+  instead — answers `unknown_op`, which the fan-out reports as "not applicable" for that source
+  rather than a failure, so a stale registration of one degrades quietly. A new item type is a new
+  value of the source-defined `type` string and does not change the schema version.
 - **`search`** — aggregated by `search` via per-source grouping, never merged across sources
   (`INV-SEARCH-1`); an optional `--fields` list requests specific result attributes, and an
   unrecognized one produces a `warnings[]` entry, never an error.

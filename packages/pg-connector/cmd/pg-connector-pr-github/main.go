@@ -26,7 +26,6 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/github"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/posted"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/activity"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/attention"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/pr"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/search"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
@@ -80,15 +79,6 @@ func newDispatchTable(backend *internal.Backend) scriptout.DispatchTable {
 	for op, handler := range search.NewDispatchTable(backend) {
 		table[op] = handler
 	}
-	// attention (list_attention, plus its own auth_status entry —
-	// functionally identical to pr's/search's, since all three
-	// type-assert the same backend; harmless to overwrite) built by
-	// pkg/provider/attention.NewDispatchTable (bead pg2-7wqkr: this
-	// backend's own ListAttention porting the mine-vs-team NeedsAttention
-	// CONCEPT from packages/pg-pr/internal/snapshot/attention.go).
-	for op, handler := range attention.NewDispatchTable(backend) {
-		table[op] = handler
-	}
 	// activity (list_activity, plus its own auth_status entry, identical in
 	// effect to the others) built by pkg/provider/activity.NewDispatchTable:
 	// this backend's own ListActivity, scoped to the authenticated viewer.
@@ -98,10 +88,9 @@ func newDispatchTable(backend *internal.Backend) scriptout.DispatchTable {
 	return scriptout.AddCapabilities(table, schema.PRSchemaVersion, scriptout.CapabilitiesResponse{
 		ProtocolVersion: scriptout.ProtocolVersion,
 		SchemaVersions: map[string]int{
-			"pr":        schema.PRSchemaVersion,
-			"search":    schema.SearchSchemaVersion,
-			"attention": schema.AttentionSchemaVersion,
-			"activity":  schema.ActivitySchemaVersion,
+			"pr":       schema.PRSchemaVersion,
+			"search":   schema.SearchSchemaVersion,
+			"activity": schema.ActivitySchemaVersion,
 		},
 		// The activity kinds this backend emits; capabilities.ops stays
 		// derived from the table above, never a hand-typed list.

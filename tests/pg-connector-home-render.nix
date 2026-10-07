@@ -43,7 +43,10 @@ let
     in
     evaluated.config.xdg.configFile."pg-pr/config.yaml".source;
 
-  # Every pre-alert capability and key the module already renders.
+  # Every pre-alert capability and key the module still renders. The deadline
+  # keys (`attention.perBackend.<name>.threshold`/`exclude`) are not among
+  # them: they were retired with the PR, Jira and beads backends' own
+  # `list_attention` code, so this scenario no longer sets them.
   legacy = {
     connector = {
       pr = [ "pg-connector-pr-github" ];
@@ -62,10 +65,6 @@ let
         "pg-connector-issue-beads"
         "pg-connector-pr-github"
       ];
-      perBackend."pg-connector-issue-beads" = {
-        threshold = "72h";
-        exclude = "no-attention";
-      };
     };
     search.sources = [ "pg-connector-issue-beads" ];
     backends."pg-connector-pr-github".example_key = "example-value";
@@ -135,6 +134,24 @@ in
   );
   # The design 5.1 Grafana sample, on its own.
   alertGrafana = render alertExample;
+  # The retired deadline options are rejected, not silently ignored: a host
+  # that still sets one fails evaluation instead of rendering a dead key.
+  retiredDeadlineOptionsRejected =
+    builtins.all
+      (
+        key:
+        !(builtins.tryEval (
+          builtins.deepSeq
+            (render {
+              attention.perBackend."pg-connector-issue-beads".${key} = "72h";
+            }).drvPath
+            true
+        )).success
+      )
+      [
+        "threshold"
+        "exclude"
+      ];
   # Alert options alongside the legacy registrations.
   legacyPlusAlert = render {
     inherit (legacy)
@@ -148,7 +165,7 @@ in
     };
     attention = {
       sources = legacy.attention.sources ++ alertExample.attention.sources;
-      perBackend = legacy.attention.perBackend // alertExample.attention.perBackend;
+      inherit (alertExample.attention) perBackend;
     };
     inherit (alertExample) alertBackends;
   };

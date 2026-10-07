@@ -9035,6 +9035,12 @@
                   # activity.sources omits the whole activity: mapping
                   same ${fixtures + "/activity.yaml"} ${rendered.activity}
                   same ${fixtures + "/legacy.yaml"} ${rendered.legacyEmptyActivity}
+                  # the retired attention.perBackend deadline options (threshold,
+                  # exclude) are rejected at evaluation, not silently ignored
+                  ${lib.optionalString (!rendered.retiredDeadlineOptionsRejected) ''
+                    echo "retired attention.perBackend deadline option still evaluates" >&2
+                    exit 1
+                  ''}
                   touch $out
                 '';
 

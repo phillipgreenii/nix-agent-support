@@ -73,19 +73,18 @@ let
     inherit (cfg.activity) sources;
   };
 
-  # attentionBackendExtra (bead pg2-7wqkr) renders one
-  # attention.perBackend.<name> entry onto the wire's own opaque
-  # per-backend config vocabulary (attention_threshold/attention_exclude
-  # -- each backend's own list_attention implementation documents these
-  # keys itself), omitting whichever of the two is unset (null) rather
-  # than rendering it as a literal `null` on the wire -- mirrors
-  # renderedAttention/renderedSearch's identical "omit rather than render
-  # null" convention above.
+  # attentionBackendExtra renders one attention.perBackend.<name> entry onto
+  # the wire's own opaque per-backend config vocabulary, omitting the key when
+  # it is unset (null) rather than rendering a literal `null` on the wire --
+  # mirrors renderedAttention/renderedSearch's identical "omit rather than
+  # render null" convention above. Only the alerts backend still reads a
+  # per-backend attention key (`attention_query`); the deadline keys
+  # (`attention_threshold`/`attention_exclude`) were retired with the PR, Jira
+  # and beads backends' own `list_attention` code, since `pg-desk` evaluates
+  # entity attention.
   attentionBackendExtra =
     entry:
     lib.filterAttrs (_: v: v != null) {
-      attention_threshold = entry.threshold;
-      attention_exclude = entry.exclude;
       # attention_query (bead pg2-9tql6): names the alerts backend's own
       # `queries` entry that `list_attention` runs.
       attention_query = entry.attentionQuery;
@@ -125,8 +124,6 @@ let
           )
           // attentionBackendExtra (
             cfg.attention.perBackend.${name} or {
-              threshold = null;
-              exclude = null;
               attentionQuery = null;
             }
           );
@@ -287,53 +284,21 @@ in
 
           # perBackend (bead pg2-7wqkr): attention.sources (above) only
           # says WHICH backends `pg-connector attention list` fans out to
-          # -- it carries no per-backend SEMANTICS. This is that new
-          # shape: a deadline threshold plus an optional exclude filter,
-          # per backend, rendered onto each named backend's own opaque
-          # backends.<name> config block (see attentionBackendExtra/
-          # renderedBackends above) rather than requiring a host to
-          # hand-write raw backends.<name>.attention_threshold/
-          # attention_exclude attrs itself.
+          # -- it carries no per-backend SEMANTICS. This is that shape,
+          # rendered onto each named backend's own opaque backends.<name>
+          # config block (see attentionBackendExtra/renderedBackends
+          # above) rather than requiring a host to hand-write raw
+          # backends.<name>.attention_query attrs itself. Only the alerts
+          # backend reads one: the deadline `threshold`/`exclude` options
+          # were removed with the PR, Jira and beads backends' own
+          # `list_attention` code (`pg-desk` evaluates entity attention).
           perBackend = lib.mkOption {
             type = lib.types.attrsOf (
               lib.types.submodule {
                 options = {
-                  threshold = lib.mkOption {
-                    type = lib.types.nullOr lib.types.str;
-                    default = null;
-                    description = ''
-                      How close to (or how far past) its due date an item
-                      from this backend must be before `list_attention`
-                      raises it -- a Go `time.ParseDuration` string (e.g.
-                      `"72h"`; there is no `d`/`w` unit, only
-                      ns/us/ms/s/m/h). `null` (the default) means this
-                      backend's own `list_attention` implementation
-                      applies its own built-in default rather than a
-                      configured one. Only consulted by a deadline-based
-                      backend (`pg-connector-issue-beads`,
-                      `pg-connector-issue-jira`) -- `pg-connector-pr-github`'s
-                      own PR attention is not deadline-based and ignores
-                      this.
-                    '';
-                  };
-                  exclude = lib.mkOption {
-                    type = lib.types.nullOr lib.types.str;
-                    default = null;
-                    description = ''
-                      An additional, backend-native exclude filter applied
-                      on top of the threshold -- e.g. a `bd
-                      --exclude-label`-shaped value for
-                      `pg-connector-issue-beads`, or a JQL boolean fragment
-                      ANDed-out for `pg-connector-issue-jira` (e.g.
-                      `"labels = no-attention"`). `null` (the default)
-                      applies no additional exclusion. Backend-specific
-                      grammar; see that backend's own doc comments.
-                    '';
-                  };
                   # attentionQuery (bead pg2-9tql6): an alerts backend's
                   # `list_attention` runs one named query from its own
-                  # `queries` (see `alertBackends`). Not deadline-based, so
-                  # `threshold`/`exclude` above are unused by alerts.
+                  # `queries` (see `alertBackends`).
                   attentionQuery = lib.mkOption {
                     type = lib.types.nullOr lib.types.str;
                     default = null;
@@ -343,9 +308,7 @@ in
                       runs; rendered as `attention_query`. `null` (the
                       default) omits the key, in which case the backend
                       returns its unfiltered firing set. Only consulted by
-                      an alerts backend (e.g. `pg-connector-alert-grafana`);
-                      deadline-based backends ignore it, and alerts
-                      backends ignore `threshold`/`exclude`.
+                      an alerts backend (e.g. `pg-connector-alert-grafana`).
                     '';
                   };
                 };
@@ -353,8 +316,8 @@ in
             );
             default = { };
             description = ''
-              Per-backend attention semantics (deadline threshold plus
-              optional exclude filter), keyed by backend binary name.
+              Per-backend attention semantics (today, only the alerts
+              backend's named query), keyed by backend binary name.
               Independent of `attention.sources` -- a backend configured
               here has no effect on `pg-connector attention list` unless
               it is ALSO registered under `attention.sources`.

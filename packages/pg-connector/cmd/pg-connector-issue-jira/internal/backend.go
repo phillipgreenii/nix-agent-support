@@ -38,7 +38,6 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-jira/internal/eventlog"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/attention"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/issue"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/search"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
@@ -100,11 +99,6 @@ var _ search.Provider = (*Backend)(nil)
 // capability (see CheckAuth's doc comment for why this backend, unlike
 // pg-connector-issue-beads, can implement it).
 var _ provider.AuthChecker = (*Backend)(nil)
-
-// Compile-time check that Backend also satisfies the attention
-// capability's own Provider interface (bead pg2-7wqkr — see attention.go's
-// own ListAttention).
-var _ attention.Provider = (*Backend)(nil)
 
 // Vocabulary is this backend's declared, non-empty state vocabulary —
 // Jira's own classic default workflow status names ("To Do"/"In

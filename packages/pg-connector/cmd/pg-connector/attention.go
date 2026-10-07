@@ -65,13 +65,11 @@ type MergedAttentionItem struct {
 //
 // reg is threaded through (bead pg2-7wqkr, mirroring fanOutCIList's own
 // identical "config travels the same way every other Tier-1 verb's
-// dispatch path already attaches it" reasoning): a deadline-based
-// backend's own list_attention needs its configured
-// attention_threshold/attention_exclude (home/programs/pg-connector's
-// attention.perBackend option, rendered onto backends.<name>), which can
-// only reach it via this call's own config argument -- unlike search's
-// sibling fanOutSearch, which deliberately still passes nil (no bead has
-// yet needed per-backend config for search). reg may be nil (every
+// dispatch path already attaches it" reasoning): a backend's own
+// list_attention reads its configured keys (e.g. the alert backend's
+// attention_query, from home/programs/pg-connector's attention.perBackend
+// option, rendered onto backends.<name>), which can only reach it via
+// this call's own config argument. reg may be nil (every
 // existing test predating this bead exercises that path); Registry.
 // BackendConfig is nil-receiver-safe and simply answers (nil, nil).
 func fanOutAttentionList(ctx context.Context, reg *Registry, backends []string) (map[string][]schema.AttentionItem, FanOutOutcome) {

@@ -34,16 +34,15 @@ type fakeGH struct {
 
 	// getPRFn lets a test answer GetPR per repo/number instead of the
 	// single fixed pr/getPRErr above — needed once a test has more than
-	// one distinct candidate PR in flight at a time (bead pg2-zutee's
-	// realistic-scale ListAttention test).
+	// one distinct candidate PR in flight at a time.
 	getPRFn func(ctx context.Context, repo string, number int) (*api.PR, error)
 
 	// searchFn/rateLimit/rateLimitErr back the List (bead pg2-2j5ac.28.1)
 	// seam. rateLimit defaults to a comfortably-above-reserve value (via
 	// rateLimitOrDefault below) so existing tests that never set it don't
 	// need to know about rate-limit protection at all. searchFn backs
-	// ghProvider.SearchPRs — List's own ids_only path, Search, and
-	// ListAttention (unchanged by bead pg2-aehpr's batched-query
+	// ghProvider.SearchPRs — List's own ids_only path and Search
+	// (unchanged by bead pg2-aehpr's batched-query
 	// rewrite). searchEnrichedFn backs ghProvider.SearchPRsEnriched —
 	// List's own non-ids_only path only (bead pg2-aehpr).
 	searchFn         func(ctx context.Context, query string) ([]api.PR, error)
@@ -65,11 +64,10 @@ type fakeGH struct {
 	filesErr   error
 	commitsErr error
 
-	// viewerLogin/viewerLoginErr and reviewsWithCommitFn back
-	// ListAttention's own ported mine-vs-team predicate (bead pg2-7wqkr).
-	viewerLogin         string
-	viewerLoginErr      error
-	reviewsWithCommitFn func(ctx context.Context, repo string, number int) ([]api.Review, error)
+	// viewerLogin/viewerLoginErr back ViewerLogin (the activity capability scopes
+	// to the viewer).
+	viewerLogin    string
+	viewerLoginErr error
 	// reviewsSubmittedFn backs ghProvider.ListReviewsSubmitted (list_activity's
 	// pr.reviewed kind).
 	reviewsSubmittedFn func(ctx context.Context, repo string, number int) ([]api.Review, error)
@@ -228,13 +226,6 @@ func (f *fakeGH) ViewerLogin(ctx context.Context) (string, error) {
 func (f *fakeGH) ListReviewsSubmitted(ctx context.Context, repo string, number int) ([]api.Review, error) {
 	if f.reviewsSubmittedFn != nil {
 		return f.reviewsSubmittedFn(ctx, repo, number)
-	}
-	return nil, nil
-}
-
-func (f *fakeGH) ReviewsWithCommit(ctx context.Context, repo string, number int) ([]api.Review, error) {
-	if f.reviewsWithCommitFn != nil {
-		return f.reviewsWithCommitFn(ctx, repo, number)
 	}
 	return nil, nil
 }
@@ -740,10 +731,6 @@ func TestBackend_RateGuard_RecordsReadingOnEvent(t *testing.T) {
 		},
 		"search": func(b *Backend, ctx context.Context) error {
 			_, err := b.Search(ctx, "is:open", nil)
-			return err
-		},
-		"list_attention": func(b *Backend, ctx context.Context) error {
-			_, err := b.ListAttention(ctx)
 			return err
 		},
 	}

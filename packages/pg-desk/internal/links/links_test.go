@@ -467,40 +467,22 @@ func TestPRLinks_FailingRunWithoutUsableURLIsOmitted(t *testing.T) {
 	}
 }
 
-// A pr-ci attention ref (pg-connector-pr-github's "CI failing on my PR" item)
-// resolves exactly as the pr ref for the same id: self PR link, a build link
-// per failing run, and the Jira issue; the item is keyed by the ref as given.
-func TestPRCIRefResolvesLikePRRef(t *testing.T) {
+// No ref type is aliased onto another: the PR connector no longer emits a
+// `pr-ci` attention item (pg-desk's own pr.own-ci-failing item has type `pr`),
+// so a `pr-ci` ref is a type pg-desk does not know, even for a PR it holds.
+func TestPRCIRefIsUnknownEvenWhenPRStored(t *testing.T) {
 	st := store.OpenNewSchemaForTest(t)
 	putEntity(t, st, "pr", testPR, "2026-10-01T10:00:00Z", prFactsWithCI(
 		t, "h",
 		ciRun("unit-tests", "failure", "h", "2", "https://ci.example.invalid/run/2"),
 	))
-	putDerived(t, st, "pr", testPR, "issue", "ABC-42", "jira", "jira-key")
 
 	r := resolve(t, deps(st), "pr-ci:"+testPR, "pr:"+testPR)
-	got := r.Items["pr-ci:"+testPR]
-	if !got.Known {
-		t.Fatalf("pr-ci ref known = false; item = %+v", got)
-	}
-	want := []Link{
-		{Kind: KindPR, Relation: "self", Label: "PR #123", URL: "https://scm.example.invalid/acme/api/pull/123"},
-		{Kind: KindBuild, Relation: "ci", Label: "unit-tests (failure)", URL: "https://ci.example.invalid/run/2", State: "failure"},
-		{Kind: KindIssue, Relation: "jira", Label: "ABC-42", URL: "https://tracker.example.invalid/browse/ABC-42"},
-	}
-	if !reflect.DeepEqual(got.Links, want) {
-		t.Fatalf("pr-ci links =\n%+v\nwant\n%+v", got.Links, want)
-	}
-	if !reflect.DeepEqual(got, r.Items["pr:"+testPR]) {
-		t.Errorf("pr-ci item %+v differs from pr item %+v", got, r.Items["pr:"+testPR])
-	}
-}
-
-// A pr-ci ref for a PR pg-desk does not hold is unknown, not an error.
-func TestPRCIRefUnknownWhenPRNotStored(t *testing.T) {
-	st := store.OpenNewSchemaForTest(t)
-	item := resolve(t, deps(st), "pr-ci:acme/api#999").Items["pr-ci:acme/api#999"]
+	item := r.Items["pr-ci:"+testPR]
 	if item.Known || item.Links == nil || len(item.Links) != 0 {
-		t.Errorf("item = %+v; want known=false and a non-nil empty links", item)
+		t.Errorf("pr-ci item = %+v; want known=false and a non-nil empty links", item)
+	}
+	if !r.Items["pr:"+testPR].Known {
+		t.Errorf("pr item = %+v; want known=true", r.Items["pr:"+testPR])
 	}
 }

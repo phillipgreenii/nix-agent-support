@@ -85,9 +85,8 @@ type PR struct {
 	// Checks are the PR's head-commit check runs / status contexts that
 	// ChecksRollup folds, each with its own classified Outcome. Filled by
 	// GetPR only (gh pr view --json statusCheckRollup); search results leave
-	// it nil. ListAttention's CI-failing predicate (bead pg2-fnqqi) reads
-	// it so configured exclusion patterns can drop individual checks, which
-	// the single folded ChecksRollup string cannot express.
+	// it nil. The per-check view (bead pg2-fnqqi) lets a consumer drop individual
+	// checks, which the single folded ChecksRollup string cannot express.
 	Checks []Check `json:"checks,omitempty"`
 	// ReviewRequests are the PR's currently-requested reviewers, both
 	// individual account logins AND team slugs — unlike RequestedReviewers

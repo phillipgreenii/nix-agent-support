@@ -258,8 +258,7 @@ type statusCheckContext struct {
 	State string `json:"state"`
 	// Name is a CheckRun's job/check name; WorkflowName is the workflow it
 	// ran under; Context is a StatusContext's name. They identify the check
-	// for the attention CI exclusion patterns (bead pg2-fnqqi) and do not
-	// affect the fold below.
+	// (bead pg2-fnqqi) and do not affect the fold below.
 	Name         string `json:"name"`
 	WorkflowName string `json:"workflowName"`
 	Context      string `json:"context"`
@@ -267,8 +266,8 @@ type statusCheckContext struct {
 
 // outcome classifies this one check as api.CheckFailure, api.CheckPending
 // or api.CheckSuccess. It is the single per-check rule checksRollupFromContexts
-// folds, and the Outcome api.Check carries to ListAttention's CI-failing
-// predicate (bead pg2-fnqqi), so the two can never disagree.
+// folds, and the Outcome api.Check carries (bead pg2-fnqqi), so the two can
+// never disagree.
 func (c statusCheckContext) outcome() string {
 	switch {
 	case c.State != "": // StatusContext (legacy commit-status API)
@@ -750,7 +749,7 @@ const activitySearchFields = "number,title,url,state,isDraft,author,labels,repos
 // the same qualifier handling as SearchPRs, but it requests
 // activitySearchFields and a caller-chosen result limit (GitHub search caps
 // any query at 1000 results). A separate method rather than a change to
-// SearchPRs, so List/Search/ListAttention keep their exact request shape.
+// SearchPRs, so List/Search keep their exact request shape.
 func (p *Provider) SearchPRsActivity(ctx context.Context, query string, limit int) ([]api.PR, error) {
 	args := []string{
 		"search", "prs",
@@ -1038,10 +1037,10 @@ func (n ghBatchedSearchNode) headCommitStatusState() string {
 // HeadSHA/ChecksRollup — List's own replacement (bead pg2-aehpr) for the
 // old SearchPRs + per-matched-PR GetPR/ReviewThreadCount fan-out (see
 // provider.go's List doc comment). SearchPRs itself (immediately above)
-// is UNCHANGED and stays in use by List's own ids_only path, by Search(),
-// and by ListAttention() — none of which this design touches (design doc
-// section 6: "The ids_only=true path is unchanged", and Search/
-// ListAttention are never mentioned in scope at all).
+// is UNCHANGED and stays in use by List's own ids_only path and by
+// Search() — neither of which this design touches (design doc
+// section 6: "The ids_only=true path is unchanged", and Search is never
+// mentioned in scope at all).
 //
 // Each request also selects rateLimit { cost }, and its cost is added to the
 // call's event (eventlog.AddGraphQLCost) so a list's total cost is logged as
@@ -1753,11 +1752,9 @@ func (p *Provider) ListReviews(ctx context.Context, repo string, number int) ([]
 }
 
 // ReviewsWithCommit returns each review's author, state and the commit it was
-// submitted against (Body and ID are populated too, though ListAttention's
-// head-staleness predicate reads only the first three). A review whose commit
-// was since deleted (e.g. a force-pushed-away head) reports a null commit,
-// decoding as an empty CommitOID, which provider.go's reviewIsStale already
-// treats as "does not stand for the current head".
+// submitted against (Body and ID are populated too). A review whose commit was since deleted
+// (e.g. a force-pushed-away head) reports a null commit, decoding as an
+// empty CommitOID, i.e. "does not stand for the current head".
 //
 // The predicate needs the complete review set, so a PR with more reviews than
 // the read cap is an error here rather than a quietly partial answer.
@@ -1834,9 +1831,7 @@ func (p *Provider) CheckAuth(ctx context.Context) error {
 // ViewerLogin resolves the authenticated GitHub account's own login via
 // the same "viewer { login }" GraphQL query CheckAuth already issues (bead
 // pg2-7wqkr), but actually decodes the response instead of discarding it —
-// ListAttention's own ported mine-vs-team NeedsAttention predicate
-// (provider.go's needsAttentionForPR) needs to know "self" to distinguish
-// the viewer's own review from a teammate's, and this backend is
+// the activity capability scopes to the viewer, and this backend is
 // stateless (D3, no local self_login configuration of its own the way
 // pg-pr's sync layer carries) so it resolves that fresh on every call.
 func (p *Provider) ViewerLogin(ctx context.Context) (string, error) {
