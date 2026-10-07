@@ -84,10 +84,25 @@ A record MUST carry:
   gathers nor syncs) or `early`.
 - `duration_ms`, `outcome` (`ok`, `degraded`, `noop`, `error`) and, on `error`, `stage`,
   `error_class` and `error`.
-- `content_hash_changed`: true when the facts this run gathered differ from the facts already
-  stored for the entity, ignoring every `as_of` timestamp (a re-read stamps a new one even when
-  nothing changed), or when no row was stored yet. It is false on a run that never gathered
-  (`interpret_only`, `early`, a failed gather).
+- `content_hash_changed`: true when the facts this run gathered differ in substance from the facts
+  already stored for the entity, or when no row was stored yet. It is false on a run that never
+  gathered (`interpret_only`, `early`, a failed gather). A comparison MUST ignore everything that
+  moves while the pull request itself does not:
+  - every `as_of` timestamp (a re-read stamps a new one even when nothing changed);
+  - the connector's cache provenance on the PR read and on each ticket read (`served_from`,
+    `age_seconds`), which says where an answer came from, not what it says;
+  - GitHub's transient mergeability: a `mergeable` other than `CONFLICTING` and a merge state other
+    than `DIRTY` compare as equal to one another, because GitHub recomputes them lazily and reports
+    `UNKNOWN` in between, so only a conflict starting or stopping counts (the same rule as the
+    connector's own change hash);
+  - in the work-beads read, every bead that is not this pull request's own (matched by repo and PR
+    number, or by the `<repo>#<n>` title forms the sync stage uses), plus the read's total counts
+    and id list. The full work-beads list is stored in every PR's facts, so a change to any other
+    PR's bead MUST NOT count as a change to this one.
+
+  A new head, a new or edited comment, a new review, a CI run or conclusion change, and any change
+  to this pull request's own beads MUST still count.
+
 - `anchor_written`: true when the sync stage applied an anchor bead write in this run, with
   `anchor_cause` naming it in the anchor-write log's vocabulary (`created`, `ledger-unrecorded`,
   `conflict-flip`, `pr-content-change`). It stays true on a run whose later sync step failed.
@@ -101,6 +116,12 @@ stores the facts it gathered, so a `changed` or `added` run between the PR's pre
 the sweep would already have absorbed the change and left the sweep seeing none. A bulk `pg-desk
 sweep` can re-use a head-unchanged shortcut within one process, which can make
 `content_hash_changed` true without a real change; measure on the router-dispatched `run` records.
+
+`content_hash_changed` is a measurement for the run record and gates nothing: no stage skips work
+because it is false. The entity row's own `content_hash` column is a different value and MUST NOT
+be used as a no-op gate or a no-op measure: it is the digest of the facts exactly as stored,
+including every `as_of`, so it differs after every gather even when nothing about the pull request
+changed. A sweep that finds nothing is recognised only by `content_hash_changed` being false.
 
 ```bash
 # no-op share of sweep runs in the last 24h (GNU date shown; on macOS use date -v-24H)

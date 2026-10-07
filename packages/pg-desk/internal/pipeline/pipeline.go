@@ -257,9 +257,11 @@ type runLogLine struct {
 	// resolution).
 	Path   string `json:"path"`
 	Change string `json:"change"`
-	// ContentHashChanged is true when this run's gathered facts differ from
-	// the stored row (ignoring every `as_of` timestamp), or no row existed
-	// yet. It is false for a run that never gathered.
+	// ContentHashChanged is true when this run's gathered facts differ in
+	// substance from the stored row (contentSignature: as_of, cache
+	// provenance, transient mergeability and other PRs' work beads are
+	// ignored), or no row existed yet. It is false for a run that never
+	// gathered. It is a measure only; nothing branches on it.
 	ContentHashChanged bool `json:"content_hash_changed"`
 	// AnchorWritten is true when the sync stage applied an anchor bead
 	// write; AnchorCause is that write's cause (the anchor-write log's
@@ -1122,11 +1124,10 @@ type runObs struct {
 	anchorCause   string
 }
 
-// factsChanged reports whether facts differ from the facts already stored for
-// the entity, ignoring every `as_of` timestamp (a re-read stamps a new one
-// even when nothing changed). No stored row counts as changed; so does an
-// unreadable or undecodable one, since a record that wrongly says "nothing
-// changed" would hide a real change.
+// factsChanged reports whether facts differ in substance from the facts
+// already stored for the entity (see contentSignature for what is ignored).
+// No stored row counts as changed; so does an unreadable or undecodable one,
+// since a record that wrongly says "nothing changed" would hide a real change.
 func (p *Pipeline) factsChanged(entityType, entityID string, facts gather.Facts) bool {
 	prior, found, err := p.store.GetEntity(p.repo(), entityType, entityID)
 	if err != nil || !found {
@@ -1139,22 +1140,79 @@ func (p *Pipeline) factsChanged(entityType, entityID string, facts gather.Facts)
 	return contentSignature(priorFacts) != contentSignature(facts)
 }
 
-// contentSignature hashes facts with every `as_of` key, at any depth, removed.
+// contentSignature hashes facts with everything that moves while the pull
+// request itself does not removed (bead pg2-7vz6p; the run-record
+// content_hash_changed measure was true on ~96% of sweep runs before this):
+//
+//   - every `as_of` key, at any depth: a re-read stamps a new one;
+//   - `served_from` and `age_seconds` on pr_show and on each jira_issues
+//     entry: the connector's read-through-cache provenance;
+//   - pr_show `mergeable` unless CONFLICTING and `merge_state_status` unless
+//     DIRTY: GitHub recomputes mergeability lazily and reports UNKNOWN in
+//     between, so only a conflict starting or stopping counts (the same rule
+//     as pg-connector's own change hash);
+//   - work_beads reduced to this PR's own beads (gather.PRWorkBeadsView): the
+//     stored value is the FULL work-beads answer, so a write to any other
+//     PR's bead used to change every PR's signature. THE volatile field.
+//
+// Head, comments, reviews, CI and this PR's own beads still count.
 func contentSignature(facts gather.Facts) string {
 	b, err := json.Marshal(facts)
 	if err != nil {
 		return ""
 	}
-	var v any
+	var v map[string]any
 	if err := json.Unmarshal(b, &v); err != nil {
 		return ""
 	}
+	normalizeVolatile(v)
 	stripAsOf(v)
 	b, err = json.Marshal(v) // map keys marshal sorted: deterministic
 	if err != nil {
 		return ""
 	}
 	return contentHash(b)
+}
+
+// normalizeVolatile removes, in place, the facts fields contentSignature
+// documents as moving without the pull request changing.
+func normalizeVolatile(facts map[string]any) {
+	show, _ := facts["pr_show"].(map[string]any)
+	if show != nil {
+		delete(show, "served_from")
+		delete(show, "age_seconds")
+		if m, ok := show["mergeable"].(string); ok && m != "CONFLICTING" {
+			delete(show, "mergeable")
+		}
+		if s, ok := show["merge_state_status"].(string); ok && s != "DIRTY" {
+			delete(show, "merge_state_status")
+		}
+	}
+	if issues, ok := facts["jira_issues"].(map[string]any); ok {
+		for _, raw := range issues {
+			if issue, ok := raw.(map[string]any); ok {
+				delete(issue, "served_from")
+				delete(issue, "age_seconds")
+			}
+		}
+	}
+	// The PR's identity comes from its own pr_show; without it the work-beads
+	// value cannot be narrowed and is compared whole (never read as "no
+	// change").
+	repo, _ := show["repo"].(string)
+	number, _ := show["number"].(float64)
+	if workBeads, ok := facts["work_beads"]; ok && repo != "" && number > 0 {
+		raw, err := json.Marshal(workBeads)
+		if err != nil {
+			return
+		}
+		if view, ok := gather.PRWorkBeadsView(raw, repo, int(number)); ok {
+			var narrowed any
+			if err := json.Unmarshal(view, &narrowed); err == nil {
+				facts["work_beads"] = narrowed
+			}
+		}
+	}
 }
 
 func stripAsOf(v any) {

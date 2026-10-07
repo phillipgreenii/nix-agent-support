@@ -101,6 +101,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -723,22 +724,74 @@ func matchWorkBeads(raw json.RawMessage, repo string, number int) []workBeadEnti
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return nil
 	}
-	prKey := repo + "#" + strconv.Itoa(number)
-	titlePrefix := prKey + ":"
-	processFeedbackTitle := "process-feedback: " + prKey
-
 	var matched []workBeadEntity
 	for _, e := range out.Entities {
-		switch {
-		case e.Metadata["repo"] == repo && e.Metadata["pr_number"] == strconv.Itoa(number):
-			matched = append(matched, e)
-		case strings.HasPrefix(e.Title, titlePrefix):
-			matched = append(matched, e)
-		case e.Title == processFeedbackTitle:
+		if e.matchesPR(repo, number) {
 			matched = append(matched, e)
 		}
 	}
 	return matched
+}
+
+// matchesPR reports whether e is a work bead of (repo, number): the dedup-key
+// vocabulary matchWorkBeads documents.
+func (e workBeadEntity) matchesPR(repo string, number int) bool {
+	prKey := repo + "#" + strconv.Itoa(number)
+	switch {
+	case e.Metadata["repo"] == repo && e.Metadata["pr_number"] == strconv.Itoa(number):
+		return true
+	case strings.HasPrefix(e.Title, prKey+":"):
+		return true
+	case e.Title == "process-feedback: "+prKey:
+		return true
+	}
+	return false
+}
+
+// PRWorkBeadsView reduces a stored Facts.WorkBeads value (an `issue list`
+// fan-out result: the FULL work-beads answer, stored whole in every PR's
+// facts) to the part that says something about (repo, number): its own work
+// beads, sorted by id, and each source's name and status. The other PRs'
+// beads, the per-source counts and reasons and the id list are dropped: they
+// move whenever ANY PR's bead is written, so keeping them in a per-PR
+// comparison made every PR look changed on every sweep. Each kept entity is
+// passed through verbatim. ok is false when raw is not a decodable fan-out
+// result, in which case the caller should keep raw as it is.
+func PRWorkBeadsView(raw json.RawMessage, repo string, number int) (view json.RawMessage, ok bool) {
+	var out struct {
+		Entities []json.RawMessage `json:"entities"`
+		Sources  []struct {
+			Source string `json:"source"`
+			Status string `json:"status"`
+		} `json:"sources"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, false
+	}
+	type keyed struct {
+		id  string
+		raw json.RawMessage
+	}
+	var own []keyed
+	for _, rawEntity := range out.Entities {
+		var e workBeadEntity
+		if err := json.Unmarshal(rawEntity, &e); err != nil {
+			return nil, false
+		}
+		if e.matchesPR(repo, number) {
+			own = append(own, keyed{id: e.ID, raw: rawEntity})
+		}
+	}
+	sort.SliceStable(own, func(i, j int) bool { return own[i].id < own[j].id })
+	entities := make([]json.RawMessage, 0, len(own))
+	for _, k := range own {
+		entities = append(entities, k.raw)
+	}
+	view, err := json.Marshal(map[string]any{"entities": entities, "sources": out.Sources})
+	if err != nil {
+		return nil, false
+	}
+	return view, true
 }
 
 // runResult is one pg-connector subprocess invocation's raw outcome:
