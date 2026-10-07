@@ -28,6 +28,16 @@ import (
 // an event a later evict removed, the evict itself, a gate_set that a later
 // set/clear/expiry superseded, and the clear/expiry records.
 //
+// HISTORY (bead pg2-n7da9). One thing is deliberately KEPT beyond "live": a bounded,
+// timestamped history of the events that have left the queue, as opArchive records
+// (one per departed event: its type, enqueue instants, each accept's listener and
+// settle/start instants, and its eviction instant and reason). A replay ignores
+// them, so replay equivalence is unchanged; they exist so queue.jsonl still answers
+// "how long did this listener wait vs run" for events that were evicted before the
+// compaction ran, rather than losing ~all of it on every restart (the log is
+// compacted at startup). The newest maxArchiveRecords are kept; older ones fall out
+// of the fold, so the history cannot grow the log without bound.
+//
 // It is deliberately NOT a retention sweep. Whether an unevicted event's
 // retention is over (INV-EVT-1) depends on which listeners are bound and on the
 // clock, neither of which exist at the store level or at startup; the queue's
@@ -57,6 +67,12 @@ const (
 	compactStageDirSynced = "dir-synced"
 )
 
+// maxArchiveRecords bounds the opArchive history a compaction keeps (the newest
+// win). At roughly 250-350 bytes a record this is well under 1 MiB, far below the
+// default compact_threshold_bytes (8 MiB), so history cannot by itself keep the log
+// above the compaction trigger.
+const maxArchiveRecords = 2048
+
 // ErrCompactionUnsupported is returned by Queue.CompactNow when the queue's
 // Store does not implement Compactor.
 var ErrCompactionUnsupported = errors.New("eventqueue: store does not support compaction")
@@ -79,6 +95,19 @@ type Compactor interface {
 	LogSizer
 	Compact() (CompactStats, error)
 }
+
+// ArchiveBudgeter is implemented by a Store whose compaction keeps the timestamped
+// opArchive history (FileStore): SetArchiveBudget caps that history's encoded size
+// in bytes (0 removes the cap; the record-count bound maxArchiveRecords always
+// applies). The queue sets it from the log-size limits so history is the first
+// thing a limit-driven compaction gives up and can never be what keeps a log over
+// its soft threshold.
+type ArchiveBudgeter interface {
+	SetArchiveBudget(bytes int64)
+}
+
+// archiveBudgetDivisor sets the history's byte budget to 1/N of the soft log limit.
+const archiveBudgetDivisor = 10
 
 // CompactStats describes one compaction.
 type CompactStats struct {
@@ -128,9 +157,9 @@ type CompactionInfo struct {
 
 // foldEvent is one live event in a logFold.
 type foldEvent struct {
-	pos     int      // FIFO position: assigned at first insert, kept across a re-enqueue
-	enq     Record   // the latest enqueue record for the id
-	accepts []string // listener ids that accepted it, in first-accept order
+	pos     int           // FIFO position: assigned at first insert, kept across a re-enqueue
+	enq     Record        // the latest enqueue record for the id
+	accepts []AcceptStamp // the accepts, in first-accept order (listener, settle and start instants)
 }
 
 // logFold replays records into the minimal live state, mirroring Queue.replay's
@@ -145,6 +174,13 @@ type logFold struct {
 	// dropped counts events a later evict removed (the dead history compaction
 	// discards); only the dry-run plan reports it.
 	dropped int
+	// archive is the bounded history of departed events (opArchive), oldest first,
+	// trimmed to the newest maxArchiveRecords as it grows.
+	archive []Record
+	// archiveBudget, when > 0, additionally caps the encoded size of the archive a
+	// compaction keeps (the newest records win), so history can never be what holds
+	// a log above its size limits (see ArchiveBudgeter). 0: no byte cap.
+	archiveBudget int64
 }
 
 func newLogFold() *logFold {
@@ -176,17 +212,20 @@ func (f *logFold) apply(r Record) {
 		if !ok {
 			return
 		}
-		for _, l := range e.accepts {
-			if l == r.ListenerID {
+		for _, a := range e.accepts {
+			if a.ListenerID == r.ListenerID {
 				return
 			}
 		}
-		e.accepts = append(e.accepts, r.ListenerID)
+		e.accepts = append(e.accepts, AcceptStamp{ListenerID: r.ListenerID, At: r.At, StartedAt: r.StartedAt})
 	case opEvict:
-		if _, ok := f.events[r.EventID]; ok {
+		if e, ok := f.events[r.EventID]; ok {
 			f.dropped++
+			f.addArchive(archiveRecord(e, r))
 		}
 		delete(f.events, r.EventID)
+	case opArchive:
+		f.addArchive(r)
 	case opGateSet:
 		f.gates[r.GateType] = r
 	case opGateCleared, opGateExpired:
@@ -195,6 +234,27 @@ func (f *logFold) apply(r Record) {
 		if r.Type != "" {
 			f.seen[r.Type] = struct{}{}
 		}
+	}
+}
+
+// addArchive appends one history record, dropping the oldest beyond the bound.
+func (f *logFold) addArchive(r Record) {
+	f.archive = append(f.archive, r)
+	if over := len(f.archive) - maxArchiveRecords; over > 0 {
+		f.archive = append(f.archive[:0:0], f.archive[over:]...)
+	}
+}
+
+// archiveRecord builds the history record for event e leaving the queue by evict.
+func archiveRecord(e *foldEvent, evict Record) Record {
+	return Record{
+		Op:        opArchive,
+		EventID:   e.enq.EventID,
+		Type:      e.enq.Type,
+		At:        e.enq.At,
+		EvictedAt: evict.At,
+		Reason:    evict.Reason,
+		Accepts:   e.accepts,
 	}
 }
 
@@ -223,14 +283,28 @@ func (f *logFold) records() []Record {
 	}
 	sort.Strings(gateTypes)
 
-	out := make([]Record, 0, len(seenOnly)+len(live)+len(gateTypes))
+	archive := f.archive
+	if f.archiveBudget > 0 {
+		var total int64
+		keepFrom := len(archive)
+		for i := len(archive) - 1; i >= 0; i-- {
+			total += encodedLen(archive[i])
+			if total > f.archiveBudget {
+				break
+			}
+			keepFrom = i
+		}
+		archive = archive[keepFrom:]
+	}
+	out := make([]Record, 0, len(seenOnly)+len(archive)+len(live)+len(gateTypes))
 	for _, t := range seenOnly {
 		out = append(out, Record{Op: opSeen, Type: t})
 	}
+	out = append(out, archive...)
 	for _, e := range live {
 		out = append(out, e.enq)
-		for _, l := range e.accepts {
-			out = append(out, Record{Op: opAccept, EventID: e.enq.EventID, ListenerID: l})
+		for _, a := range e.accepts {
+			out = append(out, Record{Op: opAccept, EventID: e.enq.EventID, ListenerID: a.ListenerID, At: a.At, StartedAt: a.StartedAt})
 		}
 	}
 	for _, t := range gateTypes {
@@ -253,8 +327,9 @@ func compactRecords(recs []Record) []Record {
 // planFrom folds the log bytes r (size of them, torn tail included) into the
 // CompactPlan a real compaction of them would execute. It writes nothing: the
 // compacted size is the encoded length of the records a real run would write.
-func planFrom(r io.Reader, size int64) (CompactPlan, error) {
+func planFrom(r io.Reader, size int64, archiveBudget int64) (CompactPlan, error) {
 	fold := newLogFold()
+	fold.archiveBudget = archiveBudget
 	torn, err := scanRecords(r, fold.apply)
 	if err != nil {
 		return CompactPlan{}, err
@@ -297,7 +372,7 @@ func PlanCompactionFile(path string) (CompactPlan, error) {
 	if err != nil {
 		return CompactPlan{}, err
 	}
-	return planFrom(io.NewSectionReader(f, 0, fi.Size()), fi.Size())
+	return planFrom(io.NewSectionReader(f, 0, fi.Size()), fi.Size(), 0)
 }
 
 // PlanCompaction is the dry run of Compact: it folds the log's current prefix
@@ -316,7 +391,7 @@ func (s *FileStore) PlanCompaction() (CompactPlan, error) {
 		return CompactPlan{}, err
 	}
 	defer func() { _ = rf.Close() }()
-	return planFrom(io.NewSectionReader(rf, 0, n), n)
+	return planFrom(io.NewSectionReader(rf, 0, n), n, s.archiveBudget.Load())
 }
 
 // syncDir fsyncs a directory so a rename inside it is durable.
@@ -374,6 +449,7 @@ func (s *FileStore) Compact() (stats CompactStats, err error) {
 	defer func() { _ = rf.Close() }()
 
 	fold := newLogFold()
+	fold.archiveBudget = s.archiveBudget.Load()
 	torn, err := scanRecords(io.NewSectionReader(rf, 0, n), fold.apply)
 	if err != nil {
 		return stats, err

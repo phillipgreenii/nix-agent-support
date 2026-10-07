@@ -69,8 +69,19 @@ func TestBootCore_CompactsQueueLogAtStartup(t *testing.T) {
 	defer func() { _ = svc.Close() }()
 
 	after, _ := os.Stat(path)
-	if after.Size()*10 > before.Size() {
+	// Dead history is dropped except the bounded, timestamped archive (bead
+	// pg2-n7da9): the 500 departed events survive as 500 compact archive records
+	// (what lets a per-listener wait-vs-run table outlive a restart), so the file
+	// is smaller than half of what it was rather than ~10x smaller.
+	if after.Size()*2 > before.Size() {
 		t.Fatalf("queue.jsonl not compacted at startup: %d -> %d bytes", before.Size(), after.Size())
+	}
+	compacted, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := bytes.Count(compacted, []byte(`"op":"archive"`)); n != 500 {
+		t.Fatalf("archive records after startup compaction = %d, want 500 departed events kept as history", n)
 	}
 	if q.LogSize() != after.Size() {
 		t.Fatalf("q.LogSize() = %d, file is %d bytes", q.LogSize(), after.Size())

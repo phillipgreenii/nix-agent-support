@@ -34,6 +34,16 @@ const (
 	// change that projection; one opSeen record per such type keeps it intact. A
 	// replay of an older binary ignores the unknown kind.
 	opSeen opKind = "seen"
+	// opArchive is written ONLY by log compaction (compact.go; bead pg2-n7da9): it
+	// is the bounded, timestamped HISTORY of an event that has left the queue — its
+	// enqueue instants, the accepts it received (who, when, and when each offer
+	// started) and when and why it was evicted — kept so a per-listener wait-vs-run
+	// breakdown can still be computed after the compaction that drops the event's own
+	// enqueue/accept/evict records. A replay IGNORES it entirely (it changes no
+	// queue state), so it is invisible to delivery semantics, and an older binary
+	// ignores the unknown kind just the same. The number kept is bounded (see
+	// maxArchiveRecords).
+	opArchive opKind = "archive"
 )
 
 // Record is one durable write-ahead-log entry. The log is append-only; queue
@@ -64,8 +74,23 @@ type Record struct {
 	ExpiresAt     time.Time      `json:"expiresAt,omitzero"`
 	EnqueuedAt    time.Time      `json:"enqueuedAt,omitzero"`
 	Payload       map[string]any `json:"payload,omitempty"`
-	// Accept fields.
-	ListenerID string `json:"listenerId,omitempty"`
+	// Accept fields. ListenerID names the accepting listener. At (shared with the
+	// enqueue/gate field above) is, on an accept record, the instant the accept was
+	// settled, and StartedAt the instant that listener's offer began (the instant it
+	// became in-flight), so settle - StartedAt is the run time and StartedAt - the
+	// event's At is the queue wait (bead pg2-n7da9). Both are absent on a record
+	// written by an older binary.
+	ListenerID string    `json:"listenerId,omitempty"`
+	StartedAt  time.Time `json:"startedAt,omitzero"`
+	// Evict fields. At is, on an evict record, the instant the event left the queue,
+	// and Reason why: EvictReason* (bead pg2-n7da9). Both absent on a record written
+	// by an older binary.
+	Reason string `json:"reason,omitempty"`
+	// Archive fields (opArchive only): EvictedAt, and the accepts the event received.
+	// Type, At, ExpiresAt, EnqueuedAt and EventID carry the enqueue half; Payload is
+	// deliberately not archived.
+	EvictedAt time.Time     `json:"evictedAt,omitzero"`
+	Accepts   []AcceptStamp `json:"accepts,omitempty"`
 	// Gate fields (gate_set / gate_cleared / gate_expired; gate.go). At is the
 	// instant the record was written (a gate_set's SetAt) and ExpiresAt a
 	// gate_set's lease end (zero: no lease). Owner is the setter's identity on a
@@ -74,6 +99,26 @@ type Record struct {
 	Description string `json:"description,omitempty"`
 	Owner       string `json:"owner,omitempty"`
 }
+
+// AcceptStamp is one accept an archived event received: which listener, when the
+// accept settled, and when that listener's offer began (bead pg2-n7da9).
+type AcceptStamp struct {
+	ListenerID string    `json:"listenerId"`
+	At         time.Time `json:"at,omitzero"`
+	StartedAt  time.Time `json:"startedAt,omitzero"`
+}
+
+// Why an event left the queue: the Reason on an evict (and archive) record.
+const (
+	// EvictReasonRetired: its retention was over and the Expire sweep removed it.
+	EvictReasonRetired = "retired"
+	// EvictReasonAllAccepted: WithEarlyEviction removed it once every bound listener
+	// had accepted it.
+	EvictReasonAllAccepted = "all-accepted"
+	// EvictReasonReemit: a re-emit of the same id arrived after its retention was
+	// over and replaced it before the sweep ran.
+	EvictReasonReemit = "reemit"
+)
 
 // Store is the durable persistence seam. The queue writes enqueue/accept/evict
 // records and replays them on startup. It is an interface so tests can inject a
@@ -165,6 +210,10 @@ type FileStore struct {
 
 	sizeGauge atomic.Int64 // lock-free mirror of size, for LogSize
 
+	// archiveBudget caps the opArchive history a compaction keeps, in encoded bytes
+	// (see ArchiveBudgeter); 0 means only the record-count bound applies.
+	archiveBudget atomic.Int64
+
 	// compactHook, when non-nil, is called at each durable step of Compact with
 	// the step's name — a test seam for crash injection (see compactStage*).
 	compactHook func(stage string)
@@ -213,6 +262,9 @@ func NewFileStore(path string) (*FileStore, error) {
 	s.sizeGauge.Store(s.size)
 	return s, nil
 }
+
+// SetArchiveBudget implements ArchiveBudgeter.
+func (s *FileStore) SetArchiveBudget(bytes int64) { s.archiveBudget.Store(bytes) }
 
 // LogSize reports the log file's current byte length. Lock-free.
 func (s *FileStore) LogSize() int64 { return s.sizeGauge.Load() }

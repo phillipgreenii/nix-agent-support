@@ -689,8 +689,16 @@ func TestCompactRuntimeThresholdTrigger(t *testing.T) {
 	if q.Compactions() != 1 {
 		t.Fatalf("Compactions = %d, want 1", q.Compactions())
 	}
-	if after := q.LogSize(); after >= grown/4 {
+	// The dead enqueue/accept/evict records are gone, but the bounded timestamped
+	// history (opArchive, bead pg2-n7da9) is deliberately kept: 200 departed events
+	// leave 200 compact archive records, so the log shrinks but not to nothing.
+	if after := q.LogSize(); after >= grown*3/4 {
 		t.Fatalf("log did not shrink enough: %d -> %d", grown, after)
+	}
+	if recs, err := fs.Replay(); err != nil {
+		t.Fatal(err)
+	} else if n := len(archivesOf(recs)); n != 200 {
+		t.Fatalf("archive records after compaction = %d, want 200 (history must survive)", n)
 	}
 	if q.LogSize() != fileSize(t, path) {
 		t.Fatalf("size gauge %d != file size %d", q.LogSize(), fileSize(t, path))

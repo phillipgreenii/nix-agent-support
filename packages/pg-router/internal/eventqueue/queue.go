@@ -42,6 +42,11 @@ type Listener interface {
 type Offering struct {
 	ID    string
 	Event Event
+	// StartedAt is the instant (the queue's clock) this attempt became in-flight
+	// — the same instant the queue reports as DispatchTiming.StartedAt. A Listener
+	// MAY use it to stamp its own per-dispatch records (bead pg2-n7da9); it is the
+	// zero time for an Offering a caller built by hand.
+	StartedAt time.Time
 }
 
 // OfferResult is what Listener.Offer reports back for one Offering: whether
@@ -168,6 +173,50 @@ type Observer interface {
 // evt is the resolved durable event, so evt.At is the ORIGINAL enqueue instant.
 type RestoreObserver interface {
 	OnRestore(evt Event)
+}
+
+// DispatchTiming is the timeline of one ACCEPTED dispatch (bead pg2-n7da9): when
+// the event was enqueued, when this listener's offer began (the listener became
+// in-flight), and when the offer settled. Wait is the time the event sat before
+// the listener could take it; Run is the (synchronous) handler run itself. They
+// are separate because the listener's run time is the listener's own, while the
+// wait is dominated by INV-CONC-1's one-at-a-time rule and queue depth — the two
+// answer different questions and the old enqueue-to-settle latency conflated them.
+type DispatchTiming struct {
+	EventID    string
+	EventType  string
+	ListenerID string
+	// EnqueuedAt is the event's resolved enqueue instant (Event.At), the same
+	// origin the dispatch-latency histogram has always measured from.
+	EnqueuedAt time.Time
+	// StartedAt is when the accepted offer became in-flight (queue clock).
+	StartedAt time.Time
+	// SettledAt is when the offer settled, i.e. the handler run returned (queue clock).
+	SettledAt time.Time
+}
+
+// Wait is StartedAt - EnqueuedAt, floored at zero (a source-stamped At may be in
+// the future of the queue's clock).
+func (t DispatchTiming) Wait() time.Duration { return nonNegative(t.StartedAt.Sub(t.EnqueuedAt)) }
+
+// Run is SettledAt - StartedAt, floored at zero.
+func (t DispatchTiming) Run() time.Duration { return nonNegative(t.SettledAt.Sub(t.StartedAt)) }
+
+func nonNegative(d time.Duration) time.Duration {
+	if d < 0 {
+		return 0
+	}
+	return d
+}
+
+// TimingObserver is an OPTIONAL extension of Observer (bead pg2-n7da9): an
+// Observer that also implements it is told, right after OnAccept for the same
+// accept, the DispatchTiming of that dispatch. It is a separate interface, not a
+// seventh method on Observer, for the reason RestoreObserver is: every existing
+// Observer implementation and test fake keeps compiling unchanged. It fires only
+// for an accepted offer — a decline or dispatch failure has no completed run.
+type TimingObserver interface {
+	OnAcceptTiming(t DispatchTiming)
 }
 
 type noopObserver struct{}
@@ -551,6 +600,18 @@ func New(store Store, opts ...Option) (*Queue, error) {
 	for _, opt := range opts {
 		opt(q)
 	}
+	// History kept by compaction (opArchive) must never be what holds the log above
+	// its limits: budget it to a fraction of the soft (else hard) limit. This runs
+	// before the startup compaction below.
+	if ab, ok := q.store.(ArchiveBudgeter); ok {
+		limit := q.lim.soft
+		if limit <= 0 {
+			limit = q.lim.hard
+		}
+		if limit > 0 {
+			ab.SetArchiveBudget(limit / archiveBudgetDivisor)
+		}
+	}
 	q.compactNext.Store(q.compactThreshold)
 	if q.compactOnStart {
 		// Before the queue replays or accepts anything. A failure is not fatal:
@@ -612,6 +673,9 @@ func (q *Queue) replay() error {
 			// Written only by compaction: a type enqueued earlier whose events are
 			// all gone (see opSeen).
 			q.publishCellLocked("", "", r.Type)
+		case opArchive:
+			// Written only by compaction: timestamped history of a departed event.
+			// It changes no queue state (see opArchive).
 		case opGateSet:
 			q.gates[r.GateType] = gateFromRecord(r)
 		case opGateCleared, opGateExpired:
@@ -710,7 +774,7 @@ func (q *Queue) Enqueue(evt Event) (EnqueueResult, error) {
 		if err := q.admitLocked(); err != nil {
 			return reject(err)
 		}
-		evictRecord := q.recordEvictLocked(e.evt.ID)
+		evictRecord := q.recordEvictLocked(e.evt.ID, EvictReasonReemit)
 		if err := q.appendBatchLocked([]Record{evictRecord, enqueueRecord}); err != nil {
 			return reject(classifyWriteErr(err))
 		}
@@ -892,6 +956,10 @@ type pendingOffer struct {
 	// Offering.ID handed to Listener.Offer and the Queue.custody key for the
 	// pass's phase 2.
 	id string
+	// startedAt is the queue-clock instant this attempt became in-flight (the same
+	// critical section that sets q.inFlight), the origin of the run time and the
+	// end of the queue wait (bead pg2-n7da9).
+	startedAt time.Time
 	// lastAttempt is the INV-EVT-4 decision for THIS attempt: the event was
 	// already expired when the attempt was made, so accept or decline, the core
 	// never offers it to this listener again. It is evaluated once, from the
@@ -943,6 +1011,9 @@ type dispatchSignal struct {
 	// pre-this-bead Listener, matching OfferResult.DeclineDetail's own "no
 	// detail" default.
 	detail string
+	// timing is the accepted dispatch's timeline (signalAccept only; bead
+	// pg2-n7da9), delivered to a TimingObserver right after OnAccept.
+	timing DispatchTiming
 }
 
 // fanOut delivers each queued signal to q.obs, in the order phase 3 recorded
@@ -953,6 +1024,9 @@ func (q *Queue) fanOut(sigs []dispatchSignal) {
 		switch s.kind {
 		case signalAccept:
 			q.obs.OnAccept(s.eventID, s.listener)
+			if to, ok := q.obs.(TimingObserver); ok {
+				to.OnAcceptTiming(s.timing)
+			}
 		case signalDeclined:
 			// reason defaults to DeclineReason's own coarse text
 			// ("busy"/"unavailable"/"none"); a Listener-supplied detail
@@ -1124,7 +1198,7 @@ func (q *Queue) snapshotLocked(takeID func() string, gsig *gateSignals) (pending
 		id := takeID()
 		q.custody[id] = custody{}
 		q.inFlight[lid] = e.evt.Type
-		pending = append(pending, pendingOffer{ls: ls, evt: e.evt, id: id, lastAttempt: e.evt.Expired(now)})
+		pending = append(pending, pendingOffer{ls: ls, evt: e.evt, id: id, startedAt: now, lastAttempt: e.evt.Expired(now)})
 	}
 	return pending, now
 }
@@ -1230,7 +1304,12 @@ func (q *Queue) settleOfferLocked(p pendingOffer, now time.Time, signals *[]disp
 	// redelivery (one extra re-offer per crash window).
 	e.accepted[lid] = true
 	e.settled[lid] = true
-	if err := q.appendLocked(Record{Op: opAccept, EventID: p.evt.ID, ListenerID: lid}); err != nil {
+	// settledAt is read FRESH, not taken from now: Dispatch carries ONE phase-1
+	// reading across its whole pass (so the pass is judged against a single
+	// "now"), which would make every Dispatch-settled run time zero. Only the
+	// timing/audit fields use it; no control-flow decision does.
+	settledAt := q.now()
+	if err := q.appendLocked(Record{Op: opAccept, EventID: p.evt.ID, ListenerID: lid, At: settledAt, StartedAt: p.startedAt}); err != nil {
 		// The in-memory accept already happened and the listener has taken
 		// delivery responsibility (INV-EVT-1); we do NOT roll back or change
 		// delivery semantics. But a swallowed accept-write is a durability
@@ -1245,7 +1324,10 @@ func (q *Queue) settleOfferLocked(p pendingOffer, now time.Time, signals *[]disp
 	}
 	p.ls.delivered.Add(1)
 	q.delivered.Add(1)
-	*signals = append(*signals, dispatchSignal{kind: signalAccept, eventID: p.evt.ID, listener: lid})
+	*signals = append(*signals, dispatchSignal{kind: signalAccept, eventID: p.evt.ID, listener: lid, timing: DispatchTiming{
+		EventID: p.evt.ID, EventType: p.evt.Type, ListenerID: lid,
+		EnqueuedAt: p.evt.At, StartedAt: p.startedAt, SettledAt: settledAt,
+	}})
 	rec, didEvict := q.maybeEvict(e)
 	return rec, didEvict, true
 }
@@ -1339,7 +1421,7 @@ func (q *Queue) Dispatch() (accepted int) {
 	for i := range pending {
 		go func(i int) {
 			defer wg.Done()
-			pending[i].result, pending[i].dispatchFailed = offerSafely(pending[i].ls.l, Offering{ID: pending[i].id, Event: pending[i].evt})
+			pending[i].result, pending[i].dispatchFailed = offerSafely(pending[i].ls.l, Offering{ID: pending[i].id, Event: pending[i].evt, StartedAt: pending[i].startedAt})
 		}(i)
 	}
 	wg.Wait()
@@ -1438,7 +1520,7 @@ func (q *Queue) Kick() (launched int) {
 	pending, _ := q.snapshotPending()
 	for _, p := range pending {
 		go func(p pendingOffer) {
-			p.result, p.dispatchFailed = offerSafely(p.ls.l, Offering{ID: p.id, Event: p.evt})
+			p.result, p.dispatchFailed = offerSafely(p.ls.l, Offering{ID: p.id, Event: p.evt, StartedAt: p.startedAt})
 
 			q.mu.Lock()
 			unlock := q.unlockOnce()
@@ -1479,7 +1561,7 @@ func (q *Queue) maybeEvict(e *entry) (Record, bool) {
 			return Record{}, false // a bound listener has not accepted yet
 		}
 	}
-	rec := q.recordEvictLocked(e.evt.ID)
+	rec := q.recordEvictLocked(e.evt.ID, EvictReasonAllAccepted)
 	delete(q.entries, e.evt.ID)
 	q.publishCellLocked(e.evt.Type, "", "")
 	// Drop the evicted id from the FIFO spine too. Leaving it as a tombstone lets
@@ -1512,7 +1594,7 @@ func (q *Queue) maybeEvict(e *entry) (Record, bool) {
 // Caller holds q.mu.
 func (q *Queue) retireLocked(e *entry) (rec Record, unconsumedExpired bool) {
 	unconsumedExpired = len(e.accepted) == 0
-	rec = q.recordEvictLocked(e.evt.ID)
+	rec = q.recordEvictLocked(e.evt.ID, EvictReasonRetired)
 	delete(q.entries, e.evt.ID)
 	q.publishCellLocked(e.evt.Type, "", "")
 	return rec, unconsumedExpired
@@ -1523,9 +1605,11 @@ func (q *Queue) retireLocked(e *entry) (rec Record, unconsumedExpired bool) {
 // persisting the record — and, on Enqueue's stale-retire path, removing id from
 // q.entries — is the caller's responsibility, since persistence is now batched
 // (one AppendBatch call per pass in Dispatch/Expire, or per stale re-emit in
-// Enqueue) rather than one Append per record. Caller holds q.mu.
-func (q *Queue) recordEvictLocked(id string) Record {
-	return Record{Op: opEvict, EventID: id}
+// Enqueue) rather than one Append per record. The record carries the eviction
+// instant (At) and why (Reason, an EvictReason* value) so the log is a timeline,
+// not just a set (bead pg2-n7da9). Caller holds q.mu.
+func (q *Queue) recordEvictLocked(id, reason string) Record {
+	return Record{Op: opEvict, EventID: id, At: q.now(), Reason: reason}
 }
 
 // publishCellLocked atomically publishes a new depthCell derived from the one
@@ -1741,6 +1825,63 @@ func (q *Queue) InFlightListeners() map[string]string {
 	out := make(map[string]string, len(q.inFlight))
 	for lid, typ := range q.inFlight {
 		out[lid] = typ
+	}
+	return out
+}
+
+// OldestPendingAgeByType reports, per event type, the age (now - Event.At) of the
+// OLDEST retained event of that type that some bound listener has not yet settled
+// — the head-of-line wait the queue is imposing right now (bead pg2-n7da9). A type
+// with nothing still owed to any listener is absent. It is the live counterpart to
+// the queue-wait histogram: the histogram only learns of a wait when it ENDS, so a
+// stuck head is invisible to it until it clears; this gauge shows it growing.
+// Read LIVE under q.mu (a scan of the retained entries); caller must NOT hold q.mu.
+func (q *Queue) OldestPendingAgeByType() map[string]time.Duration {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	now := q.now()
+	out := map[string]time.Duration{}
+	for _, id := range q.order {
+		e, ok := q.entries[id]
+		if !ok {
+			continue
+		}
+		owed := false
+		for _, ls := range q.listeners {
+			if ls.l.Matches(e.evt) && !e.settled[ls.l.ID()] {
+				owed = true
+				break
+			}
+		}
+		if !owed {
+			continue
+		}
+		age := nonNegative(now.Sub(e.evt.At))
+		if cur, seen := out[e.evt.Type]; !seen || age > cur {
+			out[e.evt.Type] = age
+		}
+	}
+	return out
+}
+
+// InFlightByListener reports, for EVERY registered listener id, 1 when it has an
+// offer outstanding right now and 0 when it does not (bead pg2-n7da9) — the
+// per-listener gauge counterpart of the scalar SessionsInFlight, over the same
+// q.inFlight index INV-CONC-1 enforces, so each value is 0 or 1 by construction.
+// Idle listeners are present (as 0) so a gauge built on it exports a continuous
+// series per role rather than one that appears and vanishes. Read LIVE under q.mu;
+// caller must NOT hold q.mu.
+func (q *Queue) InFlightByListener() map[string]int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	out := make(map[string]int, len(q.listeners))
+	for _, ls := range q.listeners {
+		lid := ls.l.ID()
+		if _, busy := q.inFlight[lid]; busy {
+			out[lid] = 1
+		} else {
+			out[lid] = 0
+		}
 	}
 	return out
 }
