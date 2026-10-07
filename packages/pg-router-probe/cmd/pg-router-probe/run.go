@@ -94,7 +94,10 @@ import (
 // pg2-o6z19 added pg-router-queue-stalled in its place (grafana/alerting/alerts.yaml
 // in packages/pg-router). pg2-irowq split the budget-exceeded cause out of
 // pg-router-failure-rate into pg-router-budget-stops (pg2-6k0l9 registered it
-// here). pg-router-triager-failures (pg2-u2yub) is deliberately NOT registered:
+// here). pg2-fy2pm registered pg-router-upstream-killed (the sustained-only rule
+// for killed gh calls, >= 10 in 30m, excluded from pg-router-failure-rate) so a
+// persistent GitHub outage still escalates through this path, as the original
+// pg-router-failure-rate page did (pg2-m6ei2). pg-router-triager-failures (pg2-u2yub) is deliberately NOT registered:
 // the probe files escalated beads/dispatches triagers, so probing triager
 // failures could feed a loop (operator decision pending).
 var registeredRuleUIDs = []string{
@@ -103,6 +106,7 @@ var registeredRuleUIDs = []string{
 	"pg-router-queue-depth-growing",
 	"pg-router-failure-rate",
 	"pg-router-budget-stops",
+	"pg-router-upstream-killed",
 }
 
 func defaultSnapshotPath() string {
