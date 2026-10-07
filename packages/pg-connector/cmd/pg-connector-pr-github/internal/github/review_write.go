@@ -47,6 +47,13 @@ var ErrPendingReviewExists = errors.New("github: a pending review already exists
 // write is not accepted.
 var ErrTwoPendingReviews = errors.New("github: identity has more than one pending review on the pull request")
 
+// ErrEmptyReviewBody is returned by UpdateReviewBody when GitHub refuses the
+// write with "Could not edit a review with a missing body": the pending review
+// was created (or started by hand) with an EMPTY body, and GitHub will not edit
+// such a review (GraphQL and REST alike). The condition is permanent for that
+// review: retrying can never converge, so callers skip the body write.
+var ErrEmptyReviewBody = errors.New("github: the pending review has an empty body and cannot be edited")
+
 // maxWriteAliasesPerDocument bounds the mutations in one GraphQL document. A
 // document of 110 aliases landed 18 and then failed with "Resource limits for
 // this query exceeded"; documents of 10 landed every item.
@@ -412,8 +419,10 @@ mutation($review: ID!, $body: String!) {
 // GraphQL node id) with body. It is last-writer-wins: the caller builds body
 // from a fresh read. With more than one pending review GitHub refuses ("User
 // can only have one pending review per pull request") and the error wraps
-// ErrTwoPendingReviews; any other failure is returned wrapped with gh's
-// stderr. The write is not retried.
+// ErrTwoPendingReviews; an empty-bodied review (GitHub refuses to edit it:
+// "Could not edit a review with a missing body") wraps ErrEmptyReviewBody; any
+// other failure is returned wrapped with gh's stderr. The write is not
+// retried.
 func (p *Provider) UpdateReviewBody(ctx context.Context, reviewID, body string) error {
 	if strings.TrimSpace(reviewID) == "" {
 		return errors.New("github: review id is required")
@@ -452,6 +461,9 @@ func (p *Provider) UpdateReviewBody(ctx context.Context, reviewID, body string) 
 	}
 	if strings.Contains(lower, "only have one pending review") {
 		return fmt.Errorf("github: update review body: %w: %w", ErrTwoPendingReviews, cause)
+	}
+	if strings.Contains(lower, "missing body") {
+		return fmt.Errorf("github: update review body: %w: %w", ErrEmptyReviewBody, cause)
 	}
 	return fmt.Errorf("github: update review body: %w", cause)
 }

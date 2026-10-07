@@ -116,8 +116,10 @@ retired with `PendingReviewRef`.
   of `written` (a section for this head was added), `kept` (a section for this head already existed,
   so the supplied body text was NOT applied), `absent` (no body supplied, no section written),
   `dismissed` (the section was written before and the operator deleted it), `skipped_extra_pending`
-  (more than one pending review exists, so body updates are refused, B1b) or `too_large` (the section
-  would exceed GitHub's body limit).
+  (more than one pending review exists, so body updates are refused, B1b), `skipped_empty_review` (the
+  review has an EMPTY body, which GitHub refuses to edit with "Could not edit a review with a missing body"
+  (pg2-16jqj); a review the tool creates always carries at least the attribution line, so only a
+  hand-started empty review lands here) or `too_large` (the section would exceed GitHub's body limit).
 - When no pending review exists and there is nothing to add (every comment already present or
   dismissed, and no body to write), NO review is created: `status` is `no_change` and `state` is
   `none`.

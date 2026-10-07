@@ -137,6 +137,10 @@ const (
 	// BodySkippedExtraPending: more than one pending review exists, so body
 	// updates are refused.
 	BodySkippedExtraPending = "skipped_extra_pending"
+	// BodySkippedEmptyReview: the pending review has an empty body (a review
+	// started by hand, say) and the host refuses to edit such a review, so no
+	// section was written; the comments are unaffected.
+	BodySkippedEmptyReview = "skipped_empty_review"
 	// BodyTooLarge: the section would exceed the host's review body limit.
 	BodyTooLarge = "too_large"
 )

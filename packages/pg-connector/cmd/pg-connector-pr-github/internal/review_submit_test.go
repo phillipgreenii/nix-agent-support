@@ -215,6 +215,10 @@ func (f *fakeGH) UpdateReviewBody(ctx context.Context, reviewID, body string) er
 	if rev == nil {
 		return errors.New("no such review")
 	}
+	if strings.TrimSpace(rev.body) == "" {
+		// GitHub refuses to edit a review whose body is empty.
+		return fmt.Errorf("github: update review body: %w: %w", github.ErrEmptyReviewBody, errors.New("Could not edit a review with a missing body"))
+	}
 	h.updates = append(h.updates, body)
 	rev.body = body
 	return nil
@@ -395,6 +399,71 @@ func TestSubmitAppendsToHandStartedReviewKeepingItsText(t *testing.T) {
 	}
 	if len(f.host.creates) != 0 {
 		t.Errorf("an existing review must be used, not a new one created")
+	}
+}
+
+// TestSubmitReplyOnlyFirstRequestThenBodyWritesTheSection is pg2-16jqj: a
+// first request without a body must not leave an empty-bodied review that
+// GitHub then refuses to edit ("Could not edit a review with a missing
+// body"); a later request that carries a body writes its section.
+func TestSubmitReplyOnlyFirstRequestThenBodyWritesTheSection(t *testing.T) {
+	f := newSubmitFixture(t)
+	f.host.addSubmitted(headA, hostComment{id: "C_old", path: "main.go", line: 1, body: "earlier", threadID: "T_old"})
+
+	first := f.mustSubmit(req("", pr.ReviewComment{ThreadID: "T_old", Body: "agreed"}))
+	if first.Status != pr.StatusPosted || first.Body != pr.BodyAbsent || first.Added != 1 {
+		t.Fatalf("first = %+v", first)
+	}
+	if len(f.host.creates) != 1 || strings.TrimSpace(f.host.creates[0]) == "" {
+		t.Fatalf("the review must be created with a non-empty body: %q", f.host.creates)
+	}
+
+	second := f.mustSubmit(req("overall: fine"))
+	if second.Status != pr.StatusAppend || second.Body != pr.BodyWritten {
+		t.Fatalf("second = %+v", second)
+	}
+	if body := f.host.pending[0].body; !strings.Contains(body, sectionOf(headA, "overall: fine")) {
+		t.Fatalf("body = %q, want the section", body)
+	}
+	if st := f.sidecar(); len(st.BodyHeads) != 1 {
+		t.Errorf("the written body head must be recorded: %+v", st)
+	}
+}
+
+// TestSubmitCommentsOnlyFirstRequestThenBodyWritesTheSection: same, with new
+// points instead of a reply.
+func TestSubmitCommentsOnlyFirstRequestThenBodyWritesTheSection(t *testing.T) {
+	f := newSubmitFixture(t)
+	f.mustSubmit(req("", point("main.go", 3, "x")))
+	second := f.mustSubmit(req("summary"))
+	if second.Status != pr.StatusAppend || second.Body != pr.BodyWritten {
+		t.Fatalf("second = %+v", second)
+	}
+}
+
+// TestSubmitEmptyBodiedReviewDegradesToSkippedBody: a pending review that
+// already has an empty body (hand-started) cannot be edited; the body is
+// skipped and the comments still go out.
+func TestSubmitEmptyBodiedReviewDegradesToSkippedBody(t *testing.T) {
+	f := newSubmitFixture(t)
+	rev := f.host.addPending(headA, "")
+	res := f.mustSubmit(req("summary", point("main.go", 3, "x")))
+	if res.Body != pr.BodySkippedEmptyReview || res.Status != pr.StatusAppend || res.Added != 1 {
+		t.Fatalf("result = %+v", res)
+	}
+	if len(rev.comments) != 1 || rev.body != "" {
+		t.Fatalf("review = %+v", rev)
+	}
+	if st := f.sidecar(); len(st.BodyHeads) != 0 {
+		t.Errorf("a skipped body must not be recorded as written: %+v", st)
+	}
+
+	// Body only, nothing else to write: no_change, body skipped.
+	f2 := newSubmitFixture(t)
+	f2.host.addPending(headA, "")
+	res = f2.mustSubmit(req("summary"))
+	if res.Body != pr.BodySkippedEmptyReview || res.Status != pr.StatusNoChange {
+		t.Fatalf("body-only result = %+v", res)
 	}
 }
 

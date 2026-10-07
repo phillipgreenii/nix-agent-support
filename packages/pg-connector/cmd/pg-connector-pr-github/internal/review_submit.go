@@ -53,7 +53,10 @@ const (
 //     lowest database id is used.
 //  4. The review body is a series of delimited per-head sections. A section for
 //     the live head is added only when missing and never rewrites existing
-//     text; with more than one pending review the body is not touched.
+//     text; with more than one pending review the body is not touched, and a
+//     review whose body is empty (GitHub refuses to edit it) is left alone
+//     (body: skipped_empty_review). A review this tool creates therefore never
+//     has an empty body: without a section it carries the attribution line.
 //  5. Comments go out in failure-isolated batches. The review is then re-read
 //     and what landed is decided by the markers found there, not by the write
 //     answers. The sidecar records only confirmed fingerprints.
@@ -333,7 +336,10 @@ func (r *submitRun) once(ctx context.Context) (res pr.ReviewSubmitResult, again 
 
 	created := false
 	if target == nil {
-		body := ""
+		// GitHub refuses to edit a review whose body is empty (pg2-16jqj), so
+		// a review created without a section still carries the attribution
+		// line; a later request's section is then appended after it.
+		body := attribution(head)
 		if plan.write {
 			body = buildSection(head, r.bodyText)
 		}
@@ -485,6 +491,9 @@ func (r *submitRun) writeBody(ctx context.Context, reviewID, head string) (dispo
 	if err := r.b.gh.UpdateReviewBody(ctx, reviewID, body); err != nil {
 		if errors.Is(err, github.ErrTwoPendingReviews) {
 			return pr.BodySkippedExtraPending, false, false, nil
+		}
+		if errors.Is(err, github.ErrEmptyReviewBody) {
+			return pr.BodySkippedEmptyReview, false, false, nil
 		}
 		return "", false, false, classifyReviewSubmitError(err)
 	}

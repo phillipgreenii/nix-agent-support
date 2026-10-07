@@ -475,6 +475,33 @@ func TestUpdateReviewBody_TwoPendingReviewsRefusalRecognized(t *testing.T) {
 	}
 }
 
+func TestUpdateReviewBody_EmptyBodiedReviewRefusalRecognized(t *testing.T) {
+	cases := map[string]func() ([]byte, error){
+		"gh error": func() ([]byte, error) {
+			return nil, &ghExecError{
+				msg:    "gh api graphql --input -: exit status 1: gh: Could not edit a review with a missing body.",
+				stderr: "gh: Could not edit a review with a missing body.",
+				err:    errors.New("exit status 1"),
+			}
+		},
+		"errors in a clean exit": func() ([]byte, error) {
+			return []byte(`{"data":{"updatePullRequestReview":null},"errors":[{"type":"UNPROCESSABLE","message":"Could not edit a review with a missing body"}]}`), nil
+		},
+	}
+	for name, answer := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := &writeFake{handle: func([]string, []byte) ([]byte, error) { return answer() }}
+			err := newWriteProvider(f).UpdateReviewBody(context.Background(), "PRR_node", "b")
+			if !errors.Is(err, ErrEmptyReviewBody) || errors.Is(err, ErrTwoPendingReviews) {
+				t.Fatalf("err = %v, want ErrEmptyReviewBody only", err)
+			}
+			if len(f.calls) != 1 {
+				t.Errorf("calls = %d, want 1 (never retried)", len(f.calls))
+			}
+		})
+	}
+}
+
 func TestUpdateReviewBody_OtherFailureIsNotTheSentinel(t *testing.T) {
 	f := &writeFake{handle: func([]string, []byte) ([]byte, error) {
 		return nil, errors.New("error connecting to api.github.com")
