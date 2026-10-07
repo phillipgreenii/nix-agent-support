@@ -60,11 +60,16 @@ every restart-time offer return and settle. Letting the offer stay unsettled is 
   (`ccpool`, `bd`, `git`) capture into their own buffers and never inherit fd 1.
 - Measured on this machine (Darwin 25.6.0), a Go child writing to a stdout pipe whose read end is
   closed dies with `signal: broken pipe` (the Go runtime raises SIGPIPE for a write to fd 1 or 2),
-  and with `signal.Ignore(syscall.SIGPIPE)` the write returns `EPIPE` and the process exits 0.
+  and when the process has called `signal.Notify` for SIGPIPE (or `signal.Ignore`) the write returns
+  `EPIPE` and the process exits 0. The two differ for the process's CHILDREN: after `signal.Ignore`
+  a child `perl` reported `SIGPIPE = IGNORE` (an ignored disposition is inherited across exec, so
+  `ccpool`, `bd` and the claude session would all run with SIGPIPE ignored), whereas after
+  `signal.Notify` it reported the default, because a caught signal resets to default on exec.
 - Conclusion: the handler is NOT killed mid-work; it is killed at the very last instruction, losing
   only a reply nobody can read. That is harmless but untidy (a signalled exit, no log line), so the
-  handler ignores SIGPIPE on `dispatch` and logs that the reply was undeliverable. The code change
-  carries a test that re-executes the test binary against a closed pipe in both modes.
+  handler subscribes to SIGPIPE with `signal.Notify` (never `signal.Ignore`) on `dispatch` and logs
+  that the reply was undeliverable. The code change carries a test that re-executes the test binary
+  against a closed pipe.
 
 ### 3. How do a new dispatch and a still-running old handler coexist? The new dispatch absorbs the session.
 
@@ -104,7 +109,8 @@ skip") does not match the code:
    25-minute review no longer burns the 20-second drain plus the 5-second tail on every restart.
    Command roles keep the existing 20-second drain then cancel. The shutdown logs how many surviving
    dispatches it is leaving running.
-4. **The handler ignores SIGPIPE on `dispatch`** and logs when the reply could not be delivered.
+4. **The handler subscribes to SIGPIPE on `dispatch`** (`signal.Notify`, which does not leak an
+   ignored disposition to its children) and logs when the reply could not be delivered.
 5. **The shutdown sweep spares a session whose supervision lease is still valid.** The sweep already
    spares `starting`/`ready`/`working`; a session that is `idle` but still inside its handler's
    settle step (worktree cleanup, settled-session close) is also supervised, so closing it would pull
