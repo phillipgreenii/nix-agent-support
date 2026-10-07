@@ -71,7 +71,7 @@ func redirectTempDirAwayFromLiteralTmp() (restore func(), err error) {
 	if effective == "" {
 		effective = filepath.Clean(os.TempDir())
 	}
-	if effective != "/tmp" && !strings.HasPrefix(effective+"/", "/tmp/") {
+	if !underTmpRoot(effective) {
 		return func() {}, nil
 	}
 
@@ -109,4 +109,26 @@ func redirectTempDirAwayFromLiteralTmp() (restore func(), err error) {
 			_ = os.Unsetenv("TMPDIR")
 		}
 	}, nil
+}
+
+// underTmpRoot reports whether path sits at or under the tool's /tmp zone.
+//
+// The product (New/NewWithCWD) stores tmpRoot as evalSymlinksWithFallback("/tmp"),
+// which on macOS is "/private/tmp" because /tmp is a symlink to private/tmp. The
+// comparison here MUST therefore cover BOTH the literal "/tmp" and its resolved
+// form: path is expected to be already symlink-resolved (as TestMain passes it),
+// so under macOS an os.TempDir() of "/tmp/pg-test-runner.X" arrives as
+// "/private/tmp/pg-test-runner.X" and would be missed by a literal-only check,
+// leaving every t.TempDir() fixture inside the tmpRoot zone (pg2-ezrep).
+func underTmpRoot(path string) bool {
+	roots := []string{"/tmp"}
+	if resolved := evalSymlinksWithFallback("/tmp"); resolved != "" && resolved != "/tmp" {
+		roots = append(roots, resolved)
+	}
+	for _, root := range roots {
+		if path == root || strings.HasPrefix(path+"/", root+"/") {
+			return true
+		}
+	}
+	return false
 }
