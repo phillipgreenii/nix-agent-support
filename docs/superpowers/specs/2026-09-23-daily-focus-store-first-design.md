@@ -3,9 +3,11 @@
 - **Date**: 2026-09-23 (revised 2026-10-06 against the landed entity change flow)
 - **Status**: Draft — the ranking model, candidate set, epic slot rule and rank placement (section 6,
   D-F11) were ruled by the operator on 2026-10-05, and the minting path (D-F12 to D-F16) on
-  2026-10-06; D-F17 to D-F21 are AGENT-PROPOSED from the 2026-10-07 five-dimension review
-  (correctness, completeness, UX, observability, test coverage) and await operator confirmation;
-  the rest of the document is pending operator review and is NOT approved
+  2026-10-06; D-F17 to D-F21 were proposed by the 2026-10-07 five-dimension review
+  (correctness, completeness, UX, observability, test coverage) and CONFIRMED by the operator on
+  2026-10-07, together with the age-key source, the per-source-freshness gap, deferral of the
+  `week`/`sprint` period types, and the landing order; the rest of the document is pending operator
+  review and is NOT approved
 - **Bead**: `pg2-2j5ac.27` (this design's own tracking bead; phase 15's decompose-trigger is
   `blocked-by` it)
 - **Depends on**: the entity change flow (`docs/superpowers/specs/2026-09-29-entity-change-flow-design.md`,
@@ -381,10 +383,9 @@ depends_on`). For beads and Jira issues it needs issue-dependency hydration (`Se
    inheritance rule is part of the port, not an incidental detail.
 4. Age (descending), then kind+key tiebreak. The age key needs a stable creation time and
    `schema.Issue` carries none (only an update time, which would reorder an item every time it is
-   touched, against D-F5): the decomposition MUST name a stable source (the tracker's creation time
-   where the snapshot carries it, else the entity's first-seen time in the store) or drop the key, in
-   which case the kind+key tiebreak follows priority. The final tiebreak makes the order total, so the
-   same inputs always rank identically.
+   touched, against D-F5): the age is the tracker's creation time where the snapshot carries it, else
+   the entity's first-seen time in the store (operator ruling, 2026-10-07). The final tiebreak makes
+   the order total, so the same inputs always rank identically.
 
 Evidence (the operator's head-to-head rulings, 2026-10-05; each pair decided the key order above):
 
@@ -997,10 +998,12 @@ the new watch queries and the new decider role live, not just a clean flake chec
   widening for the focus decider (§8 Routing); (k) the cross-document gap that per-source freshness has
   no recorder once `heartbeat` is removed (§4.2), to be closed in the change-flow design or declared
   deferred there; (l) the change-flow Phase 10 guard `TestNoDecisionLogicInPgDesk` (§8).
-- **Clarifications and agent proposals the operator should confirm** (none changes a ruled decision):
-  D-F17 to D-F21 (above, still unruled; D-F19 in particular waits on the question of whether anything
-  claims a focus bead automatically, which decides whether a strike must touch the bead at all); the
-  age key's source; and that an item selected on an earlier day and not struck keeps its bead.
+- **Clarifications and agent proposals**: all CONFIRMED by the operator on 2026-10-07 ("this is
+  good", against the agent's summary of each with its recommendation): D-F17 to D-F21 (including
+  D-F19's hold and release details and the terminal-source hold), the age key's source (tracker
+  creation time, else first-seen time in the store), that an item selected on an earlier day and not
+  struck keeps its bead and annotation, and that deferred beads are neither candidates nor "open
+  children" for the slot rule.
   RULED by the operator 2026-10-07 and already applied above: the slot rule's reading (section 6: each
   assigned child takes its own slot, an epic with open children sits in a trailing block with an
   in-plan indicator, an epic with no open child ranks normally), hidden entities are ignored for
@@ -1016,8 +1019,14 @@ the new watch queries and the new decider role live, not just a clean flake chec
   repositories, tickets or machine flake. Re-scan the whole file case-insensitively for the
   employer name, its abbreviation, private repository names, PR and ticket numbers before it
   lands, and again after any later edit.
-- Whether `week`/`sprint` period types are worth building now or genuinely deferred (the schema
-  is ready either way; no verb currently implements them).
+- **`week`/`sprint` period types: DEFERRED** (operator ruling, 2026-10-07). The schema is ready; no
+  verb implements them and none is built this phase.
+- **Per-source freshness after `heartbeat` is removed**: the operator ruled (2026-10-07) that the gap
+  is closed in the change-flow design, not here; it is not a focus problem. Until then `focus show`
+  reports per-entity `hydrated_at` plus the persisted listing status.
+- **Landing order**: the operator ruled (2026-10-07) to land this design without waiting for the
+  history scrub (bead `pg2-k23s6`), because the file has been scrubbed of private identifiers and the
+  scan is clean.
 
 ## 13. Rejected alternatives
 
