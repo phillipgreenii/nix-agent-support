@@ -5,7 +5,7 @@
 **Date**: 2026-10-06
 **Deciders**: phillipg
 
-This ADR amends that decoration-versus-decision rule (the design's "Where new logic goes" section, carried by ADR 0077) in place, and extends ADR 0081's
+This ADR amends the decoration-versus-decision rule (the entity change flow design's "Where new logic goes" section, carried by ADR 0077) in place, and extends ADR 0081's
 read-time rule from attention to the daily-focus rank. The daily-focus design that needs it is
 `2026-09-23-daily-focus-store-first-design.md`, which is provenance only because, per this repo's
 citation conventions, the files under `docs/superpowers/specs/` are not durable citation targets.
@@ -46,5 +46,14 @@ written rule disagree on the one example the rule names.
   carries no `focus-item` literal.
 - A reviewer reading ADR 0077's section on decorations and decisions finds an amendment note
   pointing here, so the two texts agree at every commit.
+- **Pending amendment, not yet ruled (agent proposal D-F19, 2026-10-07).** The daily-focus design has
+  the decider reopen a focus bead it withdrew and leave a bead a worker closed. That reads how a bead
+  was closed, which the entity change flow's S26, `INV-DECIDER-5` and the same-context text of
+  `work-items.md` forbid. The proposal is that the decider-authored `focus_withdrawn` marker is the
+  decider's own state and not a closer identity, and the one permitted exception; if the operator
+  confirms it, those texts are amended in the same change. Until then this ADR does not settle it, and
+  the design says so (its section 12 item (h)).
+- The decider's `focus_selected` selection reaches it through a dedicated `annotations.focus_selected`
+  member of the view (D-F15), not through the decider's own namespace.
 - ADR 0081 and this ADR share one rule: a rank or an evaluation that depends on time or on sibling
   entities is a read-time view; the event-driven deciders do the writing.
