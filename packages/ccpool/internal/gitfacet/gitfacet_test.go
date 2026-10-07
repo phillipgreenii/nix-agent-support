@@ -3,6 +3,7 @@ package gitfacet
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/phillipgreenii/x/gitclient"
 	"github.com/phillipgreenii/x/gitfixture"
@@ -135,5 +136,33 @@ func TestResolve_detachedHEAD(t *testing.T) {
 	}
 	if f.RepoRoot == nil || f.Worktree == nil {
 		t.Errorf("detached HEAD should still resolve root/worktree, got %+v", f)
+	}
+}
+
+// An already-expired deadline soft-fails every facet to nil instead of
+// running (or hanging on) git: the bounded-git-call contract of pg2-zzf54.
+func TestResolveWithin_expiredDeadlineYieldsNilFacets(t *testing.T) {
+	repo := gittest.New(t, gitfixture.RepoOptions{InitialBranch: "main"})
+	if _, err := repo.Commit(t.Context(), "init", nil); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	f := resolveWithin(repo.Dir, -time.Second)
+	if f.RepoRoot != nil || f.Worktree != nil || f.Branch != nil {
+		t.Errorf("expired deadline must leave all facets nil, got %+v", f)
+	}
+}
+
+// A generous deadline resolves normally (the same repo that the expired
+// deadline above leaves nil), proving the nil result is the deadline's doing.
+func TestResolveWithin_generousDeadlineResolves(t *testing.T) {
+	repo := gittest.New(t, gitfixture.RepoOptions{InitialBranch: "main"})
+	if _, err := repo.Commit(t.Context(), "init", nil); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	f := resolveWithin(repo.Dir, time.Minute)
+	if f.Worktree == nil || *f.Worktree != repo.Dir {
+		t.Errorf("Worktree = %v, want %q", f.Worktree, repo.Dir)
 	}
 }

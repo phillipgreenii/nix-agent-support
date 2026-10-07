@@ -144,6 +144,7 @@ func baseOpts(t *testing.T) runOptions {
 		ccpoolTimeout:      time.Second,
 		pgConnectorTimeout: time.Second,
 		dedupQuery:         defaultDedupQuery,
+		degradedThreshold:  defaultDegradedThreshold,
 		snapshotPath:       filepath.Join(t.TempDir(), "nested", "ccpool-probe", "snapshot.json"),
 	}
 }
@@ -283,8 +284,13 @@ func TestRunProbePartialWhenNeedsInputSubcheckDegrades(t *testing.T) {
 	cmd, _ := testCmd()
 	opts := baseOpts(t)
 	// Seed a prior snapshot so the zombie-drift sub-check has a baseline
-	// to diff against and actually produces a finding.
-	if err := saveSnapshot(opts.snapshotPath, snapshot{ZombieCount: 1}); err != nil {
+	// to diff against and actually produces a finding, and so the
+	// needs-input sub-check has ALREADY degraded threshold-1 runs in a row
+	// (pg2-zzf54: one more reaches the threshold and degrades the exit).
+	if err := saveSnapshot(opts.snapshotPath, snapshot{
+		ZombieCount: 1,
+		Degraded:    map[string]int{needsInputKey(poolRef{Label: ambientPoolLabel}): defaultDegradedThreshold - 1},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	spy := &spyDeps{
@@ -443,6 +449,9 @@ func TestRunProbeFailedPoolKeepsReadyClockAndBaseline(t *testing.T) {
 		allByPool:    map[string][]ccpoolSessionRow{ambientPoolLabel: ambientRows},
 		allErrByPool: map[string]error{workerPool.Label: errCcpoolFailed},
 	}
+	// This test is about WHAT a failed pool leaves behind, not WHEN the
+	// failure is reported; threshold 1 makes the first failure report.
+	opts.degradedThreshold = 1
 	err := runProbe(cmd, opts, spy.toRunDeps(time.Now()))
 	if exitCodeOf(t, err) != 4 {
 		t.Fatalf("expected exit 4 (partial), got %v", err)
@@ -605,5 +614,213 @@ func TestRunProbeSnapshotSaveFailureIsPartialButStillFiles(t *testing.T) {
 	}
 	if !strings.Contains(spy.created[0].body, "snapshot: persist "+opts.snapshotPath) {
 		t.Fatalf("filed body must carry the degraded note:\n%s", spy.created[0].body)
+	}
+}
+
+// degradedRun drives one runProbe where the needs-input sub-check fails
+// with err and everything else is clean, against the snapshot at
+// opts.snapshotPath. It returns runProbe's error and stderr.
+func degradedRun(t *testing.T, opts runOptions, err error) (error, string) {
+	t.Helper()
+	cmd, stderr := testCmd()
+	spy := &spyDeps{needsInputErr: err}
+	return runProbe(cmd, opts, spy.toRunDeps(time.Now())), stderr.String()
+}
+
+// TestRunProbeSingleDegradedRunIsLoggedNotReported is the pg2-zzf54 core
+// acceptance: a sub-check that fails ONCE logs to stderr and exits 0, the
+// counter is persisted in the snapshot, and only the threshold-th failure
+// in a row exits 4.
+func TestRunProbeSingleDegradedRunIsLoggedNotReported(t *testing.T) {
+	opts := baseOpts(t)
+	key := needsInputKey(poolRef{Label: ambientPoolLabel})
+
+	for run := 1; run < defaultDegradedThreshold; run++ {
+		err, stderr := degradedRun(t, opts, errCcpoolFailed)
+		if err != nil {
+			t.Fatalf("run %d: a sub-check degraded %d time(s) in a row must exit 0, got %v", run, run, err)
+		}
+		if !strings.Contains(stderr, "sub-check degraded, not yet reported") || !strings.Contains(stderr, key) {
+			t.Fatalf("run %d: stderr must log the degraded sub-check, got:\n%s", run, stderr)
+		}
+		snap, ok := loadSnapshot(opts.snapshotPath)
+		if !ok || snap.Degraded[key] != run {
+			t.Fatalf("run %d: snapshot Degraded[%q] = %d (loaded=%v), want %d", run, key, snap.Degraded[key], ok, run)
+		}
+	}
+
+	err, _ := degradedRun(t, opts, errCcpoolFailed)
+	if exitCodeOf(t, err) != 4 {
+		t.Fatalf("threshold-th consecutive failure must exit 4, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "degraded 3 runs in a row") || !strings.Contains(err.Error(), key) {
+		t.Fatalf("exit error must name the sub-check and its streak, got %v", err)
+	}
+}
+
+func TestRunProbeSuccessResetsDegradedStreak(t *testing.T) {
+	opts := baseOpts(t)
+	key := needsInputKey(poolRef{Label: ambientPoolLabel})
+	for range defaultDegradedThreshold - 1 {
+		if err, _ := degradedRun(t, opts, errCcpoolFailed); err != nil {
+			t.Fatalf("expected exit 0 below the threshold, got %v", err)
+		}
+	}
+	// A clean run clears the counter...
+	if err, _ := degradedRun(t, opts, nil); err != nil {
+		t.Fatalf("clean run: expected exit 0, got %v", err)
+	}
+	if snap, _ := loadSnapshot(opts.snapshotPath); len(snap.Degraded) != 0 {
+		t.Fatalf("a successful run must clear Degraded, got %v", snap.Degraded)
+	}
+	// ...so the next failure starts a fresh streak instead of crossing the threshold.
+	if err, _ := degradedRun(t, opts, errCcpoolFailed); err != nil {
+		t.Fatalf("failure after a reset must exit 0, got %v", err)
+	}
+	if snap, _ := loadSnapshot(opts.snapshotPath); snap.Degraded[key] != 1 {
+		t.Fatalf("streak must restart at 1, got %v", snap.Degraded)
+	}
+}
+
+func TestRunProbeDegradedThresholdOneReportsImmediately(t *testing.T) {
+	opts := baseOpts(t)
+	opts.degradedThreshold = 1
+	err, _ := degradedRun(t, opts, errCcpoolFailed)
+	if exitCodeOf(t, err) != 4 {
+		t.Fatalf("--degraded-threshold 1 must keep the old immediate exit 4, got %v", err)
+	}
+}
+
+// TestRunProbeDegradedStreakIsPerSubcheck: one failing pool must not borrow
+// another pool's (or sub-check's) streak.
+func TestRunProbeDegradedStreakIsPerSubcheck(t *testing.T) {
+	opts := baseOpts(t)
+	if err := saveSnapshot(opts.snapshotPath, snapshot{
+		Degraded: map[string]int{zombieDriftKey(reviewPool): defaultDegradedThreshold - 1},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cmd, _ := testCmd()
+	spy := &spyDeps{
+		pools:        []poolRef{workerPool, reviewPool},
+		allErrByPool: map[string]error{workerPool.Label: errCcpoolFailed},
+	}
+	err := runProbe(cmd, opts, spy.toRunDeps(time.Now()))
+	if err != nil {
+		t.Fatalf("worker pool's first failure must exit 0 (review pool's streak belongs to review), got %v", err)
+	}
+	snap, _ := loadSnapshot(opts.snapshotPath)
+	if snap.Degraded[zombieDriftKey(workerPool)] != 1 {
+		t.Fatalf("worker streak = %v", snap.Degraded)
+	}
+	if _, kept := snap.Degraded[zombieDriftKey(reviewPool)]; kept {
+		t.Fatalf("review pool succeeded this run, its streak must be cleared: %v", snap.Degraded)
+	}
+}
+
+// TestRunProbeRetriesKilledCcpoolCallOnce: a killed call is retried exactly
+// once; when the retry succeeds the sub-check is clean (no stderr warning
+// about degradation, no counter).
+func TestRunProbeRetriesKilledCcpoolCallOnce(t *testing.T) {
+	opts := baseOpts(t)
+	cmd, stderr := testCmd()
+	spy := &spyDeps{}
+	deps := spy.toRunDeps(time.Now())
+	niCalls := 0
+	deps.listNeedsInput = func(ctx context.Context, pool poolRef, warn func(string)) ([]ccpoolSessionRow, error) {
+		niCalls++
+		if niCalls == 1 {
+			return nil, errCcpoolKilled
+		}
+		return nil, nil
+	}
+	if err := runProbe(cmd, opts, deps); err != nil {
+		t.Fatalf("expected exit 0, got %v", err)
+	}
+	if niCalls != 2 {
+		t.Fatalf("killed call must be retried exactly once, got %d calls", niCalls)
+	}
+	if strings.Contains(stderr.String(), "not yet reported") {
+		t.Fatalf("a retry that succeeded is not a degraded run:\n%s", stderr.String())
+	}
+	if snap, _ := loadSnapshot(opts.snapshotPath); len(snap.Degraded) != 0 {
+		t.Fatalf("Degraded must stay empty, got %v", snap.Degraded)
+	}
+}
+
+// TestRunProbeRetryIsBounded: a call killed on both attempts is tried
+// exactly twice and then counted as one degraded run.
+func TestRunProbeRetryIsBounded(t *testing.T) {
+	opts := baseOpts(t)
+	cmd, _ := testCmd()
+	spy := &spyDeps{}
+	deps := spy.toRunDeps(time.Now())
+	niCalls := 0
+	deps.listNeedsInput = func(ctx context.Context, pool poolRef, warn func(string)) ([]ccpoolSessionRow, error) {
+		niCalls++
+		return nil, errCcpoolKilled
+	}
+	if err := runProbe(cmd, opts, deps); err != nil {
+		t.Fatalf("one fully-failed run must exit 0, got %v", err)
+	}
+	if niCalls != 2 {
+		t.Fatalf("expected exactly 2 attempts (one retry), got %d", niCalls)
+	}
+	if snap, _ := loadSnapshot(opts.snapshotPath); snap.Degraded[needsInputKey(poolRef{Label: ambientPoolLabel})] != 1 {
+		t.Fatalf("a fully-failed call counts as ONE degraded run, got %v", snap.Degraded)
+	}
+}
+
+// TestRunProbeDoesNotRetryNonKilledFailure: a ccpool that ran and exited
+// non-zero is a real error, not host-load noise; it is not retried.
+func TestRunProbeDoesNotRetryNonKilledFailure(t *testing.T) {
+	opts := baseOpts(t)
+	cmd, _ := testCmd()
+	spy := &spyDeps{}
+	deps := spy.toRunDeps(time.Now())
+	niCalls := 0
+	deps.listNeedsInput = func(ctx context.Context, pool poolRef, warn func(string)) ([]ccpoolSessionRow, error) {
+		niCalls++
+		return nil, errCcpoolFailed
+	}
+	_ = runProbe(cmd, opts, deps)
+	if niCalls != 1 {
+		t.Fatalf("a non-killed failure must not be retried, got %d calls", niCalls)
+	}
+}
+
+// TestRunProbeSnapshotPersistFailureIgnoresThreshold: a snapshot that cannot
+// be written still exits 4 on its FIRST occurrence (counters could not be
+// persisted anyway, and the checks would silently stay inert).
+func TestRunProbeSnapshotPersistFailureIgnoresThreshold(t *testing.T) {
+	opts := baseOpts(t)
+	opts.degradedThreshold = 99
+	blocker := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	opts.snapshotPath = filepath.Join(blocker, "snapshot.json")
+	cmd, _ := testCmd()
+	spy := &spyDeps{}
+	if err := runProbe(cmd, opts, spy.toRunDeps(time.Now())); exitCodeOf(t, err) != 4 {
+		t.Fatalf("expected immediate exit 4, got %v", err)
+	}
+}
+
+func TestRunCmdDegradedThresholdFlag(t *testing.T) {
+	cmd := newRunCmd()
+	f := cmd.Flags().Lookup("degraded-threshold")
+	if f == nil || f.DefValue != "3" {
+		t.Fatalf("--degraded-threshold must exist with default 3, got %+v", f)
+	}
+	cmd.SetArgs([]string{"--degraded-threshold", "0"})
+	cmd.SetContext(context.Background())
+	var out bytes.Buffer
+	cmd.SetErr(&out)
+	cmd.SetOut(&out)
+	err := cmd.Execute()
+	var ece *exitCodeError
+	if !errors.As(err, &ece) || ece.code != 2 {
+		t.Fatalf("--degraded-threshold 0 must be a usage error (exit 2), got %v", err)
 	}
 }

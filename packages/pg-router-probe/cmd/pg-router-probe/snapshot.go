@@ -53,6 +53,14 @@ type snapshot struct {
 	// bumped, because a bump would discard the whole baseline; a snapshot
 	// without it decodes to a nil map = no alert has been observed yet.
 	Alerts map[string]alertState `json:"alerts,omitempty"`
+	// Degraded maps a sub-check key (run.go's grafanaAlertsKey etc.) to how
+	// many CONSECUTIVE runs it has degraded, including the last one
+	// (pg2-zzf54). A key is absent once the sub-check succeeds. run.go exits
+	// 4 for a sub-check only once its count reaches --degraded-threshold: a
+	// single timed-out call on an overloaded host is noise, a persistent
+	// failure still surfaces. Additive and omitempty like Alerts:
+	// snapshotVersion is NOT bumped.
+	Degraded map[string]int `json:"degraded,omitempty"`
 }
 
 // alertEpisodeWindow is how far back episode start times are kept and

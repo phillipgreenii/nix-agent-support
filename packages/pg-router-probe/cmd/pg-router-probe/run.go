@@ -17,12 +17,22 @@
 //	                 nothing at all (no bd issue is filed on a
 //	                 total-failure run) [design: "Exit codes" paragraph].
 //	4 partial     -- at least one CONFIGURED sub-check was attempted and
-//	                 actually degraded (its dependency was unreachable),
-//	                 while at least one other sub-check produced a
+//	                 actually degraded (its dependency was unreachable for
+//	                 --degraded-threshold CONSECUTIVE runs, or the
+//	                 snapshot/dedup query failed), while at least one
+//	                 other sub-check produced a
 //	                 result; this run proceeds with whatever succeeded,
 //	                 and any bead it files/updates carries a note about
 //	                 which sub-check(s) were skipped or degraded [design:
 //	                 same paragraph].
+//
+// A single sub-check failure is NOT enough for exit 4 (pg2-zzf54): a
+// timed-out Grafana/status call is retried once, and a sub-check that still
+// fails is logged to stderr and counted in the snapshot (snapshot.Degraded).
+// Only a sub-check that has failed --degraded-threshold runs in a row
+// degrades the exit code. The snapshot-persist and dedup-query failures stay
+// immediate: the first disables every later comparison, and the second drops
+// findings that a later run could no longer re-derive.
 //
 // Which sub-checks are "configured" at all (Grafana URL set,
 // --queue-depth and/or --backlog/--backlog-from-status set, --binary-path set) is entirely a
@@ -65,7 +75,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -104,6 +116,9 @@ func defaultSnapshotPath() string {
 // runOptions is every "run" flag value, gathered before runProbe is
 // called.
 type runOptions struct {
+	// degradedThreshold is how many consecutive runs a sub-check must
+	// degrade before the run exits 4; values below 1 act as 1.
+	degradedThreshold  int
 	grafanaURL         string
 	grafanaToken       string
 	grafanaTimeout     time.Duration
@@ -173,8 +188,30 @@ func defaultRunDeps() runDeps {
 	}
 }
 
+// defaultDegradedThreshold is the --degraded-threshold default: three
+// consecutive degraded runs of the same sub-check before exit 4.
+const defaultDegradedThreshold = 3
+
+// Sub-check keys in snapshot.Degraded.
+const (
+	grafanaAlertsKey = "grafana-alerts"
+	backlogDriftKey  = "backlog-drift"
+	binaryHashKey    = "binary-hash"
+)
+
+// isTimeout reports whether err is a deadline expiry: the transient,
+// host-load-shaped failure runProbe retries once (pg2-zzf54).
+func isTimeout(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var ne net.Error
+	return errors.As(err, &ne) && ne.Timeout()
+}
+
 func newRunCmd() *cobra.Command {
 	opts := runOptions{
+		degradedThreshold:  defaultDegradedThreshold,
 		grafanaTimeout:     10 * time.Second,
 		pgConnectorTimeout: 30 * time.Second,
 		ruleUIDs:           append([]string{}, registeredRuleUIDs...),
@@ -199,6 +236,7 @@ never closes beads; close one once its alert clears after remediation.`,
 	}
 	cmd.Flags().StringVar(&opts.grafanaURL, "grafana-url", "", "Grafana base URL; unset skips the Grafana alerts sub-check")
 	cmd.Flags().StringVar(&opts.grafanaToken, "grafana-token", os.Getenv("PG_ROUTER_PROBE_GRAFANA_TOKEN"), "Grafana bearer token (default from PG_ROUTER_PROBE_GRAFANA_TOKEN)")
+	cmd.Flags().IntVar(&opts.degradedThreshold, "degraded-threshold", opts.degradedThreshold, "consecutive runs a sub-check must degrade (after one retry of a timed-out call) before the run exits 4; an earlier failure is only logged to stderr")
 	cmd.Flags().DurationVar(&opts.grafanaTimeout, "grafana-timeout", opts.grafanaTimeout, "explicit timeout for the Grafana HTTP call")
 	cmd.Flags().DurationVar(&opts.pgConnectorTimeout, "pg-connector-timeout", opts.pgConnectorTimeout, "explicit timeout for each pg-connector subprocess call (list/create/update/comment)")
 	cmd.Flags().StringSliceVar(&opts.ruleUIDs, "rule-uid", opts.ruleUIDs, "Grafana rule UID to check (repeatable); defaults to the registered rule UIDs")
@@ -215,6 +253,9 @@ never closes beads; close one once its alert clears after remediation.`,
 	cmd.Flags().DurationVar(&opts.stillFiringInterval, "still-firing-interval", opts.stillFiringInterval, "minimum time between still-firing comments on an open bead for an alert that has not changed episode")
 	cmd.Flags().StringVar(&opts.snapshotPath, "snapshot-path", opts.snapshotPath, "path to this probe's own persisted last-run snapshot")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		if opts.degradedThreshold < 1 {
+			return usageErrorf("run: --degraded-threshold must be at least 1")
+		}
 		if opts.stillFiringInterval < 0 {
 			return usageErrorf("run: --still-firing-interval must not be negative")
 		}
@@ -249,20 +290,42 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 	// had that sub-check's dependency go unreachable, it was never asked
 	// to run one, so it must not by itself turn an otherwise-clean run
 	// into a reported partial failure.
+	// retryOnTimeout runs call and, when it failed with a deadline expiry
+	// (and the run itself was not cancelled), runs it exactly ONCE more --
+	// each call carries its own fresh deadline, so the retry is not starved.
+	retryOnTimeout := func(what string, call func() error) error {
+		err := call()
+		if err != nil && isTimeout(err) && ctx.Err() == nil {
+			warn(fmt.Sprintf("%s: timed out; retrying once", what))
+			err = call()
+		}
+		return err
+	}
+
 	var findings []finding
 	var skipped []string
+	// degraded holds failures that exit 4 immediately (snapshot persist,
+	// dedup query) plus, once counted below, sub-check failures that reached
+	// the consecutive threshold. failures are this run's sub-check failures
+	// still to be counted against the threshold.
 	var degraded []string
+	type subcheckFailure struct{ key, msg string }
+	var failures []subcheckFailure
 	ranAny := false
 
 	// Sub-check 1: Grafana firing alerts.
 	if opts.grafanaURL == "" {
 		skipped = append(skipped, "grafana-alerts: not configured (--grafana-url unset)")
 	} else {
-		alerts, err := deps.fetchAlerts(ctx, opts)
+		var alerts []grafanaAlert
+		err := retryOnTimeout(grafanaAlertsKey, func() (e error) {
+			alerts, e = deps.fetchAlerts(ctx, opts)
+			return e
+		})
 		if err != nil {
 			msg := fmt.Sprintf("grafana-alerts: %v", err)
 			skipped = append(skipped, msg)
-			degraded = append(degraded, msg)
+			failures = append(failures, subcheckFailure{grafanaAlertsKey, msg})
 		} else {
 			ranAny = true
 			findings = append(findings, checkGrafanaAlerts(alerts)...)
@@ -274,11 +337,15 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 	// own check (pg2-5g9e0 -- only --backlog is wired in production; there
 	// is no defined single-queue reading for --queue-depth).
 	if opts.backlogFromStatus {
-		n, err := deps.fetchBacklog(ctx, opts)
+		var n int
+		err := retryOnTimeout(backlogDriftKey, func() (e error) {
+			n, e = deps.fetchBacklog(ctx, opts)
+			return e
+		})
 		if err != nil {
 			msg := fmt.Sprintf("backlog-drift: %v", err)
 			skipped = append(skipped, msg)
-			degraded = append(degraded, msg)
+			failures = append(failures, subcheckFailure{backlogDriftKey, msg})
 		} else {
 			opts.haveBacklog = true
 			opts.backlog = n
@@ -311,7 +378,7 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 	} else if h, err := hashFile(opts.binaryPath); err != nil {
 		msg := fmt.Sprintf("binary-hash: %v", err)
 		skipped = append(skipped, msg)
-		degraded = append(degraded, msg)
+		failures = append(failures, subcheckFailure{binaryHashKey, msg})
 	} else {
 		ranAny = true
 		haveHash = true
@@ -336,7 +403,44 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 	// value a DIFFERENT invocation is tracking [design: "Snapshot
 	// robustness" paragraph, generalized to every successful run, not
 	// only the broken-snapshot path].
-	next := snapshot{QueueDepth: prevSnap.QueueDepth, Backlog: prevSnap.Backlog, BinaryHash: prevSnap.BinaryHash, BinaryPath: prevSnap.BinaryPath, CheckedAt: deps.now().UTC().Format(time.RFC3339), Alerts: pruneAlertStates(prevSnap.Alerts, deps.now())}
+	// Consecutive-degraded bookkeeping (pg2-zzf54): a sub-check that failed
+	// this run is one higher than last run's count; one that was attempted
+	// and succeeded drops out; one that was not attempted keeps its count
+	// (like every other field here, an invocation that never ran a sub-check
+	// must not erase what a different invocation tracks). Only counts that
+	// reached the threshold degrade the exit code; the rest are logged.
+	threshold := max(opts.degradedThreshold, 1)
+	nextDegraded := make(map[string]int, len(prevSnap.Degraded)+len(failures))
+	for k, n := range prevSnap.Degraded {
+		nextDegraded[k] = n
+	}
+	attempted := []string{}
+	if opts.grafanaURL != "" {
+		attempted = append(attempted, grafanaAlertsKey)
+	}
+	if opts.backlogFromStatus {
+		attempted = append(attempted, backlogDriftKey)
+	}
+	if opts.binaryPath != "" {
+		attempted = append(attempted, binaryHashKey)
+	}
+	for _, k := range attempted {
+		delete(nextDegraded, k)
+	}
+	for _, f := range failures {
+		n := prevSnap.Degraded[f.key] + 1
+		nextDegraded[f.key] = n
+		if n >= threshold {
+			degraded = append(degraded, f.msg+fmt.Sprintf(" (degraded %d runs in a row)", n))
+		} else {
+			warn(fmt.Sprintf("sub-check degraded, not yet reported (%d of %d consecutive runs): %s", n, threshold, f.msg))
+		}
+	}
+	if len(nextDegraded) == 0 {
+		nextDegraded = nil
+	}
+
+	next := snapshot{Degraded: nextDegraded, QueueDepth: prevSnap.QueueDepth, Backlog: prevSnap.Backlog, BinaryHash: prevSnap.BinaryHash, BinaryPath: prevSnap.BinaryPath, CheckedAt: deps.now().UTC().Format(time.RFC3339), Alerts: pruneAlertStates(prevSnap.Alerts, deps.now())}
 	if opts.haveQueueDepth {
 		next.QueueDepth = opts.queueDepth
 	}

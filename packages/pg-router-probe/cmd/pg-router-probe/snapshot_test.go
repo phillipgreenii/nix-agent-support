@@ -168,3 +168,26 @@ func TestSnapshotAlertsFieldIsAdditive(t *testing.T) {
 		t.Fatalf("got %+v ok=%v, want %+v", got, ok, want)
 	}
 }
+
+// TestSnapshotDegradedRoundTripsAndLegacyLoads: the consecutive-degraded
+// counters (pg2-zzf54) survive a save/load, and a snapshot written without
+// them (pre-pg2-zzf54) still loads, with a nil map.
+func TestSnapshotDegradedRoundTripsAndLegacyLoads(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "snapshot.json")
+	if err := saveSnapshot(path, snapshot{Degraded: map[string]int{"grafana-alerts": 2}}); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := loadSnapshot(path)
+	if !ok || got.Degraded["grafana-alerts"] != 2 {
+		t.Fatalf("Degraded not round-tripped: ok=%v %+v", ok, got)
+	}
+
+	legacy := filepath.Join(t.TempDir(), "legacy.json")
+	if err := os.WriteFile(legacy, []byte(`{"version":1,"queue_depth":4}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, ok = loadSnapshot(legacy)
+	if !ok || got.QueueDepth != 4 || got.Degraded != nil {
+		t.Fatalf("legacy snapshot must load with nil Degraded: ok=%v %+v", ok, got)
+	}
+}

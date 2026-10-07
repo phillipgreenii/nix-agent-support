@@ -46,6 +46,15 @@ type snapshot struct {
 	// field: a snapshot written before pg2-bkzrc decodes with it nil, so
 	// snapshotVersion is unchanged.
 	ReadySeen []string `json:"ready_seen,omitempty"`
+	// Degraded maps a sub-check key (run.go's needsInputKey/zombieDriftKey)
+	// to how many CONSECUTIVE runs it has degraded, including the last one
+	// (pg2-zzf54). A key is absent once the sub-check succeeds, so the count
+	// is "runs in a row". run.go exits 4 for a sub-check only once its count
+	// reaches --degraded-threshold: a single killed ccpool call on an
+	// overloaded host is noise, a persistent failure still surfaces.
+	// Additive field: a snapshot written before pg2-zzf54 decodes with it
+	// nil, so snapshotVersion is unchanged.
+	Degraded map[string]int `json:"degraded,omitempty"`
 }
 
 // loadSnapshot returns (zero value, false) for EVERY failure mode the

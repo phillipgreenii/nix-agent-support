@@ -7,6 +7,7 @@ package gitfacet
 import (
 	"context"
 	"path/filepath"
+	"time"
 
 	"github.com/phillipgreenii/x/gitclient"
 )
@@ -25,18 +26,34 @@ type Facets struct {
 	Branch *string
 }
 
+// resolveTimeout bounds ALL git calls Resolve makes for one cwd. ccpool list
+// resolves one cwd per session row, so an unbounded git call on a loaded host
+// (or a hung filesystem) stalled the whole listing until the caller's own
+// deadline SIGKILLed it (pg2-zzf54: ccpool-probe saw exit -1 on loaded-host
+// runs). On expiry the remaining facets are simply left nil, the same soft-fail
+// as any other git failure. A healthy git answers all of them in tens of
+// milliseconds; the budget is generous so a merely slow host still resolves.
+const resolveTimeout = 3 * time.Second
+
 // Resolve returns the git facets for cwd. It never returns an error: any
 // failed sub-query leaves that facet nil. A cwd outside a git work tree (or a
 // missing git binary) yields an all-nil Facets. This is the app-side
 // soft-fail policy; it is unchanged by the migration to x/gitclient below.
 //
 // Resolve takes no context because its only caller (ccpool list) has none to
-// thread through the gitFn seam it plugs into (cmd/ccpool/list.go); a
-// package-scoped context.Background() is used for the git calls this
-// performs, matching the previous implementation's lack of any deadline.
+// thread through the gitFn seam it plugs into (cmd/ccpool/list.go); it applies
+// its own resolveTimeout deadline instead.
 func Resolve(cwd string) Facets {
+	return resolveWithin(cwd, resolveTimeout)
+}
+
+// resolveWithin is Resolve with an explicit deadline, split out so tests can
+// exercise the expiry path deterministically (a non-positive timeout is an
+// already-expired deadline).
+func resolveWithin(cwd string, timeout time.Duration) Facets {
 	var f Facets
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
 
 	// gitclient.Discover walks up from cwd to the repository toplevel and
 	// anchors a Client there -- exactly the "where am I" case this package

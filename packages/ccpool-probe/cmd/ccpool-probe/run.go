@@ -15,7 +15,8 @@
 //	                 writes nothing at all -- no snapshot update, no bd
 //	                 call [design: "Exit codes" paragraph].
 //	4 partial     -- at least one sub-check was attempted and actually
-//	                 degraded (its ccpool dependency was unreachable, the
+//	                 degraded (its ccpool dependency was unreachable for
+//	                 --degraded-threshold CONSECUTIVE runs, the
 //	                 pg-connector dedup query itself failed, or the
 //	                 last-run snapshot could not be persisted), while at
 //	                 least one other sub-check (or the dedup query, when
@@ -29,6 +30,14 @@
 //	                 (pg2-d845f), and the handler discards stderr on
 //	                 exit 0, so only a non-zero exit surfaces it.
 //
+// A single ccpool failure is NOT enough for exit 4 (pg2-zzf54): a killed call
+// is retried once, and a sub-check that still fails is logged to stderr and
+// counted in the snapshot (snapshot.Degraded). Only a sub-check that has
+// failed --degraded-threshold runs in a row degrades the exit code. The
+// snapshot-persist and dedup-query failures stay immediate: the first
+// disables every later comparison, and the second drops findings that a
+// later run could no longer re-derive.
+//
 // Unlike pg-router-probe's own run.go, this binary's sub-checks are
 // never individually "unconfigured" -- they always attempt a ccpool call
 // per pool on every invocation, so there is no skipped/degraded split here: a
@@ -40,6 +49,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -60,6 +70,9 @@ func defaultSnapshotPath() string {
 // runOptions is every "run" flag value, gathered before runProbe is
 // called.
 type runOptions struct {
+	// degradedThreshold is how many consecutive runs a ccpool sub-check
+	// must degrade before the run exits 4; values below 1 act as 1.
+	degradedThreshold  int
 	ccpoolTimeout      time.Duration
 	pgConnectorTimeout time.Duration
 	snapshotPath       string
@@ -104,8 +117,18 @@ func defaultRunDeps() runDeps {
 	}
 }
 
+// defaultDegradedThreshold is the --degraded-threshold default: three
+// consecutive degraded runs of the same sub-check before exit 4.
+const defaultDegradedThreshold = 3
+
+// needsInputKey and zombieDriftKey name a per-pool sub-check in
+// snapshot.Degraded.
+func needsInputKey(pool poolRef) string  { return "needs-input[pool " + pool.Label + "]" }
+func zombieDriftKey(pool poolRef) string { return "zombie-drift[pool " + pool.Label + "]" }
+
 func newRunCmd() *cobra.Command {
 	opts := runOptions{
+		degradedThreshold:  defaultDegradedThreshold,
 		ccpoolTimeout:      10 * time.Second,
 		pgConnectorTimeout: 30 * time.Second,
 		snapshotPath:       defaultSnapshotPath(),
@@ -117,11 +140,15 @@ func newRunCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 	}
 	cmd.Flags().DurationVar(&opts.ccpoolTimeout, "ccpool-timeout", opts.ccpoolTimeout, "explicit timeout for each ccpool subprocess call (list)")
+	cmd.Flags().IntVar(&opts.degradedThreshold, "degraded-threshold", opts.degradedThreshold, "consecutive runs a ccpool sub-check must degrade (after one retry of a killed call) before the run exits 4; an earlier failure is only logged to stderr")
 	cmd.Flags().DurationVar(&opts.pgConnectorTimeout, "pg-connector-timeout", opts.pgConnectorTimeout, "explicit timeout for each pg-connector subprocess call (list/create/update/comment)")
 	cmd.Flags().StringVar(&opts.registryDir, "registry-dir", opts.registryDir, "ccpool pool-registry directory listing every pool to scan (default: CCPOOL_REGISTRY_DIR, else $XDG_STATE_HOME/ccpool/pools.d)")
 	cmd.Flags().StringVar(&opts.dedupQuery, "dedup-query", opts.dedupQuery, "named pg-connector query listing every non-closed escalated bead (open, in_progress, blocked, deferred, human-labeled) for the dedup check; MUST NOT be the ready-only triager dispatch query")
 	cmd.Flags().StringVar(&opts.snapshotPath, "snapshot-path", opts.snapshotPath, "path to this probe's own persisted last-run snapshot")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		if opts.degradedThreshold < 1 {
+			return usageErrorf("run: --degraded-threshold must be at least 1")
+		}
 		return runProbe(cmd, opts, defaultRunDeps())
 	}
 	return cmd
@@ -146,19 +173,43 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 		return context.WithTimeout(ctx, opts.ccpoolTimeout)
 	}
 
+	// callCcpool runs one ccpool list call under a FRESH per-call deadline
+	// and retries it ONCE, with a fresh deadline, when the call was killed
+	// (errCcpoolKilled: the per-call timeout or a signal). A single kill on
+	// an overloaded host is the dominant failure mode (pg2-zzf54); the retry
+	// is bounded so a wedged ccpool costs at most two deadlines per call.
+	callCcpool := func(what string, call func(ctx context.Context) ([]ccpoolSessionRow, error)) ([]ccpoolSessionRow, error) {
+		cctx, cancel := withCcpoolTimeout()
+		rows, err := call(cctx)
+		cancel()
+		if err != nil && errors.Is(err, errCcpoolKilled) && ctx.Err() == nil {
+			warn(fmt.Sprintf("%s: ccpool call killed; retrying once", what))
+			cctx, cancel = withCcpoolTimeout()
+			rows, err = call(cctx)
+			cancel()
+		}
+		return rows, err
+	}
+
 	var findings []finding
-	var degraded []string
+	// degraded holds failures that exit 4 immediately (snapshot persist,
+	// dedup query). failures holds the per-pool ccpool sub-check failures,
+	// which exit 4 only once their consecutive count reaches the threshold;
+	// those that have are collected in persistent.
+	var degraded, persistent []string
+	type subcheckFailure struct{ key, msg string }
+	var failures []subcheckFailure
 	ranAny := false
 
 	pools := deps.listPools(opts.registryDir, warn)
 
 	// Sub-check 1: ccpool sessions stuck in needs_input, per pool.
 	for _, pool := range pools {
-		niCtx, cancel := withCcpoolTimeout()
-		niRows, err := deps.listNeedsInput(niCtx, pool, warn)
-		cancel()
+		niRows, err := callCcpool(needsInputKey(pool), func(cctx context.Context) ([]ccpoolSessionRow, error) {
+			return deps.listNeedsInput(cctx, pool, warn)
+		})
 		if err != nil {
-			degraded = append(degraded, fmt.Sprintf("needs-input[pool %s]: %v", pool.Label, err))
+			failures = append(failures, subcheckFailure{needsInputKey(pool), fmt.Sprintf("needs-input[pool %s]: %v", pool.Label, err)})
 			continue
 		}
 		ranAny = true
@@ -177,11 +228,11 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 	var perPool []string
 	var failedPools []poolRef
 	for _, pool := range pools {
-		zCtx, cancel := withCcpoolTimeout()
-		allRows, err := deps.listAllPoolSessions(zCtx, pool, warn)
-		cancel()
+		allRows, err := callCcpool(zombieDriftKey(pool), func(cctx context.Context) ([]ccpoolSessionRow, error) {
+			return deps.listAllPoolSessions(cctx, pool, warn)
+		})
 		if err != nil {
-			degraded = append(degraded, fmt.Sprintf("zombie-drift[pool %s]: %v", pool.Label, err))
+			failures = append(failures, subcheckFailure{zombieDriftKey(pool), fmt.Sprintf("zombie-drift[pool %s]: %v", pool.Label, err)})
 			failedPools = append(failedPools, pool)
 			continue
 		}
@@ -223,11 +274,38 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 		}
 	}
 
+	failureMsgs := make([]string, 0, len(failures))
+	for _, f := range failures {
+		failureMsgs = append(failureMsgs, f.msg)
+	}
+
 	if !ranAny {
 		// Total failure: every sub-check unreachable. Writes nothing --
 		// no snapshot update, no bd call [design: "Exit codes" paragraph,
-		// "writes nothing"].
-		return totalFailureErrorf("run: every sub-check unreachable: %s", strings.Join(degraded, "; "))
+		// "writes nothing"]. Deliberately NOT subject to the consecutive
+		// threshold: with nothing reachable there is no result to carry
+		// forward, and the run cannot persist the counters.
+		return totalFailureErrorf("run: every sub-check unreachable: %s", strings.Join(failureMsgs, "; "))
+	}
+
+	// Consecutive-degraded bookkeeping (pg2-zzf54): a sub-check that failed
+	// this run is one higher than last run's count; one that succeeded (or
+	// was not attempted) drops out. Only counts that reached the threshold
+	// degrade the exit code; the rest are logged and carried in the
+	// snapshot.
+	threshold := max(opts.degradedThreshold, 1)
+	nextDegraded := map[string]int{}
+	for _, f := range failures {
+		n := prevSnap.Degraded[f.key] + 1
+		nextDegraded[f.key] = n
+		if n >= threshold {
+			persistent = append(persistent, f.msg+fmt.Sprintf(" (degraded %d runs in a row)", n))
+		} else {
+			warn(fmt.Sprintf("sub-check degraded, not yet reported (%d of %d consecutive runs): %s", n, threshold, f.msg))
+		}
+	}
+	if len(nextDegraded) == 0 {
+		nextDegraded = nil
 	}
 
 	if err := saveSnapshot(opts.snapshotPath, snapshot{
@@ -235,6 +313,7 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 		ZombieConsecutiveGrowth: consecutiveGrowth,
 		CheckedAt:               deps.now().UTC().Format(time.RFC3339),
 		ReadySeen:               readySeen,
+		Degraded:                nextDegraded,
 	}); err != nil {
 		// A snapshot that cannot be persisted silently disables the drift
 		// and never-prompted checks (every later run sees "no baseline";
@@ -246,7 +325,12 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 		degraded = append(degraded, fmt.Sprintf("snapshot: persist %s: %v", opts.snapshotPath, err))
 	}
 
-	skippedNote := strings.Join(degraded, "; ")
+	// The filed-bead note lists every failure this run saw, including those
+	// still below the threshold: it is context for the reader, not an exit
+	// signal.
+	skippedNote := strings.Join(append(append([]string{}, failureMsgs...), degraded...), "; ")
+	// exitReasons is everything that degrades the exit code.
+	exitReasons := func() string { return strings.Join(append(append([]string{}, persistent...), degraded...), "; ") }
 
 	// withPgTimeout derives a FRESH, independent deadline for each
 	// individual pg-connector subprocess call below -- same requirement as
@@ -267,7 +351,7 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 			// returning immediately, no bead is filed/updated on this
 			// path.
 			degraded = append(degraded, fmt.Sprintf("dedup query: %v", err))
-			return partialErrorf("run: partial (%s)", strings.Join(degraded, "; "))
+			return partialErrorf("run: partial (%s)", exitReasons())
 		}
 		for _, f := range findings {
 			action, match := decideAction(f, existing)
@@ -300,8 +384,8 @@ func runProbe(cmd *cobra.Command, opts runOptions, deps runDeps) error {
 		}
 	}
 
-	if len(degraded) > 0 {
-		return partialErrorf("run: partial (%s)", strings.Join(degraded, "; "))
+	if len(degraded) > 0 || len(persistent) > 0 {
+		return partialErrorf("run: partial (%s)", exitReasons())
 	}
 	return nil
 }

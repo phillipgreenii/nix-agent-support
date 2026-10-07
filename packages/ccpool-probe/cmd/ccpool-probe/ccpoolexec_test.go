@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -50,6 +51,11 @@ func TestListCcpoolSessionsFailure(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected an error")
 	}
+	// A ccpool that ran and exited non-zero is NOT a killed call: it must
+	// not be retried or mistaken for host-load noise (pg2-zzf54).
+	if !errors.Is(err, errCcpoolFailed) || errors.Is(err, errCcpoolKilled) {
+		t.Fatalf("exit-1 failure must be errCcpoolFailed and not errCcpoolKilled, got %v", err)
+	}
 }
 
 // TestListCcpoolSessionsHonorsExplicitTimeout proves this probe's own
@@ -68,6 +74,12 @@ func TestListCcpoolSessionsHonorsExplicitTimeout(t *testing.T) {
 	elapsed := time.Since(start)
 	if err == nil {
 		t.Fatalf("expected a timeout error")
+	}
+	// The SIGKILLed child (Go ExitCode() == -1, empty stderr) is classified
+	// as a killed call, the retryable class (pg2-zzf54), and still is a
+	// ccpool failure for every other caller.
+	if !errors.Is(err, errCcpoolKilled) || !errors.Is(err, errCcpoolFailed) {
+		t.Fatalf("a deadline-killed call must be errCcpoolKilled (wrapping errCcpoolFailed), got %v", err)
 	}
 	if elapsed > 5*time.Second {
 		t.Fatalf("listCcpoolSessions did not respect its context deadline: took %v", elapsed)

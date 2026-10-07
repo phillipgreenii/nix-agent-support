@@ -105,3 +105,27 @@ func TestSaveSnapshotParentIsFileFails(t *testing.T) {
 		t.Fatalf("expected an error when the parent path is a regular file")
 	}
 }
+
+// TestSaveLoadSnapshotRoundTripsDegraded: the consecutive-degraded counters
+// (pg2-zzf54) survive a save/load, and a snapshot written without them
+// (pre-pg2-zzf54) still loads, with a nil map.
+func TestSaveLoadSnapshotRoundTripsDegraded(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "snapshot.json")
+	want := map[string]int{"zombie-drift[pool review]": 2}
+	if err := saveSnapshot(path, snapshot{Degraded: want}); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := loadSnapshot(path)
+	if !ok || got.Degraded["zombie-drift[pool review]"] != 2 {
+		t.Fatalf("Degraded not round-tripped: ok=%v %+v", ok, got)
+	}
+
+	legacy := filepath.Join(t.TempDir(), "legacy.json")
+	if err := os.WriteFile(legacy, []byte(`{"version":1,"zombie_count":4}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, ok = loadSnapshot(legacy)
+	if !ok || got.ZombieCount != 4 || got.Degraded != nil {
+		t.Fatalf("legacy snapshot must load with nil Degraded: ok=%v %+v", ok, got)
+	}
+}

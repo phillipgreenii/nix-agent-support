@@ -36,6 +36,12 @@ func fetchBacklogFromStatus(ctx context.Context, opts runOptions) (int, error) {
 	defer cancel()
 	out, err := execCmdFactory(sctx, opts.pgRouterPath, "status", "--json").Output()
 	if err != nil {
+		// A child killed by our own deadline surfaces as a bare "signal:
+		// killed" ExitError; attach the context error so the caller can tell
+		// a timeout (retried once, pg2-zzf54) from a real failure.
+		if cerr := sctx.Err(); cerr != nil {
+			err = fmt.Errorf("%w: %w", err, cerr)
+		}
 		return 0, fmt.Errorf("pg-router status --json: %w", err)
 	}
 	return parseBacklog(out)

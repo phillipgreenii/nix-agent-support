@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -112,6 +114,10 @@ func (s *spyDeps) toRunDeps(clock time.Time) runDeps {
 	}
 }
 
+// baseOpts leaves degradedThreshold at its zero value, which acts as 1
+// (every sub-check failure is reported at once), so the pre-pg2-zzf54 tests
+// below keep asserting on a single failing run. Tests of the consecutive
+// threshold set it explicitly (see withProdThreshold).
 func baseOpts(t *testing.T) runOptions {
 	return runOptions{
 		grafanaTimeout:     time.Second,
@@ -675,5 +681,261 @@ func TestRunProbeBinaryHashChange(t *testing.T) {
 				t.Fatalf("snapshot = %+v, want hash %s path %s", snap, wantHash, bin)
 			}
 		})
+	}
+}
+
+// withProdThreshold applies the production --degraded-threshold default.
+func withProdThreshold(opts runOptions) runOptions {
+	opts.degradedThreshold = defaultDegradedThreshold
+	return opts
+}
+
+// timeoutErr mimics the Grafana client's failure on a deadline expiry.
+func timeoutErr() error {
+	return fmt.Errorf("grafana: request: %w", context.DeadlineExceeded)
+}
+
+// runWithGrafanaErr drives one runProbe whose Grafana call fails with err
+// and whose backlog sub-check succeeds, returning the error and stderr.
+func runWithGrafanaErr(t *testing.T, opts runOptions, err error) (error, string) {
+	t.Helper()
+	cmd, stderr := testCmd()
+	opts.grafanaURL = "http://example.invalid"
+	opts.backlogFromStatus = true
+	spy := &spyDeps{fetchAlertsFn: func(ctx context.Context, opts runOptions) ([]grafanaAlert, error) {
+		return nil, err
+	}}
+	return runProbe(cmd, opts, spy.toRunDeps(time.Now())), stderr.String()
+}
+
+// TestRunProbeSingleDegradedRunIsLoggedNotReported is the pg2-zzf54 core
+// acceptance: a sub-check that fails ONCE logs to stderr and exits 0, the
+// counter is persisted in the snapshot, and only the threshold-th failure in
+// a row exits 4.
+func TestRunProbeSingleDegradedRunIsLoggedNotReported(t *testing.T) {
+	opts := withProdThreshold(baseOpts(t))
+	for run := 1; run < defaultDegradedThreshold; run++ {
+		err, stderr := runWithGrafanaErr(t, opts, errUnreachable)
+		if err != nil {
+			t.Fatalf("run %d: expected exit 0 below the threshold, got %v", run, err)
+		}
+		if !strings.Contains(stderr, "sub-check degraded, not yet reported") || !strings.Contains(stderr, "grafana-alerts") {
+			t.Fatalf("run %d: stderr must log the degraded sub-check, got:\n%s", run, stderr)
+		}
+		snap, ok := loadSnapshot(opts.snapshotPath)
+		if !ok || snap.Degraded[grafanaAlertsKey] != run {
+			t.Fatalf("run %d: Degraded[grafana-alerts] = %d (loaded=%v), want %d", run, snap.Degraded[grafanaAlertsKey], ok, run)
+		}
+	}
+	err, _ := runWithGrafanaErr(t, opts, errUnreachable)
+	if exitCodeOf(t, err) != 4 {
+		t.Fatalf("threshold-th consecutive failure must exit 4, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "grafana-alerts") || !strings.Contains(err.Error(), "degraded 3 runs in a row") {
+		t.Fatalf("exit error must name the sub-check and its streak, got %v", err)
+	}
+}
+
+func TestRunProbeSuccessResetsDegradedStreak(t *testing.T) {
+	opts := withProdThreshold(baseOpts(t))
+	for range defaultDegradedThreshold - 1 {
+		if err, _ := runWithGrafanaErr(t, opts, errUnreachable); err != nil {
+			t.Fatalf("expected exit 0 below the threshold, got %v", err)
+		}
+	}
+	if err, _ := runWithGrafanaErr(t, opts, nil); err != nil {
+		t.Fatalf("clean run: expected exit 0, got %v", err)
+	}
+	if snap, _ := loadSnapshot(opts.snapshotPath); len(snap.Degraded) != 0 {
+		t.Fatalf("a successful run must clear Degraded, got %v", snap.Degraded)
+	}
+	if err, _ := runWithGrafanaErr(t, opts, errUnreachable); err != nil {
+		t.Fatalf("failure after a reset must exit 0, got %v", err)
+	}
+	if snap, _ := loadSnapshot(opts.snapshotPath); snap.Degraded[grafanaAlertsKey] != 1 {
+		t.Fatalf("streak must restart at 1, got %v", snap.Degraded)
+	}
+}
+
+// TestRunProbeUnattemptedSubcheckKeepsItsStreak: an invocation that never
+// runs a sub-check (no --grafana-url) must not erase the streak another
+// invocation is accumulating, like every other snapshot field.
+func TestRunProbeUnattemptedSubcheckKeepsItsStreak(t *testing.T) {
+	opts := withProdThreshold(baseOpts(t))
+	if err := saveSnapshot(opts.snapshotPath, snapshot{Degraded: map[string]int{grafanaAlertsKey: 2}}); err != nil {
+		t.Fatal(err)
+	}
+	cmd, _ := testCmd()
+	opts.backlogFromStatus = true // grafana NOT configured this run
+	spy := &spyDeps{}
+	if err := runProbe(cmd, opts, spy.toRunDeps(time.Now())); err != nil {
+		t.Fatalf("expected exit 0, got %v", err)
+	}
+	if snap, _ := loadSnapshot(opts.snapshotPath); snap.Degraded[grafanaAlertsKey] != 2 {
+		t.Fatalf("unattempted sub-check's streak must be preserved, got %v", snap.Degraded)
+	}
+}
+
+func TestRunProbeDegradedThresholdOneReportsImmediately(t *testing.T) {
+	opts := baseOpts(t)
+	opts.degradedThreshold = 1
+	err, _ := runWithGrafanaErr(t, opts, errUnreachable)
+	if exitCodeOf(t, err) != 4 {
+		t.Fatalf("--degraded-threshold 1 must keep the immediate exit 4, got %v", err)
+	}
+}
+
+// TestRunProbeRetriesTimedOutGrafanaCallOnce: a timed-out call is retried
+// exactly once; when the retry succeeds the run is clean.
+func TestRunProbeRetriesTimedOutGrafanaCallOnce(t *testing.T) {
+	opts := withProdThreshold(baseOpts(t))
+	opts.grafanaURL = "http://example.invalid"
+	opts.backlogFromStatus = true
+	cmd, stderr := testCmd()
+	calls := 0
+	spy := &spyDeps{fetchAlertsFn: func(ctx context.Context, opts runOptions) ([]grafanaAlert, error) {
+		calls++
+		if calls == 1 {
+			return nil, timeoutErr()
+		}
+		return nil, nil
+	}}
+	if err := runProbe(cmd, opts, spy.toRunDeps(time.Now())); err != nil {
+		t.Fatalf("expected exit 0, got %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("a timed-out call must be retried exactly once, got %d calls", calls)
+	}
+	if strings.Contains(stderr.String(), "not yet reported") {
+		t.Fatalf("a retry that succeeded is not a degraded run:\n%s", stderr.String())
+	}
+	if snap, _ := loadSnapshot(opts.snapshotPath); len(snap.Degraded) != 0 {
+		t.Fatalf("Degraded must stay empty, got %v", snap.Degraded)
+	}
+}
+
+// TestRunProbeRetryIsBounded: a call that times out on both attempts is
+// tried exactly twice and counted as ONE degraded run.
+func TestRunProbeRetryIsBounded(t *testing.T) {
+	opts := withProdThreshold(baseOpts(t))
+	opts.grafanaURL = "http://example.invalid"
+	opts.backlogFromStatus = true
+	cmd, _ := testCmd()
+	calls := 0
+	spy := &spyDeps{fetchAlertsFn: func(ctx context.Context, opts runOptions) ([]grafanaAlert, error) {
+		calls++
+		return nil, timeoutErr()
+	}}
+	if err := runProbe(cmd, opts, spy.toRunDeps(time.Now())); err != nil {
+		t.Fatalf("one fully-failed run must exit 0, got %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("expected exactly 2 attempts, got %d", calls)
+	}
+	if snap, _ := loadSnapshot(opts.snapshotPath); snap.Degraded[grafanaAlertsKey] != 1 {
+		t.Fatalf("a fully-failed call counts as ONE degraded run, got %v", snap.Degraded)
+	}
+}
+
+// TestRunProbeDoesNotRetryNonTimeoutFailure: a Grafana that answered with an
+// error is a real error, not host-load noise; it is not retried.
+func TestRunProbeDoesNotRetryNonTimeoutFailure(t *testing.T) {
+	opts := withProdThreshold(baseOpts(t))
+	opts.grafanaURL = "http://example.invalid"
+	opts.backlogFromStatus = true
+	cmd, _ := testCmd()
+	calls := 0
+	spy := &spyDeps{fetchAlertsFn: func(ctx context.Context, opts runOptions) ([]grafanaAlert, error) {
+		calls++
+		return nil, errUnreachable
+	}}
+	_ = runProbe(cmd, opts, spy.toRunDeps(time.Now()))
+	if calls != 1 {
+		t.Fatalf("a non-timeout failure must not be retried, got %d calls", calls)
+	}
+}
+
+// TestRunProbeBacklogTimeoutIsRetriedAndCounted covers the status call.
+func TestRunProbeBacklogTimeoutIsRetriedAndCounted(t *testing.T) {
+	opts := withProdThreshold(baseOpts(t))
+	opts.backlogFromStatus = true
+	opts.binaryPath = os.Args[0] // a readable file so one sub-check succeeds
+	cmd, _ := testCmd()
+	spy := &spyDeps{}
+	deps := spy.toRunDeps(time.Now())
+	calls := 0
+	deps.fetchBacklog = func(ctx context.Context, opts runOptions) (int, error) {
+		calls++
+		return 0, fmt.Errorf("pg-router status --json: %w", context.DeadlineExceeded)
+	}
+	if err := runProbe(cmd, opts, deps); err != nil {
+		t.Fatalf("one failed run must exit 0, got %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("expected one retry, got %d calls", calls)
+	}
+	if snap, _ := loadSnapshot(opts.snapshotPath); snap.Degraded[backlogDriftKey] != 1 {
+		t.Fatalf("got %v", snap.Degraded)
+	}
+}
+
+// TestFetchBacklogFromStatusDeadlineKillIsATimeout: a status child killed
+// by the probe's own deadline is classified as a timeout (retryable).
+func TestFetchBacklogFromStatusDeadlineKillIsATimeout(t *testing.T) {
+	withFactory(t, "slow")
+	opts := baseOpts(t)
+	opts.pgRouterPath = "pg-router"
+	opts.statusTimeout = 100 * time.Millisecond
+	_, err := fetchBacklogFromStatus(context.Background(), opts)
+	if err == nil || !isTimeout(err) {
+		t.Fatalf("expected a timeout-classified error, got %v", err)
+	}
+}
+
+func TestIsTimeout(t *testing.T) {
+	if isTimeout(errUnreachable) || isTimeout(nil) {
+		t.Fatalf("non-timeouts misclassified")
+	}
+	if !isTimeout(fmt.Errorf("wrapped: %w", context.DeadlineExceeded)) {
+		t.Fatalf("wrapped deadline not classified")
+	}
+	if !isTimeout(&net.DNSError{IsTimeout: true}) {
+		t.Fatalf("net.Error timeout not classified")
+	}
+}
+
+// TestRunProbePersistFailureIgnoresThreshold: a snapshot that cannot be
+// written exits 4 on its FIRST occurrence even at a high threshold.
+func TestRunProbePersistFailureIgnoresThreshold(t *testing.T) {
+	opts := baseOpts(t)
+	opts.degradedThreshold = 99
+	blocker := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	opts.snapshotPath = filepath.Join(blocker, "snapshot.json")
+	opts.backlogFromStatus = true
+	cmd, _ := testCmd()
+	spy := &spyDeps{}
+	if err := runProbe(cmd, opts, spy.toRunDeps(time.Now())); exitCodeOf(t, err) != 4 {
+		t.Fatalf("expected immediate exit 4, got %v", err)
+	}
+}
+
+func TestRunCmdDegradedThresholdFlag(t *testing.T) {
+	cmd := newRunCmd()
+	f := cmd.Flags().Lookup("degraded-threshold")
+	if f == nil || f.DefValue != "3" {
+		t.Fatalf("--degraded-threshold must exist with default 3, got %+v", f)
+	}
+	cmd.SetArgs([]string{"--degraded-threshold", "0"})
+	cmd.SetContext(context.Background())
+	var out bytes.Buffer
+	cmd.SetErr(&out)
+	cmd.SetOut(&out)
+	err := cmd.Execute()
+	var ece *exitCodeError
+	if !errors.As(err, &ece) || ece.code != 2 {
+		t.Fatalf("--degraded-threshold 0 must be a usage error (exit 2), got %v", err)
 	}
 }

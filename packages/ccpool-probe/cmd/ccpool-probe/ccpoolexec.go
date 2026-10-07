@@ -85,6 +85,15 @@ func runCcpool(ctx context.Context, poolDir string, args []string) (ccpoolResult
 
 var errCcpoolFailed = errors.New("ccpool-probe: ccpool call failed")
 
+// errCcpoolKilled marks a ccpool call that was killed (this probe's own
+// per-call deadline SIGKILLing the child, or any other signal): Go reports
+// ExitCode() == -1 for a signalled child and the child leaves no stderr. It
+// is the transient, host-load-shaped failure runProbe retries once and
+// counts toward the consecutive-degraded threshold (pg2-zzf54), as distinct
+// from a ccpool that ran and exited non-zero. It wraps errCcpoolFailed, so
+// errors.Is(err, errCcpoolFailed) still holds for every caller.
+var errCcpoolKilled = fmt.Errorf("%w: killed (timeout or signal)", errCcpoolFailed)
+
 // ccpoolSessionRow is the subset of ccpool's own `list --json` listJSON
 // shape (packages/ccpool/cmd/ccpool/list.go) this probe needs. Decoded
 // generically since this probe has no compile-time dependency on
@@ -115,10 +124,14 @@ func listCcpoolSessions(ctx context.Context, poolDir, state string, warn func(st
 		return nil, errCcpoolFailed
 	}
 	if res.exitCode != 0 {
+		killed := res.exitCode == -1 || ctx.Err() != nil
 		if len(res.stderr) > 0 {
 			warn(string(res.stderr))
 		} else {
 			warn(fmt.Sprintf("ccpool: exit %d", res.exitCode))
+		}
+		if killed {
+			return nil, errCcpoolKilled
 		}
 		return nil, errCcpoolFailed
 	}
