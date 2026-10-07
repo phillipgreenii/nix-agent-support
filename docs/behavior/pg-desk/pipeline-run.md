@@ -61,6 +61,60 @@ at or above 4 MiB rotates it to `anchor-write.log.1` (replacing any previous one
 most two files exist. A day of causes is tallied with, for example,
 `grep -h 'anchor write' ~/.local/state/pg-desk/anchor-write.log* | grep -o 'cause=[^ ]*' | sort | uniq -c`.
 
+### Run record (bead `pg2-dpml1`)
+
+pg-router discards the stderr of a successful command-role run and its success events carry no
+change field, so the share of sweep runs that found nothing could not be measured. Every `run`
+invocation for a `pr` or `issue` entity, successful or failed, MUST therefore append one JSON
+record per entity it ran to `$XDG_STATE_HOME/pg-desk/run-record.log` (default
+`~/.local/state/pg-desk/run-record.log`, next to `store.db`), in addition to the stderr line of the
+same shape. The file follows the anchor-write log's rules: created only when a record is written, a
+write failure MUST NOT fail or slow the run, and a run that finds it at or above 8 MiB rotates it to
+`run-record.log.1` first. A `run issue` for a ticket with no linked PR writes one `noop` record for
+the ticket; a `run issue` for a PR writes one record for that PR. A failure before the pipeline
+runs (arguments, config, store open, bead resolution) writes one record with `path` `early`. `run
+thread` writes no record of its own.
+
+A record MUST carry:
+
+- `ts`: the run's end time, RFC 3339 UTC.
+- `entity_type`, `entity_id`, and, for a PR, `repo` and `pr` (the PR number).
+- `change`: `added`, `changed`, `removed` or `sweep`, as passed to `run`.
+- `path`: `full` (gather, interpret, store, sync), `interpret_only` (`run issue`, which neither
+  gathers nor syncs) or `early`.
+- `duration_ms`, `outcome` (`ok`, `degraded`, `noop`, `error`) and, on `error`, `stage`,
+  `error_class` and `error`.
+- `content_hash_changed`: true when the facts this run gathered differ from the facts already
+  stored for the entity, ignoring every `as_of` timestamp (a re-read stamps a new one even when
+  nothing changed), or when no row was stored yet. It is false on a run that never gathered
+  (`interpret_only`, `early`, a failed gather).
+- `anchor_written`: true when the sync stage applied an anchor bead write in this run, with
+  `anchor_cause` naming it in the anchor-write log's vocabulary (`created`, `ledger-unrecorded`,
+  `conflict-flip`, `pr-content-change`). It stays true on a run whose later sync step failed.
+
+`repo` and `pr` are the join keys to the anchor-write log, whose lines carry the same `repo` and
+`pr`. Two measures follow from the record alone. The no-op sweep share is the `change` `sweep`,
+`path` `full`, non-`error` records whose `content_hash_changed` is false, over all such records. A
+sweep catch (a change the changes feed had not reported) is a `sweep` `full` record with
+`content_hash_changed` true for a PR that already had an earlier `full` record: every `full` run
+stores the facts it gathered, so a `changed` or `added` run between the PR's previous record and
+the sweep would already have absorbed the change and left the sweep seeing none. A bulk `pg-desk
+sweep` can re-use a head-unchanged shortcut within one process, which can make
+`content_hash_changed` true without a real change; measure on the router-dispatched `run` records.
+
+```bash
+# no-op share of sweep runs in the last 24h (GNU date shown; on macOS use date -v-24H)
+cat ~/.local/state/pg-desk/run-record.log* | jq -s --arg since "$(date -u -d '24 hours ago' +%FT%TZ)" '
+  [.[] | select(.ts >= $since and .change == "sweep" and .path == "full" and .outcome != "error")]
+  | {sweeps: length, noop: (map(select(.content_hash_changed | not)) | length)}
+  | . + {noop_share: (if .sweeps > 0 then .noop / .sweeps else null end)}'
+
+# sweep catches in the last 24h: sweep runs that saw a change on a PR already seen
+cat ~/.local/state/pg-desk/run-record.log* | jq -s --arg since "$(date -u -d '24 hours ago' +%FT%TZ)" '
+  [.[] | select(.path == "full" and .outcome != "error" and .pr != null)] | sort_by(.ts) | group_by([.repo, .pr])
+  | map(.[1:][] | select(.ts >= $since and .change == "sweep" and .content_hash_changed)) | length'
+```
+
 ### Failure diagnosis
 
 pg-router records a failed `run` only as "exit status 1", so a failure MUST be attributable from

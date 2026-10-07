@@ -9,6 +9,7 @@ import (
 	"io"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -77,8 +78,12 @@ var runCmd = &cobra.Command{
 	Short: "Run the gather/interpret/store pipeline once for one entity",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		err := runEntity(cmd, args)
+		start := time.Now()
+		rec := newRunRecordFile()
+		defer func() { _ = rec.Close() }()
+		err := runEntity(cmd, args, rec)
 		if err != nil {
+			recordEarlyFailure(rec, args[0], args[1], gather.ChangeKind(runF.change), start, err)
 			// The returned error still maps to exit 1 in main.go (the exit-code
 			// contract is unchanged); this line makes the failure attributable
 			// when only stderr survives (bead pg2-gp50o).
@@ -143,7 +148,7 @@ func logRunFailure(w io.Writer, entityType, entityID, change string, err error) 
 // store, and dispatches by entity type. Its errors carry a stage tag where
 // the failing step is known (pipeline.TagStage), without changing any
 // message text.
-func runEntity(cmd *cobra.Command, args []string) error {
+func runEntity(cmd *cobra.Command, args []string, rec io.Writer) error {
 	entityType, entityID := args[0], args[1]
 	switch entityType {
 	case "issue", "pr", "thread":
@@ -168,7 +173,7 @@ func runEntity(cmd *cobra.Command, args []string) error {
 	syncLogger, closeSyncLog := newAnchorWriteLogger(cmd.ErrOrStderr(), anchorWriteLogPath(), anchorWriteLogMaxBytes)
 	defer func() { _ = closeSyncLog() }()
 
-	p := pipeline.New(cfg, st, pipeline.WithVerbose(runF.verbose), pipeline.WithLogWriter(cmd.ErrOrStderr()), pipeline.WithSyncLogger(syncLogger))
+	p := pipeline.New(cfg, st, pipeline.WithVerbose(runF.verbose), pipeline.WithLogWriter(cmd.ErrOrStderr()), pipeline.WithSyncLogger(syncLogger), pipeline.WithRunRecordWriter(rec))
 	change := gather.ChangeKind(runF.change)
 
 	switch entityType {
@@ -206,6 +211,7 @@ func runEntity(cmd *cobra.Command, args []string) error {
 // is also gathered and stored as an issue entity.
 func runJiraIssue(ctx context.Context, p *pipeline.Pipeline, cfg *config.Config, st *store.Store, ticketKey string, change gather.ChangeKind) error {
 	repo := runRepo(cfg)
+	start := p.Now()
 
 	var errs []error
 	if hydrateErr := hydrateJiraIssue(ctx, p, cfg, st, ticketKey, change); hydrateErr != nil {
@@ -217,6 +223,11 @@ func runJiraIssue(ctx context.Context, p *pipeline.Pipeline, cfg *config.Config,
 		return fmt.Errorf("run issue %s: list xrefs: %w", ticketKey, err)
 	}
 
+	if len(xrefs) == 0 && len(errs) == 0 {
+		// Nothing to re-interpret: leave a record anyway so the invocation is
+		// countable (bead pg2-dpml1).
+		p.RecordRun(entityTypeIssue, ticketKey, change, "noop", start)
+	}
 	for _, x := range xrefs {
 		if runErr := p.RunInterpretOnly(ctx, entityTypePR, x.FromID, change); runErr != nil {
 			errs = append(errs, fmt.Errorf("re-interpret %s: %w", x.FromID, runErr))

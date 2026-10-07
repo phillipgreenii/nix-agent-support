@@ -73,6 +73,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
@@ -130,6 +131,9 @@ type Pipeline struct {
 	clock      interpret.Clock
 	verbose    bool
 	out        io.Writer
+	// recordOut, when non-nil, receives every run record in addition to out
+	// (bead pg2-dpml1).
+	recordOut io.Writer
 
 	reconcileBudget time.Duration // 0 = unbounded (pg2-a5z69)
 
@@ -188,6 +192,14 @@ func WithLogWriter(w io.Writer) Option {
 	return func(p *Pipeline) { p.out = w }
 }
 
+// WithRunRecordWriter additionally appends every per-run record (the same
+// JSON line the log writer gets) to w. `pg-desk run` points it at a bounded
+// file next to the store, because pg-router discards the stderr of a
+// successful command-role run (bead pg2-dpml1). A write failure is dropped.
+func WithRunRecordWriter(w io.Writer) Option {
+	return func(p *Pipeline) { p.recordOut = w }
+}
+
 // New constructs a Pipeline backed by a fresh gather.Gatherer — exactly
 // one per Pipeline instance, matching internal/gather's own documented
 // expectation ("the pipeline packet, 6, is expected to construct exactly
@@ -223,13 +235,40 @@ type stageEvent struct {
 // to completion but Facts/Interpretation carried a degradation),
 // "noop" (--change removed for an id the store does not know — Binding
 // decisions), or "error" (non-nil Run error; also pr-pool exit 1).
+//
+// The same line is the persistent per-run record (bead pg2-dpml1; see
+// WithRunRecordWriter): Ts, Path, Repo, PR, ContentHashChanged, AnchorWritten
+// and AnchorCause exist so a day of records can say how many sweep runs were
+// true no-ops and how many caught a change the changes feed had not reported.
 type runLogLine struct {
+	// Ts is the run's end time, RFC 3339 UTC, from the pipeline clock.
+	Ts         string `json:"ts"`
 	EntityType string `json:"entity_type"`
 	EntityID   string `json:"entity_id"`
-	Change     string `json:"change"`
-	Outcome    string `json:"outcome"`
-	Degraded   string `json:"degraded,omitempty"`
-	Error      string `json:"error,omitempty"`
+	// Repo and PR identify the pull request (PR is its number) so a record
+	// joins the sync stage's anchor-write log, whose `repo` and `pr` fields
+	// carry the same values. Both are omitted for a non-PR entity.
+	Repo string `json:"repo,omitempty"`
+	PR   int    `json:"pr,omitempty"`
+	// Path names which entry point produced the record: "full" (gather,
+	// interpret, store, sync), "interpret_only" (`run issue`, which
+	// re-interprets stored facts and neither gathers nor syncs) or "early"
+	// (a failure before the pipeline ran: args, config, store open, bead
+	// resolution).
+	Path   string `json:"path"`
+	Change string `json:"change"`
+	// ContentHashChanged is true when this run's gathered facts differ from
+	// the stored row (ignoring every `as_of` timestamp), or no row existed
+	// yet. It is false for a run that never gathered.
+	ContentHashChanged bool `json:"content_hash_changed"`
+	// AnchorWritten is true when the sync stage applied an anchor bead
+	// write; AnchorCause is that write's cause (the anchor-write log's
+	// vocabulary), set only then.
+	AnchorWritten bool   `json:"anchor_written"`
+	AnchorCause   string `json:"anchor_cause,omitempty"`
+	Outcome       string `json:"outcome"`
+	Degraded      string `json:"degraded,omitempty"`
+	Error         string `json:"error,omitempty"`
 	// Stage and ErrorClass are set only on an "error" line whose error
 	// carries a *StageError (bead pg2-gp50o): the pipeline stage that failed
 	// and a coarse failure class (Class* constants), so a failure pg-router
@@ -296,13 +335,14 @@ func (p *Pipeline) recordSyncRetry(entityID string, runErr error) error {
 func (p *Pipeline) run(ctx context.Context, entityType, entityID string, change gather.ChangeKind) error {
 	runStart := p.clock.Now()
 	var timeline []stageEvent
+	var obs runObs
 
 	stageStart := p.clock.Now()
 	facts, err := p.gatherer.Gather(ctx, entityType, entityID, change)
 	timeline = append(timeline, stageEvent{Stage: "gather", DurationMs: p.clock.Now().Sub(stageStart).Milliseconds()})
 	if err != nil {
 		err = TagStage(StageGather, err)
-		p.logRun(entityType, entityID, change, "error", "", err, runStart)
+		p.logRunObs(pathFull, obs, entityType, entityID, change, "error", "", err, runStart)
 		return fmt.Errorf("pipeline: gather %s %s: %w", entityType, entityID, err)
 	}
 
@@ -315,11 +355,11 @@ func (p *Pipeline) run(ctx context.Context, entityType, entityID string, change 
 		_, known, getErr := p.store.GetEntity(p.repo(), entityType, entityID)
 		if getErr != nil {
 			getErr = TagStage(StageKnownCheck, getErr)
-			p.logRun(entityType, entityID, change, "error", "", getErr, runStart)
+			p.logRunObs(pathFull, obs, entityType, entityID, change, "error", "", getErr, runStart)
 			return fmt.Errorf("pipeline: check entity known %s %s: %w", entityType, entityID, getErr)
 		}
 		if !known {
-			p.logRun(entityType, entityID, change, "noop", facts.Degraded, nil, runStart)
+			p.logRunObs(pathFull, obs, entityType, entityID, change, "noop", facts.Degraded, nil, runStart)
 			return nil
 		}
 	}
@@ -329,16 +369,18 @@ func (p *Pipeline) run(ctx context.Context, entityType, entityID string, change 
 	timeline = append(timeline, stageEvent{Stage: "interpret", DurationMs: p.clock.Now().Sub(stageStart).Milliseconds()})
 	if err != nil {
 		err = TagStage(StageInterpret, err)
-		p.logRun(entityType, entityID, change, "error", "", err, runStart)
+		p.logRunObs(pathFull, obs, entityType, entityID, change, "error", "", err, runStart)
 		return fmt.Errorf("pipeline: interpret %s %s: %w", entityType, entityID, err)
 	}
+
+	obs.hashChanged = p.factsChanged(entityType, entityID, facts)
 
 	stageStart = p.clock.Now()
 	interpRow, err := p.persist(entityType, entityID, facts, interp)
 	timeline = append(timeline, stageEvent{Stage: "store", DurationMs: p.clock.Now().Sub(stageStart).Milliseconds()})
 	if err != nil {
 		err = TagStage(StageStore, err)
-		p.logRun(entityType, entityID, change, "error", "", err, runStart)
+		p.logRunObs(pathFull, obs, entityType, entityID, change, "error", "", err, runStart)
 		return fmt.Errorf("pipeline: store %s %s: %w", entityType, entityID, err)
 	}
 
@@ -355,18 +397,21 @@ func (p *Pipeline) run(ctx context.Context, entityType, entityID string, change 
 	// ledger-guarded and re-entrant, and the next successful run's persist
 	// rewrites the row with an empty sync_error.
 	if entityType == entityTypePR {
-		if syncErr := p.syncer.Sync(ctx, p.repo(), entityID, change, facts, interp); syncErr != nil {
+		syncCtx, tally := sync.WithWriteTally(ctx)
+		syncErr := p.syncer.Sync(syncCtx, p.repo(), entityID, change, facts, interp)
+		obs.anchorWritten, obs.anchorCause = tally.AnchorWritten(), tally.AnchorCause()
+		if syncErr != nil {
 			interpRow.SyncError = syncErr.Error()
 			if upsertErr := p.store.UpsertInterpretation(interpRow); upsertErr != nil {
 				// A failure to even RECORD the sync error is a genuine store
 				// error (this package's own exit-1 case), unlike the sync
 				// failure itself.
 				upsertErr = TagStage(StageRecordSyncError, upsertErr)
-				p.logRun(entityType, entityID, change, "error", "", upsertErr, runStart)
+				p.logRunObs(pathFull, obs, entityType, entityID, change, "error", "", upsertErr, runStart)
 				return fmt.Errorf("pipeline: record sync_error %s %s: %w", entityType, entityID, upsertErr)
 			}
 			syncErr = TagStage(StageSync, syncErr)
-			p.logRun(entityType, entityID, change, "error", interp.Degraded, syncErr, runStart)
+			p.logRunObs(pathFull, obs, entityType, entityID, change, "error", interp.Degraded, syncErr, runStart)
 			return fmt.Errorf("pipeline: sync %s %s: %w", entityType, entityID, syncErr)
 		}
 	}
@@ -375,7 +420,7 @@ func (p *Pipeline) run(ctx context.Context, entityType, entityID string, change 
 	if interp.Degraded != "" {
 		outcome = "degraded"
 	}
-	p.logRun(entityType, entityID, change, outcome, interp.Degraded, nil, runStart)
+	p.logRunObs(pathFull, obs, entityType, entityID, change, outcome, interp.Degraded, nil, runStart)
 	if p.verbose {
 		p.printTimeline(timeline)
 	}
@@ -409,33 +454,33 @@ func (p *Pipeline) RunInterpretOnly(ctx context.Context, entityType, entityID st
 	case gather.ChangeAdded, gather.ChangeChanged, gather.ChangeRemoved, gather.ChangeSweep:
 	default:
 		err := TagStage(StageInterpretOnlyArgs, fmt.Errorf("pipeline: interpret-only %s %s: change kind %q is not one of added/changed/removed/sweep", entityType, entityID, change))
-		p.logRun(entityType, entityID, change, "error", "", err, runStart)
+		p.logRunObs(pathInterpretOnly, runObs{}, entityType, entityID, change, "error", "", err, runStart)
 		return err
 	}
 
 	entity, found, err := p.store.GetEntity(p.repo(), entityType, entityID)
 	if err != nil {
 		err = TagStage(StageLoadFacts, err)
-		p.logRun(entityType, entityID, change, "error", "", err, runStart)
+		p.logRunObs(pathInterpretOnly, runObs{}, entityType, entityID, change, "error", "", err, runStart)
 		return fmt.Errorf("pipeline: interpret-only get entity %s %s: %w", entityType, entityID, err)
 	}
 	if !found {
 		noEntityErr := TagStage(StageLoadFacts, fmt.Errorf("pipeline: interpret-only %s %s: no stored entity facts (never gathered)", entityType, entityID))
-		p.logRun(entityType, entityID, change, "error", "", noEntityErr, runStart)
+		p.logRunObs(pathInterpretOnly, runObs{}, entityType, entityID, change, "error", "", noEntityErr, runStart)
 		return noEntityErr
 	}
 
 	var facts gather.Facts
 	if err := json.Unmarshal([]byte(entity.Facts), &facts); err != nil {
 		err = TagStage(StageLoadFacts, err)
-		p.logRun(entityType, entityID, change, "error", "", err, runStart)
+		p.logRunObs(pathInterpretOnly, runObs{}, entityType, entityID, change, "error", "", err, runStart)
 		return fmt.Errorf("pipeline: interpret-only decode stored facts %s %s: %w", entityType, entityID, err)
 	}
 
 	interp, err := interpret.Interpret(facts, p.clock, p.cfg)
 	if err != nil {
 		err = TagStage(StageInterpret, err)
-		p.logRun(entityType, entityID, change, "error", "", err, runStart)
+		p.logRunObs(pathInterpretOnly, runObs{}, entityType, entityID, change, "error", "", err, runStart)
 		return fmt.Errorf("pipeline: interpret-only interpret %s %s: %w", entityType, entityID, err)
 	}
 
@@ -447,21 +492,21 @@ func (p *Pipeline) RunInterpretOnly(ctx context.Context, entityType, entityID st
 	prior, _, err := p.store.GetInterpretation(p.repo(), entityType, entityID)
 	if err != nil {
 		err = TagStage(StageStore, err)
-		p.logRun(entityType, entityID, change, "error", "", err, runStart)
+		p.logRunObs(pathInterpretOnly, runObs{}, entityType, entityID, change, "error", "", err, runStart)
 		return fmt.Errorf("pipeline: interpret-only get prior interpretation %s %s: %w", entityType, entityID, err)
 	}
 
 	interpRow, err := p.persist(entityType, entityID, facts, interp)
 	if err != nil {
 		err = TagStage(StageStore, err)
-		p.logRun(entityType, entityID, change, "error", "", err, runStart)
+		p.logRunObs(pathInterpretOnly, runObs{}, entityType, entityID, change, "error", "", err, runStart)
 		return fmt.Errorf("pipeline: interpret-only store %s %s: %w", entityType, entityID, err)
 	}
 	if prior.SyncError != "" {
 		interpRow.SyncError = prior.SyncError
 		if err := p.store.UpsertInterpretation(interpRow); err != nil {
 			err = TagStage(StageStore, err)
-			p.logRun(entityType, entityID, change, "error", "", err, runStart)
+			p.logRunObs(pathInterpretOnly, runObs{}, entityType, entityID, change, "error", "", err, runStart)
 			return fmt.Errorf("pipeline: interpret-only restore sync_error %s %s: %w", entityType, entityID, err)
 		}
 	}
@@ -470,7 +515,7 @@ func (p *Pipeline) RunInterpretOnly(ctx context.Context, entityType, entityID st
 	if interp.Degraded != "" {
 		outcome = "degraded"
 	}
-	p.logRun(entityType, entityID, change, outcome, interp.Degraded, nil, runStart)
+	p.logRunObs(pathInterpretOnly, runObs{}, entityType, entityID, change, outcome, interp.Degraded, nil, runStart)
 	if p.verbose {
 		p.printTimeline([]stageEvent{{Stage: "interpret", DurationMs: p.clock.Now().Sub(runStart).Milliseconds()}})
 	}
@@ -1061,19 +1106,117 @@ func contentHash(factsJSON []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// logRun writes the unconditional structured JSON log line for one run
-// [design 7.9]. Never returns an error: a log-encoding failure (nil
-// runErr aside, this can only happen if json.Marshal itself fails, which
-// it cannot for this fixed, all-string/int shape) falls back to a plain
-// line rather than losing the run's outcome entirely.
-func (p *Pipeline) logRun(entityType, entityID string, change gather.ChangeKind, outcome, degraded string, runErr error, start time.Time) {
+// Paths a run record can name (runLogLine.Path).
+const (
+	pathFull          = "full"
+	pathInterpretOnly = "interpret_only"
+	// PathEarly labels a record written by WriteRunRecord for a failure
+	// before any pipeline ran.
+	PathEarly = "early"
+)
+
+// runObs is what a run observed beyond its outcome, for the per-run record.
+type runObs struct {
+	hashChanged   bool
+	anchorWritten bool
+	anchorCause   string
+}
+
+// factsChanged reports whether facts differ from the facts already stored for
+// the entity, ignoring every `as_of` timestamp (a re-read stamps a new one
+// even when nothing changed). No stored row counts as changed; so does an
+// unreadable or undecodable one, since a record that wrongly says "nothing
+// changed" would hide a real change.
+func (p *Pipeline) factsChanged(entityType, entityID string, facts gather.Facts) bool {
+	prior, found, err := p.store.GetEntity(p.repo(), entityType, entityID)
+	if err != nil || !found {
+		return true
+	}
+	var priorFacts gather.Facts
+	if err := json.Unmarshal([]byte(prior.Facts), &priorFacts); err != nil {
+		return true
+	}
+	return contentSignature(priorFacts) != contentSignature(facts)
+}
+
+// contentSignature hashes facts with every `as_of` key, at any depth, removed.
+func contentSignature(facts gather.Facts) string {
+	b, err := json.Marshal(facts)
+	if err != nil {
+		return ""
+	}
+	var v any
+	if err := json.Unmarshal(b, &v); err != nil {
+		return ""
+	}
+	stripAsOf(v)
+	b, err = json.Marshal(v) // map keys marshal sorted: deterministic
+	if err != nil {
+		return ""
+	}
+	return contentHash(b)
+}
+
+func stripAsOf(v any) {
+	switch t := v.(type) {
+	case map[string]any:
+		delete(t, "as_of")
+		for _, c := range t {
+			stripAsOf(c)
+		}
+	case []any:
+		for _, c := range t {
+			stripAsOf(c)
+		}
+	}
+}
+
+// prNumberOf returns the pull-request number an entity id names, which is the
+// whole id when numeric or the digits after the last '#' in a qualified
+// "<repo>#<n>" id; 0 when there is none.
+func prNumberOf(entityID string) int {
+	s := entityID
+	if i := strings.LastIndex(s, "#"); i >= 0 {
+		s = s[i+1:]
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
+}
+
+// WriteRunRecord writes one run record (the runLogLine shape) to w. logRunObs
+// uses it for every pipeline run; the cmd layer uses it, with PathEarly, for a
+// failure that happens before a Pipeline exists. A nil w is a no-op.
+func WriteRunRecord(w io.Writer, now time.Time, d time.Duration, repo, path, entityType, entityID string, change gather.ChangeKind, outcome, degraded string, runErr error) {
+	if w == nil {
+		return
+	}
+	WriteRunRecordObs(w, now, d, repo, path, entityType, entityID, change, outcome, degraded, runErr, false, false, "")
+}
+
+// WriteRunRecordObs is WriteRunRecord with the hash-changed and anchor fields.
+func WriteRunRecordObs(w io.Writer, now time.Time, d time.Duration, repo, path, entityType, entityID string, change gather.ChangeKind, outcome, degraded string, runErr error, hashChanged, anchorWritten bool, anchorCause string) {
+	if w == nil {
+		return
+	}
 	line := runLogLine{
-		EntityType: entityType,
-		EntityID:   entityID,
-		Change:     string(change),
-		Outcome:    outcome,
-		Degraded:   degraded,
-		DurationMs: p.clock.Now().Sub(start).Milliseconds(),
+		Ts:                 now.UTC().Format(time.RFC3339),
+		EntityType:         entityType,
+		EntityID:           entityID,
+		Path:               path,
+		Change:             string(change),
+		ContentHashChanged: hashChanged,
+		AnchorWritten:      anchorWritten,
+		AnchorCause:        anchorCause,
+		Outcome:            outcome,
+		Degraded:           degraded,
+		DurationMs:         d.Milliseconds(),
+	}
+	if entityType == entityTypePR {
+		line.Repo = repo
+		line.PR = prNumberOf(entityID)
 	}
 	if runErr != nil {
 		line.Error = runErr.Error()
@@ -1081,11 +1224,34 @@ func (p *Pipeline) logRun(entityType, entityID string, change gather.ChangeKind,
 	}
 	b, err := json.Marshal(line)
 	if err != nil {
-		fmt.Fprintf(p.out, "{\"outcome\":\"log-error\",\"error\":%q}\n", err.Error())
+		fmt.Fprintf(w, "{\"outcome\":\"log-error\",\"error\":%q}\n", err.Error())
 		return
 	}
-	fmt.Fprintln(p.out, string(b))
+	fmt.Fprintln(w, string(b))
 }
+
+// logRunObs writes the unconditional structured JSON log line for one run
+// [design 7.9] to the log writer and, when configured, the persistent run
+// record (WithRunRecordWriter). Never returns an error: a log-encoding
+// failure (which cannot happen for this fixed, all-string/int/bool shape)
+// falls back to a plain line rather than losing the run's outcome entirely.
+func (p *Pipeline) logRunObs(path string, obs runObs, entityType, entityID string, change gather.ChangeKind, outcome, degraded string, runErr error, start time.Time) {
+	now := p.clock.Now()
+	for _, w := range []io.Writer{p.out, p.recordOut} {
+		WriteRunRecordObs(w, now, now.Sub(start), p.repo(), path, entityType, entityID, change, outcome, degraded, runErr, obs.hashChanged, obs.anchorWritten, obs.anchorCause)
+	}
+}
+
+// RecordRun writes a run record for an outcome the pipeline entry points do
+// not themselves log, namely `run issue` for a ticket with no linked PR (a
+// "noop" the invocation would otherwise leave no trace of).
+func (p *Pipeline) RecordRun(entityType, entityID string, change gather.ChangeKind, outcome string, start time.Time) {
+	p.logRunObs(pathInterpretOnly, runObs{}, entityType, entityID, change, outcome, "", nil, start)
+}
+
+// Now returns the pipeline clock's current time, so a caller can take the
+// start time RecordRun measures its duration from.
+func (p *Pipeline) Now() time.Time { return p.clock.Now() }
 
 // printTimeline prints the --verbose three-stage timeline, one JSON line
 // per stage [design 7.9].

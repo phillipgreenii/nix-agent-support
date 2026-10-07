@@ -432,7 +432,7 @@ func (rc *runContext) ensureAnchor(ctx context.Context, coOwned, actsAsMine bool
 					return fmt.Errorf("sync: set anchor priority %s: %w", newID, err)
 				}
 			}
-			rc.logAnchorWrite(newID, "created", conflict)
+			rc.logAnchorWrite(ctx, newID, "created", conflict)
 		}
 		rc.anchorID = newID
 		return rc.upsertLedger(KindAnchor, rc.anchorID, hash, "")
@@ -469,7 +469,7 @@ func (rc *runContext) ensureAnchor(ctx context.Context, coOwned, actsAsMine bool
 		if err := rc.syncer.client.Update(ctx, rc.anchorID, upd); err != nil {
 			return fmt.Errorf("sync: update anchor %s: %w", rc.anchorID, err)
 		}
-		rc.logAnchorWrite(rc.anchorID, rc.anchorWriteCause(conflict, hashFor), conflict)
+		rc.logAnchorWrite(ctx, rc.anchorID, rc.anchorWriteCause(conflict, hashFor), conflict)
 	}
 	return rc.upsertLedger(KindAnchor, rc.anchorID, hash, "")
 }
@@ -478,7 +478,8 @@ func (rc *runContext) ensureAnchor(ctx context.Context, coOwned, actsAsMine bool
 // pg2-n6d8y). Every anchor write bumps the bead's updated_at, which the issue
 // changes feed echoes as a desk-issue run, so the cause is what attributes a
 // residual echo to a conflict flip, a real PR change, or a degraded read.
-func (rc *runContext) logAnchorWrite(beadID, cause string, conflict bool) {
+func (rc *runContext) logAnchorWrite(ctx context.Context, beadID, cause string, conflict bool) {
+	RecordAnchorWrite(ctx, cause)
 	rc.syncer.logger().Info(
 		"pg-desk sync: anchor write",
 		"bead", beadID,
