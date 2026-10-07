@@ -99,6 +99,43 @@ func helperMain() {
 			`{"change":"changed","source":"b2","entity":{"id":"e2","title":""}}`+
 			`]}`)
 		os.Exit(2)
+	case "changes_pr_rows":
+		// bead pg2-1ldvy: five rows over two PRs exercising every field of
+		// the retry-window change identity (change kind, source, entity id,
+		// head_sha). Entities carry the volatile as_of/stale fields.
+		_, _ = fmt.Fprint(os.Stdout, `{"sources":[{"backend":"gh","status":"succeeded","version":1,"truncated":false}],"changes":[`+
+			`{"change":"changed","source":"gh","entity":{"id":"o/r#1","title":"One","head_sha":"h1","as_of":"2026-10-07T10:00:00Z","stale":false}},`+
+			`{"change":"changed","source":"gh","entity":{"id":"o/r#1","title":"One","head_sha":"h2","as_of":"2026-10-07T10:00:00Z","stale":false}},`+
+			`{"change":"added","source":"gh","entity":{"id":"o/r#1","title":"One","head_sha":"h1","as_of":"2026-10-07T10:00:00Z","stale":false}},`+
+			`{"change":"changed","source":"other","entity":{"id":"o/r#1","title":"One","head_sha":"h1","as_of":"2026-10-07T10:00:00Z","stale":false}},`+
+			`{"change":"changed","source":"gh","entity":{"id":"o/r#2","title":"Two","head_sha":"h1","as_of":"2026-10-07T10:00:00Z","stale":false}}`+
+			`]}`)
+		os.Exit(0)
+	case "changes_pr_one":
+		// bead pg2-1ldvy: ONE changed row whose entity fields come from the
+		// environment, so a test can vary the volatile (as_of, stale, title,
+		// comment_count) and stable (head_sha, version) fields independently
+		// across invocations. An empty GO_HELPER_HEAD / GO_HELPER_VERSION
+		// leaves that field out of the entity entirely.
+		entity := map[string]any{
+			"id":            "o/r#1",
+			"title":         os.Getenv("GO_HELPER_TITLE"),
+			"as_of":         os.Getenv("GO_HELPER_ASOF"),
+			"stale":         os.Getenv("GO_HELPER_STALE") == "1",
+			"comment_count": len(os.Getenv("GO_HELPER_TITLE")),
+		}
+		if h := os.Getenv("GO_HELPER_HEAD"); h != "" {
+			entity["head_sha"] = h
+		}
+		if v := os.Getenv("GO_HELPER_VERSION"); v != "" {
+			entity["version"] = v
+		}
+		body, _ := json.Marshal(map[string]any{
+			"sources": []any{},
+			"changes": []any{map[string]any{"change": "changed", "source": "gh", "entity": entity}},
+		})
+		_, _ = os.Stdout.Write(body)
+		os.Exit(0)
 	case "changes_ok_empty":
 		_, _ = fmt.Fprint(os.Stdout, `{"sources":[],"changes":[]}`)
 		os.Exit(0)

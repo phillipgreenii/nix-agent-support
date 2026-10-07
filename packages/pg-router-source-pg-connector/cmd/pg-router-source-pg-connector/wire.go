@@ -2,9 +2,11 @@
 // rawItem, confirmed by reading
 // packages/pg-router/internal/query/command.go's rawItem struct during
 // this packet's own curation pass [design: section 6.1]. This adapter
-// emits only id/type/title/metadata: at/expiresAt/emit stay absent
-// (omitted by pg-router's own omitempty on decode) simply by never having
-// a field for them here at all.
+// emits id/type/title/metadata always. at/expiresAt (bead pg2-1ldvy) are
+// emitted ONLY by "changes --retry-window <d>" with d > 0 and are omitted
+// (omitempty) otherwise, so every other output stays byte-identical to what
+// it was before they existed; emit stays absent (this adapter has no field
+// for it).
 package main
 
 import (
@@ -18,6 +20,10 @@ type rawItem struct {
 	Type     string         `json:"type"`
 	Title    string         `json:"title"`
 	Metadata map[string]any `json:"metadata"`
+	// At and ExpiresAt are RFC3339 strings; set only by changes with a
+	// positive --retry-window (changes.go).
+	At        string `json:"at,omitempty"`
+	ExpiresAt string `json:"expiresAt,omitempty"`
 }
 
 // writeItems encodes items as one JSON array to stdout — every

@@ -24,14 +24,49 @@ flowchart LR
     ADAPTER -->|"execs, reads stdout+stderr, reads exit code"| CONNECTOR
 ```
 
-- **`changes <type> <query> --consumer <id> [--beads-dir <path>]`** — runs
-  `pg-connector <type> changes --query <query> --consumer <id> --output json`, and reprints its
-  response as one rawItem per reported change. Every printed item's `metadata.degraded_sources`
+- **`changes <type> <query> --consumer <id> [--beads-dir <path>] [--retry-window <duration>]`** —
+  runs `pg-connector <type> changes --query <query> --consumer <id> --output json`, and reprints
+  its response as one rawItem per reported change. Every printed item's `metadata.entity_id` is the
+  bare entity id (always, bead `pg2-1ldvy`), and its `metadata.degraded_sources`
   names every backend that answered degraded on that ONE invocation (the same list on every item,
   never a per-entity fact). When at least one of those degraded backends also reported a reason
   (pg-connector's own `sources[].reason`), `metadata.degraded_reasons` carries it too, as a
   `{backend: reason}` map — omitted entirely when no degraded backend on that call reported one
   (bead `pg2-wa5uk`).
+
+  `--retry-window <duration>` (bead `pg2-1ldvy`; default `0` = off) gives the router a bounded
+  retry window per change. With the default, the item `id` is the bare entity id and the output is
+  byte-identical to a call without the flag apart from `metadata.entity_id`; no `at`/`expiresAt` is
+  printed, so every event is born expired and a failed dispatch is offered once (pg-router
+  INV-EVT-4). Only when the window is greater than zero:
+  - the item `id` becomes `<entity id>@<12 hex>`, the first 12 hex characters of the SHA-256 over
+    the canonical JSON of `{change, source, entity_id, head_sha?, version?}` (keys in that order,
+    `head_sha`/`version` taken from the entity only when it carries a non-null one). Nothing else
+    reaches the digest: not `as_of` or `stale` (which vary per fetch; pg-connector's own ledger
+    hash excludes the same two), and not content such as the title or comment counts. Two reports
+    of the same row therefore get the same id (a crash re-report, or a repeated identical row,
+    dedupes in the queue: "a duplicate, never a loss"), while a new head, a new change kind, or a
+    different source gets a new id and is queued as a separate event even while the first is in
+    flight;
+  - the item carries `at` (this invocation's emit time, UTC, whole seconds, one value for every
+    item of the call) and `expiresAt` = `at` + window, so the router retries a failed dispatch of
+    that event until `expiresAt` (INV-EVT-4) and dedupes the same id for as long as it is retained
+    (INV-EVT-3).
+
+  The suffix exists only on `changes` items. Every other query, and every consumer that uses
+  `Item.ID` as a bead or entity id (the escalation and triager roles, `RefreshItem`, the ccpool
+  handler), keeps bare ids; a handler that needs the real entity id behind a suffixed event reads
+  `metadata.entity_id`. A negative window is a usage error.
+
+  Known trade-offs of the digest, accepted with the retry window (bead `pg2-1ldvy`):
+  - **A -> B -> A flip.** If a PR's head goes A, then B, then back to A inside one window, the third
+    report hashes to the first report's id and is deduped while that event is still retained: a
+    rare lost update, caught by the next sweep. The emit time is deliberately NOT part of the
+    digest, because it would defeat crash re-report dedup.
+  - **Content-only changes on one head** (a comment, a label) are `changed` rows with the same
+    head, so they share an id inside the window and coalesce into the first event; the next sweep
+    picks up what the window absorbed.
+
 - **`sweep <type> <query>... [--beads-dir <path>]`** — runs
   `pg-connector <type> list --query <query> --ids-only --output json` once per named query
   (one or more), unions the matched ids by reading each response's top-level `present_ids` array
