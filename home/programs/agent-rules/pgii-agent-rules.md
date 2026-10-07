@@ -89,7 +89,10 @@
 - **L-2** After a timeout, the SAME command MUST NOT be re-issued unchanged; re-run it in the
   background or with a larger explicit timeout, and narrow it if possible.
 - **L-3** A subagent brief that instructs a build, check, or full test run MUST state the timeout to
-  use, or say to run it in the background.
+  use, or say to run it in the background. A brief that instructs a nix run (`nix build`,
+  `nix flake check`, `nix eval`, `nix run`, `nix fmt`, `darwin-rebuild`) MUST also name
+  `pg-nix-log-wrapped` as the command prefix (the always-on workspace rule, epic pg2-kqrrs) and
+  state the timeout, since a subagent does not reliably inherit that rule.
 
 #### Scratch / Payload File Writes
 
