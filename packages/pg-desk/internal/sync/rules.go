@@ -303,15 +303,51 @@ type anchorHashInput struct {
 // in conflict while the anchor still carries its pbase marker, and stays out
 // otherwise, so a transient UNKNOWN between two DIRTY reads no longer clears
 // and re-opens the episode (two writes each time, bead pg2-jj0ym).
-func (rc *runContext) anchorConflict(curLabels []string) bool {
+//
+// When the work-beads read was degraded (no anchor entity, so no labels to
+// consult), the episode is held from the ledger instead (bead pg2-n6d8y): the
+// ledger hash records the conflict state last applied, so the UNKNOWN read
+// adopts whichever conflict value reproduces that hash. hashFor is the
+// anchor's content hash for a given conflict value. With no usable ledger
+// hash the read still counts as "no conflict".
+func (rc *runContext) anchorConflict(curLabels []string, hashFor func(conflict bool) string) bool {
 	if rc.pr.hasConflict() {
 		return true
 	}
 	if rc.pr.conflictUnknown() {
+		if rc.anchorEntity == nil && rc.anchorID != "" && rc.ledgerAnchor.LastSyncedContentHash != "" {
+			switch rc.ledgerAnchor.LastSyncedContentHash {
+			case hashFor(true):
+				return true
+			case hashFor(false):
+				return false
+			}
+		}
 		_, held := parsePbase(curLabels)
 		return held
 	}
 	return false
+}
+
+// anchorWriteCause names why ensureAnchor is about to write an existing
+// anchor bead, for the diagnostic log (bead pg2-n6d8y). The ledger stores only
+// the content hash, so the cause is derived by asking whether flipping just
+// the conflict episode reproduces the last recorded hash:
+//   - ledger-unrecorded: no hash was recorded yet.
+//   - conflict-flip: only the conflict episode differs from the last write
+//     (the flapping this log exists to confirm or rule out).
+//   - pr-content-change: something else differs (state, branch, base, author,
+//     url, draft, co-owned, area labels).
+func (rc *runContext) anchorWriteCause(conflict bool, hashFor func(conflict bool) string) string {
+	recorded := rc.ledgerAnchor.LastSyncedContentHash
+	switch {
+	case recorded == "":
+		return "ledger-unrecorded"
+	case hashFor(!conflict) == recorded:
+		return "conflict-flip"
+	default:
+		return "pr-content-change"
+	}
 }
 
 // ensureAnchor implements the Anchor rule (design section 7.5): exactly one
@@ -326,9 +362,7 @@ func (rc *runContext) ensureAnchor(ctx context.Context, coOwned, actsAsMine bool
 		}
 		curLabels = rc.anchorEntity.Labels
 	}
-	conflict := rc.anchorConflict(curLabels)
-	addLabels, removeLabels, priority, setPriority := priorityDelta(curPriority, curLabels, actsAsMine, conflict)
-
+	area := rc.areaLabels()
 	// The hash covers the DESIRED state, never the delta against the anchor's
 	// CURRENT labels (bead pg2-jj0ym). The live delta is empty once applied,
 	// so hashing it made every applied nudge look like a content change on
@@ -337,16 +371,19 @@ func (rc *runContext) ensureAnchor(ctx context.Context, coOwned, actsAsMine bool
 	// echoes as a desk-issue run. The stateless delta below is a pure
 	// function of (actsAsMine, conflict) and is empty when there is no
 	// conflict, so a quiet anchor keeps the hash it always had.
-	hashAdd, hashRemove, hashPriority, hashSetPriority := priorityDelta(bdDefaultPriority, nil, actsAsMine, conflict)
-
-	area := rc.areaLabels()
-	hash := contentHash(anchorHashInput{
-		State: rc.pr.State, Branch: rc.pr.Branch, Base: rc.pr.Base, Author: rc.pr.Author, URL: rc.pr.URL,
-		Draft: rc.pr.Draft, CoOwned: coOwned,
-		AddLabels: sortedCopy(hashAdd), RemoveLabels: sortedCopy(hashRemove),
-		Priority: hashPriority, SetPriority: hashSetPriority,
-		AreaLabels: area,
-	})
+	hashFor := func(conflict bool) string {
+		hashAdd, hashRemove, hashPriority, hashSetPriority := priorityDelta(bdDefaultPriority, nil, actsAsMine, conflict)
+		return contentHash(anchorHashInput{
+			State: rc.pr.State, Branch: rc.pr.Branch, Base: rc.pr.Base, Author: rc.pr.Author, URL: rc.pr.URL,
+			Draft: rc.pr.Draft, CoOwned: coOwned,
+			AddLabels: sortedCopy(hashAdd), RemoveLabels: sortedCopy(hashRemove),
+			Priority: hashPriority, SetPriority: hashSetPriority,
+			AreaLabels: area,
+		})
+	}
+	conflict := rc.anchorConflict(curLabels, hashFor)
+	addLabels, removeLabels, priority, setPriority := priorityDelta(curPriority, curLabels, actsAsMine, conflict)
+	hash := hashFor(conflict)
 
 	metadata := map[string]string{
 		"repo": rc.repo, "pr_number": strconv.Itoa(rc.prNumber),
@@ -378,6 +415,7 @@ func (rc *runContext) ensureAnchor(ctx context.Context, coOwned, actsAsMine bool
 					return fmt.Errorf("sync: set anchor priority %s: %w", newID, err)
 				}
 			}
+			rc.logAnchorWrite(newID, "created", conflict)
 		}
 		rc.anchorID = newID
 		return rc.upsertLedger(KindAnchor, rc.anchorID, hash, "")
@@ -414,8 +452,27 @@ func (rc *runContext) ensureAnchor(ctx context.Context, coOwned, actsAsMine bool
 		if err := rc.syncer.client.Update(ctx, rc.anchorID, upd); err != nil {
 			return fmt.Errorf("sync: update anchor %s: %w", rc.anchorID, err)
 		}
+		rc.logAnchorWrite(rc.anchorID, rc.anchorWriteCause(conflict, hashFor), conflict)
 	}
 	return rc.upsertLedger(KindAnchor, rc.anchorID, hash, "")
+}
+
+// logAnchorWrite records one applied anchor bead write and its cause (bead
+// pg2-n6d8y). Every anchor write bumps the bead's updated_at, which the issue
+// changes feed echoes as a desk-issue run, so the cause is what attributes a
+// residual echo to a conflict flip, a real PR change, or a degraded read.
+func (rc *runContext) logAnchorWrite(beadID, cause string, conflict bool) {
+	rc.syncer.logger().Info(
+		"pg-desk sync: anchor write",
+		"bead", beadID,
+		"repo", rc.repo,
+		"pr", rc.prNumber,
+		"cause", cause,
+		"conflict", conflict,
+		"conflict_unknown", rc.pr.conflictUnknown(),
+		"anchor_entity", rc.anchorEntity != nil,
+		"mode", rc.mode,
+	)
 }
 
 type cycleHashInput struct {

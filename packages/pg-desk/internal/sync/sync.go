@@ -54,6 +54,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/gather"
@@ -77,6 +78,10 @@ type Syncer struct {
 	store  *store.Store
 	client *issueClient
 	clock  interpret.Clock
+	// log receives the anchor-write diagnostic (ensureAnchor); nil means
+	// slog.Default(), resolved at log time so a handler installed after New
+	// still applies.
+	log *slog.Logger
 }
 
 // Option configures a Syncer constructed by New.
@@ -87,6 +92,20 @@ type Option func(*Syncer)
 // clock.
 func WithClock(c interpret.Clock) Option {
 	return func(s *Syncer) { s.clock = c }
+}
+
+// WithLogger overrides the logger the anchor-write diagnostic goes to
+// (default slog.Default()). Tests inject a capturing logger.
+func WithLogger(l *slog.Logger) Option {
+	return func(s *Syncer) { s.log = l }
+}
+
+// logger returns the configured logger, or slog.Default().
+func (s *Syncer) logger() *slog.Logger {
+	if s.log != nil {
+		return s.log
+	}
+	return slog.Default()
 }
 
 // New constructs a Syncer backed by cfg and st. The caller owns st's
