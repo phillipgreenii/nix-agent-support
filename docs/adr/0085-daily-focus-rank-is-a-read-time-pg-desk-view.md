@@ -5,14 +5,14 @@
 **Date**: 2026-10-06
 **Deciders**: phillipg
 
-This ADR amends ADR 0077's decoration-versus-decision rule in place, and extends ADR 0081's
+This ADR amends that decoration-versus-decision rule (the design's "Where new logic goes" section, carried by ADR 0077) in place, and extends ADR 0081's
 read-time rule from attention to the daily-focus rank. The daily-focus design that needs it is
 `2026-09-23-daily-focus-store-first-design.md`, which is provenance only because, per this repo's
 citation conventions, the files under `docs/superpowers/specs/` are not durable citation targets.
 
 ## Context
 
-ADR 0077 sorts every new behavior into a decoration (a fact derived from what pg-desk already holds,
+The entity change flow design's "Where new logic goes" section, carried by ADR 0077 through S2 and G5, sorts every new behavior into a decoration (a fact derived from what pg-desk already holds,
 with no side effect), a decision (anything that creates, changes or closes a work item, label,
 annotation or external write) or a role. Its closing sentence reads "Cross-entity judgment that
 chooses an outcome (for example daily-focus ranking) is a decision, not a decoration", and G5 puts
@@ -31,12 +31,13 @@ written rule disagree on the one example the rule names.
    writes nothing, execs nothing and mints no work. It is computed on every read and never cached.
 2. **Only the act that creates, changes or closes work remains a decision.** Minting a bead for an
    item the operator selected is done by a pg-decider rule (kind `focus-item`), reacting to the
-   `focus.selected` annotation that `focus select` and `focus pull` write. pg-desk MUST NOT contain
+   `focus_selected` annotation that `focus select` and `focus pull` write. pg-desk MUST NOT contain
    the work kind or its dedup-key logic, and MUST NOT execute a tracker write verb (G5 unchanged).
-3. **The rule in ADR 0077's decoration-versus-decision text is read accordingly.** "Cross-entity
+3. **The decoration-versus-decision rule ("Where new logic goes" in the design, carried by ADR 0077) is read accordingly.** "Cross-entity
    judgment that chooses an outcome" is a decision when it causes a write; the same judgment
    expressed as a read-only view is a view. The closing sentence's example, daily-focus ranking, is
    therefore a view, and its minting is the decision.
+4. **Operator-invoked pg-desk verbs record operator input as mechanism.** `focus select` and `focus pull` write the selection row and the `focus_selected` annotation, and `--merge` writes an external link, exactly as `hide`, `wip` and `annotate` do. "Writes nothing" is true of the rank, not of those verbs; they record what the operator said, and the decider decides only what work exists, including withdrawing a focus bead when the operator strikes its item.
 
 ## Consequences
 

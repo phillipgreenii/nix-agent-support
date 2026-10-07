@@ -76,7 +76,8 @@ pg-desk-owned plugin that its `attention.sources` registry names, because that i
 while code-level dependency stays pg-desk to pg-connector only. No decision-log row is added and
 S1 to S35 are unchanged.
 
-**Amended 2026-10-06** (ADR 0085): the decoration-versus-decision rule's closing example is
+**Amended 2026-10-06** (ADR 0085): the decoration-versus-decision rule ("Where new logic goes" in
+the entity change flow design, which this ADR carries through S2 and G5) has its closing example
 re-read. A read-only, side-effect-free cross-entity view over stored facts, such as the daily-focus
 rank, lives in pg-desk; minting work from a selection remains a decider's decision. No decision-log
 row is added and S1 to S35 are unchanged.
