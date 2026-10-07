@@ -250,6 +250,27 @@ func (p prShowFields) hasConflict() bool {
 	return p.Mergeable == "CONFLICTING" || p.MergeStateStatus == "DIRTY"
 }
 
+// conflictUnknown reports that this read carries NO definite mergeability
+// answer (bead pg2-jj0ym): GitHub computes mergeability lazily, and the
+// connector reports the interim state as UNKNOWN (73% of stored PRs on
+// 2026-10-07). It is true only when the read is not a conflict AND neither
+// field gives a definite answer — a MERGEABLE/CONFLICTING mergeable value, or
+// a merge-state status other than UNKNOWN, is definite. A read with no
+// mergeability data at all (both fields empty) is not "unknown": it keeps its
+// historical meaning of "no conflict".
+func (p prShowFields) conflictUnknown() bool {
+	if p.hasConflict() {
+		return false
+	}
+	if p.Mergeable == "MERGEABLE" || p.Mergeable == "CONFLICTING" {
+		return false
+	}
+	if p.MergeStateStatus != "" && p.MergeStateStatus != "UNKNOWN" {
+		return false
+	}
+	return p.Mergeable == "UNKNOWN" || p.MergeStateStatus == "UNKNOWN"
+}
+
 func decodePRShow(raw json.RawMessage) (prShowFields, error) {
 	var p prShowFields
 	if len(raw) == 0 {

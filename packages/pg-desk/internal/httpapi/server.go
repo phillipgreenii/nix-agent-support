@@ -258,6 +258,15 @@ type Payload struct {
 // Callers MUST have already confirmed store.HasAnyInterpretation (the
 // 503 gate); BuildPayload itself does not re-check it.
 func BuildPayload(st *store.Store, cfg *config.Config, now time.Time) (*Payload, error) {
+	return buildPayload(st, cfg, now, true)
+}
+
+// buildPayload is BuildPayload with the attention evaluation optional. The
+// /metrics snapshot passes withAttention=false: the gauges read only the
+// freshness fields, the dropped count and the source ages, and the evaluator
+// (an extra store walk per call) was the largest single cost of a scrape
+// (bead pg2-jj0ym).
+func buildPayload(st *store.Store, cfg *config.Config, now time.Time, withAttention bool) (*Payload, error) {
 	interps, err := st.ListInterpretations()
 	if err != nil {
 		return nil, fmt.Errorf("httpapi: build payload: %w", err)
@@ -350,7 +359,9 @@ func BuildPayload(st *store.Store, cfg *config.Config, now time.Time) (*Payload,
 	}
 	p.Sources = sources
 
-	p.Attention, p.AttentionError = evaluateAttention(st, cfg, now)
+	if withAttention {
+		p.Attention, p.AttentionError = evaluateAttention(st, cfg, now)
+	}
 
 	return p, nil
 }

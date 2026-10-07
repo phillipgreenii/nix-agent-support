@@ -221,3 +221,31 @@ func TestSourceAgeIsPerSourceAndOmitsUnknown(t *testing.T) {
 		}
 	}
 }
+
+// TestSnapshotComputedOncePerCollection guards bead pg2-jj0ym: the snapshot
+// behind the gauges (a full BuildPayload plus store reads) MUST run once per
+// scrape, not once per gauge. Nine redundant runs on a single-connection store
+// pushed a /metrics scrape past 40s, beyond any scrape timeout.
+func TestSnapshotComputedOncePerCollection(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	calls := 0
+	if _, err := New(mp, func() (Snapshot, error) {
+		calls++
+		return Snapshot{AgeSeconds: 3, SourceAges: []SourceAge{{Source: "s", Seconds: 9}}}, nil
+	}); err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	var rm metricdata.ResourceMetrics
+	for i := 1; i <= 3; i++ {
+		if err := reader.Collect(context.Background(), &rm); err != nil {
+			t.Fatalf("collect %d: %v", i, err)
+		}
+		if calls != i {
+			t.Fatalf("after collection %d snapshotFn ran %d times, want %d (once per collection)", i, calls, i)
+		}
+	}
+	if got := gaugeValue(t, findMetric(t, rm, MetricDashboardAge)); got != 3 {
+		t.Fatalf("MetricDashboardAge = %d, want 3", got)
+	}
+}

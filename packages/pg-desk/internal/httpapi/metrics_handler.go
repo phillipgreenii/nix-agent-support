@@ -53,7 +53,7 @@ func newMetricsHandler(st *store.Store, cfg *config.Config, pollInterval PollInt
 	// the /api/v1/dashboard payload can never disagree about what "now"
 	// means (design section 8).
 	snapshotFn := func() (metrics.Snapshot, error) {
-		payload, err := BuildPayload(st, cfg, nowUTC())
+		payload, err := buildPayload(st, cfg, nowUTC(), false)
 		if err != nil {
 			return metrics.Snapshot{}, err
 		}

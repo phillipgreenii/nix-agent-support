@@ -297,6 +297,23 @@ type anchorHashInput struct {
 	AreaLabels []string `json:",omitempty"`
 }
 
+// anchorConflict is the conflict signal the anchor's priority nudge runs on.
+// A definite read is used as-is. A read with no definite mergeability answer
+// (prShowFields.conflictUnknown) HOLDS the anchor's current episode: it stays
+// in conflict while the anchor still carries its pbase marker, and stays out
+// otherwise, so a transient UNKNOWN between two DIRTY reads no longer clears
+// and re-opens the episode (two writes each time, bead pg2-jj0ym).
+func (rc *runContext) anchorConflict(curLabels []string) bool {
+	if rc.pr.hasConflict() {
+		return true
+	}
+	if rc.pr.conflictUnknown() {
+		_, held := parsePbase(curLabels)
+		return held
+	}
+	return false
+}
+
 // ensureAnchor implements the Anchor rule (design section 7.5): exactly one
 // per (repo, number), created lazily, with the conflict-priority nudge
 // (priority.go) applied via `issue update`.
@@ -309,14 +326,25 @@ func (rc *runContext) ensureAnchor(ctx context.Context, coOwned, actsAsMine bool
 		}
 		curLabels = rc.anchorEntity.Labels
 	}
-	addLabels, removeLabels, priority, setPriority := priorityDelta(curPriority, curLabels, actsAsMine, rc.pr.hasConflict())
+	conflict := rc.anchorConflict(curLabels)
+	addLabels, removeLabels, priority, setPriority := priorityDelta(curPriority, curLabels, actsAsMine, conflict)
+
+	// The hash covers the DESIRED state, never the delta against the anchor's
+	// CURRENT labels (bead pg2-jj0ym). The live delta is empty once applied,
+	// so hashing it made every applied nudge look like a content change on
+	// the next run and cost a second, identical write per conflict
+	// transition; each write bumps updated_at, which the issue changes feed
+	// echoes as a desk-issue run. The stateless delta below is a pure
+	// function of (actsAsMine, conflict) and is empty when there is no
+	// conflict, so a quiet anchor keeps the hash it always had.
+	hashAdd, hashRemove, hashPriority, hashSetPriority := priorityDelta(bdDefaultPriority, nil, actsAsMine, conflict)
 
 	area := rc.areaLabels()
 	hash := contentHash(anchorHashInput{
 		State: rc.pr.State, Branch: rc.pr.Branch, Base: rc.pr.Base, Author: rc.pr.Author, URL: rc.pr.URL,
 		Draft: rc.pr.Draft, CoOwned: coOwned,
-		AddLabels: sortedCopy(addLabels), RemoveLabels: sortedCopy(removeLabels),
-		Priority: priority, SetPriority: setPriority,
+		AddLabels: sortedCopy(hashAdd), RemoveLabels: sortedCopy(hashRemove),
+		Priority: hashPriority, SetPriority: hashSetPriority,
 		AreaLabels: area,
 	})
 

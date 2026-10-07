@@ -155,3 +155,31 @@ func TestFailedEvaluationIsNeverAllClear(t *testing.T) {
 		})
 	}
 }
+
+// TestBuildPayloadWithoutAttentionSkipsTheEvaluator guards bead pg2-jj0ym: the
+// /metrics snapshot builds the payload without the attention evaluation (its
+// gauges never read it), leaves everything else identical, and does not report
+// an evaluation failure it never attempted.
+func TestBuildPayloadWithoutAttentionSkipsTheEvaluator(t *testing.T) {
+	s := store.OpenNewSchemaForTest(t)
+	seedAttentionPR(t, s, attentionRepo+"#1")
+	mustSetMeta(t, s, store.MetaKeyLastHeartbeat, "2026-10-06T11:59:30Z")
+
+	full, err := BuildPayload(s, attentionConfig(), attentionNow())
+	if err != nil {
+		t.Fatalf("BuildPayload: %v", err)
+	}
+	light, err := buildPayload(s, attentionConfig(), attentionNow(), false)
+	if err != nil {
+		t.Fatalf("buildPayload(false): %v", err)
+	}
+	if len(full.Attention) == 0 {
+		t.Fatal("precondition: the full payload should carry attention groups")
+	}
+	if light.Attention != nil || light.AttentionError != "" {
+		t.Fatalf("light payload evaluated attention: %+v / %q", light.Attention, light.AttentionError)
+	}
+	if light.AgeSeconds != full.AgeSeconds || light.Stale != full.Stale || len(light.TeamAwaitingMe) != len(full.TeamAwaitingMe) {
+		t.Fatalf("light payload differs from the full one beyond attention: %+v vs %+v", light, full)
+	}
+}

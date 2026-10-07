@@ -154,96 +154,86 @@ func New(mp metric.MeterProvider, snapshotFn SnapshotFunc) (*Emitter, error) {
 		return nil, err
 	}
 
-	if _, err := m.Int64ObservableGauge(
-		MetricDashboardAge,
-		metric.WithDescription("pipeline liveness: age, in seconds, of the /api/v1/dashboard payload's generated_at, i.e. of meta.last_heartbeat (promotes that payload's age_seconds field); NOT the age of the data, see pg_desk_source_age_seconds"),
-		metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
-			snap, err := snapshotFn()
-			if err != nil {
-				return err
-			}
-			o.Observe(int64(snap.AgeSeconds))
-			return nil
-		}),
-	); err != nil {
-		return nil, err
-	}
-
-	if _, err := m.Int64ObservableGauge(
-		MetricDashboardStale,
-		metric.WithDescription("pipeline liveness: 0 = fresh, 1 = stale, where stale means meta.last_heartbeat is older than two heartbeat periods (promotes the /api/v1/dashboard payload's stale field; explicit polarity, opposite of a presence-style gauge, see package doc); NOT the age of the data, see pg_desk_source_age_seconds"),
-		metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
-			snap, err := snapshotFn()
-			if err != nil {
-				return err
-			}
-			v := int64(0)
-			if snap.Stale {
-				v = 1
-			}
-			o.Observe(v)
-			return nil
-		}),
-	); err != nil {
-		return nil, err
-	}
-
-	if _, err := m.Int64ObservableGauge(
-		MetricDropped,
-		metric.WithDescription("point-in-time dropped_count from the /api/v1/dashboard payload (matches the My Work dashboard's collapsed Dropped PR Count panel's lastNotNull semantics)"),
-		metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
-			snap, err := snapshotFn()
-			if err != nil {
-				return err
-			}
-			o.Observe(int64(snap.DroppedCount))
-			return nil
-		}),
-	); err != nil {
-		return nil, err
-	}
-
-	for _, g := range []struct {
+	// Every snapshot-derived gauge is observed from ONE callback, so snapshotFn
+	// (a full BuildPayload plus ledger and interpretation reads) runs once per
+	// collection. Registering a callback per gauge ran it nine times per scrape
+	// on a single-connection store, which outlasted Prometheus's scrape timeout
+	// and piled abandoned scrapes up behind each other (bead pg2-jj0ym: a
+	// /metrics scrape did not answer within 40s).
+	type snapGauge struct {
 		name, desc string
-		val        func(Snapshot) int
-	}{
-		{MetricSyncErrorRows, "count of interpretation rows with a non-empty sync_error (leaked/unreconciled anchors)", func(s Snapshot) int { return s.SyncErrorRows }},
-		{MetricOldestSyncErrorAge, "age in seconds of the oldest row with a non-empty sync_error, 0 when none", func(s Snapshot) int { return s.OldestSyncErrorAgeSeconds }},
-		{MetricSyncErrorRetryingRows, "count of sync_error rows still being retried automatically (transient, within the retry bound)", func(s Snapshot) int { return s.SyncErrorRetryingRows }},
-		{MetricSyncErrorExhaustedRows, "count of sync_error rows with no automatic retry left (retry bound reached, or non-transient); these need an operator", func(s Snapshot) int { return s.SyncErrorExhaustedRows }},
-		{MetricOldestAnchorCheckAge, "age in seconds of the oldest applied, non-closed anchor's last check (ledger last_synced_at), 0 when none", func(s Snapshot) int { return s.OldestAnchorCheckAgeSeconds }},
-	} {
-		g := g
-		if _, err := m.Int64ObservableGauge(
-			g.name,
-			metric.WithDescription(g.desc),
-			metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
-				snap, err := snapshotFn()
-				if err != nil {
-					return err
+		val        func(Snapshot) int64
+		inst       metric.Int64ObservableGauge
+	}
+	gauges := []*snapGauge{
+		{
+			name: MetricDashboardAge, desc: "pipeline liveness: age, in seconds, of the /api/v1/dashboard payload's generated_at, i.e. of meta.last_heartbeat (promotes that payload's age_seconds field); NOT the age of the data, see pg_desk_source_age_seconds",
+			val: func(s Snapshot) int64 { return int64(s.AgeSeconds) },
+		},
+		{
+			name: MetricDashboardStale, desc: "pipeline liveness: 0 = fresh, 1 = stale, where stale means meta.last_heartbeat is older than two heartbeat periods (promotes the /api/v1/dashboard payload's stale field; explicit polarity, opposite of a presence-style gauge, see package doc); NOT the age of the data, see pg_desk_source_age_seconds",
+			val: func(s Snapshot) int64 {
+				if s.Stale {
+					return 1
 				}
-				o.Observe(int64(g.val(snap)))
-				return nil
-			}),
-		); err != nil {
+				return 0
+			},
+		},
+		{
+			name: MetricDropped, desc: "point-in-time dropped_count from the /api/v1/dashboard payload (matches the My Work dashboard's collapsed Dropped PR Count panel's lastNotNull semantics)",
+			val: func(s Snapshot) int64 { return int64(s.DroppedCount) },
+		},
+		{
+			name: MetricSyncErrorRows, desc: "count of interpretation rows with a non-empty sync_error (leaked/unreconciled anchors)",
+			val: func(s Snapshot) int64 { return int64(s.SyncErrorRows) },
+		},
+		{
+			name: MetricOldestSyncErrorAge, desc: "age in seconds of the oldest row with a non-empty sync_error, 0 when none",
+			val: func(s Snapshot) int64 { return int64(s.OldestSyncErrorAgeSeconds) },
+		},
+		{
+			name: MetricSyncErrorRetryingRows, desc: "count of sync_error rows still being retried automatically (transient, within the retry bound)",
+			val: func(s Snapshot) int64 { return int64(s.SyncErrorRetryingRows) },
+		},
+		{
+			name: MetricSyncErrorExhaustedRows, desc: "count of sync_error rows with no automatic retry left (retry bound reached, or non-transient); these need an operator",
+			val: func(s Snapshot) int64 { return int64(s.SyncErrorExhaustedRows) },
+		},
+		{
+			name: MetricOldestAnchorCheckAge, desc: "age in seconds of the oldest applied, non-closed anchor's last check (ledger last_synced_at), 0 when none",
+			val: func(s Snapshot) int64 { return int64(s.OldestAnchorCheckAgeSeconds) },
+		},
+	}
+	instruments := make([]metric.Observable, 0, len(gauges)+1)
+	for _, g := range gauges {
+		inst, err := m.Int64ObservableGauge(g.name, metric.WithDescription(g.desc))
+		if err != nil {
 			return nil, err
 		}
+		g.inst = inst
+		instruments = append(instruments, inst)
 	}
-
-	if _, err := m.Int64ObservableGauge(
+	sourceAge, err := m.Int64ObservableGauge(
 		MetricSourceAge,
 		metric.WithDescription("age, in seconds, of each source's last successful origin fetch (the connector ledger's refreshed_at), per source; a source with no recorded success exports no series"),
-		metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
-			snap, err := snapshotFn()
-			if err != nil {
-				return err
-			}
-			for _, s := range snap.SourceAges {
-				o.Observe(int64(s.Seconds), metric.WithAttributes(attribute.String("source", s.Source)))
-			}
-			return nil
-		}),
-	); err != nil {
+	)
+	if err != nil {
+		return nil, err
+	}
+	instruments = append(instruments, sourceAge)
+	if _, err := m.RegisterCallback(func(_ context.Context, o metric.Observer) error {
+		snap, err := snapshotFn()
+		if err != nil {
+			return err
+		}
+		for _, g := range gauges {
+			o.ObserveInt64(g.inst, g.val(snap))
+		}
+		for _, s := range snap.SourceAges {
+			o.ObserveInt64(sourceAge, int64(s.Seconds), metric.WithAttributes(attribute.String("source", s.Source)))
+		}
+		return nil
+	}, instruments...); err != nil {
 		return nil, err
 	}
 
