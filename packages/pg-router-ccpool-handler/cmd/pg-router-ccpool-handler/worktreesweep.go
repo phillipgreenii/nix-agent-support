@@ -38,6 +38,8 @@ import (
 //     take it;
 //   - no open or live session row in this role's pool names it (by working
 //     directory or by pgrouter.bead), read again under the lock;
+//   - no live process anywhere has it as its working directory (bead pg2-e5yw3,
+//     processCWDs), probed again under the lock; a failed probe keeps it;
 //   - its working tree is clean (so nothing uncommitted is lost) and the branch
 //     holds no commit the canonical clone's HEAD lacks (so no work is lost); an
 //     unreadable status or count keeps it;
@@ -47,12 +49,19 @@ import (
 //     drops it when a handler dies, so a killed handler's worktree is exactly one
 //     whose lock is free.
 //
-// Known residual: only this role's own pool is visible, and a per-bead worktree
-// is shared by every role's session for the bead. A session of another role,
-// idle or orphaned in ITS pool, whose handler is gone and whose worktree is
-// clean and commit-free is therefore removable here; this is the same blind spot
-// cleanupWorktree and the closed-bead reconcile already have, and the guards
-// above bound what can be lost to a clean tree.
+// Other roles' pools: only this role's own pool is visible through the rows, and
+// a per-bead worktree is shared by every role's session for the bead. A session
+// of another role whose handler is gone (spared at a daemon restart, so its flock
+// died with the handler) is invisible to the row and lock guards even though
+// claude is still running in the worktree; bead pg2-e5yw3 observed exactly that
+// (a spared escalation-triager reclaimed from under a live claude, left running
+// in a deleted directory). The live-process guard closes it without needing to
+// know any other pool: a session that is alive has a claude process whose
+// working directory is the worktree, whichever pool or handler owns it. A
+// session whose process is gone is not protected, and rightly so; the clean-tree
+// and no-unique-commits guards still bound what is lost then. The same blind
+// spot remains in cleanupWorktree and the closed-bead reconcile (not changed
+// here).
 //
 // Best effort: every failure is logged and leaves the worktree for the next
 // dispatch; it never fails the dispatch.
@@ -120,6 +129,25 @@ func sweepLeakedWorktrees(ctx context.Context, role roles.Role, deps executor.De
 			continue
 		}
 		candidates = append(candidates, c)
+	}
+	if len(candidates) > 0 && env.cwds != nil {
+		// One process listing for the whole pass, taken only when something is a
+		// candidate; reclaim re-probes under the lock. A failed probe means the
+		// sweep cannot prove any worktree unused, so it acts on none.
+		cwds, err := env.cwds(ctx)
+		if err != nil {
+			slog.Warn("worktree sweep: live-process probe failed; no action", "role", role.Name, "err", err)
+			return 0
+		}
+		kept := candidates[:0]
+		for _, c := range candidates {
+			if worktreeHeldByProcess(cwds, c) {
+				slog.Info("worktree sweep: a live process has the worktree as its working directory; keeping it", "bead", c.bead, "worktree", c.path)
+				continue
+			}
+			kept = append(kept, c)
+		}
+		candidates = kept
 	}
 	for _, c := range candidates {
 		if removed >= worktreeSweepMaxPerPass {
@@ -242,6 +270,17 @@ func reclaimLeakedWorktree(ctx context.Context, role roles.Role, deps executor.D
 	if worktreeHeldByRow(sessions, c) {
 		slog.Info("worktree sweep: a session row now names the worktree; keeping it", "bead", c.bead, "worktree", c.path)
 		return false
+	}
+	if env.cwds != nil {
+		cwds, err := env.cwds(ctx)
+		if err != nil {
+			slog.Warn("worktree sweep: live-process probe failed under lock; keeping the worktree", "bead", c.bead, "worktree", c.path, "err", err)
+			return false
+		}
+		if worktreeHeldByProcess(cwds, c) {
+			slog.Info("worktree sweep: a live process has the worktree as its working directory; keeping it", "bead", c.bead, "worktree", c.path)
+			return false
+		}
 	}
 	if _, err := os.Lstat(filepath.Join(c.admin, "locked")); err == nil {
 		slog.Info("worktree sweep: worktree is locked by git; keeping it", "bead", c.bead, "worktree", c.path)

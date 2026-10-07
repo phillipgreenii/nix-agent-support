@@ -302,6 +302,9 @@ review`. The claim is still released (status open, assignee cleared) — the lab
   - it is older than a grace window (the launch wait plus the lease TTL);
   - no open or live session row of the role's pool names it, by working directory or by bead; a row
     that is closed and no longer live does not protect it;
+  - no live process on the machine has it, or a directory inside it, as its working directory,
+    whichever role, pool or handler owns that process; a process listing that cannot be read keeps
+    every worktree;
   - its working tree is clean, and its branch holds no commit the canonical clone's `HEAD` lacks;
     an unreadable status or commit count keeps it, and so does a git refusal (the removal is never
     forced);
@@ -314,10 +317,15 @@ review`. The claim is still released (status open, assignee cleared) — the lab
   means no action. Each removal is logged and recorded as an event naming the bead, role, worktree
   and age. A worktree that is kept for any reason is left for a later dispatch or for
   `pg-disk-reclaimer`. This closes the gap `INV-CCH-15` and the session-keyed reconciles leave: each
-  of them keys on a session row. Not covered, accepted: a worktree is reclaimed only when SOME
-  worktree-isolation role next dispatches (until then it only costs disk); only the dispatching
-  role's own pool is visible, so a clean, commit-free worktree used by an idle or orphaned session
-  of another role's pool is removable (the same blind spot `INV-CCH-15` has); and a session row
+  of them keys on a session row. The live-process guard exists because only the dispatching role's
+  own pool is visible to the row guard, and a per-bead worktree is shared by every role's session
+  for the bead: a session of another role whose handler is gone (spared at a daemon restart) shows
+  in no visible row and holds no lock, yet its agent process is still running in the worktree, and
+  reclaiming it leaves that process in a deleted directory (bead `pg2-e5yw3`). Not covered,
+  accepted: a worktree is reclaimed only when SOME worktree-isolation role next dispatches (until
+  then it only costs disk); a clean, commit-free worktree whose session in another role's pool has
+  no running process is removable (the same blind spot `INV-CCH-15` has, now bounded to sessions
+  that are not running); and a session row
   left in `starting`, `ready`, `working` or `errored` by a killed handler is bounded by
   `INV-CCH-18`'s lease, not by this invariant (a lease-bearing row is reclaimed or budget-stopped
   there, and its worktree follows it; a leaseless one is bounded by `ccpool`'s idle timeout, after

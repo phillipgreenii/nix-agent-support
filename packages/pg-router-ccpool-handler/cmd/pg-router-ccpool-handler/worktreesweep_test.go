@@ -529,3 +529,141 @@ func TestHelperHoldWorktreeLock(t *testing.T) {
 	os.Stdout.WriteString("locked\n")
 	select {} // until killed
 }
+
+// Bead pg2-e5yw3. A session of a NON-dispatching role, spared at a daemon
+// restart, is alive in its own pool: the dispatching role's pool shows no row for
+// it (h.cc is empty) and its handler's worktree flock died with the handler, yet
+// claude is still running with the worktree as its working directory. The sweep
+// must keep it. The probe seam stands in for `lsof -d cwd`.
+func TestSweep_keptWhileALiveProcessHasTheWorktreeAsItsCWD(t *testing.T) {
+	cases := []struct {
+		name string
+		cwds func(path string) []string
+	}{
+		{"cwd is the worktree root", func(p string) []string { return []string{"/", p} }},
+		{"cwd is a subdirectory of the worktree", func(p string) []string { return []string{filepath.Join(p, "pkg", "sub")} }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newSweepHarness(t)
+			path := h.leak("zr-k") // no row in the dispatching role's pool, lock free, clean, no commits
+			h.env.cwds = func(context.Context) ([]string, error) { return tc.cwds(path), nil }
+			if got := h.sweep(); got != 0 {
+				t.Errorf("removed %d, want 0: a live process is running in the worktree", got)
+			}
+			h.wantKept(path, "zr-k")
+			if evs := h.reclaimEvents(); len(evs) != 0 {
+				t.Errorf("no worktree_reclaimed event expected, got %v", evs)
+			}
+		})
+	}
+}
+
+// Control for the test above: the same leaked worktree IS reclaimed when no live
+// process is in it (including one in a sibling whose name merely shares the
+// prefix), so the guard is the only thing that kept it.
+func TestSweep_reclaimedWhenNoLiveProcessIsInTheWorktree(t *testing.T) {
+	h := newSweepHarness(t)
+	path := h.leak("zr-k")
+	h.env.cwds = func(context.Context) ([]string, error) {
+		return []string{"/", h.wtDir, path + "-sibling", filepath.Join(h.wtDir, "other")}, nil
+	}
+	if got := h.sweep(); got != 1 || h.exists(path) {
+		t.Fatalf("removed=%d exists=%v, want the unused worktree reclaimed", got, h.exists(path))
+	}
+}
+
+// A probe that cannot say whether a process is in the worktree is not evidence
+// that none is: the sweep acts on nothing.
+func TestSweep_probeErrorMeansNoAction(t *testing.T) {
+	h := newSweepHarness(t)
+	path := h.leak("zr-k")
+	h.env.cwds = func(context.Context) ([]string, error) { return nil, errors.New("lsof: boom") }
+	if got := h.sweep(); got != 0 {
+		t.Errorf("removed %d on a probe error, want 0", got)
+	}
+	h.wantKept(path, "zr-k")
+}
+
+// The process can appear between the pre-filter listing and the exclusive lock:
+// the probe is repeated under the lock.
+func TestSweep_processAppearingBeforeTheLockKeepsTheWorktree(t *testing.T) {
+	h := newSweepHarness(t)
+	path := h.leak("zr-k")
+	calls := 0
+	h.env.cwds = func(context.Context) ([]string, error) {
+		calls++
+		if calls == 1 {
+			return []string{"/"}, nil
+		}
+		return []string{path}, nil
+	}
+	if got := h.sweep(); got != 0 {
+		t.Errorf("removed %d, want 0: a process took the worktree before the lock", got)
+	}
+	if calls != 2 {
+		t.Errorf("probe called %d times, want 2 (pre-filter and under the lock)", calls)
+	}
+	h.wantKept(path, "zr-k")
+}
+
+// End to end with the production probe: a REAL process whose working directory is
+// the worktree (what the spared claude is), found by the real lsof. Reclaimed
+// once the process is gone.
+func TestSweep_realProcessInTheWorktreeIsFoundByLsof(t *testing.T) {
+	if _, err := exec.LookPath("lsof"); err != nil {
+		t.Skip("lsof not available")
+	}
+	if _, err := exec.LookPath("sleep"); err != nil {
+		t.Skip("sleep not available")
+	}
+	h := newSweepHarness(t)
+	path := h.leak("zr-k")
+	h.env.cwds = processCWDs
+
+	cmd := exec.Command("sleep", "300")
+	cmd.Dir = path
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+
+	// lsof can lag the exec by an instant; poll briefly until it sees the child.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		cwds, err := processCWDs(context.Background())
+		if err != nil {
+			t.Skipf("lsof cannot list working directories here: %v", err)
+		}
+		if worktreeHeldByProcess(cwds, leakedWorktree{path: path}) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Skip("lsof did not report the child's working directory (restricted environment)")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	if got := h.sweep(); got != 0 {
+		t.Fatalf("removed %d while a real process ran in the worktree, want 0", got)
+	}
+	h.wantKept(path, "zr-k")
+
+	_ = cmd.Process.Kill()
+	_ = cmd.Wait()
+	if got := h.sweep(); got != 1 || h.exists(path) {
+		t.Errorf("after the process exited: removed=%d exists=%v, want reclaimed", got, h.exists(path))
+	}
+}
+
+func TestParseLsofCWDs(t *testing.T) {
+	out := []byte("p101\nn/\np20236\nn/Volumes/gitrepos/x/worktrees/pg2-u8y3i\np7\nn\n")
+	got := parseLsofCWDs(out)
+	want := []string{"/", "/Volumes/gitrepos/x/worktrees/pg2-u8y3i"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("parseLsofCWDs = %v, want %v", got, want)
+	}
+	if got := parseLsofCWDs(nil); len(got) != 0 {
+		t.Errorf("empty output parsed to %v", got)
+	}
+}

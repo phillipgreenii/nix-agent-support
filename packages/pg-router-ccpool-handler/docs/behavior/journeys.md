@@ -62,7 +62,8 @@ Extensions:
   session row leads to the worktree. Before checking capacity this module scans the worktree
   directory (`INV-CCH-19`) and removes each worktree, with its anchor branch, that is old enough,
   clean, holds no commit the canonical clone lacks, is not locked by git, is named by no open or
-  live session row, and is not held by a live dispatch. Anything else is kept and logged. Every
+  live session row, is not the working directory of any live process (so a spared session of
+  another role's pool is left alone), and is not held by a live dispatch. Anything else is kept and logged. Every
   dispatch of a worktree-isolation role holds a shared lock on its bead's worktree from before it
   creates the worktree until it returns, which is how a live dispatch is told from a dead one.
 - 2f. An earlier teardown of a session in a per-bead worktree was interrupted (a restart, a crash,

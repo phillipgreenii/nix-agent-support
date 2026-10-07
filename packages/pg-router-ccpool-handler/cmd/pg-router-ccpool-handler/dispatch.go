@@ -211,6 +211,7 @@ func runDispatch(args []string) int {
 		// not double-handled; best effort, never a dispatch failure.
 		if swept := sweepLeakedWorktrees(ctx, role, deps, orphanEnv{
 			open:    gitWorktreeOpener,
+			cwds:    processCWDs,
 			lockDir: deps.LockDir,
 		}); swept > 0 {
 			slog.Info("dispatch: reclaimed leaked worktrees", "reclaimed", swept)
