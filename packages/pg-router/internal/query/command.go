@@ -67,9 +67,9 @@ func (q CommandQuery) BackingCommand() string {
 // item.Item.Type) untouched. at/expiresAt are OPTIONAL RFC3339 timestamp
 // strings, camelCase to match the event wire's own at/expiresAt (Task 1.4);
 // when present they are carried onto the produced event's Attributes (the
-// general "extra, type-specific fields" seam event.Event already declares) —
-// the source-side message boundary that would route them into
-// eventqueue.Event stays Phase 5, out of this task's scope. emit is an
+// general "extra, type-specific fields" seam event.Event already declares),
+// and discover.ToQueueEvent copies them onto eventqueue.Event's At /
+// ExpiresAt (INV-EVT-1, DEC-RETRY-2). emit is an
 // OPTIONAL event-type selector: when present it MUST be one of the query's
 // declared Emits() (multi-emit); absent, the record falls back to
 // firstEmit(q) — today's behavior, unchanged.

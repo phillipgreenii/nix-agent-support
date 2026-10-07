@@ -85,7 +85,9 @@ flowchart TD
   `INV-EVT-4` bounds. An event carries an optional **`at`** (the source stamp; **absent, the core's
   own "now" at ingest is used**) and an optional **`expiresAt`** (an **absolute instant**; **absent,
   `at` is used**). Nothing computes a duration, and neither field is configured — they ride on the
-  event. The durable record is written **after acceptance is confirmed**, so a narrow crash window MAY
+  event. A **pull source** (command query) supplies them per record, and the producer's enqueue
+  carries them onto the queued event unchanged (`DEC-RETRY-2`: an adapter's `expiresAt` is the retry
+  window); a record carrying neither is enqueued with neither and stays born expired. The durable record is written **after acceptance is confirmed**, so a narrow crash window MAY
   redeliver (absorbed by idempotent handlers, `INV-EVT-2`). An accepted event is **retained** while
   its `id` is still needed for de-duplication (`INV-EVT-3`) and while any matching handler is still
   owed its opportunity. Delivery therefore **survives a restart** — the storage mechanism

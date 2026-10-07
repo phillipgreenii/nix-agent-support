@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pg-router/internal/backoff"
+	"github.com/phillipgreenii/pg-router/internal/core"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
+	"github.com/phillipgreenii/pg-router/internal/query"
 	"github.com/phillipgreenii/pg-router/internal/roles"
 	"github.com/phillipgreenii/pg-router/internal/wireclient"
 )
@@ -304,5 +306,104 @@ func TestQueue_TransientFailureIsReofferedAtBackoffThenSettles(t *testing.T) {
 	advance(6 * time.Second)
 	if got := q.Dispatch(); got != 1 || h.callCount() != 2 {
 		t.Fatalf("pass 3 (after the backoff): accepted=%d calls=%d, want the re-run accepted", got, h.callCount())
+	}
+}
+
+// stdoutCmd is a query.Commander double returning canned stdout for the
+// command query the end-to-end retry tests drive through ProduceTick.
+type stdoutCmd struct{ out string }
+
+func (c stdoutCmd) Run(context.Context, []string) ([]byte, error) { return []byte(c.out), nil }
+
+// retryE2E wires the WHOLE producer-to-handler path a deployed desk role takes:
+// a real query.CommandQuery decodes adapter stdout, Orchestrator.ProduceTick
+// (discover.Produce -> ToQueueEvent) enqueues it, and the real roleListener
+// offers it to a handler whose dispatches always die killed. Unlike the tests
+// above, no eventqueue.Event is constructed by hand, so an adapter's expiresAt
+// only helps if it really survives the discover path (bead pg2-d9yi7).
+type retryE2E struct {
+	q       *eventqueue.Queue
+	o       *Orchestrator
+	h       *seqHandler
+	robs    *fakeRetryObserver
+	advance func(time.Duration)
+}
+
+func newRetryE2E(t *testing.T, stdout string, maxRetries int) *retryE2E {
+	t.Helper()
+	now := time.Now() // real time: roleListener judges expiry against time.Now()
+	var mu sync.Mutex
+	clock := func() time.Time { mu.Lock(); defer mu.Unlock(); return now }
+	advance := func(d time.Duration) { mu.Lock(); defer mu.Unlock(); now = now.Add(d) }
+
+	q, err := eventqueue.New(eventqueue.NewMemStore(), eventqueue.WithClock(clock),
+		eventqueue.WithRetryBackoff(backoff.Policy{Initial: 5 * time.Second, Factor: 2, Max: time.Minute}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sources := query.SourceSet{{Name: "desk-pr-changes", Query: query.CommandQuery{
+		Meta:   query.Meta{EmitTypes: []string{"pr.changed"}, Trig: query.PeriodTrigger{}},
+		Argv:   []string{"adapter"},
+		Format: query.FormatJSONL,
+	}}}
+	o := newOrch(fastCfg(t), sources)
+	o.Cmd = stdoutCmd{out: stdout}
+	o.Bindings = core.NewBindings("pr.changed")
+	h := &seqHandler{errs: []error{killedErr, killedErr, killedErr, killedErr, killedErr, killedErr}}
+	o.Handler = h
+	robs := &fakeRetryObserver{}
+	o.DispatchRetryObserver = robs
+	q.Register(o.NewListener(context.Background(), roles.Role{Name: "desk-pr", Binds: []string{"pr.changed"}, MaxDispatchRetries: maxRetries}))
+
+	if _, err := o.ProduceTick(context.Background(), q); err != nil {
+		t.Fatal(err)
+	}
+	return &retryE2E{q: q, o: o, h: h, robs: robs, advance: advance}
+}
+
+// settle runs n dispatch passes, each after letting the queue's retry backoff
+// (5s, then 10s, capped at 1m) elapse.
+func (e *retryE2E) settle(n int) {
+	for i := 0; i < n; i++ {
+		e.advance(time.Minute)
+		e.q.Dispatch()
+		e.q.Expire()
+	}
+}
+
+// A command-query record carrying an adapter-supplied expiresAt is re-offered
+// after a transient (killed) failure, up to max_dispatch_retries, and then
+// stops: 1 original + 2 re-runs = 3 attempts, 2 pg_router_dispatch_retries
+// increments (the exporter appends _total).
+func TestE2E_CommandQueryExpiresAt_KilledDispatchRetriesUpToMaxThenStops(t *testing.T) {
+	exp := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+	e := newRetryE2E(t, `{"id":"pr-1","type":"pr","expiresAt":"`+exp+`"}`+"\n", 2)
+
+	e.q.Dispatch()
+	if e.h.callCount() != 1 || len(e.robs.snapshot()) != 1 {
+		t.Fatalf("first attempt: calls=%d retries=%d, want 1 and 1 (re-run scheduled)", e.h.callCount(), len(e.robs.snapshot()))
+	}
+	e.settle(6)
+	if got := e.h.callCount(); got != 3 {
+		t.Fatalf("handler attempts = %d, want 3 (1 original + max_dispatch_retries 2)", got)
+	}
+	want := []retryCall{{"desk-pr", RetryClassKilled}, {"desk-pr", RetryClassKilled}}
+	if got := e.robs.snapshot(); len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("retry observer calls = %+v, want %+v", got, want)
+	}
+}
+
+// Without an expiresAt the event is born expired (INV-EVT-1): even a role that
+// opted in to retries gets exactly one attempt and no re-run is scheduled.
+func TestE2E_CommandQueryWithoutExpiresAt_GetsExactlyOneAttempt(t *testing.T) {
+	e := newRetryE2E(t, `{"id":"pr-1","type":"pr"}`+"\n", 2)
+
+	e.q.Dispatch()
+	e.settle(6)
+	if got := e.h.callCount(); got != 1 {
+		t.Fatalf("handler attempts = %d, want exactly 1 (no retry window)", got)
+	}
+	if n := len(e.robs.snapshot()); n != 0 {
+		t.Fatalf("retry observer calls = %d, want 0", n)
 	}
 }

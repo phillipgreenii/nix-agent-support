@@ -269,7 +269,8 @@ arrives at their values:
 - `expiresAt` — **optional**, an **absolute instant**. Absent, `at` is used, so an event carrying
   neither field is **born expired**: offered once to every matching handler, then dropped
   (`INV-EVT-4`). Setting it in the future is how a retry window is requested; nothing computes a
-  duration.
+  duration. A command-query source supplies both per record (`at`, `expiresAt`: RFC 3339), and the
+  producer path carries them onto the queued event unchanged.
 - `payload` — MUST be a JSON **object** (a keyed structure, never a bare scalar/array), so a handler
   always receives a struct. `payload` is itself **optional** on the wire — a source MAY omit it
   entirely — but a handler is never handed nothing in its place: the core **realizes an absent

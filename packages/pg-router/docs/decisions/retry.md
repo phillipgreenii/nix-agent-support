@@ -67,9 +67,15 @@ narrow, **opt-in** exception, in the same spirit as `DEC-OBS-3`'s:
   per-handler serial FIFO is preserved. This is what stops a host-overload storm from amplifying:
   re-runs are spaced, bounded per event, and serial per handler.
 - **Observable.** Each scheduled re-run increments `pg_router_dispatch_retries{role,class}`
-  (`class` is `killed`/`deadline`/`unavailable`; `role` is config-bounded, `DEC-OBS-5`). Every
-  failed attempt is still counted as a `handler-error` failure, and the decline is visible as
+  (`class` is `killed`/`deadline`/`unavailable`; `role` is config-bounded, `DEC-OBS-5`). The
+  counter is registered as `pg_router_dispatch_retries`; the Prometheus exporter appends `_total`, so
+  queries and alerts spell it `pg_router_dispatch_retries_total`. Every failed attempt is still
+  counted as a `handler-error` failure, and the decline is visible as
   `declined` with reason `dispatch-retry`.
 - **Only effective with a retry window.** An event with no `expiresAt` is born expired
   (`INV-EVT-1`), so its single attempt is also its last and no re-run is possible: a producer whose
-  role opts in MUST stamp a future `expiresAt` on its events.
+  role opts in MUST stamp a future `expiresAt` on its events. For a pull source that is a command
+  query, the producer path is: the adapter's record carries `expiresAt` (and optionally `at`), the
+  command query decodes it into the produced event's attributes, and the producer's enqueue copies
+  it onto the queued event's `expiresAt` (and `at`), so the window survives into the queue. A record
+  with no `expiresAt` is enqueued with neither and stays born expired.

@@ -75,10 +75,18 @@ func DeriveContext(role roles.Role, e event.Event) DispatchContext {
 // payload["source"], so packing it was itself the same over-reach GOAL-MIN-1
 // flags, just on a field a binding never named.
 //
-// `at` is left unset so the queue resolves it against its OWN ingest clock
-// (INV-EVT-1) rather than the producer's tick time.
+// The event's own timing rides across when the producer supplied it
+// (INV-EVT-1, bead pg2-d9yi7): a command-query record's optional `at` /
+// `expiresAt` are decoded into e.Attributes by query.CommandQuery, and are
+// copied onto the queue event's At / ExpiresAt here when present and a valid
+// time.Time. `expiresAt` is the retry window DEC-RETRY-2 needs — without it
+// every command-query event is born expired (its single attempt is also its
+// last), so a role's max_dispatch_retries could never fire. An event that
+// supplied neither is unchanged: At is left unset so the queue resolves it
+// against its OWN ingest clock rather than the producer's tick time, and
+// ExpiresAt then defaults to At (born expired, exactly one attempt).
 func ToQueueEvent(e event.Event) eventqueue.Event {
-	return eventqueue.Event{
+	qe := eventqueue.Event{
 		ID:   e.ID,
 		Type: e.Type,
 		Payload: map[string]any{
@@ -88,6 +96,13 @@ func ToQueueEvent(e event.Event) eventqueue.Event {
 			"metadata": e.Item.Metadata,
 		},
 	}
+	if at, ok := e.Attributes["at"].(time.Time); ok {
+		qe.At = at
+	}
+	if expiresAt, ok := e.Attributes["expiresAt"].(time.Time); ok {
+		qe.ExpiresAt = expiresAt
+	}
+	return qe
 }
 
 // DeriveContextFromQueueEvent is DeriveContext's counterpart for the queue-side
