@@ -24,7 +24,7 @@
 # per CLAUDE.md "Versioning of Custom Packages").
 buildNpmPackage (finalAttrs: {
   pname = "codeburn";
-  version = "0.9.19";
+  version = "0.9.25";
 
   # In-tree synthetic package. Keeping the lock in-tree lets importNpmLock read it without
   # import-from-derivation (mirrors nix-support-apps' jsonl-log-parser).
@@ -46,7 +46,7 @@ buildNpmPackage (finalAttrs: {
   # already built in). This is the ONLY remote hash to bump on a version change.
   distTarball = fetchurl {
     url = "https://registry.npmjs.org/codeburn/-/codeburn-${finalAttrs.version}.tgz";
-    hash = "sha256-5TFPJQTDfn6Aeatw1NCBwU7/SBXnn7IKg2TPgVr+F+Q=";
+    hash = "sha256-ir7kJAlI4OT9/f3QDufnzoLNN1xXhz1QCwEVku6tK0s=";
   };
 
   # Replace the (absent) in-tree dist with the prebuilt one before pack/install. npm packs

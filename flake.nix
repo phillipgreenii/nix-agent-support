@@ -123,6 +123,9 @@
           # (buildNpmPackage + importNpmLock). Needs no builder args; callPackage supplies
           # buildNpmPackage/fetchurl/importNpmLock/nodejs_22 from the overlaid pkgs.
           codeburn = final.callPackage ./packages/codeburn { };
+          # codeburn-menubar: the macOS menubar app as a hash-pinned fetch of upstream's notarized
+          # release zip (version follows `codeburn`); consumed by home/programs/codeburn.
+          codeburn-menubar = final.callPackage ./packages/codeburn/menubar.nix { };
           pg-pr = final.callPackage ./packages/pg-pr {
             inherit (goBuilders) mkGoApp;
           };
@@ -9081,13 +9084,114 @@
               test-codeburn-version = pkgs.runCommand "codeburn-version" { } ''
                 export HOME="$TMPDIR"
                 v=$(${pkgs.codeburn}/bin/codeburn --version)
-                if [ "$v" = "0.9.19" ]; then
+                if [ "$v" = "0.9.25" ]; then
                   touch "$out"
                 else
-                  echo "codeburn --version mismatch (got: '$v', want '0.9.19')" >&2
+                  echo "codeburn --version mismatch (got: '$v', want '0.9.25')" >&2
                   exit 1
                 fi
               '';
+
+              # Menubar install is a hash-pinned nix package copied at activation (no network,
+              # no `codeburn menubar`). Evaluates home/programs/codeburn on a bare evalModules
+              # with stubs (the real home-manager base is not imported) and a darwin-flagged pkgs,
+              # then asserts what the rendered activation script does and does not contain, and
+              # that it parses. The bundle itself is a stub: the real one is darwin-only.
+              test-codeburn-menubar-module =
+                let
+                  darwinPkgs = pkgs // {
+                    stdenv = pkgs.stdenv // {
+                      hostPlatform = pkgs.stdenv.hostPlatform // {
+                        isDarwin = true;
+                      };
+                    };
+                  };
+                  stubMenubar = pkgs.runCommand "codeburn-menubar-stub" { } ''
+                    mkdir -p $out/Applications/CodeBurnMenubar.app
+                  '';
+                  evalHM =
+                    codeburn:
+                    (lib.evalModules {
+                      specialArgs = {
+                        pkgs = darwinPkgs;
+                        lib = lib // {
+                          hm.dag.entryAfter = after: data: { inherit after data; };
+                        };
+                      };
+                      modules = [
+                        ./home/programs/codeburn/default.nix
+                        (
+                          { lib, ... }:
+                          {
+                            options = {
+                              home = {
+                                packages = lib.mkOption {
+                                  type = lib.types.listOf lib.types.package;
+                                  default = [ ];
+                                };
+                                profileDirectory = lib.mkOption {
+                                  type = lib.types.str;
+                                  default = "/etc/profiles/per-user/test";
+                                };
+                                activation = lib.mkOption {
+                                  type = lib.types.attrsOf lib.types.anything;
+                                  default = { };
+                                };
+                              };
+                              xdg.configFile = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
+                              assertions = lib.mkOption {
+                                type = lib.types.listOf (
+                                  lib.types.submodule {
+                                    options = {
+                                      assertion = lib.mkOption { type = lib.types.bool; };
+                                      message = lib.mkOption { type = lib.types.str; };
+                                    };
+                                  }
+                                );
+                                default = [ ];
+                              };
+                            };
+                          }
+                        )
+                        {
+                          phillipgreenii.programs.codeburn = lib.recursiveUpdate codeburn {
+                            menubar.package = stubMenubar;
+                          };
+                        }
+                      ];
+                    }).config;
+                  ok = evalHM {
+                    enable = true;
+                    menubar.enable = true;
+                  };
+                  noCli = evalHM {
+                    enable = true;
+                    terminal.enable = false;
+                    menubar.enable = true;
+                  };
+                  off = evalHM { enable = true; };
+                  script = ok.home.activation.codeburnMenubar.data;
+                  failedAssertions = c: lib.filter (a: !a.assertion) c.assertions;
+                in
+                assert failedAssertions ok == [ ];
+                assert failedAssertions off == [ ];
+                assert off.home.activation == { };
+                assert lib.length (failedAssertions noCli) == 1;
+                pkgs.runCommand "codeburn-menubar-module" { } ''
+                  script=${pkgs.writeText "codeburn-menubar-activation.sh" script}
+                  sh -n "$script"
+                  grep -qF '${stubMenubar}/Applications/CodeBurnMenubar.app' "$script"
+                  grep -qF '/usr/bin/codesign --verify --deep --strict' "$script"
+                  grep -qF '/etc/profiles/per-user/test/bin/codeburn' "$script"
+                  grep -qF 'codeburn-cli-path.v1' "$script"
+                  # The old network install path must be gone.
+                  ! grep -q 'codeburn menubar' "$script"
+                  ! grep -Eq 'curl|xattr' "$script"
+                  touch "$out"
+                '';
 
               test-ollama-wrapper =
                 let

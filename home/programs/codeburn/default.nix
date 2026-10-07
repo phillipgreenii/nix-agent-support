@@ -15,7 +15,8 @@ in
   #   - terminal: the CLI/TUI, any system (the packaged npm binary on PATH)
   #   - web:      `codeburn web`, any system for the CLI; on darwin also run as a launchd user
   #               agent (see darwin/modules/codeburn) and tied into the phillipg.localhost portal
-  #   - menubar:  the macOS menubar app, darwin-only, installed via codeburn's own downloader
+  #   - menubar:  the macOS menubar app, darwin-only, a hash-pinned nix fetch of the upstream
+  #               notarized release, copied into ~/Applications at activation (no network)
   #
   # terminal and web are the SAME binary (web is a subcommand), so enabling either puts the CLI
   # on PATH. Config is nix-owned and read-only: codeburn only reads ~/.config/codeburn/config.json
@@ -50,16 +51,25 @@ in
       };
     };
 
-    menubar.enable = lib.mkOption {
-      type = lib.types.bool;
-      default = false;
-      description = ''
-        Install and launch the macOS menubar app via codeburn's own installer
-        (`codeburn menubar`, which downloads a signed `.app` into ~/Applications). macOS-only;
-        enabling it on another platform is a hard eval error. This is an escape-hatch
-        (network-at-activation, not a pure derivation) — codeburn does not distribute the
-        menubar app through nixpkgs.
-      '';
+    menubar = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Install and launch the macOS menubar app. macOS-only; enabling it on another platform
+          is a hard eval error. The app is the upstream release zip fetched by nix with a pinned
+          hash (`menubar.package`) and copied into ~/Applications at activation, so activation
+          needs no network and nothing is downloaded or quarantine-stripped at apply time.
+          Requires the CLI on the profile PATH (`terminal.enable` or `web.enable`): the menubar
+          spawns it.
+        '';
+      };
+      package = lib.mkOption {
+        type = lib.types.package;
+        default = pkgs.codeburn-menubar;
+        defaultText = lib.literalExpression "pkgs.codeburn-menubar";
+        description = "Package providing Applications/CodeBurnMenubar.app (macOS only).";
+      };
     };
 
     settings = lib.mkOption {
@@ -89,6 +99,10 @@ in
             assertion = !cfg.menubar.enable || isDarwin;
             message = "phillipgreenii.programs.codeburn.menubar.enable is macOS-only (codeburn ships the menubar app for darwin only).";
           }
+          {
+            assertion = !cfg.menubar.enable || cfg.terminal.enable || cfg.web.enable;
+            message = "phillipgreenii.programs.codeburn.menubar.enable needs the CLI on the profile PATH: enable terminal or web too (the menubar app spawns the codeburn command).";
+          }
         ];
 
         # terminal and web share one binary; install it if either surface is on.
@@ -101,35 +115,51 @@ in
         };
       }
 
-      # Menubar escape-hatch (darwin only). `codeburn menubar` downloads + installs the signed
-      # `.app` matching the CLI's own version into ~/Applications and launches it. HM activation
-      # runs in the user's GUI session (nix-darwin's `launchctl asuser <uid> sudo -u <user>
-      # --set-home`), so the download and launch work there.
+      # Menubar app (darwin only). The bundle is a hash-pinned nix fetch of the upstream notarized
+      # release (`cfg.menubar.package`), copied UNMODIFIED into ~/Applications at activation — no
+      # network, no quarantine stripping. This replaces running `codeburn menubar --force` here,
+      # which downloaded the zip at apply time and took its checksum from the same release.
       #
-      # We reinstall (with --force — codeburn will not overwrite an existing copy otherwise) only
-      # when the app is MISSING or its installed version differs from the nix-packaged CLI version.
-      # A stamp file records the last-installed version. So a codeburn version bump updates the
-      # menubar in lockstep with the CLI, while an unrelated switch (same version, app present) is
-      # a no-op — no network, no relaunch. Failures are logged and surfaced (never a silent
-      # `|| true`).
+      # We copy only when the app is MISSING or the installed copy was placed from a different
+      # store path (a stamp records it), so an unrelated switch is a no-op: no copy, no relaunch.
+      # The copy is verified with `codesign --verify --deep --strict` before it replaces anything
+      # live, and a failure is logged and surfaced (never a silent `|| true`).
+      #
+      # The menubar finds the CLI through a record file the upstream installer used to write
+      # (Library/Application Support/CodeBurn/codeburn-cli-path.v1: one absolute path to a
+      # persistent `codeburn`, which the app checks is executable). We write the same file,
+      # pointing at the GC-rooted profile bin, a stable symlink that retargets on version bumps.
+      # That file is upstream-internal state (read from codeburn's src/menubar-installer.ts and
+      # the app's CodeburnCLI.persistedCLIPath): re-check it when bumping codeburn.
       (lib.mkIf (isDarwin && cfg.menubar.enable) {
         home.activation.codeburnMenubar = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-          _cb_want="${cfg.package.version}"
-          _cb_stamp="$HOME/.cache/codeburn/.menubar-nix-version"
+          _cb_src="${cfg.menubar.package}/Applications/CodeBurnMenubar.app"
+          _cb_dst="$HOME/Applications/CodeBurnMenubar.app"
+          _cb_stamp="$HOME/.cache/codeburn/.menubar-nix-store-path"
+          _cb_record_dir="$HOME/Library/Application Support/CodeBurn"
+          _cb_record="$_cb_record_dir/codeburn-cli-path.v1"
+          _cb_cli="${config.home.profileDirectory}/bin/codeburn"
           _cb_have="$(cat "$_cb_stamp" 2>/dev/null || echo none)"
-          if [ ! -e "$HOME/Applications/CodeBurnMenubar.app" ] || [ "$_cb_have" != "$_cb_want" ]; then
-            $DRY_RUN_CMD mkdir -p "$HOME/Library/Logs" "$HOME/.cache/codeburn"
-            # codeburn's menubar installer resolves a PERSISTENT `codeburn` from $PATH (it records
-            # that path so the GUI menubar app can spawn the CLI, and refuses to install if it
-            # finds none — rejecting only npx-temp paths). The bare nix store path we invoke is not
-            # on $PATH during activation, so put the GC-rooted per-user profile bin on PATH (a
-            # stable symlink that retargets on version bumps); the installer records that path.
-            if $DRY_RUN_CMD env PATH="/etc/profiles/per-user/$(id -un)/bin:$HOME/.nix-profile/bin:$PATH" \
-                 ${cfg.package}/bin/codeburn menubar --force \
-                 > "$HOME/Library/Logs/codeburn-menubar-install.log" 2>&1; then
-              $DRY_RUN_CMD sh -c "printf %s \"$_cb_want\" > \"$_cb_stamp\""
+
+          $DRY_RUN_CMD mkdir -p "$HOME/Applications" "$HOME/.cache/codeburn" "$_cb_record_dir"
+          if [ "$(cat "$_cb_record" 2>/dev/null)" != "$_cb_cli" ]; then
+            $DRY_RUN_CMD sh -c 'printf "%s\n" "$1" > "$2" && chmod 600 "$2"' sh "$_cb_cli" "$_cb_record"
+          fi
+
+          if [ ! -e "$_cb_dst" ] || [ "$_cb_have" != "$_cb_src" ]; then
+            $DRY_RUN_CMD rm -rf "$_cb_dst.nix-new"
+            if $DRY_RUN_CMD /usr/bin/ditto "$_cb_src" "$_cb_dst.nix-new" \
+               && $DRY_RUN_CMD chmod -R u+w "$_cb_dst.nix-new" \
+               && $DRY_RUN_CMD /usr/bin/codesign --verify --deep --strict "$_cb_dst.nix-new"; then
+              # Name-exact match, as upstream's installer does: only the app's own process.
+              $DRY_RUN_CMD /usr/bin/pkill -x CodeBurnMenubar || true
+              $DRY_RUN_CMD rm -rf "$_cb_dst"
+              $DRY_RUN_CMD mv "$_cb_dst.nix-new" "$_cb_dst"
+              $DRY_RUN_CMD sh -c 'printf %s "$1" > "$2"' sh "$_cb_src" "$_cb_stamp"
+              $DRY_RUN_CMD /usr/bin/open "$_cb_dst"
             else
-              echo "codeburn: menubar install/update to $_cb_want failed — see ~/Library/Logs/codeburn-menubar-install.log; run 'codeburn menubar --force' manually" >&2
+              echo "codeburn: menubar install from $_cb_src failed (copy or signature check); the installed app, if any, was left untouched" >&2
+              $DRY_RUN_CMD rm -rf "$_cb_dst.nix-new"
             fi
           fi
         '';
