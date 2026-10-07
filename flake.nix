@@ -811,6 +811,59 @@
           require_serial = true;
         };
 
+        # pg2-u57g1: guard against landing with the claude-extended-tool-approver
+        # `integration`-tagged agreement test red. Commit 4fa66d12 (pg2-dbrsg)
+        # changed internal/effectpolicy and reached main with
+        # `TestAgreement` failing, because neither `run-unit-tests` (labels
+        # unit only) nor any default check runs the `integration` tag; it
+        # stayed red until pg2-rrdwz. TestAgreement drives BOTH the spike
+        # (effectpolicy over cmddesc's registry/policies) and the live engine
+        # against testdata/agreement.txt, so a change under effectpolicy or
+        # cmddesc (including that testdata) can move it.
+        #
+        # Cheapest fit for this repo's conventions: a path-scoped hook beside
+        # `run-unit-tests`, which `pg-hooks run pre-land` also runs over the
+        # branch diff. It runs ONLY `TestAgreement` (about 1s of test time,
+        # versus the ~46 binary-exec tests the full integration-tests check
+        # adds), so the cost is paid only on diffs touching these paths.
+        # The thorough tier stays
+        # `checks.<system>.claude-extended-tool-approver-integration-tests`.
+        # `go` resolves from PATH exactly as pg-test-runner's does for
+        # `run-unit-tests`; a missing `go` is a LOUD failure, never a skip.
+        ceta-agreement-test = {
+          enable = true;
+          name = "ceta-agreement-test";
+          description = "claude-extended-tool-approver effectpolicy/cmddesc: run the integration-tagged TestAgreement (pg2-u57g1)";
+          entry = "${
+            pkgs.writeShellApplication {
+              name = "ceta-agreement-test-hook";
+              runtimeInputs = [ pkgs.git ];
+              text = ''
+                # Hermetic checks.* tier covers this inside the nix sandbox
+                # (claude-extended-tool-approver-integration-tests); no
+                # network/module cache there anyway.
+                if [ -n "''${IN_NIX_BUILD:-}" ] || [ -n "''${NIX_BUILD_TOP:-}" ]; then
+                  echo "ceta-agreement-test: inside the nix build sandbox; skipping (checks.*-integration-tests covers this)" >&2
+                  exit 0
+                fi
+
+                if ! command -v go >/dev/null 2>&1; then
+                  echo "ceta-agreement-test: go not found on PATH -- enter the devShell or install go before committing. Do NOT bypass with --no-verify." >&2
+                  exit 1
+                fi
+
+                top="$(git rev-parse --show-toplevel)"
+                cd "$top/packages/claude-extended-tool-approver"
+                exec go test -count=1 -tags integration -run '^TestAgreement$' ./internal/effectpolicy/
+              '';
+            }
+          }/bin/ceta-agreement-test-hook";
+          language = "system";
+          files = "^packages/claude-extended-tool-approver/internal/(effectpolicy|cmddesc)/";
+          pass_filenames = false;
+          require_serial = true;
+        };
+
         # pg2-m146l: prevent main's own history from being rewritten via a
         # direct `git rebase` again. Operator decision 2026-09-07 (bead
         # pg2-m146l comments): main's local reflog showed

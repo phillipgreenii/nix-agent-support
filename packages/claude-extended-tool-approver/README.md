@@ -364,6 +364,13 @@ flake check (`mkGoTest` with `testFlags = ["-tags" "integration"]`). That check 
 by `nix flake check` and never by a package build, so a degraded disk can slow CI but can
 no longer block an activation.
 
+Because no default check or commit-time hook runs the tagged suite, the
+`ceta-agreement-test` pre-commit hook (in `flake.nix`; also run by `pg-hooks run pre-land`)
+runs just `TestAgreement` (`go test -tags integration -run '^TestAgreement$'
+./internal/effectpolicy/`) whenever a diff touches `internal/effectpolicy/` or
+`internal/cmddesc/` (including `testdata/agreement.txt`), so those changes cannot land
+with the agreement harness red (pg2-u57g1).
+
 ### Why it is I/O-bound
 
 The suite is **I/O-bound, not CPU-bound**, because most of it exercises the SQLite ask
