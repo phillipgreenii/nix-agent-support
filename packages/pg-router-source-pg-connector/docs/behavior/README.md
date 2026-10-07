@@ -66,6 +66,11 @@ flowchart LR
   - **Content-only changes on one head** (a comment, a label) are `changed` rows with the same
     head, so they share an id inside the window and coalesce into the first event; the next sweep
     picks up what the window absorbed.
+  - **Id-only catch-up rows.** pg-connector's ledger holds hashes, not entity bodies, so a row it
+    re-reports from the ledger (a catch-up after a missed or crashed poll) carries only
+    `{"id": ...}`: no `head_sha`, so its digest is over `{change, source, entity_id}` alone and two
+    such rows for one PR coalesce inside the window whatever their heads. Rows classified by the
+    same call's own refresh carry the full entity and are unaffected.
 
 - **`sweep <type> <query>... [--beads-dir <path>]`** — runs
   `pg-connector <type> list --query <query> --ids-only --output json` once per named query
