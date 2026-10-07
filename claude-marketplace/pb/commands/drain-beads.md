@@ -791,6 +791,17 @@ proceeding on currently loaded text (direct interactive invocation).`)
      re-rebase and re-invoke per the handler's OWN retry bound (FF-3 /
      PR-1: stop at the second consecutive failure; do NOT substitute a larger
      count of your own), then report `stopped:` with the reason;
+   - the FF-1b pre-land hooks are a HARD GATE on `ff-merge-to-main` (`pg2-1rlme`):
+     the lander MUST run them, MUST check their exit code, and MUST NOT run
+     `merge --ff-only` (or otherwise advance main) unless that exit code was 0
+     (or `pg-hooks`'s no-bundle / not-installed notice, exit 13 / 127, per the
+     handler's FF-1b table). Exit 10 (a hook failed) or any other non-zero exit
+     means report `stopped:precommit-branch-diff-failed` with the failing hook
+     and land NOTHING. It MUST NOT chain rebase + hooks + merge into one
+     unguarded script: check each step's exit status before the next, with `if`
+     or an explicit `$?` test, never a bare `;` chain. FF-1b can take several
+     minutes on a loaded host, so a lost ff race is expected; the handler's own
+     retry bound above applies (do not widen it);
    - MUST NOT merge any PR, MUST NOT push any primary branch, MUST NOT use
      `run_in_background` for git operations, and MUST report fully in ONE turn;
    - the lander is itself a dispatched (non-top-level) subagent, so if any step

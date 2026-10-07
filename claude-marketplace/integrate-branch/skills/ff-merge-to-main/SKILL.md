@@ -407,6 +407,12 @@ FF-2's single part keeps its historical label, FF-2b, because other skills
 
 ### FF-2b — Fast-forward-only merge in the canonical clone
 
+Run this only after FF-1b exited 0 (or 13 / 127 with its notice recorded). Any
+other FF-1b exit status, 10 included, means FF-2b MUST NOT run: halt as
+`stopped:precommit-branch-diff-failed` and leave the primary branch untouched.
+Rebase, FF-1b and this merge MUST NOT be chained in one unguarded script — check
+each step's exit status before the next (`pg2-1rlme`).
+
 ```bash
 OLD_PRIMARY=$(git -C "$CC" rev-parse "$PRIMARY")   # FF-4's bundle refresh diffs from here
 git -C "$CC" merge --ff-only "$FB"
