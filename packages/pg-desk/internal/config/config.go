@@ -416,6 +416,12 @@ type AttentionRuleConfig struct {
 	// valid only on a rule kind that has the parameter (attention.Resolve
 	// rejects it elsewhere) and MUST be positive.
 	StaleAfterDays *int `yaml:"stale_after_days,omitempty" json:"stale_after_days,omitempty"`
+	// DueSoonDays is the look-ahead window, in calendar days, of
+	// issue.due-soon: the rule raises once the due date is no further away
+	// than this. Nil means the rule's built-in default. Like StaleAfterDays it
+	// is valid only on a rule kind that has the parameter and MUST be
+	// positive.
+	DueSoonDays *int `yaml:"due_soon_days,omitempty" json:"due_soon_days,omitempty"`
 }
 
 // AttentionTiesDefault is the one tie rule the evaluator implements for
@@ -456,6 +462,9 @@ func validateAttention(a AttentionConfig) error {
 	for _, k := range kinds {
 		if d := a.Rules[k].StaleAfterDays; d != nil && *d <= 0 {
 			return fmt.Errorf("attention.rules.%s.stale_after_days %d must be positive", k, *d)
+		}
+		if d := a.Rules[k].DueSoonDays; d != nil && *d <= 0 {
+			return fmt.Errorf("attention.rules.%s.due_soon_days %d must be positive", k, *d)
 		}
 		sev := a.Rules[k].Severity
 		if sev == "" {
@@ -557,6 +566,24 @@ type JiraConfig struct {
 	// differ lists them here; empty means DefaultInProgressStatuses. Attention
 	// rules over issues read the derived category, never a status name.
 	InProgressStatuses []string `yaml:"in_progress_statuses,omitempty" json:"in_progress_statuses,omitempty"`
+	// DoneStatuses names the tracker status values that mean "nothing more
+	// to do" (matched case-insensitively), for any issue tracker the desk
+	// watches (Jira, beads). A due-date attention rule never raises on an
+	// issue in one of these. Empty means DefaultDoneStatuses.
+	DoneStatuses []string `yaml:"done_statuses,omitempty" json:"done_statuses,omitempty"`
+}
+
+// DefaultDoneStatuses is the status set jira.done_statuses defaults to: the
+// terminal statuses of the classic Jira workflow and of beads ("closed").
+var DefaultDoneStatuses = []string{"Done", "Closed", "Resolved", "Cancelled", "Canceled"}
+
+// DoneStatuses returns jira.done_statuses, or DefaultDoneStatuses when none
+// is configured. Safe on a nil Config.
+func (c *Config) DoneStatuses() []string {
+	if c != nil && c.Jira != nil && len(c.Jira.DoneStatuses) > 0 {
+		return c.Jira.DoneStatuses
+	}
+	return DefaultDoneStatuses
 }
 
 // UrgencyConfig configures urgency scoring. Thresholds maps an urgency

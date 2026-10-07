@@ -21,6 +21,17 @@ type RuleSettings struct {
 	// in days, else the rule's default. Zero for a rule with no such
 	// parameter.
 	StaleAfter time.Duration
+	// DueSoon is the look-ahead window of a due-date rule (a rule that has a
+	// DefaultDueSoon): the configured attention.rules.<kind>.due_soon_days in
+	// days, else the rule's default. Zero for a rule with no such parameter.
+	DueSoon time.Duration
+}
+
+// dueSoonRule is implemented by a due-date rule whose look-ahead window is
+// tunable through attention.rules.<kind>.due_soon_days.
+type dueSoonRule interface {
+	// DefaultDueSoon is the window used when the configuration sets none.
+	DefaultDueSoon() time.Duration
 }
 
 // staleAfterRule is implemented by a time-based rule whose threshold is
@@ -65,6 +76,10 @@ func Resolve(c config.AttentionConfig) (Settings, error) {
 		if hasStaleAfter {
 			rs.StaleAfter = sa.DefaultStaleAfter()
 		}
+		ds, hasDueSoon := r.(dueSoonRule)
+		if hasDueSoon {
+			rs.DueSoon = ds.DefaultDueSoon()
+		}
 		if cfg, ok := c.Rules[kind]; ok {
 			if cfg.Enabled != nil {
 				rs.Enabled = *cfg.Enabled
@@ -79,6 +94,12 @@ func Resolve(c config.AttentionConfig) (Settings, error) {
 				}
 				rs.StaleAfter = time.Duration(*cfg.StaleAfterDays) * 24 * time.Hour
 			}
+			if cfg.DueSoonDays != nil {
+				if !hasDueSoon {
+					return Settings{}, fmt.Errorf("attention.rules.%s.due_soon_days: this rule kind has no such parameter (rules with it: %s)", kind, strings.Join(dueSoonKinds(known), ", "))
+				}
+				rs.DueSoon = time.Duration(*cfg.DueSoonDays) * 24 * time.Hour
+			}
 		}
 		out.Rules[kind] = rs
 	}
@@ -90,6 +111,18 @@ func staleAfterKinds(known map[string]Rule) []string {
 	var out []string
 	for k, r := range known {
 		if _, ok := r.(staleAfterRule); ok {
+			out = append(out, k)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// dueSoonKinds lists, sorted, the rule kinds that take due_soon_days.
+func dueSoonKinds(known map[string]Rule) []string {
+	var out []string
+	for k, r := range known {
+		if _, ok := r.(dueSoonRule); ok {
 			out = append(out, k)
 		}
 	}

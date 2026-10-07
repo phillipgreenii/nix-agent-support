@@ -74,7 +74,7 @@ func TestConfigCoversAllSection78Keys(t *testing.T) {
 	}{
 		{"RepoConfig", reflect.TypeOf(RepoConfig{}), []string{"remote", "beads_dir"}},
 		{"AgentConfig", reflect.TypeOf(AgentConfig{}), []string{"login", "approval_regex", "policy"}},
-		{"JiraConfig", reflect.TypeOf(JiraConfig{}), []string{"high_priority_values", "incident_labels", "incident_issue_types", "in_progress_statuses"}},
+		{"JiraConfig", reflect.TypeOf(JiraConfig{}), []string{"high_priority_values", "incident_labels", "incident_issue_types", "in_progress_statuses", "done_statuses"}},
 		{"UrgencyConfig", reflect.TypeOf(UrgencyConfig{}), []string{"labels", "keywords", "thresholds"}},
 		// sync.retry (bead pg2-xb6fs) postdates the section-7.8 table: the
 		// automatic-retry bounds for a recorded sync_error.
@@ -86,7 +86,7 @@ func TestConfigCoversAllSection78Keys(t *testing.T) {
 		{"FreshnessConfig", reflect.TypeOf(FreshnessConfig{}), []string{"source_stale_after", "sources"}},
 		{"FreshnessSourceConfig", reflect.TypeOf(FreshnessSourceConfig{}), []string{"label", "stale_after"}},
 		{"AttentionConfig", reflect.TypeOf(AttentionConfig{}), []string{"rules", "ordering"}},
-		{"AttentionRuleConfig", reflect.TypeOf(AttentionRuleConfig{}), []string{"enabled", "severity", "stale_after_days"}},
+		{"AttentionRuleConfig", reflect.TypeOf(AttentionRuleConfig{}), []string{"enabled", "severity", "stale_after_days", "due_soon_days"}},
 		{"AttentionOrderingConfig", reflect.TypeOf(AttentionOrderingConfig{}), []string{"ties"}},
 		{"WatchConfig", reflect.TypeOf(WatchConfig{}), []string{"pr", "issue", "thread"}},
 		{"WatchTypeConfig", reflect.TypeOf(WatchTypeConfig{}), []string{"queries"}},
@@ -786,6 +786,44 @@ func TestLoadFile_AttentionBlock(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "attention.rules.issue.stale-in-progress.stale_after_days") {
 			t.Errorf("stale_after_days %s must be rejected naming the key, got %v", bad, err)
 		}
+	}
+}
+
+func TestDueSoonDaysConfig(t *testing.T) {
+	dir := t.TempDir()
+	base := "self_login: me\nrepos:\n  - remote: o/r\n"
+	cfg, err := LoadFile(writeYAML(t, dir, base+"attention:\n  rules:\n    issue.due-soon:\n      due_soon_days: 4\n"))
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	if d := cfg.Attention.Rules["issue.due-soon"].DueSoonDays; d == nil || *d != 4 {
+		t.Errorf("due_soon_days not parsed: %v", d)
+	}
+	for _, bad := range []string{"0", "-1"} {
+		_, err = LoadFile(writeYAML(t, dir, base+"attention:\n  rules:\n    issue.due-soon:\n      due_soon_days: "+bad+"\n"))
+		if err == nil || !strings.Contains(err.Error(), "attention.rules.issue.due-soon.due_soon_days") {
+			t.Errorf("due_soon_days %s must be rejected naming the key, got %v", bad, err)
+		}
+	}
+}
+
+func TestDoneStatuses(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  *Config
+		want []string
+	}{
+		{"nil config", nil, DefaultDoneStatuses},
+		{"no jira block", &Config{}, DefaultDoneStatuses},
+		{"empty list takes the default", &Config{Jira: &JiraConfig{}}, DefaultDoneStatuses},
+		{"configured list replaces the default", &Config{Jira: &JiraConfig{DoneStatuses: []string{"Shipped"}}}, []string{"Shipped"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.cfg.DoneStatuses(); !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("DoneStatuses() = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

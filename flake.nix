@@ -6331,6 +6331,7 @@
                         };
                         "pr.review-requested".severity = "high";
                         "issue.stale-in-progress".staleAfterDays = 10;
+                        "issue.due-soon".dueSoonDays = 4;
                       };
                       ordering.ties = "severity descending, then group size descending, then entity id";
                     };
@@ -6468,6 +6469,9 @@
                   # a time-based rule's threshold renders as stale_after_days
                   sed -n '/issue.stale-in-progress:/,/^[^ ]/p' "$a" | grep -q 'stale_after_days: 10'
                   [ "$(grep -c 'stale_after_days:' "$a")" = 1 ]
+                  # the due-soon window renders as due_soon_days
+                  sed -n '/issue.due-soon:/,/^[^ ]/p' "$a" | grep -q 'due_soon_days: 4'
+                  [ "$(grep -c 'due_soon_days:' "$a")" = 1 ]
                   grep -q '^  ordering:' "$a"
                   grep -q '^    ties: severity descending, then group size descending, then entity id$' "$a"
                   # the enum's single value must equal the Go loader's AttentionTiesDefault

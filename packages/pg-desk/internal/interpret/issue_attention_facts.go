@@ -16,6 +16,7 @@ import (
 // progress, and the connector exposes no tracker-native status category.
 const (
 	IssueStatusCategoryInProgress = "in_progress"
+	IssueStatusCategoryDone       = "done"
 	IssueStatusCategoryOther      = "other"
 )
 
@@ -37,6 +38,24 @@ type IssueAttentionFacts struct {
 	// when StatusCategory is in progress and the time is known; the zero time
 	// otherwise.
 	InProgressSince time.Time
+	// Done is true when Status is one of config jira.done_statuses
+	// (case-insensitive): the issue needs nothing more, so a due date no
+	// longer matters. StatusCategory is then IssueStatusCategoryDone, unless
+	// the status is also listed as in progress (in progress wins).
+	Done bool
+	// DueDateKnown is true when the connector supplied a due date that
+	// parses; DueDate is then valid. When false, DueDate being zero means
+	// "no due date, or one we cannot read", and a rule MUST NOT raise on it
+	// (INV-ATTNEVAL-6).
+	DueDateKnown bool
+	// DueDate is the issue's due date. For DueDateOnly it is midnight UTC of
+	// the due calendar day (only its year, month and day are meaningful);
+	// otherwise it is the due instant.
+	DueDate time.Time
+	// DueDateOnly is true when the tracker supplied a date with no time of
+	// day (Jira's duedate, "2026-10-09"): the issue is then due at the END of
+	// that calendar day, in the evaluating clock's zone.
+	DueDateOnly bool
 	// OperatorFactsKnown is true when the connector supplied the operator
 	// facts (it does so for an issue assigned to the operator). When false,
 	// OperatorUpdatedAt being zero means "unknown", NOT "never updated", and a
@@ -55,6 +74,7 @@ type issueAttentionShow struct {
 	Assignee          string `json:"assignee"`
 	StatusChangedAt   string `json:"status_changed_at"`
 	OperatorUpdatedAt string `json:"operator_updated_at"`
+	DueDate           string `json:"due_date"`
 }
 
 // DeriveIssueAttentionFacts decodes a stored entity's facts JSON (a
@@ -86,6 +106,16 @@ func DeriveIssueAttentionFacts(factsJSON string, cfg *config.Config) (IssueAtten
 			break
 		}
 	}
+	for _, d := range cfg.DoneStatuses() {
+		if show.State != "" && strings.EqualFold(strings.TrimSpace(d), strings.TrimSpace(show.State)) {
+			out.Done = true
+			if out.StatusCategory != IssueStatusCategoryInProgress {
+				out.StatusCategory = IssueStatusCategoryDone
+			}
+			break
+		}
+	}
+	out.DueDate, out.DueDateOnly, out.DueDateKnown = parseDueDate(show.DueDate)
 	changed, changedOK := parseFactTime(show.StatusChangedAt)
 	operator, _ := parseFactTime(show.OperatorUpdatedAt)
 	out.OperatorFactsKnown = changedOK
@@ -106,4 +136,22 @@ func parseFactTime(s string) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	return t.UTC(), true
+}
+
+// parseDueDate parses an issue's due date: either a bare calendar date
+// ("2026-10-09", Jira's duedate; dateOnly is then true and the time is
+// midnight UTC) or an RFC3339 instant (beads' due_at). ok is false for ""
+// or anything else.
+func parseDueDate(s string) (t time.Time, dateOnly, ok bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return time.Time{}, false, false
+	}
+	if d, err := time.Parse("2006-01-02", s); err == nil {
+		return d.UTC(), true, true
+	}
+	if d, err := time.Parse(time.RFC3339, s); err == nil {
+		return d.UTC(), false, true
+	}
+	return time.Time{}, false, false
 }

@@ -106,8 +106,21 @@ configuration (`jira.in_progress_statuses`, matched case-insensitively), not fro
 
 | Rule kind                 | Raises when                                                                                                                                                                                                                    | Default severity |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------- |
+| `issue.due-soon`          | An issue that is not done has a due date that has not yet passed and is no more than the window away (default 2 calendar days). The summary says how long is left ("Due in 1 day", "Due in under a day").                      | `medium`         |
+| `issue.overdue`           | An issue that is not done has a due date that has passed. The summary says how late it is ("Overdue by 3 days", "Overdue by under a day").                                                                                     | `high`           |
 | `issue.stale-in-progress` | An issue assigned to the operator is In Progress and the operator has not updated it for at least the threshold (default 7 calendar days). The summary says how many whole days it has been, and the item is the issue itself. | `medium`         |
 
+- **Due-date rules cover Jira issues and beads alike.** Both reach the desk as `issue` entities
+  through the generic entity pipeline, and the rules read only the issue's due date and status, so
+  whose issues are watched is decided by `watch.issue.queries`, not by the rule. Jira supplies a
+  bare date and beads an instant. A bare date falls due at the END of that calendar day in the
+  evaluating clock's zone, so an issue due today is `issue.due-soon` until the day ends. The
+  `issue.due-soon` window is measured to that due moment. At the due moment itself the issue is
+  `issue.overdue`: the two rules never raise for one issue at once.
+- **Done issues never raise a due-date rule.** An issue whose status is one of
+  `jira.done_statuses` (matched case-insensitively; default `Done`, `Closed`, `Resolved`,
+  `Cancelled`, `Canceled`, which also covers beads' `closed`) is skipped, as is one with no due
+  date, one whose due date cannot be read, or one with no known status (INV-ATTNEVAL-6).
 - **What counts as an update by the operator.** The operator's own comment or status transition.
   An update by anyone else, or by a bot, never resets the clock.
 - **Where the age is measured from.** The later of the operator's last update and the moment the
@@ -133,13 +146,14 @@ so they share one source of truth):
 | `attention.rules.<kind>.enabled`          | `true` for every kind                                           |
 | `attention.rules.<kind>.severity`         | as in the rule table                                            |
 | `attention.rules.<kind>.stale_after_days` | `7` for `issue.stale-in-progress`, the only kind that has it    |
+| `attention.rules.<kind>.due_soon_days`    | `2` for `issue.due-soon`, the only kind that has it             |
 | `attention.ordering.ties`                 | severity descending, then group size descending, then entity id |
 
 `attention.ordering.ties` admits only its default (leaving it unset is the same): any other value is
 a configuration error at load, so a deployment cannot believe it re-ordered the feed when it did
 not. An unknown rule kind in the block is a configuration error at load, and so is
-`stale_after_days` that is not a positive whole number, or that names a kind without that
-parameter. A missing kind takes its
+`stale_after_days` or `due_soon_days` that is not a positive whole number, or that names a kind
+without that parameter. A missing kind takes its
 built-in default, so a deployment with no `attention` block works. The home-manager module renders
 this block from `phillipgreenii.programs.pg-desk.attention`.
 
@@ -304,8 +318,6 @@ absence for a defect.
 - **Re-review after my approval.** Needs the commit each review was submitted against, which the
   connector's review record does not carry. Restoring it is an operator decision tracked outside
   this doc.
-- **Issue due dates** for Jira issues and beads. `issue` entities are now hydrated in the store
-  (see "Issue rules"); the due-date rule itself is not yet written.
 - **Further time-based rules** (a snooze that expires, escalation by waiting time). The evaluator
   takes the clock as an input, and `issue.stale-in-progress` is the first rule to use it.
 - **Freshness of the underlying data.** How old the data behind an item is, per source, is a

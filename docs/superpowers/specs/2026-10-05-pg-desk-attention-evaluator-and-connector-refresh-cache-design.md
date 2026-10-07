@@ -404,12 +404,11 @@ that the rules above are written around:
   the oid in the batched review query, and a desk interpret rule. The bead measured the oid at
   about 1 point per page when added to the batched query; that figure is not re-measured here.
   Whether to restore this leg at all is an open question (item 4).
-- **Jira-due and bead-due**: `schema.Issue.DueDate` exists, but the desk stores no `issue` rows
-  (299 of 299 entity rows are `pr`) and has no due-date logic. These rules need `issue` entities
-  hydrated by the generic entity pipeline, which the pg-desk inventory records as built but not
-  wired to a trigger for the operator's own issues. The hydration, the facts and the projection
-  they need are now in place (see "Issue entities for attention rules" below); the rules
-  themselves are not.
+- **Jira-due and bead-due** (bead `pg2-w7zai.3`; implemented). `issue.due-soon` (default 2 day
+  window, `due_soon_days`) and `issue.overdue` read `schema.Issue.DueDate` of the `issue` entities
+  described under "Issue entities for attention rules" below, so Jira issues and beads share the
+  rules; which issues are watched is `watch.issue.queries`. A status in `jira.done_statuses`
+  suppresses both. See `docs/behavior/pg-desk/attention.md`, "Issue rules".
 - **Time-based rules** are supported by the model (the clock is an input). The first release
   shipped none; the first one is `issue.stale-in-progress` (see "The stale In Progress rule"
   below). Other candidates (a snooze that expires, severity escalation by waiting time) still need

@@ -79,6 +79,44 @@ func TestDeriveIssueAttentionFacts(t *testing.T) {
 				InProgressSince: at("2026-09-01T10:00:00Z"), OperatorFactsKnown: true,
 			},
 		},
+		{
+			name:  "a bare due date is date-only, at midnight UTC of the due day",
+			facts: show(`{"state":"To Do","due_date":"2026-10-09"}`),
+			want:  IssueAttentionFacts{Status: "To Do", StatusCategory: IssueStatusCategoryOther, DueDateKnown: true, DueDateOnly: true, DueDate: at("2026-10-09T00:00:00Z")},
+		},
+		{
+			name:  "an RFC3339 due date is an instant, normalized to UTC",
+			facts: show(`{"state":"open","due_date":"2026-10-09T12:00:00+02:00"}`),
+			want:  IssueAttentionFacts{Status: "open", StatusCategory: IssueStatusCategoryOther, DueDateKnown: true, DueDate: at("2026-10-09T10:00:00Z")},
+		},
+		{
+			name:  "an unreadable due date is unknown, not zero",
+			facts: show(`{"state":"open","due_date":"soon"}`),
+			want:  IssueAttentionFacts{Status: "open", StatusCategory: IssueStatusCategoryOther},
+		},
+		{
+			name:  "a done status (case-insensitive, covering beads' closed) is done",
+			facts: show(`{"state":"CLOSED","due_date":"2026-10-09"}`),
+			want:  IssueAttentionFacts{Status: "CLOSED", StatusCategory: IssueStatusCategoryDone, Done: true, DueDateKnown: true, DueDateOnly: true, DueDate: at("2026-10-09T00:00:00Z")},
+		},
+		{
+			name:  "configured done statuses replace the default",
+			facts: show(`{"state":"Shipped"}`),
+			cfg:   &config.Config{Jira: &config.JiraConfig{DoneStatuses: []string{"Shipped"}}},
+			want:  IssueAttentionFacts{Status: "Shipped", StatusCategory: IssueStatusCategoryDone, Done: true},
+		},
+		{
+			name:  "the default done status is not done once the config replaces the list",
+			facts: show(`{"state":"Done"}`),
+			cfg:   &config.Config{Jira: &config.JiraConfig{DoneStatuses: []string{"Shipped"}}},
+			want:  IssueAttentionFacts{Status: "Done", StatusCategory: IssueStatusCategoryOther},
+		},
+		{
+			name:  "a status listed as both in progress and done stays in progress",
+			facts: show(`{"state":"Review"}`),
+			cfg:   &config.Config{Jira: &config.JiraConfig{InProgressStatuses: []string{"Review"}, DoneStatuses: []string{"Review"}}},
+			want:  IssueAttentionFacts{Status: "Review", StatusCategory: IssueStatusCategoryInProgress, Done: true},
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

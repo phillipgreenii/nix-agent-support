@@ -240,10 +240,14 @@ func Evaluate(in Inputs) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	now := in.Clock.Now().UTC()
+	clockNow := in.Clock.Now()
+	now := clockNow.UTC()
 	byRef := make(map[string]*View, len(views))
 	for _, v := range views {
-		v.Now = now
+		// The view keeps the clock's own zone (Result.Now is UTC): a rule over
+		// a bare calendar date, such as issue.due-soon, needs to know where
+		// the day ends.
+		v.Now = clockNow
 		byRef[v.Ref()] = v
 	}
 	chain := suppressorChain()

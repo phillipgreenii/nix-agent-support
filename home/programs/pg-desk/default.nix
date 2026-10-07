@@ -67,6 +67,7 @@ let
           lib.filterAttrs (_: v: v != null) {
             inherit (r) enabled severity;
             stale_after_days = r.staleAfterDays;
+            due_soon_days = r.dueSoonDays;
           }
         ) cfg.attention.rules;
         renderedOrdering = lib.filterAttrs (_: v: v != null) {
@@ -315,8 +316,9 @@ in
       default = null;
       description = ''
         config.yaml's jira block (high_priority_values, incident_labels,
-        incident_issue_types, in_progress_statuses), rendered verbatim;
-        in_progress_statuses defaults to "In Progress". Carries no organization identifiers by construction (an opaque
+        incident_issue_types, in_progress_statuses, done_statuses), rendered verbatim;
+        in_progress_statuses defaults to "In Progress"; done_statuses defaults to
+        Done, Closed, Resolved, Cancelled and Canceled (due-date rules skip those). Carries no organization identifiers by construction (an opaque
         passthrough of whatever this option is given).
       '';
     };
@@ -499,6 +501,16 @@ in
                       );
                       default = null;
                       description = "config.yaml's attention.rules.<kind>.severity. Null keeps the rule's built-in default severity.";
+                    };
+                    dueSoonDays = lib.mkOption {
+                      type = lib.types.nullOr lib.types.ints.positive;
+                      default = null;
+                      description = ''
+                        config.yaml's attention.rules.<kind>.due_soon_days: the
+                        look-ahead window, in calendar days, of `issue.due-soon`.
+                        Null keeps the rule's built-in default (2). pg-desk
+                        rejects it on a rule kind that has no such parameter.
+                      '';
                     };
                     staleAfterDays = lib.mkOption {
                       type = lib.types.nullOr lib.types.ints.positive;
