@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -1357,5 +1358,38 @@ func TestBackend_PerPRReads_InvalidIDTakesNoProbe(t *testing.T) {
 	_, _ = b.PendingReview(context.Background(), pr.PendingReviewRequest{ID: "nope"})
 	if gh.readRateLimitCalls != 0 {
 		t.Errorf("ReadRateLimit probes = %d, want 0", gh.readRateLimitCalls)
+	}
+}
+
+// TestBackend_Show_ReviewsCarryCommitOID proves the show path reports, for
+// each review, the commit it was submitted against (bead pg2-w7zai.2): the oid
+// when GitHub reports one, and a present-but-empty value (not an absent one)
+// for a review whose commit GitHub no longer reports.
+func TestBackend_Show_ReviewsCarryCommitOID(t *testing.T) {
+	gh := &fakeGH{
+		pr: &api.PR{Repo: "owner/repo", Number: 5, Title: "T", State: "open", HeadSHA: "h2"},
+		reviews: []api.Review{
+			{ID: "PRR_1", Author: "bob", State: "APPROVED", CommitOID: "h1"},
+			{ID: "PRR_2", Author: "carol", State: "COMMENTED", CommitOID: ""},
+		},
+	}
+	b := newTestBackend(t, gh)
+
+	got, err := b.Show(context.Background(), "owner/repo#5")
+	if err != nil {
+		t.Fatalf("Show: %v", err)
+	}
+	if len(got.Reviews) != 2 {
+		t.Fatalf("reviews = %+v, want 2", got.Reviews)
+	}
+	if o := got.Reviews[0].CommitOID; o == nil || *o != "h1" {
+		t.Errorf("review 0 commit_oid = %v, want h1", o)
+	}
+	if o := got.Reviews[1].CommitOID; o == nil || *o != "" {
+		t.Errorf("review 1 commit_oid = %v, want a pointer to the empty string (commit gone), not absent", o)
+	}
+	raw, _ := json.Marshal(got.Reviews[1])
+	if !strings.Contains(string(raw), `"commit_oid":""`) {
+		t.Errorf("wire JSON %s must carry commit_oid as an empty string", raw)
 	}
 }

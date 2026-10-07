@@ -21,10 +21,14 @@
 //     (store.Approval.IsStale against a PRIOR head SHA) requires a
 //     persisted per-approver history (internal/snapshot/builder.go's
 //     classifyApprovals, attention.go's NeedsAttention). gather.Facts is one
-//     point-in-time read with no history, and schema.PRReview carries no
-//     head-SHA-at-review field — so approvals/bot-verdict here are computed
-//     from the CURRENT pr_show read only, with no staleness axis. Documented
-//     deviation.
+//     point-in-time read with no history, so approvals/bot-verdict here are
+//     computed from the CURRENT pr_show read only. Since bead pg2-w7zai.2
+//     schema.PRReview carries the commit each review was submitted against,
+//     so the one staleness question the attention feed needs (did a push land
+//     after my review, with no standing teammate approval) IS answered, from
+//     the current read alone: Approvals.SelfReviewStale and
+//     Approvals.HumanApprovalStanding (review_staleness.go). The panels and
+//     the HumanApproved/SelfApproved counts still carry no staleness axis.
 //   - No agent registry, and no account-type field: this packet's pinned
 //     Config fields (Contract section) include approver_allowlist but not
 //     the full Agents/AgentConfig list agentregistry.Registry classifies
@@ -188,10 +192,9 @@ type Approvals struct {
 	// this PR. classifyPanel's team branch no longer routes on it (operator
 	// ruling 2026-10-02, pg2-4ajtt: a requested reviewer who has already
 	// approved is a RE-REQUEST and stays team_awaiting_me), but it remains
-	// part of the served Approvals payload. No staleness axis (see this package's own doc
-	// comment): a self-approval standing from before the PR's latest push
-	// still reads true here — a documented, currently-unavoidable gap, not
-	// a bug in this field.
+	// part of the served Approvals payload. No staleness axis in THIS field: a
+	// self-approval standing from before the PR's latest push still reads
+	// true here; SelfReviewStale carries that answer instead.
 	SelfApproved bool `json:"self_approved"`
 	// HumanChangesRequested is true iff any non-bot reviewer (not in the
 	// configured approver_allowlist and not isBotLogin) currently carries a
@@ -208,6 +211,19 @@ type Approvals struct {
 	// dependency and every non-closed dependency carries the `human` label
 	// — ported from pkg/beads.AllNonClosedHumanLabeled.
 	WaitingOnMe bool `json:"waiting_on_me"`
+	// SelfReviewStale is true iff the operator has submitted a review of this
+	// PR and none of the operator's reviews was made against the PR's current
+	// head: new commits landed after the operator last looked (bead
+	// pg2-w7zai.2). False when the answer is unknown (the connector reported
+	// no review commit, or the head is unknown), so it is omitted from the
+	// stored JSON when false and a row written before this field existed
+	// reads false.
+	SelfReviewStale bool `json:"self_review_stale,omitempty"`
+	// HumanApprovalStanding is true iff a human other than the operator has an
+	// APPROVED review made against the current head (no later-withdrawn
+	// approval, no bot). A standing teammate approval takes a stale review of
+	// the operator's off their plate (pr.review-stale-after-push).
+	HumanApprovalStanding bool `json:"human_approval_standing,omitempty"`
 }
 
 // Interpretation is this package's own return type: the same set of concepts
@@ -350,6 +366,12 @@ type prReview struct {
 	// SubmittedAt is the review's RFC3339 submission time (pg-connector
 	// schema 9+); empty from an older connector or for a pending review.
 	SubmittedAt string `json:"submitted_at,omitempty"`
+	// CommitOID is the commit the review was submitted against (bead
+	// pg2-w7zai.2, pg-connector schema 10+). nil is "the connector did not
+	// report it" (unknown, for example facts stored before the connector did),
+	// distinct from a pointer to "" which is GitHub's null commit (the commit
+	// is gone).
+	CommitOID *string `json:"commit_oid,omitempty"`
 }
 
 type prShow struct {

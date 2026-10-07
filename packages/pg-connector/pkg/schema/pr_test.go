@@ -90,12 +90,13 @@ func TestPR_CommentIDAndCommentIDAreStrings(t *testing.T) {
 }
 
 // TestPRSchemaVersion_IsCurrent pins PRSchemaVersion at its current value
-// (PRReview.SubmittedAt bumped 8 -> 9) so an accidental future edit that
+// (PRReview.SubmittedAt bumped 8 -> 9, PRReview.CommitOID bumped 9 -> 10) so
+// an accidental future edit that
 // forgets to bump it alongside a new field-shape change is caught here
 // first.
 func TestPRSchemaVersion_IsCurrent(t *testing.T) {
-	if PRSchemaVersion != 9 {
-		t.Fatalf("PRSchemaVersion = %d, want 9", PRSchemaVersion)
+	if PRSchemaVersion != 10 {
+		t.Fatalf("PRSchemaVersion = %d, want 10", PRSchemaVersion)
 	}
 }
 
@@ -402,5 +403,39 @@ func TestPR_ReviewContextFieldsRoundTrip(t *testing.T) {
 	}
 	if strings.Contains(string(listRaw), "connections") {
 		t.Errorf("a PR without a report must omit connections: %s", listRaw)
+	}
+}
+
+// TestPRReview_CommitOID_WireDistinguishesAbsentFromEmpty pins the three
+// answers of PRReview.CommitOID (bead pg2-w7zai.2): omitted when the connector
+// did not report it, "" when GitHub reports no commit, the oid otherwise.
+func TestPRReview_CommitOID_WireDistinguishesAbsentFromEmpty(t *testing.T) {
+	empty, oid := "", "abc123"
+	cases := []struct {
+		name string
+		in   PRReview
+		want string
+	}{
+		{"unreported is omitted", PRReview{ID: "r1"}, `{"id":"r1","author":"","state":""}`},
+		{"no commit is an empty string", PRReview{ID: "r1", CommitOID: &empty}, `{"id":"r1","author":"","state":"","commit_oid":""}`},
+		{"a commit is its oid", PRReview{ID: "r1", CommitOID: &oid}, `{"id":"r1","author":"","state":"","commit_oid":"abc123"}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := json.Marshal(tc.in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(raw) != tc.want {
+				t.Fatalf("wire = %s, want %s", raw, tc.want)
+			}
+			var back PRReview
+			if err := json.Unmarshal(raw, &back); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(back, tc.in) {
+				t.Fatalf("round trip = %+v, want %+v", back, tc.in)
+			}
+		})
 	}
 }

@@ -88,7 +88,13 @@ import "encoding/json"
 // and omitempty, so every version-8 consumer keeps decoding unchanged; the
 // bump follows this const's own rule that ANY field-shape change bumps the
 // version, additive or not.
-const PRSchemaVersion = 9
+//
+// Bumped 9 -> 10 by bead pg2-w7zai.2, which added PRReview.CommitOID (the
+// commit a review was submitted against, for the desk's re-review-after-push
+// rule). Additive and omitempty, so every version-9 consumer keeps decoding
+// unchanged; the bump follows this const's own rule that ANY field-shape
+// change bumps the version, additive or not.
+const PRSchemaVersion = 10
 
 // PRListFields is the authoritative set of schema.PR JSON field names the
 // cheap `list` populates (bead pg2-x3h8c.2). The list's batched search
@@ -325,6 +331,15 @@ type PRReview struct {
 	// report it. A consumer that needs "the latest review" MUST order by this
 	// field, not by position in PR.Reviews.
 	SubmittedAt string `json:"submitted_at,omitempty"`
+	// CommitOID is the commit the review was submitted against (bead
+	// pg2-w7zai.2). A pointer so the three answers stay distinct on the wire:
+	// absent means the connector did not report it (an older connector, or a
+	// read that does not select it), so a consumer MUST treat staleness as
+	// unknown; a pointer to "" means GitHub reports no commit for the review
+	// (the reviewed commit was since deleted, for example by a force push),
+	// which a consumer MAY read as "does not stand for the current head"; any
+	// other value is the commit's oid.
+	CommitOID *string `json:"commit_oid,omitempty"`
 }
 
 // PRListResult is the "list" op's wire result payload (bead pg2-2j5ac.28.1,

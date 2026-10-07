@@ -11,7 +11,7 @@ import (
 )
 
 func TestInitialRuleKindsAreRegistered(t *testing.T) {
-	want := []string{KindIssueDueSoon, KindIssueOverdue, KindIssueStaleInProgress, KindOwnCIFailing, KindOwnNeedsAction, KindReviewRequested}
+	want := []string{KindIssueDueSoon, KindIssueOverdue, KindIssueStaleInProgress, KindOwnCIFailing, KindOwnNeedsAction, KindReviewRequested, KindReviewStaleAfterPush}
 	if got := RuleKinds(); !reflect.DeepEqual(got, want) {
 		t.Errorf("RuleKinds() = %v, want %v", got, want)
 	}
@@ -36,7 +36,7 @@ func TestResolveDefaultsAndOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for kind, wantSev := range map[string]Severity{KindIssueDueSoon: SeverityMedium, KindIssueOverdue: SeverityHigh, KindIssueStaleInProgress: SeverityMedium, KindReviewRequested: SeverityMedium, KindOwnCIFailing: SeverityHigh, KindOwnNeedsAction: SeverityMedium} {
+	for kind, wantSev := range map[string]Severity{KindIssueDueSoon: SeverityMedium, KindIssueOverdue: SeverityHigh, KindIssueStaleInProgress: SeverityMedium, KindReviewRequested: SeverityMedium, KindOwnCIFailing: SeverityHigh, KindOwnNeedsAction: SeverityMedium, KindReviewStaleAfterPush: SeverityMedium} {
 		got := s.Rules[kind]
 		if !got.Enabled || got.Severity != wantSev || got.SeverityConfigured {
 			t.Errorf("default for %s = %+v, want enabled at %s", kind, got, wantSev)

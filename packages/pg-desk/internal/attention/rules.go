@@ -73,12 +73,68 @@ const (
 	KindReviewRequested = "pr.review-requested"
 	KindOwnCIFailing    = "pr.own-ci-failing"
 	KindOwnNeedsAction  = "pr.own-needs-action"
+	// KindReviewStaleAfterPush is the "re-review after my approval" leg of the
+	// retired connector item (bead pg2-w7zai.2).
+	KindReviewStaleAfterPush = "pr.review-stale-after-push"
 )
 
 func init() {
 	Register(reviewRequested{})
 	Register(ownCIFailing{})
 	Register(ownNeedsAction{})
+	Register(reviewStaleAfterPush{})
+}
+
+// reviewStaleAfterPush raises for a team PR the operator has already reviewed
+// when new commits landed after that review and nobody else's approval of the
+// current head stands: the operator's review no longer covers what is on the
+// branch. It restores the second reason of the retired connector `pr` item
+// ("re-review after my approval"), with the same two dampeners: a merge
+// conflict takes the PR off the operator's plate, and so does a standing
+// teammate approval. A teammate approval counts only if it is a human's and
+// was made against the current head (interpret.Approvals.HumanApprovalStanding),
+// so a bot approval does not clear it; that is the one deliberate departure
+// from the retired item, which let any author's approval clear it.
+//
+// It reads the stored interpretation, so it is exactly as fresh as the last
+// hydration of the entity. The staleness answer is unknown, and the rule stays
+// quiet, for facts stored before the connector reported each review's commit.
+//
+// A PR where the operator is ALSO a requested reviewer raises
+// pr.review-requested too; the evaluator collapses both into one item.
+type reviewStaleAfterPush struct{}
+
+func (reviewStaleAfterPush) Kind() string              { return KindReviewStaleAfterPush }
+func (reviewStaleAfterPush) DefaultSeverity() Severity { return SeverityMedium }
+
+func (r reviewStaleAfterPush) Raise(v *View, p RuleSettings) ([]Candidate, string) {
+	if v.Type != "pr" {
+		return nil, "not a pr"
+	}
+	if v.Degraded {
+		return nil, "interpretation degraded"
+	}
+	if v.OwnPR() {
+		return nil, "an own pr"
+	}
+	if !v.Approvals.SelfReviewStale {
+		return nil, "no stale review of mine"
+	}
+	f, ok := v.PRFacts()
+	if !ok {
+		return nil, "stored facts unavailable"
+	}
+	switch {
+	case !f.Open:
+		return nil, "pr is not open"
+	case f.Draft:
+		return nil, "pr is a draft"
+	case f.Conflict:
+		return nil, "pr has a merge conflict"
+	case v.Approvals.HumanApprovalStanding:
+		return nil, "a teammate's approval of the current head stands"
+	}
+	return []Candidate{v.candidate(r.Kind(), p.Severity, "new commits since my review")}, ""
 }
 
 // reviewRequested raises for a team PR in panel team_awaiting_me: a live

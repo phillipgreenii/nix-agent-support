@@ -667,6 +667,11 @@ func toSchemaPR(id string, in *api.PR, comments []api.Comment, reviews []api.Rev
 	}
 
 	for _, r := range reviews {
+		// bead pg2-w7zai.2: reviews reach here from the GraphQL reviews read,
+		// which always selects commit { oid }, so the oid is always reported;
+		// an empty one is GitHub's null commit (the reviewed commit was since
+		// deleted), carried as a pointer to "" and not as an absent field.
+		commitOID := r.CommitOID
 		out.Reviews = append(out.Reviews, schema.PRReview{
 			ID:       r.ID,
 			Author:   r.Author,
@@ -675,6 +680,7 @@ func toSchemaPR(id string, in *api.PR, comments []api.Comment, reviews []api.Rev
 			Comments: byReview[r.ID],
 			// pg2-4jmw2: lets a consumer order reviews without trusting array order.
 			SubmittedAt: r.SubmittedAt,
+			CommitOID:   &commitOID,
 		})
 	}
 

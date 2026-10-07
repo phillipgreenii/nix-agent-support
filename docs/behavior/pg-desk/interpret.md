@@ -135,10 +135,13 @@ and MUST NOT use an LLM for any step below.
     softening, never the cancelled-run or no-CI-data softening, never the merge-state rule, and a
     bot disapproval still blocks.
 
-  **Known data gap:** pg-desk has no per-review head-SHA history, so "approved" here means "a
-  currently `APPROVED` review exists," not "a non-stale one" — a self- or team-approval from
-  before the PR's latest push still reads as satisfied. A future gather/store change to add
-  per-review staleness would change this without changing the taxonomy above.
+  **Known data gap:** the panels carry no staleness axis, so "approved" here means "a currently
+  `APPROVED` review exists," not "a non-stale one" — a self- or team-approval from before the PR's
+  latest push still reads as satisfied. The stored approvals DO record, separately, whether the
+  operator's own review has gone stale behind a push (`self_review_stale`) and whether a human
+  teammate's approval of the current head stands (`human_approval_standing`), derived from the
+  commit each review was submitted against; only the `pr.review-stale-after-push` attention rule
+  (see [`attention.md`](attention.md)) reads them, and they never move a PR between panels.
 
   **Known scope gap:** pg-desk gathers no required-approver count or CODEOWNERS data. The team side
   works around that with GitHub's own merge state (above); the own-PR side has no such signal, so

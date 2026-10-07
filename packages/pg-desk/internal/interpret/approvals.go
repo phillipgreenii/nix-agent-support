@@ -76,10 +76,14 @@ const (
 // WaitingOnMe is populated by interpret.go's caller (computeWaitingOnMe), not
 // here.
 //
-// No PER-COMMIT staleness axis: schema.PRReview carries no head-SHA-at-review
-// field, so unlike pg-pr's store.Approval.IsStale (INV-APPROVAL-3), a review
-// is never invalidated by a LATER COMMIT landing with no new review from
-// anyone — a documented deviation (see interpret.go's package doc). This
+// The per-commit staleness axis (pg-pr's store.Approval.IsStale,
+// INV-APPROVAL-3) is reported SEPARATELY, as Approvals.SelfReviewStale and
+// Approvals.HumanApprovalStanding (computeReviewStaleness, review_staleness.go),
+// because schema.PRReview now carries the commit each review was submitted
+// against. It does NOT change HumanApproved, HumanApprovers, SelfApproved or
+// the panel: those still mean "a currently APPROVED review exists," so a
+// review is not invalidated by a LATER COMMIT for panel placement — only the
+// pr.review-stale-after-push attention rule reads the new fields. This
 // function DOES collapse pr.Reviews to each author's latest decisive verdict
 // (see latestDecision inside computeApprovals), which fixes the OTHER
 // staleness axis — a review superseded by a LATER REVIEW FROM THE SAME
@@ -160,12 +164,16 @@ func computeApprovals(pr prShow, self string, approverAllowlist []string, verdic
 		botVerdict = BotVerdictApproved
 	}
 
+	selfStale, teammateStanding := computeReviewStaleness(pr, self, approverAllowlist)
+
 	return Approvals{
 		HumanApprovers:        len(approvers),
 		HumanApproved:         len(approvers) > 0,
 		SelfApproved:          selfApproved,
 		HumanChangesRequested: humanChangesRequested,
 		BotVerdict:            botVerdict,
+		SelfReviewStale:       selfStale,
+		HumanApprovalStanding: teammateStanding,
 	}
 }
 
@@ -433,8 +441,10 @@ func computeMatchReasons(pr prShow, teamMembers, watchLabels []string, self stri
 //     5. Otherwise -> team_awaiting_team.
 //
 // No staleness axis (package doc): "approved" here means "a currently
-// APPROVED review exists," not "a non-stale one" — pg-desk has no
-// per-review head-SHA history to tell the two apart yet.
+// APPROVED review exists," not "a non-stale one". The stored approvals do
+// carry the per-commit staleness answer now (Approvals.SelfReviewStale), but
+// the panels deliberately do not consult it: only the
+// pr.review-stale-after-push attention rule does.
 func classifyPanel(own Ownership, pr prShow, ci ciRollupResult, appr Approvals, matchReasons []string) string {
 	if pr.State != "open" {
 		return PanelNone
