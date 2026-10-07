@@ -119,9 +119,9 @@ var prURLNumberRE = regexp.MustCompile(`/pull/(\d+)/?$`)
 // forms: a bare number ("123"), "OWNER/REPO#123", or a PR URL ending
 // "/pull/123". Phase 9 supports exactly one configured repository
 // (docs/behavior/pg-desk/README.md's "Scope"), so the owner/repo portion of
-// the first two forms is not otherwise consulted — resolvePRRef below
-// always resolves against cfg.Repos[0] regardless of what the reference
-// itself named.
+// the first two forms is not used here — resolvePRRef below always
+// resolves against cfg.Repos[0], and rejects a reference that explicitly
+// names a different repository.
 func parsePRNumber(ref string) (string, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
@@ -139,6 +139,24 @@ func parsePRNumber(ref string) (string, error) {
 		return m[1], nil
 	}
 	return "", fmt.Errorf("cannot parse PR reference %q (want OWNER/REPO#N, a PR URL, or a bare number)", ref)
+}
+
+// prURLRepoRE matches the OWNER/REPO that immediately precedes a PR URL's
+// trailing /pull/<N>.
+var prURLRepoRE = regexp.MustCompile(`([^/]+)/([^/]+)/pull/\d+/?$`)
+
+// namedPRRepo returns the "OWNER/REPO" a PR reference explicitly names, or ""
+// when it names none (a bare number, or a "#N" with no owner/repo prefix).
+// Only the "OWNER/REPO#N" and PR-URL forms name a repository.
+func namedPRRepo(ref string) string {
+	ref = strings.TrimSpace(ref)
+	if m := prURLRepoRE.FindStringSubmatch(ref); m != nil {
+		return m[1] + "/" + m[2]
+	}
+	if i := strings.LastIndexByte(ref, '#'); i > 0 {
+		return strings.TrimSpace(ref[:i])
+	}
+	return ""
 }
 
 // resolvePRRef resolves a <pr> command-line argument to (repo, entityID).
@@ -163,9 +181,10 @@ func parsePRNumber(ref string) (string, error) {
 // the one that must match it, regardless of which of the three documented
 // input forms (bare number / OWNER/REPO#N / URL) the caller passed — the
 // owner/repo portion of the OWNER/REPO#N form is still not otherwise
-// consulted (see parsePRNumber's doc comment): resolvePRRef always
-// rebuilds the qualified id from cfg.Repos[0].Remote, never from whatever
-// owner/repo the input itself named.
+// consulted for resolution (see parsePRNumber's doc comment): resolvePRRef
+// always rebuilds the qualified id from cfg.Repos[0].Remote — but an
+// explicit owner/repo that differs from the configured repository is
+// rejected with an explicit error, never silently remapped (pg2-5eus1).
 func resolvePRRef(cfg *config.Config, ref string) (repo, entityID string, err error) {
 	if cfg == nil || len(cfg.Repos) == 0 {
 		return "", "", fmt.Errorf("no repository configured")
@@ -175,5 +194,13 @@ func resolvePRRef(cfg *config.Config, ref string) (repo, entityID string, err er
 		return "", "", err
 	}
 	repo = cfg.Repos[0].Remote
+	// An explicit OWNER/REPO (from OWNER/REPO#N or a PR URL) that is not the
+	// configured repository MUST be rejected rather than silently resolved
+	// against cfg.Repos[0] — that would read (and may hydrate into the real
+	// store) a DIFFERENT repo's PR with the same number (pg2-5eus1). GitHub
+	// owner/repo names are case-insensitive.
+	if named := namedPRRepo(ref); named != "" && !strings.EqualFold(named, repo) {
+		return "", "", fmt.Errorf("PR reference %q names repository %q, but the only configured repository is %q (multi-repository references are not supported)", ref, named, repo)
+	}
 	return repo, repo + "#" + n, nil
 }

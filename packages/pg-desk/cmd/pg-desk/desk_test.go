@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
@@ -15,19 +16,19 @@ import (
 // bare number for every one of the three documented input forms, so
 // show/hide/wip/feedback could never resolve a real, currently-tracked PR.
 //
-// Every case below must resolve to the SAME qualified id, "o/r#123",
-// regardless of which owner/repo the input itself names: Phase 9 supports
-// exactly one configured repository (docs/behavior/pg-desk/README.md's
-// "Scope"), so resolvePRRef always rebuilds the id from cfg.Repos[0].Remote
-// (per parsePRNumber's own doc comment), never from the input's own
-// owner/repo portion.
+// Every case below must resolve to the SAME qualified id, "o/r#123": Phase 9
+// supports exactly one configured repository (docs/behavior/pg-desk/README.md's
+// "Scope"), so resolvePRRef rebuilds the id from cfg.Repos[0].Remote. A ref
+// that names a DIFFERENT repository is rejected instead (see
+// TestResolvePRRefRejectsNonConfiguredRepo).
 func TestResolvePRRefReturnsQualifiedEntityID(t *testing.T) {
 	cfg := &config.Config{Repos: []config.RepoConfig{{Remote: "o/r"}}}
 
 	cases := []string{
 		"123",
+		"#123",
 		"o/r#123",
-		"someone-else/other-repo#123",
+		"O/R#123",
 		"https://example.test/o/r/pull/123",
 		"https://example.test/o/r/pull/123/",
 	}
@@ -42,6 +43,38 @@ func TestResolvePRRefReturnsQualifiedEntityID(t *testing.T) {
 			}
 			if id != "o/r#123" {
 				t.Errorf("entityID = %q, want %q", id, "o/r#123")
+			}
+		})
+	}
+}
+
+// TestResolvePRRefRejectsNonConfiguredRepo is the regression test for
+// pg2-5eus1: an explicit OWNER/REPO#N (or PR URL) naming a repository other
+// than the configured one used to resolve silently to cfg.Repos[0] — reading
+// and possibly hydrating a DIFFERENT repo's PR with the same number. It must
+// now fail with an explicit error naming both repositories.
+func TestResolvePRRefRejectsNonConfiguredRepo(t *testing.T) {
+	cfg := &config.Config{Repos: []config.RepoConfig{{Remote: "o/r"}}}
+
+	for _, ref := range []string{
+		"someone-else/other-repo#123",
+		"o/other#123",
+		"other/r#123",
+		"https://example.test/someone-else/other-repo/pull/123",
+		"https://example.test/o/other/pull/123/",
+	} {
+		t.Run(ref, func(t *testing.T) {
+			repo, id, err := resolvePRRef(cfg, ref)
+			if err == nil {
+				t.Fatalf("resolvePRRef(%q) = (%q, %q, nil), want an error", ref, repo, id)
+			}
+			if repo != "" || id != "" {
+				t.Errorf("resolvePRRef(%q) returned (%q, %q) alongside an error, want empty", ref, repo, id)
+			}
+			for _, want := range []string{"o/r", "only configured repository"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not mention %q", err, want)
+				}
 			}
 		})
 	}

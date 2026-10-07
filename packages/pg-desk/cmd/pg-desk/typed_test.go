@@ -145,7 +145,7 @@ func TestResolveTypedRef(t *testing.T) {
 		typ, ref, wantID string
 	}{
 		{"pr", "123", "acme/api#123"},
-		{"pr", "other/repo#7", "acme/api#7"},
+		{"pr", "acme/api#7", "acme/api#7"},
 		{"issue", "PROJ-9", "PROJ-9"},
 		{"thread", "C123/1700000000.000100", "C123/1700000000.000100"},
 	} {
@@ -156,6 +156,11 @@ func TestResolveTypedRef(t *testing.T) {
 	}
 	if _, _, err := resolveTypedRef(cfg, "pr", "not-a-pr"); err == nil {
 		t.Errorf("unparseable pr ref accepted")
+	}
+	// pg2-5eus1: a pr ref naming a non-configured repository is rejected,
+	// not silently resolved against the configured one.
+	if _, _, err := resolveTypedRef(cfg, "pr", "other/repo#7"); err == nil {
+		t.Errorf("pr ref naming a non-configured repository accepted")
 	}
 	for _, typ := range []string{"pr", "issue", "thread"} {
 		if _, _, err := resolveTypedRef(openTestConfig("acme/api"), typ, "1"); err != nil {
