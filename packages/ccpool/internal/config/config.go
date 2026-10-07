@@ -61,7 +61,35 @@ type Pool struct {
 	// `ccpool reap` still reaps it and it stays registered. Distinct from
 	// idle_ttl = 0, which disables only TTL closures but still enforces the cap.
 	AutoReap bool `toml:"auto_reap"`
+	// DeadNeedsInputTTL is the backstop for a `needs_input` row that is no longer
+	// live (its tmux session is gone): reap closes it (non-purge, close reason
+	// dead_needs_input_ttl, ADR 0086) once its last activity is older than this.
+	// Live needs_input rows are NEVER closed by reap, whatever this says. Default
+	// 720h (30 days), deliberately far longer than any human-response time and far
+	// longer than the 2-day alert on ccpool_session_states{live="false",
+	// state="needs_input"}, so the alert is the human path and this is only the
+	// backstop. 0 disables the backstop (the dead row is then kept indefinitely).
+	// A non-zero value must be at least MinDeadNeedsInputTTL; negative is invalid.
+	DeadNeedsInputTTL Duration `toml:"dead_needs_input_ttl"`
 }
+
+// MinDeadNeedsInputTTL is the shortest non-zero Pool.DeadNeedsInputTTL accepted.
+// A needs_input session is parked for a person (ADR 0037); closing a dead one
+// sooner than a day would race the operator who is about to `ccpool attach` it.
+const MinDeadNeedsInputTTL = 24 * time.Hour
+
+// validate rejects values that would make a reap duration meaningless or unsafe.
+func (c Config) validate() error {
+	ttl := time.Duration(c.Pool.DeadNeedsInputTTL)
+	if ttl < 0 {
+		return fmt.Errorf("pool.dead_needs_input_ttl %s is negative (use 0 to disable)", ttl)
+	}
+	if ttl != 0 && ttl < MinDeadNeedsInputTTL {
+		return fmt.Errorf("pool.dead_needs_input_ttl %s is below the %s minimum (use 0 to disable)", ttl, MinDeadNeedsInputTTL)
+	}
+	return nil
+}
+
 type Tmux struct {
 	Socket string `toml:"socket"`
 	Prefix string `toml:"prefix"`
@@ -150,7 +178,7 @@ func (d *Duration) UnmarshalText(text []byte) error {
 
 func defaults() Config {
 	return Config{
-		Pool:   Pool{MaxSessions: 6, IdleTTL: Duration(30 * time.Minute), AutoReap: true},
+		Pool:   Pool{MaxSessions: 6, IdleTTL: Duration(30 * time.Minute), AutoReap: true, DeadNeedsInputTTL: Duration(30 * 24 * time.Hour)},
 		Tmux:   Tmux{Socket: "ccpool", Prefix: "cc-"},
 		Claude: Claude{Bin: "claude"},
 		List:   List{DoneTTL: Duration(time.Hour), FailedTTL: Duration(24 * time.Hour)},
@@ -220,6 +248,9 @@ func loadFrom(pc PoolContext) (Config, error) {
 		}
 	} else if !os.IsNotExist(err) {
 		return Config{}, fmt.Errorf("stat %s: %w", pc.ConfigPath, err)
+	}
+	if err := c.validate(); err != nil {
+		return Config{}, fmt.Errorf("%s: %w", pc.ConfigPath, err)
 	}
 	c.DBPath = pc.DBPath
 	c.StateDir = pc.StateDir

@@ -90,7 +90,9 @@ deployment-specific workflow built on top of ccpool, are out of this set's exten
 - **Reap** — periodic reclamation: sessions past an inactivity bound, and the least-recently-active
   sessions once the pool is over its cap, are closed and their records reclaimed.
 - **Human-awaited session** — a session in `needs_input`. Reap MUST spare it, TTL and cap eviction
-  alike, even if that leaves the pool briefly over its cap.
+  alike, even if that leaves the pool briefly over its cap. A human-awaited session whose session has since died (it is no longer
+  live) is the one exception: reap MAY close it, keeping its record and conversation, once it has
+  waited far longer than any plausible response (ADR 0086).
 
 ## Notification
 

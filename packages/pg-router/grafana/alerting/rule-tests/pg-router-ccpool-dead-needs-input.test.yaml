@@ -1,0 +1,118 @@
+# promtool unit tests for the pg-router-ccpool-dead-needs-input alert (pg2-s0pa3). Run by
+# the flake check test-pg-router-alert-rules, which generates rules.yml next to this file:
+# the Grafana rule's refId A wrapped as `alert: <uid>` with `expr: (<A>) > 0`, the rule's
+# `for: 48h` and labels, plus a recording rule `wrapped:<uid with _>`.
+#
+# Time model: ccpool-reap emits ccpool_session_states about every 5 minutes (it is the
+# sweep cadence), so every series here has a 5m interval. The condition needs `for: 48h`
+# (172800s), so a steady dead needs_input row is pending until about 48h and firing after:
+# not firing at 47h (169200s), firing at 49h (176400s). Series shapes mirror the exporter:
+# every (state, live) pair is emitted, zeros included, so a cleared row reads 0 rather
+# than going stale, and a row reap has CLOSED is dropped from the live="false",
+# state="needs_input" bucket and also reads 0.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a dead needs_input row held for 3 days fires at 49h but not at 47h, only for its own pool
+    interval: 5m
+    input_series:
+      - series: ccpool_session_states{pool="default",state="needs_input",live="false"}
+        values: "1x864"
+      # The same pool's other buckets are present and must not matter: a live parked
+      # session, a dead working row (the dead-but-working signal is a different rule's
+      # concern), and a healthy neighbour pool.
+      - series: ccpool_session_states{pool="default",state="needs_input",live="true"}
+        values: "1x864"
+      - series: ccpool_session_states{pool="default",state="working",live="false"}
+        values: "1x864"
+      - series: ccpool_session_states{pool="pg-router-ccpool-review",state="needs_input",live="false"}
+        values: "0x864"
+    promql_expr_test:
+      - expr: count(wrapped:pg_router_ccpool_dead_needs_input)
+        eval_time: 176400s
+        exp_samples:
+          - labels: "{}"
+            value: 1
+    alert_rule_test:
+      - eval_time: 169200s
+        alertname: pg-router-ccpool-dead-needs-input
+        exp_alerts: []
+      - eval_time: 176400s
+        alertname: pg-router-ccpool-dead-needs-input
+        exp_alerts:
+          - exp_labels:
+              pool: default
+              severity: warning
+
+  - name: a live parked session never fires, however long it waits
+    interval: 5m
+    input_series:
+      - series: ccpool_session_states{pool="default",state="needs_input",live="true"}
+        values: "1x864"
+      - series: ccpool_session_states{pool="default",state="needs_input",live="false"}
+        values: "0x864"
+    alert_rule_test:
+      - eval_time: 176400s
+        alertname: pg-router-ccpool-dead-needs-input
+        exp_alerts: []
+
+  - name: a row cleared (attended or closed) before 48h never fires
+    interval: 5m
+    input_series:
+      # 1 for 30h (360 samples), then the zero bucket.
+      - series: ccpool_session_states{pool="default",state="needs_input",live="false"}
+        values: "1x360 0x504"
+    alert_rule_test:
+      - eval_time: 176400s
+        alertname: pg-router-ccpool-dead-needs-input
+        exp_alerts: []
+
+  - name: a fired alert resolves once the row is closed
+    interval: 5m
+    input_series:
+      # 1 for 55h (660 samples), then the zero bucket a closed row reads.
+      - series: ccpool_session_states{pool="default",state="needs_input",live="false"}
+        values: "1x660 0x204"
+    alert_rule_test:
+      # 50h: held for over 48h, firing.
+      - eval_time: 180000s
+        alertname: pg-router-ccpool-dead-needs-input
+        exp_alerts:
+          - exp_labels:
+              pool: default
+              severity: warning
+      # 58h: the row has read 0 for 3h, past the 1h last_over_time lookback.
+      - eval_time: 208800s
+        alertname: pg-router-ccpool-dead-needs-input
+        exp_alerts: []
+
+  - name: a 30-minute emitter gap (a sleeping laptop) does not reset the pending timer
+    interval: 5m
+    input_series:
+      # 25h of 1, a 30m gap (6 missing samples), then 1 again. The gap is inside the
+      # rule's 1h last_over_time lookback, so the row never stops being seen.
+      - series: ccpool_session_states{pool="default",state="needs_input",live="false"}
+        values: "1x300 _x6 1x400"
+    alert_rule_test:
+      - eval_time: 176400s
+        alertname: pg-router-ccpool-dead-needs-input
+        exp_alerts:
+          - exp_labels:
+              pool: default
+              severity: warning
+
+  - name: an emitter gap longer than the lookback restarts the 48h wait
+    interval: 5m
+    input_series:
+      # 25h of 1, a 2.5h gap (30 missing samples), then 1 again. The alert restarts
+      # its pending timer when the row reappears at about 27.5h, so at 50h it has only
+      # been pending for about 22.5h.
+      - series: ccpool_session_states{pool="default",state="needs_input",live="false"}
+        values: "1x300 _x30 1x400"
+    alert_rule_test:
+      - eval_time: 180000s
+        alertname: pg-router-ccpool-dead-needs-input
+        exp_alerts: []

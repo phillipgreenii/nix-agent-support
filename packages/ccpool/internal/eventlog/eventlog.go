@@ -14,7 +14,7 @@
 //	{"ts":"<RFC3339Nano UTC>","name":"<session>","kind":"input",
 //	 "action":"escape-burst|paste|enter|clear-input","detail":"<short note>"}
 //	{"ts":"<RFC3339Nano UTC>","name":"<session>","kind":"close",
-//	 "reason":"idle_ttl|cap_eviction|operator|handler"}
+//	 "reason":"idle_ttl|cap_eviction|operator|handler|dead_needs_input_ttl"}
 //
 // Kind-specific fields are omitempty, so a transition line never carries
 // action/detail/reason, an input line never carries from/to/uuid/line_ref/reason,
@@ -63,7 +63,7 @@ type Event struct {
 	Detail string `json:"detail,omitempty"`
 
 	// Close fields.
-	Reason string `json:"reason,omitempty"` // idle_ttl | cap_eviction | operator | handler
+	Reason string `json:"reason,omitempty"` // idle_ttl | cap_eviction | operator | handler | dead_needs_input_ttl
 }
 
 // Logger appends Events to a JSONL file. The fd is opened per-write (O_APPEND),

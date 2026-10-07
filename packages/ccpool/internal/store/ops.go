@@ -205,13 +205,13 @@ func (s *Store) SetPendingQuestion(ctx context.Context, externalID, q string) er
 
 // CloseReasons is the closed vocabulary SetCloseReason accepts (ADR 0072,
 // Decision 4).
-var CloseReasons = map[string]bool{"idle_ttl": true, "cap_eviction": true, "operator": true, "handler": true, "exited": true}
+var CloseReasons = map[string]bool{"idle_ttl": true, "cap_eviction": true, "operator": true, "handler": true, "exited": true, "dead_needs_input_ttl": true}
 
 // SetCloseReason stamps close_reason/closed_at and appends a "close" event. It
 // does NOT change State (ADR 0015: the row keeps its last observed state).
 func (s *Store) SetCloseReason(ctx context.Context, externalID, reason string) error {
 	if !CloseReasons[reason] {
-		return fmt.Errorf("close reason %q not one of idle_ttl|cap_eviction|operator|handler|exited", reason)
+		return fmt.Errorf("close reason %q not one of idle_ttl|cap_eviction|operator|handler|exited|dead_needs_input_ttl", reason)
 	}
 	now := s.clock.Now().Unix()
 	res, err := s.db.ExecContext(ctx,

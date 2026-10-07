@@ -86,7 +86,7 @@ func newMetricsInstruments(meter metric.Meter) (metricsInstruments, error) {
 	}
 	if m.reapClosuresTotal, err = meter.Int64Counter(
 		"ccpool_reap_closures_total",
-		metric.WithDescription("Sessions closed by reap, labeled by reason (idle_ttl|cap_eviction)."),
+		metric.WithDescription("Sessions closed by reap, labeled by reason (idle_ttl|cap_eviction|dead_needs_input_ttl)."),
 	); err != nil {
 		return metricsInstruments{}, fmt.Errorf("ccpool_reap_closures_total: %w", err)
 	}
@@ -98,7 +98,7 @@ func newMetricsInstruments(meter metric.Meter) (metricsInstruments, error) {
 	}
 	if m.sessionsPreservedForHuman, err = meter.Int64Gauge(
 		"ccpool_sessions_preserved_for_human",
-		metric.WithDescription("Sessions reap is currently preserving for human review (preservedForHuman), one value per pool (and allowlisted label set). Each short-lived ccpool invocation pushes its own snapshot, so the series is last-value-wins: the most recent reap's count is what shows."),
+		metric.WithDescription("Sessions awaiting a human decision (needs_input), one value per pool (and allowlisted label set): live rows reap is preserving (preservedForHuman) PLUS not-live needs_input rows that have not been closed (ADR 0086). A not-live row leaves the count once reap closes it as dead_needs_input_ttl. Each short-lived ccpool invocation pushes its own snapshot, so the series is last-value-wins: the most recent reap's count is what shows."),
 	); err != nil {
 		return metricsInstruments{}, fmt.Errorf("ccpool_sessions_preserved_for_human: %w", err)
 	}
@@ -123,14 +123,14 @@ func newMetricsInstruments(meter metric.Meter) (metricsInstruments, error) {
 	if m.sessionDuration, err = meter.Float64Histogram(
 		"ccpool_session_duration_seconds",
 		metric.WithUnit("s"),
-		metric.WithDescription("Duration of one session RUN (a launch or resume), ended_at - started_at from session_runs, labeled by result (the close reason: idle_ttl|cap_eviction|operator|handler|exited). A resumed session's closed gap is not counted."),
+		metric.WithDescription("Duration of one session RUN (a launch or resume), ended_at - started_at from session_runs, labeled by result (the close reason: idle_ttl|cap_eviction|operator|handler|exited|dead_needs_input_ttl). A resumed session's closed gap is not counted."),
 		metric.WithExplicitBucketBoundaries(SessionDurationBuckets...),
 	); err != nil {
 		return metricsInstruments{}, fmt.Errorf("ccpool_session_duration_seconds: %w", err)
 	}
 	if m.sessionsClosedTotal, err = meter.Int64Counter(
 		"ccpool_sessions_closed_total",
-		metric.WithDescription("Session runs that ended, labeled by result (the close reason: idle_ttl|cap_eviction|operator|handler|exited)."),
+		metric.WithDescription("Session runs that ended, labeled by result (the close reason: idle_ttl|cap_eviction|operator|handler|exited|dead_needs_input_ttl)."),
 	); err != nil {
 		return metricsInstruments{}, fmt.Errorf("ccpool_sessions_closed_total: %w", err)
 	}
@@ -380,7 +380,7 @@ func RecordCancel(outcome string, attrs []attribute.KeyValue) {
 }
 
 // RecordReapClosure increments ccpool_reap_closures_total, labeled by reason
-// ("idle_ttl" or "cap_eviction") plus attrs. Call site:
+// ("idle_ttl", "cap_eviction" or "dead_needs_input_ttl") plus attrs. Call site:
 // internal/session/reap.go's Pass 1/Pass 2.
 func RecordReapClosure(reason string, attrs []attribute.KeyValue) {
 	ensureInstruments().reapClosure(context.Background(), reason, attrs)
@@ -457,7 +457,7 @@ func RecordSessionInfo(claudeSessionID string, attrs []attribute.KeyValue) {
 // RecordSessionClosed records one ended session RUN: one observation on
 // ccpool_session_duration_seconds (durationSeconds = ended_at - started_at of
 // the run) and one increment of ccpool_sessions_closed_total, both labeled by
-// result (the close reason: idle_ttl|cap_eviction|operator|handler|exited) plus
+// result (the close reason: idle_ttl|cap_eviction|operator|handler|exited|dead_needs_input_ttl) plus
 // attrs (pool and the allowlisted labels, resolved BEFORE any delete). The
 // caller MUST invoke it at most once per run (the session_runs metrics_emitted
 // claim guarantees that).

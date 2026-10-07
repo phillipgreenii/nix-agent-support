@@ -68,9 +68,20 @@ func evictable(r store.Session) bool {
 // working sessions. With enough preserved sessions the pool is deliberately
 // left ABOVE maxSessions; that is safe because the cap is not an admission gate
 // (Ensure never consults it), so an over-cap pool grows but cannot starve new
-// work. Only an operator clears a preserved session (`ccpool attend`/`attach`,
-// then `ccpool close`).
-func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Duration) error {
+// work. Only an operator clears a LIVE preserved session (`ccpool attend`/
+// `attach`, then `ccpool close`).
+//
+// One further, deliberately narrow closure exists, for a row that is NOT live:
+// a `needs_input` row whose tmux session is gone and whose last activity is
+// older than WithDeadNeedsInputTTL is closed (non-purge, reason
+// dead_needs_input_ttl) so it stops being counted as awaiting a human forever
+// (ADR 0086). It is opt-in per call: Reap without that option never closes a
+// dead row.
+func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Duration, opts ...ReapOption) error {
+	var o reapOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
 	rows, err := s.d.Store.List(ctx)
 	if err != nil {
 		return err
@@ -104,6 +115,14 @@ func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Durati
 		case deadKeptRow:
 			deadKept = append(deadKept, cur)
 		}
+	}
+	// Dead-row backstop (ADR 0086): after Pass 0 has classified every row and
+	// before any metric or closure pass reads them, close the dead needs_input
+	// rows that have waited past the TTL. It returns the slice with each closed
+	// row refreshed, so the metrics below describe the post-close registry.
+	deadKept, err = s.closeStaleDeadNeedsInput(ctx, deadKept, now, o.deadNeedsInputTTL)
+	if err != nil {
+		return err
 	}
 	recordSessionStates(sessionStateCounts(live, deadKept), s.poolMetricAttrs())
 
@@ -148,7 +167,7 @@ func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Durati
 	// live rows, not a per-session event, so it has no D11 narration pair (design
 	// D6/D11 list only retry-exhausted/cancel-outcome/reap-closure-or-phantom-
 	// prune/launch-outcome as per-session narration points).
-	s.recordPreservedForHuman(live)
+	s.recordPreservedForHuman(live, deadKept)
 	// ccpool_session_info: one info point per live session, labels resolved
 	// here (before any close below deletes metadata). Emitted for every live
 	// row regardless of whether this sweep then closes it; a closed session's
@@ -181,20 +200,22 @@ func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Durati
 }
 
 // recordPreservedForHuman emits ccpool_sessions_preserved_for_human: ONE value
-// per (pool, allowlisted label set) over the live rows, counting those
-// preservedForHuman. Every label set that has a live row is emitted, zeros
-// included, so a set whose sessions were all cleared reads 0 rather than a
-// stale prior value; a pool with no live rows emits a single pool-only 0. The
-// grouping key is each row's resolved attribute set, resolved per row (the
-// labels differ per session).
-func (s *Service) recordPreservedForHuman(live []store.Session) {
+// per (pool, allowlisted label set), counting the rows awaiting a human decision.
+// That is every LIVE row preservedForHuman, plus every NOT-live (dead-kept) row
+// that is still awaitingHumanDead (ADR 0086): before that, a dead needs_input
+// row was invisible here and the gauge read 0 while the row sat unreaped for
+// weeks. Every label set that has a row is emitted, zeros included, so a set
+// whose sessions were all cleared reads 0 rather than a stale prior value; a
+// pool with no rows emits a single pool-only 0. The grouping key is each row's
+// resolved attribute set, resolved per row (the labels differ per session).
+func (s *Service) recordPreservedForHuman(live, deadKept []store.Session) {
 	type group struct {
 		attrs []attribute.KeyValue
 		count int64
 	}
 	groups := map[attribute.Distinct]*group{}
 	var order []attribute.Distinct // first-seen order (live is activity-sorted): deterministic emission
-	for _, r := range live {
+	add := func(r store.Session, counts bool) {
 		attrs := s.metricAttrs(r.ExternalID)
 		set := attribute.NewSet(attrs...)
 		key := set.Equivalent()
@@ -204,9 +225,15 @@ func (s *Service) recordPreservedForHuman(live []store.Session) {
 			groups[key] = g
 			order = append(order, key)
 		}
-		if preservedForHuman(r) {
+		if counts {
 			g.count++
 		}
+	}
+	for _, r := range live {
+		add(r, preservedForHuman(r))
+	}
+	for _, r := range deadKept {
+		add(r, awaitingHumanDead(r))
 	}
 	if len(order) == 0 {
 		recordSessionsPreservedForHuman(0, s.poolMetricAttrs())
@@ -215,6 +242,108 @@ func (s *Service) recordPreservedForHuman(live []store.Session) {
 	for _, key := range order {
 		recordSessionsPreservedForHuman(groups[key].count, groups[key].attrs)
 	}
+}
+
+// ReapOption configures one Reap call.
+type ReapOption func(*reapOptions)
+
+type reapOptions struct {
+	deadNeedsInputTTL time.Duration
+}
+
+// WithDeadNeedsInputTTL enables the dead-needs_input backstop: a row that is
+// not live, is still `needs_input`, and whose last activity is older than ttl is
+// closed with reason dead_needs_input_ttl. A ttl of 0 (or negative) disables it,
+// which is also what omitting the option means.
+func WithDeadNeedsInputTTL(ttl time.Duration) ReapOption {
+	return func(o *reapOptions) { o.deadNeedsInputTTL = ttl }
+}
+
+// closedSinceActivity reports whether ccpool closed the row at or after its last
+// activity, i.e. nothing has happened to it since the close. close_reason and
+// closed_at are never cleared when a session is resumed, so the stamp alone does
+// not mean "currently closed"; a resume that reaches needs_input again bumps
+// last_activity_at past closed_at and the row counts as open once more.
+func closedSinceActivity(r store.Session) bool {
+	return r.ClosedAt > 0 && r.ClosedAt >= r.LastActivityAt
+}
+
+// awaitingHumanDead reports whether a NOT-live row is still a `needs_input` row
+// that no one has closed: the human-awaited question is still on record. Once
+// ccpool (or an operator) has closed the row, nothing awaits a human any more,
+// so it leaves the needs_input count even though its stored state is unchanged
+// (ADR 0015: a close does not fabricate a state).
+func awaitingHumanDead(r store.Session) bool {
+	return preservedForHuman(r) && !closedSinceActivity(r)
+}
+
+// closeStaleDeadNeedsInput is the dead-row backstop. For each dead-kept row that
+// is awaitingHumanDead and idle past ttl it re-reads the row UNDER the
+// per-external_id lock and closes it only if it is still dead, still
+// needs_input, still not closed, and still past the TTL, so a session resumed
+// since Pass 0's unlocked classification is never closed. The close is
+// non-purge: the row, the transcript and the worktree are untouched (the
+// session stays resumable with `ccpool attach`), only close_reason/closed_at
+// and the run end are written. Returns deadKept with each closed row replaced
+// by its fresh copy. ttl <= 0 is a no-op.
+//
+// Idempotent: a closed row has closed_at >= last_activity_at, so the next sweep
+// skips it (closedSinceActivity).
+func (s *Service) closeStaleDeadNeedsInput(ctx context.Context, deadKept []store.Session, now time.Time, ttl time.Duration) ([]store.Session, error) {
+	if ttl <= 0 {
+		return deadKept, nil
+	}
+	out := make([]store.Session, len(deadKept))
+	copy(out, deadKept)
+	for i, r := range out {
+		if !staleDeadNeedsInput(r, now, ttl) {
+			continue
+		}
+		var fresh store.Session
+		err := s.withLock(r.ExternalID, func() error {
+			cur, ok, err := s.d.Store.GetByExternalID(ctx, r.ExternalID)
+			if err != nil || !ok {
+				return err
+			}
+			fresh = cur
+			if s.d.Tmux.HasSession(TmuxName(s.d.Prefix, r.ExternalID)) || !staleDeadNeedsInput(cur, now, ttl) {
+				return nil
+			}
+			// Attributes and log args are resolved before the close, as for the
+			// live passes.
+			attrs := s.metricAttrs(r.ExternalID)
+			logArgs := append([]any{"reason", reasonDeadNeedsInputTTL, "idle_for", now.Sub(time.Unix(cur.LastActivityAt, 0)).String()}, sessionLogArgs(r.ExternalID)...)
+			if err := s.closeLocked(ctx, r.ExternalID, reasonDeadNeedsInputTTL, false); err != nil {
+				return err
+			}
+			recordReapClosure(reasonDeadNeedsInputTTL, attrs)
+			slog.Info("ccpool: reap closed dead needs_input session", logArgs...)
+			after, ok, err := s.d.Store.GetByExternalID(ctx, r.ExternalID)
+			if err != nil {
+				return err
+			}
+			if ok {
+				fresh = after
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		out[i] = fresh
+	}
+	return out, nil
+}
+
+// reasonDeadNeedsInputTTL is the close reason (store.CloseReasons) for the
+// dead-needs_input backstop.
+const reasonDeadNeedsInputTTL = "dead_needs_input_ttl"
+
+// staleDeadNeedsInput is the pure eligibility test for the backstop, applied
+// both to the Pass 0 snapshot and again to the row re-read under the lock. It
+// does NOT test liveness; the caller does.
+func staleDeadNeedsInput(r store.Session, now time.Time, ttl time.Duration) bool {
+	return awaitingHumanDead(r) && now.Sub(time.Unix(r.LastActivityAt, 0)) > ttl
 }
 
 type deadRowKind int
@@ -274,7 +403,9 @@ func (s *Service) reapDeadRow(ctx context.Context, externalID string) (deadRowKi
 // ccpool_session_states. Every known state is emitted for both liveness values
 // (zeros included) so a bucket that emptied reads 0, not its stale last value.
 // live=false,state=working is the dead-but-working signal; live=true,
-// state=needs_input is a session parked for a human.
+// state=needs_input is a session parked for a human; live=false,
+// state=needs_input is a dead row still awaiting one (awaitingHumanDead), and
+// drops out of that bucket once it is closed (ADR 0086).
 func sessionStateCounts(live, dead []store.Session) []telemetry.SessionStateCount {
 	states := []store.State{store.Starting, store.Ready, store.Working, store.NeedsInput, store.Idle, store.Errored}
 	counts := map[store.State][2]int64{} // [0]=dead, [1]=live
@@ -284,6 +415,9 @@ func sessionStateCounts(live, dead []store.Session) []telemetry.SessionStateCoun
 		counts[r.State] = c
 	}
 	for _, r := range dead {
+		if r.State == store.NeedsInput && !awaitingHumanDead(r) {
+			continue // closed: no longer awaiting a human (ADR 0086)
+		}
 		c := counts[r.State]
 		c[0]++
 		counts[r.State] = c

@@ -297,3 +297,11 @@ func TestMigration011_addsOutputTokensColumnDefaultingToZero(t *testing.T) {
 		t.Errorf("default output_tokens_total = %d, want 0", v)
 	}
 }
+
+// TestCloseReasons_includesDeadNeedsInputTTL: reap's dead-needs_input backstop
+// stamps this reason (ADR 0086); SetCloseReason must accept it.
+func TestCloseReasons_includesDeadNeedsInputTTL(t *testing.T) {
+	if !CloseReasons["dead_needs_input_ttl"] {
+		t.Fatal(`CloseReasons must include "dead_needs_input_ttl"`)
+	}
+}

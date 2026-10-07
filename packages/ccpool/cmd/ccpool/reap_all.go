@@ -8,6 +8,7 @@ import (
 
 	"github.com/phillipgreenii/ccpool/internal/config"
 	"github.com/phillipgreenii/ccpool/internal/registry"
+	"github.com/phillipgreenii/ccpool/internal/session"
 )
 
 // runReapAll governs the whole machine in one timer-driven pass: it reaps the
@@ -76,5 +77,6 @@ func reapOnePool(root string) error {
 		setSessionLabeler(nil)
 		_ = st.Close()
 	}()
-	return svc.Reap(context.Background(), cfg.Pool.MaxSessions, time.Duration(cfg.Pool.IdleTTL))
+	return svc.Reap(context.Background(), cfg.Pool.MaxSessions, time.Duration(cfg.Pool.IdleTTL),
+		session.WithDeadNeedsInputTTL(time.Duration(cfg.Pool.DeadNeedsInputTTL)))
 }

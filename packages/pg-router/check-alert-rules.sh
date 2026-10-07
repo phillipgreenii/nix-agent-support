@@ -24,7 +24,7 @@ tests_dir="$2"
 
 # Every rule uid this check wraps and tests. A rule added here extends the cases under
 # rule-tests/.
-rule_uids='["pg-router-pool-full-idle"]'
+rule_uids='["pg-router-pool-full-idle", "pg-router-ccpool-dead-needs-input"]'
 
 fail() {
   echo "FAIL: $*" >&2

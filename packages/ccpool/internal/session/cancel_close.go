@@ -158,51 +158,59 @@ func (s *Service) recordCancelOutcome(externalID, outcome string) {
 // immediately, so there is nothing to read a reason off of).
 func (s *Service) closeWithReason(ctx context.Context, externalID, reason string, purge bool) error {
 	return s.withLock(externalID, func() error {
-		if !purge {
-			if err := s.d.Store.SetCloseReason(ctx, externalID, reason); err != nil {
-				return err
-			}
-		}
-		// Pending end_reason on the open run, BEFORE /exit (also for --purge, which
-		// skips the close_reason stamp): the SessionEnd hook then finds a reason and
-		// keeps it ("purge wins"), so a ccpool-initiated close is never recorded as
-		// a natural `exited`.
-		if err := s.d.Store.SetRunPendingReason(ctx, externalID, reason); err != nil {
-			return err
-		}
-		tmuxName := TmuxName(s.d.Prefix, externalID)
-		if s.d.Tmux.HasSession(tmuxName) {
-			// deliverCommand clears the input line itself, so no separate clear here.
-			if err := s.deliverCommand(tmuxName, "/exit"); err != nil {
-				return err
-			}
-			if !s.waitGone(tmuxName, 3*time.Second) {
-				if err := s.d.Tmux.KillSession(tmuxName); err != nil {
-					return fmt.Errorf("force kill: %w", err)
-				}
-			}
-		}
-		// Teardown succeeded: end the run (a no-op if the hook already won).
-		if err := s.endOpenRun(ctx, externalID, reason, store.RunEndClose, s.now().Unix()); err != nil {
-			return err
-		}
-		if purge {
-			// Resolve the narration args BEFORE the delete: Store.Delete also
-			// removes the session's metadata, so labels resolved afterwards would
-			// always be empty.
-			args := append([]any{"reason", reason}, sessionLogArgs(externalID)...)
-			if err := s.deleteSessionLocked(ctx, externalID); err != nil {
-				return err
-			}
-			slog.Info("ccpool: purged session", args...)
-			return nil
-		}
-		// Non-purge close: emit the run(s) that ended (by this close or by the
-		// hook) once teardown succeeded, still inside the lock. The flag makes a
-		// retry after a deliverCommand error, or the next sweep, a no-op.
-		// No fabricated state.
-		return s.emitEndedRuns(ctx, externalID, s.metricAttrs(externalID))
+		return s.closeLocked(ctx, externalID, reason, purge)
 	})
+}
+
+// closeLocked is closeWithReason's body. The caller MUST hold the per-external_id
+// lock (withLock): a caller that has to re-read the row under that same lock
+// before deciding to close (closeStaleDeadNeedsInput) cannot re-enter
+// closeWithReason, which would take the lock a second time.
+func (s *Service) closeLocked(ctx context.Context, externalID, reason string, purge bool) error {
+	if !purge {
+		if err := s.d.Store.SetCloseReason(ctx, externalID, reason); err != nil {
+			return err
+		}
+	}
+	// Pending end_reason on the open run, BEFORE /exit (also for --purge, which
+	// skips the close_reason stamp): the SessionEnd hook then finds a reason and
+	// keeps it ("purge wins"), so a ccpool-initiated close is never recorded as
+	// a natural `exited`.
+	if err := s.d.Store.SetRunPendingReason(ctx, externalID, reason); err != nil {
+		return err
+	}
+	tmuxName := TmuxName(s.d.Prefix, externalID)
+	if s.d.Tmux.HasSession(tmuxName) {
+		// deliverCommand clears the input line itself, so no separate clear here.
+		if err := s.deliverCommand(tmuxName, "/exit"); err != nil {
+			return err
+		}
+		if !s.waitGone(tmuxName, 3*time.Second) {
+			if err := s.d.Tmux.KillSession(tmuxName); err != nil {
+				return fmt.Errorf("force kill: %w", err)
+			}
+		}
+	}
+	// Teardown succeeded: end the run (a no-op if the hook already won).
+	if err := s.endOpenRun(ctx, externalID, reason, store.RunEndClose, s.now().Unix()); err != nil {
+		return err
+	}
+	if purge {
+		// Resolve the narration args BEFORE the delete: Store.Delete also
+		// removes the session's metadata, so labels resolved afterwards would
+		// always be empty.
+		args := append([]any{"reason", reason}, sessionLogArgs(externalID)...)
+		if err := s.deleteSessionLocked(ctx, externalID); err != nil {
+			return err
+		}
+		slog.Info("ccpool: purged session", args...)
+		return nil
+	}
+	// Non-purge close: emit the run(s) that ended (by this close or by the
+	// hook) once teardown succeeded, still inside the lock. The flag makes a
+	// retry after a deliverCommand error, or the next sweep, a no-op.
+	// No fabricated state.
+	return s.emitEndedRuns(ctx, externalID, s.metricAttrs(externalID))
 }
 
 // Close is the operator/CLI entry point: closeWithReason with reason

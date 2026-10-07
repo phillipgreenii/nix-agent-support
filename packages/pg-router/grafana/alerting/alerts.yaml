@@ -846,3 +846,78 @@ groups:
                 - evaluator:
                     type: gt
                     params: [0]
+
+      # A ccpool session parked for a human whose tmux session is gone
+      # (bead pg2-s0pa3; ADR 0086 in this repo). A needs_input row is spared
+      # by every reap pass (ADR 0037), and once its tmux session dies nothing
+      # attends it: it sits in ccpool_session_states{live="false",
+      # state="needs_input"} until a person resumes or closes it. The
+      # 2026-10-07 router health review found one such row held for weeks on
+      # the default pool with nothing alerting; ccpool_sessions_preserved_for_human
+      # read 0 for it because it then counted only live rows (also fixed by
+      # ADR 0086, which makes that gauge count it too).
+      #
+      # Threshold: more than 2 days. A person who has not attended a dead,
+      # question-holding session in 2 days is not going to without a nudge, and
+      # the reap backstop that closes it anyway only fires after 30 days
+      # (pool.dead_needs_input_ttl). ccpool_session_states is emitted on every
+      # ccpool-reap run, about every 300s, with a zero bucket for every
+      # (state, live) pair, so a cleared row reads 0 rather than going stale; a
+      # row that reap has CLOSED (dead_needs_input_ttl, or an operator close)
+      # also reads 0, so this rule resolves on a close and cannot fire forever on
+      # a row ccpool has already dealt with.
+      #
+      # last_over_time over 1h, not the 10m the pool-full-idle rule uses: this
+      # rule needs 48h of UNBROKEN truth, and the emitter is a laptop whose
+      # sleeps would otherwise reset the pending timer with a gap of a few
+      # missed samples. The cost is that a stopped emitter resolves the alert
+      # up to 1h late.
+      #
+      # `pool` is the ccpool pool dir basename (default pool: "default").
+      # noDataState: OK because a machine with no ccpool, or a pool whose
+      # auto_reap is off, emits nothing, which is not a fault. Annotations are
+      # STATIC (see the escalation convention above), since pg-router-probe copies
+      # them verbatim into a bead. The rule carries NO `escalation: human` label:
+      # that label is pinned to pg-router-origin-unavailable alone
+      # (TestEscalationHumanLabelOnlyOnOriginUnavailable), so a bead filed for this
+      # rule goes to the triager. Routing it straight to the operator is a one-line
+      # label addition plus relaxing that test, an operator call.
+      - uid: pg-router-ccpool-dead-needs-input
+        title: ccpool session waiting on a human has no live session
+        condition: C
+        for: 48h
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "a ccpool session is waiting on a human decision but its tmux session is gone"
+          description: 'ccpool_session_states{live="false",state="needs_input"} has stayed above 0 for over 2 days: a ccpool session stopped on a question and its tmux session has since died, so nothing is attending it. Find it with `ccpool --pool <pool> list --json` (the `pool` label of this alert; the default pool needs no --pool), read its question, then resume it with `ccpool attach <external_id>` or close it with `ccpool close <external_id>`. A closed row leaves the count on the next reap sweep. If it is left alone, reap closes it (reason dead_needs_input_ttl, no purge) after pool.dead_needs_input_ttl, 30 days by default.'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 3600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: max by (pool)(last_over_time(ccpool_session_states{live="false",state="needs_input"}[1h])) > 0
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]

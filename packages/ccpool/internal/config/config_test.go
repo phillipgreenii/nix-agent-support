@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -477,5 +478,81 @@ timeout = "2s"
 	want := UsageGate{Enabled: false, Command: "/opt/bin/pa-monitor", ThresholdPct: 95.5, Timeout: Duration(2 * time.Second)}
 	if c.UsageGate != want {
 		t.Errorf("UsageGate = %+v, want %+v", c.UsageGate, want)
+	}
+}
+
+// loadWithPoolBlock loads the default pool's config with `[pool]` set to body.
+func loadWithPoolBlock(t *testing.T, body string) (Config, error) {
+	t.Helper()
+	dir := t.TempDir()
+	cfgDir := filepath.Join(dir, "cfg", "ccpool")
+	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte("[pool]\n"+body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "cfg"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "data"))
+	return Load()
+}
+
+// TestLoad_deadNeedsInputTTLDefault: with no config the backstop is on at 30 days,
+// the value ADR 0086 records.
+func TestLoad_deadNeedsInputTTLDefault(t *testing.T) {
+	c, err := loadWithPoolBlock(t, "")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if want := Duration(30 * 24 * time.Hour); c.Pool.DeadNeedsInputTTL != want {
+		t.Errorf("DeadNeedsInputTTL = %v, want 720h", time.Duration(c.Pool.DeadNeedsInputTTL))
+	}
+}
+
+// TestLoad_deadNeedsInputTTLOverrides: a valid override decodes; 0 disables; the
+// other [pool] keys keep their defaults.
+func TestLoad_deadNeedsInputTTLOverrides(t *testing.T) {
+	cases := []struct {
+		body string
+		want time.Duration
+	}{
+		{`dead_needs_input_ttl = "168h"`, 168 * time.Hour},
+		{`dead_needs_input_ttl = "24h"`, MinDeadNeedsInputTTL}, // the minimum itself is valid
+		{`dead_needs_input_ttl = "0s"`, 0},                     // disabled
+	}
+	for _, c := range cases {
+		cfg, err := loadWithPoolBlock(t, c.body+"\n")
+		if err != nil {
+			t.Fatalf("%s: Load: %v", c.body, err)
+		}
+		if got := time.Duration(cfg.Pool.DeadNeedsInputTTL); got != c.want {
+			t.Errorf("%s: DeadNeedsInputTTL = %v, want %v", c.body, got, c.want)
+		}
+		if cfg.Pool.MaxSessions != 6 || !cfg.Pool.AutoReap || time.Duration(cfg.Pool.IdleTTL) != 30*time.Minute {
+			t.Errorf("%s: other [pool] defaults lost: %+v", c.body, cfg.Pool)
+		}
+	}
+}
+
+// TestLoad_deadNeedsInputTTLValidation: a negative value, or a non-zero one below
+// the minimum, is a config error that names the key, rather than silently closing
+// human-awaited sessions early or never.
+func TestLoad_deadNeedsInputTTLValidation(t *testing.T) {
+	for _, body := range []string{
+		`dead_needs_input_ttl = "-1h"`,
+		`dead_needs_input_ttl = "30m"`,
+		`dead_needs_input_ttl = "23h59m"`,
+	} {
+		_, err := loadWithPoolBlock(t, body+"\n")
+		if err == nil {
+			t.Errorf("%s: Load succeeded, want a validation error", body)
+			continue
+		}
+		if !strings.Contains(err.Error(), "dead_needs_input_ttl") {
+			t.Errorf("%s: error %q must name pool.dead_needs_input_ttl", body, err)
+		}
+	}
+	if _, err := loadWithPoolBlock(t, "dead_needs_input_ttl = \"soon\"\n"); err == nil {
+		t.Error("an unparseable duration must be rejected")
 	}
 }

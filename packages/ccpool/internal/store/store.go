@@ -62,7 +62,7 @@ type Session struct {
 	RetryWindowStartedAt int64
 	// CloseReason records WHY ccpool itself ended this session — a fact about
 	// ccpool's own action (ADR 0015 permits facts, forbids work judgments): one
-	// of idle_ttl | cap_eviction | operator | handler; "" until ccpool closes it.
+	// of idle_ttl | cap_eviction | operator | handler | exited | dead_needs_input_ttl; "" until ccpool closes it.
 	CloseReason string
 	// ClosedAt is the unix time CloseReason was stamped; 0 when unset.
 	ClosedAt int64
