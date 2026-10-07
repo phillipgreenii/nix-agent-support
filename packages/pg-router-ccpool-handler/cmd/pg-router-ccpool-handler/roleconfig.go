@@ -9,6 +9,7 @@ import (
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/budget"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/config"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/executor"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/prompt"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/roles"
 )
@@ -137,6 +138,17 @@ func loadRole(path string) (roles.Role, error) {
 		}
 		if stopAfter < 0 {
 			return roles.Role{}, fmt.Errorf("role config %s: budgetStopEscalateAfter %d must be >= 0", path, stopAfter)
+		}
+		// isolation.prefetch (bead pg2-hh32y) checks a commit out inside the
+		// worktree this handler created, so it is valid ONLY with the
+		// worktree strategy, and its templates must parse.
+		if pf := rf.CCPool.Isolation.Prefetch; pf != nil {
+			if t := rf.CCPool.Isolation.Type; t != "" && t != "worktree" {
+				return roles.Role{}, fmt.Errorf("role config %s: isolation.prefetch requires worktree isolation, not %q", path, t)
+			}
+			if err := executor.ValidatePrefetch(*pf); err != nil {
+				return roles.Role{}, fmt.Errorf("role config %s: isolation.%w", path, err)
+			}
 		}
 		r.CCPool = &roles.CCPoolConfig{
 			Actor: rf.CCPool.Actor, SkillMD: rf.CCPool.SkillMD,

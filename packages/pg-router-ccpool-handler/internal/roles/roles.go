@@ -82,6 +82,36 @@ type IsolationConfig struct {
 	Type string
 	// Path is the fixed directory to create-or-reuse; set iff Type == "path".
 	Path string
+	// Prefetch (bead pg2-hh32y), when non-nil, has the HANDLER pin the freshly
+	// ensured worktree to a commit and pre-generate the diff before the session
+	// starts, instead of leaving the model to fetch/checkout/diff on its own
+	// clock. Valid only with the "worktree" strategy (anything else would
+	// check out into a directory this handler does not own).
+	Prefetch *PrefetchConfig
+}
+
+// PrefetchConfig configures the handler-side pre-fetch of a worktree-isolation
+// role (bead pg2-hh32y). Every *Tmpl-style field is a text/template rendered
+// against prompt.Context (so {{index .Item.Metadata "head_sha"}} works). The
+// pre-fetch is BEST EFFORT: a failure is logged and surfaces to the prompt as
+// {{.Prefetch.OK}} == false so the prompt can fall back to its own steps.
+type PrefetchConfig struct {
+	// Remote is the git remote Refspec is fetched from. "" means "origin".
+	Remote string
+	// Refspec is the ref to fetch when Rev is not already a local commit
+	// (e.g. pull/{{index .Item.Metadata "pr_number"}}/head). "" disables the
+	// fetch: Rev must then already be local.
+	Refspec string
+	// Rev is the commit the worktree is checked out at, detached. Required;
+	// must render to a hex object id (7-64 hex digits).
+	Rev string
+	// DiffBase, when non-empty, names the base the diff is taken against; the
+	// handler writes `git diff --numstat <base>...<rev>` and `git diff
+	// <base>...<rev>` files. "" writes neither.
+	DiffBase string
+	// Timeout bounds the whole pre-fetch (a Go duration string, e.g. "5m").
+	// "" means the default (5m).
+	Timeout string
 }
 
 // CommandConfig is the command role type's config.

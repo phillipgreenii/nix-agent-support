@@ -26,6 +26,10 @@ type script struct {
 	failCreate bool
 	// stdin of the submit call.
 	submitStdin string
+	// submitSeq, when set, answers successive `pr review submit` calls in
+	// order (the last answer repeats); submitCalls counts them.
+	submitSeq   []adapters.Result
+	submitCalls int
 }
 
 func (s *script) Run(_ context.Context, name string, args []string, stdin []byte, _ []string) (adapters.Result, error) {
@@ -38,6 +42,11 @@ func (s *script) Run(_ context.Context, name string, args []string, stdin []byte
 		return adapters.Result{}, nil
 	case len(args) >= 3 && args[0] == "pr" && args[1] == "review" && args[2] == "submit":
 		s.submitStdin = string(stdin)
+		s.submitCalls++
+		if len(s.submitSeq) > 0 {
+			i := min(s.submitCalls, len(s.submitSeq)) - 1
+			return s.submitSeq[i], s.submitErr
+		}
 		return s.submit, s.submitErr
 	case len(args) >= 2 && args[0] == "issue" && args[1] == "list":
 		out := s.openBeads
@@ -67,6 +76,8 @@ func (s *script) did(sub string) bool {
 type harness struct {
 	s              *script
 	stdin          string
+	files          map[string]string // --from-file contents by path
+	slept          []time.Duration
 	stdout, stderr bytes.Buffer
 }
 
@@ -74,6 +85,17 @@ func (h *harness) run(args ...string) int {
 	d := deps{
 		runner: func(time.Duration) adapters.Runner { return h.s },
 		now:    func() time.Time { return time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC) },
+		sleep: func(_ context.Context, dur time.Duration) error {
+			h.slept = append(h.slept, dur)
+			return nil
+		},
+		readFile: func(p string) ([]byte, error) {
+			c, ok := h.files[p]
+			if !ok {
+				return nil, fmt.Errorf("open %s: no such file", p)
+			}
+			return []byte(c), nil
+		},
 		stdin:  strings.NewReader(h.stdin),
 		stdout: &h.stdout,
 		stderr: &h.stderr,
@@ -279,5 +301,124 @@ func TestSplitErrors(t *testing.T) {
 	err := errors.Join(fmt.Errorf("a"), errors.Join(fmt.Errorf("b"), fmt.Errorf("c")))
 	if got := splitErrors(err); strings.Join(got, ",") != "a,b,c" {
 		t.Errorf("got %v", got)
+	}
+}
+
+const killedErr = `{"error":{"code":"internal","message":"scriptout: pg-connector-pr-github: signal: killed"}}`
+
+func TestSubmitRetriesWhenKilledThenSucceeds(t *testing.T) {
+	h := &harness{s: &script{submitSeq: []adapters.Result{
+		{ExitCode: 1, Stdout: []byte(killedErr)},
+		{ExitCode: 1, Stderr: []byte("scriptout: pg-connector-pr-github: signal: killed")},
+		{Stdout: []byte(postedOut)},
+	}}, stdin: `{"head_sha":"abc1234"}`}
+	if code := h.run("submit", "acme/api#5"); code != exitOK {
+		t.Fatalf("exit = %d, stderr:\n%s", code, h.stderr.String())
+	}
+	if h.s.submitCalls != 3 {
+		t.Errorf("submit attempts = %d, want 3", h.s.submitCalls)
+	}
+	if h.s.submitStdin != `{"head_sha":"abc1234"}` {
+		t.Errorf("the SAME request must be resent on a retry, got %q", h.s.submitStdin)
+	}
+	if h.stdout.String() != postedOut {
+		t.Errorf("stdout must be the final attempt only, got %q", h.stdout.String())
+	}
+	if len(h.slept) != 2 || h.slept[0] != defaultSubmitRetryDelay {
+		t.Errorf("back-off = %v, want two waits of %s", h.slept, defaultSubmitRetryDelay)
+	}
+	if !strings.Contains(h.stderr.String(), "attempt 1 of 3 killed by a signal") {
+		t.Errorf("stderr lacks the retry log: %q", h.stderr.String())
+	}
+}
+
+func TestSubmitRetryIsBounded(t *testing.T) {
+	h := &harness{s: &script{submit: adapters.Result{ExitCode: 1, Stdout: []byte(killedErr)}}}
+	code := h.run("submit", "--submit-retries", "1", "--submit-retry-delay", "1s", "acme/api#5")
+	if code != exitError {
+		t.Fatalf("exit = %d, want %d once attempts are exhausted", code, exitError)
+	}
+	if h.s.submitCalls != 2 {
+		t.Errorf("attempts = %d, want 1 try + 1 retry", h.s.submitCalls)
+	}
+	if h.stdout.String() != killedErr {
+		t.Errorf("the final failure must still be forwarded: %q", h.stdout.String())
+	}
+	if h.s.did("issue create") || h.s.did("push") {
+		t.Errorf("a failed submit has no outcome to escalate: %q", h.s.calls)
+	}
+}
+
+func TestSubmitRetriesZeroDisablesRetry(t *testing.T) {
+	h := &harness{s: &script{submit: adapters.Result{ExitCode: 1, Stdout: []byte(killedErr)}}}
+	if code := h.run("submit", "--submit-retries", "0", "acme/api#5"); code != exitError {
+		t.Fatalf("exit = %d", code)
+	}
+	if h.s.submitCalls != 1 || len(h.slept) != 0 {
+		t.Errorf("attempts = %d, slept = %v; want one attempt and no wait", h.s.submitCalls, h.slept)
+	}
+}
+
+func TestSubmitDoesNotRetryOtherFailures(t *testing.T) {
+	for name, res := range map[string]adapters.Result{
+		"invalid request": {ExitCode: 1, Stdout: []byte(`{"error":{"code":"invalid_argument","message":"head_sha mismatch"}}`)},
+		"not found":       {ExitCode: 4, Stdout: []byte(`{"error":{"code":"not_found"}}`)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := &harness{s: &script{submit: res}}
+			h.run("submit", "acme/api#5")
+			if h.s.submitCalls != 1 {
+				t.Errorf("attempts = %d, want 1: only a signal kill is transient", h.s.submitCalls)
+			}
+		})
+	}
+}
+
+func TestSubmitDoesNotRetrySuccessThatMentionsKilled(t *testing.T) {
+	out := `{"result":{"status":"posted","review_id":"R1","state":"pending","head_sha":"abc1234","body":"signal: killed"}}`
+	h := &harness{s: &script{submit: adapters.Result{Stdout: []byte(out)}}}
+	if code := h.run("submit", "acme/api#5"); code != exitOK {
+		t.Fatalf("exit = %d", code)
+	}
+	if h.s.submitCalls != 1 {
+		t.Errorf("attempts = %d, want 1 (exit 0 is never retried)", h.s.submitCalls)
+	}
+}
+
+func TestSubmitFromFileReadsRequestFromFile(t *testing.T) {
+	h := &harness{
+		s:     &script{submit: adapters.Result{Stdout: []byte(postedOut)}},
+		stdin: "STDIN MUST BE IGNORED",
+		files: map[string]string{"/scratch/review.json": `{"head_sha":"abc1234","body":"b"}`},
+	}
+	if code := h.run("submit", "--from-file", "/scratch/review.json", "acme/api#5"); code != exitOK {
+		t.Fatalf("exit = %d, stderr:\n%s", code, h.stderr.String())
+	}
+	if h.s.submitStdin != `{"head_sha":"abc1234","body":"b"}` {
+		t.Errorf("request = %q, want the file's content", h.s.submitStdin)
+	}
+}
+
+func TestSubmitFromFileMissingIsLoudAndSubmitsNothing(t *testing.T) {
+	h := &harness{s: &script{submit: adapters.Result{Stdout: []byte(postedOut)}}}
+	if code := h.run("submit", "--from-file", "/nope.json", "acme/api#5"); code != exitError {
+		t.Fatalf("exit = %d, want %d", code, exitError)
+	}
+	if h.s.submitCalls != 0 {
+		t.Errorf("an unreadable request must not be submitted")
+	}
+	if !strings.Contains(h.stderr.String(), "/nope.json") {
+		t.Errorf("stderr must name the file: %q", h.stderr.String())
+	}
+}
+
+func TestFromFileAndRetryFlagValidation(t *testing.T) {
+	h := &harness{s: &script{}}
+	if code := h.run("report", "--from-file", "/x", "acme/api#5"); code != exitUsage {
+		t.Errorf("report --from-file exit = %d, want usage", code)
+	}
+	h = &harness{s: &script{}}
+	if code := h.run("submit", "--submit-retries", "-1", "acme/api#5"); code != exitUsage {
+		t.Errorf("negative retries exit = %d, want usage", code)
 	}
 }

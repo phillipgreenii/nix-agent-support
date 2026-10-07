@@ -203,6 +203,13 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 		return res, fmt.Errorf("isolation %s: %w", d.Item.ID, wtErr)
 	}
 
+	// Handler-side pre-fetch (bead pg2-hh32y): pin the worktree to the item's
+	// commit and write the diff BEFORE the session launches, so neither the
+	// time nor a pool slot is spent on it. Best effort; see prefetch.go.
+	if pf := cc.Isolation.Prefetch; pf != nil && usesWorktreeIsolation(cc.Isolation) {
+		r.prefetch(ctx, *pf, d, wt)
+	}
+
 	env := map[string]string{
 		"BEADS_ACTOR": cc.Actor,
 		// BEADS_DIR stays repo-rooted: worktrees share .git but the beads dolt store
@@ -932,6 +939,9 @@ func (r *ccpoolRun) renderNudge(cc *roles.CCPoolConfig, d DispatchContext, workt
 		SkillMD:     cc.SkillMD,
 		SelfLogin:   r.deps.Cfg.SelfLogin,
 		RepoRoot:    r.deps.Cfg.RepoRoot,
+	}
+	if cc.Isolation.Prefetch != nil {
+		pctx.Prefetch = loadPrefetchInfo(worktreeDir)
 	}
 	body, err := prompt.Render(cc.Prompt, pctx)
 	if err != nil {

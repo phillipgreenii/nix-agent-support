@@ -364,3 +364,27 @@ review`. The claim is still released (status open, assignee cleared) — the lab
   pruned by the pool's own reaper first. Not covered, accepted: the retry removes one worktree
   per dispatch, so a backlog drains over several dispatches. Bead `pg2-kqegi`; closes the gap in
   which a purge-first teardown left a half-removed worktree no record led to (`pg2-me0t1`).
+
+- **`INV-CCH-21`** — a role with worktree isolation MAY be configured to pre-fetch. When it is,
+  the handler MUST, after the per-bead worktree exists and BEFORE the session is launched (so no
+  pool slot is held while it runs): (a) resolve the item's commit locally and fetch the configured
+  ref from the configured remote only if it does not resolve; (b) check the worktree out DETACHED
+  at that commit; (c) when a diff base is configured, write `git diff --numstat <base>...<commit>`
+  and `git diff <base>...<commit>` to files inside the worktree, never leaving a partial file; and
+  (d) tell the prompt the outcome (whether it succeeded, the commit, and the two file paths when
+  they exist). The commit MUST render to a 7 to 64 digit hexadecimal object id, and the fetch ref,
+  remote and base MUST NOT begin with `-` or contain whitespace, because item metadata is
+  externally sourced; a value that fails either check is a pre-fetch failure, not a git call.
+  The pre-fetch is BEST EFFORT: any failure, including a fetch that needs a credential the
+  handler's environment lacks (`docs/runbooks/dispatched-session-git-origin-auth.md`), MUST be
+  logged and MUST NOT fail or decline the dispatch; the prompt is told it did not succeed and does
+  the steps itself. The files MUST live in a directory the repository ignores (the handler adds it
+  to the repository's `info/exclude` BEFORE creating it, and creates nothing if that fails),
+  because every non-force worktree removal in this module (`INV-CCH-15`, `INV-CCH-19`,
+  `INV-CCH-20`) refuses a worktree holding untracked files. The outcome is also recorded in the
+  worktree so a re-rendered prompt for the same worktree (an absorbed duplicate) reports the same
+  outcome. Pre-fetch is invalid with any isolation other than the worktree strategy, and a role
+  config that says otherwise MUST be rejected at load time, since the checkout would otherwise
+  land in a directory this module does not own. Not covered, accepted: the fetch uses the
+  daemon's own credentials and so fails wherever the daemon cannot fetch; a commit already local
+  is trusted as is. Bead `pg2-hh32y`.

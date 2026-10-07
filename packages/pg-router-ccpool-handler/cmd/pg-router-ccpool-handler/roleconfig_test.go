@@ -339,3 +339,52 @@ func TestBuildDeps_bdRunnerCarriesRoleActor(t *testing.T) {
 		t.Errorf("bd runner Actor = %q, want pgii-pool__worker", r.Actor)
 	}
 }
+
+// prefetchRoleBody builds a ccpool roleFile whose isolation block is iso
+// (bead pg2-hh32y). The sub-field names are Go's own (roles.IsolationConfig
+// carries no json tags), exactly what the nix module renders.
+func prefetchRoleBody(iso string) string {
+	return `{"name":"review","type":"ccpool","ccpool":{"actor":"a","completion":"close-or-handback",` +
+		`"onFailure":"add-human","onDispatchFail":"leave","promptBody":"x","isolation":` + iso + `}}`
+}
+
+func TestLoadRole_decodesIsolationPrefetch(t *testing.T) {
+	iso := `{"Type":"worktree","Prefetch":{"Remote":"origin","Refspec":"pull/{{index .Item.Metadata \"pr_number\"}}/head",` +
+		`"Rev":"{{index .Item.Metadata \"head_sha\"}}","DiffBase":"origin/main","Timeout":"3m"}}`
+	r, err := loadRole(mustWriteRoleFile(t, prefetchRoleBody(iso)))
+	if err != nil {
+		t.Fatalf("loadRole: %v", err)
+	}
+	pf := r.CCPool.Isolation.Prefetch
+	if pf == nil || pf.Remote != "origin" || pf.DiffBase != "origin/main" || pf.Timeout != "3m" ||
+		!strings.Contains(pf.Refspec, "pr_number") || !strings.Contains(pf.Rev, "head_sha") {
+		t.Fatalf("Prefetch = %+v, want the configured fields", pf)
+	}
+}
+
+func TestLoadRole_prefetchAbsentIsNil(t *testing.T) {
+	r, err := loadRole(mustWriteRoleFile(t, prefetchRoleBody(`{"Type":"worktree"}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.CCPool.Isolation.Prefetch != nil {
+		t.Errorf("Prefetch = %+v, want nil when the block is absent", r.CCPool.Isolation.Prefetch)
+	}
+}
+
+func TestLoadRole_rejectsInvalidPrefetch(t *testing.T) {
+	tests := map[string]string{
+		"non-worktree isolation": `{"Type":"none","Prefetch":{"Rev":"abc1234"}}`,
+		"path isolation":         `{"Type":"path","Path":"/x","Prefetch":{"Rev":"abc1234"}}`,
+		"missing rev":            `{"Prefetch":{"Refspec":"x"}}`,
+		"unparseable template":   `{"Prefetch":{"Rev":"{{"}}`,
+		"bad timeout":            `{"Prefetch":{"Rev":"abc1234","Timeout":"soon"}}`,
+	}
+	for name, iso := range tests {
+		t.Run(name, func(t *testing.T) {
+			if _, err := loadRole(mustWriteRoleFile(t, prefetchRoleBody(iso))); err == nil {
+				t.Fatal("want an error")
+			}
+		})
+	}
+}

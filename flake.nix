@@ -5220,6 +5220,15 @@
                             cost = 250;
                             time = "25m";
                           };
+                          # pg2-hh32y: handler-side worktree pre-fetch renders
+                          # under the Go-named `Prefetch` key.
+                          isolation.prefetch = {
+                            enable = true;
+                            refspec = "pull/{{index .Item.Metadata \"pr_number\"}}/head";
+                            rev = "{{index .Item.Metadata \"head_sha\"}}";
+                            diffBase = "origin/main";
+                            timeout = "3m";
+                          };
                         };
                       };
                       worker = {
@@ -5699,6 +5708,10 @@
                         # via the untagged, Go-field-cased Isolation.Type key.
                         [ "$(jq -r .ccpool.isolation.Type "$handlerCommandDir/feedback.json")" = "" ]
                         jq -e 'has("command") | not' "$handlerCommandDir/feedback.json" >/dev/null
+                        # pg2-hh32y: isolation.prefetch renders under the Go field names.
+                        [ "$(jq -r .ccpool.isolation.Prefetch.DiffBase "$handlerCommandDir/feedback.json")" = origin/main ]
+                        [ "$(jq -r .ccpool.isolation.Prefetch.Timeout "$handlerCommandDir/feedback.json")" = 3m ]
+                        [ "$(jq -r .ccpool.isolation.Prefetch.Rev "$handlerCommandDir/feedback.json")" = '{{index .Item.Metadata "head_sha"}}' ]
                         [ "$(jq -r .name "$handlerCommandDir/worker.json")" = worker ]
                         [ "$(jq -r .type "$handlerCommandDir/worker.json")" = command ]
                         [ "$(jq -c .command.argv "$handlerCommandDir/worker.json")" = '["worker-bin","--flag"]' ]

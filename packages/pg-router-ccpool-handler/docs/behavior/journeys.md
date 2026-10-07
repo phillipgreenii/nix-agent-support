@@ -13,7 +13,7 @@ Realization gaps; these are the stories Task 5.2 onward realizes.
   a bare configured command), so pg-router itself never needs to know how to drive an agent.
   _(→ `USECASE-CCH-DISPATCH`; `INV-CCH-2`, `INV-CCH-3`, `INV-CCH-4`, `INV-CCH-5`,
   `INV-CCH-9`, `INV-CCH-10`, `INV-CCH-14`, `INV-CCH-15`, `INV-CCH-17`, `INV-CCH-18`, `INV-CCH-19`,
-  `INV-CCH-20`.)_
+  `INV-CCH-20`, `INV-CCH-21`.)_
 - **`STORY-CCH-QUERY`** <!-- uuid: 661a1b2c-4243-42b3-8fcc-607e8ec7e4af --> — As pg-router's core, I
   want a registered source to query beads for events on my behalf, so pg-router itself never needs
   to know beads' query language. _(→ `USECASE-CCH-QUERY`; `INV-CCH-1`, `INV-CCH-4`, `INV-CCH-5`.)_
@@ -26,7 +26,7 @@ Realization gaps; these are the stories Task 5.2 onward realizes.
 **Level:** user-goal.
 **Preconditions:** this module is registered with a reachable core (`phillipgreenii-nix-agent-support`
 ADR 0036 — this module never starts a core).
-_Requires:_ `INTF-HANDLER`, `INV-CCH-2`, `INV-CCH-3`, `INV-CCH-14`, `INV-CCH-15`, `INV-CCH-17`, `INV-CCH-18`, `INV-CCH-19`, `INV-CCH-20`.
+_Requires:_ `INTF-HANDLER`, `INV-CCH-2`, `INV-CCH-3`, `INV-CCH-14`, `INV-CCH-15`, `INV-CCH-17`, `INV-CCH-18`, `INV-CCH-19`, `INV-CCH-20`, `INV-CCH-21`.
 _Includes:_ `INTF-CCH-CCPOOL` or a configured command, per the role's own backing kind.
 
 1. The core dispatches one event under one tracking id to a bound role.
@@ -74,6 +74,14 @@ Extensions:
   record. If another live session still uses the worktree (`INV-CCH-15`), the record is purged and
   the worktree is left for that session. A failed retry leaves the record for the next dispatch.
   Until then the record is neither absorbed as a settled duplicate nor reclaimed as an orphan.
+- 2g. A role with worktree isolation is configured to pre-fetch (`INV-CCH-21`), as a review of a
+  pull request is: after the per-bead worktree exists and before the session launches, this module
+  makes the item's commit local (fetching it only when it is not), checks the worktree out at it,
+  and writes the change's file statistics and diff to files in the worktree. The prompt is told the
+  commit and the file paths, so the session starts already on the commit with the diff on disk,
+  and neither the time nor a pool slot is spent on it. If any step fails (an origin that needs a
+  credential the handler lacks, a commit that cannot be found), the dispatch still proceeds and the
+  prompt is told the pre-fetch did not succeed, so it does those steps itself.
 - 3a. The session hits a post-accept failure (`retryable`, `resource-limit`, `critical`): this
   module surfaces it on its own logs/metrics or as a new event, never as anything but the opaque
   completion outcome the core already stores (`INV-CCH-3`).

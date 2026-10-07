@@ -67,6 +67,7 @@ type FakeCC struct {
 	EnsuredMeta map[string]string // the meta of the last Ensure call
 	EnsuredEnv  map[string]string // the env of the last Ensure call (BEADS_ACTOR et al.)
 	Sent        []string
+	SentText    []string // the nudge text of each Send, parallel to Sent
 	Closed      []string
 	ClosedPurge []bool
 	SendErr     error
@@ -118,8 +119,9 @@ func (f *FakeCC) Ensure(_ context.Context, externalID, name, cwd string, env, me
 	return f.EnsureErr
 }
 
-func (f *FakeCC) Send(_ context.Context, externalID, _ string, _ ccpool.SendMode) error {
+func (f *FakeCC) Send(_ context.Context, externalID, text string, _ ccpool.SendMode) error {
 	f.Sent = append(f.Sent, externalID)
+	f.SentText = append(f.SentText, text)
 	return f.SendErr
 }
 func (f *FakeCC) Cancel(_ context.Context, _ string) error { return nil }

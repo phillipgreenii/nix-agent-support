@@ -83,6 +83,9 @@ type Deps struct {
 	// pg2-g2u9m, INV-CCH-18): <handler state dir>/locks. Empty disables the lock
 	// (unit tests; buildDeps always sets it).
 	LockDir string
+	// GitRun runs git for the handler-side worktree pre-fetch (bead pg2-hh32y);
+	// nil => osGitRun (gitenv-hermetic). Tests substitute a script.
+	GitRun GitRun
 }
 
 func (d Deps) git() watchdog.GitRunner {

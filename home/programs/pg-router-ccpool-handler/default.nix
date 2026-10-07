@@ -334,6 +334,18 @@ let
             isolation = {
               Type = roleCfg.ccpool.isolation.type;
               Path = roleCfg.ccpool.isolation.path;
+            }
+            // lib.optionalAttrs roleCfg.ccpool.isolation.prefetch.enable {
+              # prefetch (bead pg2-hh32y): omitted unless enabled, so a role that
+              # never opts in decodes `Prefetch == nil` (unchanged behavior).
+              # Field names are Go's own (roles.PrefetchConfig has no json tags).
+              Prefetch = {
+                Remote = roleCfg.ccpool.isolation.prefetch.remote;
+                Refspec = roleCfg.ccpool.isolation.prefetch.refspec;
+                Rev = roleCfg.ccpool.isolation.prefetch.rev;
+                DiffBase = roleCfg.ccpool.isolation.prefetch.diffBase;
+                Timeout = roleCfg.ccpool.isolation.prefetch.timeout;
+              };
             };
           }
           // lib.optionalAttrs (roleCfg.ccpool.beadsDir != "") {
@@ -622,6 +634,48 @@ let
                       type = lib.types.str;
                       default = "";
                       description = "Fixed directory to create-or-reuse; only meaningful when `type` == \"path\" (`roles.IsolationConfig.Path`).";
+                    };
+                    prefetch = {
+                      enable = lib.mkEnableOption ''
+                        handler-side worktree pre-fetch (bead pg2-hh32y): after the
+                        worktree exists and BEFORE the session launches, the handler
+                        fetches the item's commit if it is not local, checks the worktree
+                        out detached at it, and writes the numstat and diff to files under
+                        `<worktree>/.pg-router/`. The outcome reaches the prompt as
+                        `{{.Prefetch.OK}}`, `{{.Prefetch.Rev}}`, `{{.Prefetch.DiffFile}}`
+                        and `{{.Prefetch.NumstatFile}}`. Best effort: a failure is logged
+                        and surfaces as `OK == false`, so the prompt keeps its own
+                        fallback. Valid only with worktree isolation
+                      '';
+                      remote = lib.mkOption {
+                        type = lib.types.str;
+                        default = "";
+                        description = "Git remote the `refspec` is fetched from (a template over the dispatch context). \"\" means `origin`.";
+                      };
+                      refspec = lib.mkOption {
+                        type = lib.types.str;
+                        default = "";
+                        example = ''pull/{{index .Item.Metadata "pr_number"}}/head'';
+                        description = "Ref to fetch when `rev` is not already a local commit (a template). \"\" disables the fetch: `rev` must then already be local.";
+                      };
+                      rev = lib.mkOption {
+                        type = lib.types.str;
+                        default = "";
+                        example = ''{{index .Item.Metadata "head_sha"}}'';
+                        description = "Commit the worktree is checked out at, detached (a template). Required when `enable`; must render to a 7-64 digit hex object id.";
+                      };
+                      diffBase = lib.mkOption {
+                        type = lib.types.str;
+                        default = "";
+                        example = "origin/main";
+                        description = "Base for the numstat/diff files, taken as `git diff <base>...<rev>` (a template). \"\" writes neither file.";
+                      };
+                      timeout = lib.mkOption {
+                        type = lib.types.str;
+                        default = "";
+                        example = "5m";
+                        description = "Go duration bounding the whole pre-fetch. \"\" means 5m.";
+                      };
                     };
                   };
                 };

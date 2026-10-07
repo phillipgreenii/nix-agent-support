@@ -60,6 +60,9 @@ treatment of its own named boundaries (its `INTF-BRIDGE` — example only, not a
   retries (one per dispatch; for the default pool, the shutdown sweep too) rather than a worktree
   no record leads to. While such a teardown is unfinished, the record is never treated as a
   duplicate to absorb. This marking is a `ccpool` metadata write, never a `ccpool` label.
+  A role configured to pre-fetch also runs `git` in the per-bead worktree before the session
+  launches (`INV-CCH-21`): it resolves or fetches one commit from the configured remote, checks it
+  out detached, and writes two files under an ignored directory of the worktree.
 - **`INTF-CCH-BEADS`** <!-- uuid: 01dd79ce-ffbc-4234-9d6e-e7125561694f --> — this module's
   beads-backed source querying `bd` for events, and a handler session's completion policy writing
   a result back to `bd`. **Counterparty:** `bd` (boundary). **Initiator:** this module.

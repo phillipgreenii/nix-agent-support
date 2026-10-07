@@ -46,6 +46,9 @@ flowchart LR
   stdout and stderr unchanged, passes through the verb's exit code when it is non-zero (`4` stays
   `4`, anything else becomes `1`, and nothing is escalated because a failed submit has no outcome),
   and otherwise applies the outcome below.
+  `--from-file <path>` reads the request from that file instead of stdin (the two are not combined),
+  for a caller that cannot pipe or redirect, such as a session under a restrictive permission mode,
+  or a handler submitting a request an agent wrote to disk (bead `pg2-hh32y`).
 - **`report [flags] <pr-id>`** reads a submit output on stdin (the wire envelope `{"result": ...}`
   or the bare result object) and applies it. It exists for replay and for a caller that ran the verb
   itself.
@@ -100,6 +103,17 @@ flowchart TD
    notification is still sent so the operator hears of the stuck review.
 8. A submit output with an error envelope, no status, an unknown status, or a `blocked_human_pending`
    without a reason is NOT an outcome: it exits `1`, and the submit output is still forwarded.
+9. A submit that FAILED because a process in the connector's chain was killed by a signal (exit
+   non-zero and the text `signal: killed` on its stdout or stderr, for example the connector's
+   `scriptout: pg-connector-pr-github: signal: killed`) MUST be re-run, with the same request, up
+   to `--submit-retries` more times (default 2) with `--submit-retry-delay` between attempts
+   (default `5s`), and only the FINAL attempt's output and exit code are forwarded. Nothing else is
+   retried: not a non-zero exit without that text, not exit `4`, not a start failure or a timeout
+   of the attempt itself, and never an exit `0`. The re-run sends an identical request, so the
+   verb's own head and pending-review checks decide its outcome. Not verified live: whether a kill
+   can strike the deployed replace verb between its delete and its create; the pending-review reuse
+   design (append) removes that window. Bead `pg2-hh32y`: a finished review was lost when two
+   submits in a row were killed and the role gave up.
 
 Consumer of the bead metadata (bead `pg2-vhs3e`): `pg-router-source-pg-connector list
 --exclude-escalated-query` reads `review_escalation_key`, `review_escalation_head` and
@@ -112,20 +126,23 @@ therefore a change to that adapter too.
 Everything deployment-specific is a flag. This public repo names no push channel, tracker or
 organization.
 
-| Flag                  | Default                                                | Meaning                                                                                                    |
-| --------------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| `--renotify-interval` | `12h`                                                  | Minimum time between push notifications for one PR or roll-up. The first notification is immediate.        |
-| `--rollup-threshold`  | `3`                                                    | More than this many PRs blocked for one systemic reason roll up into one bead. A negative value disables.  |
-| `--systemic-reason`   | `detection_failed`, `delete_refused`, `archive_failed` | Reasons that can roll up; repeatable. Giving any replaces the defaults.                                    |
-| `--notify-arg`        | none (required for any `blocked_human_pending`)        | One element of the push command's argv; repeatable. `{title}`, `{body}`, `{url}`, `{key}` are substituted. |
-| `--label`             | none                                                   | Extra label on every created bead (for example a repo label the tracker requires); repeatable.             |
-| `--priority`          | tracker default                                        | Priority of created beads, in the tracker's own form.                                                      |
-| `--tracker-backend`   | `pg-connector-issue-beads`                             | The pg-connector issue backend every tracker call is pinned to.                                            |
-| `--list-query`        | `pending-review-escalations`                           | Named pg-connector query listing every OPEN escalation bead.                                               |
-| `--submit-backend`    | none                                                   | Pins the `pr review submit` call to one backend (`submit` only).                                           |
-| `--pg-connector-path` | `pg-connector`                                         | The pg-connector binary.                                                                                   |
-| `--exec-timeout`      | `30s`                                                  | Timeout of each tracker and notify call.                                                                   |
-| `--submit-timeout`    | `2m`                                                   | Timeout of the `pr review submit` call.                                                                    |
+| Flag                   | Default                                                | Meaning                                                                                                    |
+| ---------------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| `--renotify-interval`  | `12h`                                                  | Minimum time between push notifications for one PR or roll-up. The first notification is immediate.        |
+| `--rollup-threshold`   | `3`                                                    | More than this many PRs blocked for one systemic reason roll up into one bead. A negative value disables.  |
+| `--systemic-reason`    | `detection_failed`, `delete_refused`, `archive_failed` | Reasons that can roll up; repeatable. Giving any replaces the defaults.                                    |
+| `--notify-arg`         | none (required for any `blocked_human_pending`)        | One element of the push command's argv; repeatable. `{title}`, `{body}`, `{url}`, `{key}` are substituted. |
+| `--label`              | none                                                   | Extra label on every created bead (for example a repo label the tracker requires); repeatable.             |
+| `--priority`           | tracker default                                        | Priority of created beads, in the tracker's own form.                                                      |
+| `--tracker-backend`    | `pg-connector-issue-beads`                             | The pg-connector issue backend every tracker call is pinned to.                                            |
+| `--list-query`         | `pending-review-escalations`                           | Named pg-connector query listing every OPEN escalation bead.                                               |
+| `--submit-backend`     | none                                                   | Pins the `pr review submit` call to one backend (`submit` only).                                           |
+| `--pg-connector-path`  | `pg-connector`                                         | The pg-connector binary.                                                                                   |
+| `--exec-timeout`       | `30s`                                                  | Timeout of each tracker and notify call.                                                                   |
+| `--submit-timeout`     | `2m`                                                   | Timeout of each `pr review submit` attempt.                                                                |
+| `--from-file`          | none (stdin)                                           | `submit` only: read the request JSON from this file instead of stdin.                                      |
+| `--submit-retries`     | `2`                                                    | `submit` only: extra attempts after a submit killed by a signal; `0` disables.                             |
+| `--submit-retry-delay` | `5s`                                                   | `submit` only: wait between attempts.                                                                      |
 
 Deployment requirements:
 

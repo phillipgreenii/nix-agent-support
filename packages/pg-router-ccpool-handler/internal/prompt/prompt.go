@@ -17,6 +17,22 @@ type Context struct {
 	SkillMD     string
 	SelfLogin   string
 	RepoRoot    string
+	// Prefetch is the outcome of the role's handler-side pre-fetch (bead
+	// pg2-hh32y); the zero value (OK == false, no paths) when the role has no
+	// isolation.prefetch block or the pre-fetch failed.
+	Prefetch PrefetchInfo
+}
+
+// PrefetchInfo describes what the handler pre-fetched into the worktree before
+// the session started. OK is true only when the worktree is checked out,
+// detached, at Rev. DiffFile/NumstatFile are absolute paths, empty when not
+// produced (no DiffBase configured, or the base did not resolve).
+type PrefetchInfo struct {
+	OK          bool   `json:"ok"`
+	Rev         string `json:"rev,omitempty"`
+	Dir         string `json:"dir,omitempty"`
+	DiffFile    string `json:"diffFile,omitempty"`
+	NumstatFile string `json:"numstatFile,omitempty"`
 }
 
 // BeadID is a convenience alias for {{.BeadID}} == {{.Item.ID}}.
