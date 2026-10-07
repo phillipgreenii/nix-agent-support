@@ -118,6 +118,25 @@ that lacks the sentinel (for example `error connecting to api.github.com`) keeps
 rule individually. Same bounds as above: the reason is a fixed constant and `role` stays
 config-bounded.
 
+**Amended** (operator ruling A, Phillip, 2026-10-05; bead `pg2-vn4jb`). The budget-stop rule
+(`pg-router-budget-stops`) is **repeat-only**: it pages when a role records **2 or more**
+`reason="budget-exceeded"` handler errors in a 1-hour window
+(`sum by (role) (increase(...[1h])) >= 2`, `for: 0m` because the window already encodes
+"repeated"). One stop in an hour is benign contention and **MUST NOT** page; the `pg2-68005`
+shape (the same beads re-failing 2-3 times per hour per role) pages. Repeats page through
+`pg-router-budget-stops`, **not** through `pg-router-failure-rate` (the residual still excludes
+`budget-exceeded`). Why `for: 0m`: a `for: 10m` hold on a 1-hour window would suppress pairs 51 to
+59 minutes apart and delay the rest for no benefit. The old rule (`rate(...[10m]) > 0`, `for: 10m`)
+never paged an isolated stop in the replayed model (the rate stays above 0 for just under 10 minutes, shorter than the
+hold) but also missed a repeat 25 minutes apart, because each stop's hold ended before the next
+began; the replayed model is `internal/alertrules/budget_stops_test.go`. Cardinality is unchanged
+(`role` only; per-bead+role detection and a launch-timeout reason were **not** chosen, and the
+orphaned-session-budget gap stays with `pg2-3j76b`). **Accepted limitation:** a brand-new series
+does not count its first increment, so the first budget stop for a role after a pg-router restart
+is not counted and two stops on a fresh series read as 1 (the 3rd pages); the series is not
+pre-initialized because the core does not know the role set. Singles stay visible in the metric
+(`pg_router_failures_total{reason="budget-exceeded"}`).
+
 ### `DEC-OBS-4` — a source is persistently failing when it has not succeeded for max(3 x its period, 30m); a pause is not a failure <!-- uuid: 91571075-a2d2-4e39-8e31-4ce6e7f020c9 -->
 
 **Decided** (operator approval, Phillip, 2026-10-05; bead `pg2-tv11a`). The core exports two gauges per

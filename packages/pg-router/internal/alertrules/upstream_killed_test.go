@@ -74,11 +74,17 @@ func ukSeries(from, to time.Time, base float64, kills []time.Time, fresh bool) [
 	return out
 }
 
-// ukIncrease models Prometheus increase() over the range (t-window, t]:
-// last-first scaled by range extrapolation (no counter resets in the tests,
-// and ONE sample yields no result).
+// ukIncrease models Prometheus increase() over the 30m range (t-30m, t].
 func ukIncrease(series []ukSample, t time.Time) (float64, bool) {
-	start := t.Add(-ukWindow)
+	return promIncrease(series, t, ukWindow)
+}
+
+// promIncrease models Prometheus increase() over the range (t-window, t]:
+// last-first scaled by range extrapolation (no counter resets in the tests,
+// and ONE sample yields no result). Shared with the budget-stops model
+// (budget_stops_test.go, pg2-vn4jb), which uses a 1h and a 10m window.
+func promIncrease(series []ukSample, t time.Time, window time.Duration) (float64, bool) {
+	start := t.Add(-window)
 	var in []ukSample
 	for _, s := range series {
 		if s.at.After(start) && !s.at.After(t) {

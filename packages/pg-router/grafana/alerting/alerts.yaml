@@ -442,28 +442,55 @@ groups:
       # limit / used / cap detail is NOT a label: it is in the handler's error
       # text and eventlog hard_stop record. Only `role` can be referenced in
       # the annotation -- Grafana sees only labels present on the series.
+      #
+      # Repeat-only (pg2-vn4jb, operator ruling A, 2026-10-05): ONE budget stop
+      # in an hour is benign contention and MUST NOT page; two or more for the
+      # same role within one hour page (the pg2-68005 shape: 2-3 per hour per
+      # role, a leaked session re-absorbed on every redelivery). The old rule
+      # (rate[10m] > 0, for: 10m) paged ONLY when events chained inside the
+      # 10m hold, so it missed a ~25-minute repeat while an isolated event
+      # could not satisfy the hold either (the true span is < 10m). Repeats
+      # still do NOT fire pg-router-failure-rate; this rule is where they page.
+      # The `>= 2` lives in the PromQL expr (the queue-depth and upstream-
+      # killed rules do the same) because the Grafana threshold evaluator has
+      # no gte; the threshold node is the usual `gt 0` over the filtered value,
+      # so an empty result (below the bar) is NoData -> OK. relativeTimeRange
+      # from 3600 matches the [1h] range. `for: 0m`: the 1h window already
+      # encodes "repeated"; a further hold would only suppress pairs 51-59
+      # minutes apart and delay a page the window has already earned (with
+      # for: 10m two events 59 minutes apart satisfy the condition for under
+      # a minute and never page). Pairs 59 minutes apart page only if an
+      # evaluation lands in that sub-minute overlap; 61 minutes apart never.
+      # increase() uses a NEW series' first sample as its baseline, so the
+      # very first budget stop for a role after a pg-router restart is not
+      # counted: two stops on a fresh series read as 1 and the 3rd pages. That
+      # undercount is ACCEPTED (not pre-initialized; the Emitter does not know
+      # the role set, same as pg-router-upstream-killed) and pinned by the
+      # alertrules model. Role-only cardinality (DEC-OBS-3, DEC-OBS-5); the
+      # per-bead+role and launch-timeout variants are out of scope (pg2-3j76b
+      # keeps the orphaned-session-budget gap).
       - uid: pg-router-budget-stops
-        title: pg-router session budget stops (by role)
+        title: pg-router session budget stops repeating (by role)
         condition: C
-        for: 10m
+        for: 0m
         noDataState: OK
         execErrState: Error
         labels:
           severity: warning
         annotations:
-          summary: "pg-router role {{ $labels.role }} is hitting its session budget"
-          description: 'sum by (role) (rate(pg_router_failures_total{class="handler-error",reason="budget-exceeded"}[10m])) has stayed above 0 for over 10 minutes for role {{ $labels.role }} -- sessions are being hard-stopped at their budget. Which limit (tokens/cost/time), pool, used-vs-cap and bead are in the handler error text and the handler''s eventlog hard_stop record, not in labels (DEC-OBS-3, pg2-irowq).'
+          summary: "pg-router role {{ $labels.role }} has hit its session budget 2 or more times in the last hour"
+          description: 'sum by (role) (increase(pg_router_failures_total{class="handler-error",reason="budget-exceeded"}[1h])) >= 2 for role {{ $labels.role }} -- sessions are being hard-stopped at their budget repeatedly (a single stop in an hour does not page; it stays visible as pg_router_failures_total{reason="budget-exceeded"}). Repeats usually mean the same bead is re-failing, not routine contention: pg2-68005 was a leaked session re-absorbed on every redelivery. Which limit (tokens/cost/time), pool, used-vs-cap and bead are in the handler error text and the handler''s eventlog hard_stop record, not in labels (DEC-OBS-3, pg2-irowq, pg2-vn4jb). A fresh series after a pg-router restart undercounts by one (increase() does not count the first sample), so the first stop after a restart is not counted.'
         data:
           - refId: A
             relativeTimeRange:
-              from: 600
+              from: 3600
               to: 0
             datasourceUid: prometheus
             model:
               refId: A
               editorMode: code
               instant: true
-              expr: sum by (role) (rate(pg_router_failures_total{class="handler-error",reason="budget-exceeded"}[10m]))
+              expr: sum by (role) (increase(pg_router_failures_total{class="handler-error",reason="budget-exceeded"}[1h])) >= 2
           - refId: B
             datasourceUid: __expr__
             model:

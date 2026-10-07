@@ -237,7 +237,9 @@ sequenceDiagram
   that carries the documented **budget-stop sentinel** (`interfaces.md`, "Budget-stop sentinel") is
   counted under the existing handler-error class with a `reason` and a `role` label, so an operator can
   tell which role tripped its budget; the core still never re-offers it and still takes no status
-  stream — it reads only the error text it was already handed. The same holds for a handler error
+  stream — it reads only the error text it was already handed. A single budget stop in an hour **MUST NOT** page;
+  the budget-stop alert **MUST** page only when a role records two or more within one hour
+  (`DEC-OBS-3`, amended). The same holds for a handler error
   from an escalation-triage role, counted with `reason="triager-failure"` so it stays out of the
   worker/review failure-rate series (`DEC-OBS-3`, amended). A handler error that carries the documented
   **upstream-killed sentinel** (`interfaces.md`, "Upstream-killed sentinel": BOTH `scriptout:` and

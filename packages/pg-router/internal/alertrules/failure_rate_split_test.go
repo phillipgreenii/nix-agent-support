@@ -12,7 +12,7 @@ import (
 // (pg-router-failure-rate) becomes the RESIDUAL that keeps every failure not
 // matched by the first two.
 const (
-	wantBudgetExpr   = `sum by (role) (rate(pg_router_failures_total{class="handler-error",reason="budget-exceeded"}[10m]))`
+	wantBudgetExpr   = `sum by (role) (increase(pg_router_failures_total{class="handler-error",reason="budget-exceeded"}[1h])) >= 2`
 	wantResidualExpr = `sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure|upstream-killed|skipped-.+"}[10m]))`
 	wantTriagerExpr  = `sum by (role) (rate(pg_router_failures_total{class="handler-error",reason="triager-failure"}[10m]))`
 )
@@ -44,15 +44,41 @@ func ruleExpr(t *testing.T, block string) string {
 	return m[1]
 }
 
+// pg2-vn4jb: pg-router-budget-stops is repeat-only. The expr pins the exact
+// text (the `>= 2` lives in PromQL, the threshold node stays `gt 0`), the
+// relativeTimeRange matches the [1h] range, `for` is 0m (the window already
+// encodes "repeated"), and the only grouping label is role. The window
+// semantics are replayed in budget_stops_test.go.
 func TestBudgetStopRule(t *testing.T) {
 	r := ruleBlock(t, "pg-router-budget-stops")
 	if got := ruleExpr(t, r); got != wantBudgetExpr {
 		t.Errorf("budget-stops expr:\n got %q\nwant %q", got, wantBudgetExpr)
 	}
-	for _, need := range []string{"for: 10m", "noDataState: OK", "execErrState: Error", "severity: warning", "{{ $labels.role }}"} {
+	for _, need := range []string{
+		"for: 0m", "noDataState: OK", "execErrState: Error", "severity: warning",
+		"{{ $labels.role }}", "from: 3600", "type: gt", "params: [0]", "instant: true",
+	} {
 		if !strings.Contains(r, need) {
 			t.Errorf("budget-stops rule lost %q", need)
 		}
+	}
+	// Role-only cardinality: the only grouping label is role, and only one
+	// aggregation exists.
+	if !strings.Contains(wantBudgetExpr, "sum by (role) (") || strings.Count(wantBudgetExpr, " by (") != 1 {
+		t.Error("expr must aggregate by role only")
+	}
+	if regexp.MustCompile(`by \([^)]*(class|reason|source|bead|pool)`).MatchString(wantBudgetExpr) {
+		t.Error("expr must not group by any label other than role")
+	}
+	// The old behavior (rate over 10m, for: 10m, paged while the rate stayed
+	// above 0) is gone, and the annotation no longer describes it.
+	for _, gone := range []string{"for: 10m", "from: 600", "stayed above 0", "[10m]"} {
+		if strings.Contains(r, gone) {
+			t.Errorf("budget-stops rule still carries the old %q", gone)
+		}
+	}
+	if !strings.Contains(r, wantBudgetExpr) || !strings.Contains(r, "2 or more times in the last hour") {
+		t.Error("budget-stops annotations must state the repeat-only (>= 2 in 1h) condition")
 	}
 }
 
