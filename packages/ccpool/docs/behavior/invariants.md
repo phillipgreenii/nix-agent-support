@@ -36,6 +36,18 @@ Rules this set's implementation MUST hold, following the behavior-docs method
   however the pool is driven, so a caller that re-offers work later is held until the reset. When
   the usage surface cannot be read, or reports a hit window with no known reset, the pool MUST
   keep accepting work: not knowing is never a refusal. (ADR 0080)
+- **`INV-POOL-5`** <!-- uuid: d31042c8-954b-4156-abf3-8941935cccc6 --> — **A pool's per-session lock files MUST NOT accumulate
+  without bound.** Each session id leaves one empty lock file in the pool directory; the sweep
+  that reaps the pool (`INV-POOL-2`) MUST also remove a lock file, and MUST remove one only when
+  ALL of the following hold: the name ends in `.lock`; the file's modification time and the
+  timestamp embedded in the session id are both more than 24 hours old (an id carrying no
+  parseable timestamp is never removed); no session row exists for the id, read again after the
+  lock is held and immediately before the removal, so that a session being created cannot lose
+  its lock; and the lock can be taken exclusively without waiting, so a lock held by any running
+  operation is never removed. Removal MUST NOT weaken the lock's mutual exclusion: an operation
+  that was waiting for a lock file at the moment it was removed MUST NOT proceed as if it held
+  the lock, and MUST instead take the lock again on the file that now exists. Failing to remove a
+  lock MUST NOT fail the sweep.
 
 ## Session lifecycle (`INV-STATE-*`, `INV-SESS-*`, `INV-CCPOOL-CWD-*`)
 

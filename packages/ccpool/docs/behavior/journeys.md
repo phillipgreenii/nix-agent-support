@@ -193,7 +193,7 @@ question MAY still separately enter `needs_input` afterward for a reason unrelat
 **Level:** summary.
 **Intent:** tell the whole arc once — the pool stays bounded on its own, sparing anyone waiting on
 a person, without an operator managing it by hand.
-_Requires:_ `INV-POOL-2`, `INV-POOL-3`.
+_Requires:_ `INV-POOL-2`, `INV-POOL-3`, `INV-POOL-5`.
 _Includes:_ `USECASE-CCP-ATTEND`, `USECASE-CCP-CLOSE`.
 
 ```mermaid
@@ -202,5 +202,6 @@ flowchart LR
     C -->|"needs_input"| SPARE["spared - never reaped (INV-POOL-3)"]
     C -->|"yes, and not needs_input"| CLOSE["closed, least-recently-active first"]
     C -->|"no"| LEAVE["left alone"]
+    T --> L["orphaned, idle lock files removed (INV-POOL-5)"]
     SPARE -.->|"an operator attends it directly"| ATTEND["USECASE-CCP-ATTEND"]
 ```

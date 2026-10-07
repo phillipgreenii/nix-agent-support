@@ -174,6 +174,9 @@ func (s *Service) Reap(ctx context.Context, maxSessions int, idleTTL time.Durati
 		recordReapClosure(reason, attrs)
 		slog.Info("ccpool: reap closed session", logArgs...)
 	}
+	// Last step, after every row decision above: collect orphaned lock files.
+	// Best effort and never fatal (see gcLocks).
+	s.gcLocks(ctx)
 	return nil
 }
 

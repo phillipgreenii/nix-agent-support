@@ -349,3 +349,19 @@ func reclaimLeakedWorktree(ctx context.Context, role roles.Role, deps executor.D
 	})
 	return true
 }
+
+// sweepStaleLocks garbage-collects the handler's own lock directory (bead
+// pg2-bjhoq): one empty <external_id>.lock per session and one
+// worktree--<bead>.lock per bead used to accumulate forever. It removes only
+// files unused for sessionlock.DefaultStaleAge whose exclusive flock it can take
+// without blocking, unlinking under that flock, so it can never remove a lock a
+// live dispatch or reclaimer holds (shared or exclusive); the open-then-unlink
+// race against a concurrent opener is closed by the opener's inode re-verification
+// (see sessionlock.SweepStale). It runs after the worktree sweep, which has
+// already released its own per-bead locks. Best effort; returns the count removed.
+func sweepStaleLocks(deps executor.Deps) int {
+	if deps.LockDir == "" {
+		return 0
+	}
+	return sessionlock.SweepStale(deps.LockDir, sessionlock.DefaultStaleAge, orphanNow(deps))
+}

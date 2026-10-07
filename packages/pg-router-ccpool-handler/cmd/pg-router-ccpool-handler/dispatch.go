@@ -249,6 +249,12 @@ func runDispatch(args []string) int {
 		}); swept > 0 {
 			slog.Info("dispatch: reclaimed leaked worktrees", "reclaimed", swept)
 		}
+		// Lock-file GC (pg2-bjhoq): bound the handler lock directory. After the
+		// worktree sweep, so the locks it just used count as freshly used; best
+		// effort, never a dispatch failure.
+		if n := sweepStaleLocks(deps); n > 0 {
+			slog.Info("dispatch: removed stale lock files", "removed", n)
+		}
 	}
 	// Zero-model-cost precheck (INV-CCH-22, bead pg2-5x29j): a review dispatch
 	// whose bead is closed, whose PR is merged, or whose pending review already

@@ -667,3 +667,63 @@ func TestParseLsofCWDs(t *testing.T) {
 		t.Errorf("empty output parsed to %v", got)
 	}
 }
+
+// Lock-file GC (bead pg2-bjhoq): the handler's lock directory is swept of files
+// unused for sessionlock.DefaultStaleAge, never of a held one, and never of a
+// recently used one. Temp dirs only.
+func TestSweepStaleLocks(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+	deps := executor.Deps{LockDir: dir, Now: func() time.Time { return now }}
+
+	mk := func(key string, age time.Duration) string {
+		l, err := sessionlock.TryLock(dir, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		l.Unlock()
+		p := filepath.Join(dir, key+".lock")
+		old := now.Add(-age)
+		if err := os.Chtimes(p, old, old); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	stale := mk(sessionlock.WorktreeKey("zr-stale.2"), 10*24*time.Hour)
+	staleSession := mk("pg-router-review-zr-1-20260901T000000.000000000", 10*24*time.Hour)
+	recent := mk(sessionlock.WorktreeKey("zr-recent.2"), 2*24*time.Hour)
+
+	heldKey := sessionlock.WorktreeKey("zr-held.2")
+	held, err := sessionlock.TryRLock(dir, heldKey) // a live dispatch's shared worktree lock
+	if err != nil {
+		t.Fatal(err)
+	}
+	heldPath := filepath.Join(dir, heldKey+".lock")
+	old := now.Add(-30 * 24 * time.Hour)
+	if err := os.Chtimes(heldPath, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	if n := sweepStaleLocks(deps); n != 2 {
+		t.Fatalf("sweepStaleLocks removed %d, want 2", n)
+	}
+	for _, p := range []string{stale, staleSession} {
+		if _, err := os.Lstat(p); !os.IsNotExist(err) {
+			t.Errorf("%s should have been removed (err=%v)", p, err)
+		}
+	}
+	for _, p := range []string{recent, heldPath} {
+		if _, err := os.Lstat(p); err != nil {
+			t.Errorf("%s should have been kept: %v", p, err)
+		}
+	}
+	// The held lock still excludes an exclusive taker.
+	if _, err := sessionlock.TryLock(dir, heldKey); !errors.Is(err, sessionlock.ErrHeld) {
+		t.Errorf("TryLock over a swept-past held lock = %v, want ErrHeld", err)
+	}
+	held.Unlock()
+
+	if n := sweepStaleLocks(executor.Deps{}); n != 0 {
+		t.Errorf("no LockDir: removed %d", n)
+	}
+}

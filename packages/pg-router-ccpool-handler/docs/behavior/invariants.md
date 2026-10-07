@@ -456,3 +456,13 @@ review`. The claim is still released (status open, assignee cleared) — the lab
   still holds the slot after the window (a handler could close the session before removing the
   worktree, which this invariant does not change). Bead `pg2-uyahp`, follow-up of `pg2-hh32y`
   item 3 and `pg2-vlk1f`; see ADR 0082.
+
+- **`INV-CCH-24`** — the handler's lock directory MUST NOT grow without bound. Every session and
+  every per-bead worktree leaves one empty lock file there (`INV-CCH-18`, `INV-CCH-19`), so a
+  dispatch of a role with worktree isolation MUST also remove a lock file, and only one for which
+  ALL of the following hold: its name ends in `.lock`; nothing has acquired it for more than seven
+  days (each acquisition refreshes its modification time); and the lock can be taken exclusively
+  without waiting, so one held by any live dispatch or reclaimer, shared or exclusive, is never
+  removed. Removal MUST NOT weaken the lock's mutual exclusion: a taker that had the file open
+  when it was removed MUST retry on the file that now exists rather than report a lock it does not
+  hold. A removal that fails is logged-and-ignored, never a dispatch failure. Bead `pg2-bjhoq`.
