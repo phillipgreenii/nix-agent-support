@@ -188,6 +188,9 @@ func (b *Backend) Show(ctx context.Context, id string) (*schema.PR, error) {
 	if err != nil {
 		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, err.Error())
 	}
+	if err := b.checkRateReserve(ctx); err != nil {
+		return nil, err
+	}
 	ghPR, err := b.gh.GetPR(ctx, repo, number)
 	if err != nil {
 		return nil, classifyGHError(err)
@@ -240,7 +243,7 @@ func rateReservePoints(config json.RawMessage) int {
 	return *cfg.RateReservePoints
 }
 
-// checkRateReserve is the shared "Rate protection" gate List and Search each run before their first search: it reads the GraphQL
+// checkRateReserve is the shared "Rate protection" gate List, Search, Show, Files, Commits and PendingReview each run before their first GitHub read (bead pg2-8wg9a: the pg-desk gather's show/files/commits were the unguarded majority of the daily GraphQL spend; the rateLimit query itself is uncharged): it reads the GraphQL
 // rate-limit state, records it on the call's event (eventlog.RecordRateLimit,
 // bead pg2-ph0o4 — the budget dipping under the reserve is what starved
 // pg-desk's My Work panel, and this is the one place every guarded call
@@ -517,6 +520,9 @@ func (b *Backend) Files(ctx context.Context, id string) (*schema.PRFilesResult, 
 	if err != nil {
 		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, err.Error())
 	}
+	if err := b.checkRateReserve(ctx); err != nil {
+		return nil, err
+	}
 	files, err := b.gh.GetFiles(ctx, repo, number)
 	if err != nil {
 		return nil, classifyGHError(err)
@@ -535,6 +541,9 @@ func (b *Backend) Commits(ctx context.Context, id string) (*schema.PRCommitsResu
 	repo, number, err := parsePRID(id)
 	if err != nil {
 		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, err.Error())
+	}
+	if err := b.checkRateReserve(ctx); err != nil {
+		return nil, err
 	}
 	commits, err := b.gh.GetCommits(ctx, repo, number)
 	if err != nil {

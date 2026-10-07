@@ -287,8 +287,9 @@ func TestRun_InstrumentWritesOneEventPerCallToTheBackendsOwnLog(t *testing.T) {
 	if evs[0]["op"] != "show" || evs[0]["level"] != "info" || evs[0]["service"] != "pg-connector-pr-github" {
 		t.Errorf("show event = %v", evs[0])
 	}
-	if _, has := evs[0]["graphql_remaining"]; has {
-		t.Errorf("show does not read the rate limit but event has graphql_remaining: %v", evs[0])
+	// show is rate-reserve guarded (bead pg2-8wg9a), so its event carries the reading too.
+	if evs[0]["graphql_remaining"] != float64(5000) {
+		t.Errorf("show event missing rate-limit reading: %v", evs[0])
 	}
 	if evs[1]["op"] != "search" || evs[1]["graphql_remaining"] != float64(5000) || evs[1]["graphql_reset_at"] != "2026-10-03T14:00:00Z" {
 		t.Errorf("search event missing rate-limit reading: %v", evs[1])

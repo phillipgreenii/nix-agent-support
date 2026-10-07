@@ -53,6 +53,9 @@ func (b *Backend) PendingReview(ctx context.Context, req pr.PendingReviewRequest
 	if err != nil {
 		return pr.PendingReviewResult{}, scriptout.WrapError(scriptout.ErrInvalidArgument, err.Error())
 	}
+	if err := b.checkRateReserve(ctx); err != nil {
+		return pr.PendingReviewResult{}, err
+	}
 	data, err := b.gh.GetPendingReview(ctx, repo, number)
 	if err != nil {
 		return pr.PendingReviewResult{}, classifyPendingReviewError(err)

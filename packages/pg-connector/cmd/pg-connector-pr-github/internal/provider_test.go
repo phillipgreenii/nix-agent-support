@@ -10,6 +10,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/api"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/eventlog"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/github"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/pr"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
@@ -1276,4 +1277,81 @@ func TestNew_InstallsRateReserveAsRetryGuard(t *testing.T) {
 	}
 	// A gh that cannot take a guard is simply left alone.
 	_ = New(&fakeGH{})
+}
+
+// TestBackend_PerPRReads_AreGuardedByTheRateReserve (bead pg2-8wg9a): show,
+// files, commits and review_pending are the pg-desk gather's per-PR reads and
+// were the unguarded majority of the daily GraphQL spend. Each one now takes the
+// reserve check before its first GitHub read: below the reserve it answers
+// unavailable having made NO read, and above it the read runs after exactly one
+// probe. The reading lands on the call's event either way.
+func TestBackend_PerPRReads_AreGuardedByTheRateReserve(t *testing.T) {
+	const id = "owner/repo#1"
+	ops := map[string]func(b *Backend, ctx context.Context) error{
+		"show":    func(b *Backend, ctx context.Context) error { _, err := b.Show(ctx, id); return err },
+		"files":   func(b *Backend, ctx context.Context) error { _, err := b.Files(ctx, id); return err },
+		"commits": func(b *Backend, ctx context.Context) error { _, err := b.Commits(ctx, id); return err },
+		"review_pending": func(b *Backend, ctx context.Context) error {
+			_, err := b.PendingReview(ctx, pr.PendingReviewRequest{ID: id})
+			return err
+		},
+	}
+	for opName, run := range ops {
+		t.Run(opName+"/below reserve", func(t *testing.T) {
+			var reads []string
+			gh := &fakeGH{
+				rateLimit: 400,
+				getPRFn: func(context.Context, string, int) (*api.PR, error) {
+					reads = append(reads, "GetPR")
+					return &api.PR{}, nil
+				},
+				pendingErr: errors.New("must not be read below the reserve"),
+			}
+			b := newTestBackend(t, gh)
+			sink := &captureSink{}
+			table := eventlog.Instrument(scriptout.DispatchTable{opName: {
+				SchemaVersion: 1,
+				Handle: func(ctx context.Context, _ json.RawMessage) (any, error) {
+					return nil, run(b, scriptout.WithConfig(ctx, []byte(`{"rate_reserve_points":1000}`)))
+				},
+			}}, sink, "", time.Now)
+			_, err := table[opName].Handle(context.Background(), nil)
+			if !errors.Is(err, scriptout.ErrUnavailable) {
+				t.Fatalf("err = %v, want unavailable", err)
+			}
+			if len(reads) != 0 || gh.pendingCalls != 0 {
+				t.Errorf("reads = %v, pendingCalls = %d; want no GitHub read below the reserve", reads, gh.pendingCalls)
+			}
+			if gh.readRateLimitCalls != 1 {
+				t.Errorf("ReadRateLimit probes = %d, want 1", gh.readRateLimitCalls)
+			}
+			ev := sink.last(t)
+			if ev.GraphQLRemaining == nil || *ev.GraphQLRemaining != 400 || !ev.BelowReserve {
+				t.Errorf("event remaining = %v below_reserve = %v, want 400/true", ev.GraphQLRemaining, ev.BelowReserve)
+			}
+		})
+		t.Run(opName+"/above reserve", func(t *testing.T) {
+			gh := &fakeGH{rateLimit: 2500, pr: &api.PR{Repo: "owner/repo", Number: 1}, pendingData: &github.PendingReviewData{HeadSHA: "abc"}}
+			b := newTestBackend(t, gh)
+			if err := run(b, scriptout.WithConfig(context.Background(), []byte(`{"rate_reserve_points":1000}`))); err != nil {
+				t.Fatalf("err = %v, want success above the reserve", err)
+			}
+			if gh.readRateLimitCalls != 1 {
+				t.Errorf("ReadRateLimit probes = %d, want 1", gh.readRateLimitCalls)
+			}
+		})
+	}
+}
+
+// An invalid id is rejected before any rate-limit probe is spent.
+func TestBackend_PerPRReads_InvalidIDTakesNoProbe(t *testing.T) {
+	gh := &fakeGH{}
+	b := newTestBackend(t, gh)
+	_, _ = b.Show(context.Background(), "nope")
+	_, _ = b.Files(context.Background(), "nope")
+	_, _ = b.Commits(context.Background(), "nope")
+	_, _ = b.PendingReview(context.Background(), pr.PendingReviewRequest{ID: "nope"})
+	if gh.readRateLimitCalls != 0 {
+		t.Errorf("ReadRateLimit probes = %d, want 0", gh.readRateLimitCalls)
+	}
 }

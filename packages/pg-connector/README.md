@@ -195,6 +195,14 @@ never retried. Before every retry the same GraphQL reserve check that guards `li
 a refusal ends the retrying. When every attempt fails the call still answers `unavailable`, with
 the last attempt's stderr and a note of the earlier attempts in `error`.
 
+The GraphQL reserve (`config.rate_reserve_points`, default 1000) guards every per-PR read of
+`pg-connector-pr-github`, not only `list` and `search`: `show`, `files`, `commits` and
+`review_pending` each take one uncharged `rateLimit` probe before their first GitHub read and answer
+`unavailable` without reading when the remainder is below the reserve (bead `pg2-8wg9a`; the
+2026-10-07 attribution showed pg-desk's gather, which issues about 2 `show`s plus 1 `files` and 1
+`commits` per desk-pr dispatch, was the unguarded majority of the daily spend). The reading is
+logged on the event like any guarded call. `review_submit` (a write) is deliberately unguarded.
+
 `pg-connector-thread-slack` follows the same pattern: it appends to
 `${XDG_STATE_HOME}/pg-connector-thread-slack/events.jsonl` (override with
 `PG_CONNECTOR_THREAD_SLACK_EVENTS_FILE`; `off` disables it), same rotation, with the common fields
