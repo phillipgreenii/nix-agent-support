@@ -219,7 +219,11 @@ event log, so a refusal shows only as the `unavailable` answer.
 `PG_CONNECTOR_THREAD_SLACK_EVENTS_FILE`; `off` disables it), same rotation, with the common fields
 plus `claude_calls`, `failure_stage` (where the `claude -p` round trip broke: `exec`, `envelope`,
 `claude_error`, `reply_decode`, `reply_incomplete`) and `failure_class` (`auth` when claude's own
-failure text looks like an authentication problem; the wire `error_code` stays `unavailable`).
+failure text looks like an authentication problem; the wire `error_code` stays `unavailable`). When
+`claude -p` exits non-zero (`failure_stage` `exec`), its JSON envelope on stdout is still decoded and
+its `subtype`/`result` text is appended to the error (redacted of credential-like strings and capped
+at 2 KiB) after the stderr tail, so the cause is named even when stderr is empty; empty or non-JSON
+stdout leaves the error text as it was.
 `packages/pg-connector/grafana/alerting/thread-slack-alerts.yaml` alerts on auth failure and sustained
 `unavailable`. There is deliberately NO quota alert: the backend reads no Slack rate-limit header or
 `Retry-After` (claude's envelope is decoded for `result`/`is_error` only), so it has no quota reading

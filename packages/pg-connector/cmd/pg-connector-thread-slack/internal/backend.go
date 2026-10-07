@@ -22,8 +22,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-thread-slack/internal/eventlog"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/thread"
@@ -61,6 +63,10 @@ var _ thread.Provider = (*Backend)(nil)
 type claudeEnvelope struct {
 	Result  string `json:"result"`
 	IsError bool   `json:"is_error"`
+	// Subtype is claude -p's own result subtype (e.g. error_max_turns,
+	// error_during_execution). It is only read on the non-zero-exit path
+	// (see execFailureNote).
+	Subtype string `json:"subtype"`
 }
 
 // decodeClaudeEnvelope decodes claude -p's own stdout (the outer
@@ -72,6 +78,75 @@ func decodeClaudeEnvelope(raw string) (*claudeEnvelope, error) {
 		return nil, err
 	}
 	return &env, nil
+}
+
+// maxEnvelopeTextBytes caps how much of a failed `claude -p` run's stdout
+// envelope text execFailureNote copies into the unavailable error (bead
+// pg2-ezwut). This package had no redaction or tail helper to reuse for it
+// (runner.go's stderr tail is only capped at scriptout.MaxFoldedOutputBytes,
+// 64 KiB), so this is a conservative fresh cap.
+const maxEnvelopeTextBytes = 2048
+
+// credentialPatterns match credential-like substrings in claude-reported
+// text. Conservative and best-effort: the envelope text comes from claude
+// itself, not Slack content, but an API error can echo a token or header.
+var credentialPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`sk-ant-[A-Za-z0-9_-]+`),
+	regexp.MustCompile(`xox[a-zA-Z]-[A-Za-z0-9-]+`),
+	regexp.MustCompile(`\bgh[pousr]_[A-Za-z0-9]{20,}`),
+	regexp.MustCompile(`(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+`),
+	regexp.MustCompile(`eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`),
+	regexp.MustCompile(`(?i)\b(api[_-]?key|token|secret|password|passwd|authorization)(["']?\s*[:=]\s*["']?)[^\s"',;]+`),
+}
+
+// redactCredentials replaces credential-like substrings in s with
+// "[REDACTED]", keeping any "key=" prefix of a key/value match.
+func redactCredentials(s string) string {
+	for i, re := range credentialPatterns {
+		if i == len(credentialPatterns)-1 {
+			s = re.ReplaceAllString(s, "${1}${2}[REDACTED]")
+		} else {
+			s = re.ReplaceAllString(s, "[REDACTED]")
+		}
+	}
+	return s
+}
+
+// boundText trims s and caps it at max bytes (cut back to a rune boundary),
+// appending a marker that notes how many bytes were dropped.
+func boundText(s string, max int) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= max {
+		return s
+	}
+	cut := max
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return fmt.Sprintf("%s... [truncated %d of %d bytes]", s[:cut], len(s)-cut, len(s))
+}
+
+// execFailureNote returns a "; claude stdout: ..." suffix carrying the
+// subtype/result of the claude -p JSON envelope found on stdout of a
+// non-zero exit (redacted, then bounded), or "" when stdout is empty,
+// non-JSON, or carries neither field — in which case the caller's error
+// text is exactly what it was before bead pg2-ezwut.
+func execFailureNote(stdout string) string {
+	env, err := decodeClaudeEnvelope(stdout)
+	if err != nil {
+		return ""
+	}
+	var parts []string
+	if sub := strings.TrimSpace(env.Subtype); sub != "" {
+		parts = append(parts, "subtype="+sub)
+	}
+	if res := strings.TrimSpace(env.Result); res != "" {
+		parts = append(parts, "result="+res)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "; claude stdout: " + boundText(redactCredentials(strings.Join(parts, " ")), maxEnvelopeTextBytes)
 }
 
 // slackThreadFields is the plain-fact field set both showPrompt and
@@ -260,8 +335,13 @@ func (b *Backend) runClaude(ctx context.Context, prompt string, jsonSchema strin
 	eventlog.RecordClaudeCall(ctx)
 	out, err := b.runner.Run(ctx, prompt, jsonSchema)
 	if err != nil {
-		eventlog.RecordFailure(ctx, eventlog.StageExec, err.Error())
-		return "", scriptout.WrapError(scriptout.ErrUnavailable, "claude -p: "+err.Error())
+		// A non-zero exit still writes claude -p's JSON envelope to stdout (the
+		// Runner returns it alongside the error); its result/subtype name the
+		// cause when stderr is empty (bead pg2-ezwut). Empty/non-JSON stdout
+		// adds nothing, leaving the error exactly as it was.
+		detail := err.Error() + execFailureNote(out)
+		eventlog.RecordFailure(ctx, eventlog.StageExec, detail)
+		return "", scriptout.WrapError(scriptout.ErrUnavailable, "claude -p: "+detail)
 	}
 	env, decodeErr := decodeClaudeEnvelope(out)
 	if decodeErr != nil {

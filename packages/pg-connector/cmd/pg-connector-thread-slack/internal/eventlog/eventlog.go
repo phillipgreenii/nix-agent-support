@@ -73,7 +73,8 @@ const EnvPath = "PG_CONNECTOR_THREAD_SLACK_EVENTS_FILE"
 // Where in the claude -p round trip a failed call broke (failure_stage).
 const (
 	// StageExec: running the claude binary failed (not on PATH, non-zero
-	// exit, timeout); the detail is claude's stderr tail.
+	// exit, timeout); the detail is claude's stderr tail, plus the subtype/
+	// result of the JSON envelope on stdout when a non-zero exit left one.
 	StageExec = "exec"
 	// StageEnvelope: claude's own --output-format json outer envelope did not
 	// decode.

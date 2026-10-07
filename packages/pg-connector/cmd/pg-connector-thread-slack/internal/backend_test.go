@@ -5,7 +5,9 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-thread-slack/internal/eventlog"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
@@ -271,4 +273,122 @@ func TestBackend_List_MalformedReplyIsUnavailable(t *testing.T) {
 
 func TestBackend_ImplementsProvider(t *testing.T) {
 	_ = New(&fakeRunner{})
+}
+
+// ----------------------------------------------------------------------
+// Non-zero exit with a claude -p envelope on stdout (bead pg2-ezwut)
+// ----------------------------------------------------------------------
+
+// A non-zero `claude -p` exit still writes its JSON envelope to stdout;
+// CLIRunner.Run returns that stdout alongside the exec error, so the
+// backend can surface the envelope's own cause text.
+const execFailMsg = "claude -p --output-format json: exit status 1: "
+
+func TestBackend_RunFailure_SurfacesEnvelopeResultFromStdout(t *testing.T) {
+	b := New(&fakeRunner{handle: func(string) (string, error) {
+		return `{"type":"result","subtype":"error_during_execution","is_error":true,"result":"API Error: 529 overloaded"}`,
+			errors.New(execFailMsg)
+	}})
+	_, err := b.Show(context.Background(), "some-id")
+	if !errors.Is(err, scriptout.ErrUnavailable) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrUnavailable)", err)
+	}
+	for _, want := range []string{execFailMsg, "error_during_execution", "API Error: 529 overloaded"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %q, want it to contain %q", err.Error(), want)
+		}
+	}
+}
+
+func TestBackend_RunFailure_EmptyOrNonJSONStdoutIsUnchanged(t *testing.T) {
+	for name, stdout := range map[string]string{
+		"empty":      "",
+		"whitespace": "  \n",
+		"non-JSON":   "Segmentation fault",
+		"JSON array": `["x"]`,
+		"empty obj":  `{}`,
+		"null":       `null`,
+		"no cause":   `{"type":"result","is_error":true}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			b := New(&fakeRunner{handle: func(string) (string, error) {
+				return stdout, errors.New(execFailMsg)
+			}})
+			_, err := b.Show(context.Background(), "some-id")
+			if !errors.Is(err, scriptout.ErrUnavailable) {
+				t.Fatalf("err = %v, want errors.Is(err, ErrUnavailable)", err)
+			}
+			want := "claude -p: " + execFailMsg
+			if !strings.Contains(err.Error(), want) || strings.Contains(err.Error(), "stdout") {
+				t.Errorf("err = %q, want unchanged text containing %q and no stdout note", err.Error(), want)
+			}
+		})
+	}
+}
+
+func TestBackend_RunFailure_EnvelopeTextIsBounded(t *testing.T) {
+	long := strings.Repeat("é", 5000) // 10000 bytes of 2-byte runes
+	b := New(&fakeRunner{handle: func(string) (string, error) {
+		return `{"is_error":true,"result":"` + long + `"}`, errors.New(execFailMsg)
+	}})
+	_, err := b.Show(context.Background(), "some-id")
+	if err == nil {
+		t.Fatal("want error")
+	}
+	if len(err.Error()) > maxEnvelopeTextBytes+1024 {
+		t.Errorf("error length %d is not bounded near %d", len(err.Error()), maxEnvelopeTextBytes)
+	}
+	if !strings.Contains(err.Error(), "truncated") {
+		t.Errorf("err = %q, want a truncation marker", err.Error())
+	}
+	if !utf8.ValidString(err.Error()) {
+		t.Error("truncation split a multi-byte rune")
+	}
+}
+
+func TestBackend_RunFailure_EnvelopeTextIsRedacted(t *testing.T) {
+	secrets := []string{
+		"sk-ant-api03-AbCdEf0123456789_-xyz",
+		"xoxb-1234-5678-abcdefGHIJ",
+		"ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+		"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.abcDEF123_-",
+		"hunter2hunter2",
+	}
+	b := New(&fakeRunner{handle: func(string) (string, error) {
+		return `{"is_error":true,"result":"401 for ` + secrets[0] + ` and ` + secrets[1] + ` via ` + secrets[2] +
+			` Authorization: Bearer ` + secrets[3] + ` password=` + secrets[4] + ` end"}`, errors.New(execFailMsg)
+	}})
+	_, err := b.Show(context.Background(), "some-id")
+	if err == nil {
+		t.Fatal("want error")
+	}
+	for _, s := range secrets {
+		if strings.Contains(err.Error(), s) {
+			t.Errorf("err = %q leaks %q", err.Error(), s)
+		}
+	}
+	if !strings.Contains(err.Error(), "401 for") || !strings.Contains(err.Error(), "end") {
+		t.Errorf("err = %q, want the non-secret text kept", err.Error())
+	}
+}
+
+func TestBackend_RunFailure_EventRowCarriesEnvelopeText(t *testing.T) {
+	sink := &captureSink{}
+	table := instrumented(New(&fakeRunner{handle: func(string) (string, error) {
+		return `{"is_error":true,"result":"Invalid API key"}`, errors.New(execFailMsg)
+	}}), sink)
+	_, err := table["show"].Handle(context.Background(), nil)
+	if !errors.Is(err, scriptout.ErrUnavailable) {
+		t.Fatalf("err = %v, want ErrUnavailable", err)
+	}
+	ev := sink.last(t)
+	if ev.ErrorCode != "unavailable" || ev.FailureStage != eventlog.StageExec {
+		t.Errorf("event = %+v, want error_code=unavailable failure_stage=exec", ev)
+	}
+	if !strings.Contains(ev.Error, "Invalid API key") {
+		t.Errorf("event error = %q, want the envelope text", ev.Error)
+	}
+	if ev.FailureClass != eventlog.ClassAuth {
+		t.Errorf("failure_class = %q, want auth (envelope text reads as auth)", ev.FailureClass)
+	}
 }
