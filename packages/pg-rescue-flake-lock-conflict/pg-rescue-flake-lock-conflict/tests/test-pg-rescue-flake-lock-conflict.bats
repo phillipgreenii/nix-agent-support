@@ -20,7 +20,7 @@ setup() {
     # Local run: the sibling phillipg-nix-repo-base checkout (the nix check
     # injects TEST_SUPPORT from the base flake's git-fixture-harness package;
     # pg2-xy4w7).
-    TEST_SUPPORT="$(env -u GIT_DIR -u GIT_COMMON_DIR -u GIT_WORK_TREE git -C "$BATS_TEST_DIRNAME" rev-parse --path-format=absolute --git-common-dir)/../../phillipg-nix-repo-base/lib/scripts"
+    TEST_SUPPORT="$("$(env -u GIT_DIR -u GIT_COMMON_DIR -u GIT_WORK_TREE git -C "$BATS_TEST_DIRNAME" rev-parse --show-toplevel)/tests/support/find-gfh-dir.sh")"
   fi
   # shellcheck disable=SC1091
   source "$TEST_SUPPORT/git-fixture-harness.bash"

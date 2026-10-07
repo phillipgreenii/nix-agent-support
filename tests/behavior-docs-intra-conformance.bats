@@ -17,7 +17,7 @@ if [[ -n ${GFH_LIB:-} ]]; then
   source "$GFH_LIB"
 else
   # shellcheck disable=SC1090
-  source "$(env -u GIT_DIR -u GIT_COMMON_DIR -u GIT_WORK_TREE git -C "$BATS_TEST_DIRNAME" rev-parse --path-format=absolute --git-common-dir)/../../phillipg-nix-repo-base/lib/scripts/git-fixture-harness.bash"
+  source "$("$(env -u GIT_DIR -u GIT_COMMON_DIR -u GIT_WORK_TREE git -C "$BATS_TEST_DIRNAME" rev-parse --show-toplevel)/tests/support/find-gfh-dir.sh")/git-fixture-harness.bash"
 fi
 
 setup() {
@@ -1129,7 +1129,7 @@ MD
   if [[ -n ${GFH_LIB:-} ]]; then
     harness_path="$GFH_LIB"
   else
-    harness_path="$(env -u GIT_DIR -u GIT_COMMON_DIR -u GIT_WORK_TREE git -C "$BATS_TEST_DIRNAME" rev-parse --path-format=absolute --git-common-dir)/../../phillipg-nix-repo-base/lib/scripts/git-fixture-harness.bash"
+    harness_path="$("$(env -u GIT_DIR -u GIT_COMMON_DIR -u GIT_WORK_TREE git -C "$BATS_TEST_DIRNAME" rev-parse --show-toplevel)/tests/support/find-gfh-dir.sh")/git-fixture-harness.bash"
   fi
 
   run env GIT_DIR="$bogus" GIT_INDEX_FILE="$bogus/index" HARNESS_PATH="$harness_path" REAL_DIR="$real_dir" bash -c '

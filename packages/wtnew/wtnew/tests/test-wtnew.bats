@@ -23,7 +23,7 @@ setup() {
     source "$test_support_saved/git-fixture-harness.bash"
   else
     # shellcheck disable=SC1091
-    source "$(env -u GIT_DIR -u GIT_COMMON_DIR -u GIT_WORK_TREE git -C "$BATS_TEST_DIRNAME" rev-parse --path-format=absolute --git-common-dir)/../../phillipg-nix-repo-base/lib/scripts/git-fixture-harness.bash"
+    source "$("$(env -u GIT_DIR -u GIT_COMMON_DIR -u GIT_WORK_TREE git -C "$BATS_TEST_DIRNAME" rev-parse --show-toplevel)/tests/support/find-gfh-dir.sh")/git-fixture-harness.bash"
   fi
 
   command -v integrate-branch-support >/dev/null 2>&1 || skip "integrate-branch-support not on PATH"

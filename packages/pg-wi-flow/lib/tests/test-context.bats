@@ -17,7 +17,7 @@ load_git_fixture_harness() {
     source "$TEST_SUPPORT/git-fixture-harness.bash"
   else
     # shellcheck disable=SC1091 # local run: sibling phillipg-nix-repo-base checkout (pg2-xy4w7)
-    source "$(env -u GIT_DIR -u GIT_COMMON_DIR -u GIT_WORK_TREE git -C "$BATS_TEST_DIRNAME" rev-parse --path-format=absolute --git-common-dir)/../../phillipg-nix-repo-base/lib/scripts/git-fixture-harness.bash"
+    source "$("$(env -u GIT_DIR -u GIT_COMMON_DIR -u GIT_WORK_TREE git -C "$BATS_TEST_DIRNAME" rev-parse --show-toplevel)/tests/support/find-gfh-dir.sh")/git-fixture-harness.bash"
   fi
 }
 
