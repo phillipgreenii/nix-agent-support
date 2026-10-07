@@ -465,7 +465,7 @@ func (b *Backend) Search(ctx context.Context, query string, _ []string) ([]schem
 
 // maxParallelWorkers bounds how many concurrent `gh` subprocesses one fan-out
 // (parallelMap) spawns. 8 is a modest bound: enough concurrency to bring a few
-// dozen per-PR calls comfortably under scriptout's own 30s DefaultExecTimeout
+// dozen per-PR calls comfortably under scriptout's own 30s DefaultBackendTimeout
 // (packages/pg-connector/pkg/scriptout/limits.go), without spawning so many
 // `gh` processes/TLS handshakes at once that it looks like a burst against a
 // single GitHub token (this is a fan-out WITHIN one backend's own

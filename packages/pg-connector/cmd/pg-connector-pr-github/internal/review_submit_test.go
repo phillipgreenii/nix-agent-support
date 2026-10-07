@@ -799,7 +799,7 @@ func TestSubmitRejectsBadInput(t *testing.T) {
 // pg2-m79ch: a request at the cap is written in at most
 // ceil(cap/10) sequential GraphQL documents, and at the measured worst case of
 // about 4s per document plus two reads it must finish well inside
-// scriptout.DefaultExecTimeout, or the umbrella kills the first call mid-way.
+// scriptout.DefaultBackendTimeout, or the umbrella kills the first call mid-way.
 func TestSubmitCommentCapIsSizedForTheExecTimeout(t *testing.T) {
 	const (
 		aliasesPerDocument = 10 // github.maxWriteAliasesPerDocument
@@ -808,9 +808,9 @@ func TestSubmitCommentCapIsSizedForTheExecTimeout(t *testing.T) {
 	)
 	documents := (maxRequestComments + aliasesPerDocument - 1) / aliasesPerDocument
 	worst := time.Duration(documents)*perDocument + reads
-	if worst*5 > scriptout.DefaultExecTimeout*4 { // keep at least a 20% margin
+	if worst*5 > scriptout.DefaultBackendTimeout*4 { // keep at least a 20% margin
 		t.Fatalf("cap %d needs ~%v worst case; exec timeout is %v (lower the cap or revisit the ruling)",
-			maxRequestComments, worst, scriptout.DefaultExecTimeout)
+			maxRequestComments, worst, scriptout.DefaultBackendTimeout)
 	}
 }
 

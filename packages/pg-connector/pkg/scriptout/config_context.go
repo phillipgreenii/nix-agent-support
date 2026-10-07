@@ -7,7 +7,7 @@
 // never gives a Config-consuming op — for a value only pr/issue's own
 // "list" op actually reads. Context is this package's existing vehicle
 // for a value every handler transitively receives without changing its
-// own signature (serveLoop already threads a DefaultExecTimeout deadline
+// own signature (serveLoop already threads a DefaultBackendTimeout deadline
 // this same way).
 package scriptout
 

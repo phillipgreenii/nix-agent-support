@@ -78,7 +78,7 @@ func runInvoke(ctx context.Context, binary string, req Request) ([]byte, error) 
 			// Name the call and how long it ran: a bare "signal: killed" is
 			// exactly what the umbrella's own deadline kill used to leave
 			// the caller with, indistinguishable between ops and between a
-			// 30s stall and an instant crash [bead pg2-5dyz2].
+			// 35s stall and an instant crash [bead pg2-5dyz2].
 			detail := callDetail(ctx, req, elapsed)
 			if stderr.Len() > 0 {
 				return nil, fmt.Errorf("scriptout: %s: %s: %w (stderr: %s)",

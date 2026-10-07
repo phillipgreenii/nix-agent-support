@@ -24,13 +24,10 @@ import (
 	"unicode/utf8"
 )
 
-// DefaultExecTimeout bounds how long a single exec of another process is
-// allowed to run before its context is canceled: the umbrella's own exec of
-// a Tier-2 backend binary (exec.go's runInvoke), the backend binary's own
-// per-request context (serve.go's serveLoop, which every handler's own
-// gh/git/bd exec.CommandContext calls inherit transitively), and a value
-// every backend's own gh/git/bd wrapper documents itself as using for the
-// same purpose.
+// DefaultBackendTimeout is the per-call budget of a Tier-2 backend: the
+// deadline its own per-request context carries (serve.go's serveLoop), which
+// every handler's gh/git/bd exec.CommandContext inherits, so it bounds the
+// whole op and every child it runs.
 //
 // 30s: generous for a normal gh/bd/git call (a handful of HTTPS round
 // trips, or a dolt query under ordinary load) to complete comfortably,
@@ -39,11 +36,19 @@ import (
 // wedged dolt server, a grandchild process holding a pipe open — fails
 // within a bounded, human-noticeable time instead of hanging the calling
 // process forever.
-const DefaultExecTimeout = 30 * time.Second
+//
+// This is a BUDGET other code is sized against, so lowering it is a
+// behaviour change, not a diagnostics tweak [bead pg2-27z7j]: it was briefly
+// 25s (bead pg2-5dyz2 took the stagger margin OUT of the budget), which turned
+// every call that legitimately ran 25-30s into a failure. The one that mattered
+// is pg-connector-pr-github's team search list, which pages a ~10-page result
+// serially at about 2.7s a page (about 27s end to end): its failure rate went
+// from 1.5% to 33% when the apply carrying that change landed. review_submit's
+// comment caps (pg2-m79ch) are sized against this value too.
+const DefaultBackendTimeout = 30 * time.Second
 
-// BackendDeadlineMargin is how much EARLIER than the umbrella's
-// DefaultExecTimeout a Tier-2 backend's own per-request deadline fires
-// [bead pg2-5dyz2].
+// BackendDeadlineMargin is how much LATER than a backend's own
+// DefaultBackendTimeout the umbrella's exec deadline fires [bead pg2-5dyz2].
 //
 // Before this margin both deadlines were 30s and started within
 // milliseconds of each other (the umbrella arms its deadline, execs the
@@ -51,27 +56,32 @@ const DefaultExecTimeout = 30 * time.Second
 // SIGKILL of the backend won the race: the backend never got to report
 // "deadline exceeded", wrote no event-log row, and the caller saw only a
 // bare "signal: killed" (67 such source failures on 2026-10-06). With the
-// backend's deadline this much earlier, the backend normally answers first
+// umbrella's deadline this much later, the backend normally answers first
 // with a structured error naming op, args and elapsed time, and the
 // umbrella's kill is left as a backstop for a backend that cannot even do
 // that (wedged before or after its handler).
 //
+// The margin is ADDED to the budget (the backend keeps its full 30s) rather
+// than taken out of it [bead pg2-27z7j].
+//
 // 5s: equal to DefaultWaitDelay, which is the longest a killed handler child
 // can still hold the backend's pipes before Go force-closes them, so the
 // backend's own error is written before the umbrella's deadline in the
-// ordinary case, while still leaving the backend 25s of the old 30s budget.
+// ordinary case.
 const BackendDeadlineMargin = 5 * time.Second
 
-// DefaultBackendTimeout is the deadline a Tier-2 backend's own per-request
-// context carries (serve.go's serveLoop): DefaultExecTimeout minus
-// BackendDeadlineMargin.
-const DefaultBackendTimeout = DefaultExecTimeout - BackendDeadlineMargin
+// DefaultExecTimeout bounds how long the umbrella lets a single exec of a
+// Tier-2 backend binary run (exec.go's runInvoke) before it kills it: the
+// backend's own DefaultBackendTimeout plus BackendDeadlineMargin. It is the
+// backstop; a backend that is merely slow or whose child hung is ended by its
+// own, earlier deadline.
+const DefaultExecTimeout = DefaultBackendTimeout + BackendDeadlineMargin
 
 // execTimeout is the deadline runInvoke (exec.go) applies to the umbrella's
 // exec of a backend. It starts at DefaultExecTimeout; tests swap it to a
 // short value (the same swappable-var pattern exec.go's own execCmdFactory
 // already uses) so a hang-and-get-killed test proves the mechanism without
-// waiting out the real 30s production value.
+// waiting out the real 35s production value.
 var execTimeout = DefaultExecTimeout
 
 // backendTimeout is the deadline serveLoop (serve.go) applies to the

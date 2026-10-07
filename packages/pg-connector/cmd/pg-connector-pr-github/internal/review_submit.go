@@ -23,7 +23,7 @@ const (
 	// Ruling (bead pg2-m79ch, 2026-10-07; options: lower the cap, extend the
 	// verb's exec timeout, or document retry-on-kill): the cap is lowered so
 	// that a request at the cap always completes inside scriptout's
-	// DefaultExecTimeout (pkg/scriptout/limits.go, 30s), which bounds the whole
+	// DefaultBackendTimeout (pkg/scriptout/limits.go, 30s), which bounds the whole
 	// run: the lookup, the sequential write documents (10 mutations each, see
 	// github.maxWriteAliasesPerDocument) and the re-read. The previous cap of
 	// 200 (20 documents) was not reachable in 30s: live, a 105-comment request

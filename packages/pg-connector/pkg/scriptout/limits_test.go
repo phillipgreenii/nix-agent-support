@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 )
 
@@ -71,11 +72,11 @@ func isValidUTF8(s string) bool {
 	return strings.ToValidUTF8(s, "�") == s
 }
 
-// TestBackendDeadlineIsShorterThanUmbrella pins bead pg2-5dyz2's staggering:
-// the backend's own deadline MUST fire before the umbrella's, by at least
+// TestBackendDeadlineFiresBeforeUmbrella pins bead pg2-5dyz2's staggering: the
+// backend's own deadline MUST fire before the umbrella's, by at least
 // DefaultWaitDelay, or the umbrella's SIGKILL wins the race again and the
 // backend never reports what timed out.
-func TestBackendDeadlineIsShorterThanUmbrella(t *testing.T) {
+func TestBackendDeadlineFiresBeforeUmbrella(t *testing.T) {
 	if DefaultBackendTimeout >= DefaultExecTimeout {
 		t.Fatalf("DefaultBackendTimeout %v is not shorter than DefaultExecTimeout %v", DefaultBackendTimeout, DefaultExecTimeout)
 	}
@@ -84,6 +85,24 @@ func TestBackendDeadlineIsShorterThanUmbrella(t *testing.T) {
 	}
 	if backendTimeout != DefaultBackendTimeout || execTimeout != DefaultExecTimeout {
 		t.Fatalf("production vars drifted: backendTimeout=%v execTimeout=%v", backendTimeout, execTimeout)
+	}
+}
+
+// TestStaggerDoesNotShrinkTheBackendBudget pins bead pg2-27z7j: the stagger
+// margin is added to the umbrella's deadline, never taken out of the backend's
+// budget. When pg2-5dyz2 cut the backend to 25s, every call that ran 25-30s
+// (pg-connector-pr-github's team search list pages serially, about 27s) was
+// killed: its failure rate went from 1.5% to 33%. The budget MUST stay at
+// least the 30s every op was sized against, and the umbrella's deadline MUST
+// stay the budget plus the margin.
+func TestStaggerDoesNotShrinkTheBackendBudget(t *testing.T) {
+	const minBudget = 30 * time.Second
+	if DefaultBackendTimeout < minBudget {
+		t.Fatalf("DefaultBackendTimeout %v is below the %v budget ops are sized against", DefaultBackendTimeout, minBudget)
+	}
+	if DefaultExecTimeout != DefaultBackendTimeout+BackendDeadlineMargin {
+		t.Fatalf("DefaultExecTimeout %v != DefaultBackendTimeout %v + BackendDeadlineMargin %v",
+			DefaultExecTimeout, DefaultBackendTimeout, BackendDeadlineMargin)
 	}
 }
 

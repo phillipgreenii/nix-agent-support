@@ -81,11 +81,12 @@ func serveLoop(env dispatchEnv, table DispatchTable) int {
 	// backend process (and, transitively, whichever umbrella fan-out is
 	// waiting on it) forever [bead #13].
 	//
-	// The deadline is backendTimeout, deliberately SHORTER than the
-	// umbrella's execTimeout (see BackendDeadlineMargin): the umbrella
+	// The deadline is backendTimeout, which fires BEFORE the umbrella's
+	// (longer) execTimeout (see BackendDeadlineMargin): the umbrella
 	// SIGKILLs this process at its own, later deadline, so a backend that
 	// shared the umbrella's 30s lost that race and never got to say what
-	// timed out [bead pg2-5dyz2].
+	// timed out [bead pg2-5dyz2]. The margin sits on the umbrella's side so
+	// this budget stays the full 30s [bead pg2-27z7j].
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), backendTimeout)
 	defer cancel()

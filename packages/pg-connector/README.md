@@ -249,13 +249,16 @@ single `bd` run and its argv). The log is registered as a Loki source in
 `darwin/modules/pg-connector-issue-beads`; no alert rule ships with it, and the generic error-rate alert
 is off, because its purpose is to make slow and killed calls attributable by query, not to page.
 
-Deadlines and killed calls (bead `pg2-5dyz2`). The umbrella gives each backend exec
-`scriptout.DefaultExecTimeout` (30s) and kills it with SIGKILL at that deadline; a backend's own
-per-request deadline is `scriptout.DefaultBackendTimeout` (25s, `DefaultExecTimeout` minus
-`BackendDeadlineMargin`), so the backend normally answers first. When its deadline expires the
-backend's error reads `deadline exceeded after <elapsed> (limit <limit>) in op=<op> args=<args>:
-<handler error>` and keeps the `unavailable` wire code. When the umbrella's kill still wins (a
-backend wedged before or after its handler), the umbrella's error reads `scriptout: <binary>:
+Deadlines and killed calls (bead `pg2-5dyz2`). A backend's own per-request deadline is
+`scriptout.DefaultBackendTimeout` (30s): the whole-call budget every op and its `gh`/`git`/`bd` children
+run inside. The umbrella gives each backend exec `scriptout.DefaultExecTimeout` (35s,
+`DefaultBackendTimeout` plus `BackendDeadlineMargin`) and kills it with SIGKILL at that deadline, so the
+backend normally answers first. The margin is added on the umbrella's side, never taken out of the
+backend's budget (bead `pg2-27z7j`: a 25s backend deadline failed 33% of `pg-connector-pr-github`'s
+team-search `list` calls, which page serially for about 27s). When the backend's deadline expires its
+error reads `deadline exceeded after <elapsed> (limit <limit>) in op=<op> args=<args>: <handler error>`
+and keeps the `unavailable` wire code. When the umbrella's kill still wins (a backend wedged before or
+after its handler), the umbrella's error reads `scriptout: <binary>:
 op=<op> elapsed=<elapsed> (umbrella deadline <limit> exceeded; backend killed) args=<args>: signal:
 killed`; other exec failures carry `op=` and `elapsed=` without the args. `args` is the request's args
 JSON compacted and capped at 256 bytes. `pg-connector-pr-github` and `pg-connector-issue-beads` also

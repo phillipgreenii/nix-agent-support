@@ -484,7 +484,7 @@ func TestSubmitEarlierHeadCommentCap(t *testing.T) {
 // TestSubmitEarlierHeadCapIsSizedForTheExecTimeout is the time budget of the
 // earlier-head path: two write documents at about 4s each, the live-head path's
 // two reads (8s) and the two extra reads (8s) must leave the same 20% margin
-// under scriptout.DefaultExecTimeout that the live-head cap keeps.
+// under scriptout.DefaultBackendTimeout that the live-head cap keeps.
 func TestSubmitEarlierHeadCapIsSizedForTheExecTimeout(t *testing.T) {
 	const (
 		aliasesPerDocument = 10 // github.maxWriteAliasesPerDocument
@@ -494,9 +494,9 @@ func TestSubmitEarlierHeadCapIsSizedForTheExecTimeout(t *testing.T) {
 	)
 	documents := (maxOlderHeadComments + aliasesPerDocument - 1) / aliasesPerDocument
 	worst := time.Duration(documents)*perDocument + reads + extraReads
-	if worst*5 > scriptout.DefaultExecTimeout*4 {
+	if worst*5 > scriptout.DefaultBackendTimeout*4 {
 		t.Fatalf("cap %d needs ~%v worst case; exec timeout is %v (lower the cap or revisit the budget)",
-			maxOlderHeadComments, worst, scriptout.DefaultExecTimeout)
+			maxOlderHeadComments, worst, scriptout.DefaultBackendTimeout)
 	}
 	if maxOlderHeadComments > maxRequestComments {
 		t.Errorf("the earlier-head cap %d must not exceed the live-head cap %d", maxOlderHeadComments, maxRequestComments)
