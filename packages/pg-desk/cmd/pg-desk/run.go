@@ -162,7 +162,13 @@ func runEntity(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = st.Close() }()
 
-	p := pipeline.New(cfg, st, pipeline.WithVerbose(runF.verbose), pipeline.WithLogWriter(cmd.ErrOrStderr()))
+	// The sync stage's per-write "anchor write ... cause=" lines go to stderr
+	// AND a bounded file under the state dir: a router command role's stderr
+	// is discarded on success (bead pg2-kwwn2).
+	syncLogger, closeSyncLog := newAnchorWriteLogger(cmd.ErrOrStderr(), anchorWriteLogPath(), anchorWriteLogMaxBytes)
+	defer func() { _ = closeSyncLog() }()
+
+	p := pipeline.New(cfg, st, pipeline.WithVerbose(runF.verbose), pipeline.WithLogWriter(cmd.ErrOrStderr()), pipeline.WithSyncLogger(syncLogger))
 	change := gather.ChangeKind(runF.change)
 
 	switch entityType {

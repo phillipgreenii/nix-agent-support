@@ -68,6 +68,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"sort"
 	"time"
@@ -159,6 +160,13 @@ func WithReconcileBudget(d time.Duration) Option {
 // of an exhausted or non-transient row is fixed; scheduled runs never set it.
 func WithReconcileRetryAll(v bool) Option {
 	return func(p *Pipeline) { p.retryAll = v }
+}
+
+// WithSyncLogger overrides the logger the sync stage writes its diagnostics
+// to (the per-write "anchor write ... cause=" line, bead pg2-kwwn2); the
+// default is slog.Default().
+func WithSyncLogger(l *slog.Logger) Option {
+	return func(p *Pipeline) { p.syncer = sync.New(p.cfg, p.store, sync.WithLogger(l)) }
 }
 
 // WithLogWriter overrides where structured JSON logs are written.

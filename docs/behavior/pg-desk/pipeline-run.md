@@ -50,6 +50,17 @@ is a later observability item, alongside pg-router's own metrics sink. `run` MUS
 JSON to stderr, which pg-router captures as the triggering scheduler. `--verbose` additionally
 prints the three-stage timeline (gather, interpret, sync).
 
+### Anchor-write log (bead `pg2-kwwn2`)
+
+pg-router discards the stderr of a successful command-role run, so the sync stage's per-write
+`pg-desk sync: anchor write ... cause=...` lines (bead `pg2-n6d8y`) MUST ALSO be appended to
+`$XDG_STATE_HOME/pg-desk/anchor-write.log` (default `~/.local/state/pg-desk/anchor-write.log`,
+next to `store.db`), in addition to stderr. The file MUST be created only when a line is written,
+and a failure to write it MUST NOT fail or slow the run. It is bounded: a run that finds the file
+at or above 4 MiB rotates it to `anchor-write.log.1` (replacing any previous one) first, so at
+most two files exist. A day of causes is tallied with, for example,
+`grep -h 'anchor write' ~/.local/state/pg-desk/anchor-write.log* | grep -o 'cause=[^ ]*' | sort | uniq -c`.
+
 ### Failure diagnosis
 
 pg-router records a failed `run` only as "exit status 1", so a failure MUST be attributable from

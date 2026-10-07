@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/gather"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/interpret"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/sync"
 )
 
 // gatherFunc adapts a plain function to the gatherer interface (mirrors
@@ -1036,5 +1038,21 @@ func TestPipelineReconcile_RepairsClosedAnchorWithStaleMetadata(t *testing.T) {
 	}
 	if a.shows != 2 || len(a.stamps) != 1 {
 		t.Fatalf("second Reconcile re-audited: shows=%d stamps=%v", a.shows, a.stamps)
+	}
+}
+
+// TestWithSyncLogger_ReplacesSyncer pins that the option swaps in a
+// logger-carrying real syncer (bead pg2-kwwn2); the logger's own behavior
+// (the anchor-write line) is covered in internal/sync.
+func TestWithSyncLogger_ReplacesSyncer(t *testing.T) {
+	st := store.OpenForTest(t)
+	plain := New(testCfg(), st)
+	logged := New(testCfg(), st, WithSyncLogger(slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))))
+
+	if _, ok := logged.syncer.(*sync.Syncer); !ok {
+		t.Fatalf("WithSyncLogger syncer is %T, want *sync.Syncer", logged.syncer)
+	}
+	if plain.syncer == logged.syncer {
+		t.Fatal("WithSyncLogger did not construct a new syncer")
 	}
 }
