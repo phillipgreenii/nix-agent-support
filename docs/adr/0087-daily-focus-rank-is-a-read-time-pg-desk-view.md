@@ -1,7 +1,7 @@
 # The daily-focus rank is a read-time pg-desk view; minting stays in a decider
 
-**Status**: Accepted (operator ruling, 2026-10-06; lands with the daily-focus design, bead
-`pg2-2j5ac.27`)
+**Status**: Accepted (operator ruling, 2026-10-06; revised 2026-10-07 for the defer-and-undefer
+mechanism of its strike consequence; lands with the daily-focus design, bead `pg2-2j5ac.27`)
 **Date**: 2026-10-06
 **Deciders**: phillipg
 
