@@ -13,7 +13,6 @@ import (
 	"strings"
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/beads"
-	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/ccpool"
 	"github.com/phillipgreenii/pg-router/conformance"
 	"github.com/phillipgreenii/pg-router/schemas"
 )
@@ -115,20 +114,19 @@ func runQuery(args []string) int {
 		return conformance.ExitError
 	}
 	// Opportunistic reconciliation (pg2-hrppg): DEFENSE IN DEPTH, not the
-	// primary hook — dispatch.go's runDispatch is the call site actually
+	// primary hook -- dispatch.go's runDispatch is the call site actually
 	// guaranteed to fire in the live deployment (see reconcile.go's own doc
-	// comment for the full trace of why this one alone is not enough: no
-	// live [[query]] source is ever wired to this handler, so this branch
-	// never runs there today). Kept here for any FUTURE deployment that does
-	// configure a [[query]] source at this handler, so a session whose bead
-	// closed since the last tick still gets a second chance to be
-	// reconciled here too. Gated on `configured` (this branch) the same way
-	// precheck above is — an unconfigured invocation (no --query-config;
-	// TestLiveQuery's own case) must stay a pure, side-effect-free stub
-	// reply, never touching a real ccpool/bd. Best effort: logged, never
-	// turned into a query failure.
-	if closed := reconcileClosedBeadSessions(ctx, ccpool.NewCLIRunner(cfg), gitWorktreeOpener, br, cfg.SessionPrefix, cfg.RepoRoot, cfg.WorktreeDir, newTranscriptQuietCheck(cfg.WorktreeQuietWindow, nil, nil)); closed > 0 {
-		slog.Info("query: reconciled sessions with closed beads", "closed", closed)
+	// comment: no live [[query]] source is ever wired to this handler, so this
+	// branch never runs there today). Kept for any FUTURE deployment that does
+	// configure a [[query]] source here. Since pg2-wqi3e it is the GUARDED
+	// default-pool pass (reconcileDefaultPool) rather than the old unguarded
+	// reconcile, so a query tick can never force-remove a dirty worktree.
+	// Gated on `configured` (this branch) the same way precheck above is -- an
+	// unconfigured invocation (no --query-config; TestLiveQuery's own case) must
+	// stay a pure, side-effect-free stub reply, never touching a real ccpool/bd.
+	// Best effort: logged, never turned into a query failure.
+	if closed := reconcileDefaultPool(ctx, cfg); closed > 0 {
+		slog.Info("query: reconciled stale default-pool sessions with closed beads", "closed", closed)
 	}
 	events, err := queryBeadsReady(ctx, br, qf)
 	if err != nil {

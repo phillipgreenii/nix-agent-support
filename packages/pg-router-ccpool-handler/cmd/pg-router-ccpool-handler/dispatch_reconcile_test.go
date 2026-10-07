@@ -163,3 +163,49 @@ func TestRunDispatch_reconciliationSkippedForCommandRole(t *testing.T) {
 		}
 	}
 }
+
+// dispatchWithRole runs one dispatch of a worker ccpool role whose JSON carries
+// extraCCPool (e.g. `"poolDir":"/x",`) with PATH broken, so every ccpool call
+// fails soft and is observable only through its log line (pg2-wqi3e).
+func dispatchWithRole(t *testing.T, extraCCPool string) []string {
+	t.Helper()
+	t.Setenv("PATH", "/usr/bin")
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	dir := t.TempDir()
+	rolePath := filepath.Join(dir, "role.json")
+	roleJSON := `{"name":"worker","type":"ccpool","ccpool":{` + extraCCPool + `"actor":"test-actor","completion":"close-only","onFailure":"unclaim","onDispatchFail":"unclaim","promptBody":"hello"}}`
+	if err := os.WriteFile(rolePath, []byte(roleJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	restoreIn := redirectStdin(t, `{"schemaVersion":"1","id":"d-1","event":{"id":"e-1","type":"dispatch","payload":{"id":"zr-w"}}}`)
+	defer restoreIn()
+	var msgs []string
+	_ = captureStdout(t, func() {
+		msgs = captureSlog(t, func() {
+			runDispatch([]string{"--role-config", rolePath})
+		})
+	})
+	return msgs
+}
+
+// pg2-wqi3e: a role with its own pool must ALSO sweep ccpool's default pool
+// (guarded), observed through the default-pool pass's own list-failure line.
+func TestRunDispatch_defaultPoolReconcileRunsForRoleWithOwnPool(t *testing.T) {
+	t.Setenv("CCPOOL_POOL", "")
+	msgs := dispatchWithRole(t, `"poolDir":"`+t.TempDir()+`",`)
+	if !containsSubstring(msgs, "reconcile: list failed (default pool)") {
+		t.Fatalf("a role with its own pool must also reconcile the default pool; got messages=%v", msgs)
+	}
+}
+
+// ... and a role already on the default pool must not run it a second time.
+func TestRunDispatch_defaultPoolReconcileSkippedWhenRoleUsesDefaultPool(t *testing.T) {
+	t.Setenv("CCPOOL_POOL", "")
+	msgs := dispatchWithRole(t, "")
+	if containsSubstring(msgs, "reconcile: list failed (default pool)") {
+		t.Fatalf("the default pool is already swept by the role's own pass; got messages=%v", msgs)
+	}
+	if !containsSubstring(msgs, "reconcile: list failed") {
+		t.Fatalf("the role's own pass must still run; got messages=%v", msgs)
+	}
+}

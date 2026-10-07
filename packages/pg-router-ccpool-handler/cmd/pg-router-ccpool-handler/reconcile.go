@@ -25,10 +25,16 @@ import (
 // shutdown (bead zr-50s7h.2: closed 2026-09-19, its own session still live
 // ~2.5 days later).
 //
+// Widening (pg2-wqi3e): dispatch.go also runs it against the DEFAULT pool, which
+// no role's pool covers and ccpool's own reaper never closes (a not-live row with
+// a resumable transcript is kept, and needs_input is preserved for a human). That
+// pass is guarded (reconcileStaleDefaultPoolSessions, stalesession.go): idle for
+// staleSessionMinIdle and a worktree that is absent or clean and pushed.
+//
 // Scope: it runs against ONE pool -- the runner it is handed. From
 // dispatch.go's runDispatch that is the dispatching role's own pool
 // (deps.CC, scoped by buildDeps), so a role reconciles only its own pool's
-// sessions; query.go's call uses the default-pool runner. It handles closed
+// sessions; query.go's call is the guarded default-pool pass. It handles closed
 // beads only; sessions whose HANDLER died while the bead is still open are the
 // separate, role-scoped orphan reconcile (orphan.go, INV-CCH-18), which
 // runDispatch runs right after this one.
@@ -45,9 +51,9 @@ import (
 // PG_ROUTER_HANDLER_COMMAND only ever backs the `dispatch` subcommand for
 // review/feedback/worker, and nothing sets --query-config/
 // PG_ROUTER_CCPOOL_HANDLER_QUERY — so that hook was dead code as deployed.
-// query.go's own call is kept as defense-in-depth for a future deployment
-// that DOES configure a [[query]] source here, but dispatch.go's call is the
-// one that actually fires today.
+// query.go's own call (since pg2-wqi3e the guarded default-pool pass) is kept
+// as defense-in-depth for a future deployment that DOES configure a [[query]]
+// source here, but dispatch.go's call is the one that actually fires today.
 //
 // postStartup/preShutdown each fire exactly once (args.go's usageLine doc),
 // so neither is a candidate for a periodic-ish sweep either — dispatch is
@@ -83,9 +89,24 @@ import (
 // window is skipped this sweep (idle-with-running-subagents, pg2-9fwft) and
 // retried by the next one. nil disables the guard.
 func reconcileClosedBeadSessions(ctx context.Context, cc ccpool.Runner, open worktree.Opener, br beads.Runner, prefix, repoRoot, worktreeDir string, quiet quietCheck) (closed int) {
+	return reconcileClosedBeadSessionsGuarded(ctx, cc, open, br, prefix, repoRoot, worktreeDir, quiet, nil, "reconcile: list failed")
+}
+
+// sessionGuard is an extra, caller-supplied precondition on closing a
+// closed-bead session (pg2-wqi3e): it reports whether s may be closed now, and
+// otherwise why not (logged). It runs only after the bead is confirmed closed,
+// so its (git) work is never spent on a session whose bead is still open. nil
+// means no extra condition.
+type sessionGuard func(ctx context.Context, s ccpool.Session) (ok bool, reason string)
+
+// reconcileClosedBeadSessionsGuarded is reconcileClosedBeadSessions with an
+// optional guard (see sessionGuard) and the log line used when the pool cannot
+// be listed. reconcileStaleDefaultPoolSessions (stalesession.go) uses it to
+// widen the sweep to the default pool safely.
+func reconcileClosedBeadSessionsGuarded(ctx context.Context, cc ccpool.Runner, open worktree.Opener, br beads.Runner, prefix, repoRoot, worktreeDir string, quiet quietCheck, guard sessionGuard, listFailMsg string) (closed int) {
 	sessions, err := cc.List(ctx)
 	if err != nil {
-		slog.Warn("reconcile: list failed", "err", err)
+		slog.Warn(listFailMsg, "err", err)
 		return 0
 	}
 	// Purge_pending retry (bead pg2-kqegi, INV-CCH-20), FIRST and from the same
@@ -120,6 +141,12 @@ func reconcileClosedBeadSessions(ctx context.Context, cc ccpool.Runner, open wor
 		}
 		if !beadAlreadyClosed(ctx, br, s) {
 			continue
+		}
+		if guard != nil {
+			if ok, reason := guard(ctx, s); !ok {
+				slog.Info("reconcile: preserving closed-bead session", "session", s.ExternalID, "reason", reason)
+				continue
+			}
 		}
 		if quiet != nil && !quiet(s) {
 			slog.Info("reconcile: session transcript still active; deferring", "session", s.ExternalID)

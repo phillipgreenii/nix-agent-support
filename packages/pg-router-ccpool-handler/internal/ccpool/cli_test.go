@@ -713,3 +713,21 @@ func TestSetMeta_propagatesError(t *testing.T) {
 		t.Fatal("SetMeta must surface a ccpool failure")
 	}
 }
+
+// pg2-wqi3e: NewCLIRunnerDefaultPool must strip an inherited CCPOOL_POOL from
+// every subprocess call (through the real, unfaked run closure), so ccpool
+// resolves its shared default pool even when this process itself runs against
+// another pool; other inherited variables are untouched.
+func TestNewCLIRunnerDefaultPool_runClosureStripsInheritedPool(t *testing.T) {
+	t.Setenv("CCPOOL_POOL", "/inherited/pool")
+	t.Setenv("PG_WQI3E_KEEP", "kept")
+	cli := NewCLIRunnerDefaultPool(config.Default())
+	cli.bin = "sh"
+	stdout, _, err := cli.run(context.Background(), []string{"-c", "printf '%s|%s' \"${CCPOOL_POOL-<unset>}\" \"$PG_WQI3E_KEEP\""})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if string(stdout) != "<unset>|kept" {
+		t.Errorf("child env = %q, want CCPOOL_POOL unset and other vars kept", stdout)
+	}
+}

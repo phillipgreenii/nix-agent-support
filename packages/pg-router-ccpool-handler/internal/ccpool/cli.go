@@ -60,6 +60,12 @@ type CLIRunner struct {
 	// caller holding a *CLIRunner (e.g. buildDeps' own test) can confirm
 	// which pool it is scoped to.
 	PoolDir string
+	// DefaultPool (bead pg2-wqi3e), when true, REMOVES CCPOOL_POOL from the
+	// environment of every `ccpool` subprocess call this runner makes, so ccpool
+	// resolves its shared default (XDG) pool whatever pool this process itself
+	// was launched against (pg-router core exports CCPOOL_POOL for the whole
+	// handler process tree). Mutually exclusive with PoolDir (PoolDir wins).
+	DefaultPool bool
 	// run executes `bin args...` under ctx and returns stdout and stderr in
 	// SEPARATE buffers (so stderr noise can never corrupt `list --json` —
 	// pg2-x6ef) plus the run error.
@@ -83,10 +89,19 @@ func NewCLIRunnerForPool(cfg config.Config, poolDir string) *CLIRunner {
 	return newCLIRunner(cfg, poolDir)
 }
 
+// NewCLIRunnerDefaultPool builds a CLIRunner scoped to ccpool's shared default
+// (XDG) pool regardless of an inherited CCPOOL_POOL (bead pg2-wqi3e): every
+// subprocess call runs with CCPOOL_POOL removed from its environment.
+func NewCLIRunnerDefaultPool(cfg config.Config) *CLIRunner {
+	c := newCLIRunner(cfg, "")
+	c.DefaultPool = true
+	return c
+}
+
 func newCLIRunner(cfg config.Config, poolDir string) *CLIRunner {
 	c := &CLIRunner{Effort: cfg.Effort, Model: cfg.Model, PermissionMode: cfg.PermissionMode, AllowedTools: cfg.AllowedTools, ConfirmIngest: cfg.ConfirmIngest, Autonomous: cfg.Autonomous, bin: config.CCPoolCommand, PoolDir: poolDir}
 	c.run = func(ctx context.Context, args []string) ([]byte, []byte, error) {
-		return execCmd(ctx, c.bin, c.PoolDir, args)
+		return execCmdIn(ctx, c.bin, c.PoolDir, c.DefaultPool, args)
 	}
 	return c
 }
@@ -98,9 +113,26 @@ func newCLIRunner(cfg config.Config, poolDir string) *CLIRunner {
 // (bead pg2-mr0sl) — cmd.Env is left nil (inherit os.Environ() unchanged,
 // the pre-existing behavior) when poolDir is "".
 func execCmd(ctx context.Context, bin, poolDir string, args []string) (stdout, stderr []byte, err error) {
+	return execCmdIn(ctx, bin, poolDir, false, args)
+}
+
+// execCmdIn is execCmd plus defaultPool (bead pg2-wqi3e): when true and poolDir
+// is "", CCPOOL_POOL is stripped from the child's environment so ccpool uses
+// its default pool.
+func execCmdIn(ctx context.Context, bin, poolDir string, defaultPool bool, args []string) (stdout, stderr []byte, err error) {
 	cmd := exec.CommandContext(ctx, bin, args...)
-	if poolDir != "" {
+	switch {
+	case poolDir != "":
 		cmd.Env = append(os.Environ(), "CCPOOL_POOL="+poolDir)
+	case defaultPool:
+		for _, kv := range os.Environ() {
+			if !strings.HasPrefix(kv, "CCPOOL_POOL=") {
+				cmd.Env = append(cmd.Env, kv)
+			}
+		}
+		if cmd.Env == nil {
+			cmd.Env = []string{} // non-nil: an empty env, not "inherit"
+		}
 	}
 	var so, se bytes.Buffer
 	cmd.Stdout = &so

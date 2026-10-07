@@ -271,6 +271,11 @@ type listJSON struct {
 	// CloseReason is WHY ccpool closed this session (ADR 0072, Decision 4); ""
 	// for a live/never-closed row or a legacy row inserted before migration 008.
 	CloseReason string `json:"close_reason"`
+	// LastActivityAt is the row's last_activity_at as Unix seconds (pg2-wqi3e):
+	// lets a consumer such as pg-router-ccpool-handler's stale-session reconcile
+	// judge idle age without reading the transcript. Omitted when zero (an
+	// unset row), so a consumer must treat absence as "age unknown".
+	LastActivityAt int64 `json:"last_activity_at,omitempty"`
 }
 
 // renderListJSON marshals the visible rows as a JSON array (one object per
@@ -306,6 +311,7 @@ func renderListJSON(rows []store.Session, all bool, stateFilter string,
 			LaunchDir:       r.CWD,
 			CWD:             r.CWD, // default: fall back to launch dir
 			CloseReason:     r.CloseReason,
+			LastActivityAt:  r.LastActivityAt,
 		}
 		if lr.live {
 			// Resolve the LIVE pane cwd; fall back to launch dir on error.

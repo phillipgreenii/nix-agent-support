@@ -458,3 +458,33 @@ func TestRenderListJSON_includesCloseReason(t *testing.T) {
 		t.Errorf(`row[1]["close_reason"] = %#v, want "" (legacy row)`, got[1]["close_reason"])
 	}
 }
+
+// TestRenderListJSON_lastActivityAt pins pg2-wqi3e's additive field: the row's
+// last_activity_at is exposed as Unix seconds (so a consumer can judge idle
+// age), and omitted entirely when the row has none (age unknown).
+func TestRenderListJSON_lastActivityAt(t *testing.T) {
+	now := time.Unix(10_000, 0)
+	rows := []store.Session{
+		{Name: "a", ExternalID: "ext-a", State: store.NeedsInput, TmuxSession: "cc-a", LastActivityAt: 9_500},
+		{Name: "b", ExternalID: "ext-b", State: store.NeedsInput, TmuxSession: "cc-b"},
+	}
+	liveFn := func(_, _ string) bool { return true }
+	pathFn := func(_, _ string) (string, error) { return "/cwd", nil }
+	out, err := renderListJSON(rows, true, "", liveFn, pathFn, nilGit, nil, "ccpool", now, time.Hour, 24*time.Hour)
+	if err != nil {
+		t.Fatalf("renderListJSON: %v", err)
+	}
+	var got []map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("unmarshal %q: %v", out, err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("want 2 rows, got %q", out)
+	}
+	if v, ok := got[0]["last_activity_at"].(float64); !ok || int64(v) != 9_500 {
+		t.Errorf("last_activity_at = %#v, want 9500", got[0]["last_activity_at"])
+	}
+	if _, ok := got[1]["last_activity_at"]; ok {
+		t.Errorf("last_activity_at must be omitted when zero; row=%v", got[1])
+	}
+}

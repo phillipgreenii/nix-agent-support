@@ -77,6 +77,10 @@ type Session struct {
 	// stamped by CLIRunner.Close). Distinguishes an eviction/external close from
 	// one the handler itself initiated.
 	CloseReason string `json:"close_reason"`
+	// LastActivityAt is the session's last activity as Unix seconds, as
+	// `ccpool list --json` reports it (pg2-wqi3e); 0 when absent (an older
+	// ccpool), meaning the idle age is unknown.
+	LastActivityAt int64 `json:"last_activity_at,omitempty"`
 }
 
 // Capacity mirrors ccpool's session.Capacity (ADR 0072): the pool's occupancy

@@ -191,6 +191,18 @@ func runDispatch(args []string) int {
 		if closed := reconcileClosedBeadSessions(ctx, deps.CC, gitWorktreeOpener, deps.BD, cfg.SessionPrefix, cfg.RepoRoot, cfg.WorktreeDir, newTranscriptQuietCheck(cfg.WorktreeQuietWindow, nil, nil)); closed > 0 {
 			slog.Info("dispatch: reconciled sessions with closed beads", "closed", closed)
 		}
+		// Default-pool pass (pg2-wqi3e): a role with its own pool (or a process
+		// launched against a non-default CCPOOL_POOL) never sweeps ccpool's shared
+		// DEFAULT pool, where a not-live needs_input row can sit forever (ccpool's
+		// reaper spares needs_input; the orphan reconcile needs a lease). GUARDED:
+		// only a long-idle row whose worktree is absent or clean and pushed is
+		// closed (stalesession.go). Skipped when the role's own pool already IS the
+		// default pool, which the unguarded pass above has just swept. Best effort.
+		if role.CCPool.PoolDir != "" || os.Getenv("CCPOOL_POOL") != "" {
+			if closed := reconcileDefaultPool(ctx, cfg); closed > 0 {
+				slog.Info("dispatch: reconciled stale default-pool sessions with closed beads", "closed", closed)
+			}
+		}
 		// Orphan reconcile (pg2-g2u9m, INV-CCH-18): reclaim or budget-stop the
 		// sessions of THIS role whose handler died (expired supervision lease),
 		// scoped to the role's own pool runner (deps.CC) and run before the
