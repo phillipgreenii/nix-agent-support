@@ -11075,8 +11075,8 @@
     "notes": "pg2-33slg: absolute forwarded path."
   },
   {
-    "case": "repo_base_regrade_git__C__repo_stash_push__u__m_unique_tag",
-    "tags": ["repo-base-plugin", "pg2-33slg"],
+    "case": "stash_push_approve_git_C_repo_stash_push_u_m_unique_tag",
+    "tags": ["repo-base-plugin", "pg2-y9xc6"],
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
@@ -11090,8 +11090,502 @@
     "mode": "default",
     "settings": {},
     "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-y9xc6: the one approved stash form, `git [-C <path>] stash push [-u] [-m <literal>]` (skill-instructed by pn-workspace-sync; pg2-cjfpy ruling)."
+  },
+  {
+    "case": "stash_push_approve_git_C_repo_stash_push",
+    "tags": ["repo-base-plugin", "pg2-y9xc6"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C /repo stash push"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-y9xc6: the one approved stash form, `git [-C <path>] stash push [-u] [-m <literal>]` (skill-instructed by pn-workspace-sync; pg2-cjfpy ruling)."
+  },
+  {
+    "case": "stash_push_approve_git_C_repo_stash_push_u",
+    "tags": ["repo-base-plugin", "pg2-y9xc6"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C /repo stash push -u"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-y9xc6: the one approved stash form, `git [-C <path>] stash push [-u] [-m <literal>]` (skill-instructed by pn-workspace-sync; pg2-cjfpy ruling)."
+  },
+  {
+    "case": "stash_push_approve_git_C_repo_stash_push_m_tag",
+    "tags": ["repo-base-plugin", "pg2-y9xc6"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C /repo stash push -m unique-tag"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-y9xc6: the one approved stash form, `git [-C <path>] stash push [-u] [-m <literal>]` (skill-instructed by pn-workspace-sync; pg2-cjfpy ruling)."
+  },
+  {
+    "case": "stash_push_approve_git_C_repo_stash_push_include_untracked_message",
+    "tags": ["repo-base-plugin", "pg2-y9xc6"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C /repo stash push --include-untracked --message unique-tag"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-y9xc6: the one approved stash form, `git [-C <path>] stash push [-u] [-m <literal>]` (skill-instructed by pn-workspace-sync; pg2-cjfpy ruling)."
+  },
+  {
+    "case": "stash_push_approve_git_stash_push",
+    "tags": ["repo-base-plugin", "pg2-y9xc6"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git stash push"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-y9xc6: the one approved stash form, `git [-C <path>] stash push [-u] [-m <literal>]` (skill-instructed by pn-workspace-sync; pg2-cjfpy ruling)."
+  },
+  {
+    "case": "stash_push_approve_git_stash_push_u_m_tag",
+    "tags": ["repo-base-plugin", "pg2-y9xc6"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git stash push -u -m unique-tag"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-y9xc6: the one approved stash form, `git [-C <path>] stash push [-u] [-m <literal>]` (skill-instructed by pn-workspace-sync; pg2-cjfpy ruling)."
+  },
+  {
+    "case": "stash_push_approve_git_stash_push_u_m_quoted_tag",
+    "tags": ["repo-base-plugin", "pg2-y9xc6"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git stash push -u -m \"pn-workspace-sync 2026-10-07 abc123\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-y9xc6: the one approved stash form, `git [-C <path>] stash push [-u] [-m <literal>]` (skill-instructed by pn-workspace-sync; pg2-cjfpy ruling)."
+  },
+  {
+    "case": "stash_push_abstain_drop",
+    "tags": ["repo-base-plugin", "pg2-y9xc6"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git stash drop"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
     "expected_verdict": "not-approve",
-    "notes": "pg2-33slg: pg2-33slg: no stash schema; awaiting operator decision."
+    "notes": "pg2-y9xc6: stash form outside the one approved shape stays Abstain (ADR 0075 R5; agent rule R3): stash drop destroys an entry."
+  },
+  {
+    "case": "stash_push_abstain_C_drop",
+    "tags": ["repo-base-plugin", "pg2-y9xc6"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C /repo stash drop"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-y9xc6: stash form outside the one approved shape stays Abstain (ADR 0075 R5; agent rule R3): stash drop destroys an entry."
+  },
+  {
+    "case": "stash_push_abstain_clear",
+    "tags": ["repo-base-plugin", "pg2-y9xc6"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git stash clear"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-y9xc6: stash form outside the one approved shape stays Abstain (ADR 0075 R5; agent rule R3): stash clear destroys every entry."
+  },
+  {
+    "case": "stash_push_abstain_pop",
+    "tags": ["repo-base-plugin", "pg2-y9xc6"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git stash pop"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-y9xc6: stash form outside the one approved shape stays Abstain (ADR 0075 R5; agent rule R3): stash pop rewrites the working tree."
+  },
+  {
+    "case": "stash_push_abstain_C_pop",
+    "tags": ["repo-base-plugin", "pg2-y9xc6"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C /repo stash pop"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-y9xc6: stash form outside the one approved shape stays Abstain (ADR 0075 R5; agent rule R3): stash pop rewrites the working tree."
+  },
+  {
+    "case": "stash_push_abstain_apply",
+    "tags": ["repo-base-plugin", "pg2-y9xc6"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git stash apply"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-y9xc6: stash form outside the one approved shape stays Abstain (ADR 0075 R5; agent rule R3): stash apply rewrites the working tree."
+  },
+  {
+    "case": "stash_push_abstain_branch",
+    "tags": ["repo-base-plugin", "pg2-y9xc6"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git stash branch newbranch"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-y9xc6: stash form outside the one approved shape stays Abstain (ADR 0075 R5; agent rule R3): stash branch creates a branch."
+  },
+  {
+    "case": "stash_push_abstain_bare",
+    "tags": ["repo-base-plugin", "pg2-y9xc6"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git stash"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-y9xc6: stash form outside the one approved shape stays Abstain (ADR 0075 R5; agent rule R3): bare shorthand is not the instructed form."
+  },
+  {
+    "case": "stash_push_abstain_bare_u",
+    "tags": ["repo-base-plugin", "pg2-y9xc6"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git stash -u"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-y9xc6: stash form outside the one approved shape stays Abstain (ADR 0075 R5; agent rule R3): bare shorthand is not the instructed form."
+  },
+  {
+    "case": "stash_push_abstain_push_pathspec",
+    "tags": ["repo-base-plugin", "pg2-y9xc6"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C /repo stash push -u -m unique-tag -- a.go"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-y9xc6: stash form outside the one approved shape stays Abstain (ADR 0075 R5; agent rule R3): a pathspec limits what is stashed."
+  },
+  {
+    "case": "stash_push_abstain_push_pathspec_nodash",
+    "tags": ["repo-base-plugin", "pg2-y9xc6"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git stash push a.go"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-y9xc6: stash form outside the one approved shape stays Abstain (ADR 0075 R5; agent rule R3): a pathspec limits what is stashed."
+  },
+  {
+    "case": "stash_push_abstain_push_k",
+    "tags": ["repo-base-plugin", "pg2-y9xc6"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git stash push -k"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-y9xc6: stash form outside the one approved shape stays Abstain (ADR 0075 R5; agent rule R3): -k/--keep-index is not the instructed form."
+  },
+  {
+    "case": "stash_push_abstain_push_keep_index",
+    "tags": ["repo-base-plugin", "pg2-y9xc6"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git stash push --keep-index"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-y9xc6: stash form outside the one approved shape stays Abstain (ADR 0075 R5; agent rule R3): -k/--keep-index is not the instructed form."
+  },
+  {
+    "case": "stash_push_abstain_push_a",
+    "tags": ["repo-base-plugin", "pg2-y9xc6"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git stash push -a"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-y9xc6: stash form outside the one approved shape stays Abstain (ADR 0075 R5; agent rule R3): -a also stashes ignored files."
+  },
+  {
+    "case": "stash_push_abstain_push_p",
+    "tags": ["repo-base-plugin", "pg2-y9xc6"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git stash push -p"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-y9xc6: stash form outside the one approved shape stays Abstain (ADR 0075 R5; agent rule R3): -p is interactive."
+  },
+  {
+    "case": "stash_push_abstain_push_m_var",
+    "tags": ["repo-base-plugin", "pg2-y9xc6"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C /repo stash push -u -m \"$TAG\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-y9xc6: stash form outside the one approved shape stays Abstain (ADR 0075 R5; agent rule R3): -m operand is a runtime expansion."
+  },
+  {
+    "case": "stash_push_abstain_push_m_cmdsubst",
+    "tags": ["repo-base-plugin", "pg2-y9xc6"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git stash push -u -m \"$(date +%s)\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-y9xc6: stash form outside the one approved shape stays Abstain (ADR 0075 R5; agent rule R3): -m operand is a command substitution."
+  },
+  {
+    "case": "stash_push_abstain_push_m_dash",
+    "tags": ["repo-base-plugin", "pg2-y9xc6"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git stash push -m -p"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-y9xc6: stash form outside the one approved shape stays Abstain (ADR 0075 R5; agent rule R3): -m operand begins with a dash."
+  },
+  {
+    "case": "stash_push_abstain_C_var_push",
+    "tags": ["repo-base-plugin", "pg2-y9xc6"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "git -C \"$WT\" stash push -u -m unique-tag"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-y9xc6: stash form outside the one approved shape stays Abstain (ADR 0075 R5; agent rule R3): the -C directory is a runtime expansion."
   },
   {
     "case": "repo_base_regrade_git__C__repo_reset___hard_origin_main",

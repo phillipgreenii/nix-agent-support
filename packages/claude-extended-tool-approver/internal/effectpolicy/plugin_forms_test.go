@@ -534,9 +534,11 @@ var pluginForms = []pluginForm{
 	// every spelling; landed as pg2-ur9zc) and item 5 (git branch: Abstain any
 	// unsafe spelling -D/-M/-C/-f; landed as pg2-fkmg4), reconfirmed by the
 	// operator 2026-08-12, plus ADR 0075 R5 (approve only when sure safe) and R6
-	// (a branch --delete abstains). `git stash push -u -m` has no explicit ruling
-	// and stays Abstain (unmodeled subcommand) pending an operator decision.
-	{"pn-workspace-rules", "git -C <ROOT> stash push -u -m unique-tag", evalcontract.Abstain, "no stash schema; stash push -u moves untracked work off the tree. Awaiting an operator decision (pg2-33slg)"},
+	// (a branch --delete abstains). `git stash push [-u] [-m <literal>]` is the
+	// one stash form approved (pg2-y9xc6, per the pg2-cjfpy ruling: the form is
+	// skill-instructed by pn-workspace-sync); every other stash form stays
+	// Abstain -- see TestGitStashPushGrading.
+	{"pn-workspace-rules", "git -C <ROOT> stash push -u -m unique-tag", evalcontract.Approve, ""},
 	{"pn-workspace-rules", "git -C <ROOT> reset --hard origin/main", evalcontract.Abstain, "operator ruling pg2-4yy4r item 4 / pg2-ur9zc: git reset --hard Abstains in every spelling"},
 	{"pn-workspace-rules", "git -C <ROOT> branch -D pn-update/20261005", evalcontract.Abstain, "operator ruling pg2-4yy4r item 5 / pg2-fkmg4: git branch Abstains on any unsafe spelling; -D deletes an unmerged branch"},
 	{"pn-workspace-rules", "git -C <ROOT> branch -f main origin/main", evalcontract.Abstain, "operator ruling pg2-4yy4r item 5 / pg2-fkmg4: -f force-moves a branch ref"},

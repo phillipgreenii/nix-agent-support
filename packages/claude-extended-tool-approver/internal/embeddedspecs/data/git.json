@@ -5026,6 +5026,113 @@
             "stdout": "metadata",
             "unknownFlag": "insufficient",
             "endOfOptions": true
+          },
+          "push": {
+            "name": "push",
+            "provenance": "git version 2.54.0, git help stash",
+            "citations": {
+              "provenance": {
+                "source": "git stash --help: \"usage: git stash [push] [-p | --patch] [-S | --staged] [-k | --[no-]keep-index] [-q | --quiet] [-u | --include-untracked] [-a | --all] [(-m | --message) \u003cmessage\u003e] [--pathspec-from-file=\u003cfile\u003e [--pathspec-file-nul]] [--] [\u003cpathspec\u003e...]\""
+              },
+              "stdin": {
+                "source": "git stash --help: \"usage: git stash [push] [-p | --patch] [-S | --staged] [-k | --[no-]keep-index] [-q | --quiet] [-u | --include-untracked] [-a | --all] [(-m | --message) \u003cmessage\u003e] [--pathspec-from-file=\u003cfile\u003e [--pathspec-file-nul]] [--] [\u003cpathspec\u003e...]\" (no explicit stdin wording in the reviewed text; classified \"never\" from the documented operand/argument shape in this same synopsis)"
+              },
+              "stdout": {
+                "source": "git stash --help: \"usage: git stash [push] [-p | --patch] [-S | --staged] [-k | --[no-]keep-index] [-q | --quiet] [-u | --include-untracked] [-a | --all] [(-m | --message) \u003cmessage\u003e] [--pathspec-from-file=\u003cfile\u003e [--pathspec-file-nul]] [--] [\u003cpathspec\u003e...]\" (no explicit stdout wording in the reviewed text; classified \"metadata\" from the documented operand/argument shape in this same synopsis)"
+              },
+              "unknownFlag": {
+                "source": "git stash --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+              }
+            },
+            "flags": {
+              "--include-untracked": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "git stash --help: \"[-u | --include-untracked]\" -- the untracked files are stashed too"
+                }
+              },
+              "--message": {
+                "arity": "one",
+                "operand": {
+                  "kind": "allowed-literal",
+                  "set": "git-stash-message"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "git stash --help: \"[(-m | --message) \u003cmessage\u003e]\" -- the message is only a label on the stash commit; the operand is restricted to a closed literal shape (git-stash-message)"
+                }
+              },
+              "-m": {
+                "arity": "one",
+                "operand": {
+                  "kind": "allowed-literal",
+                  "set": "git-stash-message"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "git stash --help: \"[(-m | --message) \u003cmessage\u003e]\" -- the message is only a label on the stash commit; the operand is restricted to a closed literal shape (git-stash-message)"
+                }
+              },
+              "-u": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "git stash --help: \"[-u | --include-untracked]\" -- the untracked files are stashed too"
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "unmodeled"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "git stash --help: \"usage: git stash [push] [-p | --patch] [-S | --staged] [-k | --[no-]keep-index] [-q | --quiet] [-u | --include-untracked] [-a | --all] [(-m | --message) \u003cmessage\u003e] [--pathspec-from-file=\u003cfile\u003e [--pathspec-file-nul]] [--] [\u003cpathspec\u003e...]\" -- every \u003cpathspec\u003e positional is left unmodeled (a pathspec limits what is stashed; ADR 0075 R5)"
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "path-modify"
+                },
+                "target": ".",
+                "citation": {
+                  "source": "git stash --help: \"usage: git stash [push] [-p | --patch] [-S | --staged] [-k | --[no-]keep-index] [-q | --quiet] [-u | --include-untracked] [-a | --all] [(-m | --message) \u003cmessage\u003e] [--pathspec-from-file=\u003cfile\u003e [--pathspec-file-nul]] [--] [\u003cpathspec\u003e...]\" -- documents the command whose implicit effect (target \".\", role \"path-modify\": the working tree is reset to HEAD) is derived from this synopsis"
+                }
+              },
+              {
+                "role": {
+                  "kind": "path-modify"
+                },
+                "target": ".git",
+                "citation": {
+                  "source": "git stash --help: \"usage: git stash [push] [-p | --patch] [-S | --staged] [-k | --[no-]keep-index] [-q | --quiet] [-u | --include-untracked] [-a | --all] [(-m | --message) \u003cmessage\u003e] [--pathspec-from-file=\u003cfile\u003e [--pathspec-file-nul]] [--] [\u003cpathspec\u003e...]\" -- documents the command whose implicit effect (target \".git\", role \"path-modify\": the stash ref and objects are written) is derived from this synopsis"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
           }
         }
       },

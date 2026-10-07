@@ -17,10 +17,11 @@ package cmddesc
 //
 // Forms the skills instruct that this file deliberately does NOT model
 // (they stay abstain; listed in the bead close report as ruling collisions
-// or unmodelable): `git stash push|pop|apply|drop` and `git checkout
+// or unmodelable): `git stash pop|apply|drop|clear|branch` and `git checkout
 // <branch>` (the agent rule R3 forbids stashing/re-checking-out the canonical
 // clone on its own initiative — the skills instruct them only after asking
-// the operator), `git apply` (the paths a patch writes are inside the patch),
+// the operator; the ONE stash exception is `git stash push [-u] [-m <literal>]`,
+// modeled by gitStashPushSchema per pg2-y9xc6), `git apply` (the paths a patch writes are inside the patch),
 // `git config <key> <value>` (config writes are judged per key, P16 — a later
 // phase), `git rebase -i`/`--exec` (editor / arbitrary commands).
 
@@ -223,11 +224,14 @@ var gitRemoteSchema = CommandSchema{
 	EndOfOptions: true,
 }
 
-// gitStashSchema: the LISTING form only — `git stash list [<log-options>]`
-// (git help stash). stash push/pop/apply/drop/clear are NOT modeled: the
-// agent rule R3 forbids stashing the canonical clone on the agent's own
-// initiative, and the skills instruct them only after asking the operator,
-// so they stay abstain (reported as a ruling collision, not overridden).
+// gitStashSchema: the LISTING form `git stash list [<log-options>]` plus the
+// ONE stash-modifying form the pn-workspace-rules skills instruct, `git stash
+// push [-u|--include-untracked] [-m <literal>]` (git help stash; pg2-y9xc6).
+// pop/apply/drop/clear/branch/show/create/store and the bare `git stash [-u]`
+// shorthand are NOT modeled and stay abstain: the agent rule R3 forbids
+// stashing the canonical clone on the agent's own initiative, and only the
+// push form is skill-instructed (pn-workspace-sync: `git -C <path> stash push
+// -u -m "<unique-tag>"`) and covered by the operator's pg2-cjfpy ruling.
 var gitStashSchema = CommandSchema{
 	Name:         "stash",
 	Provenance:   "git version 2.54.0, git help stash",
@@ -248,7 +252,38 @@ var gitStashSchema = CommandSchema{
 			UnknownFlag:  UnknownFlagInsufficient,
 			EndOfOptions: true,
 		},
+		"push": gitStashPushSchema,
 	},
+}
+
+// gitStashPushSchema: `git stash push [-u | --include-untracked] [-m <msg>]`
+// (git help stash) — exactly those flags. The stash moves tracked (and with
+// -u, untracked) changes out of the working tree into a stash commit
+// recoverable through refs/stash, which the implicit PathModify of "." (the
+// working tree) and ".git" (the stash ref and objects) declares. Everything
+// else is deliberately unmodeled so it abstains (ADR 0075 R5, approve only
+// when sure): -k/--keep-index, -a/--all, -p/--patch, -q, -S/--staged and
+// every other flag are unknown flags (insufficient); any pathspec positional
+// (`-- <path>...`, which limits what is stashed) is Unmodeled; and -m takes
+// only a closed-shape literal (allowedLiteralSets["git-stash-message"]) — a
+// runtime expansion, an empty value or a `-`-prefixed value is insufficient.
+var gitStashPushSchema = CommandSchema{
+	Name:       "push",
+	Provenance: "git version 2.54.0, git help stash",
+	Flags: map[string]FlagSpec{
+		"-u": inert, "--include-untracked": inert,
+		"-m":        {Arity: ArityOne, Operand: AllowedLiteral("git-stash-message")},
+		"--message": {Arity: ArityOne, Operand: AllowedLiteral("git-stash-message")},
+	},
+	Positionals: PositionalSpec{Rest: Unmodeled},
+	ImplicitEffects: []ImplicitEffect{
+		{Role: PathModify, Target: "."},
+		{Role: PathModify, Target: ".git"},
+	},
+	Stdin:        StdinNever,
+	Stdout:       StdoutMetadata,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
 }
 
 // gitFetchSchema: `git fetch [-q] [-p] [-t] [-a] [--depth <n>] [<remote>

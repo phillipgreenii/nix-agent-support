@@ -557,6 +557,14 @@ var allowedLiteralSets = map[string]func(string) bool{
 		"core.editor=true", "core.editor=:",
 		"sequence.editor=true", "sequence.editor=:",
 	),
+	// "git-stash-message": the `-m <message>` of `git stash push` (pg2-y9xc6):
+	// a plain literal that is non-empty and does not start with `-`. A
+	// runtime expansion never reaches this predicate (allowedLiteral rejects a
+	// live operand first), so the message is always what the command line
+	// spells; the stash message is only a label on the stash commit.
+	"git-stash-message": func(tok string) bool {
+		return tok != "" && !strings.HasPrefix(tok, "-")
+	},
 	// "git-plain-refspec": a `git push` refspec that is neither a force
 	// (`+src:dst`) nor a delete (`:dst`) nor a glob — the operand shapes
 	// that turn an "ordinary" push into the unreviewable rewrites R6 rejects
