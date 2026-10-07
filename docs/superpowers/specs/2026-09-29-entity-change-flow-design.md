@@ -797,9 +797,21 @@ and S9 already permits (without requiring) a decider for every type.
 
 Until one exists, pg-desk still watches, hydrates and classifies issues and threads exactly as
 configured (6.1, 6.3, 6.4): their change records are logged and visible through `changes`,
-`history` and `show` (STORY-OP-1, STORY-OP-2) regardless of whether any decider subscribes. An
-operator simply does not configure a pg-router query/role pair for that type (8.3) until a decider
-for it exists; pg-desk itself never depends on one existing.
+`history` and `show` (STORY-OP-1, STORY-OP-2) regardless of whether any decider subscribes.
+pg-desk itself never depends on a decider existing.
+
+> **SUPERSEDED 2026-10-06 (bead `pg2-efvdd`):** the instruction that "an operator simply does not configure a
+> pg-router query/role pair for that type (8.3) until a decider for it exists" is replaced.
+> Operator ruling (Phillip, 2026-10-06), Option 2: an operator MUST configure a pg-desk `changes`
+> source for EVERY watched type (`pr`, `issue`, `thread`), each emitting exactly `<type>.changed`,
+> and MUST bind each type that has no decider (today `issue` and `thread`) to a deliberately
+> minimal no-op command role, until a real decider exists. Reason: the `pg-desk <type> changes`
+> command is the only path that discovers watched entities and runs the age sweep, so dropping the
+> source would stop discovery and re-hydration of that type entirely; and S22 rejects an unbound
+> `<type>.changed` producer at load time (orphan-producer check), so the source cannot be left
+> unrouted. The no-op role exists only to satisfy S22 while no issue/thread decider exists (S20);
+> it is replaced by the real decider role (or removed) when one lands. This note reconciles 7.10
+> with S22; it does not amend S22 or the loader's orphan-producer check.
 
 ## 8. Delivery, routing and the sweep
 
