@@ -69,6 +69,16 @@ show)
   ;;
 update)
   id="$2"
+  case " $* " in
+  *" --claim "*)
+    for failing in ${MOCK_BD_CLAIM_FAIL_IDS:-}; do
+      if [[ $id == "$failing" ]]; then
+        echo "mock bd update: --claim refused for $id" >&2
+        exit 1
+      fi
+    done
+    ;;
+  esac
   for failing in ${MOCK_BD_UPDATE_FAIL_IDS:-}; do
     if [[ $id == "$failing" ]]; then
       echo "mock bd update: refused for $id" >&2
@@ -217,6 +227,28 @@ show_fixture() {
   export MOCK_BD_UPDATE_FAIL_IDS="tc-1"
   run pgwf_tracker_try_claim tc-1 some-actor-stage
   [ "$status" -ne 0 ]
+}
+
+@test "pgwf_tracker_claim_or_transfer: reserved by same session -> transfers assignee to the worker actor" {
+  export MOCK_BD_CLAIM_FAIL_IDS="tc-1"
+  show_fixture tc-1 '{"id":"tc-1","assignee":"abcd1234-main-dispatcher-work"}'
+  run pgwf_tracker_claim_or_transfer tc-1 abcd1234-a1-worker-work abcd1234-a1-worker
+  [ "$status" -eq 0 ]
+  grep -q -- "update tc-1 --assignee abcd1234-a1-worker-work --actor abcd1234-a1-worker-work" "$MOCK_BD_LOG"
+}
+
+@test "pgwf_tracker_claim_or_transfer: held by a foreign session -> still fails, no transfer" {
+  export MOCK_BD_CLAIM_FAIL_IDS="tc-1"
+  show_fixture tc-1 '{"id":"tc-1","assignee":"ffff0000-main-main-work"}'
+  run pgwf_tracker_claim_or_transfer tc-1 abcd1234-a1-worker-work abcd1234-a1-worker
+  [ "$status" -ne 0 ]
+  ! grep -q -- "--assignee" "$MOCK_BD_LOG"
+}
+
+@test "pgwf_tracker_claim_or_transfer: plain successful claim does not consult assignee" {
+  run pgwf_tracker_claim_or_transfer tc-1 abcd1234-a1-worker-work abcd1234-a1-worker
+  [ "$status" -eq 0 ]
+  ! grep -q -- "^show" "$MOCK_BD_LOG"
 }
 
 @test "pgwf_tracker_release: clears the assignee in the SAME bd call as the status change" {

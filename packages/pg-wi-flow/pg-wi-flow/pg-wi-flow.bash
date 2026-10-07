@@ -425,7 +425,10 @@ pgwf_cmd_claim() {
   stage="$(pgwf_effective_stage_name "$config_json" "$id")" || return 1
   actor="$(pgwf_current_actor "$stage")" || return 1
 
-  if ! pgwf_tracker_try_claim "$id" "$actor"; then
+  # The dispatcher's `next` reserved the item under its own actor; the
+  # worker's ident differs only after the leading <session8> segment, so
+  # same-session reservations are transferred, foreign ones still fail.
+  if ! pgwf_tracker_claim_or_transfer "$id" "$actor" "${PG_WI_FLOW_IDENT:-}"; then
     echo "pg-wi-flow: claim: failed to claim $id" >&2
     return 1
   fi

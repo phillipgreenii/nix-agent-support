@@ -79,6 +79,16 @@ ready)
   ;;
 update)
   id="$2"
+  case " $* " in
+  *" --claim "*)
+    for failing in ${MOCK_BD_CLAIM_FAIL_IDS:-}; do
+      if [[ $id == "$failing" ]]; then
+        echo "mock bd update: --claim refused for $id" >&2
+        exit 1
+      fi
+    done
+    ;;
+  esac
   for failing in ${MOCK_BD_UPDATE_FAIL_IDS:-}; do
     if [[ $id == "$failing" ]]; then
       echo "mock bd update: refused for $id" >&2
@@ -290,6 +300,28 @@ show_fixture() {
   [[ "$output" == *"## Item"* ]]
   [[ "$output" == *"WI_ID=tc-1"* ]]
   [[ "$output" == *"WI_STAGE=implement"* ]]
+}
+
+@test "cmd_claim: item reserved by the same run's dispatcher -> succeeds and assignee becomes the worker actor (tc-qho87)" {
+  show_fixture tc-1 '{"id":"tc-1","labels":["stage:implement"],"assignee":"abcd1234-main-dispatcher-implement","metadata":{}}'
+  export MOCK_BD_CLAIM_FAIL_IDS="tc-1"
+  unset PGWF_EXPLICIT_ACTOR
+  export PG_WI_FLOW_IDENT="abcd1234-a1-worker"
+  run pgwf_cmd_claim tc-1
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "tc-1 implement $PGWF_NULL_WORKFLOW_NAME" ]
+  grep -q -- "update tc-1 --assignee abcd1234-a1-worker-implement --actor abcd1234-a1-worker-implement" "$MOCK_BD_LOG"
+}
+
+@test "cmd_claim: item held by a foreign run -> still fails (tc-qho87)" {
+  show_fixture tc-1 '{"id":"tc-1","labels":["stage:implement"],"assignee":"ffff0000-main-main-implement","metadata":{}}'
+  export MOCK_BD_CLAIM_FAIL_IDS="tc-1"
+  unset PGWF_EXPLICIT_ACTOR
+  export PG_WI_FLOW_IDENT="abcd1234-a1-worker"
+  run pgwf_cmd_claim tc-1
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"failed to claim tc-1"* ]]
+  ! grep -q -- "--assignee" "$MOCK_BD_LOG"
 }
 
 @test "cmd_release: clears the assignee in one bd call" {

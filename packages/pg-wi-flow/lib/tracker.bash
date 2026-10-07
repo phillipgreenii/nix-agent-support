@@ -244,6 +244,31 @@ pgwf_tracker_try_claim() {
   bd update "$id" --claim --actor "$actor" --json >/dev/null 2>&1
 }
 
+# pgwf_tracker_claim_or_transfer ID ACTOR IDENT -- worker-side claim:
+# `bd update ID --claim` first; if bd refuses because the item is already
+# assigned, and the current assignee was composed under the SAME run
+# (assignee starts with "<session8>-", the leading segment of IDENT =
+# PG_WI_FLOW_IDENT), the item is this run's own dispatcher reservation and
+# is TRANSFERRED to ACTOR (`bd update ID --assignee ACTOR`) [design: ##
+# Components, Worker step 1: "claim <id> transfers the reservation"].
+# An item held by a different session (or an
+# empty IDENT) still fails, preserving the lost-race semantics of C-4.
+pgwf_tracker_claim_or_transfer() {
+  local id="$1" actor="$2" session="${3:-}"
+  session="${session%%-*}"
+  if pgwf_tracker_try_claim "$id" "$actor"; then
+    return 0
+  fi
+  [[ -n $session ]] || return 1
+
+  local item assignee
+  item="$(pgwf_tracker_show_json "$id" 2>/dev/null)" || return 1
+  assignee="$(jq -r '.assignee // .owner // empty' <<<"$item")" || return 1
+  [[ $assignee == "$session"-* ]] || return 1
+
+  bd update "$id" --assignee "$actor" --actor "$actor" --json >/dev/null 2>&1
+}
+
 # pgwf_tracker_release ID ACTOR -- releases ID with the assignee cleared in
 # the SAME `bd update` call as the status change [design: ## Components,
 # "Invariants enforced inside the CLI"; workspace B-1/B-2 restated as a
