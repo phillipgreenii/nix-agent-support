@@ -19,7 +19,9 @@
 #
 # It is compiled into a test binary because the suite is ordinary `go test`
 # code; the wrapper only supplies the committed queue definitions and a
-# hermetic PATH.
+# hermetic PATH. The suite's bd children run with the same bash+coreutils PATH
+# the real exporter's childPath carries (git deliberately absent), so a bd that
+# is a shell wrapper can be pointed at with --bd.
 let
   testBinary = buildGoApplication {
     pname = "beads-exporter-contract-test";
@@ -55,7 +57,13 @@ writeShellApplication {
   ];
   text = ''
     exec ${testBinary}/libexec/beads-exporter-contract.test \
-      -test.v -test.timeout=0 -queues ${queues} "$@"
+      -test.v -test.timeout=0 -queues ${queues} \
+      -child-path ${
+        lib.makeBinPath [
+          bash
+          coreutils
+        ]
+      } "$@"
   '';
   meta = {
     description = "bd contract suite for beads-exporter: pins the bd flags, output shapes and ready/list semantics against a real bd";

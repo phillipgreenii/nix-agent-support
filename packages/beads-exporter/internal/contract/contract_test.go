@@ -25,10 +25,11 @@ import (
 )
 
 var (
-	bdPath       = flag.String("bd", "", "absolute path of the bd binary under test (required)")
-	update       = flag.Bool("update", false, "record testdata/bd fixtures and the VERSION pin")
-	testdataFlag = flag.String("testdata", "../../testdata/bd", "directory the -update flag writes fixtures to")
-	queuesFlag   = flag.String("queues", "../../../../claude-marketplace/pb/queues.json", "path of the committed queue definitions")
+	bdPath        = flag.String("bd", "", "absolute path of the bd binary under test (required)")
+	update        = flag.Bool("update", false, "record testdata/bd fixtures and the VERSION pin")
+	testdataFlag  = flag.String("testdata", "../../testdata/bd", "directory the -update flag writes fixtures to")
+	childPathFlag = flag.String("child-path", "", "PATH of every bd child, as the real exporter's childPath (colon-separated absolute bash and coreutils bin dirs); empty means an empty directory, which only works for a bd that needs nothing on PATH")
+	queuesFlag    = flag.String("queues", "../../../../claude-marketplace/pb/queues.json", "path of the committed queue definitions")
 )
 
 func TestMain(m *testing.M) {
@@ -37,7 +38,26 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, "contract: -bd must be the absolute path of a bd binary")
 		os.Exit(2)
 	}
+	if err := validateChildPath(*childPathFlag); err != nil {
+		fmt.Fprintf(os.Stderr, "contract: -child-path: %v\n", err)
+		os.Exit(2)
+	}
 	os.Exit(m.Run())
+}
+
+// validateChildPath mirrors the real exporter's childPath rule (internal/config):
+// every colon-separated entry MUST be an absolute directory path. Empty is valid
+// and selects the empty-directory default.
+func validateChildPath(p string) error {
+	if p == "" {
+		return nil
+	}
+	for _, entry := range strings.Split(p, ":") {
+		if !filepath.IsAbs(entry) {
+			return fmt.Errorf("entries must be absolute, got %q", entry)
+		}
+	}
+	return nil
 }
 
 const fixtureActor = "fixture-actor"
@@ -182,14 +202,25 @@ func (e *env) created(args ...string) string {
 	return env.Data.ID
 }
 
-// client is the production adapter pointed at the temp database. Its child PATH
-// is an empty directory: bd must run without git, bash or coreutils.
+// childPath is the PATH of every bd child. By default it is an empty directory:
+// bd must run without git, bash or coreutils. A bd that is a shell wrapper (the
+// machine's wrapped bd) needs bash and coreutils, so -child-path supplies the
+// same bash+coreutils PATH the real exporter's childPath carries; git stays off.
+func (e *env) childPath() string {
+	if *childPathFlag != "" {
+		return *childPathFlag
+	}
+	return e.emptyBin
+}
+
+// client is the production adapter pointed at the temp database, running bd
+// with childPath() as its PATH.
 func (e *env) client() *bd.Client {
 	return bd.NewClient(bd.ClientConfig{
 		BDPath:    *bdPath,
 		BeadsDir:  e.beadsDir,
 		Home:      e.home,
-		ChildPath: e.emptyBin,
+		ChildPath: e.childPath(),
 		Timeout:   2 * time.Minute,
 	})
 }
@@ -198,7 +229,7 @@ func (e *env) client() *bd.Client {
 func (e *env) raw(argv []string) (string, int) {
 	e.t.Helper()
 	res, err := bd.ExecRunner{}.Run(context.Background(), bd.Cmd{
-		Path: *bdPath, Args: argv, Env: bd.ChildEnv(e.home, e.emptyBin, e.beadsDir),
+		Path: *bdPath, Args: argv, Env: bd.ChildEnv(e.home, e.childPath(), e.beadsDir),
 	})
 	if err != nil {
 		e.t.Fatalf("run %v: %v", argv, err)
@@ -598,5 +629,23 @@ func TestRecordFixtures(t *testing.T) {
 	}
 	if err := os.WriteFile(filepath.Join(dir, "VERSION"), []byte(m[1]+"\n"), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestValidateChildPath(t *testing.T) {
+	for _, tc := range []struct {
+		in      string
+		wantErr bool
+	}{
+		{"", false},
+		{"/a/bin", false},
+		{"/a/bin:/b/bin", false},
+		{"/a/bin:bin", true},
+		{"/a/bin::/b/bin", true},
+		{"bin", true},
+	} {
+		if err := validateChildPath(tc.in); (err != nil) != tc.wantErr {
+			t.Errorf("validateChildPath(%q) err = %v, wantErr %v", tc.in, err, tc.wantErr)
+		}
 	}
 }

@@ -243,6 +243,12 @@ nix run .#beads-exporter-contract -- --bd /path/to/bd --update --testdata packag
 With `--update` it records `testdata/bd/*.json` (output shapes) and `testdata/bd/VERSION` (the bd
 version pin).
 
+The suite runs every bd child with the same `PATH` the real exporter's `childPath` carries: the
+bash and coreutils store paths, no `git`. The `beads-exporter-contract` wrapper passes it as
+`-child-path`, so `--bd` MAY point at a bd that is a shell wrapper (it needs bash and coreutils).
+When the test binary is run directly without `-child-path`, the child `PATH` is an empty directory,
+which only works for a bd that needs nothing on `PATH`.
+
 ### The bd flag and version check
 
 `testdata/bd/VERSION` and `testdata/bd/flags.txt` (every flag the exporter can pass, as
