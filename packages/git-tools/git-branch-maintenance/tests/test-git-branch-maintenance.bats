@@ -5,20 +5,18 @@
 # Tests key functionality without modifying the real repository
 
 setup() {
-    # SCRIPTS_DIR may already be exported (nix check: `export SCRIPTS_DIR=
-    # "${src}"`), and gfh_setup below scrubs every exported var not on its
-    # allowlist -- capture it into a plain local FIRST, before that scrub
-    # runs, then re-export it after (pg2-31f13).
-    local scripts_dir_saved="${SCRIPTS_DIR:-}"
-    local test_support_saved="${TEST_SUPPORT:-}"
-
-    if [[ -n $test_support_saved ]]; then
+    # SCRIPTS_DIR and TEST_SUPPORT may already be exported (nix check: `export
+    # SCRIPTS_DIR="${src}"`), and gfh_setup scrubs every exported var not on
+    # its allowlist. gfh_save_env/gfh_restore_env carry them across it.
+    if [[ -n ${TEST_SUPPORT:-} ]]; then
         # shellcheck disable=SC1091
-        source "$test_support_saved/git-fixture-harness.bash"
+        source "$TEST_SUPPORT/git-fixture-harness.bash"
     else
         # shellcheck disable=SC1091
         source "$(env -u GIT_DIR -u GIT_COMMON_DIR -u GIT_WORK_TREE git -C "$BATS_TEST_DIRNAME" rev-parse --path-format=absolute --git-common-dir)/../../phillipg-nix-repo-base/lib/scripts/git-fixture-harness.bash"
     fi
+
+    gfh_save_env SCRIPTS_DIR TEST_SUPPORT
 
     # Hermetic-by-construction git fixture (GIT_CEILING_DIRECTORIES + env
     # allowlist reset + fresh HOME + hooks disabled): see pg2-31f13/pg2-gucfd.
@@ -27,16 +25,11 @@ setup() {
     # var from a linked-worktree commit hook (pg2-67h4y).
     gfh_setup "git-branch-maintenance"
 
-    if [[ -z $scripts_dir_saved ]]; then
-        scripts_dir_saved="$(cd "$(dirname "${BATS_TEST_FILENAME}")/.." && pwd)"
+    gfh_restore_env
+    if [[ -z ${SCRIPTS_DIR:-} ]]; then
+        SCRIPTS_DIR="$(cd "$(dirname "${BATS_TEST_FILENAME}")/.." && pwd)"
     fi
-    export SCRIPTS_DIR="$scripts_dir_saved"
-
-    # Re-export TEST_SUPPORT too (also scrubbed by gfh_setup above) -- the
-    # regression-guard test below needs it to resolve the harness path again.
-    if [[ -n $test_support_saved ]]; then
-        export TEST_SUPPORT="$test_support_saved"
-    fi
+    export SCRIPTS_DIR
 
     # Create a separate directory for mock scripts (not in the git repo)
     export MOCK_DIR
