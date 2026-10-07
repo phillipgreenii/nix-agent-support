@@ -163,3 +163,28 @@ func TestNew_WithoutWorktreePool_RegistersNoPoolGauges(t *testing.T) {
 		}
 	}
 }
+
+// TestPoolScanner_RefreshUsesScanTimeoutOfAtLeast180s (pg2-9q3pq): the scan
+// budget handed to the walker is the 180s default, so a full pool of monorepo
+// checkouts does not routinely truncate.
+func TestPoolScanner_RefreshUsesScanTimeoutOfAtLeast180s(t *testing.T) {
+	clk := &mockClock{t: time.Unix(1000, 0)}
+	p := newPoolScanner("/x", time.Minute, clk.now)
+	var budget time.Duration
+	p.scan = func(ctx context.Context, _ string) poolStat {
+		dl, ok := ctx.Deadline()
+		if !ok {
+			t.Error("scan ctx has no deadline")
+			return poolStat{}
+		}
+		budget = time.Until(dl)
+		return poolStat{}
+	}
+	p.refresh()
+	if budget < 170*time.Second || budget > 180*time.Second {
+		t.Errorf("scan budget = %v, want about 180s", budget)
+	}
+	if poolScanTimeout < 180*time.Second {
+		t.Errorf("poolScanTimeout = %v, want >= 180s", poolScanTimeout)
+	}
+}

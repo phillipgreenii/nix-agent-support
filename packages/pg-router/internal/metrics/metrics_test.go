@@ -1270,3 +1270,28 @@ func TestOnHandlerFailure_BudgetSentinelMapsToReasonAndRoleLabel(t *testing.T) {
 		}
 	}
 }
+
+// TestSilentCountersExportZeroSeriesFromStartup (pg2-9q3pq): a counter never
+// Add()ed exports no series, so deduped/unknown_type_rejected/enqueue_rejected
+// are pre-recorded at 0 and exist from the first collect, before any event.
+func TestSilentCountersExportZeroSeriesFromStartup(t *testing.T) {
+	h := newHarness(t)
+	rm := h.collect(t)
+	for _, name := range []string{MetricDeduped, MetricUnknownTypeRejected, MetricEnqueueRejected} {
+		m := findMetric(t, rm, name)
+		s, ok := m.Data.(metricdata.Sum[int64])
+		if !ok || len(s.DataPoints) == 0 {
+			t.Fatalf("%s: no series at startup (data=%T)", name, m.Data)
+		}
+		for _, dp := range s.DataPoints {
+			if dp.Value != 0 {
+				t.Errorf("%s: startup datapoint = %d, want 0", name, dp.Value)
+			}
+		}
+	}
+	// Pre-recording must not disturb real counts.
+	h.emitter.OnDeduped("t")
+	if got := sumFor(findMetric(t, h.collect(t), MetricDeduped), "type", "t"); got != 1 {
+		t.Errorf("deduped[t] = %d after one event, want 1", got)
+	}
+}

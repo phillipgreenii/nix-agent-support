@@ -659,7 +659,21 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 	e.gateDrops = gateDrops
 	e.now = cfg.now
 	e.pending = map[string]pendingDispatch{}
+	e.preRecordZeroCounters()
 	return e, nil
+}
+
+// preRecordZeroCounters adds 0 to the counters that are otherwise silent until
+// their (rare) first event, so each exports a label-less zero series from
+// startup. A zero-increment OTel counter that has never been Add()ed exports no
+// series, leaving Prometheus without a `_total` to rate()/absent() against
+// (pg2-9q3pq). The label-less series sits beside, and is never merged with, the
+// labelled per-type series the real events create, so sum() is unaffected.
+func (e *Emitter) preRecordZeroCounters() {
+	ctx := context.Background()
+	e.deduped.Add(ctx, 0)
+	e.unknownType.Add(ctx, 0)
+	e.enqueueRejected.Add(ctx, 0)
 }
 
 // gateLabel returns the label value for a gate TYPE, folding TYPEs beyond

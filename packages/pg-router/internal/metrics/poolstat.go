@@ -31,9 +31,13 @@ const (
 	// scrape inside the TTL reads the cached result.
 	defaultPoolScanTTL = 10 * time.Minute
 	// poolScanMaxEntries and poolScanTimeout bound one scan's cost (a
-	// monorepo checkout is ~213k files per worktree; see pg2-8vn8t).
+	// monorepo checkout is ~213k files per worktree; see pg2-8vn8t). The
+	// timeout was 60s, which truncated routinely on a full pool and made
+	// pg_router_worktree_scan_truncated flap (pg2-9q3pq); 180s is sized so a
+	// full pool completes. The scan is a background single-flight refresh, so
+	// a longer budget never delays a scrape.
 	poolScanMaxEntries = 2_000_000
-	poolScanTimeout    = 60 * time.Second
+	poolScanTimeout    = 180 * time.Second
 )
 
 // poolStat is one completed scan's result.
@@ -52,6 +56,8 @@ type poolScanner struct {
 	ttl  time.Duration
 	now  func() time.Time
 	scan func(ctx context.Context, dir string) poolStat
+	// timeout bounds one scan; set from poolScanTimeout (tests override).
+	timeout time.Duration
 
 	mu       sync.Mutex
 	last     poolStat
@@ -64,7 +70,7 @@ func newPoolScanner(dir string, ttl time.Duration, now func() time.Time) *poolSc
 	if ttl <= 0 {
 		ttl = defaultPoolScanTTL
 	}
-	return &poolScanner{dir: dir, ttl: ttl, now: now, scan: scanWorktreePool}
+	return &poolScanner{dir: dir, ttl: ttl, now: now, scan: scanWorktreePool, timeout: poolScanTimeout}
 }
 
 // get returns the cached stat, starting a background refresh if it is stale.
@@ -80,7 +86,7 @@ func (p *poolScanner) get() (poolStat, bool) {
 
 // refresh runs one scan and stores the result. Exposed to tests via direct call.
 func (p *poolScanner) refresh() {
-	ctx, cancel := context.WithTimeout(context.Background(), poolScanTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
 	defer cancel()
 	st := p.scan(ctx, p.dir)
 	p.mu.Lock()

@@ -113,6 +113,13 @@ func TestOnEnqueueRejectedCounts(t *testing.T) {
 	for _, dp := range sum.DataPoints {
 		ty, _ := dp.Attributes.Value("type")
 		re, _ := dp.Attributes.Value("reason")
+		if dp.Attributes.Len() == 0 {
+			// The label-less startup baseline (pg2-9q3pq) is not an event.
+			if dp.Value != 0 {
+				t.Fatalf("label-less baseline = %d, want 0", dp.Value)
+			}
+			continue
+		}
 		got[ty.AsString()+"/"+re.AsString()] = dp.Value
 	}
 	if got["a.ready/log_full"] != 2 || got["b.ready/log_unwritable"] != 1 || len(got) != 2 {
