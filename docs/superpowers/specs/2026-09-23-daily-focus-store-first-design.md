@@ -313,8 +313,9 @@ ownership filter that hides an assigned item:
 Two exclusions, both applied before the slot rule: an entity whose own metadata carries `source_id`
 is NEVER a candidate (it is a minted focus bead; without this rule a bead assigned or owned by the
 operator would take a second slot for the same work, and could be selected so the decider would mint
-a bead for a bead), and an entity hidden through `pg-desk <type> hide` is not a candidate (the
-operator already said to ignore it; a `wip`-marked entity stays one).
+a bead for a bead), and an entity hidden through `pg-desk <type> hide` is not a candidate (operator
+ruling 2026-10-07: a hidden entity is ignored for decisions and logic, though it keeps being updated,
+until it goes away or is unhidden; a `wip`-marked entity stays a candidate).
 
 **Slot rule** (D-F11): an epic and its children MUST NOT consume more than one slot between them.
 A child item takes the slot; the epic is NOT listed separately while it has any open child. An epic
@@ -323,14 +324,20 @@ must move it along (create children, split it, and so on). The rule is applied B
 is counted. The old D-F7 narrowing ("has an open child") is superseded; the closed-child signal is
 no longer needed, so the sketched `pg-connector-issue-beads` capability is not required.
 
-Reading of the slot rule, for the tests to pin (a clarification of D-F11, flagged in section 12 for
-the operator to confirm): "child" means a DIRECT child (the child's `parent` field names the epic), an
-inactive entity (`active = 0`) is not an open child, and an open child owned by someone else still
-hides the epic (the literal ruling, "listed only when it has no open child"). Each open child
-assigned to the operator is its own candidate; the rule's only effect is that the epic never adds a
-second slot. A child that is not in the store yet (hydration is capped, §4.2) is unknown, not absent:
-`focus show`'s coverage header (§7.1) says so, and the epic is then listed as it would be with no
-child.
+Reading of the slot rule, confirmed by the operator 2026-10-07 and pinned by the tests: working on a
+child implies working on its epic, so the epic does not need a slot. "Child" means a DIRECT child
+(the child's `parent` field names the epic), and an inactive entity (`active = 0`) is not an open
+child. Each open child assigned to the operator is its own candidate, so the operator can focus on two
+or three children of one epic and each takes its own slot; the epic is not in the ranked slots while
+it has any open child (an open child owned by someone else counts). Such an epic is shown instead in a
+trailing block below the cap line, "epics with children in play", unranked and not counted against
+`cap`, each with an indicator of how many of its open children are in the plan (a join over the same
+`parent` field the slot rule already reads; if it proves non-trivial the decomposition drops the
+indicator and keeps the block, and if the block itself is non-trivial it drops both). An epic with NO
+open child is a candidate in its own right and ranks normally, because it needs the operator to
+review it: close it, or create the children that finish it. A child that is not in the store yet
+(hydration is capped, §4.2) is unknown, not absent: `focus show`'s coverage header (§7.1) says so, and
+the epic is then listed as it would be with no child.
 
 **Started** (D-F11): a bead with state `in_progress`; a Jira issue in the In Progress status
 category; any open PR assigned to the operator, whether authored or review-assigned. Consequence to
@@ -414,7 +421,9 @@ exit `0`. The per-verb descriptions below use this scheme.
 Computes the candidate set and rank fresh (§6), cross-references existing `focus_selection` rows
 for the period so already-selected items display as selected, and prints the ranked table.
 By default the table shows the in-plan rows plus the next ten; `--all` prints every candidate (the
-candidate set is uncapped, D-F11). Each row carries its tier, the key that decided its position
+candidate set is uncapped, D-F11). Below the cap line, an "epics with children in play" block lists
+each epic that has an open child, unranked, with how many of its children are in the plan (§6). A
+`digest:` line identifies the table as shown, for `select --expect` (§7.2). Each row carries its tier, the key that decided its position
 against its neighbor, due date, priority, a `(stale)` mark when its stored snapshot is flagged stale,
 and its bead state (below). A header names the scope (the configured repository) so a narrowing
 such as D-F2's is visible rather than silent, and prints a **coverage line per watched type**: the
@@ -455,7 +464,13 @@ or `claimed, left open with a note`), so the operator can see what a strike did.
 ### 7.2 `pg-desk focus select --date YYYY-MM-DD --apply [--dry-run] [--merge <keepKey>=<absorbedKey>,...]` (reply on stdin)
 
 1. Recompute the candidate table live (identical to `show`) and **print it** — this is what the
-   reply gets applied against, always current, never more than one round trip stale (D-F5). The
+   reply gets applied against, always current, never more than one round trip stale (D-F5). `show`
+   prints a short digest of the ranked key order and cap line, and `select` accepts an OPTIONAL
+   `--expect <digest>`: when given, it aborts with a distinct exit code (chosen by the decomposition
+   from the codes pg-desk does not use) if the table changed since it was shown (an
+   optimistic-concurrency check). It is never required: without it, `select` applies the reply to
+   whatever the table now is, which is the live-recompute behavior D-F5 chose (operator, 2026-10-07).
+   The
    reply is applied against THIS table, which can differ from the `show` table the operator read (a
    poll landed, or a due date crossed midnight); the echo (step 7) is what makes any such difference
    visible.
@@ -670,18 +685,18 @@ annotation `escalated.focus.item`); one rule covers mint, withdraw and reopen. T
 fields it needs (title, priority, issue type) are not read by pg-decider's view reader today, which
 decodes a snapshot only for `pr`, so an issue-snapshot decoder is a section 12 item.
 
-| Property       | Value                                                                                                                                                                                                                                                                                   |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Source kinds   | A PR, and a Jira issue: a bead is minted. An epic, or a plain bd task assigned or owned by the operator: NO bead (its entity id already is a bead id). The decider tells the two issue backends apart by the issue snapshot's backend discriminator; the decomposition names the field. |
-| Type           | `bug` when the source is a Jira `Bug` (a PR is `task`), else `task`.                                                                                                                                                                                                                    |
-| Priority       | The source's priority through the same data-driven mapping table as the rank (§6); unmapped values and PRs without one map to P2.                                                                                                                                                       |
-| Title          | `Focus <source ref> - <source title>`. The title MUST NOT start with `<ref>: `, which pg-decider's anchor-adoption match would read as the PR's own anchor bead.                                                                                                                        |
-| Labels         | `focus-item`. No `human` label, no worker-routing label: whether a worker takes the bead is the router's decision, not the rule's.                                                                                                                                                      |
-| Assignee/owner | Empty. A minted bead MUST NOT be assigned or owned by the operator (it would match the candidate rule, §6) and MUST read unclaimed for the withdraw rule.                                                                                                                               |
-| Parent         | None (D-F4: no per-day parent).                                                                                                                                                                                                                                                         |
-| Metadata       | `source_type`, `source_id` (neutral names, no focus vocabulary), and the decider's `focus_withdrawn` and `focus_struck_noted` markers (D-F19).                                                                                                                                          |
-| Description    | One line naming the source entity, so a worker who opens the bead can find it.                                                                                                                                                                                                          |
-| Dedup key      | `<entity_type>:<entity_id>:focus-item` (D-F13), no per-day suffix.                                                                                                                                                                                                                      |
+| Property       | Value                                                                                                                                                                                                                                                                                                                                                                      |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Source kinds   | A PR, and a Jira issue: a bead is minted. An epic, or a plain bd task assigned or owned by the operator: NO bead (its entity id already is a bead id; operator, 2026-10-07: for now a bead only helps track things, and this may change). The decider tells the two issue backends apart by the issue snapshot's backend discriminator; the decomposition names the field. |
+| Type           | `bug` when the source is a Jira `Bug` (a PR is `task`), else `task`.                                                                                                                                                                                                                                                                                                       |
+| Priority       | The source's priority through the same data-driven mapping table as the rank (§6); unmapped values and PRs without one map to P2.                                                                                                                                                                                                                                          |
+| Title          | `Focus <source ref> - <source title>`. The title MUST NOT start with `<ref>: `, which pg-decider's anchor-adoption match would read as the PR's own anchor bead.                                                                                                                                                                                                           |
+| Labels         | `focus-item`. No `human` label, no worker-routing label: whether a worker takes the bead is the router's decision, not the rule's.                                                                                                                                                                                                                                         |
+| Assignee/owner | Empty. A minted bead MUST NOT be assigned or owned by the operator (it would match the candidate rule, §6) and MUST read unclaimed for the withdraw rule.                                                                                                                                                                                                                  |
+| Parent         | None (D-F4: no per-day parent).                                                                                                                                                                                                                                                                                                                                            |
+| Metadata       | `source_type`, `source_id` (neutral names, no focus vocabulary), and the decider's `focus_withdrawn` and `focus_struck_noted` markers (D-F19).                                                                                                                                                                                                                             |
+| Description    | One line naming the source entity, so a worker who opens the bead can find it.                                                                                                                                                                                                                                                                                             |
+| Dedup key      | `<entity_type>:<entity_id>:focus-item` (D-F13), no per-day suffix.                                                                                                                                                                                                                                                                                                         |
 
 ### 8.2 Telemetry, logs and health (D-F21)
 
@@ -901,14 +916,14 @@ the new watch queries and the new decider role live, not just a clean flake chec
   no recorder once `heartbeat` is removed (§4.2), to be closed in the change-flow design or declared
   deferred there; (l) the change-flow Phase 10 guard `TestNoDecisionLogicInPgDesk` (§8).
 - **Clarifications and agent proposals the operator should confirm** (none changes a ruled decision):
-  D-F17 to D-F21 (above); that the slot rule reads as section 6 now says (each open child assigned to
-  the operator is its own candidate, an open child owned by someone else still hides the epic, only
-  direct, active children count), since the ruling's wording "never use more than one slot" is
-  ambiguous for an epic with several assigned children; that hidden entities are not candidates; the
-  age key's source; that no bead is minted for a bd task assigned to the operator; whether `select`
-  should also accept an `--expect <digest>` of the table the operator read, aborting if it changed
-  (not specified, because the echo of step 7 already makes a difference visible, but a digest would
-  make it a hard stop); and that an item selected on an earlier day and not struck keeps its bead.
+  D-F17 to D-F21 (above, still unruled; D-F19 in particular waits on the question of whether anything
+  claims a focus bead automatically, which decides whether a strike must touch the bead at all); the
+  age key's source; and that an item selected on an earlier day and not struck keeps its bead.
+  RULED by the operator 2026-10-07 and already applied above: the slot rule's reading (section 6: each
+  assigned child takes its own slot, an epic with open children sits in a trailing block with an
+  in-plan indicator, an epic with no open child ranks normally), hidden entities are ignored for
+  decisions and logic, no bead is minted for a bead (section 8.1), and `--expect <digest>` is
+  optional (section 7.2).
 - **The rest of the document is not yet reviewed by the operator.** Only section 6, D-F11 and the
   2026-10-06 rulings D-F12 to D-F16 are ruled; approval of the whole document, recorded in this
   header, is still required before landing. The 2026-10-07 five-dimension review (correctness and
