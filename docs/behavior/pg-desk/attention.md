@@ -89,6 +89,14 @@ reason so that severity and summary say why.
   report one cause twice.
 - **One exclusion list.** The CI rule uses the same `check_interpreters` patterns as the CI
   rollup and the build links. There is no separate attention-only exclusion setting.
+- **The only source of the own-PR CI item.** `pr.own-ci-failing` is the sole producer of the
+  "CI failing on my PR" attention item. The PR connector does not emit one: it answers
+  `list_attention` with `unknown_op`, so a stale registration of it in `attention.sources` reads as
+  "not applicable" instead of failing. The item's `type` is `pr` and its `id` is the PR id, so it
+  is keyed exactly like the PR's other items; no separate `pr-ci` type exists. The own-PR CI
+  contract is therefore this rule and nothing else: one item per own, open, non-draft, unmerged
+  PR whose rollup is `failure`, severity `high`, and never one for a passing, pending or absent
+  rollup. The links to the PR and its failing builds come from `pg-desk links`.
 
 ### Issue rules
 
