@@ -697,7 +697,7 @@ func TestSubmitReadErrorTaxonomy(t *testing.T) {
 }
 
 func TestSubmitRejectsBadInput(t *testing.T) {
-	tooMany := make([]pr.ReviewComment, 201)
+	tooMany := make([]pr.ReviewComment, maxRequestComments+1)
 	for i := range tooMany {
 		tooMany[i] = point("a.go", i+1, "x")
 	}
@@ -713,7 +713,7 @@ func TestSubmitRejectsBadInput(t *testing.T) {
 		"thread with line": func(r *pr.ReviewSubmitRequest) {
 			r.Comments[0] = pr.ReviewComment{ThreadID: "PRRT_1", Line: 3, Body: "x"}
 		},
-		"over 200 comments":        func(r *pr.ReviewSubmitRequest) { r.Comments = tooMany },
+		"over the comment cap":     func(r *pr.ReviewSubmitRequest) { r.Comments = tooMany },
 		"section delimiter":        func(r *pr.ReviewSubmitRequest) { r.Body = "a " + pgposted.SectionClose },
 		"body with a short head":   func(r *pr.ReviewSubmitRequest) { r.Body = "text"; r.HeadSHA = "abc" },
 		"section opener in a body": func(r *pr.ReviewSubmitRequest) { r.Body = "<!-- pg-section head=zzz -->" },
@@ -733,14 +733,33 @@ func TestSubmitRejectsBadInput(t *testing.T) {
 	}
 }
 
-func TestSubmit200CommentsAreAccepted(t *testing.T) {
+// TestSubmitCommentCapIsSizedForTheExecTimeout pins the ruling of bead
+// pg2-m79ch: a request at the cap is written in at most
+// ceil(cap/10) sequential GraphQL documents, and at the measured worst case of
+// about 4s per document plus two reads it must finish well inside
+// scriptout.DefaultExecTimeout, or the umbrella kills the first call mid-way.
+func TestSubmitCommentCapIsSizedForTheExecTimeout(t *testing.T) {
+	const (
+		aliasesPerDocument = 10 // github.maxWriteAliasesPerDocument
+		perDocument        = 4 * time.Second
+		reads              = 8 * time.Second // lookup + re-read, generous
+	)
+	documents := (maxRequestComments + aliasesPerDocument - 1) / aliasesPerDocument
+	worst := time.Duration(documents)*perDocument + reads
+	if worst*5 > scriptout.DefaultExecTimeout*4 { // keep at least a 20% margin
+		t.Fatalf("cap %d needs ~%v worst case; exec timeout is %v (lower the cap or revisit the ruling)",
+			maxRequestComments, worst, scriptout.DefaultExecTimeout)
+	}
+}
+
+func TestSubmitCommentsAtTheCapAreAccepted(t *testing.T) {
 	f := newSubmitFixture(t)
-	cs := make([]pr.ReviewComment, 200)
+	cs := make([]pr.ReviewComment, maxRequestComments)
 	for i := range cs {
 		cs[i] = point("a.go", i+1, "x")
 	}
 	res := f.mustSubmit(req("", cs...))
-	if res.Added != 200 {
+	if res.Added != maxRequestComments {
 		t.Fatalf("added = %d", res.Added)
 	}
 }

@@ -19,7 +19,25 @@ var _ pr.ReviewSubmitter = (*Backend)(nil)
 
 const (
 	// maxRequestComments caps the comments of one request.
-	maxRequestComments = 200
+	//
+	// Ruling (bead pg2-m79ch, 2026-10-07; options: lower the cap, extend the
+	// verb's exec timeout, or document retry-on-kill): the cap is lowered so
+	// that a request at the cap always completes inside scriptout's
+	// DefaultExecTimeout (pkg/scriptout/limits.go, 30s), which bounds the whole
+	// run: the lookup, the sequential write documents (10 mutations each, see
+	// github.maxWriteAliasesPerDocument) and the re-read. The previous cap of
+	// 200 (20 documents) was not reachable in 30s: live, a 105-comment request
+	// (11 documents) was killed ("signal: killed") after 70 comments had
+	// landed, i.e. 7 documents plus the first read fit in under 30s, so one
+	// document costs at most about 4s. 40 comments is 4 documents, about 16s
+	// of writes; with a generous 8s for the two reads the worst case is about 24s,
+	// under the 30s timeout. Raising the timeout was rejected
+	// because it would also lengthen the bound on a genuinely hung gh for
+	// every other op; retry-on-kill was rejected because the first call
+	// would still fail mid-way. A caller with more comments splits them
+	// across requests: the replay is idempotent (already_present), so
+	// sequential requests converge on the same review.
+	maxRequestComments = 40
 	// maxFailuresListed caps the failures an error message lists.
 	maxFailuresListed = 20
 	// maxReviewBody is GitHub's limit on a review body.

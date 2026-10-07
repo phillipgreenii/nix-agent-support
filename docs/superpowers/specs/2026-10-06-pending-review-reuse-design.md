@@ -244,8 +244,8 @@ flowchart TD
 
 - **Lock.** An advisory `flock(2)` on `<state home>/locks/<owner>__<repo>__<n>.lock` held from the
   read to the sidecar update, with a bounded WAIT of 60 seconds (then `unavailable`, retryable) and a
-  documented bound on the HOLD (the batches of one request; a request over 200 comments is refused
-  with `invalid_argument`). A crash releases the lock with the process. The lock files are tiny and
+  documented bound on the HOLD (the batches of one request; a request over 40 comments is refused
+  with `invalid_argument`, a cap sized so a full request fits the 30s scriptout exec timeout, bead pg2-m79ch). A crash releases the lock with the process. The lock files are tiny and
   are not cleaned. D1 proved the shape.
 - **The read is one GraphQL document** and returns the head, every pending review of the viewer, the
   comments of each (paginated, 100 per page), and the viewer's comments in submitted reviews. The
