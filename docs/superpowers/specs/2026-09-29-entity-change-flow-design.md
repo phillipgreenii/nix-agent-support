@@ -158,6 +158,11 @@ belongs in a role, which MAY write its result back as an annotation for `show` t
 Cross-entity judgment that chooses an outcome (for example daily-focus ranking) is a decision, not
 a decoration. An entity type with no decider is still watched, hydrated and classified (7.10).
 
+> Amended 2026-10-06 (ADR 0085): the same cross-entity judgment expressed as a read-only,
+> side-effect-free view over stored facts, which writes nothing and mints no work, is a view that
+> lives in pg-desk (as attention does, ADR 0081). The daily-focus rank is such a view; minting a
+> bead for an item the operator selected is the decision, and stays in a decider.
+
 ## 3. Decision log
 
 Every decision this design depends on, merged into one log. **Operator ruling** rows were

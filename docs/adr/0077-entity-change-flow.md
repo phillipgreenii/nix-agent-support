@@ -76,6 +76,11 @@ pg-desk-owned plugin that its `attention.sources` registry names, because that i
 while code-level dependency stays pg-desk to pg-connector only. No decision-log row is added and
 S1 to S35 are unchanged.
 
+**Amended 2026-10-06** (ADR 0085): the decoration-versus-decision rule's closing example is
+re-read. A read-only, side-effect-free cross-entity view over stored facts, such as the daily-focus
+rank, lives in pg-desk; minting work from a selection remains a decider's decision. No decision-log
+row is added and S1 to S35 are unchanged.
+
 **Approval and provenance.** The operator (Phillip) approved the design and its implementation plan
 on 2026-09-29 ("if good, consider it approved and continue", recorded on bead `pg2-2j5ac.51`). The
 generic entity pipeline design that this flow governs where the two overlap (bead `pg2-2j5ac.46`)
