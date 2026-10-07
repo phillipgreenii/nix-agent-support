@@ -217,3 +217,54 @@ They are not four spellings of one concept, so only one is unified:
 
 **Bounds.** Unchanged: `role` is config-bounded (`DEC-OBS-5`). The rename swaps a label key; it adds
 no series.
+
+### `DEC-OBS-8` — a router-shutdown cancellation is not a source failure; a timeout kill is its own reason; each attempt is timed and counted in flight <!-- uuid: 4bcd8655-b8ba-4c1c-9610-590c71bd6e24 -->
+
+**Decided** (bead `pg2-zdowv`, from the 2026-10-07 router health review). Four changes to how a pull
+source's attempt is observed:
+
+- **A failed attempt while the router's own context is cancelled is not a source failure.**
+  `discover.runAndEnqueue` checks `ctx.Err()` after a failed `Query.Run`. If the context is
+  cancelled, the cancellation (a restart or shutdown killing the producer tick's child) is
+  propagated as the pass's own error, exactly as a cancelled backoff wait already was. It is **not**
+  passed to `OnSourceFailure`, not recorded in `ProduceReport.SourceErrors` or `Failure`, and does
+  not log a source WARN (`runOneTick` logs the interrupted tick at INFO). On 2026-10-06, 21
+  `context canceled` and 4 bare `signal: killed` failures were the router's own ticks cancelled at
+  restart, and counted as source failures beside 67 genuine timeout kills. Because the check is on the
+  router's context and not on the error text, it is exact: no error string can make a real failure
+  disappear.
+- **`reason="timeout"` is added to `source_failures`**, taken out of `interrupted`. It matches
+  `signal: killed`, `context deadline exceeded` and `errors.Is(DeadlineExceeded)`, and is checked
+  before the generic `scriptout: unavailable` wrapper (a backend that reports its own timeout as
+  unavailable is still a timeout). `interrupted` remains for a `context canceled` reported from
+  inside the backend's own process tree when the router's context is live. Rate-limit and
+  unauthenticated are still checked first. A bare SIGKILL from some other cause (an OOM kill) also
+  lands in `timeout`; the timeout kill is the only source of SIGKILLs known here, and the
+  `elapsed` on the WARN (below) disambiguates.
+- **`pg_router_source_duration_seconds{source}`** (histogram) is fed by a new
+  `SourceFailureObserver.OnSourceAttemptStart/OnSourceAttemptEnd(source, elapsed, shutdown)` pair
+  bracketing each attempt; **`pg_router_source_inflight_children{source}`** (gauge) is the same
+  pair's balance, seeded to 0 for every period-bearing pull source. The duration is recorded per
+  attempt (a retry is its own sample), for success and failure alike, and skipped for a
+  shutdown-cut attempt. The pair rides the existing failure-observer seam, not
+  `SourceActivityObserver`, because that interface's single orchestrator slot belongs to the activity
+  ring and the metrics emitter already holds this one.
+- **The producer-tick `source failed` WARN carries `elapsed` (the give-up attempt's run time),
+  `attempts`, `argv` (the source's command line, `query.ArgvOf`) and `load1` (host 1-minute load
+  average, `/proc/loadavg` or `sysctl vm.loadavg`)**. Elapsed and argv ride on `discover.FailureInfo`.
+  The load lookup runs only on this failure path.
+
+**Bounds.** `source` is config-bounded; the new `reason` value is a fixed constant. The gauge and
+histogram add one series per source (the histogram 14 buckets). No argv, load or elapsed becomes a
+label; they live in the log line only.
+
+**Dashboards and alerts.** The observed consumers are `pg-router-source-failure-rate` and
+`pg-router-source-persistent-failure` (both `sum by (source)`, reason aggregated away, so the new
+reason and the removal of shutdown cancellations need no rule change) and the pg-router dashboard's
+source-failures panel in `phillipgreenii-nix-support-apps` (`sum by (source) (rate(...))`, likewise
+unaffected). No query anywhere in the workspace repos matches `reason="interrupted"`. A shutdown
+cancellation stops counting as a failure, which is the intent, and the persistent-failure alert is
+unaffected (a cancelled attempt never advanced the last-success gauge either).
+
+**Not decided here.** An alert on a source child stuck in flight, or on the duration histogram's
+tail, is a possible follow-up; no rule is added by this entry.

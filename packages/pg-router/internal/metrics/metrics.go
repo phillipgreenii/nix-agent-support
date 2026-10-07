@@ -189,6 +189,22 @@ const (
 	MetricSourceExpectedInterval = "pg_router_source_expected_interval"
 )
 
+// The per-source attempt-timing metrics (bead pg2-zdowv, DEC-OBS-8). Like the
+// liveness gauges above they sit outside the INV-OBS-1 catalog's count.
+const (
+	// MetricSourceDuration is a histogram, in seconds (Prometheus
+	// pg_router_source_duration_seconds), of how long one pull-source query
+	// ATTEMPT ran, per source. It is recorded for every attempt that ran to its
+	// own end, success or failure — a source killed by the 30s scriptout timeout
+	// lands in the 30s bucket — and NOT for an attempt cut short by the router's
+	// own shutdown.
+	MetricSourceDuration = "pg_router_source_duration"
+	// MetricSourceInflightChildren is a gauge, per source, of query attempts
+	// (the source's child process) currently running. A source whose value
+	// stays at 1 for longer than its timeout is a hung child.
+	MetricSourceInflightChildren = "pg_router_source_inflight_children"
+)
+
 // The Gate Registry's metrics (bead pg2-h63eu; internal/eventqueue/gate.go).
 // They are NOT part of the ten-member INV-OBS-1 catalog above: they observe a
 // separate mechanism and are registered alongside it by the same Emitter, which
@@ -332,6 +348,11 @@ type Emitter struct {
 	// name are ignored, which bounds the gauge's cardinality.
 	srcMu          sync.Mutex
 	srcLastSuccess map[string]time.Time
+	// srcInflight is the per-source count of running query attempts (also
+	// guarded by srcMu). Keys are config-bounded source names; every
+	// WithPullSources source is seeded at 0 so its series exists from start.
+	srcInflight map[string]int
+	srcDuration metric.Float64Histogram
 
 	// mu guards pending/order — the eventID->{type, enqueue-time} correlation
 	// map OnAccept needs to feed RecordThroughput/RecordDispatchLatency (see
@@ -548,7 +569,10 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 	); err != nil {
 		return nil, err
 	}
-	e := &Emitter{gateSeen: map[string]struct{}{}}
+	e := &Emitter{gateSeen: map[string]struct{}{}, srcInflight: map[string]int{}}
+	if err := e.registerSourceTiming(m, cfg.pullSources); err != nil {
+		return nil, err
+	}
 	if len(cfg.pullSources) > 0 {
 		if err := e.registerSourceGauges(m, cfg.pullSources, cfg.now()); err != nil {
 			return nil, err
@@ -1006,8 +1030,15 @@ const (
 	// SourceFailureUnavailable: the backend reported scriptout "unavailable"
 	// for any reason other than a rate limit.
 	SourceFailureUnavailable = "unavailable"
-	// SourceFailureInterrupted: the attempt was cut short by the daemon itself
-	// (context cancelled or the child killed on shutdown), not by the backend.
+	// SourceFailureTimeout: the attempt ran out its time budget and the child
+	// was killed (the backend's 30s scriptout timeout, a SIGKILL, or a deadline
+	// exceeded). Split out of "interrupted" by bead pg2-zdowv (DEC-OBS-8): it is
+	// a genuine source problem, where a router-shutdown cancellation is not.
+	SourceFailureTimeout = "timeout"
+	// SourceFailureInterrupted: the attempt was cut short by a cancellation
+	// that is NOT the router's own shutdown (that case is not a failure at all,
+	// DEC-OBS-8) — e.g. a "context canceled" a backend reported from inside its
+	// own process tree.
 	SourceFailureInterrupted = "interrupted"
 	// SourceFailureError: any other failure (non-zero exit with no
 	// recognized backend class, malformed output, ...).
@@ -1021,7 +1052,13 @@ const (
 // vocabulary ("scriptout: unavailable", "scriptout: unauthenticated") and the
 // rate-limit phrasing, case-insensitively. Rate limiting is checked FIRST
 // because a rate-limit breach also carries the generic "scriptout: unavailable"
-// wrapper. A nil error classifies as SourceFailureError.
+// wrapper. A kill or deadline (SourceFailureTimeout) is checked before the
+// generic "unavailable" wrapper too, so a backend that reports its own timeout
+// as unavailable is still named a timeout. A nil error classifies as
+// SourceFailureError.
+//
+// A router-shutdown cancellation never reaches here: discover.runAndEnqueue
+// does not report it to OnSourceFailure at all (DEC-OBS-8).
 func ClassifySourceFailure(err error) string {
 	if err == nil {
 		return SourceFailureError
@@ -1032,9 +1069,11 @@ func ClassifySourceFailure(err error) string {
 		return SourceFailureRateLimited
 	case strings.Contains(msg, "scriptout: unauthenticated"):
 		return SourceFailureUnauthenticated
+	case errors.Is(err, context.DeadlineExceeded) || strings.Contains(msg, "signal: killed") || strings.Contains(msg, "deadline exceeded"):
+		return SourceFailureTimeout
 	case strings.Contains(msg, "scriptout: unavailable"):
 		return SourceFailureUnavailable
-	case errors.Is(err, context.Canceled) || strings.Contains(msg, "context canceled") || strings.Contains(msg, "signal: killed"):
+	case errors.Is(err, context.Canceled) || strings.Contains(msg, "context canceled"):
 		return SourceFailureInterrupted
 	}
 	return SourceFailureError
@@ -1100,6 +1139,70 @@ func (e *Emitter) advanceSource(source string) {
 		return
 	}
 	e.srcLastSuccess[source] = e.now()
+}
+
+// sourceDurationBuckets are the pg_router_source_duration_seconds boundaries:
+// sub-second to the 30s scriptout timeout (30 and 45 straddle it) and beyond.
+var sourceDurationBuckets = []float64{0.1, 0.25, 0.5, 1, 2.5, 5, 10, 20, 30, 45, 60, 120, 300}
+
+// registerSourceTiming registers the attempt-duration histogram and the
+// in-flight children gauge (bead pg2-zdowv, DEC-OBS-8). sources seeds the
+// gauge so each pull source has a 0 series from start.
+func (e *Emitter) registerSourceTiming(m metric.Meter, sources map[string]time.Duration) error {
+	for name, iv := range sources {
+		if iv > 0 {
+			e.srcInflight[name] = 0
+		}
+	}
+	h, err := m.Float64Histogram(
+		MetricSourceDuration,
+		metric.WithUnit("s"),
+		metric.WithDescription("how long one pull-source query attempt ran, per source, success or failure; attempts cut short by router shutdown are not recorded (DEC-OBS-8)"),
+		metric.WithExplicitBucketBoundaries(sourceDurationBuckets...),
+	)
+	if err != nil {
+		return err
+	}
+	e.srcDuration = h
+	_, err = m.Int64ObservableGauge(
+		MetricSourceInflightChildren,
+		metric.WithUnit("{process}"),
+		metric.WithDescription("pull-source query attempts (child processes) currently running, per source (DEC-OBS-8)"),
+		metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
+			e.srcMu.Lock()
+			defer e.srcMu.Unlock()
+			for name, n := range e.srcInflight {
+				o.Observe(int64(n), metric.WithAttributes(attribute.String("source", name)))
+			}
+			return nil
+		}),
+	)
+	return err
+}
+
+// OnSourceAttemptStart implements discover.SourceFailureObserver: one more
+// child process is running for source.
+func (e *Emitter) OnSourceAttemptStart(source string) {
+	e.srcMu.Lock()
+	defer e.srcMu.Unlock()
+	e.srcInflight[source]++
+}
+
+// OnSourceAttemptEnd implements discover.SourceFailureObserver: the child for
+// source has ended. elapsed is recorded in the duration histogram unless the
+// attempt was cut short by the router's own shutdown (its truncated duration
+// says nothing about the source).
+func (e *Emitter) OnSourceAttemptEnd(source string, elapsed time.Duration, shutdown bool) {
+	e.srcMu.Lock()
+	if e.srcInflight[source] > 0 {
+		e.srcInflight[source]--
+	}
+	e.srcMu.Unlock()
+	if shutdown {
+		return
+	}
+	e.srcDuration.Record(context.Background(), elapsed.Seconds(),
+		metric.WithAttributes(attribute.String("source", source)))
 }
 
 // OnSourceFailure implements discover.SourceFailureObserver (the interface is

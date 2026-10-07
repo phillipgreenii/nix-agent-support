@@ -337,7 +337,11 @@ func TestClassifySourceFailure(t *testing.T) {
 		{"scriptout unauthenticated", errors.New("exit status 1: scriptout: unauthenticated: token expired"), SourceFailureUnauthenticated},
 		{"context cancelled sentinel", fmt.Errorf("command query [x]: %w", context.Canceled), SourceFailureInterrupted},
 		{"context canceled text", errors.New("command query [x]: context canceled"), SourceFailureInterrupted},
-		{"child killed", errors.New("command query [x]: signal: killed"), SourceFailureInterrupted},
+		{"child killed by a timeout (the 30s scriptout kill)", errors.New("command query [x]: exit status 1: scriptout: pg-connector-pr-github: signal: killed"), SourceFailureTimeout},
+		{"bare child kill", errors.New("command query [x]: signal: killed"), SourceFailureTimeout},
+		{"deadline exceeded sentinel", fmt.Errorf("command query [x]: %w", context.DeadlineExceeded), SourceFailureTimeout},
+		{"deadline exceeded text", errors.New("command query [x]: context deadline exceeded"), SourceFailureTimeout},
+		{"timeout wins over the generic unavailable wrapper", errors.New("exit status 1: scriptout: unavailable: backend: signal: killed"), SourceFailureTimeout},
 		{"unrecognized exit", errors.New("command query [x]: exit status 1"), SourceFailureError},
 		{"nil error", nil, SourceFailureError},
 	}

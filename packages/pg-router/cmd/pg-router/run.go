@@ -1227,6 +1227,26 @@ func gateSignature(gates []eventqueue.Gate) string {
 	return strings.Join(types, ",")
 }
 
+// sourceFailedAttrs builds the slog attributes of the producer-tick "source
+// failed" WARN (bead pg2-zdowv): beyond the error it names how long the final
+// attempt ran (a value near the scriptout timeout identifies a timeout kill),
+// the source's command line, the attempt count and the host's 1-minute load.
+// fi is the zero FailureInfo when the failure was not a give-up (a log-limit
+// refusal), in which case only the always-known attributes are emitted.
+func sourceFailedAttrs(name string, serr error, fi discover.FailureInfo) []any {
+	attrs := []any{"source", name, "err", serr}
+	if fi.Count > 0 {
+		attrs = append(attrs, "elapsed", fi.Elapsed.Round(time.Millisecond), "attempts", fi.Count)
+	}
+	if len(fi.Argv) > 0 {
+		attrs = append(attrs, "argv", strings.Join(fi.Argv, " "))
+	}
+	if l, ok := load1(); ok {
+		attrs = append(attrs, "load1", l)
+	}
+	return attrs
+}
+
 // runOneTick executes one iteration of `run`'s drive loop body (INV-LIFE-2):
 // it ALWAYS runs ProduceTick + Kick + Expire and publishes the tick — whether
 // a gate is active is no longer a pool-wide on/off decided here. Under the Gate
@@ -1270,7 +1290,11 @@ func runOneTick(ctx context.Context, cfg config.Config, o *orchestrator.Orchestr
 	// log (at the hard limit the loop would wedge for good). rpt is whatever the
 	// pass managed to record before it stopped.
 	rpt, err := o.ProduceTick(ctx, q)
-	if err != nil {
+	if err != nil && ctx.Err() != nil {
+		// The router's own shutdown cancelled the tick (bead pg2-zdowv,
+		// DEC-OBS-8): expected, not a producer failure.
+		slog.Info("producer tick interrupted by shutdown", "err", err)
+	} else if err != nil {
 		slog.Error("producer tick failed; still dispatching, expiring and publishing this tick", "err", err)
 	}
 	// Source isolation (INV-FAIL-3, INV-EVT-1): a partial produce (one or
@@ -1278,7 +1302,7 @@ func runOneTick(ctx context.Context, cfg config.Config, o *orchestrator.Orchestr
 	// Dispatch/Expire still run over the queue for every other source's
 	// and every pushed event's already-queued work.
 	for name, serr := range rpt.SourceErrors {
-		slog.Warn("producer tick: source failed; other sources still produced", "source", name, "err", serr)
+		slog.Warn("producer tick: source failed; other sources still produced", sourceFailedAttrs(name, serr, rpt.Failure[name])...)
 	}
 	for name, gate := range rpt.Blocked {
 		slog.Debug("producer tick: source blocked by a gate; not polled", "source", name, "gate", gate)

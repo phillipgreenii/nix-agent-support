@@ -473,9 +473,12 @@ sequenceDiagram
     source with no retries configured — so a source that fails fast on every tick (the default) is
     counted on every tick. The `reason` label is one of a closed set: `rate-limited` (the backend
     reported an exhausted or below-reserve upstream API budget), `unavailable` and `unauthenticated`
-    (the backend's own wire-level failure classes, rate limiting excluded), `interrupted` (the daemon
-    itself cancelled or killed the attempt), and `error` (anything else). A watcher that only needs "is
-    this source failing" aggregates `reason` away, so no reason is invisible to it;
+    (the backend's own wire-level failure classes, rate limiting excluded), `timeout` (the attempt ran out
+    its time budget and its child was killed), `interrupted` (a cancellation reported from inside the
+    backend, not the daemon's own), and `error` (anything else). An attempt cut short because **the
+    daemon itself is shutting down** is **not a source failure**: it is not counted, has no reason, and
+    does not fail the pass (`DEC-OBS-8`). A watcher that only needs "is this source failing"
+    aggregates `reason` away, so no reason is invisible to it;
   - **deduped** — counter, per `type`: a duplicate `id` the core **accepted** only because
     de-duplication already covers it (`INV-EVT-3`), never a fresh append. It is a **separate**
     member from `ingest-event`'s own `accepted` count below, which counts both together and
@@ -494,8 +497,16 @@ sequenceDiagram
     The two together let an observer tell a source that is **persistently** failing (no success for
     far longer than its period) from one that merely hit transient failures with a success always
     intervening, which `source_failures` alone cannot (`DEC-OBS-4`);
+  - **source_duration** — histogram, in seconds, per source: how long one **pull-source query
+    attempt** ran, recorded for every attempt that ran to its own end (success or failure, so a
+    timeout kill lands at the timeout's bucket) and **not** for an attempt cut short by the daemon's
+    shutdown (`DEC-OBS-8`). Bucket boundaries: 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 20, 30, 45, 60, 120 and
+    300;
+  - **source_inflight_children** — gauge, per source: how many query attempts (child processes) of
+    that source are running right now; a series held at 1 for longer than the source's timeout is a
+    hung child (`DEC-OBS-8`);
 
-  and, alongside those eight, the **throughput**, **backlog**, **liveness** and **dispatch-latency**
+  and, alongside those catalog members, the **throughput**, **backlog**, **liveness** and **dispatch-latency**
   metrics an observer watches to tell a busy system from a stalled one (`STORY-OBS-1`):
   **throughput** is a counter per `type` **and** `role` (the accepting handler role); **dispatch
   latency** is a histogram, in milliseconds from the event's enqueue to its accept, per `outcome`,

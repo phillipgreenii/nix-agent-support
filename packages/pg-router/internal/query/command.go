@@ -32,6 +32,28 @@ func (q CommandQuery) Validate() error {
 	return nil
 }
 
+// ArgvOf returns a copy of the command line a query shells out to (the argv a
+// CommandQuery runs, or a ParticipantQuery's command prefix), or nil for a
+// query with no command (an in-process producer such as the timer). It exists
+// so a failure log can name what actually ran (bead pg2-zdowv).
+func ArgvOf(q Query) []string {
+	var argv []string
+	switch v := q.(type) {
+	case CommandQuery:
+		argv = v.Argv
+	case *CommandQuery:
+		argv = v.Argv
+	case ParticipantQuery:
+		argv = v.Command
+	case *ParticipantQuery:
+		argv = v.Command
+	}
+	if len(argv) == 0 {
+		return nil
+	}
+	return append([]string(nil), argv...)
+}
+
 // BackingCommand is argv[0]: the executable this source shells out to.
 func (q CommandQuery) BackingCommand() string {
 	if len(q.Argv) == 0 {

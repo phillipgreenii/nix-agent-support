@@ -608,7 +608,8 @@ groups:
       # Counting contract (pg2-jgbnp, pg2-hsla6): every failed attempt counts
       # once, including a fail-fast source's give-up, and the series carries a
       # `reason` label (rate-limited / unavailable / unauthenticated /
-      # interrupted / error). This rule's `sum by (source)` deliberately sums
+      # timeout / interrupted / error; a router-shutdown cancellation is not
+      # counted at all, pg2-zdowv, DEC-OBS-8). This rule's `sum by (source)` deliberately sums
       # the reason away, so a GraphQL rate-limit-reserve breach (reason=
       # rate-limited) fires it exactly like any other failure; do not add a
       # reason matcher here. The 2026-10-01/02 episode (~740 pr-mine/pr-team

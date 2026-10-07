@@ -139,6 +139,16 @@ type SourceFailureObserver interface {
 	// (DEC-OBS-4) — a pg-router pause or log-limit halt must not make every
 	// pull source look like it has stopped succeeding.
 	OnSourcePaused(source string)
+	// OnSourceAttemptStart fires immediately before each query attempt's
+	// s.Query.Run call and OnSourceAttemptEnd immediately after it returns,
+	// whatever the outcome (bead pg2-zdowv, DEC-OBS-8): the pair feeds the
+	// per-source in-flight children gauge and the per-source attempt-duration
+	// histogram. shutdown is true when the attempt was cut short because the
+	// daemon's own context was cancelled (a restart/shutdown); such an attempt
+	// is NOT a source failure and its truncated duration is not a duration
+	// sample, so the observer records neither.
+	OnSourceAttemptStart(source string)
+	OnSourceAttemptEnd(source string, elapsed time.Duration, shutdown bool)
 }
 
 // SourceActivityObserver is notified of a pull source's own per-pass
@@ -278,6 +288,13 @@ type FailureInfo struct {
 	// there (the query's own Trigger/cadence, not this backoff, decides
 	// when it is actually retried).
 	NextEligible time.Time
+	// Elapsed is how long the FINAL (give-up) attempt's query ran before it
+	// failed, and Argv is the source's command line (nil for an in-process
+	// query). Both exist so the "source failed" log line can say how long the
+	// child ran (a ~30s value names the scriptout timeout) and what it was
+	// (bead pg2-zdowv).
+	Elapsed time.Duration
+	Argv    []string
 }
 
 // newProduceReport returns a ProduceReport with every map initialized (never
@@ -560,12 +577,31 @@ func runAndEnqueue(ctx context.Context, env query.Env, s query.Source, q *eventq
 		if activityObs != nil {
 			activityObs.OnSourceFetchStart(s.Name)
 		}
+		if obs != nil {
+			obs.OnSourceAttemptStart(s.Name)
+		}
+		attemptStart := now()
 		evts, err = s.Query.Run(ctx, env)
+		elapsed := now().Sub(attemptStart)
+		// A failed attempt while the daemon's own context is cancelled is the
+		// router stopping its own producer tick (restart/shutdown), not the
+		// source failing (bead pg2-zdowv, DEC-OBS-8).
+		shutdown := err != nil && ctx.Err() != nil
+		if obs != nil {
+			obs.OnSourceAttemptEnd(s.Name, elapsed, shutdown)
+		}
 		if activityObs != nil {
 			activityObs.OnSourceFetchEnd(s.Name)
 		}
 		if err == nil {
 			break
+		}
+		if shutdown {
+			// Neither counted (OnSourceFailure), recorded in SourceErrors /
+			// Failure, nor notified as a give-up: propagate the cancellation
+			// exactly like a cancelled backoff wait below, so produce stops the
+			// pass instead of running every remaining source into a dead ctx.
+			return fmt.Errorf("produce %s: %w", s.Name, ctx.Err())
 		}
 		if attempt >= fb.Retries {
 			// Isolate: a query failure must NOT masquerade as "no ready work"
@@ -577,7 +613,7 @@ func runAndEnqueue(ctx context.Context, env query.Env, s query.Source, q *eventq
 			// Failure (Task 4.1): the SAME give-up point, recorded alongside
 			// SourceErrors above — see FailureInfo's own doc for why
 			// NextEligible is simply `now` for a fail-fast (Retries==0) query.
-			rpt.Failure[s.Name] = FailureInfo{Count: attempt + 1, NextEligible: now().Add(lastWait)}
+			rpt.Failure[s.Name] = FailureInfo{Count: attempt + 1, NextEligible: now().Add(lastWait), Elapsed: elapsed, Argv: query.ArgvOf(s.Query)}
 			if activityObs != nil {
 				activityObs.OnSourceGaveUp(s.Name)
 			}

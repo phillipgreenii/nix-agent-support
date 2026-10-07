@@ -183,3 +183,26 @@ func TestCommandQuery_RealFailingCommandFoldsStderrReasonIntoError(t *testing.T)
 		t.Fatalf("error must carry the backing command's own stderr reason; err = %v", err)
 	}
 }
+
+// ArgvOf names what a source actually runs, for the producer-tick failure log
+// (bead pg2-zdowv); a query with no command yields nil and the result is a copy.
+func TestArgvOf(t *testing.T) {
+	cq := CommandQuery{Argv: []string{"a", "b"}}
+	got := ArgvOf(cq)
+	if len(got) != 2 || got[0] != "a" || got[1] != "b" {
+		t.Fatalf("ArgvOf(CommandQuery) = %v", got)
+	}
+	got[0] = "mutated"
+	if cq.Argv[0] != "a" {
+		t.Fatal("ArgvOf must return a copy, not the query's own slice")
+	}
+	if got := ArgvOf(ParticipantQuery{Command: []string{"p", "q"}}); len(got) != 2 || got[0] != "p" {
+		t.Fatalf("ArgvOf(ParticipantQuery) = %v", got)
+	}
+	if got := ArgvOf(&CommandQuery{Argv: []string{"x"}}); len(got) != 1 {
+		t.Fatalf("ArgvOf(*CommandQuery) = %v", got)
+	}
+	if got := ArgvOf(CommandQuery{}); got != nil {
+		t.Fatalf("ArgvOf(empty) = %v, want nil", got)
+	}
+}

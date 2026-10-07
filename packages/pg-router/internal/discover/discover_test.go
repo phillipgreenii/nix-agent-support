@@ -474,6 +474,23 @@ type recordingSourceFailureObserver struct {
 	errs      []error
 	succeeded []string
 	paused    []string
+	starts    []string
+	ends      []attemptEnd
+}
+
+// attemptEnd is one recorded OnSourceAttemptEnd call.
+type attemptEnd struct {
+	source   string
+	elapsed  time.Duration
+	shutdown bool
+}
+
+func (r *recordingSourceFailureObserver) OnSourceAttemptStart(source string) {
+	r.starts = append(r.starts, source)
+}
+
+func (r *recordingSourceFailureObserver) OnSourceAttemptEnd(source string, elapsed time.Duration, shutdown bool) {
+	r.ends = append(r.ends, attemptEnd{source, elapsed, shutdown})
 }
 
 func (r *recordingSourceFailureObserver) OnSourceSucceeded(source string) {

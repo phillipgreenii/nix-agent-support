@@ -96,6 +96,8 @@ func TestStartMetricsServer_CatalogSurvivesUTF8EscapingNegotiation(t *testing.T)
 	emitter.RecordFailure(metrics.FailureClassDeclined)
 	emitter.OnSourceFailure("srcA", errors.New("boom"))
 	emitter.OnSourceSucceeded("srcA")
+	emitter.OnSourceAttemptStart("srcA")
+	emitter.OnSourceAttemptEnd("srcA", 1500*time.Millisecond, false)
 	emitter.OnDeduped("review-requested")
 	emitter.RecordThroughput("review-requested", "worker-a")
 	emitter.RecordDispatchLatency(12.5, "accepted", "worker-a", "review-requested")
@@ -147,6 +149,9 @@ func TestStartMetricsServer_CatalogSurvivesUTF8EscapingNegotiation(t *testing.T)
 		// alert queries exactly these exported names.
 		"pg_router_source_last_success_timestamp_seconds",
 		"pg_router_source_expected_interval_seconds",
+		// Per-source attempt timing (bead pg2-zdowv, DEC-OBS-8).
+		"pg_router_source_duration_seconds_bucket",
+		"pg_router_source_inflight_children",
 	}
 	for _, w := range want {
 		if !strings.Contains(text, w) {
