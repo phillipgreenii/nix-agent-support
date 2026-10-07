@@ -39,6 +39,32 @@ duplicating the commit run, forcing the slow always-on hooks (bats, nix, …) ev
 diff, and **false-blocking** a clean change on a pre-existing violation in a file it never touched.
 Reserve `--all-files` for a deliberate full-repo sweep, not per-change validation.
 
+## `pg-hooks status` state reference
+
+Moved here from the always-on core. `pg-hooks status --porcelain || true` prints a `state=` line:
+`present`, `stale`, `missing`, `broken`, `unreachable` or `relocated`. `status` exits non-zero for
+most non-`present` states by design, so read the state, not the exit code. Never probe with bare
+`ls` (it exits non-zero on a missing file, which is itself a failed tool call).
+
+- `present`/`stale` (bundle repo): `git add` first, then `pg-hooks fix` (also `pre-commit-fix`),
+  which applies the repo's fixers to staged files only and restages them; it exits `11` after
+  listing files skipped because they have both staged and unstaged changes. Before staging, run
+  the project formatter in write mode (`nix fmt -- <files>`, `gofumpt -w`, `prettier --write`) to
+  avoid a failed-commit + restage round trip.
+- `missing`/`broken`/`unreachable`/`relocated`: the commit-time stubs print one `pg-hooks:` notice
+  and exit 0, so the commit gate is NOT in force; say so in the report. The notice names the exact
+  rebuild command; a rebuild is a nix build, so run it through `bgrun` and check with `bgcheck`.
+  Never link, copy or regenerate a hook config to make hooks run.
+- Exit `127` or no `state=` line: `pg-hooks` is not installed; report
+  `pg-hooks not installed on this machine; ask the operator to run pn workspace apply` and fall back
+  to `test -f .pre-commit-config.yaml && echo yes || echo no`.
+
+```text
+before committing:  git add <files>; pg-hooks fix; git commit
+before landing:     pg-hooks run pre-land
+diagnose:           pg-hooks status        (full reference: docs/hooks.md in phillipg-nix-repo-base)
+```
+
 ## Scoping a `prek`/`pre-commit` run to a commit RANGE, not just a file list
 
 `--files <list>` (above) is right when you know exactly which files one change touched. It is the

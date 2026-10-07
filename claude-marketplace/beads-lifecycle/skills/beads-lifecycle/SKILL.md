@@ -349,6 +349,19 @@ preconditions, and premise freshness (whose heaviest reference material lives in
   on its FIRST park, not only after a person has said so once. `pb:drain-stuck`'s DEFER-ON-EVENT
   exit is the operational form of this rule.
 
+## Misfiled Beads: Recreate and Verify (BF-3, BF-4)
+
+BF-1/BF-2 (file in the tracker of the repo where the fix lands; never fall back to another
+repo's tracker) stay in the always-on core. Their follow-through lives here.
+
+- **BF-3** A bead found already filed in the wrong tracker MUST be RECREATED in the correct
+  tracker, with provenance in the new body (original id, source tracker, date, reason), and the
+  original MUST be closed with a reason that names the new id. The agent MUST NOT leave the
+  original open, and MUST NOT move it by editing rows in place.
+- **BF-4** After creating a bead (or its dependency edges) the agent MUST verify with a read-back
+  run from the intended tracker root (`bd show <id>`, and `bd dep list <id>` if edges were
+  added) and confirm the id, title and labels landed where intended, before reporting it filed.
+
 ## Handoff Preconditions
 
 > A precondition written at time T against implementation I persists as an INSTRUCTION while
