@@ -37,7 +37,7 @@ written rule disagree on the one example the rule names.
    judgment that chooses an outcome" is a decision when it causes a write; the same judgment
    expressed as a read-only view is a view. The closing sentence's example, daily-focus ranking, is
    therefore a view, and its minting is the decision.
-4. **Operator-invoked pg-desk verbs record operator input as mechanism.** `focus select` and `focus pull` write the selection row and the `focus_selected` annotation, and `--merge` writes an external link, exactly as `hide`, `wip` and `annotate` do. "Writes nothing" is true of the rank, not of those verbs; they record what the operator said, and the decider decides only what work exists, including withdrawing a focus bead when the operator strikes its item.
+4. **Operator-invoked pg-desk verbs record operator input as mechanism.** `focus select` and `focus pull` write the selection row and the `focus_selected` annotation, and `--merge` writes an external link, exactly as `hide`, `wip` and `annotate` do. "Writes nothing" is true of the rank, not of those verbs; they record what the operator said, and the decider decides only what work exists, including holding (deferring) a focus bead when the operator strikes its item and releasing it on a reselect.
 
 ## Consequences
 
@@ -46,13 +46,7 @@ written rule disagree on the one example the rule names.
   carries no `focus-item` literal.
 - A reviewer reading ADR 0077's section on decorations and decisions finds an amendment note
   pointing here, so the two texts agree at every commit.
-- **Pending amendment, not yet ruled (agent proposal D-F19, 2026-10-07).** The daily-focus design has
-  the decider reopen a focus bead it withdrew and leave a bead a worker closed. That reads how a bead
-  was closed, which the entity change flow's S26, `INV-DECIDER-5` and the same-context text of
-  `work-items.md` forbid. The proposal is that the decider-authored `focus_withdrawn` marker is the
-  decider's own state and not a closer identity, and the one permitted exception; if the operator
-  confirms it, those texts are amended in the same change. Until then this ADR does not settle it, and
-  the design says so (its section 12 item (h)).
+- The decider never closes or reopens a focus bead: a strike defers it indefinitely and a reselect undefers it (the operator's direction, 2026-10-07; the design's D-F16 and D-F19). "Closed" therefore keeps meaning only that the work is finished, and the change flow's S26 and `INV-DECIDER-5` (no decider behavior depends on how a work item was closed) need no exception. Tools that look for a focus bead must look at deferred ones too.
 - The decider's `focus_selected` selection reaches it through a dedicated `annotations.focus_selected`
   member of the view (D-F15), not through the decider's own namespace.
 - ADR 0081 and this ADR share one rule: a rank or an evaluation that depends on time or on sibling
