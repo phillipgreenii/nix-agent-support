@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"io"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -79,13 +81,16 @@ func (r *shutdownRunner) snapshot() (dispatches int, steps []string, ctxErr erro
 
 // startShutdownRun boots runLongRunningBody over a timer source and one role
 // backed by r, returning the signal-ctx cancel func and the body's exit code.
-func startShutdownRun(t *testing.T, r *shutdownRunner, drainTimeout time.Duration) (signal context.CancelFunc, done <-chan int) {
+func startShutdownRun(t *testing.T, r *shutdownRunner, drainTimeout time.Duration, mutate ...func(*config.Config)) (signal context.CancelFunc, done <-chan int) {
 	t.Helper()
 	cfg := config.Config{
 		LogDir:       shortDir(t),
 		PollInterval: 20 * time.Millisecond,
 		Roles:        roles.RoleSet{{Name: "r1", Enabled: true, Binds: []string{"t1"}}},
 		Queries:      query.SourceSet{{Name: "tick", Query: query.TimerQuery{Meta: query.Meta{EmitTypes: []string{"t1"}}}}},
+	}
+	for _, m := range mutate {
+		m(&cfg)
 	}
 	h := &wireclient.Client{Runner: r, Command: func(_ roles.Role, sub string) ([]string, error) { return []string{"fake-handler", sub}, nil }}
 	o := &orchestrator.Orchestrator{Cfg: cfg, Handler: h, Bindings: core.NewBindings("t1")}
@@ -216,4 +221,90 @@ func TestRunOneTick_noKickAfterShutdownRequested(t *testing.T) {
 		t.Fatal("control tick did not dispatch the queued event")
 	}
 	waitInFlight(t, q)
+}
+
+// roleDirWith writes a per-role config dir holding r1.json with body, the
+// shape the deployment module renders under PG_ROUTER_HANDLER_COMMAND_DIR.
+func roleDirWith(t *testing.T, body string) func(*config.Config) {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "r1.json"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return func(c *config.Config) { c.HandlerCommandDir = dir }
+}
+
+// (d) A role whose config declares `survivesShutdown` keeps its dispatch
+// running across a daemon shutdown (bead pg2-dtigc, ADR 0085): the run does not
+// wait out the drain on it, never cancels its context, and still runs the
+// preShutdown sweep, which spares what the handler supervises.
+func TestRunLongRunning_survivingRoleIsNeitherWaitedOnNorCancelled(t *testing.T) {
+	r := newShutdownRunner()
+	// A one-minute drain: if the run waited on the surviving offer, it would
+	// not exit within the 10s allowed below.
+	signal, done := startShutdownRun(t, r, time.Minute, roleDirWith(t, `{"name":"r1","type":"ccpool","survivesShutdown":true}`))
+	signal()
+
+	select {
+	case code := <-done:
+		if code != exitOK {
+			t.Fatalf("exit = %d, want %d", code, exitOK)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("run waited on a dispatch that is meant to outlive it")
+	}
+	// Give a (wrongly) cancelled context time to propagate before looking.
+	time.Sleep(200 * time.Millisecond)
+	r.mu.Lock()
+	ctxErr := r.dispatchCtx.Err()
+	r.mu.Unlock()
+	if ctxErr != nil {
+		t.Fatalf("the surviving role's dispatch context was cancelled: %v", ctxErr)
+	}
+	n, steps, endErr := r.snapshot()
+	if endErr != nil || n != 1 {
+		t.Fatalf("dispatches=%d endErr=%v, want 1 dispatch still running undisturbed", n, endErr)
+	}
+	for _, s := range steps {
+		if s == "dispatch-cancelled" {
+			t.Fatalf("steps = %v: the surviving dispatch was cancelled", steps)
+		}
+	}
+	if got := withoutStep(steps, "postStartup"); len(got) != 1 || got[0] != "preShutdown" {
+		t.Fatalf("steps = %v, want exactly the preShutdown sweep after the run exits with the dispatch still running", steps)
+	}
+	close(r.release) // let the "handler" finish so its goroutine does not leak
+}
+
+// (e) Control for (d): the same run with the flag absent or false is the
+// pre-existing behavior, so (d) cannot pass by the flag being ignored.
+func TestRunLongRunning_roleWithoutSurvivalFlagIsStillCancelledAfterDrain(t *testing.T) {
+	for name, body := range map[string]string{
+		"flag false":   `{"name":"r1","type":"command","survivesShutdown":false}`,
+		"flag absent":  `{"name":"r1","type":"command"}`,
+		"malformed":    `{not json`,
+		"wrong type":   `{"survivesShutdown":"yes"}`,
+		"empty object": `{}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := newShutdownRunner()
+			signal, done := startShutdownRun(t, r, 200*time.Millisecond, roleDirWith(t, body))
+			signal()
+			select {
+			case <-done:
+			case <-time.After(20 * time.Second):
+				t.Fatal("run did not exit after the drain timeout")
+			}
+			deadline := time.Now().Add(20 * time.Second)
+			for {
+				if _, _, endErr := r.snapshot(); endErr == context.Canceled {
+					return
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("a role without the survival flag must still be cancelled after the drain timeout")
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+		})
+	}
 }

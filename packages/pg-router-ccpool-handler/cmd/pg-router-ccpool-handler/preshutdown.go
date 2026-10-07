@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/beads"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/ccpool"
@@ -173,13 +174,17 @@ func servePreShutdown(cc ccpool.Runner, open worktree.Opener, br beads.Runner, s
 //  3. Pool capacity (INV-CCH-6). Spared starting/ready/working rows count
 //     toward max_sessions, so the next daemon cannot launch past the cap while
 //     they run; the leak cannot grow the pool beyond the cap.
-//  4. The supervision lease (pg2-g2u9m, INV-CCH-18, ADR 0083). The spared
-//     session's handler dies with the old daemon, so its pgrouter.lease_until
-//     stops being refreshed and expires; the next dispatch of the same role
-//     (reconcileOrphanSessions, orphan.go) then closes an idle orphan and
-//     releases its bead claim, or enforces a working orphan's time budget from
-//     its launch time. Until then the session runs unsupervised; an orphan is
-//     handled only when its OWN role next dispatches.
+//  4. The supervision lease (pg2-g2u9m, INV-CCH-18, ADR 0083). A ccpool-backed
+//     dispatch is NOT cancelled by a daemon restart (pg2-dtigc, ADR 0085), so
+//     its handler normally keeps refreshing pgrouter.lease_until, the next
+//     daemon re-offers the event and the redelivered dispatch absorbs the live
+//     session. Only a handler that died anyway stops refreshing: its lease then
+//     expires and the next dispatch of the same role (reconcileOrphanSessions,
+//     orphan.go) closes an idle orphan and releases its bead claim, or
+//     enforces a working orphan's time budget from its launch time. Until then
+//     the session runs unsupervised; an orphan is handled only when its OWN
+//     role next dispatches. An OPEN session whose lease has NOT expired is
+//     spared by this sweep too (supervisedAtShutdown), whatever its state.
 //
 // Two-phase teardown (bead pg2-kqegi, INV-CCH-20): a session in a per-bead
 // linked worktree is purged only after its worktree is removed (closeSession). A
@@ -239,6 +244,31 @@ func sparedAtShutdown(state ccpool.SessionState) bool {
 	return false
 }
 
+// supervisedAtShutdown reports whether s is still supervised by a LIVE handler
+// and so must be spared by the shutdown sweep whatever its state (bead
+// pg2-dtigc, ADR 0085): a ccpool-backed dispatch outlives the daemon that
+// started it, and while its handler runs it refreshes the supervision lease
+// (INV-CCH-18) every poll. An OPEN row whose lease has not expired is therefore
+// in the hands of a running handler -- including one whose turn has just ended
+// (idle) and which is still in its settle step (worktree cleanup, settled-
+// session close). Closing it here would pull the session out from under that
+// handler. A row with no lease (an older build), an expired lease (its handler
+// is gone: the dispatch-time orphan reconcile owns it) or a close reason set
+// (nothing left to supervise) is NOT spared by this rule.
+func supervisedAtShutdown(s ccpool.Session, now time.Time) bool {
+	if s.CloseReason != "" {
+		return false
+	}
+	until, ok := s.LeaseUntil()
+	return ok && until.After(now)
+}
+
+// sparedSession is the shutdown sweep's whole spare test for the working-state
+// and lease rules (needs_input is decided separately, by its bead).
+func sparedSession(s ccpool.Session) bool {
+	return sparedAtShutdown(s.State) || supervisedAtShutdown(s, time.Now())
+}
+
 // worktreeHeldBySparedPeer reports whether another session in sessions that
 // the shutdown sweep SPARES (sparedAtShutdown) still uses s's working
 // directory. A per-bead worktree path is keyed by bead id alone
@@ -251,7 +281,7 @@ func worktreeHeldBySparedPeer(sessions []ccpool.Session, s ccpool.Session) bool 
 		return false
 	}
 	for _, o := range sessions {
-		if o.ExternalID != s.ExternalID && o.CWD == s.CWD && sparedAtShutdown(o.State) {
+		if o.ExternalID != s.ExternalID && o.CWD == s.CWD && sparedSession(o) {
 			return true
 		}
 	}
@@ -300,6 +330,11 @@ func worktreeHeldBySparedPeer(sessions []ccpool.Session, s ccpool.Session) bool 
 func closeUnlessNeedsInput(ctx context.Context, cc ccpool.Runner, open worktree.Opener, br beads.Runner, repoRoot, worktreeDir string, s ccpool.Session, keepWorktree bool) bool {
 	if sparedAtShutdown(s.State) {
 		slog.Info("preShutdown: teardown sparing actively working session (left alive, worktree untouched)",
+			"session", s.ExternalID, "state", string(s.State), "cwd", s.CWD)
+		return false
+	}
+	if supervisedAtShutdown(s, time.Now()) {
+		slog.Info("preShutdown: teardown sparing session still supervised by a live handler (lease not expired; left alive, worktree untouched)",
 			"session", s.ExternalID, "state", string(s.State), "cwd", s.CWD)
 		return false
 	}

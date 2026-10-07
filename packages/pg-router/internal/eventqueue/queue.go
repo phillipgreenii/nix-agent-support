@@ -1784,6 +1784,49 @@ func (q *Queue) WaitForInFlightDrain(ctx context.Context, pollInterval time.Dura
 	}
 }
 
+// WaitForInFlightDrainExcept is WaitForInFlightDrain over only the offers
+// whose listener id ignore does NOT name: it blocks until every outstanding
+// offer belonging to a listener ignore(id) reports false has settled, or ctx is
+// done. It exists for a shutdown that deliberately leaves some listeners'
+// offers running past the process's own exit (bead pg2-dtigc, ADR 0085): such
+// an offer never settles in this process, so waiting on it would only burn the
+// drain budget. Its event stays un-accepted in the durable log and is
+// re-offered by the next process (replay). A nil ignore ignores nothing, which
+// makes this exactly WaitForInFlightDrain. Returns true if no un-ignored offer
+// remained when it returned.
+func (q *Queue) WaitForInFlightDrainExcept(ctx context.Context, pollInterval time.Duration, ignore func(listenerID string) bool) bool {
+	if q.inFlightExcept(ignore) == 0 {
+		return true
+	}
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return q.inFlightExcept(ignore) == 0
+		case <-ticker.C:
+			if q.inFlightExcept(ignore) == 0 {
+				return true
+			}
+		}
+	}
+}
+
+// inFlightExcept counts the outstanding offers whose listener ignore does not
+// name, read live under q.mu. Caller must NOT hold q.mu.
+func (q *Queue) inFlightExcept(ignore func(listenerID string) bool) int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	n := 0
+	for lid := range q.inFlight {
+		if ignore != nil && ignore(lid) {
+			continue
+		}
+		n++
+	}
+	return n
+}
+
 // ListenerCount reports how many listeners are currently registered with the
 // queue (len(listeners)) — the "total" half of the status/TUI dispatch
 // concurrency pair (Task 6.5; SessionsInFlight above is "busy"). It reads the

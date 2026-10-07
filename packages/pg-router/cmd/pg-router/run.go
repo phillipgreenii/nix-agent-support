@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -81,6 +82,11 @@ const inFlightDrainTimeout = 5 * time.Second
 // and never raise this without shrinking another term. A drain that times out
 // is no worse than the old behavior: the dispatch context is then cancelled
 // and the handler killed as before.
+//
+// This budget applies only to roles that do NOT declare survivesShutdown
+// (bead pg2-dtigc, ADR 0085). A ccpool-backed role's dispatch lasts far longer
+// than any budget launchd allows, so the daemon neither waits for it nor
+// cancels it: its handler keeps running and the next daemon adopts the session.
 const shutdownDrainTimeout = 20 * time.Second
 
 // inFlightDrainPollInterval is WaitForInFlightDrain's poll cadence during
@@ -103,10 +109,15 @@ const inFlightDrainPollInterval = 100 * time.Millisecond
 // offer's write is lost, logged at "error" -- matching this package's
 // existing swallowed-durable-write precedent (eventqueue's own accept/
 // evict-append error handling), never a silent no-op.
-func drainThenCloseStore(q *eventqueue.Queue, storeClose func() error) {
+//
+// survives (nil: none) names listeners whose offers are deliberately left
+// running past this process (ADR 0085); they never settle here, so they are
+// neither waited on nor reported as lost -- their events stay un-accepted in
+// the durable log and the next process re-offers them.
+func drainThenCloseStore(q *eventqueue.Queue, storeClose func() error, survives func(listenerID string) bool) {
 	drainCtx, cancel := context.WithTimeout(context.Background(), inFlightDrainTimeout)
 	defer cancel()
-	if !q.WaitForInFlightDrain(drainCtx, inFlightDrainPollInterval) {
+	if !q.WaitForInFlightDrainExcept(drainCtx, inFlightDrainPollInterval, survives) {
 		slog.Error("shutdown: in-flight dispatch offer(s) did not drain before the timeout; closing the durable store anyway -- any still-outstanding offer's durable write will be lost",
 			"timeout", inFlightDrainTimeout, "sessionsInFlight", q.SessionsInFlight())
 	}
@@ -120,14 +131,34 @@ func drainThenCloseStore(q *eventqueue.Queue, storeClose func() error) {
 // unsticks any handler that outlived the timeout (wireclient's
 // exec.CommandContext kills it). The caller MUST run this before
 // preShutdownAll so the ccpool session sweep never races a live dispatch.
-func drainThenCancelDispatch(q *eventqueue.Queue, cancelDispatch context.CancelFunc, timeout time.Duration) {
+//
+// survives (nil: none) names the listeners whose dispatches survive a
+// shutdown (bead pg2-dtigc, ADR 0085): their listener contexts are not derived
+// from the dispatch context, so cancelDispatch does not reach them. They are
+// excluded from the wait -- a ccpool-backed dispatch lasts far longer than any
+// drain budget launchd allows -- and left running, supervised by their own
+// handler, until the next daemon re-offers the event and absorbs the session.
+func drainThenCancelDispatch(q *eventqueue.Queue, cancelDispatch context.CancelFunc, timeout time.Duration, survives func(listenerID string) bool) {
 	drainCtx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	if !q.WaitForInFlightDrain(drainCtx, inFlightDrainPollInterval) {
+	if !q.WaitForInFlightDrainExcept(drainCtx, inFlightDrainPollInterval, survives) {
 		slog.Warn("shutdown: in-flight dispatch(es) did not finish before the drain timeout; cancelling them",
 			"timeout", timeout, "sessionsInFlight", q.SessionsInFlight())
 	}
 	cancelDispatch()
+	if survives != nil {
+		var left []string
+		for lid := range q.InFlightListeners() {
+			if survives(lid) {
+				left = append(left, lid)
+			}
+		}
+		if len(left) > 0 {
+			sort.Strings(left)
+			slog.Info("shutdown: leaving dispatch(es) running; the next daemon re-offers their events and adopts the sessions",
+				"roles", left)
+		}
+	}
 }
 
 // handlerCommandFor builds the wireclient.CommandFor seam bootCore and
@@ -147,7 +178,7 @@ func drainThenCancelDispatch(q *eventqueue.Queue, cancelDispatch context.CancelF
 // already anticipated as an accepted shape — "every enabled role resolves to
 // the SAME command"): when cfg.HandlerCommandDir is also set, the resolved
 // argv threads a per-role --role-config path
-// (filepath.Join(cfg.HandlerCommandDir, role.Name+".json")) onto the
+// (handlerRoleConfigPath(cfg.HandlerCommandDir, role.Name)) onto the
 // handler command, so differently-configured roles sharing one
 // HandlerCommand binary (e.g. feedback/worker/review, each with its own
 // ccpool actor/prompt) each dispatch through their OWN participant config.
@@ -164,7 +195,7 @@ func handlerCommandFor(cfg config.Config) wireclient.CommandFor {
 			return nil, fmt.Errorf("no handler command configured for role %q (set PG_ROUTER_HANDLER_COMMAND)", role.Name)
 		}
 		if cfg.HandlerCommandDir != "" {
-			return []string{cfg.HandlerCommand, subcommand, "--role-config", filepath.Join(cfg.HandlerCommandDir, role.Name+".json")}, nil
+			return []string{cfg.HandlerCommand, subcommand, "--role-config", handlerRoleConfigPath(cfg.HandlerCommandDir, role.Name)}, nil
 		}
 		return []string{cfg.HandlerCommand, subcommand}, nil
 	}
@@ -455,7 +486,17 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 			slog.Info("role disabled; not registering a listener", "role", r.Name)
 			continue
 		}
-		q.Register(o.NewListener(ctx, r))
+		// A role whose handler supervises its own work (a ccpool-backed session)
+		// declares it survives a shutdown (bead pg2-dtigc, ADR 0085): in daemon
+		// mode its dispatch runs on a context the shutdown's cancelDispatch cannot
+		// reach, so exec.CommandContext never SIGKILLs its handler. Drain-and-exit
+		// keeps the cancellable ctx: an interactive interrupt still stops handlers.
+		listenerCtx := ctx
+		if runMode == core.RunModeLongRunning && roleSurvivesShutdown(cfg, r.Name) {
+			listenerCtx = context.WithoutCancel(ctx)
+			slog.Info("role dispatch survives shutdown; it is never cancelled by this daemon", "role", r.Name)
+		}
+		q.Register(o.NewListener(listenerCtx, r))
 		if _, err := svc.Registry().RegisterInProcess(r.Name, core.KindHandler); err != nil {
 			_ = store.Close()
 			return nil, nil, nil, nil, fmt.Errorf("register role %s: %w", r.Name, err)
@@ -1379,7 +1420,7 @@ func runUntilIdleBody(ctx context.Context, pr preparedRun) int {
 	// deliberately: reordering would make metrics.Flush wait on the SAME
 	// bounded drain this defer performs, which is a real behavior change,
 	// not a comment-only fix.
-	defer drainThenCloseStore(q, storeClose)
+	defer drainThenCloseStore(q, storeClose, nil)
 	accepted := make(chan error, 1)
 	go func() { accepted <- svc.Accept(ctx) }()
 
@@ -1585,7 +1626,11 @@ func runLongRunningBody(ctx context.Context, pr preparedRun, drainTimeout time.D
 	// introduces) and left unreordered deliberately: reordering would make
 	// metrics.Flush block on this same drain, a real behavior change, not a
 	// comment-only fix.
-	defer drainThenCloseStore(q, storeClose)
+	// survives names the roles whose dispatches this shutdown leaves running
+	// (ADR 0085); the drain and the store close do not wait on them.
+	survivors := survivingRoles(pr.cfg)
+	survives := func(listenerID string) bool { return survivors[listenerID] }
+	defer drainThenCloseStore(q, storeClose, survives)
 	accepted := make(chan error, 1)
 	go func() { accepted <- svc.Accept(ctx) }()
 
@@ -1629,7 +1674,7 @@ func runLongRunningBody(ctx context.Context, pr preparedRun, drainTimeout time.D
 			slog.Info("run: shutdown requested")
 			// Drain BEFORE returning: the deferred preShutdownAll (the ccpool
 			// session sweep) must not run while a dispatch is still in flight.
-			drainThenCancelDispatch(q, cancelDispatch, drainTimeout)
+			drainThenCancelDispatch(q, cancelDispatch, drainTimeout, survives)
 			return exitOK
 		case <-ticker.C:
 		}

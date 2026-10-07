@@ -191,7 +191,12 @@ review`. The claim is still released (status open, assignee cleared) — the lab
   is already closed. A `needs_input` session whose bead is still open, or whose bead status cannot
   be determined, is also preserved (so a person can still attach). A purged session's worktree
   MUST be kept when a spared session still uses the same directory (a per-bead worktree is shared
-  by every role's session for that bead). The shutdown sweep lists only the daemon's default
+  by every role's session for that bead). The sweep MUST also spare an OPEN session whose
+  supervision lease (`INV-CCH-18`) has not expired, whatever its state: its handler is still
+  running (a dispatch of a ccpool-backed role outlives a daemon restart, see below), so closing the
+  session would pull it out from under that handler; a session with no lease, an expired lease, or
+  a close reason set is not spared by this rule, and a spared session's worktree is kept like any
+  other spared session's. The shutdown sweep lists only the daemon's default
   `ccpool` pool: a session in a role's own dedicated pool is outside it, neither purged nor spared
   by shutdown, and is bounded only by the mechanisms below. Operator ruling (Phillip, 2026-09-30,
   bead `pg2-hwt7v`), superseding the earlier behavior of closing working sessions and
@@ -206,10 +211,17 @@ review`. The claim is still released (status open, assignee cleared) — the lab
     sessions over `max_sessions` (never `starting`/`ready`/`working`); both stamp a close reason
     (`phillipgreenii-nix-agent-support` ADR 0072). (c) Spared sessions still count toward
     `max_sessions`, so `INV-CCH-6` stops the next daemon from launching past the cap while they
-    run. (d) The spared session's handler dies with the old daemon, but its supervision lease
-    (`INV-CCH-18`) then expires, and the next dispatch of the same role reclaims it: an idle one
-    is closed and its bead claim released, a working one has its time budget enforced from its
-    launch time. Until then the session runs unsupervised. (e) A worktree left with no session row at all
+    run. (d) A daemon restart MUST NOT kill the dispatch of a ccpool-backed role: the daemon does
+    not cancel it and does not wait for it, so the handler keeps supervising its session (and
+    refreshing the lease) across the restart. The unsettled offer is re-offered by the next
+    daemon, and that redelivered dispatch absorbs the live session (`INV-EVT-2`, `INV-CCH-2`)
+    rather than launching a second one; two handlers then watch one session, both finish
+    idempotently, and the daemon that is running accounts the outcome once. A handler whose
+    daemon is gone cannot deliver its reply; that is not a failure, and it MUST exit normally.
+    Only if a handler dies anyway (a crash, a kill) does its lease expire, and the next dispatch
+    of the same role reclaims the session: an idle one is closed and its bead claim released, a
+    working one has its time budget enforced from its launch time. Until then the session runs
+    unsupervised. (e) A worktree left with no session row at all
     is reclaimed by the worktree-keyed sweep of `INV-CCH-19`.
 - **`INV-CCH-15`** — a dispatch-time worktree cleanup (after a session reaches a terminal outcome)
   MUST NOT remove a per-bead worktree while another live session in `starting`, `ready`, `working`

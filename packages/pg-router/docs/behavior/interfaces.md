@@ -169,6 +169,13 @@ stateDiagram-v2
   boundary as a rule.
 - **`stopping`** — an orderly shutdown is underway. The core stops issuing _new_ requests; in-flight
   deferred work MAY complete on the callback channel or be abandoned. New messages are not accepted.
+  A handler whose dispatch supervises its own long-running work independently of the core (a
+  session that lasts far longer than any shutdown budget) MAY declare, in its role's configuration,
+  that its dispatch **survives the core's shutdown**. For such a role the core **MUST NOT** cancel
+  an in-flight dispatch when it stops and **MUST NOT** wait for it to finish; the offer is left
+  un-accepted, so the next core re-offers the event (`INV-EVT-1`) and the handler absorbs the
+  duplicate onto the work already running (`INV-EVT-2`). A role that makes no such declaration
+  keeps the default: in-flight dispatches get a bounded drain, then are cancelled.
 - **`stopped`** — the participant has drained and deregistered; no messages cross.
 - **`crashing`** — a **best-effort** signal emitted on a _sudden_ shutdown (crash or forced kill)
   from any active state. It is a courtesy, not a guarantee: it MAY be lost entirely. A participant

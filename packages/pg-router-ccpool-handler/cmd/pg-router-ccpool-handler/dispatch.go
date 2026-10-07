@@ -9,7 +9,9 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/beads"
@@ -90,6 +92,18 @@ type dispatchEvent struct {
 func runDispatch(args []string) int {
 	fs := flag.NewFlagSet("dispatch", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
+	// The daemon that spawned this handler MAY exit while the dispatch is still
+	// running (a restart leaves ccpool-backed dispatches running, ADR 0085), which
+	// closes the read end of our stdout pipe. Everything the dispatch does is
+	// finished before the one reply write, so losing that write must not be a
+	// signalled death: subscribe to SIGPIPE so the write fails with EPIPE, is
+	// logged by writeReply, and the process exits normally. Notify, NOT
+	// signal.Ignore: an ignored disposition is inherited across exec, so every
+	// child this dispatch starts (ccpool, bd, and through it the claude session)
+	// would run with SIGPIPE ignored; a Notify handler resets to the default.
+	pipeSignals := make(chan os.Signal, 1)
+	signal.Notify(pipeSignals, syscall.SIGPIPE)
+	defer signal.Stop(pipeSignals)
 	roleConfig := fs.String("role-config", os.Getenv(envRoleConfig), "path to this process's own role config JSON (or "+envRoleConfig+")")
 	cfgPath := fs.String("config", os.Getenv(envConfig), "path to this process's own launch config JSON (or "+envConfig+")")
 	switch err := fs.Parse(args); {
@@ -388,7 +402,11 @@ func newEventLog(cfg config.Config) *eventlog.Writer {
 
 func writeReply(w io.Writer, v any) {
 	b, _ := json.Marshal(v)
-	_, _ = w.Write(b)
+	if _, err := w.Write(b); err != nil {
+		// Not fatal: the reader (the daemon) may be gone already, e.g. a dispatch
+		// that outlived a daemon restart (ADR 0085). The dispatch's work is done.
+		slog.Warn("reply undeliverable; the process that read this handler's stdout is gone", "err", err)
+	}
 }
 
 func writeErrorReply(w io.Writer, msg string) {

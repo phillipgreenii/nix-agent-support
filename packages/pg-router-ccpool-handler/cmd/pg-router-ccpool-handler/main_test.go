@@ -9,6 +9,9 @@ import (
 // that builds production deps (buildDeps opens <stateDir>/events.jsonl,
 // bead pg2-ui2gk) never writes into the developer's real handler state dir.
 func TestMain(m *testing.M) {
+	if mode := os.Getenv(brokenPipeHelperEnv); mode != "" {
+		os.Exit(runBrokenPipeHelper(mode))
+	}
 	dir, err := os.MkdirTemp("", "ccpool-handler-state-")
 	if err != nil {
 		panic(err)

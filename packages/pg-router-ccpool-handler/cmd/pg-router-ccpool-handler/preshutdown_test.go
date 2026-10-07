@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/ccpool"
 	"github.com/phillipgreenii/pg-router/conformance"
@@ -697,5 +698,87 @@ func TestServePreShutdown_rejectsMalformedRequest(t *testing.T) {
 	}
 	if len(cc.Closed) != 0 {
 		t.Errorf("a malformed request must not run the sweep; closed=%v", cc.Closed)
+	}
+}
+
+// leaseMeta is a session meta map carrying a supervision lease that expires at
+// until (INV-CCH-18), plus the bead tag the sweep reads.
+func leaseMeta(until time.Time, bead string) map[string]string {
+	return map[string]string{ccpool.MetaKeyLeaseUntil: ccpool.FormatMetaTime(until), ccpool.MetaKeyBead: bead}
+}
+
+// A ccpool-backed dispatch outlives the daemon that started it (ADR 0085), so
+// an OPEN session whose supervision lease has not expired is in the hands of a
+// running handler. That holds whatever its state: an idle session whose handler
+// is still in its settle step must not be closed out from under it.
+func TestCloseUnlessNeedsInput_sparesSessionSupervisedByLiveHandler(t *testing.T) {
+	for _, st := range []ccpool.SessionState{ccpool.StateIdle, ccpool.StateErrored} {
+		t.Run(string(st), func(t *testing.T) {
+			cc := &fakeCC{}
+			open := &fakeWorktreeOpener{}
+			s := ccpool.Session{
+				ExternalID: "pg-router-review-zr-x", Live: true, State: st, CWD: "/wt/zr-x",
+				Meta: leaseMeta(time.Now().Add(time.Minute), "zr-x"),
+			}
+			if closeUnlessNeedsInput(context.Background(), cc, open.Open, fakeBR{}, "/repo/root", "", s, false) {
+				t.Fatalf("closeUnlessNeedsInput = true, want false: a %s session with a live lease is supervised", st)
+			}
+			if len(cc.Closed) != 0 {
+				t.Errorf("session must NOT be closed; closed=%v", cc.Closed)
+			}
+			if len(open.Opens) != 0 || len(open.Removed) != 0 || len(open.BranchDeletes) != 0 {
+				t.Errorf("worktree must be untouched; opens=%v removed=%v deletes=%v", open.Opens, open.Removed, open.BranchDeletes)
+			}
+		})
+	}
+}
+
+// The other side: a lease that has expired (its handler is gone), no lease at
+// all (an older build), and a row that is already closed are each NOT spared by
+// the lease rule, so an idle one is still purged with its worktree.
+func TestCloseUnlessNeedsInput_leaseRuleDoesNotSpareUnsupervisedOrClosedRows(t *testing.T) {
+	cases := map[string]ccpool.Session{
+		"expired lease": {
+			ExternalID: "pg-router-review-zr-x", State: ccpool.StateIdle, CWD: "/wt/zr-x",
+			Meta: leaseMeta(time.Now().Add(-time.Minute), "zr-x"),
+		},
+		"no lease": {
+			ExternalID: "pg-router-review-zr-x", State: ccpool.StateIdle, CWD: "/wt/zr-x",
+			Meta: map[string]string{ccpool.MetaKeyBead: "zr-x"},
+		},
+		"closed row with an unexpired lease": {
+			ExternalID: "pg-router-review-zr-x", State: ccpool.StateIdle, CWD: "/wt/zr-x",
+			CloseReason: "handler", Meta: leaseMeta(time.Now().Add(time.Minute), "zr-x"),
+		},
+	}
+	for name, s := range cases {
+		t.Run(name, func(t *testing.T) {
+			cc := &fakeCC{}
+			open := &fakeWorktreeOpener{}
+			if !closeUnlessNeedsInput(context.Background(), cc, open.Open, fakeBR{}, "/repo/root", "", s, false) {
+				t.Fatalf("closeUnlessNeedsInput = false, want true: %s must not be spared", name)
+			}
+			if len(open.Removed) != 1 || open.Removed[0] != "/wt/zr-x" {
+				t.Errorf("worktree must be removed; calls=%v", open.Removed)
+			}
+		})
+	}
+}
+
+// A per-bead worktree is shared by every role's session for the bead, so a
+// lease-supervised idle peer protects the worktree of a session that is purged,
+// exactly as a working peer does.
+func TestTeardownAllSessions_keepsWorktreeSharedWithLeaseSupervisedPeer(t *testing.T) {
+	cc := &fakeCC{ListSeq: [][]ccpool.Session{{
+		{ExternalID: "pg-router-review-zr-x", State: ccpool.StateIdle, CWD: "/wt/zr-x", Meta: map[string]string{ccpool.MetaKeyBead: "zr-x"}},
+		{ExternalID: "pg-router-feedback-zr-x", Live: true, State: ccpool.StateIdle, CWD: "/wt/zr-x", Meta: leaseMeta(time.Now().Add(time.Minute), "zr-x")},
+	}}}
+	open := &fakeWorktreeOpener{}
+	n := teardownAllSessions(context.Background(), cc, open.Open, fakeBR{}, "pg-router-", "/repo/root", "")
+	if n != 1 || len(cc.Closed) != 1 || cc.Closed[0] != "pg-router-review-zr-x" {
+		t.Fatalf("only the unsupervised idle session may be closed; n=%d closed=%v", n, cc.Closed)
+	}
+	if len(open.Removed) != 0 || len(open.BranchDeletes) != 0 {
+		t.Errorf("a worktree shared with a supervised session must be kept; removed=%v deletes=%v", open.Removed, open.BranchDeletes)
 	}
 }

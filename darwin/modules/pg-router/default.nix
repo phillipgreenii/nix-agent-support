@@ -203,11 +203,22 @@ in
           # not change how `pg-router run-until-idle`/CLI invocations spawn
           # handlers (a per-handler group would stop an interactive Ctrl-C
           # reaching them and puts them in a background group for any TTY
-          # use), and it needs no Go change. Trade-off, accepted: survivors
-          # run on as orphans the new daemon does not track, and a hung
+          # use), and it needs no Go change. Trade-off, accepted: a hung
           # group member is no longer reaped by launchd (it is reaped
           # only by its own exit). ExitTimeOut is unchanged (60, the
           # launchd hard cap, see above).
+          #
+          # pg2-dtigc (ADR 0085): this key is now LOAD-BEARING for the
+          # restart requirement ("restarts MUST NOT kill existing
+          # sessions"), not just a drain bugfix. The daemon no longer
+          # cancels a ccpool-backed role's dispatch at shutdown
+          # (survivesShutdown, rendered by
+          # home/programs/pg-router-ccpool-handler), so those handlers are
+          # EXPECTED to outlive the daemon and must not be group-killed. They
+          # are no longer untracked orphans: the new daemon replays the
+          # un-accepted offer, re-offers it, and the redelivered dispatch
+          # absorbs the live session. Command-type roles are unchanged
+          # (drain, then cancel).
           AbandonProcessGroup = true;
         };
       };

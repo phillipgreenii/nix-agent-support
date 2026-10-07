@@ -5685,6 +5685,9 @@
                         [ "$(jq -r .type "$handlerCommandDir/feedback.json")" = ccpool ]
                         [ "$(jq -r .ccpool.actor "$handlerCommandDir/feedback.json")" = feedback-actor ]
                         [ "$(jq -r .ccpool.completion "$handlerCommandDir/feedback.json")" = close-only ]
+                        # survivesShutdown (pg2-dtigc, ADR 0085): rendered for a
+                        # ccpool-type role, never for a command-type one.
+                        [ "$(jq -r .survivesShutdown "$handlerCommandDir/feedback.json")" = true ]
                         # budget.{tokens,cost,time} renders into the same
                         # roleFile.CCPool.Budget shape loadRole decodes
                         # (pg2-r8al1 acceptance criterion 2).
@@ -5700,6 +5703,7 @@
                         [ "$(jq -r .type "$handlerCommandDir/worker.json")" = command ]
                         [ "$(jq -c .command.argv "$handlerCommandDir/worker.json")" = '["worker-bin","--flag"]' ]
                         jq -e 'has("ccpool") | not' "$handlerCommandDir/worker.json" >/dev/null
+                        jq -e 'has("survivesShutdown") | not' "$handlerCommandDir/worker.json" >/dev/null
                         [ "$(ls -1 "$emptyHandlerCommandDir" | wc -l)" -eq 0 ]
 
                         # launchConfigFile (this bead, pg2-qsred): the

@@ -47,8 +47,8 @@ Extensions:
 - 2b. The git origin the dispatch runs against is unavailable (`INV-CCH-10`): this module declines
   `busy` with reason `origin-unavailable` before touching any bead; dispatches into other origins
   are unaffected, and dispatch resumes on the first successful probe.
-- 2d. An earlier dispatch's handler died (the daemon restarted at `INV-CCH-14`'s shutdown, or the
-  handler crashed) and left its session unsupervised: its lease has expired. Before checking
+- 2d. An earlier dispatch's handler died (it crashed or was killed; a daemon restart alone no
+  longer kills it, `INV-CCH-14`) and left its session unsupervised: its lease has expired. Before checking
   capacity this module handles each such orphan of its own role (`INV-CCH-18`). An `idle` or
   `errored` one is closed (not purged), its bead claim released if the role's own actor still
   holds it, and its worktree removed; a `starting`, `ready` or `working` one past its time budget

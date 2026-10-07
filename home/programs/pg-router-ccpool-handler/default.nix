@@ -308,6 +308,15 @@ let
           inherit (roleCfg) type;
         }
         // lib.optionalAttrs (roleCfg.type == "ccpool") {
+          # survivesShutdown (bead pg2-dtigc, ADR 0085): a ccpool-backed role's
+          # handler supervises its session independently of the daemon, so the
+          # daemon MUST NOT cancel its dispatch when it shuts down (a restart
+          # leaves the session and its dispatch running; the next daemon
+          # re-offers the event and absorbs the live session). Derived from
+          # `type`, not a user option: a command-type role stays cancellable
+          # (short, and killing a stuck one is the point). pg-router reads
+          # only this one key of the file; the Go `roleFile` ignores it.
+          survivesShutdown = true;
           ccpool = {
             inherit (roleCfg.ccpool)
               actor
