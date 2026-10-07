@@ -469,6 +469,33 @@ var knownSpikeLooser = map[string]spikeLooserEntry{
 			"deferred. The spike confines a pipeline stage's cd to that stage (interpretRange " +
 			"counts stages per PipelineID) and judges mkdir at the base CWD: Approve.",
 	},
+	"assign_cmdsubst_approves": {
+		Class: "looser-than-abstain",
+		Cause: "pg2-dbrsg (commit 4fa66d12) taught the spike to model an assignment-only leaf " +
+			"(`X=...`) as an env:set effect and to lower the value's command substitutions into " +
+			"scopes graded by the same effect analysis as any command; the golden table and this " +
+			"register were not updated then (pg2-rrdwz). Production has no rule that approves an " +
+			"assignment-only leaf: engine.go's command-less-leaf branch judges the substitution " +
+			"(`git rev-parse --show-toplevel` is a safe read) but the leaf itself ends with " +
+			"\"env assignments only, no rule has an opinion (nothing is executed)\" — even a plain " +
+			"`X=foo` — so the whole expression is NoOpinion and defers to claude-code. The spike's " +
+			"approve is sound here: the only effects are an env:set of a non-shell-behaviour " +
+			"variable (IFS/CDPATH/GIT_DIR/... are guarded by EnvAssignment policy, see " +
+			"assign_persistent_ifs_abstains and assign_persistent_git_dir_rejects) and a read-only " +
+			"substitution, and a destructive substitution still abstains " +
+			"(assign_cmdsubst_rm_abstains). Production-side fix, if wanted: give engine.go's " +
+			"assignment-only leaf an approving rule.",
+	},
+	"case_assign_arm": {
+		Class: "looser-than-abstain",
+		Cause: "same root cause as assign_cmdsubst_approves (pg2-dbrsg, commit 4fa66d12): the spike " +
+			"models a `case` statement's subject and patterns as inert data leaves and its arm's " +
+			"assignment (`p=\"$W/$p\"`) as an env:set of a non-shell-behaviour variable, so every " +
+			"node is permitted and it Approves; production's assignment-only arm leaf ends with " +
+			"\"env assignments only, no rule has an opinion\" and the expression is NoOpinion " +
+			"(deferred to claude-code). Not a new class of write: the arm executes nothing and " +
+			"sets one ordinary variable.",
+	},
 	"cat_redirect_single_quoted_literal": {
 		Class: "looser-than-abstain",
 		Cause: "internal/engine/engine.go's isDynamicRedirectTarget is a RAW-TEXT heuristic " +
