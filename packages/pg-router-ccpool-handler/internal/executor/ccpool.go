@@ -19,6 +19,7 @@ import (
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/ccpool"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/complete"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/failsig"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/item"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/prompt"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/report"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/roles"
@@ -113,12 +114,12 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 	// stable name; if so this dispatch is an already-in-flight duplicate, and
 	// absorbing it (rather than starting a second session for the same bead)
 	// closes register row INV-EVT-2 for real (ADR 0065's "Register" section).
-	if existing, ok := r.findSessionByName(ctx, display, d.EventID); ok {
+	if existing, ok := r.findSessionByName(ctx, display, d.EventID, dispatchHeadSHA(d.Item)); ok {
 		// Take the per-session lock and refresh the supervision lease BEFORE
 		// waiting, so a concurrent orphan reconcile either already finished (the
 		// row is then closed and not absorbable: fall through to a fresh launch)
 		// or sees the fresh lease and stands down (INV-CCH-18).
-		existing, ok, err := r.takeOverForAbsorb(ctx, existing, d.EventID)
+		existing, ok, err := r.takeOverForAbsorb(ctx, existing, d.EventID, dispatchHeadSHA(d.Item))
 		if err != nil {
 			return report.Result{}, fmt.Errorf("absorb %s: %w", display, err)
 		}
@@ -210,7 +211,7 @@ func (r *ccpoolRun) run(ctx context.Context, d DispatchContext) (report.Result, 
 		"BEADS_DIR":      beadsDirFor(r.deps.Cfg.RepoRoot, cc) + "/.beads",
 		"WORKSPACE_ROOT": wt,
 	}
-	if err := r.deps.CC.Ensure(ctx, r.deps.ExternalID, display, wt, env, ccpool.DispatchMeta(d.Item.ID, d.Role.Name, r.deps.clock(), r.deps.Cfg.LeaseTTL, d.EventID)); err != nil {
+	if err := r.deps.CC.Ensure(ctx, r.deps.ExternalID, display, wt, env, ccpool.DispatchMeta(d.Item.ID, d.Role.Name, r.deps.clock(), r.deps.Cfg.LeaseTTL, d.EventID, dispatchHeadSHA(d.Item))); err != nil {
 		// Could not even create the session. The bead was never dispatched, so we
 		// do not flag/unclaim it on a transient hiccup. But a bead that fails to
 		// launch repeatedly is escalated (ADR 0015): stamp pool-launch-fail on the
@@ -741,16 +742,16 @@ func usesWorktreeIsolation(cfg roles.IsolationConfig) bool {
 // "handler", idle/errored; INV-CCH-17) is still a duplicate to absorb.
 //
 // A handler-closed settled row is further bounded by the dispatching event
-// (pg2-uprw5, ADR 0082): it is a duplicate only for a redelivery of the SAME
-// event, never for a later re-dispatch of the same bead and role (see
-// staleSettledRow).
-func (r *ccpoolRun) findSessionByName(ctx context.Context, name, eventID string) (ccpool.Session, bool) {
+// (pg2-uprw5, ADR 0082) AND the item's pinned head (pg2-afre3): it is a
+// duplicate only for a redelivery of the SAME event at the SAME head, never for
+// a later re-dispatch of the same bead and role (see staleSettledRow).
+func (r *ccpoolRun) findSessionByName(ctx context.Context, name, eventID, headSHA string) (ccpool.Session, bool) {
 	sessions, err := r.deps.CC.List(ctx)
 	if err != nil {
 		return ccpool.Session{}, false
 	}
 	for _, s := range sessions {
-		if s.Name == name && !crashOrphaned(s) && !staleSettledRow(s, eventID) {
+		if s.Name == name && !crashOrphaned(s) && !staleSettledRow(s, eventID, headSHA) {
 			return s, true
 		}
 	}
@@ -825,16 +826,45 @@ func crashOrphaned(s ccpool.Session) bool {
 //     with none): it cannot be proven a redelivery, so it IS stale;
 //   - otherwise it is stale exactly when the ids differ.
 //
+// The event id alone is NOT enough for an item-carrying event (bead pg2-afre3):
+// event.FingerprintID is deterministic per (event type, bead), so a review
+// re-dispatched after a head advance carries the SAME id as the review that
+// already settled, and the id check above never fires. The id comparison is
+// therefore refined by the item's pinned head (ccpool.MetaKeyHeadSHA), applied
+// only to a row whose event id matched:
+//
+//   - this dispatch carries no head_sha (a worker/feedback role, or a bead
+//     without one): no head bound applies;
+//   - the row carries no head (launched by an older build): it cannot be proven
+//     the same head, so it IS stale;
+//   - otherwise it is stale exactly when the heads differ.
+//
+// Absorbing such a row would adopt the OLD head's outcome and, worse, measure the
+// time budget from its original launch, tripping an instant false
+// "session budget exceeded" without any model work.
+//
 // Only a handler-closed settled row is ever stale here. Rows still open, or
 // closed by anyone else, are judged by crashOrphaned alone.
-func staleSettledRow(s ccpool.Session, eventID string) bool {
+func staleSettledRow(s ccpool.Session, eventID, headSHA string) bool {
 	if eventID == "" || s.CloseReason != "handler" {
 		return false
 	}
 	if s.State != ccpool.StateIdle && s.State != ccpool.StateErrored {
 		return false
 	}
-	return s.Meta[ccpool.MetaKeyEventID] != eventID
+	if s.Meta[ccpool.MetaKeyEventID] != eventID {
+		return true
+	}
+	return headSHA != "" && s.Meta[ccpool.MetaKeyHeadSHA] != headSHA
+}
+
+// dispatchHeadSHA returns the pinned PR head of the dispatched item (its
+// head_sha metadata, refreshed from the bead at dispatch time), or "" when the
+// item carries none -- worker and feedback beads have no head, so no head bound
+// applies to them (bead pg2-afre3).
+func dispatchHeadSHA(it item.Item) string {
+	h, _ := it.Metadata["head_sha"].(string)
+	return h
 }
 
 // absorbDuplicate treats this dispatch as an already-in-flight duplicate of

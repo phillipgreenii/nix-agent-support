@@ -39,6 +39,15 @@ const (
 	// deciding whether to absorb a handler-closed settled row. Absent when the
 	// dispatch carried no event id. Never a --label.
 	MetaKeyEventID = "pgrouter.event_id"
+	// MetaKeyHeadSHA is the pinned PR head (the dispatched item's head_sha
+	// metadata) the session was launched to review (bead pg2-afre3). The event id
+	// alone cannot tell a redelivery from a re-dispatch for an item-carrying event,
+	// because it is deterministic per (event type, bead) -- review.ready:<bead> --
+	// and so is identical across every re-review of the same bead. The head is what
+	// changes: a review re-dispatched after a head advance is NOT a redelivery of
+	// the earlier head's settled session. Absent when the dispatch carried no
+	// head_sha. Never a --label.
+	MetaKeyHeadSHA = "pgrouter.head_sha"
 	// MetaKeyPurgePending marks a session whose teardown is two-phase and not yet
 	// finished (bead pg2-kqegi, INV-CCH-20): the handler has closed the row
 	// (non-purge) but not yet removed its per-bead worktree, and will purge the
@@ -63,8 +72,9 @@ const PoolName = "pg-router"
 // mistaken for an orphan; the handler shortens it to now+TTL on its first
 // refresh once Ensure succeeds. A zero now or a non-positive leaseTTL omits the
 // lease keys (the session is then never treated as an orphan). A non-empty
-// eventID is stamped as MetaKeyEventID; an empty one omits the key.
-func DispatchMeta(beadID, role string, now time.Time, leaseTTL time.Duration, eventID string) map[string]string {
+// eventID is stamped as MetaKeyEventID, and a non-empty headSHA as
+// MetaKeyHeadSHA; an empty one omits its key.
+func DispatchMeta(beadID, role string, now time.Time, leaseTTL time.Duration, eventID, headSHA string) map[string]string {
 	m := map[string]string{
 		MetaKeyBead: beadID,
 		MetaKeyRole: role,
@@ -72,6 +82,9 @@ func DispatchMeta(beadID, role string, now time.Time, leaseTTL time.Duration, ev
 	}
 	if eventID != "" {
 		m[MetaKeyEventID] = eventID
+	}
+	if headSHA != "" {
+		m[MetaKeyHeadSHA] = headSHA
 	}
 	if !now.IsZero() && leaseTTL > 0 {
 		m[MetaKeyLaunchedAt] = FormatMetaTime(now)

@@ -1,6 +1,6 @@
 # A gated dispatcher closes the sessions it settles
 
-**Status**: Accepted (amends 0072); item 4 bounded by an event-id check (2026-10-06, bead `pg2-uprw5`)
+**Status**: Accepted (amends 0072); item 4 bounded by an event-id check (2026-10-06, bead `pg2-uprw5`) and a pinned-head check (2026-10-07, bead `pg2-afre3`)
 **Date**: 2026-10-05
 **Deciders**: Phillip Green II
 
@@ -51,7 +51,15 @@ The dispatch-time reconcile does not help: it closes only sessions whose bead is
    is a new event with a different id (for example a review bead reopened after a head advance),
    and launches a fresh session instead. A handler-closed row with no recorded event id (launched
    by an older build) cannot be proven a redelivery and is not absorbed; a dispatch with no event
-   id applies no bound. Rows that are still open are judged as before.
+   id applies no bound. Rows that are still open are judged as before. **Refined by head
+   (2026-10-07, bead `pg2-afre3`):** the event id is deterministic per event type and bead
+   (`review.ready:<bead>`), so a re-review after a head advance carries the SAME id and the check
+   above never fired for it; the re-dispatch absorbed the settled row and measured its time budget
+   from the original launch, tripping an instant false "session budget exceeded". The launching
+   dispatch therefore also stamps the item's pinned head (`pgrouter.head_sha`), and a handler-closed
+   row is absorbed only when the head also matches. A dispatch with no `head_sha` (a worker or
+   feedback bead) applies no head bound; a row with no recorded head (older build) is not absorbed.
+   The event id is deliberately left unchanged: it is the core's dedup key (INV-EVT-3).
 
 ## Consequences
 

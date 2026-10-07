@@ -402,7 +402,7 @@ func TestTakeOverForAbsorb_reclaimedRowIsNotAbsorbable(t *testing.T) {
 	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{reclaimed}}}
 	e := newExec(cc, &dtest.ScriptBD{}, leaseCfg())
 	e.deps.LockDir = t.TempDir()
-	_, ok, err := e.takeOverForAbsorb(context.Background(), settledRow(), "")
+	_, ok, err := e.takeOverForAbsorb(context.Background(), settledRow(), "", "")
 	if err != nil || ok {
 		t.Fatalf("a reclaimed row must not be absorbable: ok=%v err=%v", ok, err)
 	}
@@ -416,7 +416,7 @@ func TestTakeOverForAbsorb_goneRowIsNotAbsorbable(t *testing.T) {
 	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{}}}
 	e := newExec(cc, &dtest.ScriptBD{}, leaseCfg())
 	e.deps.LockDir = t.TempDir()
-	if _, ok, err := e.takeOverForAbsorb(context.Background(), settledRow(), ""); err != nil || ok {
+	if _, ok, err := e.takeOverForAbsorb(context.Background(), settledRow(), "", ""); err != nil || ok {
 		t.Fatalf("a vanished row must not be absorbable: ok=%v err=%v", ok, err)
 	}
 }

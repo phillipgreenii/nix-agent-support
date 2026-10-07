@@ -248,7 +248,8 @@ review`. The claim is still released (status open, assignee cleared) — the lab
   review reopened after a head advance), or a row with no recorded event id, launches a fresh
   session instead of being absorbed into the dead row. Operator ruling (Phillip, 2026-10-05, bead `pg2-58edz`), narrowing
   the purge-on-teardown of `phillipgreenii-nix-agent-support` ADR 0015 to a non-purge close; see
-  ADR 0082. The event bound on absorption is bead `pg2-uprw5`.
+  ADR 0082. The event bound on absorption is bead `pg2-uprw5`; because the event id is identical across
+  re-reviews of one bead, absorption is also bounded by the item's pinned head (`pg2-afre3`).
 - **`INV-CCH-18`** — a session the handler launched MUST NOT stay unsupervised once its handler is
   gone. While a handler is alive it MUST keep a supervision lease on its session: the lease is
   stamped when the session is launched (covering the whole launch wait, so a session still

@@ -8,7 +8,7 @@ import (
 )
 
 func TestDispatchMeta_buildsPgrouterNamespacedMap(t *testing.T) {
-	got := DispatchMeta("zr-1", "worker", time.Time{}, 0, "")
+	got := DispatchMeta("zr-1", "worker", time.Time{}, 0, "", "")
 	want := map[string]string{
 		MetaKeyBead: "zr-1",
 		MetaKeyRole: "worker",
@@ -23,7 +23,7 @@ func TestDispatchMeta_buildsPgrouterNamespacedMap(t *testing.T) {
 // launch time is stamped alongside it (INV-CCH-18).
 func TestDispatchMeta_stampsLaunchTimeAndInitialLease(t *testing.T) {
 	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
-	got := DispatchMeta("zr-1", "worker", now, 2*time.Minute, "")
+	got := DispatchMeta("zr-1", "worker", now, 2*time.Minute, "", "")
 	if got[MetaKeyLaunchedAt] != "2026-10-06T12:00:00Z" {
 		t.Errorf("launched_at = %q", got[MetaKeyLaunchedAt])
 	}
@@ -38,7 +38,7 @@ func TestDispatchMeta_stampsLaunchTimeAndInitialLease(t *testing.T) {
 }
 
 func TestDispatchMeta_nonPositiveTTLOmitsLease(t *testing.T) {
-	got := DispatchMeta("zr-1", "worker", time.Now(), 0, "")
+	got := DispatchMeta("zr-1", "worker", time.Now(), 0, "", "")
 	if _, ok := got[MetaKeyLeaseUntil]; ok {
 		t.Errorf("a zero TTL must omit the lease: %v", got)
 	}
@@ -51,12 +51,25 @@ func TestDispatchMeta_nonPositiveTTLOmitsLease(t *testing.T) {
 // redelivery of the same event from a re-dispatch (pg2-uprw5); an empty id
 // omits the key.
 func TestDispatchMeta_stampsEventID(t *testing.T) {
-	got := DispatchMeta("zr-1", "worker", time.Time{}, 0, "evt-7")
+	got := DispatchMeta("zr-1", "worker", time.Time{}, 0, "evt-7", "")
 	if got[MetaKeyEventID] != "evt-7" {
 		t.Errorf("event_id = %q, want evt-7", got[MetaKeyEventID])
 	}
-	if _, ok := DispatchMeta("zr-1", "worker", time.Time{}, 0, "")[MetaKeyEventID]; ok {
+	if _, ok := DispatchMeta("zr-1", "worker", time.Time{}, 0, "", "")[MetaKeyEventID]; ok {
 		t.Errorf("an empty event id must omit the key")
+	}
+}
+
+// The dispatched item's pinned head is stamped so a later dispatch of the same
+// bead can tell a re-review after a head advance from a redelivery (pg2-afre3);
+// an empty head omits the key.
+func TestDispatchMeta_stampsHeadSHA(t *testing.T) {
+	got := DispatchMeta("zr-1", "review", time.Time{}, 0, "review.ready:zr-1", "abc123")
+	if got[MetaKeyHeadSHA] != "abc123" {
+		t.Errorf("head_sha = %q, want abc123", got[MetaKeyHeadSHA])
+	}
+	if _, ok := DispatchMeta("zr-1", "worker", time.Time{}, 0, "evt-7", "")[MetaKeyHeadSHA]; ok {
+		t.Errorf("an empty head must omit the key")
 	}
 }
 
@@ -85,7 +98,7 @@ func TestSession_LeaseUntilAndLaunchedAt(t *testing.T) {
 // would churn telemetry (bead pg2-g2u9m).
 func TestEnsure_neverLabelsLeaseKeys(t *testing.T) {
 	cli, got, _ := newSpy()
-	meta := DispatchMeta("zr-1", "worker", time.Now(), 2*time.Minute, "")
+	meta := DispatchMeta("zr-1", "worker", time.Now(), 2*time.Minute, "", "")
 	if err := cli.Ensure(t.Context(), "s", "", "/r", nil, meta); err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}

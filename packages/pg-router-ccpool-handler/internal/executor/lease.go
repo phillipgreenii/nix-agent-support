@@ -120,7 +120,7 @@ func (r *ccpoolRun) startLease(ctx context.Context, name string) (stop func()) {
 // orphan): the caller then launches a fresh session. Without a configured lock
 // dir (unit tests; production always sets one) there is nothing to exclude, and
 // the lease is simply refreshed.
-func (r *ccpoolRun) takeOverForAbsorb(ctx context.Context, existing ccpool.Session, eventID string) (ccpool.Session, bool, error) {
+func (r *ccpoolRun) takeOverForAbsorb(ctx context.Context, existing ccpool.Session, eventID, headSHA string) (ccpool.Session, bool, error) {
 	if r.deps.LockDir == "" {
 		r.refreshLeaseOnce(ctx, existing.ExternalID)
 		return existing, true, nil
@@ -142,7 +142,7 @@ func (r *ccpoolRun) takeOverForAbsorb(ctx context.Context, existing ccpool.Sessi
 		if s.ExternalID != existing.ExternalID {
 			continue
 		}
-		if crashOrphaned(s) || staleSettledRow(s, eventID) {
+		if crashOrphaned(s) || staleSettledRow(s, eventID, headSHA) {
 			slog.Info("absorb: session was closed or reclaimed while taking over; launching afresh",
 				"session", s.ExternalID, "close_reason", s.CloseReason)
 			return ccpool.Session{}, false, nil
