@@ -135,7 +135,7 @@ func TestGateMetrics_BlockedAndDropsPerParticipantAndType_OwnerIsNeverALabel(t *
 		t.Errorf("blocked{poll,src} = %d, want 1", got)
 	}
 	drops := findMetric(t, rm, MetricGateDrops)
-	if got := sumForBoth(drops, "listener", "worker", "gate", "ALPHA"); got != 1 {
+	if got := sumForBoth(drops, "role", "worker", "gate", "ALPHA"); got != 1 {
 		t.Errorf("drops{worker,ALPHA} = %d, want 1", got)
 	}
 	// Cardinality guard: the owner string must appear in NO metric's attributes.

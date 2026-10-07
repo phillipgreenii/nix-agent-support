@@ -161,7 +161,7 @@ through the queue's signal fan-out.
 traffic. No other identifier (event id, session, bead) becomes a label. Existing labels are
 unchanged, including the inconsistent names other metrics use for the same concept (`listener` on
 gate-drops, `participant` on gate-blocked, `pgrouter_role` on ccpool metrics); unifying them is a
-possible follow-up, not part of this decision.
+possible follow-up, not part of this decision (settled in `DEC-OBS-7`).
 
 **Latency buckets.** Latency is measured from the event's enqueue instant through the handler's
 synchronous run, so the old 1 ms to 5 s boundaries left every real sample in the overflow bucket.
@@ -193,3 +193,27 @@ new series. No event id, session or bead becomes a label.
 that does not match on it: the observed consumers (the pg-router dashboard's p50/p95 panels)
 aggregate with `sum by (le)`. A query that groups by `outcome` or `role` alone is likewise
 unaffected; only a rule that expects exactly one series per (`outcome`, `role`) would change.
+
+### `DEC-OBS-7` — a listener's id is labelled `role` on every pg-router metric that carries one; `participant` and `pgrouter_role` keep their names <!-- uuid: 38fa463e-63b0-44d3-b3a7-26e8c4519934 -->
+
+**Decided** (bead `pg2-q1dcc`, follow-up to `pg2-nimab` and `DEC-OBS-5`, which left the naming
+inconsistency open). Four label names overlapped: `role`, `listener`, `participant`, `pgrouter_role`.
+They are not four spellings of one concept, so only one is unified:
+
+- `pg_router_gate_drops` renames `listener` to `role`. Its value is the listener id, the same value
+  `role` carries on `failures`, `throughput` and `dispatch-latency` (`DEC-OBS-3`, `DEC-OBS-5`), so
+  a listener-scoped metric now uses one label name. The observed consumers are none: no dashboard,
+  alert rule or query in any workspace repo references `pg_router_gate_drops`, so the rename breaks
+  nothing known. Series recorded before the change keep `listener`; a query that wants both
+  spellings during the overlap can match either.
+- `pg_router_gate_blocked` keeps `participant`. Its value is any registry participant a gate
+  stopped, including a polled event **source** as well as a listener, so it is the wider concept
+  and `role` would mislabel the source rows.
+- ccpool's `pgrouter_role` keeps its name. It is not emitted by pg-router: it is a
+  ccpool session label (`pgrouter.role`, allowlisted onto ccpool's metrics and exported with an
+  underscore) that identifies the pg-router role a ccpool session was launched for, and the ccpool
+  dashboards select on it.
+  Renaming it would break those dashboards and join expressions for no gain in clarity.
+
+**Bounds.** Unchanged: `role` is config-bounded (`DEC-OBS-5`). The rename swaps a label key; it adds
+no series.

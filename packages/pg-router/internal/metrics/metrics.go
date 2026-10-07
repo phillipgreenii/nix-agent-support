@@ -210,8 +210,8 @@ const (
 	// TYPE.
 	MetricGateBlocked = "pg_router_gate_blocked"
 	// MetricGateDrops counts events that went away for a gate-blocked listener at
-	// its final attempt (INV-EVT-4), per event type, listener and gate TYPE — the
-	// measure of how much routing a long gate cost.
+	// its final attempt (INV-EVT-4), per event type, role (the listener id, DEC-OBS-7)
+	// and gate TYPE — the measure of how much routing a long gate cost.
 	MetricGateDrops = "pg_router_gate_drops"
 )
 
@@ -703,7 +703,7 @@ func (e *Emitter) OnGateBlocked(participant, kind, gateType string) {
 func (e *Emitter) OnGateDrop(evtType, listenerID, gateType string) {
 	e.gateDrops.Add(context.Background(), 1, metric.WithAttributes(
 		attribute.String("event_type", evtType),
-		attribute.String("listener", listenerID),
+		attribute.String("role", listenerID),
 		attribute.String("gate", e.gateLabel(gateType)),
 	))
 }
