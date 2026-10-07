@@ -247,8 +247,11 @@ func defaults() Config {
 
 // defaultPricing is the built-in per-model price table (Anthropic published
 // per-MTok rates as of 2026-06: Opus 4.x in5/out25/cc6.25/cr0.50, Sonnet 4.x
-// in3/out15/cc3.75/cr0.30, Haiku 4.5 in1/out5/cc1.25/cr0.10). It lets native
-// cost emit with no [account.pricing] config; [account.pricing] overrides it.
+// in3/out15/cc3.75/cr0.30, Haiku 4.5 in1/out5/cc1.25/cr0.10; Sonnet 5.5
+// in2/out10/cc2.50/cr0.20, Opus 5.5 in4/out20/cc5.00/cr0.20, confirmed
+// 2026-10-06 against Anthropic's pricing page; cc is the 5-minute-TTL write).
+// It lets native cost emit with no [account.pricing] config; [account.pricing]
+// overrides it.
 // Default (unknown-model fallback) matches Opus, the priciest common tier, so
 // unknown models are never understated.
 func defaultPricing() PricingConfig {
@@ -258,6 +261,8 @@ func defaultPricing() PricingConfig {
 			"claude-opus-4-7":           {InputPerMTok: 5, OutputPerMTok: 25, CacheCreationPerMTok: 6.25, CacheReadPerMTok: 0.50},
 			"claude-opus-4-6":           {InputPerMTok: 5, OutputPerMTok: 25, CacheCreationPerMTok: 6.25, CacheReadPerMTok: 0.50},
 			"claude-opus-4-5":           {InputPerMTok: 5, OutputPerMTok: 25, CacheCreationPerMTok: 6.25, CacheReadPerMTok: 0.50},
+			"claude-opus-5-5":           {InputPerMTok: 4, OutputPerMTok: 20, CacheCreationPerMTok: 5.00, CacheReadPerMTok: 0.20},
+			"claude-sonnet-5-5":         {InputPerMTok: 2, OutputPerMTok: 10, CacheCreationPerMTok: 2.50, CacheReadPerMTok: 0.20},
 			"claude-sonnet-4-6":         {InputPerMTok: 3, OutputPerMTok: 15, CacheCreationPerMTok: 3.75, CacheReadPerMTok: 0.30},
 			"claude-sonnet-4-5":         {InputPerMTok: 3, OutputPerMTok: 15, CacheCreationPerMTok: 3.75, CacheReadPerMTok: 0.30},
 			"claude-haiku-4-5-20251001": {InputPerMTok: 1, OutputPerMTok: 5, CacheCreationPerMTok: 1.25, CacheReadPerMTok: 0.10},

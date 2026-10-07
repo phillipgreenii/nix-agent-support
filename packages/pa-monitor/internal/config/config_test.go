@@ -551,3 +551,32 @@ func TestFirstPromptMaxChars(t *testing.T) {
 		}
 	})
 }
+
+// TestDefaultPricingIncludesFiveFiveModels pins the built-in prices for the
+// 5.5 generation (USD per MTok, confirmed 2026-10-06 against Anthropic's
+// pricing page; cache-creation is the 5-minute-TTL write) and that the
+// unknown-model fallback stays at the Opus 4.x tier.
+func TestDefaultPricingIncludesFiveFiveModels(t *testing.T) {
+	cfg, err := Load(filepath.Join(t.TempDir(), "nonexistent.toml"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	want := map[string]ModelPricing{
+		"claude-sonnet-5-5": {InputPerMTok: 2, OutputPerMTok: 10, CacheCreationPerMTok: 2.50, CacheReadPerMTok: 0.20},
+		"claude-opus-5-5":   {InputPerMTok: 4, OutputPerMTok: 20, CacheCreationPerMTok: 5.00, CacheReadPerMTok: 0.20},
+	}
+	for model, w := range want {
+		got, ok := cfg.Pricing.Models[model]
+		if !ok {
+			t.Errorf("default pricing missing %q", model)
+			continue
+		}
+		if got != w {
+			t.Errorf("default pricing for %q = %+v, want %+v", model, got, w)
+		}
+	}
+	wantDefault := ModelPricing{InputPerMTok: 5, OutputPerMTok: 25, CacheCreationPerMTok: 6.25, CacheReadPerMTok: 0.50}
+	if cfg.Pricing.Default != wantDefault {
+		t.Errorf("default fallback = %+v, want %+v", cfg.Pricing.Default, wantDefault)
+	}
+}
