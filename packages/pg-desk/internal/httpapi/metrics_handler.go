@@ -111,7 +111,7 @@ func newMetricsHandler(st *store.Store, cfg *config.Config, pollInterval PollInt
 		return nil, fmt.Errorf("httpapi: register change-flow metrics: %w", err)
 	}
 
-	return promhttp.HandlerFor(registry, promhttp.HandlerOpts{}), nil
+	return scrapeHandler(registry, scrapeTimeout), nil
 }
 
 // sourceAges projects the payload's sources[] to the gauge's input: a
@@ -165,4 +165,30 @@ func syncRetryStats(st *store.Store, interps []store.Interpretation) (retrying, 
 		}
 	}
 	return retrying, exhausted, nil
+}
+
+// scrapeTimeout is how long one /metrics scrape may take before it is
+// answered 503. Prometheus's default scrape timeout is 10s; this is
+// deliberately looser so a slow-but-finishing collection still lands, while a
+// wedged one cannot hold a connection forever.
+const scrapeTimeout = 30 * time.Second
+
+// scrapeHandler serves reg as Prometheus exposition text, hardened against
+// the pile-up bead pg2-jj0ym observed (a scrape not answering within 40s,
+// abandoned scrapes not cancelling) — bead pg2-n6d8y item 3.
+//
+// A collection cannot be cancelled once started: the OTel exporter collects
+// with a background context, so the request context never reaches the store
+// reads behind the snapshot. What the handler can bound is the work a client
+// causes by scraping:
+//   - CoalesceGather: every scrape arriving while a collection is in flight
+//     joins it and shares its result, so abandoned scrapes cost nothing extra
+//     and at most ONE collection runs at a time;
+//   - Timeout: a scrape not finished within timeout is answered 503 instead of
+//     holding its connection open.
+func scrapeHandler(reg prometheus.Gatherer, timeout time.Duration) http.Handler {
+	return promhttp.HandlerFor(reg, promhttp.HandlerOpts{
+		CoalesceGather: true,
+		Timeout:        timeout,
+	})
 }

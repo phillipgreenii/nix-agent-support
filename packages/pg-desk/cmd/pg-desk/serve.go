@@ -23,6 +23,30 @@ import (
 // so requests are cheap) before forcing the listener closed.
 const shutdownGrace = 5 * time.Second
 
+// Server timeouts (bead pg2-n6d8y item 3). A bare http.Server has none, so a
+// stalled or abandoned client held its connection and goroutine forever.
+// serve's requests are small reads, so only the write deadline needs room: it
+// MUST outlast the 30s /metrics scrape deadline (httpapi) or that handler's own
+// 503 could never be written.
+const (
+	serveReadHeaderTimeout = 10 * time.Second
+	serveReadTimeout       = 30 * time.Second
+	serveWriteTimeout      = 60 * time.Second
+	serveIdleTimeout       = 2 * time.Minute
+)
+
+// newHTTPServer builds serve's http.Server with the timeouts above.
+func newHTTPServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{ //nolint:gosec // addr/port are operator-supplied, never network-untrusted input
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: serveReadHeaderTimeout,
+		ReadTimeout:       serveReadTimeout,
+		WriteTimeout:      serveWriteTimeout,
+		IdleTimeout:       serveIdleTimeout,
+	}
+}
+
 // defaultServeLogPath is the fallback log path when neither the launchd
 // module (packet 10) nor the operator's config sets serve.log, per the
 // Binding decisions section: "Default log path (if the launchd module
@@ -150,7 +174,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("serve: %w", err)
 	}
-	srv := &http.Server{Addr: addr, Handler: handler} //nolint:gosec // addr/port are operator-supplied, never network-untrusted input
+	srv := newHTTPServer(addr, handler)
 
 	// main.go wires SIGINT/SIGTERM into cmd.Context() via
 	// signal.NotifyContext, which only CONVERTS the signal into context
