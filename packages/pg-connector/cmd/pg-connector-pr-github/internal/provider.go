@@ -60,7 +60,12 @@ type ghProvider interface {
 	// HeadSHA/ChecksRollup — List's own non-ids_only path uses this
 	// instead of the old SearchPRs + per-matched-PR GetPR/ReviewThreadCount
 	// fan-out.
-	SearchPRsEnriched(ctx context.Context, query string) ([]api.PR, error)
+	//
+	// The gated form (bead pg2-cw6b3.3, spec section 14 D5) also reads the
+	// rate-limit state out of that same document and offers it to gate after
+	// every page; a gate error refuses the read and is returned as-is. This
+	// is how List enforces the reserve without a separate probe call.
+	SearchPRsEnrichedGated(ctx context.Context, query string, gate github.RateGate) ([]api.PR, github.RateLimit, error)
 	// SearchPRsActivity runs one GitHub search-syntax query for the activity
 	// capability: the result carries createdAt/closedAt, and limit is the
 	// result cap (GitHub search caps any query at 1000).
@@ -252,6 +257,15 @@ func (b *Backend) checkRateReserve(ctx context.Context) error {
 	if err != nil {
 		return classifyGHError(err)
 	}
+	return enforceRateReserve(ctx, rl)
+}
+
+// enforceRateReserve applies the reserve to an already-taken reading: it
+// records the reading on the call's event and answers unavailable when the
+// remainder is below config.rate_reserve_points. checkRateReserve (a probe
+// read) and List's folded gate (a reading carried by the search response, bead
+// pg2-cw6b3.3) share it so the two paths cannot drift.
+func enforceRateReserve(ctx context.Context, rl github.RateLimit) error {
 	reserve := rateReservePoints(scriptout.ConfigFromContext(ctx))
 	eventlog.RecordRateLimit(ctx, rl.Remaining, rl.ResetAt, reserve)
 	if rl.Remaining < reserve {
@@ -272,14 +286,19 @@ func (b *Backend) checkRateReserve(ctx context.Context) error {
 // "<owner>/<repo>#<number>" id convention (formatPRID) — design's
 // "run each, union results deduplicated by id" rule.
 //
-// Before searching, this checks the GraphQL rate-limit remainder
+// This checks the GraphQL rate-limit remainder
 // (design's "Rate protection" bullet) against
 // config.rate_reserve_points (rateReservePoints, reading the SAME
 // per-backend config member every op receives via
 // scriptout.ConfigFromContext) — falling below it answers unavailable
 // rather than a partial/misleading result set, since a caller cannot
 // otherwise tell "genuinely zero matches" apart from "GitHub throttled
-// this call partway through." Truncated is always false: both
+// this call partway through." The ids_only path probes before searching; the
+// enriched path reads the remainder out of each search response instead
+// (bead pg2-cw6b3.3, spec section 14 D5: a latency and simplicity change, the
+// probe it replaces was uncharged), so a below-reserve answer there costs the
+// one search that carried the reading, and its results are discarded and no
+// further page or query string is requested. Truncated is always false: both
 // SearchPRs and SearchPRsEnriched fully paginate their own results
 // internally, so there is never a partial page to report [freedom
 // boundary].
@@ -328,8 +347,15 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 	if rngErr != nil {
 		return nil, rngErr
 	}
-	if err := b.checkRateReserve(ctx); err != nil {
-		return nil, err
+	// idsOnly searches via `gh search prs` (REST), which carries no rate-limit
+	// reading, so it keeps the up-front probe. The enriched path below does
+	// NOT probe: its batched GraphQL document selects rateLimit, and each page's
+	// reading is gated by enforceRateReserve before the page is used or the next
+	// is requested (bead pg2-cw6b3.3, spec section 14 D5).
+	if idsOnly {
+		if err := b.checkRateReserve(ctx); err != nil {
+			return nil, err
+		}
 	}
 	// imprecise: some PR's updatedAt could not be judged against the bound,
 	// so the result is flagged truncated rather than claimed exact.
@@ -360,10 +386,11 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 		return &schema.PRListResult{PresentIDs: ids, Cursor: nil, Truncated: imprecise}, nil
 	}
 
+	gate := func(rl github.RateLimit) error { return enforceRateReserve(ctx, rl) }
 	seen := make(map[string]bool)
 	matched := make([]api.PR, 0)
 	for _, q := range query {
-		prs, err := b.gh.SearchPRsEnriched(ctx, withUpdatedQualifier(q, rng))
+		prs, _, err := b.gh.SearchPRsEnrichedGated(ctx, withUpdatedQualifier(q, rng), gate)
 		if err != nil {
 			return nil, classifyGHError(err)
 		}

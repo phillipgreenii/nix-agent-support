@@ -941,8 +941,14 @@ type ghBatchedSearchResponse struct {
 	Data struct {
 		// RateLimit (bead pg2-x3h8c.2) is the request's own rateLimit
 		// selection: Cost is the points this one request cost.
-		RateLimit struct {
-			Cost int `json:"cost"`
+		//
+		// It is a pointer so a response that omitted the selection is
+		// distinguishable from a genuine zero reading: the gated read
+		// (SearchPRsEnrichedGated) must not treat "absent" as "0 remaining".
+		RateLimit *struct {
+			Cost      int    `json:"cost"`
+			Remaining int    `json:"remaining"`
+			ResetAt   string `json:"resetAt"`
 		} `json:"rateLimit"`
 		Search struct {
 			PageInfo struct {
@@ -1062,8 +1068,35 @@ func (n ghBatchedSearchNode) headCommitStatusState() string {
 // old SearchPRs' fixed --limit 100 (which silently capped at 100 with no
 // truncation signal of its own).
 func (p *Provider) SearchPRsEnriched(ctx context.Context, query string) ([]api.PR, error) {
+	prs, _, err := p.SearchPRsEnrichedGated(ctx, query, nil)
+	return prs, err
+}
+
+// RateGate judges one rate-limit reading taken from a search response. A
+// non-nil error refuses the read.
+type RateGate func(RateLimit) error
+
+// SearchPRsEnrichedGated is SearchPRsEnriched that also reads the rate-limit
+// state out of the SAME GraphQL document as the search (bead pg2-cw6b3.3,
+// spec section 14 D5): the document already selects rateLimit { cost remaining
+// resetAt }, so the reading costs no process spawn, no round trip and no extra
+// points (the separate probe it replaces was uncharged, spec section 6.6; this
+// is a latency and simplicity change, not a budget change).
+//
+// gate, when non-nil, judges the reading after EVERY page, before that page's
+// results are used and before the next page is requested. A refusal returns the
+// gate's error as-is with no results, so a throttled call never yields a partial
+// result set and never pages on. The read that carried the refusing reading has
+// already happened, which is the one thing a fold cannot avoid: the reading is
+// in the response. A response with no rateLimit object at all is an error when
+// gate is non-nil (fail closed), never a reading of 0.
+//
+// The returned RateLimit is the last page's reading (zero when gate is nil and
+// the response carried none).
+func (p *Provider) SearchPRsEnrichedGated(ctx context.Context, query string, gate RateGate) ([]api.PR, RateLimit, error) {
 	searchQuery := "is:pr " + query
 	var out []api.PR
+	var last RateLimit
 	after := ""
 	for {
 		args := []string{
@@ -1076,16 +1109,27 @@ func (p *Provider) SearchPRsEnriched(ctx context.Context, query string) ([]api.P
 		}
 		raw, err := p.runRead(ctx, readOpts{}, args...)
 		if err != nil {
-			return nil, err
+			return nil, RateLimit{}, err
 		}
 		var resp ghBatchedSearchResponse
 		if err := json.Unmarshal(raw, &resp); err != nil {
-			return nil, fmt.Errorf("github: parse batched search graphql response: %w", err)
+			return nil, RateLimit{}, fmt.Errorf("github: parse batched search graphql response: %w", err)
 		}
-		// Every request's own cost is summed onto the call's event (a no-op
-		// when ctx carries no recorder), so the op=list row logs the points
-		// the whole call spent across its pages.
-		eventlog.AddGraphQLCost(ctx, resp.Data.RateLimit.Cost)
+		if rl := resp.Data.RateLimit; rl != nil {
+			// Every request's own cost is summed onto the call's event (a
+			// no-op when ctx carries no recorder), so the op=list row logs
+			// the points the whole call spent across its pages.
+			eventlog.AddGraphQLCost(ctx, rl.Cost)
+			last = RateLimit{Remaining: rl.Remaining, ResetAt: rl.ResetAt}
+		}
+		if gate != nil {
+			if resp.Data.RateLimit == nil {
+				return nil, RateLimit{}, errors.New("github: batched search graphql response carried no rateLimit reading")
+			}
+			if gerr := gate(last); gerr != nil {
+				return nil, last, gerr
+			}
+		}
 		for _, n := range resp.Data.Search.Nodes {
 			if n.Number == 0 {
 				// The matched search() node's inline PullRequest fragment
@@ -1107,7 +1151,7 @@ func (p *Provider) SearchPRsEnriched(ctx context.Context, query string) ([]api.P
 			break
 		}
 	}
-	return out, nil
+	return out, last, nil
 }
 
 // rateLimitWire is the shape of `gh api graphql -f query='{ rateLimit {

@@ -87,8 +87,11 @@ type Event struct {
 	// summed over every page of every search string (bead pg2-x3h8c.2). Every
 	// op=list row carries it, 0 included (the ids-only path spends none). The
 	// row carries no query name, so a reader attributes cost to one query by
-	// running a single list call at a time. The rate-limit read that guards the
-	// call is not counted.
+	// running a single list call at a time. The separate rate-limit probe of an
+	// ids-only call is not counted (it is uncharged); the enriched path takes no
+	// probe, its reading rides on the search response (bead pg2-cw6b3.3), so a
+	// call refused below the reserve there logs the cost of the one search that
+	// carried the reading.
 	GraphQLCost  *int `json:"graphql_cost,omitempty"`
 	BelowReserve bool `json:"below_reserve,omitempty"`
 }
@@ -185,7 +188,7 @@ func buildEvent(op, version string, start, end time.Time, err error, rec *record
 		ev.BelowReserve = headroom < 0
 	}
 	// Every op=list row carries a numeric graphql_cost, 0 when the call made
-	// no search request (ids-only, or refused below the reserve), so a reader
+	// no search request (ids-only), so a reader
 	// can tell "cost 0" from "cost not logged".
 	if op == "list" {
 		cost := rec.cost

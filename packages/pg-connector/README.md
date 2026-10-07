@@ -159,8 +159,8 @@ source plus Grafana alert rules for it are registered in that backend's own nix 
 event carries `time`, `level`, `msg`, `op`, `error_code`, `duration_ms` and, on calls that read the
 GraphQL budget, `graphql_remaining`, `graphql_reset_at`, `graphql_reserve` and `graphql_headroom`.
 Every `op=list` event also carries a numeric `graphql_cost`: the points that one list call spent on
-its search requests, summed over every page of every search string (0 for an `--ids-only` call or a
-call refused below the reserve). The row names no query, so attribute cost to one search string by
+its search requests, summed over every page of every search string (0 for an `--ids-only` call; a call
+refused below the reserve logs the cost of the one search whose response carried the reading). The row names no query, so attribute cost to one search string by
 running a single list call at a time.
 `packages/pg-connector/grafana/alerting/pr-github-alerts.yaml` alerts on auth failure, sustained
 `unavailable`, and the budget sitting under `rate_reserve_points`. Writing the log is best effort and

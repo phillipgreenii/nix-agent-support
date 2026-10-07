@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"regexp"
 	"sort"
 	"strings"
@@ -312,5 +313,83 @@ func TestSearchBatchedQuery_PinnedFieldSet(t *testing.T) {
 	if got != pinnedSearchBatchedQuery {
 		t.Fatalf("searchBatchedQuery changed. The 74-node page size was measured for the pinned document only; "+
 			"re-measure the cost boundary (rateLimit(dryRun: true) at first:74 and first:75), then update searchBatchedPageSize and pinnedSearchBatchedQuery together.\n got: %s\nwant: %s", got, pinnedSearchBatchedQuery)
+	}
+}
+
+// The folded rate-limit read (bead pg2-cw6b3.3, spec section 14 D5): the batched
+// search document already selects rateLimit, so SearchPRsEnrichedGated reads the
+// reserve's input from the SAME response instead of a separate probe call.
+
+const gatedPage1 = `{"data":{"rateLimit":{"cost":1,"remaining":4000,"resetAt":"2026-10-06T13:00:00Z"},"search":{"pageInfo":{"hasNextPage":true,"endCursor":"C1"},"nodes":[
+  {"number":1,"url":"u","state":"OPEN","repository":{"nameWithOwner":"o/r"}}]}}}`
+
+const gatedPage2 = `{"data":{"rateLimit":{"cost":1,"remaining":3999,"resetAt":"2026-10-06T13:00:00Z"},"search":{"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[
+  {"number":2,"url":"u","state":"OPEN","repository":{"nameWithOwner":"o/r"}}]}}}`
+
+// The gate sees every page's reading, in order, and needs no extra gh call: the
+// only requests issued are the search pages themselves.
+func TestSearchPRsEnrichedGated_GatesEachPageFromTheSearchResponse(t *testing.T) {
+	gh := &sequencedGH{responses: [][]byte{[]byte(gatedPage1), []byte(gatedPage2)}}
+	var seen []RateLimit
+	prs, last, err := NewWithRunner(gh).SearchPRsEnrichedGated(context.Background(), "is:open",
+		func(rl RateLimit) error { seen = append(seen, rl); return nil })
+	if err != nil {
+		t.Fatalf("SearchPRsEnrichedGated: %v", err)
+	}
+	if len(prs) != 2 {
+		t.Fatalf("prs = %d, want 2", len(prs))
+	}
+	want := []RateLimit{{Remaining: 4000, ResetAt: "2026-10-06T13:00:00Z"}, {Remaining: 3999, ResetAt: "2026-10-06T13:00:00Z"}}
+	if len(seen) != 2 || seen[0] != want[0] || seen[1] != want[1] {
+		t.Fatalf("gate saw %+v, want %+v", seen, want)
+	}
+	if last != want[1] {
+		t.Errorf("returned reading = %+v, want the last page's %+v", last, want[1])
+	}
+	if len(gh.calls) != 2 {
+		t.Fatalf("gh calls = %d, want 2 (the two search pages, no separate rate-limit probe)", len(gh.calls))
+	}
+	for i, c := range gh.calls {
+		if !strings.Contains(strings.Join(c, " "), "search(query") {
+			t.Errorf("call %d is not a search page: %v", i, c)
+		}
+	}
+}
+
+// A refusing gate returns its own error and no results, and no further page is
+// requested.
+func TestSearchPRsEnrichedGated_RefusalStopsPagingAndDiscardsResults(t *testing.T) {
+	gh := &sequencedGH{responses: [][]byte{[]byte(gatedPage1), []byte(gatedPage2)}}
+	refusal := errors.New("below reserve")
+	prs, rl, err := NewWithRunner(gh).SearchPRsEnrichedGated(context.Background(), "is:open",
+		func(RateLimit) error { return refusal })
+	if !errors.Is(err, refusal) {
+		t.Fatalf("err = %v, want the gate's error", err)
+	}
+	if prs != nil {
+		t.Errorf("prs = %+v, want none", prs)
+	}
+	if rl.Remaining != 4000 {
+		t.Errorf("reading = %+v, want the refusing page's", rl)
+	}
+	if len(gh.calls) != 1 {
+		t.Fatalf("gh calls = %d, want 1 (no second page after a refusal)", len(gh.calls))
+	}
+}
+
+// With a gate, a response that omits rateLimit fails closed (it is not a reading
+// of 0 remaining and not a pass); with no gate the same response is accepted, as
+// before.
+func TestSearchPRsEnrichedGated_MissingRateLimit(t *testing.T) {
+	const noRL = `{"data":{"search":{"pageInfo":{"hasNextPage":false},"nodes":[]}}}`
+	gated := func(RateLimit) error {
+		t.Fatal("gate must not be offered a reading the response did not carry")
+		return nil
+	}
+	if _, _, err := NewWithRunner(&sequencedGH{responses: [][]byte{[]byte(noRL)}}).SearchPRsEnrichedGated(context.Background(), "is:open", gated); err == nil {
+		t.Fatal("want an error for a gated read whose response carried no rateLimit")
+	}
+	if _, _, err := NewWithRunner(&sequencedGH{responses: [][]byte{[]byte(noRL)}}).SearchPRsEnrichedGated(context.Background(), "is:open", nil); err != nil {
+		t.Fatalf("ungated read of a response without rateLimit: %v", err)
 	}
 }

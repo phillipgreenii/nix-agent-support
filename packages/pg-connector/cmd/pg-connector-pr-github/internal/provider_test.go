@@ -53,6 +53,10 @@ type fakeGH struct {
 	rateLimit        int
 	rateLimitResetAt string
 	rateLimitErr     error
+	// readRateLimitCalls counts ReadRateLimit probes; enrichedGateCalls counts
+	// the rate-limit readings SearchPRsEnrichedGated offered its gate.
+	readRateLimitCalls int
+	enrichedGateCalls  int
 
 	// files/commits/filesErr/commitsErr back the Files/Commits (bead
 	// pg2-2j5ac.28.2) seam.
@@ -145,11 +149,32 @@ func (f *fakeGH) SearchPRs(ctx context.Context, query string) ([]api.PR, error) 
 	return nil, nil
 }
 
-func (f *fakeGH) SearchPRsEnriched(ctx context.Context, query string) ([]api.PR, error) {
+// SearchPRsEnrichedGated models the real provider: the search runs first, THEN
+// the reading carried in its response (here the fake's rateLimit, the same value
+// ReadRateLimit answers) is offered to gate; a gate refusal discards the results.
+// enrichedGateCalls counts the readings offered, so a test can prove how many
+// responses were gated. The fake never calls ReadRateLimit from here: the point
+// of the fold is that no separate probe is taken.
+func (f *fakeGH) SearchPRsEnrichedGated(ctx context.Context, query string, gate github.RateGate) ([]api.PR, github.RateLimit, error) {
+	var prs []api.PR
 	if f.searchEnrichedFn != nil {
-		return f.searchEnrichedFn(ctx, query)
+		var err error
+		if prs, err = f.searchEnrichedFn(ctx, query); err != nil {
+			return nil, github.RateLimit{}, err
+		}
 	}
-	return nil, nil
+	remaining := f.rateLimit
+	if remaining == 0 {
+		remaining = rateLimitOrDefaultReserve
+	}
+	rl := github.RateLimit{Remaining: remaining, ResetAt: f.rateLimitResetAt}
+	f.enrichedGateCalls++
+	if gate != nil {
+		if err := gate(rl); err != nil {
+			return nil, rl, err
+		}
+	}
+	return prs, rl, nil
 }
 
 func (f *fakeGH) SearchPRsActivity(ctx context.Context, query string, limit int) ([]api.PR, error) {
@@ -166,6 +191,7 @@ func (f *fakeGH) SearchPRsActivity(ctx context.Context, query string, limit int)
 const rateLimitOrDefaultReserve = defaultRateReservePoints + 1000
 
 func (f *fakeGH) ReadRateLimit(ctx context.Context) (github.RateLimit, error) {
+	f.readRateLimitCalls++
 	if f.rateLimitErr != nil {
 		return github.RateLimit{}, f.rateLimitErr
 	}
@@ -591,27 +617,84 @@ func TestBackend_List_SearchError_Classified(t *testing.T) {
 }
 
 // TestBackend_List_RateLimitBelowReserve_IsUnavailable is the design
-// "Rate protection" bullet's own regression proof: a rate-limit
-// remainder below the reserve answers unavailable BEFORE any search is
-// even attempted.
+// "Rate protection" bullet's own regression proof: a rate-limit remainder
+// below the reserve answers unavailable and yields no result set. Since bead
+// pg2-cw6b3.3 the reading arrives WITH the first search response, so that one
+// search has run; what the gate guarantees is that its results are discarded
+// and no further page or query string is requested.
 func TestBackend_List_RateLimitBelowReserve_IsUnavailable(t *testing.T) {
-	searchEnrichedCalled := false
+	var searched []string
 	gh := &fakeGH{
 		rateLimit: 500,
 		searchEnrichedFn: func(ctx context.Context, query string) ([]api.PR, error) {
-			searchEnrichedCalled = true
-			return nil, nil
+			searched = append(searched, query)
+			return []api.PR{{Repo: "owner/repo", Number: 1}}, nil
 		},
 	}
 	b := newTestBackend(t, gh)
 
 	ctx := scriptout.WithConfig(context.Background(), []byte(`{"rate_reserve_points":1000}`))
-	_, err := b.List(ctx, []string{"is:open"}, false, nil)
+	got, err := b.List(ctx, []string{"is:open", "is:closed"}, false, nil)
 	if !errors.Is(err, scriptout.ErrUnavailable) {
 		t.Fatalf("err = %v, want errors.Is(err, ErrUnavailable)", err)
 	}
-	if searchEnrichedCalled {
-		t.Fatal("SearchPRsEnriched must not be called once the rate-limit check fails")
+	if got != nil {
+		t.Fatalf("result = %+v, want none (no partial result set below the reserve)", got)
+	}
+	if len(searched) != 1 {
+		t.Fatalf("searches = %v, want exactly the one that carried the reading (the second query string must not run)", searched)
+	}
+}
+
+// TestBackend_List_EnrichedPath_TakesNoSeparateRateLimitProbe is bead
+// pg2-cw6b3.3's whole point: the enriched list reads the rate limit from the
+// search response, so it makes no ReadRateLimit call, while every response is
+// still gated against the reserve. The ids_only path (REST search, no reading in
+// its response) keeps the up-front probe.
+func TestBackend_List_EnrichedPath_TakesNoSeparateRateLimitProbe(t *testing.T) {
+	gh := &fakeGH{rateLimit: 2000}
+	b := newTestBackend(t, gh)
+	ctx := scriptout.WithConfig(context.Background(), []byte(`{"rate_reserve_points":1000}`))
+
+	if _, err := b.List(ctx, []string{"is:open", "is:closed"}, false, nil); err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if gh.readRateLimitCalls != 0 {
+		t.Errorf("ReadRateLimit probes = %d, want 0 on the enriched path", gh.readRateLimitCalls)
+	}
+	if gh.enrichedGateCalls != 2 {
+		t.Errorf("gated readings = %d, want 2 (one per query string)", gh.enrichedGateCalls)
+	}
+
+	gh2 := &fakeGH{rateLimit: 2000}
+	if _, err := newTestBackend(t, gh2).List(ctx, []string{"is:open"}, true, nil); err != nil {
+		t.Fatalf("List ids_only: %v", err)
+	}
+	if gh2.readRateLimitCalls != 1 {
+		t.Errorf("ids_only ReadRateLimit probes = %d, want 1 (REST search carries no reading)", gh2.readRateLimitCalls)
+	}
+}
+
+// A reading that drops below the reserve on a LATER query string still stops the
+// list: the first string passes, the second's response refuses.
+func TestBackend_List_GatesEveryQueryStringsResponse(t *testing.T) {
+	gh := &fakeGH{}
+	calls := 0
+	gh.searchEnrichedFn = func(ctx context.Context, query string) ([]api.PR, error) {
+		calls++
+		if calls == 2 {
+			gh.rateLimit = 400 // the budget drops while the list is running
+		}
+		return []api.PR{{Repo: "owner/repo", Number: calls}}, nil
+	}
+	b := newTestBackend(t, gh)
+	ctx := scriptout.WithConfig(context.Background(), []byte(`{"rate_reserve_points":1000}`))
+	_, err := b.List(ctx, []string{"a", "b", "c"}, false, nil)
+	if !errors.Is(err, scriptout.ErrUnavailable) {
+		t.Fatalf("err = %v, want unavailable", err)
+	}
+	if calls != 2 {
+		t.Fatalf("searches = %d, want 2 (third query string must not run)", calls)
 	}
 }
 
@@ -709,7 +792,12 @@ func TestBackend_RateGuard_RecordsReadingOnEvent(t *testing.T) {
 // unauthenticated (what the auth alert keys on) and has no graphql fields.
 func TestBackend_RateGuard_ReadFailureIsClassifiedAndLeavesNoReading(t *testing.T) {
 	sink := &captureSink{}
-	b := newTestBackend(t, &fakeGH{rateLimitErr: github.ErrGHAuthInvalid})
+	b := newTestBackend(t, &fakeGH{
+		rateLimitErr: github.ErrGHAuthInvalid,
+		// The enriched list takes no separate probe (bead pg2-cw6b3.3); the
+		// auth failure surfaces from the search itself.
+		searchEnrichedFn: func(context.Context, string) ([]api.PR, error) { return nil, github.ErrGHAuthInvalid },
+	})
 	table := eventlog.Instrument(scriptout.DispatchTable{"list": {
 		SchemaVersion: 1,
 		Handle: func(ctx context.Context, _ json.RawMessage) (any, error) {

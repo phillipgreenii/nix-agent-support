@@ -51,8 +51,14 @@ func (fakeGH) SearchPRs(ctx context.Context, query string) ([]api.PR, error) {
 	return nil, nil
 }
 
-func (fakeGH) SearchPRsEnriched(ctx context.Context, query string) ([]api.PR, error) {
-	return nil, nil
+func (fakeGH) SearchPRsEnrichedGated(ctx context.Context, query string, gate github.RateGate) ([]api.PR, github.RateLimit, error) {
+	rl := github.RateLimit{Remaining: 5000, ResetAt: "2026-10-03T14:00:00Z"}
+	if gate != nil {
+		if err := gate(rl); err != nil {
+			return nil, rl, err
+		}
+	}
+	return nil, rl, nil
 }
 
 func (fakeGH) SearchPRsActivity(ctx context.Context, query string, limit int) ([]api.PR, error) {
