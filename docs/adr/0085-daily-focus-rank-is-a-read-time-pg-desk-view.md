@@ -46,7 +46,7 @@ written rule disagree on the one example the rule names.
   carries no `focus-item` literal.
 - A reviewer reading ADR 0077's section on decorations and decisions finds an amendment note
   pointing here, so the two texts agree at every commit.
-- The decider never closes or reopens a focus bead: a strike defers it indefinitely and a reselect undefers it (the operator's direction, 2026-10-07; the design's D-F16 and D-F19). "Closed" therefore keeps meaning only that the work is finished, and the change flow's S26 and `INV-DECIDER-5` (no decider behavior depends on how a work item was closed) need no exception. Tools that look for a focus bead must look at deferred ones too.
+- The decider never closes or reopens a focus bead: a strike defers it indefinitely and a reselect undefers it (the operator's direction, 2026-10-07). "Closed" therefore keeps meaning that the work is finished, and nothing in the rule depends on how a work item was closed. The decider's own behavior documents word its reading of a work item more narrowly than this and are amended with the daily-focus change. Tools that look for a focus bead must look at deferred ones too.
 - The decider's `focus_selected` selection reaches it through a dedicated `annotations.focus_selected`
   member of the view (D-F15), not through the decider's own namespace.
 - ADR 0081 and this ADR share one rule: a rank or an evaluation that depends on time or on sibling
