@@ -10,7 +10,7 @@
 # just a stub shaped to match.
 
 setup() {
-  # SCRIPTS_DIR/TEST_SUPPORT: injected by nix check (raw src dir / vendored
+  # SCRIPTS_DIR/TEST_SUPPORT: injected by nix check (raw src dir / base-flake
   # harness path), or computed relative to this test file for a local
   # `bats tests/` run. MUST honor an already-set env var -- gfh_setup below
   # scrubs every exported var not on its allowlist, so both are captured
@@ -23,7 +23,7 @@ setup() {
     source "$test_support_saved/git-fixture-harness.bash"
   else
     # shellcheck disable=SC1091
-    source "$(cd "$(dirname "${BATS_TEST_FILENAME}")/../../test-support" && pwd)/git-fixture-harness.bash"
+    source "$(git -C "$BATS_TEST_DIRNAME" rev-parse --path-format=absolute --git-common-dir)/../../phillipg-nix-repo-base/lib/scripts/git-fixture-harness.bash"
   fi
 
   command -v integrate-branch-support >/dev/null 2>&1 || skip "integrate-branch-support not on PATH"

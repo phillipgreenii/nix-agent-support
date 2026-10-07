@@ -16,8 +16,8 @@ load_git_fixture_harness() {
     # shellcheck disable=SC1091 # nix-provided test-support path
     source "$TEST_SUPPORT/git-fixture-harness.bash"
   else
-    # shellcheck disable=SC1091 # sibling test-support dir, resolved at source time
-    source "$(cd "$(dirname "${BATS_TEST_FILENAME}")/../test-support" && pwd)/git-fixture-harness.bash"
+    # shellcheck disable=SC1091 # local run: sibling phillipg-nix-repo-base checkout (pg2-xy4w7)
+    source "$(git -C "$BATS_TEST_DIRNAME" rev-parse --path-format=absolute --git-common-dir)/../../phillipg-nix-repo-base/lib/scripts/git-fixture-harness.bash"
   fi
 }
 

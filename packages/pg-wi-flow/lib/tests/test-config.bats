@@ -8,8 +8,7 @@ bats_require_minimum_version 1.5.0
 
 # load_git_fixture_harness -- sources the shared hermetic-by-construction
 # bats git-fixture harness (pg2-31f13/pg2-gucfd; see
-# packages/pg-wi-flow/lib/test-support/git-fixture-harness.bash's own
-# header) so a test that needs a real throwaway git repo (gfh_setup /
+# phillipg-nix-repo-base lib/scripts/git-fixture-harness.bash) so a test that needs a real throwaway git repo (gfh_setup /
 # gfh_teardown) can get one immune to GIT_DIR-family leakage from an
 # enclosing `git commit` hook.
 load_git_fixture_harness() {
@@ -17,8 +16,8 @@ load_git_fixture_harness() {
     # shellcheck disable=SC1091 # nix-provided test-support path
     source "$TEST_SUPPORT/git-fixture-harness.bash"
   else
-    # shellcheck disable=SC1091 # sibling test-support dir, resolved at source time
-    source "$(cd "$(dirname "${BATS_TEST_FILENAME}")/../test-support" && pwd)/git-fixture-harness.bash"
+    # shellcheck disable=SC1091 # local run: sibling phillipg-nix-repo-base checkout (pg2-xy4w7)
+    source "$(git -C "$BATS_TEST_DIRNAME" rev-parse --path-format=absolute --git-common-dir)/../../phillipg-nix-repo-base/lib/scripts/git-fixture-harness.bash"
   fi
 }
 
@@ -226,9 +225,13 @@ EOF
   gfh_setup "pg-wi-flow-config"
   mkdir -p "$GFH_REPO/sub/deeper"
   run pgwf_config_repo_path "$GFH_REPO/sub/deeper"
+  # git reports the PHYSICAL toplevel; GFH_REPO may sit under a symlinked
+  # TMPDIR (macOS /var -> /private/var), so compare physical paths.
+  local want
+  want="$(cd "$GFH_REPO" && pwd -P)/.claude/wi-flow/config.json"
   gfh_teardown
   [ "$status" -eq 0 ]
-  [ "$output" = "$GFH_REPO/.claude/wi-flow/config.json" ]
+  [ "$output" = "$want" ]
 }
 
 @test "pgwf_config_repo_path: falls back to the given directory outside a git tree" {

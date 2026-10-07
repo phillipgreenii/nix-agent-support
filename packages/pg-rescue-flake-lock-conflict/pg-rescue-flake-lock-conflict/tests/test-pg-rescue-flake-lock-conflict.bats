@@ -17,7 +17,10 @@ setup() {
     SCRIPTS_DIR="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
   fi
   if [[ -z ${TEST_SUPPORT:-} ]]; then
-    TEST_SUPPORT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)/test-support"
+    # Local run: the sibling phillipg-nix-repo-base checkout (the nix check
+    # injects TEST_SUPPORT from the base flake's git-fixture-harness package;
+    # pg2-xy4w7).
+    TEST_SUPPORT="$(git -C "$BATS_TEST_DIRNAME" rev-parse --path-format=absolute --git-common-dir)/../../phillipg-nix-repo-base/lib/scripts"
   fi
   # shellcheck disable=SC1091
   source "$TEST_SUPPORT/git-fixture-harness.bash"

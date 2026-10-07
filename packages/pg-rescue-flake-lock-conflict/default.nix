@@ -3,12 +3,11 @@
   bashBuilders,
 }:
 let
-  # Shared hermetic-by-construction bats git-fixture harness. test-support/
-  # holds a byte-for-byte copy of phillipg-nix-repo-base
-  # lib/scripts/git-fixture-harness.bash (pg2-emjgm); same vendoring
-  # mechanism as packages/wtdone/test-support, tracked for replacement by
-  # pg2-xy4w7. Re-copy it from canonical rather than editing it here.
-  testSupport = ./test-support;
+  # Shared hermetic-by-construction bats git-fixture harness (pg2-emjgm),
+  # consumed BY REFERENCE from phillipg-nix-repo-base's `git-fixture-harness`
+  # package (pkgs.git-fixture-harness via this flake's overlay; pg2-xy4w7) --
+  # no vendored copy to drift.
+  testSupport = "${pkgs.git-fixture-harness}/lib/scripts";
 
   # A single deterministic pg-rescue handler (bead pg2-3ybxg). It lives in its
   # own packages/ entry rather than inside packages/pg-rescue: that directory

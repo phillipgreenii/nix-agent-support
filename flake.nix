@@ -649,7 +649,15 @@
             }).pgWiFlowData;
         }
         // prev.lib.optionalAttrs (basePkgs ? pnwf) { inherit (basePkgs) pnwf; }
-        // prev.lib.optionalAttrs (basePkgs ? wsplan) { inherit (basePkgs) wsplan; };
+        // prev.lib.optionalAttrs (basePkgs ? wsplan) { inherit (basePkgs) wsplan; }
+        # git-fixture-harness (pg2-xy4w7): the canonical hermetic-by-construction
+        # bats git-fixture harness, consumed BY REFERENCE (no vendored copies) by
+        # this repo's bats check derivations as `pkgs.git-fixture-harness`. Same
+        # per-package `?` guard as pnwf/wsplan above; only forced when a bats
+        # check that needs it is built.
+        // prev.lib.optionalAttrs (basePkgs ? git-fixture-harness) {
+          inherit (basePkgs) git-fixture-harness;
+        };
 
       # pg2-i5t0k: the `prevent-main-rebase` pre-rebase hook's shell text
       # (used below as the `phillipgreenii.pre-commit.extraHooks` entry, and
@@ -1307,7 +1315,8 @@
               # pitfall test-behavior-docs-inter-conformance (above) already
               # documents for behavior-docs-resolve-links.bats. This test's
               # fixture needs the shared git-fixture-harness (pg2-31f13/pg2-gucfd),
-              # so it uses the same GFH_LIB env-var-override pattern instead.
+              # so it uses the same GFH_LIB env-var-override pattern instead
+              # (pointing at the base flake's packaged harness, pg2-xy4w7).
               test-prevent-main-rebase-hook =
                 let
                   preventMainRebaseHookPkg = pkgs.writeShellApplication {
@@ -1327,7 +1336,7 @@
                   }
                   ''
                     export PATH="${preventMainRebaseHookPkg}/bin:$PATH"
-                    export GFH_LIB="${./tests/support/git-fixture-harness.bash}"
+                    export GFH_LIB="${pkgs.git-fixture-harness}/lib/scripts/git-fixture-harness.bash"
                     bats ${./tests/prevent-main-rebase.bats}
                     touch $out
                   '';
@@ -6673,7 +6682,7 @@
                     # store-path interpolation of the .bats file (below) has no
                     # sibling tests/support/ directory, so this env var is the
                     # only way this check's copy resolves it.
-                    export GFH_LIB="${./tests/support/git-fixture-harness.bash}"
+                    export GFH_LIB="${pkgs.git-fixture-harness}/lib/scripts/git-fixture-harness.bash"
                     bats ${./tests/behavior-docs-intra-conformance.bats}
                     touch $out
                   '';
@@ -6733,7 +6742,7 @@
                     # interpolation of either .bats file has no sibling
                     # tests/support/ directory, so this env var is the only way
                     # this check's copy resolves it.
-                    export GFH_LIB="${./tests/support/git-fixture-harness.bash}"
+                    export GFH_LIB="${pkgs.git-fixture-harness}/lib/scripts/git-fixture-harness.bash"
                     bats ${./tests/behavior-docs-inter-conformance.bats}
                     bats ${./tests/behavior-docs-resolve-links.bats}
                     touch $out

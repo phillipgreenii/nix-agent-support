@@ -4,12 +4,13 @@
 }:
 let
   # test-support: the shared hermetic-by-construction bats git-fixture
-  # harness (vendored copy, see test-support/git-fixture-harness.bash's own
-  # header), needed by test-config.bats's two git-toplevel-resolution
-  # cases. Wired onto BOTH config and tracker below -- tracker's own check
-  # ALSO runs test-config.bats in full (its composed lib includes
-  # config.bash), not just config's own check.
-  testSupport = ./test-support;
+  # harness (consumed by reference from phillipg-nix-repo-base's
+  # `git-fixture-harness` package, pkgs.git-fixture-harness via this flake's
+  # overlay; pg2-xy4w7), needed by test-config.bats's two
+  # git-toplevel-resolution cases. Wired onto BOTH config and tracker below --
+  # tracker's own check ALSO runs test-config.bats in full (its composed lib
+  # includes config.bash), not just config's own check.
+  testSupport = "${pkgs.git-fixture-harness}/lib/scripts";
 
   # actor.bash: PG_WI_FLOW_IDENT + stage composition, or an explicit
   # --actor override (bead tc-q25wo item 2).

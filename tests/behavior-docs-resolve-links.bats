@@ -13,7 +13,7 @@ if [[ -n ${GFH_LIB:-} ]]; then
   source "$GFH_LIB"
 else
   # shellcheck disable=SC1090
-  source "$(cd "$BATS_TEST_DIRNAME/support" && pwd)/git-fixture-harness.bash"
+  source "$(git -C "$BATS_TEST_DIRNAME" rev-parse --path-format=absolute --git-common-dir)/../../phillipg-nix-repo-base/lib/scripts/git-fixture-harness.bash"
 fi
 
 setup() {
@@ -297,7 +297,7 @@ MD
   if [[ -n ${GFH_LIB:-} ]]; then
     harness_path="$GFH_LIB"
   else
-    harness_path="$(cd "$BATS_TEST_DIRNAME/support" && pwd)/git-fixture-harness.bash"
+    harness_path="$(git -C "$BATS_TEST_DIRNAME" rev-parse --path-format=absolute --git-common-dir)/../../phillipg-nix-repo-base/lib/scripts/git-fixture-harness.bash"
   fi
 
   run env GIT_DIR="$bogus" GIT_INDEX_FILE="$bogus/index" HARNESS_PATH="$harness_path" REAL_DIR="$real_dir" bash -c '

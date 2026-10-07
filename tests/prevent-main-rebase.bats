@@ -29,7 +29,7 @@ if [[ -n ${GFH_LIB:-} ]]; then
   source "$GFH_LIB"
 else
   # shellcheck disable=SC1090
-  source "$(cd "$BATS_TEST_DIRNAME/support" && pwd)/git-fixture-harness.bash"
+  source "$(git -C "$BATS_TEST_DIRNAME" rev-parse --path-format=absolute --git-common-dir)/../../phillipg-nix-repo-base/lib/scripts/git-fixture-harness.bash"
 fi
 
 setup() {

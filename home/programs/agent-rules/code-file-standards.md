@@ -53,7 +53,7 @@ repo := gittest.New(t, gitfixture.RepoOptions{})
   environment is an allowlist.
 
 Bash/bats (`git-fixture-harness.bash`; canonical copy in `phillipg-nix-repo-base` under
-`lib/scripts/`, vendored into some `test-support/` directories):
+`lib/scripts/`, exported by that flake as the `git-fixture-harness` package):
 
 ```bash
 setup() { gfh_setup "my-suite"; }
@@ -78,9 +78,11 @@ teardown() { gfh_teardown; }
   preserve it with `gfh_save_env VAR...` BEFORE `gfh_setup` and `gfh_restore_env` AFTER it, and MUST
   NOT re-export any `GIT_*`-family variable that way. `gfh_save_env` replaces hand-rolled
   copy-to-an-unexported-name-and-back code.
-- A vendored copy under a `test-support/` directory MAY lag the canonical copy and lack the
-  primitives above; a suite that needs one MUST re-vendor the canonical file rather than hand-roll
-  the fixture.
+- A repo SHOULD consume the harness by reference (`phillipg-nix-repo-base`'s `git-fixture-harness`
+  package, handed to the bats check as its `testSupport`) rather than vendor a copy, so there is
+  nothing to drift. A repo that still vendors a copy under a `test-support/` directory MAY see it
+  lag the canonical copy and lack the primitives above; a suite that needs one MUST re-vendor the
+  canonical file rather than hand-roll the fixture.
 
 Both libraries are hermetic BY CONSTRUCTION: the fixture lives under a temp root, `HOME` and the
 system git config are neutralised, and the environment is rebuilt from an allowlist rather than

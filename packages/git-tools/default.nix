@@ -4,10 +4,12 @@
 }:
 let
   # Shared hermetic-by-construction bats git-fixture harness (pg2-31f13; design
-  # pg2-gucfd; vendored pending pg2-ljn47.1's cross-repo nix packaging -- see
-  # test-support/git-fixture-harness.bash's own header). One copy, shared by
-  # all three sub-tools' bats suites, per pg2-gucfd's shared-harness decision.
-  testSupport = ./test-support;
+  # pg2-gucfd), consumed BY REFERENCE from phillipg-nix-repo-base's
+  # `git-fixture-harness` package (surfaced as pkgs.git-fixture-harness by this
+  # flake's overlay; pg2-xy4w7) -- there is no vendored copy to drift. One
+  # harness, shared by all three sub-tools' bats suites, per pg2-gucfd's
+  # shared-harness decision.
+  testSupport = "${pkgs.git-fixture-harness}/lib/scripts";
 
   git-branch-maintenance = pkgs.callPackage ./git-branch-maintenance {
     inherit (bashBuilders) mkBashScript;
