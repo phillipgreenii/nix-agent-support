@@ -153,6 +153,136 @@ func TestStatusJSON_RateLimitsOmittedWhenUnknown(t *testing.T) {
 	}
 }
 
+func TestCaffeinateProcessToken(t *testing.T) {
+	cases := []struct {
+		in   pb.CaffeinateProcess
+		want string
+	}{
+		{pb.CaffeinateProcess_CAFFEINATE_PROCESS_OFF, "off"},
+		{pb.CaffeinateProcess_CAFFEINATE_PROCESS_ON, "holding"},
+		{pb.CaffeinateProcess_CAFFEINATE_PROCESS_GRACE, "grace"},
+		{pb.CaffeinateProcess_CAFFEINATE_PROCESS_ERROR, "error"},
+		{pb.CaffeinateProcess(99), "unknown"},
+		{pb.CaffeinateProcess(-1), "unknown"},
+	}
+	for _, c := range cases {
+		if got := caffeinateProcessToken(c.in); got != c.want {
+			t.Errorf("caffeinateProcessToken(%v) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// statusJSONMap marshals the status document and decodes it generically so a
+// test can distinguish a key that is absent from one that is false/zero.
+func statusJSONMap(t *testing.T, state *pb.DaemonState) map[string]any {
+	t.Helper()
+	raw, err := json.Marshal(statusJSON(state, nil, time.Now().UTC()))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	return m
+}
+
+func TestStatusJSON_Caffeinate(t *testing.T) {
+	cases := []struct {
+		name        string
+		mode        bool
+		process     pb.CaffeinateProcess
+		graceS      uint32
+		wantProcess string
+		wantGrace   bool
+	}{
+		{"mode on holding", true, pb.CaffeinateProcess_CAFFEINATE_PROCESS_ON, 0, "holding", false},
+		{"mode off off", false, pb.CaffeinateProcess_CAFFEINATE_PROCESS_OFF, 0, "off", false},
+		{"mode on grace", true, pb.CaffeinateProcess_CAFFEINATE_PROCESS_GRACE, 42, "grace", true},
+		{"mode off grace", false, pb.CaffeinateProcess_CAFFEINATE_PROCESS_GRACE, 7, "grace", true},
+		{"mode on error", true, pb.CaffeinateProcess_CAFFEINATE_PROCESS_ERROR, 0, "error", false},
+		{"out of range", false, pb.CaffeinateProcess(99), 0, "unknown", false},
+		// grace seconds are only meaningful during grace: stray non-zero
+		// seconds in any other process state are not emitted.
+		{"stray grace seconds outside grace", true, pb.CaffeinateProcess_CAFFEINATE_PROCESS_ON, 30, "holding", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m := statusJSONMap(t, &pb.DaemonState{
+				CaffeinateMode:            c.mode,
+				CaffeinateProcess:         c.process,
+				CaffeinateGraceRemainingS: c.graceS,
+			})
+			caf, ok := m["caffeinate"].(map[string]any)
+			if !ok {
+				t.Fatalf("caffeinate key missing or wrong type: %v", m["caffeinate"])
+			}
+			if caf["mode"] != c.mode {
+				t.Errorf("mode = %v, want %v", caf["mode"], c.mode)
+			}
+			if caf["process"] != c.wantProcess {
+				t.Errorf("process = %v, want %q", caf["process"], c.wantProcess)
+			}
+			g, hasGrace := caf["grace_remaining_s"]
+			if hasGrace != c.wantGrace {
+				t.Fatalf("grace_remaining_s present = %v, want %v (%v)", hasGrace, c.wantGrace, caf)
+			}
+			if c.wantGrace && g != float64(c.graceS) {
+				t.Errorf("grace_remaining_s = %v, want %d", g, c.graceS)
+			}
+		})
+	}
+}
+
+func TestStatusJSON_GraceZeroOmitted(t *testing.T) {
+	// omitempty: a grace state with 0 seconds left carries no key; consumers
+	// MUST read the absence as 0.
+	m := statusJSONMap(t, &pb.DaemonState{
+		CaffeinateMode:    true,
+		CaffeinateProcess: pb.CaffeinateProcess_CAFFEINATE_PROCESS_GRACE,
+	})
+	caf := m["caffeinate"].(map[string]any)
+	if _, ok := caf["grace_remaining_s"]; ok {
+		t.Errorf("grace_remaining_s must be omitted when 0, got %v", caf)
+	}
+	if caf["process"] != "grace" {
+		t.Errorf("process = %v, want grace", caf["process"])
+	}
+}
+
+func TestStatusJSON_AutoResumeAlwaysPresent(t *testing.T) {
+	for _, want := range []bool{true, false} {
+		m := statusJSONMap(t, &pb.DaemonState{AutoResumeEnabled: want})
+		got, ok := m["auto_resume"]
+		if !ok {
+			t.Fatalf("auto_resume must be present even when %v", want)
+		}
+		if got != want {
+			t.Errorf("auto_resume = %v, want %v", got, want)
+		}
+		if _, ok := m["caffeinate"]; !ok {
+			t.Errorf("caffeinate must always be emitted by a new client")
+		}
+	}
+}
+
+// TestStatusJSON_OldShapeDecodes pins backward compatibility: a document
+// WITHOUT the new keys (an older pa-monitor client's output) still decodes
+// into the current struct, leaving the new fields at their zero values.
+func TestStatusJSON_OldShapeDecodes(t *testing.T) {
+	old := `{"sessions":[{"session_id":"s1","cwd":"/r","model":"m","status":"idle","session_tokens":1,"cost_usd":0,"long_idle":false}],"active_block":{"id":"b1","cost_usd":1}}`
+	var doc statusJSONDoc
+	if err := json.Unmarshal([]byte(old), &doc); err != nil {
+		t.Fatalf("old-shape decode: %v", err)
+	}
+	if len(doc.Sessions) != 1 || doc.Sessions[0].SessionID != "s1" {
+		t.Errorf("sessions decoded wrong: %+v", doc.Sessions)
+	}
+	if doc.Caffeinate != nil || doc.AutoResume {
+		t.Errorf("new fields must stay zero for an old doc: %+v %v", doc.Caffeinate, doc.AutoResume)
+	}
+}
+
 func TestStripJSONFlag(t *testing.T) {
 	rest, jsonMode := stripJSONFlag([]string{"session:s1", "--json"})
 	if !jsonMode || len(rest) != 1 || rest[0] != "session:s1" {

@@ -117,11 +117,63 @@ type rateLimitsJSON struct {
 	CapturedAt *string              `json:"captured_at,omitempty"`
 }
 
+// caffeinateJSON is the wire shape for `status --json`'s "caffeinate" key: the
+// operator's caffeinate MODE (the intent) next to the PROCESS state (what the
+// daemon is actually holding), so a consumer can tell "on but not holding" from
+// "on and holding". Process is exactly one of off|holding|grace|error|unknown
+// (see caffeinateProcessToken). GraceRemainingS is emitted only while the
+// process is in grace and is omitempty, so a consumer MUST read a missing value
+// during process "grace" as 0.
+type caffeinateJSON struct {
+	Mode            bool   `json:"mode"`
+	Process         string `json:"process"`
+	GraceRemainingS uint32 `json:"grace_remaining_s,omitempty"`
+}
+
+// statusJSONDoc is the `status --json` document. Caffeinate and AutoResume are
+// additive keys (menu-bar plugin contract): a client that has them ALWAYS
+// emits both, so key ABSENCE means "an older pa-monitor client". AutoResume is
+// deliberately NOT omitempty -- false is a meaningful value ("off").
 type statusJSONDoc struct {
 	Sessions    []sessionJSON    `json:"sessions"`
 	ActiveBlock *usageWindowJSON `json:"active_block,omitempty"`
 	ActiveWeek  *usageWindowJSON `json:"active_week,omitempty"`
 	RateLimits  *rateLimitsJSON  `json:"rate_limits,omitempty"`
+	Caffeinate  *caffeinateJSON  `json:"caffeinate,omitempty"`
+	AutoResume  bool             `json:"auto_resume"`
+}
+
+// caffeinateProcessToken maps the proto process enum to the stable machine
+// token used on the wire. It is separate from caffeinateProcessString, which
+// returns human display strings ("on (holding)"). Any value this client does not
+// recognise (e.g. one added by a newer daemon) maps to "unknown".
+func caffeinateProcessToken(p pb.CaffeinateProcess) string {
+	switch p {
+	case pb.CaffeinateProcess_CAFFEINATE_PROCESS_OFF:
+		return "off"
+	case pb.CaffeinateProcess_CAFFEINATE_PROCESS_ON:
+		return "holding"
+	case pb.CaffeinateProcess_CAFFEINATE_PROCESS_GRACE:
+		return "grace"
+	case pb.CaffeinateProcess_CAFFEINATE_PROCESS_ERROR:
+		return "error"
+	default:
+		return "unknown"
+	}
+}
+
+// toCaffeinateJSON reads the mode from GetCaffeinateMode() only, for parity
+// with the text status (cli.go); the legacy GetActive() fallback in control.go
+// is deliberately not mirrored.
+func toCaffeinateJSON(state *pb.DaemonState) *caffeinateJSON {
+	c := &caffeinateJSON{
+		Mode:    state.GetCaffeinateMode(),
+		Process: caffeinateProcessToken(state.GetCaffeinateProcess()),
+	}
+	if state.GetCaffeinateProcess() == pb.CaffeinateProcess_CAFFEINATE_PROCESS_GRACE {
+		c.GraceRemainingS = state.GetCaffeinateGraceRemainingS()
+	}
+	return c
 }
 
 // toRateLimitWindowJSON builds one window, or nil when neither the percentage nor
@@ -219,6 +271,8 @@ func statusJSON(state *pb.DaemonState, details []*pb.SessionDetail, now time.Tim
 		doc.ActiveWeek = toUsageWindowJSON(w.GetId(), w.GetCostUsd(), w.GetCapHitAt())
 	}
 	doc.RateLimits = toRateLimitsJSON(state)
+	doc.Caffeinate = toCaffeinateJSON(state)
+	doc.AutoResume = state.GetAutoResumeEnabled()
 	return doc
 }
 

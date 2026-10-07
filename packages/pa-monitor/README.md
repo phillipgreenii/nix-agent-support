@@ -55,6 +55,7 @@ pa-monitor config show
 | `tui`                                                | Interactive TUI (always daemon-backed).                      |
 | `status [--json]`                                    | One-shot dump of daemon state (`--json`: see below).         |
 | `caffeinate on\|off\|toggle`                         | Drive the caffeinate manager.                                |
+| `auto-resume on\|off\|toggle`                        | Drive the auto-resume setting (the TUI's `[R]` key).         |
 | `nudge <selector> [--text=...]`                      | Signal a session via the daemon.                             |
 | `info <selector>`                                    | Print session or directory details.                          |
 | `agents-busy-check [--consider-daemon-down-as-busy]` | Exit 0 iff any agent is busy (see caveat).                   |
@@ -64,10 +65,11 @@ pa-monitor config show
 
 `<selector>` accepts `session:<id>`, `path:<workspace-path>`, `cmux:<workspace-id>`, or a bare value (slash → path, otherwise session).
 
-### `status --json`: the `rate_limits` object
+### `status --json`: the `rate_limits`, `caffeinate` and `auto_resume` keys
 
-`status --json` prints one JSON document: `sessions`, `active_block`, `active_week`, and — when the
-daemon holds an authoritative status-line reading (ADR 0021) — `rate_limits`:
+`status --json` prints one JSON document: `sessions`, `active_block`, `active_week`, `caffeinate`,
+`auto_resume`, and — when the daemon holds an authoritative status-line reading (ADR 0021) —
+`rate_limits`:
 
 ```json
 {
@@ -83,6 +85,27 @@ Every field is independently optional: an absent `used_pct` or `resets_at` means
 and never 1970, and the whole `rate_limits` key is omitted when neither window is known. This is the
 contract `ccpool`'s usage gate binds (it refuses work while a window is at its limit and its reset is
 still in the future), so a field rename here is a breaking change for it.
+
+`caffeinate` and `auto_resume` carry the two operator toggles (additive keys; no existing key
+changed):
+
+```json
+{
+  "caffeinate": { "mode": true, "process": "holding", "grace_remaining_s": 42 },
+  "auto_resume": false
+}
+```
+
+- `caffeinate.mode` is the operator's intent; `caffeinate.process` is what the daemon is actually
+  doing, exactly one of `off`, `holding`, `grace`, `error`, or `unknown` (a value this client does
+  not recognise, e.g. from a newer daemon). `mode` on with `process` `off` is the "armed but not
+  holding" case.
+- `caffeinate.grace_remaining_s` is emitted only while `process` is `grace` and is omitted when 0, so
+  a consumer MUST read a missing value during `grace` as 0.
+- `auto_resume` is always present; `false` is a meaningful value, not "unknown".
+- A pa-monitor client with this change ALWAYS emits both keys, so key **absence** means "an older
+  pa-monitor client" and a consumer SHOULD hide the toggles. A new client talking to an OLD daemon
+  cannot tell unknown from off (proto3 zero values) and will report both as off; this is accepted.
 
 ### Busy/idle gates: a blocked session counts as idle
 
