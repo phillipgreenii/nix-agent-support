@@ -92,6 +92,9 @@ func cmdPrepare(args []string, stdout, stderr io.Writer) int {
 	fs.StringVar(&o.LiveStore, "live-store", "", "live store (default ~/.local/state/pg-desk/store.db)")
 	fs.StringVar(&o.DeskConfig, "pg-desk-config", "", "live pg-desk config")
 	fs.StringVar(&o.PRConfig, "pg-pr-config", "", "live pg-pr config")
+	fs.IntVar(&o.ListAttempts, "list-attempts", 6, "tries per warm-up listing that exits 3 (the team listing sits near the connector's 25s backend deadline)")
+	var toolDirs string
+	fs.StringVar(&toolDirs, "tool-dir", "", "comma-separated extra directories searched for tools after PATH")
 	if err := fs.Parse(args); err != nil {
 		return exitRefuse
 	}
@@ -100,6 +103,9 @@ func cmdPrepare(args []string, stdout, stderr io.Writer) int {
 		return exitRefuse
 	}
 	o.Queries = strings.Split(queries, ",")
+	if toolDirs != "" {
+		o.ToolDirs = strings.Split(toolDirs, ",")
+	}
 	o.Log = stdout
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()

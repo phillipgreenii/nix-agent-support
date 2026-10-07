@@ -109,8 +109,6 @@ func Synthesize(dir string, o SynthOptions) (Synthetic, error) {
 
 	var rows []string
 	rows = append(rows, js(schema.Row{Schema: schema.Version, Kind: schema.KindRunStart, Phase: o.Phase, At: schema.Format(t0)}))
-	zero, _ := 0, 0
-	_ = zero
 	gapFrom, gapTo := at(10, 28, 0), at(10, 35, 0)
 	rows = append(rows, js(schema.Row{Schema: schema.Version, Kind: schema.KindGap, Phase: o.Phase, Reason: schema.GapSleep, GapFrom: schema.Format(gapFrom), GapTo: schema.Format(gapTo), At: schema.Format(gapTo)}))
 	n := 0

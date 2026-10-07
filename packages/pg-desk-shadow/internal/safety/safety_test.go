@@ -135,7 +135,10 @@ func requireTool(t *testing.T, path string) {
 func sandboxUsable(t *testing.T) {
 	t.Helper()
 	requireTool(t, DefaultSandboxExec)
-	out, err := exec.Command(DefaultSandboxExec, "-p", "(version 1)(allow default)", "/usr/bin/true").CombinedOutput()
+	// Apply the REAL profile to a trivial command: inside the nix build
+	// sandbox sandbox-exec exists but cannot nest (sandbox_apply fails).
+	argv := Wrap(DefaultSandboxExec, t.TempDir(), []string{"/usr/bin/true"})
+	out, err := exec.Command(argv[0], argv[1:]...).CombinedOutput()
 	if err != nil {
 		if os.Getenv("PG_DESK_SHADOW_REQUIRE_TOOLS") == "1" {
 			t.Fatalf("sandbox-exec unusable: %v %s", err, out)

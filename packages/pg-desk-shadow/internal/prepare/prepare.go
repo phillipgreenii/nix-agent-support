@@ -41,6 +41,13 @@ type Options struct {
 	Live        scratch.LiveSources
 	Log         io.Writer
 	LookPath    func(string) (string, error)
+	// ToolDirs are searched for a tool AFTER the ambient PATH (for example a
+	// freshly built pg-router-source-pg-desk that is not installed yet).
+	ToolDirs []string
+	// ListAttempts is how many times a warm-up listing is tried when it exits
+	// 3 (the team listing sits close to the connector's 25s backend deadline
+	// and a loaded machine tips it over).
+	ListAttempts int
 }
 
 // Defaults fills unset options from the environment.
@@ -90,6 +97,24 @@ func (o *Options) Defaults() error {
 	}
 	if o.Log == nil {
 		o.Log = io.Discard
+	}
+	if o.ListAttempts <= 0 {
+		o.ListAttempts = 6
+	}
+	if len(o.ToolDirs) > 0 {
+		base, dirs := o.LookPath, o.ToolDirs
+		o.LookPath = func(name string) (string, error) {
+			if p, err := base(name); err == nil {
+				return p, nil
+			}
+			for _, d := range dirs {
+				p := filepath.Join(d, name)
+				if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+					return p, nil
+				}
+			}
+			return "", exec.ErrNotFound
+		}
 	}
 	if o.Self == "" {
 		self, err := os.Executable()
@@ -267,7 +292,15 @@ func Prepare(ctx context.Context, o Options) (scratch.Layout, scratch.Manifest, 
 func seed(ctx context.Context, o Options, l scratch.Layout, m *scratch.Manifest, run *runner.Runner, db sqlite.DB) error {
 	var listings []warmup.Listing
 	for _, q := range o.Queries {
-		res, err := run.Run(ctx, 5*time.Minute, filepath.Join(l.BinDir(), "pg-connector"), "pr", "list", "--query", q, "--fingerprints", "--output", "json")
+		var res runner.Result
+		var err error
+		for attempt := 1; attempt <= o.ListAttempts; attempt++ {
+			res, err = run.Run(ctx, 5*time.Minute, filepath.Join(l.BinDir(), "pg-connector"), "pr", "list", "--query", q, "--fingerprints", "--output", "json")
+			if err != nil || res.Exit != 3 {
+				break
+			}
+			o.logf("prepare: warm-up list %q exited 3 (attempt %d of %d)", q, attempt, o.ListAttempts)
+		}
 		if err != nil {
 			return fmt.Errorf("prepare: warm-up list %q: %w", q, err)
 		}

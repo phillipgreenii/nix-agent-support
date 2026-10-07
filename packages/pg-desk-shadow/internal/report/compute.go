@@ -190,7 +190,7 @@ func Compute(in Input, p Params) PhaseReport {
 		for _, t := range done {
 			doneAt[parseTS(t.Slot)] = true
 		}
-		compl := 0
+		okEligible := 0
 		for _, s := range slots {
 			dq.SlotsTotal++
 			excluded := false
@@ -205,19 +205,11 @@ func Compute(in Input, p Params) PhaseReport {
 				}
 			}
 			if doneAt[s] {
-				compl++
+				okEligible++
 			}
 			if !excluded {
 				dq.SlotsEligible++
 			}
-		}
-		_ = compl
-		okEligible := 0
-		for _, s := range slots {
-			if !doneAt[s] {
-				continue
-			}
-			okEligible++
 		}
 		if dq.SlotsTotal > 0 {
 			dq.UptimeRaw = float64(okEligible) / float64(dq.SlotsTotal)
@@ -619,9 +611,13 @@ func classifyMiss(id string, e time.Time, T time.Duration, firstStart, t0 time.T
 			hydFail = true
 		}
 		for _, src := range t.Sources {
-			if strings.Contains(src.Reason, "hydration_budget") || strings.Contains(src.Reason, "hydration_backend_degraded") {
+			switch {
+			case src.Status == "ok":
+			case strings.Contains(src.Reason, "hydration_budget") || strings.Contains(src.Reason, "hydration_backend_degraded"):
 				budgetEx = true
-			} else if src.Status != "ok" && strings.Contains(src.Reason, "hydrate") {
+			default:
+				// A listing that failed or degraded (the team listing regularly
+				// hits the connector's 25s backend deadline) or a failed hydration.
 				hydFail = true
 			}
 		}

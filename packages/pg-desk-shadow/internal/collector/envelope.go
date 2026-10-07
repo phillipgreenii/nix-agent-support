@@ -53,12 +53,12 @@ var (
 // literals (login, repo slug) and every owner/repo, #number, @handle and path
 // shaped token are replaced, whitespace collapsed and the text truncated.
 func Scrub(s string, literals []string) string {
+	s = pathRE.ReplaceAllString(s, "<path>")
 	for _, l := range literals {
 		if l != "" {
 			s = strings.ReplaceAll(s, l, "<redacted>")
 		}
 	}
-	s = pathRE.ReplaceAllString(s, "<path>")
 	s = refRE.ReplaceAllString(s, "<ref>")
 	s = atRE.ReplaceAllString(s, "<@>")
 	s = spaceRE.ReplaceAllString(strings.TrimSpace(s), " ")

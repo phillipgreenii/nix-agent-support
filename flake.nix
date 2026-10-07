@@ -327,6 +327,14 @@
           pg-decider = final.callPackage ./packages/pg-decider {
             inherit (goBuilders) mkGoApp;
           };
+          # pg-desk-shadow: Pattern A (ADR 0008), a one-off measurement tool
+          # (bead pg2-nu7h0) that runs pg-desk's fingerprint change detection
+          # beside the live flow on a store copy. It execs the pg-* tools it
+          # finds on PATH (no compile-time dependency, no local `replace`), and
+          # its wrapper carries sqlite3 for the collector's store reads.
+          pg-desk-shadow = final.callPackage ./packages/pg-desk-shadow {
+            inherit (goBuilders) mkGoApp;
+          };
           # pg-router-probe: Pattern A (ADR 0008), same shape as
           # pg-router-source-pg-connector above — a standalone deterministic
           # health probe over pg-router's own operational health (docket
@@ -1157,6 +1165,8 @@
               # reentrant test-helper-process shape for its own pg-desk wire
               # double, verified via
               # `grep -rln '^//go:build' packages/pg-router-source-pg-desk`;
+              # `pg-desk-shadow` added bead pg2-nu7h0 - no build-tagged test files,
+              # verified via `grep -rln '^//go:build' packages/pg-desk-shadow`;
               # `ccpool-probe` added docket pg2-93e5s packet 2 — same
               # reentrant test-helper-process shape, this time doubling
               # for BOTH its ccpool and pg-connector subprocess wire
@@ -1220,6 +1230,7 @@
                 "pg-router-source-pg-connector"
                 "pg-router-source-pg-desk"
                 "pg-decider"
+                "pg-desk-shadow"
                 "pg-router-probe"
                 "pg-router-disk-watchdog"
                 "pg-router-review-escalator"
@@ -3530,6 +3541,20 @@
                 pname = "pg-decider-go-tests";
                 src = lib.cleanSource ./packages/pg-decider; # matches default.nix
                 gomod2nixToml = ./packages/pg-decider/gomod2nix.toml;
+              };
+
+              # pg-desk-shadow (bead pg2-nu7h0) - whole-module Go test gate. Pattern
+              # A: flat src at the module dir, no local replace. sqlite3 on PATH
+              # for the fake-store tests. Tests that need sandbox-exec or the
+              # sibling pg-desk source SKIP inside this isolated build (no nested
+              # sandbox, no sibling module); the commit-time run-unit-tests hook
+              # runs them in the checkout (PG_DESK_SHADOW_REQUIRE_TOOLS=1 makes
+              # them fail instead of skip).
+              pg-desk-shadow-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-desk-shadow-go-tests";
+                src = lib.cleanSource ./packages/pg-desk-shadow; # matches default.nix
+                gomod2nixToml = ./packages/pg-desk-shadow/gomod2nix.toml;
+                testDeps = [ pkgs.sqlite ];
               };
 
               # pg-decider old-vs-new parity gate (bead pg2-v3cti, follow-up of
@@ -9969,6 +9994,7 @@
               pg-router-source-pg-connector
               pg-router-source-pg-desk
               pg-decider
+              pg-desk-shadow
               pg-router-probe
               pg-router-disk-watchdog
               pg-router-review-escalator

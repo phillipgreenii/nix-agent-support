@@ -75,11 +75,12 @@ The collector outlives agent sessions (a launchd agent is out of scope). It writ
 `<scratch>/collector/ticks.jsonl` and `collector.log` and exits when a stop or kill condition fires
 or on `SIGTERM`/`SIGINT`.
 
-| Exit | Meaning                                                                            |
-| ---- | ---------------------------------------------------------------------------------- |
-| 0    | Stopped on request (`--max-ticks`, signal) or the stop criteria were met           |
-| 1    | Refused to start (safety check, missing tool, second collector holding the lock)   |
-| 4    | Kill criterion tripped (spend ceiling, 10 consecutive failed ticks, denial, write) |
+| Exit | Meaning                                                                                   |
+| ---- | ----------------------------------------------------------------------------------------- |
+| 0    | Stopped on request (`--max-ticks`, signal)                                                |
+| 1    | Generic error (unexpected; read the message)                                              |
+| 2    | Refused to start (safety check, missing tool, a second collector holding the lock)        |
+| 4    | Kill criterion tripped (spend ceiling, failed ticks, sandbox denial, rejected write verb) |
 
 ### Resume
 
