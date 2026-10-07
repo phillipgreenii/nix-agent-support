@@ -133,6 +133,12 @@ type Orchestrator struct {
 	// whose Offer should notify it. cmd/pg-router's bootCore is the one
 	// production site that wires a live metrics.Emitter in here.
 	HandlerFailureObserver HandlerFailureObserver
+	// DispatchRetryObserver is notified each time a role with
+	// MaxDispatchRetries > 0 schedules a re-run of a transiently failed
+	// dispatch (bead pg2-yu5y2; see retry.go). nil (the default) disables the
+	// notification; captured by NewListener like the observers above.
+	// cmd/pg-router's bootCore wires the metrics.Emitter in here.
+	DispatchRetryObserver DispatchRetryObserver
 	// lastTick is the per-source next-fire substrate ProduceTick threads into
 	// discover.ProduceWithCadence (Task 1.3, discover.Cadence.LastTick): an
 	// Orchestrator OUTLIVES a single Produce call across `run`'s whole ticker

@@ -40,3 +40,36 @@ possible, never the concrete keys.
 **Not decided here.** Whether a future surface needs a DIFFERENT shape (e.g. jittered backoff, to
 avoid a thundering-herd effect across many handlers freeing up at once) is left for if and when
 that need is observed; nothing here forecloses it.
+
+### `DEC-RETRY-2` — a role MAY opt in to a bounded re-run of a transiently failed dispatch <!-- uuid: 3441f46c-18ee-4a18-a5c5-ab5eb07766af -->
+
+**Decided.** `INV-FAIL-1` leaves a post-accept failure to the handler: the core does not re-offer
+it. A handler that is a thin command wrapper (for example a sync of one entity) has no retry loop
+of its own, and a failure of that kind that is _transient_ — the handler or a child it ran was
+killed under host overload, a deadline expired, or a backend reported itself unavailable — was
+lost until some unrelated periodic sweep happened to re-drive the entity. So the core offers one
+narrow, **opt-in** exception, in the same spirit as `DEC-OBS-3`'s:
+
+- **Opt-in per role, default off.** A role carries `max_dispatch_retries` (0 = off, the default, so
+  every existing role and every built-in role is unchanged). It MUST NOT be enabled for a role
+  whose handler is not safe to run twice for the same event (event delivery is already
+  at-least-once, `INV-EVT-1`, so a handler MUST be idempotent regardless).
+- **Transient classes only.** `killed`, `deadline` and `unavailable`. A deterministic failure
+  (validation, authentication, an ordinary non-zero exit with a reason) is never re-run, a failure
+  while the run is shutting down is never re-run, and a busy decline keeps its own `INV-FAIL-1`
+  path.
+- **Bounded.** At most `max_dispatch_retries` re-runs per event, hard-capped at 3 by config
+  validation, and never past the event's `expiresAt` (`INV-EVT-4`: an attempt on an expired event
+  is its last). The count is in memory only (`DEC-EVENT-1`: no attempt history on disk), so a
+  restart starts it over, still bounded by `expiresAt`.
+- **Mechanism: a pre-accept decline.** The failed attempt is reported to the queue as a decline, so
+  the existing `INV-FAIL-2` cadence (exponential backoff with a cap) spaces the re-run and the
+  per-handler serial FIFO is preserved. This is what stops a host-overload storm from amplifying:
+  re-runs are spaced, bounded per event, and serial per handler.
+- **Observable.** Each scheduled re-run increments `pg_router_dispatch_retries{role,class}`
+  (`class` is `killed`/`deadline`/`unavailable`; `role` is config-bounded, `DEC-OBS-5`). Every
+  failed attempt is still counted as a `handler-error` failure, and the decline is visible as
+  `declined` with reason `dispatch-retry`.
+- **Only effective with a retry window.** An event with no `expiresAt` is born expired
+  (`INV-EVT-1`), so its single attempt is also its last and no re-run is possible: a producer whose
+  role opts in MUST stamp a future `expiresAt` on its events.

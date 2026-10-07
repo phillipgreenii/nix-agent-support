@@ -300,11 +300,32 @@ func (c *Client) Dispatch(ctx context.Context, role roles.Role, evt eventqueue.E
 		if len(stdout) > 0 {
 			var reply dispatchReply
 			if err := json.Unmarshal(stdout, &reply); err == nil && reply.Error != "" {
-				return Reply{}, fmt.Errorf("wireclient: role %q exited %d: %s", role.Name, code, reply.Error)
+				return Reply{}, &ExitError{Role: role.Name, Code: code, Detail: reply.Error}
 			}
 		}
-		return Reply{}, fmt.Errorf("wireclient: role %q exited %d", role.Name, code)
+		return Reply{}, &ExitError{Role: role.Name, Code: code}
 	}
+}
+
+// ExitError is Dispatch's error for a handler subprocess that exited with a
+// non-zero, non-busy code (bead pg2-yu5y2). It exists so a caller can
+// classify the failure structurally (Code -1 is how os/exec reports a child
+// killed by a signal) instead of parsing the message; Error() renders the
+// exact text Dispatch always produced for this case, so every existing
+// string match is unaffected.
+type ExitError struct {
+	Role string
+	// Code is the subprocess's exit code (-1 when it was killed by a signal).
+	Code int
+	// Detail is the reply body's own error text, "" when the handler gave none.
+	Detail string
+}
+
+func (e *ExitError) Error() string {
+	if e.Detail != "" {
+		return fmt.Sprintf("wireclient: role %q exited %d: %s", e.Role, e.Code, e.Detail)
+	}
+	return fmt.Sprintf("wireclient: role %q exited %d", e.Role, e.Code)
 }
 
 // lifecycleRequest / lifecycleReply mirror

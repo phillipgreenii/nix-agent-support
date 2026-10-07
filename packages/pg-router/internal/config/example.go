@@ -53,6 +53,11 @@ const exampleHeader = `# pg-router configuration — repo-local at <RepoRoot>/.p
 # every TYPE), and the built-in type = "timer" query is never blocked by any
 # gate:
 # non_blocking_gates = ["LOW_DISK_USAGE"]
+# A role MAY opt in to a bounded re-run of a dispatch whose handler failed with a
+# TRANSIENT error (killed / deadline / unavailable; never a deterministic
+# failure), at the role's retry cadence, at most this many times per event
+# (0 = off, the default; hard cap 3):
+# max_dispatch_retries = 2
 # The event log (queue.jsonl) is size-limited: [pool].max_log_bytes (default
 # 67108864 = 64 MiB; PG_ROUTER_MAX_LOG_BYTES takes units such as 64MiB). Past 90%
 # of it polled emitters are halted; at it new events are rejected with a log_full

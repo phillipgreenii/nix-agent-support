@@ -76,6 +76,8 @@ docs cite. An entry that overlaps an existing repository ADR MUST **cite** it, n
   event type's prefix before the first `.`; unparseable values map to `other`).
 - [`DEC-RETRY-1`](retry.md) — exponential-backoff-with-a-cap shape, and its default values, for
   both the handler retry cadence and the pull-source failure backoff.
+- [`DEC-RETRY-2`](retry.md) — a role MAY opt in to a bounded (hard cap 3), transient-class-only
+  re-run of a failed dispatch, carried as a pre-accept decline at the `INV-FAIL-2` cadence.
 - [`DEC-WIRE-1`](wire.md) — the default transport is a CLI invocation carrying JSON, with coarse exit
   codes, plus the illustrative message shapes.
 - [`DEC-WIRE-2`](wire.md) — the core is reached over a socket, and a callback command arrives with

@@ -143,6 +143,11 @@ type roleTOML struct {
 	// pg2-h63eu) this role's listener does NOT block on, declared at
 	// registration. Absent: the listener blocks on every gate TYPE.
 	NonBlockingGates []string `toml:"non_blocking_gates"`
+	// MaxDispatchRetries opts this role in to a bounded re-run of a dispatch
+	// that failed with a transient error (killed / deadline / unavailable;
+	// bead pg2-yu5y2). Absent or 0: no re-run (the default). Must be within
+	// 0..roles.MaxDispatchRetriesCap.
+	MaxDispatchRetries *int `toml:"max_dispatch_retries"`
 }
 
 // queryTOML is one top-level [[query]]: a named producer. It carries its config
@@ -458,7 +463,14 @@ func (r *Registry) buildRole(md toml.MetaData, rt roleTOML, configDir string, c 
 	if err := validateGateTypes(rt.NonBlockingGates); err != nil {
 		return roles.Role{}, fmt.Errorf("non_blocking_gates: %w", err)
 	}
-	return roles.Role{Name: rt.Name, Enabled: enabled, Binds: rt.Binds, RetryBackoff: retryBackoff, Description: rt.Description, NonBlockingGates: rt.NonBlockingGates}, nil
+	maxRetries := 0
+	if rt.MaxDispatchRetries != nil {
+		maxRetries = *rt.MaxDispatchRetries
+	}
+	if maxRetries < 0 || maxRetries > roles.MaxDispatchRetriesCap {
+		return roles.Role{}, fmt.Errorf("max_dispatch_retries = %d: must be between 0 and %d (a hard cap so a transient-failure storm cannot amplify load)", maxRetries, roles.MaxDispatchRetriesCap)
+	}
+	return roles.Role{Name: rt.Name, Enabled: enabled, Binds: rt.Binds, RetryBackoff: retryBackoff, MaxDispatchRetries: maxRetries, Description: rt.Description, NonBlockingGates: rt.NonBlockingGates}, nil
 }
 
 // buildQuery decodes one [[query]] into a concrete query.Query, installing its

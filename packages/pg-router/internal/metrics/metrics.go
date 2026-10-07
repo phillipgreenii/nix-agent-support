@@ -136,6 +136,13 @@ const (
 	// type and reason ("log_full" / "log_unwritable"); push and pull together
 	// (eventqueue.RejectObserver).
 	MetricEnqueueRejected = "pg_router_enqueue_rejected"
+	// MetricDispatchRetries counts each re-run the core schedules for a
+	// dispatch whose handler failed with a transient error (bead pg2-yu5y2), per
+	// role and class (killed / deadline / unavailable). It is the only
+	// post-accept-adjacent signal besides the handler-error class and exists so
+	// a retry storm is visible; the cap on retries per event is
+	// roles.MaxDispatchRetriesCap.
+	MetricDispatchRetries = "pg_router_dispatch_retries"
 	// MetricLiveness reports 1 while the daemon's last tick is within its
 	// liveness window, else 0. Registered ONLY when New is given WithLiveness
 	// (daemon-mode only — Task 3.3 binding decision: drain-and-exit never
@@ -304,6 +311,7 @@ type Emitter struct {
 	sourceFailures  metric.Int64Counter
 	deduped         metric.Int64Counter
 	enqueueRejected metric.Int64Counter
+	dispatchRetries metric.Int64Counter
 	dispatchLatency metric.Float64Histogram
 
 	// Gate Registry instruments (gate.go's GateObserver half; see the const
@@ -492,6 +500,14 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 	if err != nil {
 		return nil, err
 	}
+	dispatchRetries, err := m.Int64Counter(
+		MetricDispatchRetries,
+		metric.WithUnit("{retry}"),
+		metric.WithDescription("re-runs the core scheduled for a dispatch whose handler failed with a transient error, per role and class (killed/deadline/unavailable); bounded per event by the role's max_dispatch_retries"),
+	)
+	if err != nil {
+		return nil, err
+	}
 	dispatchLatency, err := m.Float64Histogram(
 		MetricDispatchLatency,
 		metric.WithUnit("ms"),
@@ -633,6 +649,7 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 	e.sourceFailures = sourceFailures
 	e.deduped = deduped
 	e.enqueueRejected = enqueueRejected
+	e.dispatchRetries = dispatchRetries
 	e.dispatchLatency = dispatchLatency
 	e.gateSets = gateSets
 	e.gateClears = gateClears
@@ -880,6 +897,17 @@ func (e *Emitter) OnHandlerFailure(_, _, listenerID string, err error) {
 		attrs = append(attrs, attribute.String("reason", ReasonBudgetExceeded))
 	}
 	e.failures.Add(context.Background(), 1, metric.WithAttributes(attrs...))
+}
+
+// OnDispatchRetry implements orchestrator.DispatchRetryObserver
+// (structurally, like OnHandlerFailure): it counts one re-run scheduled for a
+// transiently failed dispatch, labeled by the config-bounded role name and the
+// transient class (bead pg2-yu5y2).
+func (e *Emitter) OnDispatchRetry(role, class string) {
+	e.dispatchRetries.Add(context.Background(), 1, metric.WithAttributes(
+		attribute.String("role", role),
+		attribute.String("class", class),
+	))
 }
 
 // OnDeduped implements both the extended core.IngestObserver contract AND

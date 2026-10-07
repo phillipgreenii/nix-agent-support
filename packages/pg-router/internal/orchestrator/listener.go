@@ -9,6 +9,7 @@ import (
 	"github.com/phillipgreenii/pg-router/internal/core"
 	"github.com/phillipgreenii/pg-router/internal/discover"
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
+	"github.com/phillipgreenii/pg-router/internal/report"
 	"github.com/phillipgreenii/pg-router/internal/roles"
 	"github.com/phillipgreenii/pg-router/internal/wireclient"
 )
@@ -162,6 +163,16 @@ type roleListener struct {
 	// test) disables the notification entirely: Offer still runs the
 	// identical error check but skips the call.
 	handlerFailureObs HandlerFailureObserver
+	// retryObs is notified of each scheduled re-run of a transiently failed
+	// dispatch (bead pg2-yu5y2), captured at construction like the observers
+	// above; nil disables the notification, not the retry.
+	retryObs DispatchRetryObserver
+	// maxRetries is role.MaxDispatchRetries clamped to
+	// roles.MaxDispatchRetriesCap; 0 disables the retry entirely.
+	maxRetries int
+	// retries tracks the re-runs already scheduled per event id. It is NOT a
+	// capacity count (INV-CONC-1): it bounds how often ONE event is re-run.
+	retries retryLedger
 }
 
 // NewListener returns the eventqueue.Listener for role, run under ctx — the
@@ -180,7 +191,19 @@ func (o *Orchestrator) NewListener(ctx context.Context, role roles.Role) eventqu
 		o: o, role: role, ctx: ctx, poolDefault: o.Cfg.RetryBackoff,
 		reg: o.Registry, resourceLimitObs: o.ResourceLimitObserver,
 		handlerFailureObs: o.HandlerFailureObserver,
+		retryObs:          o.DispatchRetryObserver,
+		maxRetries:        clampRetries(role.MaxDispatchRetries),
 	}
+}
+
+func clampRetries(n int) int {
+	if n < 0 {
+		return 0
+	}
+	if n > roles.MaxDispatchRetriesCap {
+		return roles.MaxDispatchRetriesCap
+	}
+	return n
 }
 
 func (l *roleListener) ID() string { return l.role.Name }
@@ -243,6 +266,32 @@ func (l *roleListener) Matches(evt eventqueue.Event) bool {
 	return false
 }
 
+// DeclineDetailDispatchRetry is the DeclineDetail (the `reason` label of
+// pg_router_failures_total{class="declined"}) of an Offer that was handed back
+// to the queue to re-run a transiently failed dispatch (bead pg2-yu5y2), so a
+// retry is distinguishable from a busy/unavailable decline.
+const DeclineDetailDispatchRetry = "dispatch-retry"
+
+// shouldRetry reports whether this failed attempt gets re-run: the role opted
+// in (maxRetries > 0), the run is not shutting down, the event has not already
+// expired (the queue treats an attempt past expiresAt as the last one), the
+// error is a transient class, and fewer than maxRetries re-runs were already
+// spent on this event. When it returns true it has consumed one retry and
+// notified retryObs.
+func (l *roleListener) shouldRetry(evt eventqueue.Event, err error) bool {
+	if l.maxRetries <= 0 || l.ctx.Err() != nil || (!evt.ExpiresAt.IsZero() && evt.Expired(time.Now())) {
+		return false
+	}
+	class, ok := classifyTransient(err)
+	if !ok || !l.retries.take(evt.ID, l.maxRetries) {
+		return false
+	}
+	if l.retryObs != nil {
+		l.retryObs.OnDispatchRetry(l.role.Name, class)
+	}
+	return true
+}
+
 // Offer dispatches the event to this role's registered handler participant
 // over the wire (internal/wireclient.Dispatch, Task 5.4 — before it, this
 // ran the OLD in-process executor, ensure -> send -> wait for a ccpool
@@ -290,6 +339,16 @@ func (l *roleListener) Matches(evt eventqueue.Event) bool {
 // pg_router_failures_total can record it under its own class rather than
 // falling through both existing failure classes uncounted, as it did before
 // this bead (see HandlerFailureObserver's own doc comment above).
+//
+// bead pg2-yu5y2 adds an OPT-IN exception to the "always reports acceptance"
+// rule above: a role with MaxDispatchRetries > 0 whose dispatch failed with a
+// TRANSIENT class (killed / deadline / unavailable, classifyTransient) is
+// returned as a pre-accept decline (DeclineDetailDispatchRetry) instead of an
+// accept, at most MaxDispatchRetries times per event, so the queue re-offers
+// it at the role's RetryBackoff cadence while it is unexpired. Every failed
+// attempt still reaches handlerFailureObs; each scheduled re-run also reaches
+// retryObs. A deterministic failure, a cancelled run, or an exhausted budget
+// falls through to the unchanged accept.
 func (l *roleListener) Offer(o eventqueue.Offering) eventqueue.OfferResult {
 	if l.reg != nil && !l.reg.Available(l.role.Name) {
 		return eventqueue.OfferResult{Accepted: false, Decline: eventqueue.DeclineUnavailable}
@@ -321,6 +380,15 @@ func (l *roleListener) Offer(o eventqueue.Offering) eventqueue.OfferResult {
 	if err != nil && l.handlerFailureObs != nil {
 		l.handlerFailureObs.OnHandlerFailure(evt.ID, evt.Type, l.role.Name, err)
 	}
+	if err != nil && l.shouldRetry(evt, err) {
+		// A transient failure with retries left: hand the event back as a
+		// pre-accept decline so the queue re-offers it at the role's
+		// RetryBackoff cadence (bead pg2-yu5y2). emitResult still logs the
+		// failed attempt; the event is NOT accepted, so it is not settled.
+		l.o.emitResult(l.ctx, l.role, d.Item.ID, report.Result{}, err)
+		return eventqueue.OfferResult{Accepted: false, Decline: eventqueue.DeclineNone, DeclineDetail: DeclineDetailDispatchRetry}
+	}
+	l.retries.forget(evt.ID)
 	l.o.emitResult(l.ctx, l.role, d.Item.ID, l.o.buildResult(d, reply, err), err)
 	return eventqueue.OfferResult{Accepted: true, Decline: eventqueue.DeclineNone}
 }

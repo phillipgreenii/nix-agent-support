@@ -348,6 +348,8 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	// delivered/declined into, so composeStatusReply's listeners[] can render
 	// a per-role FAIL count alongside DLVD/DECL.
 	o.HandlerFailureObserver = fanOutHandlerFailureObserver{emitter, &handlerFailureCountObserver{counts: listenerCounts}}
+	// pg_router_dispatch_retries_total{role,class} (bead pg2-yu5y2).
+	o.DispatchRetryObserver = emitter
 	q, err = eventqueue.New(store, eventqueue.WithRetryBackoff(cfg.RetryBackoff), eventqueue.WithObserver(fanOutObserver{emitter, fanOutObserver{activityObs, newListenerCountObserver(listenerCounts)}}), eventqueue.WithSerializeTypes(cfg.SerializeTypes...), eventqueue.WithGateObserver(emitter),
 		// Compact queue.jsonl down to live state: once at startup (before the queue
 		// replays it or accepts an event) and, at runtime, whenever it outgrows

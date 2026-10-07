@@ -43,6 +43,13 @@ func (rs RoleSet) DeclaredBindTypes() []string {
 	return out
 }
 
+// MaxDispatchRetriesCap is the hard ceiling on a role's MaxDispatchRetries:
+// whatever an operator configures, one event is never re-run more than this
+// many times after a transient handler failure, so a host-overload storm
+// cannot amplify load without bound (bead pg2-yu5y2, motivated by pg2-r9ly8).
+// Config decode rejects a larger value and the listener clamps defensively.
+const MaxDispatchRetriesCap = 3
+
 type Role struct {
 	Name    string
 	Enabled bool
@@ -61,6 +68,16 @@ type Role struct {
 	// backoff.Policy.Duration sanitizes it against backoff.Default() — so a role
 	// that never sets it (e.g. every built-in role) still gets a sane cadence.
 	RetryBackoff backoff.Policy
+	// MaxDispatchRetries bounds how many times the core re-runs ONE event after
+	// this role's handler FAILED it with a transient error (killed / deadline /
+	// unavailable; bead pg2-yu5y2) — an opt-in, narrow exception to INV-FAIL-1's
+	// "the core does not re-offer post-accept work". The failed attempt is
+	// reported to the queue as a pre-accept decline, so the re-run waits the
+	// RetryBackoff cadence above and is bounded by expiresAt too. 0 (the zero
+	// value, and every built-in role) disables it: a failed dispatch is accepted
+	// and never re-run, exactly as before. Capped at
+	// MaxDispatchRetriesCap by config decode.
+	MaxDispatchRetries int
 	// Description is an optional, operator-authored free-text note about
 	// this role (pg2-ec754) — purely informational, surfaced in the TUI
 	// drill-down details so an operator can record why a listener exists

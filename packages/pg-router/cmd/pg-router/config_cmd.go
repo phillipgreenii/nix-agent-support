@@ -150,7 +150,7 @@ func renderConfigShowJSON(w io.Writer, cfg config.Config) {
 		},
 	}
 	for _, r := range cfg.Roles {
-		out.Roles = append(out.Roles, configShowRole{Name: r.Name, Enabled: r.Enabled, Binds: r.Binds, NonBlockingGates: r.NonBlockingGates})
+		out.Roles = append(out.Roles, configShowRole{Name: r.Name, Enabled: r.Enabled, Binds: r.Binds, NonBlockingGates: r.NonBlockingGates, MaxDispatchRetries: r.MaxDispatchRetries})
 	}
 	for _, s := range cfg.Queries {
 		var emits []string
@@ -182,6 +182,9 @@ type configShowRole struct {
 	// NonBlockingGates are the gate TYPEs this listener declared it does not
 	// block on (Gate Registry); omitted when it blocks on every TYPE.
 	NonBlockingGates []string `json:"nonBlockingGates,omitempty"`
+	// MaxDispatchRetries is the role's opt-in bounded re-run count for a
+	// transiently failed dispatch (bead pg2-yu5y2); omitted when 0 (off).
+	MaxDispatchRetries int `json:"maxDispatchRetries,omitempty"`
 }
 
 // configShowQuery echoes one configured producer's emits, flagging a stub query

@@ -201,6 +201,18 @@ dir) — exactly one.
 > committed there. `pg-router run-until-idle` warns at pre-flight if
 > `.pg-router/config.toml` is git-tracked.
 
+### Re-running a transiently failed dispatch
+
+A failed dispatch is normally accepted and never re-run (`INV-FAIL-1`: post-accept failures are the
+handler's). A `[[role]]` MAY opt in with `max_dispatch_retries = N` (0 = off, the default; hard cap 3) for a handler that has no retry of its own, such as a command wrapper whose child was killed
+under host overload. Only **transient** failures are re-run (`killed`, `deadline`, `unavailable`;
+never a deterministic failure or a failure during shutdown), at most N times per event, at the
+role's retry cadence (`[role.retry]` / `[pool].retry`), and never past the event's `expiresAt` — so
+the event MUST carry a future `expiresAt` or its single attempt is also its last. Each re-run
+increments `pg_router_dispatch_retries{role,class}`; the failed attempts still count as
+`handler-error` and the hand-back as `declined` with reason `dispatch-retry` (`DEC-RETRY-2`).
+The handler MUST be idempotent per event (delivery is already at-least-once).
+
 ## Configuration (pool-wide env)
 
 Pool-wide settings come from `PG_ROUTER_*` environment variables; roles are NOT

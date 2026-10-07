@@ -239,7 +239,12 @@ sequenceDiagram
   tell which role tripped its budget; the core still never re-offers it and still takes no status
   stream — it reads only the error text it was already handed. The same holds for a handler error
   from an escalation-triage role, counted with `reason="triager-failure"` so it stays out of the
-  worker/review failure-rate series (`DEC-OBS-3`, amended). Every other post-accept outcome stays
+  worker/review failure-rate series (`DEC-OBS-3`, amended). A **second narrow exception is opt-in per
+  role** (`DEC-RETRY-2`): a role MAY declare a small bounded number of re-runs, and the core then
+  re-runs a dispatch whose handler failed with a **transient** class (`killed`, `deadline`,
+  `unavailable`) — never a deterministic failure — carrying each failed attempt as a pre-accept
+  decline at the `INV-FAIL-2` cadence, never past `expiresAt`, and counts each re-run by `role` and
+  `class`. Every other post-accept outcome stays
   uncounted. Such an outcome is **surfaced on the handler's own surface** (its
   own logs and metrics) or turned into a **new event**, and `critical` still means **a human is
   needed** — never a silent core retry. The core takes no per-run status stream back from a handler at
