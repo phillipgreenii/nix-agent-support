@@ -95,6 +95,14 @@ func (fakeGH) WriteReviewItems(ctx context.Context, reviewID string, items []git
 
 func (fakeGH) UpdateReviewBody(ctx context.Context, reviewID, body string) error { return nil }
 
+func (fakeGH) GetPRHistory(ctx context.Context, repo string, number int) (*github.PRHistory, error) {
+	return &github.PRHistory{}, nil
+}
+
+func (fakeGH) GetComparedFiles(ctx context.Context, repo, base, head string, wanted []string) ([]github.ComparedFile, error) {
+	return nil, nil
+}
+
 func (fakeGH) GetPendingReview(ctx context.Context, repo string, number int) (*github.PendingReviewData, error) {
 	return &github.PendingReviewData{HeadSHA: "deadbeef"}, nil
 }

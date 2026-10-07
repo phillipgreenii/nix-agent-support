@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -30,6 +31,9 @@ type hostComment struct {
 	line     int
 	body     string
 	commit   string
+	// position is the diff position of a comment appended at a named commit
+	// (0 for a comment anchored by line at the live head).
+	position int
 }
 
 // hostReview is one review (pending or submitted) held by the simulated host.
@@ -69,15 +73,43 @@ type fakeHost struct {
 	updateTwoPending bool
 	createErr        error
 
+	// Earlier-head path: the PR's commit list and base tip (GetPRHistory) and
+	// the compared files (GetComparedFiles). The commit list is empty by
+	// default, so a head_sha other than the live head is "not a commit of the
+	// PR" until a test says otherwise.
+	commits          []string
+	commitsTruncated bool
+	baseOID          string
+	compared         []github.ComparedFile
+	historyErr       error
+	compareErr       error
+	// onCompare runs inside GetComparedFiles (a test blocks or inspects here).
+	onCompare func(h *fakeHost)
+	// rejectUnknownCommit makes the host refuse an append at a commit that is
+	// not in the commit list, as GitHub refuses a commit it does not have.
+	rejectUnknownCommit bool
+
 	// Records.
-	reads   int
-	creates []string // bodies of created reviews
-	updates []string // bodies sent to UpdateReviewBody
-	writes  []writeCall
+	reads        int
+	historyReads int
+	compareReads int
+	compareCalls []compareCall
+	creates      []string // bodies of created reviews
+	updates      []string // bodies sent to UpdateReviewBody
+	writes       []writeCall
 }
 
+// compareCall records one GetComparedFiles call.
+type compareCall struct {
+	base, head string
+	wanted     []string
+}
+
+// baseTip is the fake host's base branch tip.
+const baseTip = "0123456789abcdef0123456789abcdef01234567"
+
 func newFakeHost(head string) *fakeHost {
-	return &fakeHost{head: head, threads: map[string]bool{}, nextID: 100}
+	return &fakeHost{head: head, threads: map[string]bool{}, nextID: 100, baseOID: baseTip}
 }
 
 // addPending adds a pending review (a hand-started one, say).
@@ -178,6 +210,9 @@ func (f *fakeGH) WriteReviewItems(ctx context.Context, reviewID string, items []
 		if h.failItem != nil {
 			reason = h.failItem(it)
 		}
+		if reason == "" && it.AtCommit() && h.rejectUnknownCommit && !slices.Contains(h.commits, it.CommitOID) {
+			reason = github.ReasonAnchorRejected
+		}
 		if it.IsReply() && reason == "" && !h.threads[it.ReplyToThreadID] {
 			reason = github.ReasonThreadNotFound
 		}
@@ -193,7 +228,10 @@ func (f *fakeGH) WriteReviewItems(ctx context.Context, reviewID string, items []
 			continue
 		}
 		h.nextID++
-		c := hostComment{id: fmt.Sprintf("C_%d", h.nextID), path: it.Path, line: it.Line, body: it.Body, commit: h.head}
+		c := hostComment{id: fmt.Sprintf("C_%d", h.nextID), path: it.Path, line: it.Line, body: it.Body, commit: h.head, position: it.Position}
+		if it.AtCommit() {
+			c.commit = it.CommitOID
+		}
 		if it.IsReply() {
 			c.threadID = it.ReplyToThreadID
 		} else {
@@ -203,6 +241,30 @@ func (f *fakeGH) WriteReviewItems(ctx context.Context, reviewID string, items []
 		rev.comments = append(rev.comments, c)
 	}
 	return out, nil
+}
+
+func (f *fakeGH) GetPRHistory(ctx context.Context, repo string, number int) (*github.PRHistory, error) {
+	f.ops = append(f.ops, "history")
+	h := f.host
+	h.historyReads++
+	if h.historyErr != nil {
+		return nil, h.historyErr
+	}
+	return &github.PRHistory{BaseOID: h.baseOID, CommitSHAs: slices.Clone(h.commits), Truncated: h.commitsTruncated}, nil
+}
+
+func (f *fakeGH) GetComparedFiles(ctx context.Context, repo, base, head string, wanted []string) ([]github.ComparedFile, error) {
+	f.ops = append(f.ops, "compare")
+	h := f.host
+	h.compareReads++
+	h.compareCalls = append(h.compareCalls, compareCall{base: base, head: head, wanted: slices.Clone(wanted)})
+	if h.onCompare != nil {
+		h.onCompare(h)
+	}
+	if h.compareErr != nil {
+		return nil, h.compareErr
+	}
+	return slices.Clone(h.compared), nil
 }
 
 func (f *fakeGH) UpdateReviewBody(ctx context.Context, reviewID, body string) error {
@@ -767,10 +829,11 @@ func TestSubmitCommentsAtTheCapAreAccepted(t *testing.T) {
 func TestSubmitHeadMismatchUnderLockWritesNothing(t *testing.T) {
 	f := newSubmitFixture(t)
 	f.host.addPending(headB, "")
-	f.host.head = headB // the head moved
+	f.host.head = headB              // the head moved
+	f.host.commits = []string{headB} // headA is no commit of the PR (force-pushed away)
 	_, err := f.submit(req("summary", point("main.go", 3, "x")))
 	isCode(t, err, scriptout.ErrInvalidArgument)
-	for _, want := range []string{"head moved", headA, headB, "nothing was written"} {
+	for _, want := range []string{"head moved", headA, headB, "not a commit of the pull request", "nothing was written"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q must mention %q", err, want)
 		}

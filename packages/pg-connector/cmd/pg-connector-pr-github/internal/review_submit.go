@@ -38,6 +38,16 @@ const (
 	// across requests: the replay is idempotent (already_present), so
 	// sequential requests converge on the same review.
 	maxRequestComments = 40
+	// maxOlderHeadComments caps the comments of a request that saves at an
+	// EARLIER head of the PR (INV-REVHEAD-3). That path reads two more things
+	// inside the same 30s run, the PR's commit list and the compared patches
+	// (one or more REST pages), so the cap is lowered from the 40 above to 20:
+	// two write documents (about 8s at the measured 4s each), the two reads
+	// the live-head path has (about 8s, generous) and the two extra reads
+	// (about 8s, generous) come to about 24s, under the 30s timeout with the
+	// same 20% margin the live-head arithmetic keeps. A caller with more
+	// comments splits them across requests; the replay is idempotent.
+	maxOlderHeadComments = 20
 	// maxFailuresListed caps the failures an error message lists.
 	maxFailuresListed = 20
 	// maxReviewBody is GitHub's limit on a review body.
@@ -58,24 +68,31 @@ const (
 //
 //  1. Read the live head, every pending review of the identity (all comments
 //     paginated) and the identity's comments in submitted reviews, in one
-//     lookup. A head_sha that is not the live head is invalid_argument and
-//     nothing is written.
+//     lookup. A head_sha that is not the live head is accepted only when it is
+//     one of the PR's commits (saved-at an earlier head, INV-REVHEAD-1..3,
+//     see saveAtEarlierHead); otherwise it is invalid_argument and nothing is
+//     written.
 //  2. Classify every requested comment by the hidden fingerprint marker it
 //     would carry: already on the host (already_present), written before and
 //     since deleted by the operator (dismissed, from the posted-sidecar), or
 //     to be written. Identical items in one request are one item.
 //  3. When nothing is to be written and no body section is needed the status
 //     is no_change and no review is created. Otherwise, with no pending review,
-//     a body-only review is created at the live head (a 422 "one pending
-//     review" starts the run over, which then appends); with one or more, the
-//     lowest database id is used.
+//     a body-only review is created at the saved-at head, which is the live
+//     head unless step 1 accepted an earlier one (a 422 "one pending review"
+//     starts the run over, which then appends); with one or more, the lowest
+//     database id is used.
 //  4. The review body is a series of delimited per-head sections. A section for
-//     the live head is added only when missing and never rewrites existing
-//     text; with more than one pending review the body is not touched, and a
+//     the saved-at head (followed, for an earlier head, by a line saying where
+//     it was saved and what the PR head was) is added only when missing and
+//     never rewrites existing text; with more than one pending review the body is not touched, and a
 //     review whose body is empty (GitHub refuses to edit it) is left alone
 //     (body: skipped_empty_review). A review this tool creates therefore never
 //     has an empty body: without a section it carries the attribution line.
-//  5. Comments go out in failure-isolated batches. The review is then re-read
+//  5. Comments go out in failure-isolated batches: by line and side at the
+//     live head, or, for an earlier head, by diff position at that commit (a
+//     point whose line is not in that diff fails alone as anchor_rejected;
+//     resolveAnchors). The review is then re-read
 //     and what landed is decided by the markers found there, not by the write
 //     answers. The sidecar records only confirmed fingerprints.
 //
@@ -91,6 +108,10 @@ func (b *Backend) SubmitReview(ctx context.Context, req pr.ReviewSubmitRequest) 
 	if strings.TrimSpace(req.HeadSHA) == "" {
 		return pr.ReviewSubmitResult{}, scriptout.WrapError(scriptout.ErrInvalidArgument, "review_submit: head_sha is required")
 	}
+	if !github.IsFullSHA(req.HeadSHA) {
+		return pr.ReviewSubmitResult{}, scriptout.WrapError(scriptout.ErrInvalidArgument,
+			fmt.Sprintf("review_submit: head_sha %q is not a full 40-character commit sha (an abbreviated sha is not accepted); nothing was written", req.HeadSHA))
+	}
 	items, err := buildSubmitItems(req.Comments)
 	if err != nil {
 		return pr.ReviewSubmitResult{}, err
@@ -100,10 +121,6 @@ func (b *Backend) SubmitReview(ctx context.Context, req pr.ReviewSubmitRequest) 
 		if strings.Contains(bodyText, pgposted.SectionClose) || strings.Contains(bodyText, "<!-- pg-section") {
 			return pr.ReviewSubmitResult{}, scriptout.WrapError(scriptout.ErrInvalidArgument,
 				"review_submit: body must not contain a review body section delimiter")
-		}
-		if pgposted.SectionOpen(req.HeadSHA) == "" {
-			return pr.ReviewSubmitResult{}, scriptout.WrapError(scriptout.ErrInvalidArgument,
-				"review_submit: head_sha is too short to name a review body section")
 		}
 	}
 	owner, name, _ := strings.Cut(repo, "/")
@@ -194,6 +211,10 @@ type submitRun struct {
 	number   int
 	items    []submitItem
 	bodyText string
+	// sectionText is what a body section for the saved-at head holds: bodyText,
+	// plus the saved-at line when the review is saved at an earlier head. Set by
+	// once() on every attempt.
+	sectionText string
 }
 
 // hostFingerprints returns every comment fingerprint marker found on comments
@@ -280,7 +301,7 @@ func (r *submitRun) planBody(target *github.PendingReviewNode, extras int, st pg
 	if bodyHeadRecorded(st, head) {
 		return bodyPlan{disposition: pr.BodyDismissed}
 	}
-	if len(appendSection(existing, buildSection(head, r.bodyText))) > maxReviewBody {
+	if len(appendSection(existing, buildSection(head, r.sectionText))) > maxReviewBody {
 		return bodyPlan{disposition: pr.BodyTooLarge}
 	}
 	return bodyPlan{disposition: pr.BodyWritten, write: true}
@@ -298,12 +319,19 @@ func (r *submitRun) once(ctx context.Context) (res pr.ReviewSubmitResult, again 
 		return res, false, scriptout.WrapError(scriptout.ErrUnavailable,
 			fmt.Sprintf("review_submit: could not determine the current head of %s; nothing was written", r.req.ID))
 	}
-	head := data.HeadSHA
-	if !strings.EqualFold(head, r.req.HeadSHA) {
-		return res, false, scriptout.WrapError(scriptout.ErrInvalidArgument,
-			fmt.Sprintf("review_submit: head moved: head_sha %s is not the current head of %s (current head is %s); "+
-				"refresh the PR and retry against the current head; nothing was written",
-				r.req.HeadSHA, r.req.ID, head))
+	live := data.HeadSHA
+	head := live
+	moved := !strings.EqualFold(live, r.req.HeadSHA)
+	var baseOID string
+	if moved {
+		head, baseOID, err = r.saveAtEarlierHead(ctx, live)
+		if err != nil {
+			return res, false, err
+		}
+	}
+	r.sectionText = r.bodyText
+	if moved && r.bodyText != "" {
+		r.sectionText = r.bodyText + "\n\n" + savedAtLine(head, live)
 	}
 	st, err := r.b.posted.Load(r.owner, r.name, r.number)
 	if err != nil {
@@ -335,6 +363,8 @@ func (r *submitRun) once(ctx context.Context) (res pr.ReviewSubmitResult, again 
 	res = pr.ReviewSubmitResult{
 		State:               "pending",
 		HeadSHA:             head,
+		HeadMoved:           moved,
+		LiveHeadSHA:         live,
 		Status:              pr.StatusNoChange,
 		AlreadyPresent:      alreadyPresent,
 		Dismissed:           dismissed,
@@ -352,14 +382,25 @@ func (r *submitRun) once(ctx context.Context) (res pr.ReviewSubmitResult, again 
 		return res, false, nil
 	}
 
+	// Saved at an earlier head: resolve every new point's diff position before
+	// anything is written, so a failed read leaves the host untouched. A point
+	// that does not resolve is a per-item anchor_rejected, not an abort.
+	anchors, err := r.resolveAnchors(ctx, toWrite, moved, baseOID, head)
+	if err != nil {
+		return res, false, err
+	}
+
 	created := false
 	if target == nil {
 		// GitHub refuses to edit a review whose body is empty (pg2-16jqj), so
 		// a review created without a section still carries the attribution
 		// line; a later request's section is then appended after it.
 		body := attribution(head)
+		if moved {
+			body += "\n\n" + savedAtLine(head, live)
+		}
 		if plan.write {
-			body = buildSection(head, r.bodyText)
+			body = buildSection(head, r.sectionText)
 		}
 		rev, err := r.b.gh.CreateBodyOnlyPendingReview(ctx, r.repo, r.number, head, body)
 		if errors.Is(err, github.ErrPendingReviewExists) {
@@ -407,13 +448,29 @@ func (r *submitRun) once(ctx context.Context) (res pr.ReviewSubmitResult, again 
 
 	var results []github.ReviewWriteResult
 	if len(toWrite) > 0 {
-		writeItems := make([]github.ReviewWriteItem, len(toWrite))
+		results = make([]github.ReviewWriteResult, len(toWrite))
+		var sendIdx []int
+		var writeItems []github.ReviewWriteItem
 		for i, it := range toWrite {
-			writeItems[i] = r.writeItem(it, head)
+			if anchors[i].rejected {
+				results[i] = github.ReviewWriteResult{Reason: github.ReasonAnchorRejected}
+				continue
+			}
+			sendIdx = append(sendIdx, i)
+			writeItems = append(writeItems, r.writeItem(it, head, anchors[i]))
 		}
-		results, err = r.b.gh.WriteReviewItems(ctx, target.ID, writeItems)
-		if err != nil {
-			return res, false, scriptout.WrapError(scriptout.ErrInvalidArgument, "review_submit: "+err.Error())
+		if len(writeItems) > 0 {
+			sent, err := r.b.gh.WriteReviewItems(ctx, target.ID, writeItems)
+			if err != nil {
+				return res, false, scriptout.WrapError(scriptout.ErrInvalidArgument, "review_submit: "+err.Error())
+			}
+			for k, i := range sendIdx {
+				if k < len(sent) {
+					results[i] = sent[k]
+				} else {
+					results[i] = github.ReviewWriteResult{Reason: github.ReasonUnconfirmed}
+				}
+			}
 		}
 	}
 
@@ -502,7 +559,7 @@ func (r *submitRun) writeBody(ctx context.Context, reviewID, head string) (dispo
 	if _, _, ok := pgposted.FindSection(rev.Body, head); ok {
 		return pr.BodyKept, false, false, nil
 	}
-	body := appendSection(rev.Body, buildSection(head, r.bodyText))
+	body := appendSection(rev.Body, buildSection(head, r.sectionText))
 	if len(body) > maxReviewBody {
 		return pr.BodyTooLarge, false, false, nil
 	}
@@ -520,21 +577,120 @@ func (r *submitRun) writeBody(ctx context.Context, reviewID, head string) (dispo
 
 // writeItem renders one item for the write call: the request text, then the
 // attribution line and the hidden fingerprint marker.
-func (r *submitRun) writeItem(it submitItem, head string) github.ReviewWriteItem {
+func (r *submitRun) writeItem(it submitItem, head string, a anchor) github.ReviewWriteItem {
 	body := it.body + "\n\n" + attribution(head) + "\n" + pgposted.Marker(it.fp)
 	if it.reply {
 		return github.ReviewWriteItem{Body: body, ReplyToThreadID: it.threadID}
+	}
+	if a.atCommit {
+		return github.ReviewWriteItem{Path: a.path, CommitOID: head, Position: a.position, Body: body}
 	}
 	return github.ReviewWriteItem{Path: it.path, Line: it.line, Side: it.side, Body: body}
 }
 
 // attribution is the visible line every written comment ends with.
 func attribution(head string) string {
-	short := head
-	if len(short) > 7 {
-		short = short[:7]
+	return "*Posted by pg-connector at " + short7(head) + ".*"
+}
+
+func short7(sha string) string {
+	if len(sha) > 7 {
+		return sha[:7]
 	}
-	return "*Posted by pg-connector at " + short + ".*"
+	return sha
+}
+
+// savedAtLine is the plain line a review saved at an earlier head carries in
+// its body, so an operator submitting it can tell a mix of comments anchored
+// at different commits apart (INV-REVHEAD-2).
+func savedAtLine(saved, live string) string {
+	return fmt.Sprintf("Saved at %s; PR head was %s when saved.", short7(saved), short7(live))
+}
+
+// saveAtEarlierHead decides whether a head_sha that is not the live head may
+// be saved at (INV-REVHEAD-1). It returns the commit as the host spells it
+// and the current tip of the PR's base branch, or an error with nothing
+// written: invalid_argument when the sha is not a commit of the PR,
+// unavailable when the commit list could not be read in full.
+func (r *submitRun) saveAtEarlierHead(ctx context.Context, live string) (head, baseOID string, err error) {
+	if len(r.req.Comments) > maxOlderHeadComments {
+		return "", "", scriptout.WrapError(scriptout.ErrInvalidArgument,
+			fmt.Sprintf("review_submit: %d comments exceed the limit of %d per request saved at an earlier head; "+
+				"split them across requests; nothing was written", len(r.req.Comments), maxOlderHeadComments))
+	}
+	hist, err := r.b.gh.GetPRHistory(ctx, r.repo, r.number)
+	if err != nil {
+		return "", "", classifyReviewSubmitError(err)
+	}
+	if hist == nil {
+		return "", "", scriptout.WrapError(scriptout.ErrUnavailable,
+			fmt.Sprintf("review_submit: could not read the commits of %s; nothing was written", r.req.ID))
+	}
+	for _, sha := range hist.CommitSHAs {
+		if strings.EqualFold(sha, r.req.HeadSHA) {
+			if !github.IsFullSHA(hist.BaseOID) {
+				return "", "", scriptout.WrapError(scriptout.ErrUnavailable,
+					fmt.Sprintf("review_submit: could not determine the base of %s; nothing was written", r.req.ID))
+			}
+			return sha, hist.BaseOID, nil
+		}
+	}
+	if hist.Truncated {
+		return "", "", scriptout.WrapError(scriptout.ErrUnavailable,
+			fmt.Sprintf("review_submit: head_sha %s was not found among the commits read of %s, but the commit list is longer than "+
+				"could be read, so it cannot be ruled out; nothing was written", r.req.HeadSHA, r.req.ID))
+	}
+	return "", "", scriptout.WrapError(scriptout.ErrInvalidArgument,
+		fmt.Sprintf("review_submit: head moved: head_sha %s is not the current head of %s (current head is %s) and is not a commit of "+
+			"the pull request; refresh the PR and retry against the current head, or a commit it still has; nothing was written",
+			r.req.HeadSHA, r.req.ID, live))
+}
+
+// anchor is where one comment to write goes: by diff position at a named
+// commit (atCommit), by line and side at the live head (neither flag), or
+// refused because its line is not in the diff at the saved-at head (rejected).
+type anchor struct {
+	atCommit bool
+	rejected bool
+	path     string
+	position int
+}
+
+// resolveAnchors resolves the new points of toWrite when the review is saved at
+// an earlier head; otherwise every comment keeps its line-and-side anchor. The
+// compared patches are read only when a new point needs them.
+func (r *submitRun) resolveAnchors(ctx context.Context, toWrite []submitItem, moved bool, baseOID, head string) ([]anchor, error) {
+	out := make([]anchor, len(toWrite))
+	if !moved {
+		return out, nil
+	}
+	seen := map[string]bool{}
+	var paths []string
+	for _, it := range toWrite {
+		if !it.reply && !seen[it.path] {
+			seen[it.path] = true
+			paths = append(paths, it.path)
+		}
+	}
+	if len(paths) == 0 {
+		return out, nil
+	}
+	files, err := r.b.gh.GetComparedFiles(ctx, r.repo, baseOID, head, paths)
+	if err != nil {
+		return nil, classifyReviewSubmitError(err)
+	}
+	for i, it := range toWrite {
+		if it.reply {
+			continue
+		}
+		path, pos, ok := github.ResolveAnchor(files, it.path, it.side, it.line)
+		if !ok {
+			out[i] = anchor{rejected: true}
+			continue
+		}
+		out[i] = anchor{atCommit: true, path: path, position: pos}
+	}
+	return out, nil
 }
 
 func nowRFC3339() string { return time.Now().UTC().Format(time.RFC3339) }

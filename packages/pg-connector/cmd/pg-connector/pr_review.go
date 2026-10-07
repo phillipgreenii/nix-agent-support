@@ -146,6 +146,9 @@ func humanizeReviewSubmit(raw json.RawMessage) (string, error) {
 	}
 	s += fmt.Sprintf("\n  comments: %d added, %d already present, %d dismissed  body: %s  extra pending reviews: %d",
 		r.Added, r.AlreadyPresent, r.Dismissed, r.Body, r.ExtraPendingReviews)
+	if r.HeadMoved {
+		s += fmt.Sprintf("\n  saved at an earlier head %s (the PR head is %s)", r.HeadSHA, r.LiveHeadSHA)
+	}
 	if r.URL != "" {
 		s += "\n  review: " + r.URL
 	}

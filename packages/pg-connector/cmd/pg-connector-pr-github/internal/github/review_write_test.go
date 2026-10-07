@@ -52,7 +52,7 @@ func decodeSentDoc(t *testing.T, stdin []byte) sentDoc {
 	return d
 }
 
-var aliasDeclRE = regexp.MustCompile(`(?m)^\s+(w\d+): (addPullRequestReviewThread(?:Reply)?)\(`)
+var aliasDeclRE = regexp.MustCompile(`(?m)^\s+(w\d+): (addPullRequestReview(?:Thread(?:Reply)?|Comment))\(`)
 
 // aliasesOf lists (alias, mutation) pairs of a document in order.
 func aliasesOf(doc string) [][2]string {
@@ -70,9 +70,9 @@ func answerLanded(doc string, nullAliases map[string]bool) []byte {
 	for _, a := range aliasesOf(doc) {
 		name, mut := a[0], a[1]
 		switch {
-		case mut == "addPullRequestReviewThreadReply" && nullAliases[name]:
+		case mut != "addPullRequestReviewThread" && nullAliases[name]:
 			data[name] = map[string]any{"comment": nil}
-		case mut == "addPullRequestReviewThreadReply":
+		case mut != "addPullRequestReviewThread":
 			data[name] = map[string]any{"comment": map[string]any{"id": "C_" + name}}
 		case nullAliases[name]:
 			data[name] = map[string]any{"thread": nil}
@@ -521,5 +521,110 @@ func TestUpdateReviewBody_EmptyAnswerIsNotSuccess(t *testing.T) {
 	}}
 	if err := newWriteProvider(f).UpdateReviewBody(context.Background(), "PRR_node", "b"); err == nil {
 		t.Fatal("an answer carrying no review must not count as success")
+	}
+}
+
+// --- new points at a named commit -------------------------------------
+
+func commitItems(n int, commit string) []ReviewWriteItem {
+	items := make([]ReviewWriteItem, n)
+	for i := range items {
+		items[i] = ReviewWriteItem{Path: fmt.Sprintf("f%d.go", i), Position: i + 1, CommitOID: commit, Body: fmt.Sprintf("point %d", i)}
+	}
+	return items
+}
+
+// TestWriteReviewItems_AtCommitUsesThePositionMutation: a new point with a
+// commit goes out through the commit-and-position mutation, its commit, path
+// and position travel as variables, and a reply and a live-head point in the
+// same document keep their own mutations.
+func TestWriteReviewItems_AtCommitUsesThePositionMutation(t *testing.T) {
+	const commit = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+	f := &writeFake{handle: func(_ []string, stdin []byte) ([]byte, error) {
+		return answerLanded(decodeSentDoc(t, stdin).Query, nil), nil
+	}}
+	items := []ReviewWriteItem{
+		{Path: "a.go", Position: 7, CommitOID: commit, Body: "at the commit", Line: 99, Side: "LEFT"},
+		{ReplyToThreadID: "PRRT_1", Body: "a reply"},
+		{Path: "b.go", Line: 3, Side: "RIGHT", Body: "at the live head"},
+	}
+	res, err := newWriteProvider(f).WriteReviewItems(context.Background(), "PRR_node", items)
+	if err != nil {
+		t.Fatalf("WriteReviewItems: %v", err)
+	}
+	for i, r := range res {
+		if !r.Landed {
+			t.Errorf("item %d did not land: %+v", i, r)
+		}
+	}
+	if res[0].CommentID != "C_w0" {
+		t.Errorf("a position comment carries its comment id: %+v", res[0])
+	}
+	if len(f.stdins) != 1 {
+		t.Fatalf("documents = %d, want 1", len(f.stdins))
+	}
+	d := decodeSentDoc(t, f.stdins[0])
+	got := aliasesOf(d.Query)
+	want := [][2]string{{"w0", "addPullRequestReviewComment"}, {"w1", "addPullRequestReviewThreadReply"}, {"w2", "addPullRequestReviewThread"}}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("aliases = %v, want %v", got, want)
+	}
+	if !strings.Contains(d.Query, "commitOID: $c0") || !strings.Contains(d.Query, "position: $o0") || !strings.Contains(d.Query, "$c0: GitObjectID!") {
+		t.Errorf("document = %s", d.Query)
+	}
+	if d.Variables["c0"] != commit || d.Variables["p0"] != "a.go" || d.Variables["o0"] != float64(7) || d.Variables["b0"] != "at the commit" {
+		t.Errorf("variables = %v", d.Variables)
+	}
+	if _, has := d.Variables["l0"]; has {
+		t.Errorf("a position comment must not carry a line variable: %v", d.Variables)
+	}
+	if strings.Contains(d.Query, "at the commit") || strings.Contains(d.Query, commit) {
+		t.Errorf("bodies and commits travel as variables, never in the document text")
+	}
+}
+
+// TestWriteReviewItems_AtCommitNullCommentIsAnchorRejected: a null comment is a
+// refused anchor for a point at a commit, never a success and never a reply
+// failure.
+func TestWriteReviewItems_AtCommitNullCommentIsAnchorRejected(t *testing.T) {
+	f := &writeFake{handle: func(_ []string, stdin []byte) ([]byte, error) {
+		return answerLanded(decodeSentDoc(t, stdin).Query, map[string]bool{"w1": true}), nil
+	}}
+	res, err := newWriteProvider(f).WriteReviewItems(context.Background(), "PRR_node", commitItems(3, "abc"))
+	if err != nil {
+		t.Fatalf("WriteReviewItems: %v", err)
+	}
+	if !res[0].Landed || res[1].Landed || res[1].Reason != ReasonAnchorRejected || !res[2].Landed {
+		t.Fatalf("results = %+v", res)
+	}
+}
+
+// A rate limit answer marks every alias the document did not answer as
+// rate_limited, and an alias that did land stays landed.
+func TestWriteReviewItems_AtCommitRateLimitAndMissingAlias(t *testing.T) {
+	f := &writeFake{handle: func([]string, []byte) ([]byte, error) {
+		return []byte(`{"data":{"w0":{"comment":{"id":"C1"}}},"errors":[{"message":"API rate limit exceeded","path":["w2"]}]}`), nil
+	}}
+	res, err := newWriteProvider(f).WriteReviewItems(context.Background(), "PRR_node", commitItems(3, "abc"))
+	if err != nil {
+		t.Fatalf("WriteReviewItems: %v", err)
+	}
+	if !res[0].Landed || res[1].Reason != ReasonRateLimited || res[2].Reason != ReasonRateLimited {
+		t.Fatalf("results = %+v", res)
+	}
+}
+
+func TestWriteReviewItems_AtCommitNeedsAPathAndAPosition(t *testing.T) {
+	p := newWriteProvider(&writeFake{})
+	for name, it := range map[string]ReviewWriteItem{
+		"no position": {Path: "a.go", CommitOID: "abc", Body: "x", Line: 3},
+		"no path":     {Position: 2, CommitOID: "abc", Body: "x"},
+	} {
+		if _, err := p.WriteReviewItems(context.Background(), "PRR_node", []ReviewWriteItem{it}); err == nil {
+			t.Errorf("%s: want an error", name)
+		}
+	}
+	if !(ReviewWriteItem{ReplyToThreadID: "T", CommitOID: "abc"}).IsReply() || (ReviewWriteItem{ReplyToThreadID: "T", CommitOID: "abc"}).AtCommit() {
+		t.Error("a reply is never a point at a commit")
 	}
 }

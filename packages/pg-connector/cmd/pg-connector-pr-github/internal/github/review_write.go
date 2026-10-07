@@ -30,7 +30,9 @@ import (
 //     pullRequestReviewId for those writes, including a reply to a thread of
 //     a SUBMITTED review.
 //   - WriteReviewItems: GraphQL writes in documents of at most
-//     maxWriteAliasesPerDocument mutations, every alias checked.
+//     maxWriteAliasesPerDocument mutations, every alias checked. A new point
+//     is added by line and side at the live head, or, to save a review at an
+//     earlier head, by diff position at a named commit.
 //   - UpdateReviewBody: a whole-body updatePullRequestReview write
 //     (last-writer-wins; the caller builds the new body from a fresh read).
 
@@ -63,8 +65,9 @@ const maxWriteAliasesPerDocument = 10
 type WriteFailReason string
 
 const (
-	// ReasonAnchorRejected: the new point's anchor (path, line, side) was
-	// refused; the thread came back null. Permanent for that request.
+	// ReasonAnchorRejected: the new point's anchor (path, line, side, or path,
+	// commit and position) was refused; the thread or comment came back null.
+	// Permanent for that request.
 	ReasonAnchorRejected WriteFailReason = "anchor_rejected"
 	// ReasonThreadNotFound: the reply's thread does not exist on this PR or
 	// the reply came back with no comment. Permanent for that request.
@@ -92,6 +95,12 @@ type CreatedReview struct {
 // ReviewWriteItem is one comment to add to a pending review: a new point
 // (ReplyToThreadID empty) or a reply (ReplyToThreadID is the review-thread
 // node id; Path, Line and Side are then ignored).
+//
+// A new point is anchored one of two ways. With CommitOID empty it is anchored
+// by Path, Line and Side at the PR's LIVE head. With CommitOID set it is
+// anchored at THAT commit by Path and Position (a 1-based diff position, see
+// DiffPositions), and Line and Side are ignored: this is how a review is saved
+// at an earlier head of the PR (INV-REVHEAD-2).
 type ReviewWriteItem struct {
 	Path string
 	Line int
@@ -99,10 +108,17 @@ type ReviewWriteItem struct {
 	Side            string
 	Body            string
 	ReplyToThreadID string
+	// CommitOID and Position anchor a new point at a named commit.
+	CommitOID string
+	Position  int
 }
 
 // IsReply reports whether the item replies to an existing thread.
 func (i ReviewWriteItem) IsReply() bool { return i.ReplyToThreadID != "" }
+
+// AtCommit reports whether the item is a new point anchored at a named commit
+// by diff position, rather than at the live head by line and side.
+func (i ReviewWriteItem) AtCommit() bool { return !i.IsReply() && i.CommitOID != "" }
 
 // ReviewWriteResult is the outcome of one ReviewWriteItem, in input order.
 type ReviewWriteResult struct {
@@ -226,6 +242,21 @@ func buildWriteDocument(reviewID string, items []ReviewWriteItem) (string, map[s
 			))
 			continue
 		}
+		if it.AtCommit() {
+			cvar, pvar, ovar := fmt.Sprintf("c%d", i), fmt.Sprintf("p%d", i), fmt.Sprintf("o%d", i)
+			decls = append(decls,
+				fmt.Sprintf("$%s: GitObjectID!", cvar),
+				fmt.Sprintf("$%s: String!", pvar),
+				fmt.Sprintf("$%s: Int!", ovar))
+			vars[cvar] = it.CommitOID
+			vars[pvar] = it.Path
+			vars[ovar] = it.Position
+			sels = append(sels, fmt.Sprintf(
+				"  %s: addPullRequestReviewComment(input: {pullRequestReviewId: $review, commitOID: $%s, path: $%s, position: $%s, body: $%s}) { comment { id } }",
+				a, cvar, pvar, ovar, bvar,
+			))
+			continue
+		}
 		pvar, lvar, svar := fmt.Sprintf("p%d", i), fmt.Sprintf("l%d", i), fmt.Sprintf("s%d", i)
 		decls = append(decls,
 			fmt.Sprintf("$%s: String!", pvar),
@@ -272,6 +303,12 @@ func (p *Provider) WriteReviewItems(ctx context.Context, reviewID string, items 
 	}
 	for i, it := range items {
 		if it.IsReply() {
+			continue
+		}
+		if it.AtCommit() {
+			if strings.TrimSpace(it.Path) == "" || it.Position <= 0 {
+				return nil, fmt.Errorf("github: item %d: a new point at a commit needs a path and a positive diff position", i)
+			}
 			continue
 		}
 		if strings.TrimSpace(it.Path) == "" || it.Line <= 0 {
@@ -354,7 +391,9 @@ func classifyWriteDocument(chunk []ReviewWriteItem, raw []byte, runErr error) ([
 			}
 			continue
 		}
-		if it.IsReply() {
+		if it.IsReply() || it.AtCommit() {
+			// Both shapes answer comment { id }; they differ only in why a null
+			// answer failed (failedItemReason).
 			var v struct {
 				Comment *struct {
 					ID string `json:"id"`
@@ -396,7 +435,9 @@ func classifyWriteDocument(chunk []ReviewWriteItem, raw []byte, runErr error) ([
 	return results, limited
 }
 
-// failedItemReason classifies an alias that answered but did not land.
+// failedItemReason classifies an alias that answered but did not land. A
+// comment appended at a named commit that comes back null failed because its
+// anchor (path or position at that commit) was refused, like a new point.
 func failedItemReason(it ReviewWriteItem, aliasMsg string, hasErr bool) WriteFailReason {
 	if hasErr && isRateLimitText(aliasMsg) {
 		return ReasonRateLimited

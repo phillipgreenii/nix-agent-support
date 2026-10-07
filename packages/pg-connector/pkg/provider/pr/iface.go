@@ -157,10 +157,17 @@ const (
 // ExtraPendingReviews is the number of pending reviews beyond the one used
 // (normally 0). LastAppend is the backend's own record of the latest append to
 // the PR, as of the end of this run.
+//
+// HeadSHA is the commit the content was saved at (the request's head_sha);
+// LiveHeadSHA is the PR's head as read during the run; HeadMoved is true when
+// the two differ, i.e. the review was saved at an earlier head of the PR
+// (INV-REVHEAD-3).
 type ReviewSubmitResult struct {
 	ReviewID            string      `json:"review_id"`
 	State               string      `json:"state"`
 	HeadSHA             string      `json:"head_sha"`
+	HeadMoved           bool        `json:"head_moved"`
+	LiveHeadSHA         string      `json:"live_head_sha"`
 	AsOf                string      `json:"as_of"`
 	Status              string      `json:"status"`
 	Added               int         `json:"added"`

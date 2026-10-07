@@ -48,7 +48,7 @@ func TestReviewSubmit_DispatchRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(raw, &m); err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"review_id", "state", "head_sha", "as_of", "status", "added", "already_present", "dismissed", "body", "extra_pending_reviews"} {
+	for _, k := range []string{"review_id", "state", "head_sha", "head_moved", "live_head_sha", "as_of", "status", "added", "already_present", "dismissed", "body", "extra_pending_reviews"} {
 		if _, ok := m[k]; !ok {
 			t.Errorf("output missing key %q: %s", k, raw)
 		}
@@ -65,7 +65,7 @@ func TestReviewSubmit_ResultWireShape(t *testing.T) {
 	raw, _ := json.Marshal(ReviewSubmitResult{State: StateNone, Status: StatusNoChange, Body: BodyAbsent})
 	var m map[string]any
 	_ = json.Unmarshal(raw, &m)
-	for _, k := range []string{"review_id", "state", "head_sha", "as_of", "status", "added", "already_present", "dismissed", "body", "extra_pending_reviews"} {
+	for _, k := range []string{"review_id", "state", "head_sha", "head_moved", "live_head_sha", "as_of", "status", "added", "already_present", "dismissed", "body", "extra_pending_reviews"} {
 		if _, ok := m[k]; !ok {
 			t.Errorf("missing %q: %s", k, raw)
 		}

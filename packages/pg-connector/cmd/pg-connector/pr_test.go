@@ -693,6 +693,10 @@ func TestHumanizeReviewSubmitByStatus(t *testing.T) {
 			`{"review_id":"","state":"none","head_sha":"abc","as_of":"t","status":"no_change","already_present":2,"body":"absent"}`,
 			[]string{"no_change", "none created", "2 already present"},
 		},
+		"saved at an earlier head": {
+			`{"review_id":"r2","state":"pending","head_sha":"aaa","head_moved":true,"live_head_sha":"bbb","as_of":"t","status":"posted","added":1,"body":"written"}`,
+			[]string{"posted", "saved at an earlier head aaa", "the PR head is bbb"},
+		},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {

@@ -91,6 +91,12 @@ type ghProvider interface {
 	CreateBodyOnlyPendingReview(ctx context.Context, repo string, number int, commitID, body string) (*github.CreatedReview, error)
 	WriteReviewItems(ctx context.Context, reviewID string, items []github.ReviewWriteItem) ([]github.ReviewWriteResult, error)
 	UpdateReviewBody(ctx context.Context, reviewID, body string) error
+	// GetPRHistory and GetComparedFiles are the reads review_submit needs to
+	// save a review at an EARLIER head of the PR (INV-REVHEAD-1..3): the PR's
+	// commit list with its base tip, and the patches of the files that differ
+	// between that base tip and the earlier head.
+	GetPRHistory(ctx context.Context, repo string, number int) (*github.PRHistory, error)
+	GetComparedFiles(ctx context.Context, repo, base, head string, wanted []string) ([]github.ComparedFile, error)
 }
 
 // Backend is pg-connector-pr-github's concrete pr.Provider implementation.
