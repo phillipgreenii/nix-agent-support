@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/x/gitclient"
+	"github.com/phillipgreenii/x/gitfixture"
+	"github.com/phillipgreenii/x/gittest"
 )
 
 // recWTM records every CreateWorktree call a fake Opener's client receives.
@@ -244,44 +246,17 @@ func TestEnsure_probeMissingPathNotWrappedAsNotARepositoryStillCreates(t *testin
 	}
 }
 
-// fixtureGitEnv is a minimal, explicit environment for the git commands this
-// test file uses to BUILD fixtures directly (not through gitclient): PATH plus
-// a fixed test identity, and nothing else from the ambient environment.
-// Mirrors internal/watchdog/terminal_test.go's helper of the same name.
-func fixtureGitEnv(t *testing.T) []string {
+// newCommittedRepo returns the root of a hermetic fixture repository
+// (x/gittest: allowlisted child env, fixture HOME, GIT_CEILING_DIRECTORIES, no
+// ambient GIT_DIR/GIT_WORK_TREE), checked out on main with one empty commit so
+// HEAD resolves.
+func newCommittedRepo(t *testing.T) string {
 	t.Helper()
-	return []string{
-		"PATH=" + os.Getenv("PATH"),
-		"HOME=" + t.TempDir(),
-		"GIT_CONFIG_NOSYSTEM=1",
-		"GIT_CONFIG_GLOBAL=/dev/null",
-		"GIT_CONFIG_SYSTEM=/dev/null",
-		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
-		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t",
+	repo := gittest.New(t, gitfixture.RepoOptions{InitialBranch: "main"})
+	if _, err := repo.Commit(context.Background(), "init", nil); err != nil {
+		t.Fatalf("fixture initial commit: %v", err)
 	}
-}
-
-func runFixtureGit(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	cmd.Env = fixtureGitEnv(t)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git -C %s %v: %v\n%s", dir, args, err, out)
-	}
-}
-
-// initFixtureRepo creates a fresh git repo at a temp dir, checked out on
-// branch, with one empty commit so HEAD resolves.
-func initFixtureRepo(t *testing.T, branch string) string {
-	t.Helper()
-	dir := t.TempDir()
-	dir, err := filepath.EvalSymlinks(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	runFixtureGit(t, dir, "init", "-q", "-b", branch)
-	runFixtureGit(t, dir, "commit", "-q", "--allow-empty", "-m", "init")
-	return dir
+	return repo.Dir
 }
 
 // TestEnsure_createsFreshPerBeadWorktree_realGitClient is the integration
@@ -299,7 +274,7 @@ func TestEnsure_createsFreshPerBeadWorktree_realGitClient(t *testing.T) {
 		t.Skip("git not available")
 	}
 
-	repoRoot := initFixtureRepo(t, "main")
+	repoRoot := newCommittedRepo(t)
 	wtDir := t.TempDir()
 	homeDir := t.TempDir() // isolate HOME from this machine's real git config/hooks
 	open := func(ctx context.Context, dir string) (gitclient.WorktreeManager, error) {
