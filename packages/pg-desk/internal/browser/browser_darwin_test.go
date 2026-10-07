@@ -27,6 +27,10 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+// stubExitWait is how long tests let openWindow wait for a stub to exit. It is
+// a ceiling, not a delay: openWindow returns as soon as the stub exits.
+const stubExitWait = 60 * time.Second
+
 // stubChrome installs an executable standing in for Chrome that appends its
 // argv (one argument per line) to a record file, and points BinEnvVar at it.
 // It returns the record path.
@@ -35,8 +39,23 @@ func TestMain(m *testing.M) {
 // contract with Chrome — --new-window is what yields one window rather than
 // tabs appended to the operator's current one, and --profile-directory is what
 // keeps them in the operator's own profile — so it is the thing worth pinning.
+//
+// It also widens forwardWait for the test's duration. openWindow returns nil
+// when forwardWait elapses BEFORE the child exits (that is the cold-start
+// "this process became the browser" success path), without waiting for the
+// child to do anything. A test that reads the record after openWindow returns
+// is therefore only sound if openWindow returned because the stub EXITED —
+// the stub appends its argv before exiting, so exit implies a complete record.
+// Under heavy host load the stub's fork/exec/exit can take longer than the 5s
+// production default, the timeout branch wins, and the record is still empty
+// (observed 2026-10-07, pg2-ea1ye). The wide bound never costs time when the
+// host is idle, because openWindow returns the moment the stub exits.
 func stubChrome(t *testing.T, exitCode int) (record string) {
 	t.Helper()
+	prev := forwardWait
+	t.Cleanup(func() { forwardWait = prev })
+	forwardWait = stubExitWait
+
 	dir := t.TempDir()
 	record = filepath.Join(dir, "argv")
 	bin := filepath.Join(dir, "chrome-stub")
@@ -155,19 +174,15 @@ func TestOpenWindowConfigBinTakesPrecedenceOverEnvVar(t *testing.T) {
 }
 
 // TestOpenWindowReportsNonZeroExit exercises the exit-detection path, not the
-// timeout path, so it widens forwardWait well past the production default:
-// the stub exits in low milliseconds under normal scheduling, but under
-// severe CPU contention observing that exit can be delayed past the 5s
+// timeout path. stubChrome widens forwardWait well past the production
+// default: the stub exits in low milliseconds under normal scheduling, but
+// under severe CPU contention observing that exit can be delayed past the 5s
 // default, which makes the timeout branch win the select and return nil
 // instead of the stub's real exit-3 error (observed 2026-08-21 under
 // concurrent nix jobs, packages/pg-pr/internal/browser). Widening only the
 // test's own copy of the var doesn't change openWindow's production
 // contract — see forwardWait's doc comment.
 func TestOpenWindowReportsNonZeroExit(t *testing.T) {
-	prev := forwardWait
-	t.Cleanup(func() { forwardWait = prev })
-	forwardWait = 30 * time.Second
-
 	stubChrome(t, 3)
 
 	err := openWindow([]string{"https://example.test/pull/1"}, "")
