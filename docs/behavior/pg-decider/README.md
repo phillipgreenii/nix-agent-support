@@ -72,7 +72,7 @@ A rule is added to this table in the change that registers it.
 The invariants of this set are numbered `INV-DECIDER-<n>` across the docs, in RFC 2119 language:
 
 - `INV-DECIDER-1` to `INV-DECIDER-6` are in [`work-items.md`](work-items.md).
-- `INV-DECIDER-7` to `INV-DECIDER-20` are in [`plan-and-apply.md`](plan-and-apply.md).
+- `INV-DECIDER-7` to `INV-DECIDER-20` and `INV-DECIDER-25` are in [`plan-and-apply.md`](plan-and-apply.md).
 - `INV-DECIDER-21` to `INV-DECIDER-24` are in [`config.md`](config.md).
 
 ## Scope

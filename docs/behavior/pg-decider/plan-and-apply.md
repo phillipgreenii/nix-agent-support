@@ -57,6 +57,15 @@ Two stops are evaluated before any rule runs:
 
 Otherwise each rule is evaluated against the current view.
 
+### Terminal entities
+
+A merged or closed PR is dead. Unlike hidden and suppressed, this is not a step the engine
+evaluates before the rules: each rule applies the liveness test itself, so the rule set as a whole
+MUST uphold it (`INV-DECIDER-25`). Only the rules that keep the anchor in step with the PR and
+close its open work MAY act on a terminal PR; every other rule skips it as `not matched`. A
+terminal PR that has no anchor and no work items therefore yields no action at all: nothing is
+created for it only to be closed again on the next run.
+
 ### Skip reasons
 
 A rule that produced no action is listed with exactly one of five reasons:
@@ -275,3 +284,7 @@ is written even for a run that planned nothing.
 - **INV-DECIDER-20.** Each `apply` run that reaches its action list MUST write exactly one run
   counters line to stderr whose counts satisfy `planned = applied + deduped + failed + skipped` for
   every rule.
+- **INV-DECIDER-25.** For a merged or closed PR, the rules that keep the anchor in step with the PR
+  and close its open work are the only ones that MAY act; every other rule MUST skip it, so a
+  terminal PR with no anchor and no work items MUST yield no action, and no work item or
+  annotation MUST be created, reopened or updated for it.

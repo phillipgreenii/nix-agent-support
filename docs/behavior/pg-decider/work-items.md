@@ -108,6 +108,9 @@ Further, for every kind:
 - A closed item is left closed unless its own rule says that a new context reopens it. A hit on a
   closed item is therefore either a reopen (for the kinds above that say so) or nothing at all; it
   is never a second item.
+- A merged or closed PR is dead, so the decider creates no work item for it, anchor included, and
+  does not reopen one for it, unless the item is the anchor's own mirror or close (see "Terminal
+  entities" and `INV-DECIDER-25` in [`plan-and-apply.md`](plan-and-apply.md)).
 - A changed `fbsum` digest alone is not more feedback. A cycle is raised only for comments that no
   earlier cycle covers.
 - Items without a `dedup_key` that belong to the PR (matched by exact title, by the anchor title
