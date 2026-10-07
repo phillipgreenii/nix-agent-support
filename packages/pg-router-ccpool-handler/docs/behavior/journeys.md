@@ -13,7 +13,7 @@ Realization gaps; these are the stories Task 5.2 onward realizes.
   a bare configured command), so pg-router itself never needs to know how to drive an agent.
   _(→ `USECASE-CCH-DISPATCH`; `INV-CCH-2`, `INV-CCH-3`, `INV-CCH-4`, `INV-CCH-5`,
   `INV-CCH-9`, `INV-CCH-10`, `INV-CCH-14`, `INV-CCH-15`, `INV-CCH-17`, `INV-CCH-18`, `INV-CCH-19`,
-  `INV-CCH-20`, `INV-CCH-21`.)_
+  `INV-CCH-20`, `INV-CCH-21`, `INV-CCH-22`.)_
 - **`STORY-CCH-QUERY`** <!-- uuid: 661a1b2c-4243-42b3-8fcc-607e8ec7e4af --> — As pg-router's core, I
   want a registered source to query beads for events on my behalf, so pg-router itself never needs
   to know beads' query language. _(→ `USECASE-CCH-QUERY`; `INV-CCH-1`, `INV-CCH-4`, `INV-CCH-5`.)_
@@ -26,7 +26,7 @@ Realization gaps; these are the stories Task 5.2 onward realizes.
 **Level:** user-goal.
 **Preconditions:** this module is registered with a reachable core (`phillipgreenii-nix-agent-support`
 ADR 0036 — this module never starts a core).
-_Requires:_ `INTF-HANDLER`, `INV-CCH-2`, `INV-CCH-3`, `INV-CCH-14`, `INV-CCH-15`, `INV-CCH-17`, `INV-CCH-18`, `INV-CCH-19`, `INV-CCH-20`, `INV-CCH-21`.
+_Requires:_ `INTF-HANDLER`, `INV-CCH-2`, `INV-CCH-3`, `INV-CCH-14`, `INV-CCH-15`, `INV-CCH-17`, `INV-CCH-18`, `INV-CCH-19`, `INV-CCH-20`, `INV-CCH-21`, `INV-CCH-22`.
 _Includes:_ `INTF-CCH-CCPOOL` or a configured command, per the role's own backing kind.
 
 1. The core dispatches one event under one tracking id to a bound role.
@@ -47,6 +47,10 @@ Extensions:
 - 2b. The git origin the dispatch runs against is unavailable (`INV-CCH-10`): this module declines
   `busy` with reason `origin-unavailable` before touching any bead; dispatches into other origins
   are unaffected, and dispatch resumes on the first successful probe.
+- 2h. A REVIEW dispatch whose bead is already closed, whose PR is merged, or whose pending review
+  already holds content for the head (`INV-CCH-22`): this module declines `busy` before any
+  capacity, isolation or launch step, with reason `skipped-bead-closed`, `skipped-pr-merged` or
+  `skipped-pending-review`. It reads only, and any failure to read launches as normal.
 - 2d. An earlier dispatch's handler died (it crashed or was killed; a daemon restart alone no
   longer kills it, `INV-CCH-14`) and left its session unsupervised: its lease has expired. Before checking
   capacity this module handles each such orphan of its own role (`INV-CCH-18`). An `idle` or

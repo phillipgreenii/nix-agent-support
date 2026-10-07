@@ -388,3 +388,33 @@ review`. The claim is still released (status open, assignee cleared) — the lab
   land in a directory this module does not own. Not covered, accepted: the fetch uses the
   daemon's own credentials and so fails wherever the daemon cannot fetch; a commit already local
   is trusted as is. Bead `pg2-hh32y`.
+
+- **`INV-CCH-22`** — before a REVIEW-role dispatch preflights anything that costs a session (capacity,
+  isolation, launch), the handler MUST check, read-only and at zero model cost, that the review is
+  still worth running, and MUST decline the dispatch, launching no session and writing nothing,
+  when ANY of these holds, in this order: (a) the review bead is already closed (its status as just
+  re-read at dispatch, no further bead call); (b) the pull request the item names (`<repo>#<number>`
+  from the item's metadata) is merged; (c) the acting identity already has a pending review on that
+  pull request that holds content for the PR's live head (the connector's own `stale` verdict is
+  false: a comment anchored to the head, a body section for it, or a review of the identity at it).
+  A pending review that holds content only for an older head is stale and does NOT skip. The
+  handler cannot tell a human-edited pending review from one it wrote (the connector's pending
+  record carries no authorship marker, because create-or-append deletes nothing), so (c) is "a
+  pending review already covers the head", not "a human edited it". The decline is the pre-accept
+  busy decline of `INV-CCH-6`, carrying one reason per case: `skipped-bead-closed`,
+  `skipped-pr-merged`, `skipped-pending-review`; each decline is logged with a message distinct per
+  case and written to the event log as a `precheck_skip` record carrying role, bead, PR and reason.
+  The check MUST fail OPEN: an unreadable bead, an item that names no well-formed PR, or any
+  connector failure (binary missing, timeout, error answer, malformed answer) is logged and the
+  dispatch proceeds exactly as without this invariant. Every PR read goes through the connector's
+  read-only verbs; a PR merged-state read MAY be served from the connector's cache, which is safe
+  because a cached "open" only means the dispatch proceeds. A role other than `review` is never
+  prechecked. **Telemetry.** The handler has no metrics emitter; the declines reach
+  `pg_router_failures{class=declined,reason=skipped-*}` through the core's existing handling of a
+  busy decline's reason, and the failure-rate alert excludes the `skipped-` reasons (a declined
+  event is re-offered until it expires, `INV-EVT-4`, so a sustained rate is expected). **Trade-off.**
+  A skipped event is re-offered, each time costing one bead re-read and up to two connector reads,
+  until the source stops listing the bead or the event expires; (c) also skips a same-head
+  re-dispatch after a session that died mid-review, leaving its pending review for the human. Bead
+  `pg2-5x29j`; found by the 2026-10-07 router health review (about 11 of 50 sessions in 72 hours
+  had nothing worth reviewing).

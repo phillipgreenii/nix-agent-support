@@ -168,7 +168,8 @@ func runDispatch(args []string) int {
 	// bead's CURRENT metadata so the rendered prompt (e.g. a review's pinned
 	// head_sha) reflects the bead as it is at dispatch time, not as it was when
 	// the event was queued before a head advance reopened the bead (pg2-1pt7r).
-	dctx.Item = executor.RefreshItem(context.Background(), deps.BD, dctx.Item)
+	var bead *beads.Issue
+	dctx.Item, bead = executor.RefreshItemIssue(context.Background(), deps.BD, dctx.Item)
 	// Stamp a fresh per-attempt ExternalID here — the call the old monolithic
 	// internal/orchestrator made before invoking the ccpool executor
 	// in-process, and which the Phase 5 participant extraction (docket
@@ -242,6 +243,16 @@ func runDispatch(args []string) int {
 		}); swept > 0 {
 			slog.Info("dispatch: reclaimed leaked worktrees", "reclaimed", swept)
 		}
+	}
+	// Zero-model-cost precheck (INV-CCH-22, bead pg2-5x29j): a review dispatch
+	// whose bead is closed, whose PR is merged, or whose pending review already
+	// holds content for the head launches no session. Read-only; fails open.
+	// After the reconciles above so their housekeeping still runs on a decline;
+	// the decline is the same pre-accept busy reply as every other, carrying the
+	// skip's own reason so pg-router core's declined metric counts it per reason.
+	if skip, skipped := executor.PrecheckReview(ctx, dctx, deps, bead); skipped {
+		writeBusyReply(os.Stdout, skip.Reason)
+		return conformance.ExitBusy
 	}
 	result, err := executor.For(role.Type).Dispatch(ctx, dctx, deps)
 	if reason, busy := busyDeclineReason(err); busy {

@@ -32,16 +32,26 @@ import (
 // payload item untouched and is logged, never turned into a dispatch failure —
 // a stale-but-present prompt is no worse than before this refresh existed.
 func RefreshItem(ctx context.Context, bd beads.Runner, it item.Item) item.Item {
+	it, _ = RefreshItemIssue(ctx, bd, it)
+	return it
+}
+
+// RefreshItemIssue is RefreshItem that also hands back the bead it read, so a
+// caller that needs the bead's current status (PrecheckReview, pg2-5x29j) does
+// not pay a second `bd show`. The returned *beads.Issue is nil exactly when no
+// bead was read: a non-bead item, a nil runner, or a bd failure (already
+// logged). Everything else about the item is as RefreshItem documents.
+func RefreshItemIssue(ctx context.Context, bd beads.Runner, it item.Item) (item.Item, *beads.Issue) {
 	if bd == nil || !beads.IsID(it.ID) {
-		return it
+		return it, nil
 	}
 	iss, err := beads.ShowObj(ctx, bd, it.ID)
 	if err != nil {
 		slog.Warn("dispatch: could not refresh item metadata from bd; using the event payload's", "bead", it.ID, "err", err)
-		return it
+		return it, nil
 	}
 	if len(iss.Metadata) == 0 {
-		return it
+		return it, &iss
 	}
 	merged := make(map[string]any, len(it.Metadata)+len(iss.Metadata))
 	for k, v := range it.Metadata {
@@ -51,5 +61,5 @@ func RefreshItem(ctx context.Context, bd beads.Runner, it item.Item) item.Item {
 		merged[k] = v
 	}
 	it.Metadata = merged
-	return it
+	return it, &iss
 }

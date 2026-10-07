@@ -120,6 +120,11 @@ type Config struct {
 	// gate (bead pg2-4gi2c, INV-CCH-10). The zero-origin default watches
 	// nothing, so a deployment that never sets it is unchanged.
 	OriginProbe OriginProbe
+	// ConnectorBinary is the pg-connector executable the review precheck
+	// (INV-CCH-22, bead pg2-5x29j) reads PR merged state and pending-review
+	// state through. Empty means "pg-connector" resolved on PATH. A binary that
+	// cannot be run only disables the precheck's PR reads (it fails open).
+	ConnectorBinary string
 }
 
 // WatchedOrigin is one git origin the handler probes before accepting a

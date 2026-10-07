@@ -13,7 +13,7 @@ import (
 // matched by the first two.
 const (
 	wantBudgetExpr   = `sum by (role) (rate(pg_router_failures_total{class="handler-error",reason="budget-exceeded"}[10m]))`
-	wantResidualExpr = `sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure"}[10m]))`
+	wantResidualExpr = `sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure|skipped-.+"}[10m]))`
 	wantTriagerExpr  = `sum by (role) (rate(pg_router_failures_total{class="handler-error",reason="triager-failure"}[10m]))`
 )
 
@@ -66,9 +66,10 @@ func TestResidualFailureRateRule(t *testing.T) {
 	// (own rule, pg2-o03wl so an outage pages once), at-capacity
 	// (intentionally silent), budget-exceeded (its own rule) and triager-failure
 	// (its own rule, pg2-u2yub: a failing escalation triager must not fire the
-	// worker/review failure-rate alert). Nothing else.
-	if !strings.Contains(got, `reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure"`) {
-		t.Errorf("residual must exclude exactly at-capacity, budget-exceeded, origin-unavailable and triager-failure: %q", got)
+	// worker/review failure-rate alert). And the handler's review-precheck
+	// declines (skipped-*, pg2-5x29j), which are healthy and moot by construction. Nothing else.
+	if !strings.Contains(got, `reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure|skipped-.+"`) {
+		t.Errorf("residual must exclude exactly at-capacity, budget-exceeded, origin-unavailable, triager-failure and skipped-*: %q", got)
 	}
 	for _, need := range []string{"for: 10m", "noDataState: OK", "execErrState: Error", "{{ $labels.role }}", "{{ $labels.class }}"} {
 		if !strings.Contains(r, need) {
