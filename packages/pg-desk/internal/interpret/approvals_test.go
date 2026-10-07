@@ -212,3 +212,103 @@ func TestHumanApproved_ExcludesEveryBot(t *testing.T) {
 		}
 	})
 }
+
+// latestDecisions must give the same per-author verdict whichever order the
+// connector emits reviews in (oldest-first before pg-connector 8245dbc9,
+// newest-first since; bead pg2-4jmw2). Each case is run forwards and reversed.
+func TestLatestDecisions_IsOrderIndependent(t *testing.T) {
+	rv := func(author, state, at string) prReview {
+		return prReview{ID: author + state + at, Author: author, State: state, SubmittedAt: at}
+	}
+	cases := []struct {
+		name    string
+		reviews []prReview // oldest-first
+		want    map[string]string
+	}{
+		{
+			name: "changes requested then approved by same author",
+			reviews: []prReview{
+				rv("alice", "CHANGES_REQUESTED", "2026-10-01T09:00:00Z"),
+				rv("alice", "APPROVED", "2026-10-02T09:00:00Z"),
+			},
+			want: map[string]string{"alice": "APPROVED"},
+		},
+		{
+			name: "approved then changes requested by same author",
+			reviews: []prReview{
+				rv("alice", "APPROVED", "2026-10-01T09:00:00Z"),
+				rv("alice", "CHANGES_REQUESTED", "2026-10-02T09:00:00Z"),
+			},
+			want: map[string]string{"alice": "CHANGES_REQUESTED"},
+		},
+		{
+			name: "later COMMENTED never overwrites a decisive review",
+			reviews: []prReview{
+				rv("alice", "APPROVED", "2026-10-01T09:00:00Z"),
+				rv("alice", "COMMENTED", "2026-10-03T09:00:00Z"),
+			},
+			want: map[string]string{"alice": "APPROVED"},
+		},
+		{
+			name: "authors are collapsed independently, offsets compared as instants",
+			reviews: []prReview{
+				rv("alice", "CHANGES_REQUESTED", "2026-10-01T09:00:00Z"),
+				rv("bob", "APPROVED", "2026-10-01T09:30:00Z"),
+				rv("alice", "APPROVED", "2026-10-01T05:30:00-04:00"),        // 09:30Z, after 09:00Z
+				rv("bob", "CHANGES_REQUESTED", "2026-10-01T08:00:00-04:00"), // 12:00Z, after bob's approval
+			},
+			want: map[string]string{"alice": "APPROVED", "bob": "CHANGES_REQUESTED"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rev := make([]prReview, len(tc.reviews))
+			for i, r := range tc.reviews {
+				rev[len(rev)-1-i] = r
+			}
+			for name, in := range map[string][]prReview{"oldest-first": tc.reviews, "newest-first": rev} {
+				got := latestDecisions(in)
+				if len(got) != len(tc.want) {
+					t.Fatalf("%s: got %v, want %v", name, got, tc.want)
+				}
+				for a, st := range tc.want {
+					if got[a] != st {
+						t.Fatalf("%s: %s = %q, want %q (all: %v)", name, a, got[a], st, got)
+					}
+				}
+			}
+		})
+	}
+}
+
+// Without timestamps (a pre-schema-9 connector) position decides, by the
+// newest-first contract: the first decisive review seen wins.
+func TestLatestDecisions_NoTimestampsFallsBackToNewestFirst(t *testing.T) {
+	got := latestDecisions([]prReview{
+		{Author: "alice", State: "APPROVED"},          // newest
+		{Author: "alice", State: "CHANGES_REQUESTED"}, // older
+	})
+	if got["alice"] != "APPROVED" {
+		t.Fatalf("alice = %q, want APPROVED", got["alice"])
+	}
+}
+
+// End to end through computeApprovals: the same reviews in either order give
+// the same Approvals.
+func TestComputeApprovals_ReviewOrderDoesNotChangeResult(t *testing.T) {
+	oldest := []prReview{
+		{Author: "me", State: "CHANGES_REQUESTED", SubmittedAt: "2026-10-01T09:00:00Z"},
+		{Author: "me", State: "APPROVED", SubmittedAt: "2026-10-02T09:00:00Z"},
+		{Author: "bob", State: "APPROVED", SubmittedAt: "2026-10-01T10:00:00Z"},
+		{Author: "bob", State: "CHANGES_REQUESTED", SubmittedAt: "2026-10-02T10:00:00Z"},
+	}
+	newest := []prReview{oldest[3], oldest[2], oldest[1], oldest[0]}
+	a := computeApprovals(prShow{Reviews: oldest}, "me", nil, nil)
+	b := computeApprovals(prShow{Reviews: newest}, "me", nil, nil)
+	if a != b {
+		t.Fatalf("order changed result: oldest-first %+v vs newest-first %+v", a, b)
+	}
+	if !a.SelfApproved || !a.HumanChangesRequested || a.HumanApprovers != 1 {
+		t.Fatalf("unexpected approvals %+v (want self approved, bob requesting changes, 1 approver)", a)
+	}
+}

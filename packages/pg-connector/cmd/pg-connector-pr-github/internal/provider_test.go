@@ -252,7 +252,7 @@ func TestBackend_Show_MapsGHDataToSchemaPR(t *testing.T) {
 			{ID: "c2", Author: "bob", Body: "inline", Path: "main.go", Line: 10, ThreadID: "t2", ReviewID: "PRR_kwDOKtdWE88AAAABL3blsA"},
 		},
 		reviews: []api.Review{
-			{ID: "PRR_kwDOKtdWE88AAAABL3blsA", Author: "bob", State: "CHANGES_REQUESTED", Body: "please fix"},
+			{ID: "PRR_kwDOKtdWE88AAAABL3blsA", Author: "bob", State: "CHANGES_REQUESTED", Body: "please fix", SubmittedAt: "2026-10-01T09:00:00Z"},
 		},
 	}
 	b := newTestBackend(t, gh)
@@ -269,6 +269,10 @@ func TestBackend_Show_MapsGHDataToSchemaPR(t *testing.T) {
 	}
 	if len(got.Reviews) != 1 || len(got.Reviews[0].Comments) != 1 || got.Reviews[0].Comments[0].ID != "c2" {
 		t.Fatalf("review-nested comments mismatch: %+v", got.Reviews)
+	}
+	// pg2-4jmw2: submitted_at rides the wire so consumers need not trust array order.
+	if got.Reviews[0].SubmittedAt != "2026-10-01T09:00:00Z" {
+		t.Fatalf("Reviews[0].SubmittedAt = %q, want 2026-10-01T09:00:00Z", got.Reviews[0].SubmittedAt)
 	}
 }
 

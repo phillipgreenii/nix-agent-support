@@ -81,7 +81,14 @@ import "encoding/json"
 // and the exported PRListFields set. Additive and omitempty, so every
 // version-7 consumer keeps decoding unchanged; the bump follows this const's
 // own rule that ANY field-shape change bumps the version, additive or not.
-const PRSchemaVersion = 8
+//
+// Bumped 8 -> 9 by bead pg2-4jmw2, which added PRReview.SubmittedAt so a
+// consumer can order a PR's reviews itself instead of depending on the
+// array order (pr show emits reviews newest-first since schema 7). Additive
+// and omitempty, so every version-8 consumer keeps decoding unchanged; the
+// bump follows this const's own rule that ANY field-shape change bumps the
+// version, additive or not.
+const PRSchemaVersion = 9
 
 // PRListFields is the authoritative set of schema.PR JSON field names the
 // cheap `list` populates (bead pg2-x3h8c.2). The list's batched search
@@ -313,6 +320,11 @@ type PRReview struct {
 	State    string      `json:"state"`
 	Body     string      `json:"body,omitempty"`
 	Comments []PRComment `json:"comments,omitempty"`
+	// SubmittedAt is the review's RFC3339 submission time (bead pg2-4jmw2),
+	// empty for a pending (unsubmitted) review or a backend that does not
+	// report it. A consumer that needs "the latest review" MUST order by this
+	// field, not by position in PR.Reviews.
+	SubmittedAt string `json:"submitted_at,omitempty"`
 }
 
 // PRListResult is the "list" op's wire result payload (bead pg2-2j5ac.28.1,

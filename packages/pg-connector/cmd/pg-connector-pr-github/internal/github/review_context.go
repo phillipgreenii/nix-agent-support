@@ -247,6 +247,8 @@ func toAPIReview(r gqlReview) api.Review {
 		State:     r.State,
 		Body:      r.Body,
 		CommitOID: r.Commit.OID,
+		// Empty for a pending review (it has no submission time yet).
+		SubmittedAt: r.SubmittedAt,
 	}
 }
 

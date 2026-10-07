@@ -347,6 +347,9 @@ type prReview struct {
 	State    string      `json:"state"`
 	Body     string      `json:"body,omitempty"`
 	Comments []prComment `json:"comments,omitempty"`
+	// SubmittedAt is the review's RFC3339 submission time (pg-connector
+	// schema 9+); empty from an older connector or for a pending review.
+	SubmittedAt string `json:"submitted_at,omitempty"`
 }
 
 type prShow struct {

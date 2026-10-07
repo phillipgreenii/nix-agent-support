@@ -673,6 +673,8 @@ func toSchemaPR(id string, in *api.PR, comments []api.Comment, reviews []api.Rev
 			State:    r.State,
 			Body:     r.Body,
 			Comments: byReview[r.ID],
+			// pg2-4jmw2: lets a consumer order reviews without trusting array order.
+			SubmittedAt: r.SubmittedAt,
 		})
 	}
 

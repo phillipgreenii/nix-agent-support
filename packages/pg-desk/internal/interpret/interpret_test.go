@@ -655,8 +655,8 @@ func TestComputeApprovals_CommentVerdictGrammar(t *testing.T) {
 func TestComputeApprovals_LatestReviewPerAuthorWins(t *testing.T) {
 	t.Run("changes requested then approved by the same author reads approved", func(t *testing.T) {
 		pr := prShow{Reviews: []prReview{
-			{Author: "carol", State: "CHANGES_REQUESTED"},
-			{Author: "carol", State: "APPROVED"},
+			{Author: "carol", State: "CHANGES_REQUESTED", SubmittedAt: "2026-10-01T09:00:00Z"},
+			{Author: "carol", State: "APPROVED", SubmittedAt: "2026-10-02T09:00:00Z"},
 		}}
 		appr := computeApprovals(pr, "", nil, nil)
 		if !appr.HumanApproved || appr.HumanChangesRequested {
@@ -665,8 +665,8 @@ func TestComputeApprovals_LatestReviewPerAuthorWins(t *testing.T) {
 	})
 	t.Run("approved then changes requested by the same author reads changes requested", func(t *testing.T) {
 		pr := prShow{Reviews: []prReview{
-			{Author: "carol", State: "APPROVED"},
-			{Author: "carol", State: "CHANGES_REQUESTED"},
+			{Author: "carol", State: "APPROVED", SubmittedAt: "2026-10-01T09:00:00Z"},
+			{Author: "carol", State: "CHANGES_REQUESTED", SubmittedAt: "2026-10-02T09:00:00Z"},
 		}}
 		appr := computeApprovals(pr, "", nil, nil)
 		if appr.HumanApproved || !appr.HumanChangesRequested {
@@ -684,8 +684,8 @@ func TestComputeApprovals_LatestReviewPerAuthorWins(t *testing.T) {
 	})
 	t.Run("self approves then later requests changes: SelfApproved reads false", func(t *testing.T) {
 		pr := prShow{Reviews: []prReview{
-			{Author: "me", State: "APPROVED"},
-			{Author: "me", State: "CHANGES_REQUESTED"},
+			{Author: "me", State: "APPROVED", SubmittedAt: "2026-10-01T09:00:00Z"},
+			{Author: "me", State: "CHANGES_REQUESTED", SubmittedAt: "2026-10-02T09:00:00Z"},
 		}}
 		if got := computeApprovals(pr, "me", nil, nil).SelfApproved; got {
 			t.Fatalf("got SelfApproved=%v; want false (self's later CHANGES_REQUESTED supersedes the earlier APPROVED)", got)

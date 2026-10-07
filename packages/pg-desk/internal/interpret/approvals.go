@@ -3,6 +3,7 @@ package interpret
 import (
 	"encoding/json"
 	"strings"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/verdict"
@@ -102,8 +103,8 @@ const (
 func computeApprovals(pr prShow, self string, approverAllowlist []string, verdictClassifier *verdict.Classifier) Approvals {
 	allow := toSet(approverAllowlist)
 
-	// latestDecision collapses pr.Reviews (a full chronological history,
-	// per pg-connector-pr-github's ListReviews) to each author's most
+	// latestDecision collapses pr.Reviews (a full review history; see
+	// latestDecisions for why array order is not trusted) to each author's most
 	// recent APPROVED/CHANGES_REQUESTED verdict. A COMMENTED (or any other)
 	// review never overwrites an earlier decisive one, mirroring
 	// pg-connector-pr-github's own needsAttentionForPR collapse
@@ -112,13 +113,7 @@ func computeApprovals(pr prShow, self string, approverAllowlist []string, verdic
 	// satisfied — an ordinary review cycle — would read as "still
 	// requesting changes" forever, since pr.Reviews carries every
 	// historical event, not just the live one.
-	latestDecision := map[string]string{}
-	for _, r := range pr.Reviews {
-		switch r.State {
-		case "APPROVED", "CHANGES_REQUESTED":
-			latestDecision[r.Author] = r.State
-		}
-	}
+	latestDecision := latestDecisions(pr.Reviews)
 
 	approvers := map[string]struct{}{}
 	selfApproved := false
@@ -172,6 +167,47 @@ func computeApprovals(pr prShow, self string, approverAllowlist []string, verdic
 		HumanChangesRequested: humanChangesRequested,
 		BotVerdict:            botVerdict,
 	}
+}
+
+// latestDecisions collapses reviews to each author's most recent decisive
+// (APPROVED / CHANGES_REQUESTED) review state. It is independent of the order
+// the reviews arrive in: "most recent" is decided by SubmittedAt, never by
+// array position (pg-connector's pr show emitted reviews oldest-first before
+// commit 8245dbc9 and newest-first since, bead pg2-4jmw2).
+//
+// Only when two competing reviews of one author lack a comparable timestamp
+// (a pre-schema-9 connector, which does not send submitted_at) does position
+// decide, and then by the connector's newest-first contract: the first review
+// seen wins. Equal timestamps likewise keep the first seen.
+func latestDecisions(reviews []prReview) map[string]string {
+	best := map[string]prReview{}
+	for _, r := range reviews {
+		switch r.State {
+		case "APPROVED", "CHANGES_REQUESTED":
+		default:
+			continue
+		}
+		cur, seen := best[r.Author]
+		if !seen || submittedAfter(r.SubmittedAt, cur.SubmittedAt) {
+			best[r.Author] = r
+		}
+	}
+	out := make(map[string]string, len(best))
+	for author, r := range best {
+		out[author] = r.State
+	}
+	return out
+}
+
+// submittedAfter reports whether timestamp a is strictly later than b; false
+// when either is missing or unparseable (the caller then keeps its incumbent).
+func submittedAfter(a, b string) bool {
+	ta, errA := time.Parse(time.RFC3339, a)
+	tb, errB := time.Parse(time.RFC3339, b)
+	if errA != nil || errB != nil {
+		return false
+	}
+	return ta.After(tb)
 }
 
 // knownBotLogins are bot accounts whose login pg-connector reports WITHOUT

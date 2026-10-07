@@ -90,12 +90,12 @@ func TestPR_CommentIDAndCommentIDAreStrings(t *testing.T) {
 }
 
 // TestPRSchemaVersion_IsCurrent pins PRSchemaVersion at its current value
-// (the review-context change to show bumped 6 -> 7) so an accidental future edit that
+// (PRReview.SubmittedAt bumped 8 -> 9) so an accidental future edit that
 // forgets to bump it alongside a new field-shape change is caught here
 // first.
 func TestPRSchemaVersion_IsCurrent(t *testing.T) {
-	if PRSchemaVersion != 8 {
-		t.Fatalf("PRSchemaVersion = %d, want 8", PRSchemaVersion)
+	if PRSchemaVersion != 9 {
+		t.Fatalf("PRSchemaVersion = %d, want 9", PRSchemaVersion)
 	}
 }
 
