@@ -145,7 +145,8 @@ their own terms in a downstream deployment set.
 
 - **Wiring** (a **routing graph**) — the declared flow connecting event sources, event types, and
   event handlers through their bindings. The core validates **only** the wiring, **pre-runtime**, over
-  six blocking checks — no orphan event types, no unhandled source output, no disconnected handlers, no
+  six blocking checks — no orphan event types (a wildcard such as `pr.*` is never a match: routing is by
+  exact string equality, so it is reported here), no unhandled source output, no disconnected handlers, no
   handler left with no events to listen for, no absent backing command, and no determinably
   non-terminating re-entry cycle — and reports pass or fail on it; a re-entry cycle whose termination
   is **not determinable** is its one warning. It does **not** validate workflow-completeness or

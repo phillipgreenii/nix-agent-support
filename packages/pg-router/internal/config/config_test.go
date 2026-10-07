@@ -1573,3 +1573,168 @@ func TestLoad_noFile_optOutSuppressesWarn(t *testing.T) {
 		t.Errorf("PG_ROUTER_NO_CONFIG_WARN=true must still log at INFO (not go fully silent), got:\n%s", infoBuf.String())
 	}
 }
+
+// Routing is by exact string equality only (S22): a wildcard in a query's emits
+// or a role's binds can never match anything, so the loader rejects it as a
+// blocking finding that names the owner and the offending string. The
+// finding is aggregated with the other findings, so BOTH offenders appear.
+func TestLoaderRejectsWildcardEmitsBinds(t *testing.T) {
+	writeCfg(t, `
+[[query]]
+name = "pr-changes"
+emits = ["pr.*"]
+type = "command"
+[query.command]
+argv = ["x"]
+format = "jsonl"
+
+[[role]]
+name = "pr-decider"
+type = "command"
+cap = 1
+binds = ["pr.*"]
+[role.command]
+argv = ["x"]
+`)
+	_, err := Load()
+	if err == nil {
+		t.Fatal("a wildcard emits/binds entry must fail Load()")
+	}
+	msg := err.Error()
+	for _, want := range []string{`query "pr-changes"`, `role "pr-decider"`, `"pr.*"`, "wildcard"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error must name %s; got:\n%s", want, msg)
+		}
+	}
+}
+
+// workedExampleTOML is the entity-change-flow routing (Decision A): one
+// <type>.changed source per watched type, a decider role for pr, and a no-op
+// bound role each for issue and thread so the orphan-producer check (S22) holds.
+const workedExampleTOML = `
+[[query]]
+name = "desk-pr-changes"
+emits = ["pr.changed"]
+type = "command"
+[query.command]
+argv = ["pg-desk", "changes", "--type", "pr"]
+format = "jsonl"
+
+[[query]]
+name = "desk-issue-changes"
+emits = ["issue.changed"]
+type = "command"
+[query.command]
+argv = ["pg-desk", "changes", "--type", "issue"]
+format = "jsonl"
+
+[[query]]
+name = "desk-thread-changes"
+emits = ["thread.changed"]
+type = "command"
+[query.command]
+argv = ["pg-desk", "changes", "--type", "thread"]
+format = "jsonl"
+
+[[role]]
+name = "pr-decider"
+type = "command"
+cap = 1
+binds = ["pr.changed"]
+[role.command]
+argv = ["pr-decider"]
+
+[[role]]
+name = "desk-issue-noop"
+type = "command"
+cap = 1
+binds = ["issue.changed"]
+[role.command]
+argv = ["true"]
+
+[[role]]
+name = "desk-thread-noop"
+type = "command"
+cap = 1
+binds = ["thread.changed"]
+[role.command]
+argv = ["true"]
+`
+
+// The worked example loads with no finding and round-trips exactly
+// pr.changed, issue.changed and thread.changed through emits and binds; change
+// kinds are not routed and are not enumerated.
+func TestWorkedExampleRoundTrips(t *testing.T) {
+	writeCfg(t, workedExampleTOML)
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("the worked example must load without a finding: %v", err)
+	}
+	wantEmits := map[string]string{
+		"desk-pr-changes":     "pr.changed",
+		"desk-issue-changes":  "issue.changed",
+		"desk-thread-changes": "thread.changed",
+	}
+	if len(c.Queries) != len(wantEmits) {
+		t.Fatalf("queries = %d, want %d: %+v", len(c.Queries), len(wantEmits), c.Queries)
+	}
+	for _, s := range c.Queries {
+		want, ok := wantEmits[s.Name]
+		if !ok {
+			t.Fatalf("unexpected query %q", s.Name)
+		}
+		if got := s.Query.Emits(); len(got) != 1 || got[0] != want {
+			t.Errorf("query %q emits = %v, want [%s]", s.Name, got, want)
+		}
+	}
+	wantBinds := map[string]string{
+		"pr-decider":       "pr.changed",
+		"desk-issue-noop":  "issue.changed",
+		"desk-thread-noop": "thread.changed",
+	}
+	if len(c.Roles) != len(wantBinds) {
+		t.Fatalf("roles = %d, want %d: %+v", len(c.Roles), len(wantBinds), c.Roles)
+	}
+	for _, r := range c.Roles {
+		want, ok := wantBinds[r.Name]
+		if !ok {
+			t.Fatalf("unexpected role %q", r.Name)
+		}
+		if len(r.Binds) != 1 || r.Binds[0] != want {
+			t.Errorf("role %q binds = %v, want [%s]", r.Name, r.Binds, want)
+		}
+	}
+}
+
+// The orphan checks behave on the worked example (they exercise something the
+// existing four orphan tests do not: the full three-type shape). Dropping a
+// no-op role orphans its producer; dropping a source orphans its consumer.
+func TestWorkedExampleOrphanChecks(t *testing.T) {
+	cut := func(t *testing.T, header string) string {
+		t.Helper()
+		i := strings.Index(workedExampleTOML, header)
+		if i < 0 {
+			t.Fatalf("header %q not in example", header)
+		}
+		rest := workedExampleTOML[i+len(header):]
+		end := strings.Index(rest, "\n[[")
+		if end < 0 {
+			end = len(rest)
+		}
+		return workedExampleTOML[:i] + rest[end:]
+	}
+	t.Run("dropping the issue no-op role orphans its producer", func(t *testing.T) {
+		writeCfg(t, cut(t, "[[role]]\nname = \"desk-issue-noop\""))
+		_, err := Load()
+		if err == nil || !strings.Contains(err.Error(), "orphan producer") || !strings.Contains(err.Error(), "issue.changed") {
+			t.Fatalf("want orphan-producer finding naming issue.changed; got %v", err)
+		}
+	})
+	t.Run("dropping the thread source orphans its consumer", func(t *testing.T) {
+		writeCfg(t, cut(t, "[[query]]\nname = \"desk-thread-changes\""))
+		_, err := Load()
+		if err == nil || !strings.Contains(err.Error(), "orphan consumer") || !strings.Contains(err.Error(), "thread.changed") {
+			t.Fatalf("want orphan-consumer finding naming thread.changed; got %v", err)
+		}
+	})
+}

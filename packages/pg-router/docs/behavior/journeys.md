@@ -40,7 +40,7 @@ occurred to someone, so a missing one shows up as an empty cell instead of as si
   _(→ `USECASE-CONFIGURE-OPTIONAL`; `INV-DISP-2`, `GOAL-MIN-1`.)_
 - **`STORY-OP-5`** <!-- uuid: dd96bcfb-509c-4543-b32c-1f77af7330b7 --> — **validate the wiring before
   running** and get a **pass/fail report** instead of a runtime surprise, with every broken wiring
-  **surfaced** rather than silently dropped: no **orphan event type**, no **unhandled source output**,
+  **surfaced** rather than silently dropped: no **orphan event type** (a wildcard such as `pr.*` counts: matching is exact), no **unhandled source output**,
   no **disconnected handler**, no **handler left with no events to listen for**, no **source or
   handler whose backing command is absent**, and no **determinably non-terminating re-entry cycle**.
   All six are determinable from the configuration alone, so all six are checked **pre-runtime** and
@@ -830,6 +830,9 @@ one on its own **blocks startup** — anything determinable as an invalid config
 (`INV-WORKFLOW-1`):
 
 - **Orphan event type** — a binding matches a `type` no configured source emits → error.
+  Routing is by **exact string equality**, so a wildcard in a source's emitted `type` or a binding's
+  `type` (for example `pr.*`) can never match and is reported as an error naming the owner and the
+  string.
 - **Unhandled source output** — a source emits a `type` **no configured binding declares at all** →
   error. That `type` is unknown to the configuration, so at runtime the core **rejects** it to the
   caller rather than queueing it (`INV-DISP-3`) — a config that would emit it is invalid, not merely

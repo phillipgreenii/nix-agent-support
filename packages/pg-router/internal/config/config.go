@@ -515,7 +515,9 @@ func noConfigWarnSuppressed() bool {
 // as an invalid configuration. Six conditions are blocking, and they are the ones
 // docs/behavior states (INV-WORKFLOW-1, USECASE-VALIDATE-CONFIG):
 //
-//  1. orphan event type          — a binding matches a type no source emits
+//  1. orphan event type          — a binding matches a type no source emits (a
+//     wildcard emits/binds entry such as "pr.*" is rejected under this check
+//     too: routing is by exact string equality, so it can never match)
 //  2. unhandled source output    — a source emits a type no binding declares
 //  3. disconnected handler       — a handler no binding can reach
 //  4. handler with no events     — a BOUND handler whose reachable event set is empty
@@ -576,12 +578,18 @@ func (c Config) diagnose() (errs []error, warns []string) {
 		}
 		for _, e := range s.Query.Emits() {
 			emitted[e] = true
+			if isWildcardEventType(e) {
+				errs = append(errs, fmt.Errorf("query %q emits wildcard event type %q; routing is by exact string equality, so list each event type explicitly", s.Name, e))
+			}
 		}
 	}
 	bound := map[string]bool{}
 	for _, role := range c.Roles {
 		for _, b := range role.Binds {
 			bound[b] = true
+			if isWildcardEventType(b) {
+				errs = append(errs, fmt.Errorf("role %q binds wildcard event type %q; routing is by exact string equality, so list each event type explicitly", role.Name, b))
+			}
 			if !emitted[b] {
 				errs = append(errs, fmt.Errorf("role %q binds event type %q that no query emits (orphan consumer)", role.Name, b))
 			}
@@ -611,6 +619,12 @@ func (c Config) diagnose() (errs []error, warns []string) {
 	warns = append(warns, cycleWarns...)
 	return errs, warns
 }
+
+// isWildcardEventType reports whether an emits/binds entry contains a wildcard
+// character. Matching is by exact string equality (S22), so such an entry can
+// never match a real event type; it is rejected rather than left to surface as
+// a confusing orphan finding.
+func isWildcardEventType(s string) bool { return strings.ContainsRune(s, '*') }
 
 // logLimitFindings checks the queue-log size settings (bead pg2-5d3ui): the hard
 // limit max_log_bytes must be positive, and the thresholds must be ordered
