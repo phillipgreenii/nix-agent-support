@@ -16,6 +16,8 @@
 package scriptout
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -39,12 +41,74 @@ import (
 // process forever.
 const DefaultExecTimeout = 30 * time.Second
 
-// execTimeout is the deadline runInvoke (exec.go) and serveLoop (serve.go)
-// actually apply. It starts at DefaultExecTimeout; tests swap it to a short
-// value (the same swappable-var pattern exec.go's own execCmdFactory
+// BackendDeadlineMargin is how much EARLIER than the umbrella's
+// DefaultExecTimeout a Tier-2 backend's own per-request deadline fires
+// [bead pg2-5dyz2].
+//
+// Before this margin both deadlines were 30s and started within
+// milliseconds of each other (the umbrella arms its deadline, execs the
+// backend, and the backend arms its own on startup), so the umbrella's
+// SIGKILL of the backend won the race: the backend never got to report
+// "deadline exceeded", wrote no event-log row, and the caller saw only a
+// bare "signal: killed" (67 such source failures on 2026-10-06). With the
+// backend's deadline this much earlier, the backend normally answers first
+// with a structured error naming op, args and elapsed time, and the
+// umbrella's kill is left as a backstop for a backend that cannot even do
+// that (wedged before or after its handler).
+//
+// 5s: equal to DefaultWaitDelay, which is the longest a killed handler child
+// can still hold the backend's pipes before Go force-closes them, so the
+// backend's own error is written before the umbrella's deadline in the
+// ordinary case, while still leaving the backend 25s of the old 30s budget.
+const BackendDeadlineMargin = 5 * time.Second
+
+// DefaultBackendTimeout is the deadline a Tier-2 backend's own per-request
+// context carries (serve.go's serveLoop): DefaultExecTimeout minus
+// BackendDeadlineMargin.
+const DefaultBackendTimeout = DefaultExecTimeout - BackendDeadlineMargin
+
+// execTimeout is the deadline runInvoke (exec.go) applies to the umbrella's
+// exec of a backend. It starts at DefaultExecTimeout; tests swap it to a
+// short value (the same swappable-var pattern exec.go's own execCmdFactory
 // already uses) so a hang-and-get-killed test proves the mechanism without
 // waiting out the real 30s production value.
 var execTimeout = DefaultExecTimeout
+
+// backendTimeout is the deadline serveLoop (serve.go) applies to the
+// backend's own per-request context. It starts at DefaultBackendTimeout,
+// deliberately SHORTER than execTimeout (see BackendDeadlineMargin); tests
+// swap it the same way they swap execTimeout.
+var backendTimeout = DefaultBackendTimeout
+
+// MaxSummarizedArgsBytes caps how much of a request's args JSON is folded
+// into a deadline error or an event-log row by SummarizeArgs: enough to
+// identify a query or an id list, small enough that one pathological request
+// (a long comment body) cannot bloat a log line.
+const MaxSummarizedArgsBytes = 256
+
+// SummarizeArgs renders a request's args for a diagnostic message: the raw
+// JSON compacted onto one line and capped at MaxSummarizedArgsBytes on a rune
+// boundary, with a marker noting how many bytes were dropped. An empty or
+// null args renders as "{}" so the caller never prints a bare "args=".
+func SummarizeArgs(raw json.RawMessage) string {
+	var buf bytes.Buffer
+	if len(raw) == 0 || json.Compact(&buf, raw) != nil {
+		buf.Reset()
+		buf.WriteString(strings.TrimSpace(string(raw)))
+	}
+	s := buf.String()
+	if s == "" || s == "null" {
+		return "{}"
+	}
+	if len(s) <= MaxSummarizedArgsBytes {
+		return s
+	}
+	cut := MaxSummarizedArgsBytes
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return fmt.Sprintf("%s...[+%d bytes]", s[:cut], len(s)-cut)
+}
 
 // DefaultWaitDelay is the exec.Cmd.WaitDelay (Go 1.20+) every exec.Cmd this
 // module and its sibling backends' own gh/git/bd wrappers set.

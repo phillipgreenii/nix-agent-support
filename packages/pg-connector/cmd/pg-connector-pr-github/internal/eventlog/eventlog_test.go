@@ -520,3 +520,94 @@ func TestInstrument_NonListRowHasNoGraphQLCost(t *testing.T) {
 func TestAddGraphQLCost_NoRecorderIsNoOp(t *testing.T) {
 	AddGraphQLCost(context.Background(), 2) // must not panic
 }
+
+// ---------------------------------------------------------------------
+// In-flight rows (bead pg2-5dyz2).
+// ---------------------------------------------------------------------
+
+func readLines(t *testing.T, path string) []map[string]any {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []map[string]any
+	for _, l := range strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n") {
+		var m map[string]any
+		if err := json.Unmarshal([]byte(l), &m); err != nil {
+			t.Fatalf("line %q: %v", l, err)
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// TestInstrument_FileSinkWritesStartRowThenFinalRow: with the production
+// FileSink every call leaves a start row BEFORE its final row, so a call that
+// is SIGKILLed mid-flight (the bead's 67 killed sources) still appears in the
+// log.
+func TestInstrument_FileSinkWritesStartRowThenFinalRow(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	tb := Instrument(table(func(context.Context, json.RawMessage) (any, error) { return "res", nil }),
+		FileSink{Path: path, MaxBytes: 1 << 20}, "v1", time.Now)
+	if _, err := tb["list"].Handle(context.Background(), json.RawMessage(`{"query":"is:open"}`)); err != nil {
+		t.Fatal(err)
+	}
+	rows := readLines(t, path)
+	if len(rows) != 2 {
+		t.Fatalf("rows = %v, want a start row and a final row", rows)
+	}
+	start, final := rows[0], rows[1]
+	if start["phase"] != "start" || start["op"] != "list" || start["args"] != `{"query":"is:open"}` || start["msg"] != "list started" {
+		t.Errorf("start row = %v", start)
+	}
+	if _, ok := start["duration_ms"]; ok {
+		t.Errorf("start row looks like a finished call: %v", start)
+	}
+	if _, ok := final["phase"]; ok || final["msg"] != "list ok" {
+		t.Errorf("final row = %v, want the unchanged finished-call shape", final)
+	}
+	if start["pid"] != final["pid"] {
+		t.Errorf("start and final rows disagree on pid: %v vs %v", start["pid"], final["pid"])
+	}
+}
+
+// TestInstrument_FileSinkHeartbeatsWhileStillRunning: a call still running
+// after the heartbeat interval writes heartbeat rows carrying elapsed_ms, even
+// if it never finishes (here the handler is still blocked when we read).
+func TestInstrument_FileSinkHeartbeatsWhileStillRunning(t *testing.T) {
+	orig := heartbeatInterval
+	heartbeatInterval = 10 * time.Millisecond
+	t.Cleanup(func() { heartbeatInterval = orig })
+
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	release := make(chan struct{})
+	tb := Instrument(table(func(context.Context, json.RawMessage) (any, error) { <-release; return nil, nil }),
+		FileSink{Path: path, MaxBytes: 1 << 20}, "", time.Now)
+	done := make(chan struct{})
+	go func() { defer close(done); _, _ = tb["list"].Handle(context.Background(), nil) }()
+
+	deadline := time.Now().Add(5 * time.Second)
+	var rows []map[string]any
+	for time.Now().Before(deadline) {
+		if raw, err := os.ReadFile(path); err == nil && strings.Count(string(raw), `"phase":"heartbeat"`) >= 2 {
+			rows = readLines(t, path)
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if rows == nil {
+		t.Fatal("no heartbeat rows while the call was still running")
+	}
+	for _, r := range rows {
+		if r["phase"] == nil {
+			t.Fatalf("a final row was written while the handler is still blocked: %v", r)
+		}
+	}
+	last := rows[len(rows)-1]
+	if last["phase"] != "heartbeat" || last["elapsed_ms"].(float64) <= 0 {
+		t.Errorf("last row = %v, want a heartbeat with elapsed_ms > 0", last)
+	}
+	close(release)
+	<-done
+}

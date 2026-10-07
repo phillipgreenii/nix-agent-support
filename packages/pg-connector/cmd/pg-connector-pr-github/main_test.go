@@ -262,16 +262,27 @@ func TestRun_InstrumentWritesOneEventPerCallToTheBackendsOwnLog(t *testing.T) {
 		t.Fatalf("event log not written at %s: %v", path, err)
 	}
 	lines := strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
-	if len(lines) != 3 {
-		t.Fatalf("lines = %d, want 3:\n%s", len(lines), raw)
+	// Each call also writes a start row first (bead pg2-5dyz2), so a call
+	// SIGKILLed before its final row is still attributable.
+	if len(lines) != 6 {
+		t.Fatalf("lines = %d, want 3 start rows + 3 final rows:\n%s", len(lines), raw)
 	}
 	var evs []map[string]any
-	for _, l := range lines {
+	for i, l := range lines {
 		var m map[string]any
 		if err := json.Unmarshal([]byte(l), &m); err != nil {
 			t.Fatalf("bad line %q: %v", l, err)
 		}
+		if m["phase"] == "start" {
+			if i%2 != 0 || m["pid"] == nil || m["args"] == nil {
+				t.Errorf("start row %d malformed or misplaced: %v", i, m)
+			}
+			continue
+		}
 		evs = append(evs, m)
+	}
+	if len(evs) != 3 {
+		t.Fatalf("final rows = %d, want 3:\n%s", len(evs), raw)
 	}
 	if evs[0]["op"] != "show" || evs[0]["level"] != "info" || evs[0]["service"] != "pg-connector-pr-github" {
 		t.Errorf("show event = %v", evs[0])

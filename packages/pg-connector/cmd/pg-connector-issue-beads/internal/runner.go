@@ -30,7 +30,9 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-beads/internal/eventlog"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
@@ -341,15 +343,26 @@ func (r *CLIRunner) Run(ctx context.Context, args ...string) (string, error) {
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+	start := time.Now()
+	err = cmd.Run()
+	elapsed := time.Since(start)
+	// Recorded on the in-flight call's event (a no-op without one), whether
+	// bd succeeded or not: a killed call's slowest bd command is exactly
+	// what the 2026-10-06 SIGKILL cluster could not be attributed to
+	// [bead pg2-5dyz2].
+	eventlog.RecordBDCall(ctx, append([]string{"bd"}, fullArgs...), elapsed)
+	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			// Capped [bead pg2-332z8 #26]: see scriptout.TruncateForFold.
-			return stdout.String(), fmt.Errorf("bd %s: %w: %s",
-				strings.Join(fullArgs, " "), err, scriptout.TruncateForFold(stderr.Bytes()))
+			// The elapsed time rides along so a kill at the call's deadline
+			// reads "(after 25.001s): signal: killed" instead of a bare
+			// "signal: killed" [bead pg2-5dyz2].
+			return stdout.String(), fmt.Errorf("bd %s (after %s): %w: %s",
+				strings.Join(fullArgs, " "), elapsed.Round(time.Millisecond), err, scriptout.TruncateForFold(stderr.Bytes()))
 		}
-		return stdout.String(), fmt.Errorf("bd %s: %w (is bd on PATH?)",
-			strings.Join(fullArgs, " "), err)
+		return stdout.String(), fmt.Errorf("bd %s (after %s): %w (is bd on PATH?)",
+			strings.Join(fullArgs, " "), elapsed.Round(time.Millisecond), err)
 	}
 	return stdout.String(), nil
 }

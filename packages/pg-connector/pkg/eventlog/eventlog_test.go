@@ -161,6 +161,128 @@ func TestWrap_AroundRunsPerCallAndPassesResultThrough(t *testing.T) {
 	}
 }
 
+type progressRow struct {
+	op, phase string
+	start     time.Time
+	at        time.Time
+}
+
+// TestWrapProgress_StartThenHeartbeatsThenFinish proves bead pg2-5dyz2's
+// in-flight rows: a start row before the handler runs, heartbeats while it is
+// still running, no heartbeat after the handler returned, and the result and
+// error passed through untouched.
+func TestWrapProgress_StartThenHeartbeatsThenFinish(t *testing.T) {
+	var mu sync.Mutex
+	var rows []progressRow
+	var order []string
+	progress := func(op string, args json.RawMessage, phase string, start, now time.Time) {
+		mu.Lock()
+		defer mu.Unlock()
+		rows = append(rows, progressRow{op: op, phase: phase, start: start, at: now})
+		order = append(order, phase)
+		if string(args) != `{"q":1}` {
+			t.Errorf("args = %s", args)
+		}
+	}
+	release := make(chan struct{})
+	table := scriptout.DispatchTable{"list": {SchemaVersion: 3, Handle: func(ctx context.Context, args json.RawMessage) (any, error) {
+		<-release
+		return "res", errors.New("boom")
+	}}}
+	wrapped := WrapProgress(table, time.Now, func(ctx context.Context, op string) (context.Context, Finish) {
+		return ctx, func(start, end time.Time, err error) {
+			mu.Lock()
+			order = append(order, "finish")
+			mu.Unlock()
+		}
+	}, progress, 10*time.Millisecond)
+
+	type out struct {
+		res any
+		err error
+	}
+	done := make(chan out)
+	go func() {
+		res, err := wrapped["list"].Handle(context.Background(), json.RawMessage(`{"q":1}`))
+		done <- out{res, err}
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		mu.Lock()
+		n := len(rows)
+		mu.Unlock()
+		if n >= 3 { // start + at least two heartbeats
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("only %d in-flight rows after 5s", n)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	close(release)
+	o := <-done
+	if o.res != "res" || o.err == nil || o.err.Error() != "boom" {
+		t.Errorf("result/error altered: %v, %v", o.res, o.err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if rows[0].phase != PhaseStart || !rows[0].at.Equal(rows[0].start) {
+		t.Errorf("first row = %+v, want a start row with elapsed 0", rows[0])
+	}
+	for _, r := range rows[1:] {
+		if r.phase != PhaseHeartbeat || r.op != "list" || !r.at.After(r.start) {
+			t.Errorf("row = %+v, want a later heartbeat", r)
+		}
+	}
+	if order[len(order)-1] != "finish" {
+		t.Errorf("a heartbeat was written after the final row: %v", order)
+	}
+}
+
+func TestWrapProgress_NilProgressIsPlainWrap(t *testing.T) {
+	table := scriptout.DispatchTable{"list": {Handle: func(context.Context, json.RawMessage) (any, error) { return 1, nil }}}
+	finished := 0
+	wrapped := WrapProgress(table, time.Now, func(ctx context.Context, op string) (context.Context, Finish) {
+		return ctx, func(time.Time, time.Time, error) { finished++ }
+	}, nil, 0)
+	if res, err := wrapped["list"].Handle(context.Background(), nil); res != 1 || err != nil || finished != 1 {
+		t.Errorf("res=%v err=%v finished=%d", res, err, finished)
+	}
+}
+
+func TestNewProgressEvent_ShapeAndFields(t *testing.T) {
+	start := time.Date(2026, 10, 6, 14, 9, 20, 0, time.UTC)
+	ev := NewProgressEvent("svc", "list", "v1", PhaseHeartbeat, json.RawMessage(`{ "q": "x" }`), start, start.Add(10*time.Second))
+	line, err := Line(ev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(line, &m); err != nil {
+		t.Fatal(err)
+	}
+	for k, want := range map[string]any{
+		"level": "info", "msg": "list still running", "service": "svc", "op": "list",
+		"phase": "heartbeat", "elapsed_ms": float64(10000), "args": `{"q":"x"}`,
+		"time": "2026-10-06T14:09:30.000Z",
+	} {
+		if m[k] != want {
+			t.Errorf("%s = %v, want %v", k, m[k], want)
+		}
+	}
+	// In-flight rows must not look like finished calls to a latency or
+	// error-rate query.
+	for _, k := range []string{"duration_ms", "error_code", "error"} {
+		if _, ok := m[k]; ok {
+			t.Errorf("progress row carries %s", k)
+		}
+	}
+	if got := NewProgressEvent("svc", "list", "", PhaseStart, nil, start, start); got.Msg != "list started" || got.Args != "{}" {
+		t.Errorf("start row = %+v", got)
+	}
+}
+
 func TestLine_OneNewlineTerminatedLineNoHTMLEscape(t *testing.T) {
 	line, err := Line(Base{Time: "t", Level: "info", Msg: "a<b&c"})
 	if err != nil {

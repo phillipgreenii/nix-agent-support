@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 )
 
 // OpHandler pairs an op's business logic with the schema version of the
@@ -69,9 +70,9 @@ func serveLoop(env dispatchEnv, table DispatchTable) int {
 		return writeErrorResponse(env.out, 0, WrapError(ErrUnknownOp, fmt.Sprintf("unknown op %q", req.Op)))
 	}
 
-	// ctx carries a DefaultExecTimeout deadline (via the swappable
-	// execTimeout var — see exec.go's identical use for the umbrella-side
-	// choke point) rather than the unbounded context.Background() this
+	// ctx carries a DefaultBackendTimeout deadline (via the swappable
+	// backendTimeout var — exec.go applies execTimeout the same way on the
+	// umbrella side) rather than the unbounded context.Background() this
 	// used to pass. Every handler in this design threads ctx straight
 	// through to its own gh/git/bd exec.CommandContext calls, so this one
 	// deadline transitively bounds those children too — a hung `gh`, a
@@ -79,7 +80,14 @@ func serveLoop(env dispatchEnv, table DispatchTable) int {
 	// stall now fails within a bounded time instead of hanging this
 	// backend process (and, transitively, whichever umbrella fan-out is
 	// waiting on it) forever [bead #13].
-	ctx, cancel := context.WithTimeout(context.Background(), execTimeout)
+	//
+	// The deadline is backendTimeout, deliberately SHORTER than the
+	// umbrella's execTimeout (see BackendDeadlineMargin): the umbrella
+	// SIGKILLs this process at its own, later deadline, so a backend that
+	// shared the umbrella's 30s lost that race and never got to say what
+	// timed out [bead pg2-5dyz2].
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), backendTimeout)
 	defer cancel()
 	// Every op handler transitively receives the request's own opaque
 	// config block via ConfigFromContext, without widening OpHandler's own
@@ -91,6 +99,9 @@ func serveLoop(env dispatchEnv, table DispatchTable) int {
 
 	result, err := entry.Handle(ctx, req.Args)
 	if err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			err = deadlineError(req.Op, req.Args, time.Since(start), backendTimeout, err)
+		}
 		return writeErrorResponse(env.out, entry.SchemaVersion, err)
 	}
 
@@ -136,6 +147,21 @@ func serveLoop(env dispatchEnv, table DispatchTable) int {
 		return 1
 	}
 	return 0
+}
+
+// deadlineError replaces a handler's error with one that names what was
+// running when the backend's own deadline expired: the op, a summary of its
+// args, how long it ran and the limit, followed by the handler's own error
+// (which, for a handler whose child gh/git/bd was killed by the deadline,
+// is the otherwise-uninformative "signal: killed", but for a bd/gh wrapper
+// already carries that child's argv). Classified unavailable, the same code
+// an unwrapped error falls back to, so the wire code is unchanged
+// [bead pg2-5dyz2].
+func deadlineError(op string, args json.RawMessage, elapsed, limit time.Duration, inner error) error {
+	return WrapError(ErrUnavailable, fmt.Sprintf(
+		"deadline exceeded after %s (limit %s) in op=%s args=%s: %v",
+		elapsed.Round(time.Millisecond), limit, op, SummarizeArgs(args), inner,
+	))
 }
 
 // writeBytesResult writes the success envelope for a []byte result —

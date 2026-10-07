@@ -462,6 +462,54 @@ func TestInvoke_HungChild_KilledAtDeadlineNotHungForever(t *testing.T) {
 	}
 }
 
+// TestInvoke_HungChild_ErrorNamesOpArgsAndElapsed is the bead pg2-5dyz2
+// regression proof for the umbrella-side half: a backend killed by the
+// umbrella's deadline used to surface as a bare "scriptout: <bin>: signal:
+// killed". The error must now name the op, the elapsed time, the limit and
+// the request's args, and keep "signal: killed" as the wrapped cause.
+func TestInvoke_HungChild_ErrorNamesOpArgsAndElapsed(t *testing.T) {
+	withFactory(t, "hang")
+	origTimeout := execTimeout
+	execTimeout = 150 * time.Millisecond
+	t.Cleanup(func() { execTimeout = origTimeout })
+
+	_, err := Invoke(context.Background(), "fake-binary", "list", map[string]any{"query": "is:open"}, nil)
+	if err == nil {
+		t.Fatal("expected an error from a killed hung child, got nil")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"fake-binary",
+		"op=list",
+		"elapsed=",
+		"umbrella deadline 150ms exceeded",
+		`args={"query":"is:open"}`,
+		"signal: killed",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error %q does not contain %q", msg, want)
+		}
+	}
+}
+
+// TestInvoke_ChildFailure_NamesOpWithoutArgs proves a failure that is not a
+// deadline still names the op and elapsed time, but does not echo the args
+// (they are only folded in when the deadline kill needs diagnosing).
+func TestInvoke_ChildFailure_NamesOpWithoutArgs(t *testing.T) {
+	withFactory(t, "big_stderr")
+	_, err := Invoke(context.Background(), "fake-binary", "comment", map[string]any{"body": "SECRET-BODY"}, nil)
+	if err == nil {
+		t.Fatal("expected error from the big_stderr helper")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "op=comment elapsed=") {
+		t.Errorf("error does not name op and elapsed: %.200q", msg)
+	}
+	if strings.Contains(msg, "SECRET-BODY") || strings.Contains(msg, "args=") {
+		t.Errorf("non-deadline failure echoed the request args: %.200q", msg)
+	}
+}
+
 // TestInvoke_StderrFoldIsCapped is the umbrella-side regression proof for
 // bead #26: before TruncateForFold existed, runInvoke's stderr-fold branch
 // (used when the backend binary produced no stdout at all) interpolated

@@ -10,6 +10,7 @@
     ./modules/pg-connector-pr-github
     ./modules/pg-connector-thread-slack
     ./modules/pg-connector-issue-jira
+    ./modules/pg-connector-issue-beads
     ./modules/pg-rescue
     ./modules/pg-desk-serve
     ./modules/ccpool

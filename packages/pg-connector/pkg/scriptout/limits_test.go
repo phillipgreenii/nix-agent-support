@@ -1,8 +1,10 @@
 package scriptout
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestTruncateForFold_ShortInput_Unchanged(t *testing.T) {
@@ -67,4 +69,55 @@ func TestTruncateForFold_RuneBoundarySafe(t *testing.T) {
 
 func isValidUTF8(s string) bool {
 	return strings.ToValidUTF8(s, "�") == s
+}
+
+// TestBackendDeadlineIsShorterThanUmbrella pins bead pg2-5dyz2's staggering:
+// the backend's own deadline MUST fire before the umbrella's, by at least
+// DefaultWaitDelay, or the umbrella's SIGKILL wins the race again and the
+// backend never reports what timed out.
+func TestBackendDeadlineIsShorterThanUmbrella(t *testing.T) {
+	if DefaultBackendTimeout >= DefaultExecTimeout {
+		t.Fatalf("DefaultBackendTimeout %v is not shorter than DefaultExecTimeout %v", DefaultBackendTimeout, DefaultExecTimeout)
+	}
+	if DefaultExecTimeout-DefaultBackendTimeout < DefaultWaitDelay {
+		t.Fatalf("margin %v is smaller than DefaultWaitDelay %v", DefaultExecTimeout-DefaultBackendTimeout, DefaultWaitDelay)
+	}
+	if backendTimeout != DefaultBackendTimeout || execTimeout != DefaultExecTimeout {
+		t.Fatalf("production vars drifted: backendTimeout=%v execTimeout=%v", backendTimeout, execTimeout)
+	}
+}
+
+func TestSummarizeArgs(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"empty", "", "{}"},
+		{"null", "null", "{}"},
+		{"compacts", "{ \"a\": 1,\n \"b\": [1, 2] }", `{"a":1,"b":[1,2]}`},
+		{"invalid json passes through trimmed", "  not json ", "not json"},
+	}
+	for _, c := range cases {
+		if got := SummarizeArgs(json.RawMessage(c.raw)); got != c.want {
+			t.Errorf("%s: SummarizeArgs(%q) = %q, want %q", c.name, c.raw, got, c.want)
+		}
+	}
+}
+
+func TestSummarizeArgs_CapsLongInputOnRuneBoundary(t *testing.T) {
+	for pad := 0; pad < 4; pad++ {
+		raw := `{"x":"` + strings.Repeat("a", MaxSummarizedArgsBytes-8-pad) + strings.Repeat("€", 50) + `"}`
+		got := SummarizeArgs(json.RawMessage(raw))
+		if !strings.Contains(got, "...[+") {
+			t.Fatalf("pad %d: no truncation marker in %q", pad, got)
+		}
+		head := got[:strings.Index(got, "...[+")]
+		if len(head) > MaxSummarizedArgsBytes {
+			t.Fatalf("pad %d: head is %d bytes, over the cap", pad, len(head))
+		}
+		if !utf8.ValidString(got) {
+			t.Fatalf("pad %d: invalid UTF-8 in %q", pad, got)
+		}
+	}
 }

@@ -205,6 +205,95 @@ type Around func(ctx context.Context, op string) (context.Context, Finish)
 // wrapped handler's result and error are passed through untouched. now is
 // injectable for tests.
 func Wrap(table scriptout.DispatchTable, now func() time.Time, around Around) scriptout.DispatchTable {
+	return WrapProgress(table, now, around, nil, 0)
+}
+
+// ---------------------------------------------------------------------
+// In-flight (start / heartbeat) rows [bead pg2-5dyz2].
+// ---------------------------------------------------------------------
+
+// Phases of an in-flight row.
+const (
+	// PhaseStart is written when a call begins.
+	PhaseStart = "start"
+	// PhaseHeartbeat is written every heartbeat interval while a call is
+	// still running.
+	PhaseHeartbeat = "heartbeat"
+)
+
+// HeartbeatInterval is how often a still-running call writes a heartbeat row.
+// Shorter than a typical deadline so even a call SIGKILLed mid-flight leaves
+// a last heartbeat that bounds how long it ran, yet long enough that a call
+// finishing in a few seconds writes none.
+const HeartbeatInterval = 10 * time.Second
+
+// ProgressEvent is one in-flight row: a call's start, or a heartbeat while it
+// is still running. It exists because a backend SIGKILLed by its caller's
+// deadline never reaches the code that writes the final row, so a call that
+// was killed used to appear nowhere in the log (bead pg2-5dyz2: 67 killed
+// source calls on 2026-10-06, none attributable). A call with a start row
+// and no final row (the same pid, op and args) was killed or crashed, and its
+// last heartbeat's elapsed_ms is a lower bound on how long it ran.
+//
+// It is deliberately NOT a Base: it carries no duration_ms or error_code, so
+// a latency or error-rate query over the final rows is not diluted by
+// in-flight ones. The fields time/level/msg are the JSONL standard's required
+// ones; Level is always info.
+type ProgressEvent struct {
+	Time    string `json:"time"`
+	Level   string `json:"level"`
+	Msg     string `json:"msg"`
+	Service string `json:"service"`
+	Version string `json:"version,omitempty"`
+	PID     int    `json:"pid"`
+
+	Op string `json:"op"`
+	// Phase is PhaseStart or PhaseHeartbeat.
+	Phase string `json:"phase"`
+	// ElapsedMS is how long the call had been running when the row was
+	// written (0 on the start row).
+	ElapsedMS int64 `json:"elapsed_ms"`
+	// Args is scriptout.SummarizeArgs of the request's args: the closest the
+	// backend has to the call's argv.
+	Args string `json:"args,omitempty"`
+}
+
+// NewProgressEvent builds the row for one in-flight call.
+func NewProgressEvent(service, op, version, phase string, args json.RawMessage, start, now time.Time) ProgressEvent {
+	msg := op + " started"
+	if phase == PhaseHeartbeat {
+		msg = op + " still running"
+	}
+	return ProgressEvent{
+		Time:      now.UTC().Format("2006-01-02T15:04:05.000Z07:00"),
+		Level:     LevelInfo,
+		Msg:       msg,
+		Service:   service,
+		Version:   version,
+		PID:       os.Getpid(),
+		Op:        op,
+		Phase:     phase,
+		ElapsedMS: now.Sub(start).Milliseconds(),
+		Args:      scriptout.SummarizeArgs(args),
+	}
+}
+
+// Progress is called with the start row (before the handler runs) and then
+// with a heartbeat row every interval while it is still running. now is the
+// time the row was produced; start is the call's start time. It runs on the
+// call's goroutine (start) or a heartbeat goroutine (heartbeats), so it MUST
+// be safe to call concurrently with a Finish.
+type Progress func(op string, args json.RawMessage, phase string, start, now time.Time)
+
+// WrapProgress is Wrap plus in-flight rows: when progress is non-nil it is
+// called with PhaseStart before the handler runs and with PhaseHeartbeat every
+// interval (HeartbeatInterval when interval <= 0) until the handler returns.
+// The heartbeat goroutine has stopped before the handler's result is passed
+// on, so no heartbeat is written after the final row.
+func WrapProgress(table scriptout.DispatchTable, now func() time.Time, around Around, progress Progress, interval time.Duration) scriptout.DispatchTable {
+	if interval <= 0 {
+		interval = HeartbeatInterval
+	}
 	out := make(scriptout.DispatchTable, len(table))
 	for op, h := range table {
 		op, h := op, h
@@ -212,13 +301,43 @@ func Wrap(table scriptout.DispatchTable, now func() time.Time, around Around) sc
 		h.Handle = func(ctx context.Context, args json.RawMessage) (any, error) {
 			ctx, finish := around(ctx, op)
 			start := now()
+			stop := func() {}
+			if progress != nil {
+				progress(op, args, PhaseStart, start, start)
+				stop = heartbeat(op, args, start, now, interval, progress)
+			}
 			result, err := inner(ctx, args)
+			stop()
 			finish(start, now(), err)
 			return result, err
 		}
 		out[op] = h
 	}
 	return out
+}
+
+// heartbeat starts the goroutine that writes a heartbeat every interval and
+// returns the function that stops it and waits for it to exit.
+func heartbeat(op string, args json.RawMessage, start time.Time, now func() time.Time, interval time.Duration, progress Progress) (stop func()) {
+	done := make(chan struct{})
+	exited := make(chan struct{})
+	go func() {
+		defer close(exited)
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-t.C:
+				progress(op, args, PhaseHeartbeat, start, now())
+			}
+		}
+	}()
+	return func() {
+		close(done)
+		<-exited
+	}
 }
 
 // ---------------------------------------------------------------------

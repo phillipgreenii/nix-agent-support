@@ -218,7 +218,31 @@ auth failure, sustained `unavailable` (excluding throttling) and repeated 429s. 
 NO remaining-budget alert: the backend reads no Jira quota figure, header or `Retry-After`, so the 429
 itself is the only quota signal it can see.
 
-The writer mechanics all three backends share (the common event fields, size-based rotation, the path
+`pg-connector-issue-beads` follows the same pattern: it appends to
+`${XDG_STATE_HOME}/pg-connector-issue-beads/events.jsonl` (override with
+`PG_CONNECTOR_ISSUE_BEADS_EVENTS_FILE`; `off` disables it), same rotation, with the common fields plus
+`bd_calls` (how many `bd` runs the call made), and `bd_slowest_ms` / `bd_slowest_argv` (the longest
+single `bd` run and its argv). The log is registered as a Loki source in
+`darwin/modules/pg-connector-issue-beads`; no alert rule ships with it, and the generic error-rate alert
+is off, because its purpose is to make slow and killed calls attributable by query, not to page.
+
+Deadlines and killed calls (bead `pg2-5dyz2`). The umbrella gives each backend exec
+`scriptout.DefaultExecTimeout` (30s) and kills it with SIGKILL at that deadline; a backend's own
+per-request deadline is `scriptout.DefaultBackendTimeout` (25s, `DefaultExecTimeout` minus
+`BackendDeadlineMargin`), so the backend normally answers first. When its deadline expires the
+backend's error reads `deadline exceeded after <elapsed> (limit <limit>) in op=<op> args=<args>:
+<handler error>` and keeps the `unavailable` wire code. When the umbrella's kill still wins (a
+backend wedged before or after its handler), the umbrella's error reads `scriptout: <binary>:
+op=<op> elapsed=<elapsed> (umbrella deadline <limit> exceeded; backend killed) args=<args>: signal:
+killed`; other exec failures carry `op=` and `elapsed=` without the args. `args` is the request's args
+JSON compacted and capped at 256 bytes. `pg-connector-pr-github` and `pg-connector-issue-beads` also
+write in-flight rows to their event log: a `phase":"start"` row before each call and a
+`phase":"heartbeat"` row (with `elapsed_ms`) every 10s while it is still running. These rows carry no
+`duration_ms` or `error_code`, so latency and error-rate queries over the final rows are unaffected. A
+call with a start row and no final row (same `pid`, `op` and `args`) was killed or crashed, and its last
+heartbeat's `elapsed_ms` is a lower bound on how long it ran.
+
+The writer mechanics the backends share (the common event fields, size-based rotation, the path
 rule, call timing) live in `pkg/eventlog`; each backend still owns its log path, its event shape and
 its alert rules. Other external-service connectors are expected to follow the same pattern.
 

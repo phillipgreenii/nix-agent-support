@@ -2193,6 +2193,110 @@
                     touch $out
                   '';
 
+              # darwin/modules/pg-connector-issue-beads (bead pg2-5dyz2): the beads
+              # sibling of test-pg-connector-issue-jira-darwin-module above --
+              # registers the backend's own event log as a Loki log source from
+              # its own nix module rather than through pg-connector's config. Same
+              # stub technique (a stub of the observability surface mirroring the
+              # REAL logSources submodule's defaults), so the assertions prove the
+              # module leaves `path`/`serviceName` at their defaults -- which the
+              # Go side (eventlog.Path) depends on -- switches the generic
+              # error-rate alert off, and registers NO alert rule file. The
+              # runCommand then checks that the default glob selects events.jsonl
+              # and not the rotated copy or the rotation lock, and that the event
+              # fields the log exists for (bd_calls, bd_slowest_ms,
+              # bd_slowest_argv, and the shared in-flight phase/elapsed_ms) are
+              # still json tags on the writer.
+              test-pg-connector-issue-beads-darwin-module =
+                let
+                  logSourceSubmodule =
+                    { name, config, ... }:
+                    {
+                      options = {
+                        path = lib.mkOption {
+                          type = lib.types.str;
+                          default = "\${env:XDG_STATE_HOME}/${name}/*.jsonl";
+                        };
+                        serviceName = lib.mkOption {
+                          type = lib.types.str;
+                          default = name;
+                        };
+                        format = lib.mkOption {
+                          type = lib.types.enum [
+                            "jsonl"
+                            "raw"
+                          ];
+                          default = "jsonl";
+                        };
+                        errorAlert.enable = lib.mkOption { type = lib.types.bool; };
+                      };
+                      config.errorAlert.enable = lib.mkDefault (config.format == "jsonl");
+                    };
+                  evalDarwin =
+                    obsEnable:
+                    (lib.evalModules {
+                      specialArgs = { inherit pkgs lib; };
+                      modules = [
+                        ./darwin/modules/pg-connector-issue-beads/default.nix
+                        {
+                          options.phillipgreenii.observability = {
+                            enable = lib.mkOption {
+                              type = lib.types.bool;
+                              default = false;
+                            };
+                            logSources = lib.mkOption {
+                              type = lib.types.attrsOf (lib.types.submodule logSourceSubmodule);
+                              default = { };
+                            };
+                            alertRuleFiles = lib.mkOption {
+                              type = lib.types.listOf lib.types.path;
+                              default = [ ];
+                            };
+                          };
+                          config.phillipgreenii.observability.enable = obsEnable;
+                        }
+                      ];
+                    }).config.phillipgreenii.observability;
+                  enabled = evalDarwin true;
+                  disabled = evalDarwin false;
+                  src = enabled.logSources.pg-connector-issue-beads;
+                in
+                assert disabled.logSources == { };
+                assert enabled.alertRuleFiles == [ ];
+                assert src.path == "\${env:XDG_STATE_HOME}/pg-connector-issue-beads/*.jsonl";
+                assert src.serviceName == "pg-connector-issue-beads";
+                assert src.format == "jsonl";
+                assert src.errorAlert.enable == false;
+                pkgs.runCommand "test-pg-connector-issue-beads-darwin-module-ok"
+                  {
+                    nativeBuildInputs = [ pkgs.gnugrep ];
+                    glob = src.path;
+                    eventlogSrc = ./packages/pg-connector/cmd/pg-connector-issue-beads/internal/eventlog/eventlog.go;
+                    sharedEventlogSrc = ./packages/pg-connector/pkg/eventlog/eventlog.go;
+                  }
+                  ''
+                    export HOME="$TMPDIR"
+                    fail() { echo "FAIL: $*" >&2; exit 1; }
+
+                    # The default glob selects events.jsonl and not the rotated
+                    # copy or the rotation lock.
+                    state="$TMPDIR/state/pg-connector-issue-beads"
+                    mkdir -p "$state"
+                    touch "$state/events.jsonl" "$state/events.jsonl.1" "$state/events.jsonl.lock"
+                    pattern="''${glob/\$\{env:XDG_STATE_HOME\}/$TMPDIR/state}"
+                    # shellcheck disable=SC2086 # the glob must expand
+                    matched="$(ls -d $pattern 2>/dev/null || true)"
+                    [ "$matched" = "$state/events.jsonl" ] || fail "glob '$glob' matched: $matched"
+
+                    for field in bd_calls bd_slowest_ms bd_slowest_argv; do
+                      grep -q "json:\"$field[,\"]" "$eventlogSrc" || fail "eventlog.Event has no json tag $field"
+                    done
+                    for field in phase elapsed_ms args; do
+                      grep -q "json:\"$field[,\"]" "$sharedEventlogSrc" || fail "evlog.ProgressEvent has no json tag $field"
+                    done
+                    touch $out
+                  '';
+
               # Durable-citation guard for the ccpool surface OUTSIDE the Go
               # module (bead pg2-qkk8n, widening pg2-oxrha's guard).
               #

@@ -29,6 +29,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"time"
 )
 
 // execCmdFactory constructs exec.Cmd. Production code uses
@@ -67,20 +68,44 @@ func runInvoke(ctx context.Context, binary string, req Request) ([]byte, error) 
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
+	start := time.Now()
 	runErr := cmd.Run()
+	elapsed := time.Since(start)
 
 	out := stdout.Bytes()
 	if len(out) == 0 {
 		if runErr != nil {
+			// Name the call and how long it ran: a bare "signal: killed" is
+			// exactly what the umbrella's own deadline kill used to leave
+			// the caller with, indistinguishable between ops and between a
+			// 30s stall and an instant crash [bead pg2-5dyz2].
+			detail := callDetail(ctx, req, elapsed)
 			if stderr.Len() > 0 {
-				return nil, fmt.Errorf("scriptout: %s: %w (stderr: %s)",
-					binary, runErr, TruncateForFold(stderr.Bytes()))
+				return nil, fmt.Errorf("scriptout: %s: %s: %w (stderr: %s)",
+					binary, detail, runErr, TruncateForFold(stderr.Bytes()))
 			}
-			return nil, fmt.Errorf("scriptout: %s: %w", binary, runErr)
+			return nil, fmt.Errorf("scriptout: %s: %s: %w", binary, detail, runErr)
 		}
 		return nil, fmt.Errorf("scriptout: %s: no response on stdout", binary)
 	}
 	return out, nil
+}
+
+// callDetail describes a failed backend exec for its error message: the op,
+// how long the exec ran, and — when ctx ended it — whether the umbrella's
+// deadline expired (with the limit and a summary of the request's args, the
+// only "argv" the backend process itself has) or the caller canceled
+// [bead pg2-5dyz2].
+func callDetail(ctx context.Context, req Request, elapsed time.Duration) string {
+	detail := fmt.Sprintf("op=%s elapsed=%s", req.Op, elapsed.Round(time.Millisecond))
+	switch {
+	case errors.Is(ctx.Err(), context.DeadlineExceeded):
+		detail += fmt.Sprintf(" (umbrella deadline %s exceeded; backend killed) args=%s",
+			execTimeout, SummarizeArgs(req.Args))
+	case errors.Is(ctx.Err(), context.Canceled):
+		detail += " (canceled by caller) args=" + SummarizeArgs(req.Args)
+	}
+	return detail
 }
 
 // Invoke runs binary with a request for op+args on stdin, decodes the

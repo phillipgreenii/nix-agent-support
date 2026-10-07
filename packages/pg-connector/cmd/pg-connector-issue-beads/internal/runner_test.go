@@ -2,13 +2,17 @@ package internal
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-beads/internal/eventlog"
+	evlog "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/eventlog"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
@@ -233,6 +237,57 @@ func TestCLIRunner_Run_CapsStderr(t *testing.T) {
 		t.Fatalf("expected a truncation marker in the error, got a %d-byte message", len(err.Error()))
 	}
 }
+
+// TestCLIRunner_Run_FailureNamesArgvAndElapsed is bead pg2-5dyz2's runner
+// half: a bd failure must carry the argv and how long bd ran, so a call
+// killed at its deadline is attributable to a command and a duration instead
+// of a bare "signal: killed".
+func TestCLIRunner_Run_FailureNamesArgvAndElapsed(t *testing.T) {
+	bdStubExitingWithStderr(t, 1, "boom")
+	r := &CLIRunner{Dir: t.TempDir()}
+	_, err := r.Run(context.Background(), "list", "--json")
+	if err == nil {
+		t.Fatal("expected error from the failing bd stub")
+	}
+	for _, want := range []string{"bd -C ", "list --json", "(after ", "boom"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not contain %q", err, want)
+		}
+	}
+}
+
+// TestCLIRunner_Run_RecordsEveryBDCallOnTheCallsEvent proves Run notes each bd
+// execution (argv + elapsed) on the in-flight call's recorder, success or
+// failure, and is a no-op when the context carries none.
+func TestCLIRunner_Run_RecordsEveryBDCallOnTheCallsEvent(t *testing.T) {
+	bdStubExitingWithStderr(t, 0, "")
+	r := &CLIRunner{Dir: t.TempDir()}
+	if _, err := r.Run(context.Background(), "list", "--json"); err != nil {
+		t.Fatalf("Run without a recorder: %v", err)
+	}
+
+	var got []string
+	tb := eventlog.Instrument(scriptout.DispatchTable{"list": {Handle: func(ctx context.Context, _ json.RawMessage) (any, error) {
+		if _, err := r.Run(ctx, "list", "--json"); err != nil {
+			return nil, err
+		}
+		_, err := r.Run(ctx, "show", "tp-1")
+		return nil, err
+	}}}, sinkFunc(func(ev eventlog.Event) {
+		got = append(got, fmt.Sprintf("%d|%s", ev.BDCalls, ev.BDSlowestArgv))
+	}), "", time.Now)
+	if _, err := tb["list"].Handle(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || !strings.HasPrefix(got[0], "2|bd -C ") {
+		t.Fatalf("event = %v, want 2 bd calls and a slowest argv starting with bd -C", got)
+	}
+}
+
+type sinkFunc func(eventlog.Event)
+
+func (f sinkFunc) Write(ev eventlog.Event)           { f(ev) }
+func (f sinkFunc) WriteProgress(evlog.ProgressEvent) {}
 
 // ----------------------------------------------------------------------
 // bead pg2-lhi3b: every bd CLAIM carries an explicit actor

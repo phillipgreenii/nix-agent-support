@@ -30,6 +30,7 @@ package eventlog
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"time"
 
@@ -104,6 +105,17 @@ type Sink interface {
 	Write(Event)
 }
 
+// heartbeatInterval is how often a still-running call writes a heartbeat row;
+// tests swap it to a few milliseconds.
+var heartbeatInterval = evlog.HeartbeatInterval
+
+// ProgressSink is the optional extension of Sink that also receives in-flight
+// rows (a call's start and its heartbeats; bead pg2-5dyz2). A Sink that does
+// not implement it gets final rows only.
+type ProgressSink interface {
+	WriteProgress(evlog.ProgressEvent)
+}
+
 // ---------------------------------------------------------------------
 // Per-call recorder, carried on the context.
 // ---------------------------------------------------------------------
@@ -157,19 +169,29 @@ func AddGraphQLCost(ctx context.Context, points int) {
 // ---------------------------------------------------------------------
 
 // Instrument returns a copy of table whose every handler appends one Event
-// to sink after the call returns. The wrapped handler's result and error are
-// passed through untouched. now is injectable for tests.
+// to sink after the call returns. When sink is also a ProgressSink, each call
+// additionally writes a start row before it runs and a heartbeat row every
+// evlog.HeartbeatInterval while it is still running (bead pg2-5dyz2): a call
+// SIGKILLed by its caller's deadline never reaches the final row, and these
+// are what make it show up in the log at all. The wrapped handler's result and
+// error are passed through untouched. now is injectable for tests.
 func Instrument(table scriptout.DispatchTable, sink Sink, version string, now func() time.Time) scriptout.DispatchTable {
 	if sink == nil {
 		return table
 	}
-	return evlog.Wrap(table, now, func(ctx context.Context, op string) (context.Context, evlog.Finish) {
+	var progress evlog.Progress
+	if ps, ok := sink.(ProgressSink); ok {
+		progress = func(op string, args json.RawMessage, phase string, start, at time.Time) {
+			ps.WriteProgress(evlog.NewProgressEvent(ServiceName, op, version, phase, args, start, at))
+		}
+	}
+	return evlog.WrapProgress(table, now, func(ctx context.Context, op string) (context.Context, evlog.Finish) {
 		rec := &recorder{}
 		ctx = context.WithValue(ctx, recorderKey{}, rec)
 		return ctx, func(start, end time.Time, err error) {
 			sink.Write(buildEvent(op, version, start, end, err, rec))
 		}
-	})
+	}, progress, heartbeatInterval)
 }
 
 func buildEvent(op, version string, start, end time.Time, err error, rec *recorder) Event {
@@ -211,6 +233,12 @@ type FileSink struct {
 // Write appends ev as one line. Errors are swallowed (see the package doc's
 // failure policy).
 func (s FileSink) Write(ev Event) { evlog.WriteBestEffort(s.Path, s.MaxBytes, ev) }
+
+// WriteProgress appends an in-flight row (see ProgressSink). Errors are
+// swallowed like Write's.
+func (s FileSink) WriteProgress(ev evlog.ProgressEvent) {
+	evlog.WriteBestEffort(s.Path, s.MaxBytes, ev)
+}
 
 // Line is ev as one line of JSON ending in a newline.
 func Line(ev Event) ([]byte, error) { return evlog.Line(ev) }

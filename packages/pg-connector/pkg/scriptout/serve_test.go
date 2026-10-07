@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -285,13 +286,13 @@ func TestServeLoop_CapabilitiesBespokeShape(t *testing.T) {
 // with NO way to ever observe ctx.Done() — a handler that (like every real
 // Provider method in this design) shells out via exec.CommandContext(ctx,
 // ...) and blocks on that child would hang this whole backend process
-// forever. execTimeout is overridden to a short value (mirroring exec.go's
+// forever. backendTimeout is overridden to a short value (mirroring exec.go's
 // own execCmdFactory swap pattern in exec_test.go) so this stays fast
-// instead of waiting out the real 30s DefaultExecTimeout.
+// instead of waiting out the real DefaultBackendTimeout.
 func TestServeLoop_HandlerGetsDeadline_DoesNotHangForever(t *testing.T) {
-	origTimeout := execTimeout
-	execTimeout = 150 * time.Millisecond
-	t.Cleanup(func() { execTimeout = origTimeout })
+	origTimeout := backendTimeout
+	backendTimeout = 150 * time.Millisecond
+	t.Cleanup(func() { backendTimeout = origTimeout })
 
 	table := DispatchTable{
 		"slow_op": {
@@ -308,10 +309,77 @@ func TestServeLoop_HandlerGetsDeadline_DoesNotHangForever(t *testing.T) {
 	elapsed := time.Since(start)
 
 	if elapsed > 5*time.Second {
-		t.Fatalf("serveLoop took %v to return with execTimeout=150ms; handler's ctx never got a deadline", elapsed)
+		t.Fatalf("serveLoop took %v to return with backendTimeout=150ms; handler's ctx never got a deadline", elapsed)
 	}
 	if code == 0 {
 		t.Fatalf("expected a non-zero exit code for a deadline-exceeded handler, got 0 (resp=%v)", resp)
+	}
+}
+
+// TestServeLoop_DeadlineError_NamesOpArgsAndElapsed is the bead pg2-5dyz2
+// regression proof: a handler that fails because the backend's own deadline
+// expired (its child was killed, surfacing as a bare "signal: killed") must
+// answer with an error naming the op, the args, the elapsed time and the
+// limit, keep the original error text, and keep the unavailable wire code.
+func TestServeLoop_DeadlineError_NamesOpArgsAndElapsed(t *testing.T) {
+	origTimeout := backendTimeout
+	backendTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { backendTimeout = origTimeout })
+
+	table := DispatchTable{
+		"list": {
+			SchemaVersion: 1,
+			Handle: func(ctx context.Context, _ json.RawMessage) (any, error) {
+				<-ctx.Done()
+				return nil, errors.New("gh search prs: signal: killed")
+			},
+		},
+	}
+
+	code, resp := runServeLoop(t, table, `{"op":"list","args":{"query":"is:open author:x"}}`)
+	if code != ExitCodeForCode("unavailable") {
+		t.Fatalf("exit code = %d, want the unavailable code %d", code, ExitCodeForCode("unavailable"))
+	}
+	errObj, _ := resp["error"].(map[string]any)
+	if errObj == nil {
+		t.Fatalf("expected an error envelope, got %v", resp)
+	}
+	if got := errObj["code"]; got != "unavailable" {
+		t.Fatalf("error.code = %v, want unavailable", got)
+	}
+	msg, _ := errObj["message"].(string)
+	for _, want := range []string{
+		"deadline exceeded after",
+		"limit 100ms",
+		"op=list",
+		`args={"query":"is:open author:x"}`,
+		"gh search prs: signal: killed",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("message %q does not contain %q", msg, want)
+		}
+	}
+}
+
+// TestServeLoop_NonDeadlineError_Unchanged proves the deadline wrapping only
+// applies when the deadline actually expired: a plain handler failure keeps
+// its own message and classification untouched.
+func TestServeLoop_NonDeadlineError_Unchanged(t *testing.T) {
+	table := DispatchTable{
+		"show": {
+			SchemaVersion: 1,
+			Handle: func(context.Context, json.RawMessage) (any, error) {
+				return nil, WrapError(ErrNotFound, "no such thing")
+			},
+		},
+	}
+	_, resp := runServeLoop(t, table, `{"op":"show","args":{}}`)
+	errObj, _ := resp["error"].(map[string]any)
+	if errObj == nil || errObj["code"] != "not_found" {
+		t.Fatalf("want not_found envelope, got %v", resp)
+	}
+	if msg, _ := errObj["message"].(string); strings.Contains(msg, "deadline") {
+		t.Errorf("non-deadline error was wrapped as a deadline error: %q", msg)
 	}
 }
 
