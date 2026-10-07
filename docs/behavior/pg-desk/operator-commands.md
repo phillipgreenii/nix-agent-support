@@ -79,9 +79,9 @@ matching the open queries, so a single failed closure would leave a merge-reques
 forever. `reconcile` reads the store and re-drives, through the same `run pr <id> --change
 removed` path (so closure stays ledger-guarded and re-entrant), every PR entity that has any of:
 
-- a `kind=anchor` ledger row that is not `closed` (with a non-empty bead id) whose PR a
-  `--change removed` re-read reports as merged, closed, or not found; a PR still `open` is left
-  alone; or
+- a `kind=anchor` ledger row that is not `closed` (with a non-empty bead id) whose PR is absent
+  from the current open set and whose `--change removed` re-read reports as merged, closed, or
+  not found; a PR still `open` is left alone; or
 - a recorded `interpretation.sync_error` whose automatic retry is due (see [`sync.md`](sync.md)'s
   "Automatic retry"), re-driven regardless of PR state (a successful run clears it). A row with
   no recorded retry state yet is due.
@@ -98,9 +98,28 @@ transient failure heals on a later scheduled pass with no operator action, while
 stops after the retry bound. `--retry-all` lifts the hold for one run: every recorded `sync_error`
 is re-driven now, whatever its retry state — the operator's manual repair once the cause is fixed.
 
+The open set is the PR ids that the watched PR queries (`watch.pr.queries`) list right now, read
+with one cheap ids-only listing per query before any re-read. `reconcile` MUST NOT re-read an
+open anchor whose PR a watched query still lists: such a PR cannot have left the open set, and
+the re-read is the expensive call. A listing that fails, or a gatherer or configuration that
+cannot list, only shrinks the open set (down to empty), so the anchors it would have excluded are
+re-read as before; it never skips a closure. It logs
+`{"event":"reconcile_open_set","open_ids":N,"skipped_open":S,"candidates":C}` once per run when
+the open set was read.
+
 `reconcile` MUST be idempotent: once an anchor is closed and `sync_error` is empty, the entity is
 no longer re-driven. Every candidate is attempted even after one fails; failures are joined into
-one error. It takes no positional arguments and does not stamp `meta.last_sweep`. `pg-desk`
+one error, with one exception: a candidate whose READ of the PR (the re-read that confirms its
+anchor's PR left the open set, or the closed-anchor audit's re-read) fails transiently — the
+connector child was killed, a deadline expired, or pg-connector answered `unavailable` — is
+DEFERRED, not failed. `reconcile` logs
+`{"event":"reconcile_deferred","entity_id":...,"error_class":...,"consecutive":N,"max":3,...}`,
+leaves the candidate in place for the next scheduled run, and does not count it toward exit `1`.
+A candidate deferred on `3` runs in a row (`meta.reconcile.deferred.<id>`, cleared by its next
+successful attempt) fails the next run, so a read that keeps failing still reaches the failure
+metric. A non-transient read failure (for example `unauthenticated`), and any failure of the
+closure re-drive itself (which records its own `sync_error` and retry state), fail the run
+immediately. It takes no positional arguments and does not stamp `meta.last_sweep`. `pg-desk`
 ships no scheduler: an external scheduler (for example a pg-router timer or launchd job) MUST
 invoke `pg-desk reconcile` periodically — without `--retry-all`, so the retry policy holds.
 
@@ -114,8 +133,8 @@ the previous one stopped. Re-reads are serial (the gatherer is not safe for conc
 Exit codes: `0` when every candidate succeeds (including none) and also when the budget ran out
 with candidates remaining — that case is distinguishable only by the stderr JSON line
 `{"event":"reconcile_budget_exhausted","processed":N,"remaining":M}`; `1` when config or store
-cannot be opened, or when any candidate's re-drive failed (naming which), even if the budget also
-ran out.
+cannot be opened, or when any candidate's re-drive failed (naming which; a deferred transient read
+failure is not one, until it repeats), even if the budget also ran out.
 
 ## pr head-check
 

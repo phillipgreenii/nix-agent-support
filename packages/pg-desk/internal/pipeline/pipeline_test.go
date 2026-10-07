@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -1054,5 +1055,310 @@ func TestWithSyncLogger_ReplacesSyncer(t *testing.T) {
 	}
 	if plain.syncer == logged.syncer {
 		t.Fatal("WithSyncLogger did not construct a new syncer")
+	}
+}
+
+// --- Reconcile open set and transient failures: pg2-hpakl --------------------
+
+// openSetGatherer layers ListOpenIDs over gatherFunc, recording every call.
+type openSetGatherer struct {
+	gatherFunc
+	ids      map[string][]string // query -> listed ids
+	errs     map[string]error    // query -> listing failure
+	listed   []string            // queries listed, in order
+	gathered []string            // ids re-read, in order
+}
+
+func (g *openSetGatherer) ListOpenIDs(ctx context.Context, entityType, query string) ([]string, error) {
+	g.listed = append(g.listed, query)
+	if err := g.errs[query]; err != nil {
+		return nil, err
+	}
+	return g.ids[query], nil
+}
+
+// newOpenSetPipeline builds a Pipeline whose PR queries are `queries`, whose
+// re-reads report merged (so a re-read anchor is closed), and whose gatherer
+// records what was re-read. failFor, when non-nil, injects a re-read failure.
+func newOpenSetPipeline(t *testing.T, out *bytes.Buffer, queries []string, g *openSetGatherer, failFor func(id string) error) *Pipeline {
+	t.Helper()
+	g.gatherFunc = func(ctx context.Context, entityType, entityID string, change gather.ChangeKind) (gather.Facts, error) {
+		g.gathered = append(g.gathered, entityID)
+		if failFor != nil {
+			if err := failFor(entityID); err != nil {
+				return gather.Facts{}, err
+			}
+		}
+		facts := minimalFacts(t, map[string]any{"author": "me", "title": "x", "state": "closed", "merged": true, "repo": "acme/widgets"})
+		facts.RemovedState = "merged"
+		return facts, nil
+	}
+	p := newTestPipeline(t, g, out)
+	p.cfg.Watch.PR.Queries = queries
+	p.syncer = syncerFunc(func(ctx context.Context, repo, entityID string, change gather.ChangeKind, facts gather.Facts, interp interpret.Interpretation) error {
+		return p.store.UpsertLedger(store.LedgerEntry{
+			Repo: repo, EntityType: "pr", EntityID: entityID, Kind: "anchor", BeadID: "bead-" + entityID, LastSyncedContentHash: "closed",
+		})
+	})
+	return p
+}
+
+func eventLines(t *testing.T, out *bytes.Buffer, event string) []map[string]any {
+	t.Helper()
+	var lines []map[string]any
+	for _, l := range strings.Split(out.String(), "\n") {
+		if !strings.Contains(l, `"event":"`+event+`"`) {
+			continue
+		}
+		var m map[string]any
+		if err := json.Unmarshal([]byte(l), &m); err != nil {
+			t.Fatalf("bad log line %q: %v", l, err)
+		}
+		lines = append(lines, m)
+	}
+	return lines
+}
+
+// TestPipelineReconcile_RereadsOnlyAnchorsAbsentFromTheOpenSet: anchors whose
+// PR a watched query still lists are not re-read at all; only the one that
+// left the open set is, and it is closed.
+func TestPipelineReconcile_RereadsOnlyAnchorsAbsentFromTheOpenSet(t *testing.T) {
+	var out bytes.Buffer
+	g := &openSetGatherer{ids: map[string][]string{"mine": {"1"}, "review-requested": {"2"}}}
+	p := newOpenSetPipeline(t, &out, []string{"mine", "review-requested"}, g, nil)
+	for _, id := range []string{"1", "2", "3"} {
+		seedReconcileEntity(t, p, id, "abc")
+	}
+
+	if err := p.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if got := strings.Join(g.gathered, ","); got != "3,3" { // peek, then the closure Run's own gather
+		t.Fatalf("re-read %q, want only anchor 3 (peek + closure run)", got)
+	}
+	if strings.Join(g.listed, ",") != "mine,review-requested" {
+		t.Fatalf("listed queries %v, want one ids-only listing per watched query", g.listed)
+	}
+	if h, _, _ := p.store.GetLedger("acme/widgets", "pr", "3", "anchor"); h.LastSyncedContentHash != "closed" {
+		t.Fatalf("anchor 3 not closed: %+v", h)
+	}
+	ev := eventLines(t, &out, "reconcile_open_set")
+	if len(ev) != 1 || ev[0]["open_ids"] != float64(2) || ev[0]["skipped_open"] != float64(2) || ev[0]["candidates"] != float64(1) {
+		t.Fatalf("reconcile_open_set = %v, want open_ids=2 skipped_open=2 candidates=1", ev)
+	}
+}
+
+// TestPipelineReconcile_OpenSetUnreadableRereadsEverything: a failed listing
+// must never cost a closure; with no usable open set every open anchor is
+// re-read, and a query that still lists contributes its ids.
+func TestPipelineReconcile_OpenSetUnreadableRereadsEverything(t *testing.T) {
+	var out bytes.Buffer
+	g := &openSetGatherer{errs: map[string]error{"mine": errors.New("list: boom")}}
+	p := newOpenSetPipeline(t, &out, []string{"mine"}, g, nil)
+	for _, id := range []string{"1", "2"} {
+		seedReconcileEntity(t, p, id, "abc")
+	}
+	if err := p.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if len(g.gathered) != 4 { // 2 peeks + 2 closure runs
+		t.Fatalf("re-read %v, want both anchors re-read", g.gathered)
+	}
+	if len(eventLines(t, &out, "reconcile_open_set_query_failed")) != 1 {
+		t.Fatalf("expected a reconcile_open_set_query_failed line: %s", out.String())
+	}
+
+	// One failing query among several keeps the ids the others listed.
+	out.Reset()
+	g2 := &openSetGatherer{
+		ids:  map[string][]string{"review-requested": {"1"}},
+		errs: map[string]error{"mine": errors.New("list: boom")},
+	}
+	p2 := newOpenSetPipeline(t, &out, []string{"mine", "review-requested"}, g2, nil)
+	for _, id := range []string{"1", "2"} {
+		seedReconcileEntity(t, p2, id, "abc")
+	}
+	if err := p2.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if strings.Contains(strings.Join(g2.gathered, ","), "1") {
+		t.Fatalf("anchor 1 is listed by a healthy query and must not be re-read: %v", g2.gathered)
+	}
+}
+
+// TestPipelineReconcile_NoOpenSetWithoutQueriesOrLister: no watched query, or
+// a gatherer that cannot list, keeps the re-read-everything behavior.
+func TestPipelineReconcile_NoOpenSetWithoutQueriesOrLister(t *testing.T) {
+	g := &openSetGatherer{ids: map[string][]string{"mine": {"1"}}}
+	p := newOpenSetPipeline(t, nil, nil, g, nil) // no queries
+	seedReconcileEntity(t, p, "1", "abc")
+	if err := p.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if len(g.listed) != 0 || len(g.gathered) == 0 {
+		t.Fatalf("listed=%v gathered=%v, want no listing and a re-read", g.listed, g.gathered)
+	}
+}
+
+// killedErr is the exact failure text the 2026-10-07 router health review
+// found behind desk-reconcile's exit 1.
+const killedErrText = "gather: removed re-read pr show: pg-connector [pr show acme/widgets#9 --fresh]: exit 1: unavailable: scriptout: pg-connector-pr-github: signal: killed"
+
+// TestPipelineReconcile_DefersTransientFailuresAndExitsZero covers every
+// deferrable class: killed, deadline and unavailable candidate failures are
+// logged as deferred and the pass returns nil; the candidate keeps its place.
+func TestPipelineReconcile_DefersTransientFailuresAndExitsZero(t *testing.T) {
+	cases := map[string]error{
+		"killed-and-unavailable": errors.New(killedErrText),
+		"killed-only":            errors.New("pg-connector [pr show 2 --fresh]: exit -1: signal: killed"),
+		"deadline":               fmt.Errorf("gather: removed re-read pr show: %w", context.DeadlineExceeded),
+		"unavailable-only":       errors.New("gather: removed re-read pr show: pg-connector [pr show 4 --fresh]: exit 1: unavailable: backend cannot be used"),
+		"connector-error":        &sync.ConnectorError{Args: []string{"issue", "update"}, ExitCode: 1, Code: "unavailable", Detail: "unavailable: no tracker"},
+	}
+	for name, failure := range cases {
+		t.Run(name, func(t *testing.T) {
+			var out bytes.Buffer
+			p := newTestPipeline(t, gatherFunc(func(ctx context.Context, entityType, entityID string, change gather.ChangeKind) (gather.Facts, error) {
+				return gather.Facts{}, failure
+			}), &out)
+			seedReconcileEntity(t, p, "9", "abc")
+			if err := p.Reconcile(context.Background()); err != nil {
+				t.Fatalf("a transient failure must be deferred (exit 0), got %v", err)
+			}
+			ev := eventLines(t, &out, "reconcile_deferred")
+			if len(ev) != 1 || ev[0]["entity_id"] != "9" || ev[0]["consecutive"] != float64(1) || ev[0]["error_class"] == "" {
+				t.Fatalf("reconcile_deferred = %v", ev)
+			}
+			if v, found, _ := p.store.GetMeta(reconcileDeferredKeyPrefix + "9"); !found || v != "1" {
+				t.Fatalf("deferral counter = %q found=%v, want 1", v, found)
+			}
+		})
+	}
+}
+
+// TestPipelineReconcile_NonTransientFailureStillFailsThePass: a deferrable
+// failure beside a non-transient one defers only the former; the pass fails
+// naming the latter.
+func TestPipelineReconcile_NonTransientFailureStillFailsThePass(t *testing.T) {
+	for _, msg := range []string{"boom", "pg-connector [pr show 5 --fresh]: exit 1: unauthenticated: bad token"} {
+		var out bytes.Buffer
+		p := newTestPipeline(t, gatherFunc(func(ctx context.Context, entityType, entityID string, change gather.ChangeKind) (gather.Facts, error) {
+			if entityID == "4" {
+				return gather.Facts{}, errors.New(killedErrText)
+			}
+			return gather.Facts{}, errors.New(msg)
+		}), &out)
+		seedReconcileEntity(t, p, "4", "abc")
+		seedReconcileEntity(t, p, "5", "abc")
+		err := p.Reconcile(context.Background())
+		if err == nil || !strings.Contains(err.Error(), "reconcile 5") || strings.Contains(err.Error(), "reconcile 4") {
+			t.Fatalf("msg %q: err = %v, want a failure naming only entity 5", msg, err)
+		}
+		if len(eventLines(t, &out, "reconcile_deferred")) != 1 {
+			t.Fatalf("msg %q: entity 4 should have been deferred: %s", msg, out.String())
+		}
+	}
+}
+
+// TestPipelineReconcile_RepeatedTransientFailureFailsThePass: a candidate
+// deferred reconcileMaxDeferrals passes in a row fails the next pass; one
+// success clears the count so a later blip is deferred again.
+func TestPipelineReconcile_RepeatedTransientFailureFailsThePass(t *testing.T) {
+	fail := true
+	var out bytes.Buffer
+	p := newTestPipeline(t, gatherFunc(func(ctx context.Context, entityType, entityID string, change gather.ChangeKind) (gather.Facts, error) {
+		if fail {
+			return gather.Facts{}, errors.New(killedErrText)
+		}
+		facts := minimalFacts(t, map[string]any{"author": "me", "title": "x", "state": "open", "repo": "acme/widgets"})
+		facts.RemovedState = "open"
+		return facts, nil
+	}), &out)
+	seedReconcileEntity(t, p, "9", "abc")
+
+	for run := 1; run <= reconcileMaxDeferrals; run++ {
+		if err := p.Reconcile(context.Background()); err != nil {
+			t.Fatalf("run %d: want deferred (nil), got %v", run, err)
+		}
+	}
+	if err := p.Reconcile(context.Background()); err == nil {
+		t.Fatalf("run %d: a candidate deferred %d passes in a row must fail the pass", reconcileMaxDeferrals+1, reconcileMaxDeferrals)
+	}
+	if err := p.Reconcile(context.Background()); err == nil {
+		t.Fatal("it must keep failing until a success clears the count")
+	}
+
+	fail = false
+	if err := p.Reconcile(context.Background()); err != nil {
+		t.Fatalf("recovered pass: %v", err)
+	}
+	if _, found, _ := p.store.GetMeta(reconcileDeferredKeyPrefix + "9"); found {
+		t.Fatal("a success must clear the deferral counter")
+	}
+	fail = true
+	if err := p.Reconcile(context.Background()); err != nil {
+		t.Fatalf("a fresh blip after recovery must be deferred again: %v", err)
+	}
+}
+
+// TestPipelineReconcile_FailedClosureRunIsNeverDeferred: only the candidate
+// READ is deferrable; once the PR is confirmed gone, a closure Run that fails
+// (here the Run's own re-gather is killed) keeps its exit-1 contract.
+func TestPipelineReconcile_FailedClosureRunIsNeverDeferred(t *testing.T) {
+	calls := 0
+	var out bytes.Buffer
+	p := newTestPipeline(t, gatherFunc(func(ctx context.Context, entityType, entityID string, change gather.ChangeKind) (gather.Facts, error) {
+		calls++
+		if calls == 2 { // the closure Run's gather, after a successful peek
+			return gather.Facts{}, errors.New(killedErrText)
+		}
+		facts := minimalFacts(t, map[string]any{"author": "me", "title": "x", "state": "closed", "merged": true, "repo": "acme/widgets"})
+		facts.RemovedState = "merged"
+		return facts, nil
+	}), &out)
+	seedReconcileEntity(t, p, "9", "abc")
+	if err := p.Reconcile(context.Background()); err == nil {
+		t.Fatal("a failed closure Run must fail the pass")
+	}
+	if len(eventLines(t, &out, "reconcile_deferred")) != 0 {
+		t.Fatalf("a closure Run failure must not be logged as deferred: %s", out.String())
+	}
+}
+
+// TestPipelineReconcile_CancelledPassIsNotDeferred: when the pass's own
+// context is done, a killed child is the caller cancelling us, not a blip.
+func TestPipelineReconcile_CancelledPassIsNotDeferred(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	p := newTestPipeline(t, gatherFunc(func(c context.Context, entityType, entityID string, change gather.ChangeKind) (gather.Facts, error) {
+		cancel()
+		return gather.Facts{}, errors.New(killedErrText)
+	}), nil)
+	seedReconcileEntity(t, p, "9", "abc")
+	if err := p.Reconcile(ctx); err == nil {
+		t.Fatal("a failure under a cancelled pass context must fail the pass")
+	}
+}
+
+// TestTransientClass pins the classification table.
+func TestTransientClass(t *testing.T) {
+	cases := []struct {
+		err  error
+		want string
+	}{
+		{errors.New("x: signal: killed"), "killed"},
+		{errors.New("pg-connector [a]: exit -1: boom"), "killed"},
+		{context.DeadlineExceeded, "deadline"},
+		{errors.New("exit 1: unavailable: scriptout: x"), "unavailable"},
+		{&sync.ConnectorError{Code: "unavailable"}, "unavailable"},
+		{context.Canceled, ""},
+		{errors.New("boom"), ""},
+		{errors.New("exit 1: unauthenticated: nope"), ""},
+		{&sync.ConnectorError{Code: "not_found"}, ""},
+		{errors.New("database is locked"), ""},
+	}
+	for _, c := range cases {
+		if got := transientClass(c.err); got != c.want {
+			t.Errorf("transientClass(%v) = %q, want %q", c.err, got, c.want)
+		}
 	}
 }

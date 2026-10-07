@@ -70,7 +70,9 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"regexp"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
@@ -89,6 +91,14 @@ import (
 // *gather.Gatherer satisfies this interface by construction.
 type gatherer interface {
 	Gather(ctx context.Context, entityType, entityID string, change gather.ChangeKind) (gather.Facts, error)
+}
+
+// openLister is the optional capability Reconcile uses to read the current
+// open set (bead pg2-hpakl). It is a separate interface, asserted at use, so a
+// gatherer without it (a test double) just re-reads every open anchor.
+// *gather.Gatherer satisfies it.
+type openLister interface {
+	ListOpenIDs(ctx context.Context, entityType, query string) ([]string, error)
 }
 
 // syncer is the subset of *sync.Syncer's API this package depends on,
@@ -553,9 +563,27 @@ func (p *Pipeline) Sweep(ctx context.Context, entities []store.Entity) error {
 //
 // It is idempotent: once an anchor is closed, audited and sync_error is
 // empty the entity is no longer a candidate. Every candidate is attempted even after
-// one fails; failures are joined into the returned error (exit 1) so the
-// caller's scheduler retries the pass. Unlike Sweep it does not touch
-// meta.last_sweep.
+// one fails; failures are joined into the returned error (exit 1). Unlike
+// Sweep it does not touch meta.last_sweep.
+//
+// # Open set and transient failures (bead pg2-hpakl)
+//
+// An open anchor is re-read only when its PR is absent from the current open
+// set: the ids the watched PR queries list right now (one ids-only listing per
+// query, reconcileOpenSet). A PR a query still lists cannot have left the open
+// set, so re-reading it (a ~4s `pr show --fresh`) bought nothing. When the
+// open set cannot be read every open anchor is re-read, as before.
+//
+// A candidate whose READ of the PR (the peek, or the closed-anchor audit's
+// re-read) fails transiently (a killed or timed-out connector child, or
+// pg-connector's `unavailable` code, see transientClass) is logged as
+// {"event":"reconcile_deferred",...} and does NOT fail the pass: the next
+// scheduled pass retries it, since it keeps its place as a candidate. It fails
+// the pass again once it has been deferred reconcileMaxDeferrals passes in a
+// row (meta reconcile.deferred.<id>, cleared by its next success). Every
+// other failure (a non-transient read failure, or any failure of the closure
+// Run, which carries its own sync_error and retry bound) fails the pass at
+// once.
 //
 // # Budget and convergence (bead pg2-a5z69)
 //
@@ -626,6 +654,19 @@ func (p *Pipeline) Reconcile(ctx context.Context) error {
 		needsPeek[id] = prev && peek
 	}
 	settleWindow := p.cfg.ReviewSettleWindow()
+	// Only an anchor whose PR is absent from the current open set can have
+	// left it, so the open set is read first (one ids-only listing per watched
+	// query) and a listed anchor is not re-read at all (bead pg2-hpakl). It is
+	// read only when some open anchor could use it.
+	var openSet map[string]bool
+	for _, l := range ledger {
+		if l.Repo == repo && l.EntityType == entityTypePR && l.Kind == sync.KindAnchor && l.BeadID != "" &&
+			l.LastSyncedContentHash != sync.ClosedSentinel && !held[l.EntityID] {
+			openSet = p.reconcileOpenSet(ctx)
+			break
+		}
+	}
+	skippedOpen := 0
 	for _, l := range ledger {
 		if l.Repo == repo && l.EntityType == entityTypePR && !held[l.EntityID] && sync.SettleDue(l, settleWindow, now) {
 			settle[l.EntityID] = true
@@ -635,9 +676,14 @@ func (p *Pipeline) Reconcile(ctx context.Context) error {
 			continue
 		}
 		if l.LastSyncedContentHash != sync.ClosedSentinel {
-			if !held[l.EntityID] {
-				add(l.EntityID, true)
+			if held[l.EntityID] {
+				continue
 			}
+			if openSet[l.EntityID] {
+				skippedOpen++
+				continue
+			}
+			add(l.EntityID, true)
 			continue
 		}
 		// Closed anchor: audit its bead's metadata once (pg2-a6aw6).
@@ -657,14 +703,33 @@ func (p *Pipeline) Reconcile(ctx context.Context) error {
 	// Oldest-checked (or never-checked) first; stable so ties keep the
 	// deterministic ledger/interpretation order.
 	checkedAt := map[string]string{}
+	deferrals := map[string]int{}
 	for _, id := range order {
 		v, _, mErr := p.store.GetMeta(reconcileCheckedKeyPrefix + id)
 		if mErr != nil {
 			return fmt.Errorf("pipeline: reconcile: %w", mErr)
 		}
 		checkedAt[id] = v
+		d, found, mErr := p.store.GetMeta(reconcileDeferredKeyPrefix + id)
+		if mErr != nil {
+			return fmt.Errorf("pipeline: reconcile: %w", mErr)
+		}
+		if found {
+			n, aErr := strconv.Atoi(d)
+			if aErr != nil || n < 0 {
+				n = 0 // a corrupt counter restarts the count rather than wedging the row
+			}
+			deferrals[id] = n
+		}
 	}
 	sort.SliceStable(order, func(a, b int) bool { return checkedAt[order[a]] < checkedAt[order[b]] })
+
+	if openSet != nil {
+		line, _ := json.Marshal(map[string]any{
+			"event": "reconcile_open_set", "open_ids": len(openSet), "skipped_open": skippedOpen, "candidates": len(order),
+		})
+		_, _ = fmt.Fprintln(p.out, string(line))
+	}
 
 	start := p.clock.Now()
 	var errs []error
@@ -677,25 +742,22 @@ func (p *Pipeline) Reconcile(ctx context.Context) error {
 			break
 		}
 		p.markReconcileChecked(id)
-		if peek, redrive := needsPeek[id]; redrive {
-			if err := p.reconcileRedrive(ctx, id, peek); err != nil {
-				errs = append(errs, err)
-				continue
+		err := p.reconcileCandidate(ctx, id, needsPeek, settle, audit)
+		switch {
+		case err == nil:
+			if deferrals[id] > 0 {
+				_ = p.store.DeleteMeta(reconcileDeferredKeyPrefix + id) // best-effort, like the stamp
 			}
-		}
-		if settle[id] {
-			// Re-driven through the ordinary run path; the anchor-closure
-			// path above (if it ran) already cleared the pending head when
-			// the PR had left the open set, so this is then a cheap no-op.
-			if err := p.Run(ctx, entityTypePR, id, gather.ChangeSweep); err != nil {
-				errs = append(errs, fmt.Errorf("reconcile %s: settled review: %w", id, err))
-				continue
-			}
-		}
-		if audit[id] {
-			if err := p.reconcileAuditClosedAnchor(ctx, repo, id); err != nil {
-				errs = append(errs, fmt.Errorf("reconcile %s: %w", id, err))
-			}
+		case deferrable(ctx, err, deferrals[id]):
+			deferrals[id]++
+			_ = p.store.SetMeta(reconcileDeferredKeyPrefix+id, strconv.Itoa(deferrals[id]))
+			line, _ := json.Marshal(map[string]any{
+				"event": "reconcile_deferred", "entity_id": id, "error_class": transientClass(err),
+				"consecutive": deferrals[id], "max": reconcileMaxDeferrals, "error": err.Error(),
+			})
+			_, _ = fmt.Fprintln(p.out, string(line))
+		default:
+			errs = append(errs, err)
 		}
 	}
 	if len(errs) > 0 {
@@ -704,13 +766,128 @@ func (p *Pipeline) Reconcile(ctx context.Context) error {
 	return nil
 }
 
+// reconcileCandidate runs one candidate's re-drive, settled-review re-run and
+// closed-anchor audit.
+func (p *Pipeline) reconcileCandidate(ctx context.Context, id string, needsPeek, settle, audit map[string]bool) error {
+	if peek, redrive := needsPeek[id]; redrive {
+		if err := p.reconcileRedrive(ctx, id, peek); err != nil {
+			return err
+		}
+	}
+	if settle[id] {
+		// Re-driven through the ordinary run path; the anchor-closure
+		// path above (if it ran) already cleared the pending head when
+		// the PR had left the open set, so this is then a cheap no-op.
+		if err := p.Run(ctx, entityTypePR, id, gather.ChangeSweep); err != nil {
+			return fmt.Errorf("reconcile %s: settled review: %w", id, err)
+		}
+	}
+	if audit[id] {
+		if err := p.reconcileAuditClosedAnchor(ctx, p.repo(), id); err != nil {
+			return fmt.Errorf("reconcile %s: %w", id, err)
+		}
+	}
+	return nil
+}
+
+// reconcileOpenSet returns the ids the watched PR queries currently list (one
+// ids-only listing per query, bead pg2-hpakl), or nil when it cannot be
+// known: the gatherer cannot list, no PR query is configured, or every
+// listing failed. nil makes every open anchor a re-read candidate, the
+// pre-existing behavior, so a failed listing only costs time, never closure.
+// A query whose listing fails or is partial just contributes fewer ids.
+func (p *Pipeline) reconcileOpenSet(ctx context.Context) map[string]bool {
+	lister, ok := p.gatherer.(openLister)
+	if !ok || p.cfg == nil {
+		return nil
+	}
+	queries := p.cfg.WatchQueries(entityTypePR)
+	if len(queries) == 0 {
+		return nil
+	}
+	set := map[string]bool{}
+	listed := 0
+	for _, q := range queries {
+		ids, err := lister.ListOpenIDs(ctx, entityTypePR, q)
+		if err != nil {
+			line, _ := json.Marshal(map[string]any{"event": "reconcile_open_set_query_failed", "query": q, "error": err.Error()})
+			_, _ = fmt.Fprintln(p.out, string(line))
+			continue
+		}
+		listed++
+		for _, id := range ids {
+			set[id] = true
+		}
+	}
+	if listed == 0 {
+		return nil
+	}
+	return set
+}
+
+// reconcileMaxDeferrals is how many CONSECUTIVE passes may defer one
+// candidate's transient failure before the next such failure is a failure
+// (exit 1) again: a read that keeps being killed is a real problem, not a
+// blip, and must reach the failure metric (bead pg2-hpakl).
+const reconcileMaxDeferrals = 3
+
+// readError marks a failure of Reconcile's own read of a PR (the peek that
+// confirms an anchor's PR left the open set, or the closed-anchor audit's
+// re-read), as opposed to a failure of the closure Run that follows. Its text
+// is the wrapped error's, unchanged.
+type readError struct{ err error }
+
+func (e *readError) Error() string { return e.err.Error() }
+func (e *readError) Unwrap() error { return e.err }
+
+// deferrable reports whether err is a transient connector failure that this
+// pass may log as deferred instead of failing on: a candidate READ (readError)
+// whose child was killed, whose deadline expired, or which pg-connector
+// answered "unavailable". A failed closure Run is never deferred: it records
+// sync_error and its own retry state, and its exit-1 contract is unchanged.
+// Nor is it ever deferred when the pass's own context is done (the caller is
+// cancelling the whole run), once the candidate has already been deferred
+// reconcileMaxDeferrals passes in a row, or for any other class: non-transient
+// failures (a missing binary, a store error, an auth or validation failure)
+// still fail the run.
+func deferrable(ctx context.Context, err error, priorDeferrals int) bool {
+	var re *readError
+	if !errors.As(err, &re) || ctx.Err() != nil || priorDeferrals >= reconcileMaxDeferrals {
+		return false
+	}
+	return transientClass(err) != ""
+}
+
+// unavailableRe matches pg-connector's `unavailable` wire code as the gather
+// layer renders it into an error ("...: exit 1: unavailable: <message>").
+var unavailableRe = regexp.MustCompile(`exit \d+: unavailable:`)
+
+// transientClass returns the deferrable class of err (ClassKilled,
+// ClassDeadline or "unavailable"), or "" when err is not deferrable.
+func transientClass(err error) string {
+	switch ClassifyError(err) {
+	case ClassKilled:
+		return ClassKilled
+	case ClassDeadline:
+		return ClassDeadline
+	}
+	var ce *sync.ConnectorError
+	if errors.As(err, &ce) && ce.Code == "unavailable" {
+		return "unavailable"
+	}
+	if unavailableRe.MatchString(err.Error()) {
+		return "unavailable"
+	}
+	return ""
+}
+
 // reconcileRedrive re-drives closure for one candidate: peek=true confirms
 // the PR left the open set first (a still-open PR is left alone).
 func (p *Pipeline) reconcileRedrive(ctx context.Context, id string, peek bool) error {
 	if peek {
 		facts, err := p.gatherer.Gather(ctx, entityTypePR, id, gather.ChangeRemoved)
 		if err != nil {
-			return fmt.Errorf("reconcile %s: %w", id, err)
+			return &readError{fmt.Errorf("reconcile %s: %w", id, err)}
 		}
 		if facts.RemovedState == "open" {
 			return nil // still open: nothing to close
@@ -738,7 +915,7 @@ func (p *Pipeline) reconcileAuditClosedAnchor(ctx context.Context, repo, id stri
 	if stale {
 		facts, gErr := p.gatherer.Gather(ctx, entityTypePR, id, gather.ChangeRemoved)
 		if gErr != nil {
-			return gErr
+			return &readError{gErr}
 		}
 		if facts.RemovedState == "open" || facts.RemovedState == "" {
 			return nil
@@ -763,6 +940,11 @@ const reconcileAuditedKeyPrefix = "reconcile.anchor-audited."
 // reconcileCheckedKeyPrefix prefixes the per-entity meta key recording when
 // Reconcile last attempted that entity (RFC3339Nano UTC).
 const reconcileCheckedKeyPrefix = "reconcile.checked."
+
+// reconcileDeferredKeyPrefix prefixes the per-entity meta key counting the
+// consecutive passes that deferred that entity's transient failure; deleted by
+// the entity's next successful attempt.
+const reconcileDeferredKeyPrefix = "reconcile.deferred."
 
 // markReconcileChecked stamps id as attempted now. Best-effort: a failed
 // stamp only costs ordering fidelity on the next run, never correctness.
