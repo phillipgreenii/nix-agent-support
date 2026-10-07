@@ -648,10 +648,10 @@ func boundedJQL(jql, updatedSince string) string {
 // to parse or restrict (no equivalent "only ready/list as the first
 // token" rule applies here).
 //
-// Per expression, TWO searches run, unconditionally, regardless of
-// idsOnly (mirroring this method's own pre-existing "always search,
-// discard Entities afterward when idsOnly" precedent, extended to a
-// second search):
+// Per expression, TWO searches run for a full call, and ONE for an idsOnly
+// call (the ids-only search below; the entity search is skipped because its
+// result would be discarded — the umbrella's refresh-cache membership query,
+// INV-CACHE-6, is exactly such a call and MUST stay cheap):
 //
 //   - The bound-appended search (boundedJQL(jql, cursor's own
 //     updated_since)) feeds Entities — a fresh cursor's bound narrows this
@@ -704,31 +704,37 @@ func (b *Backend) List(ctx context.Context, query schema.QueryExpr, idsOnly bool
 			continue
 		}
 
-		primaryJQL := rangedJQL(boundedJQL(jql, prevCursor.UpdatedSince), rng)
-		out, runErr := b.runner.Run(ctx, "search", "--jql", primaryJQL, "--all")
-		if runErr != nil {
-			return nil, classifyPJIRAErrorMessage(runErr.Error())
-		}
-		result, decodeErr := decodePJIRASearchResult(out)
-		if decodeErr != nil {
-			return nil, scriptout.WrapError(scriptout.ErrUnavailable, "pjira: decode search result: "+decodeErr.Error())
-		}
-		if result.Truncated {
-			truncated = true
-		}
-		asOf := time.Now().UTC()
-		for i := range result.Items {
-			item := result.Items[i]
-			if item.Key == "" || seenEntities[item.Key] {
-				continue
+		// An ids_only call is the membership query of the umbrella's refresh
+		// cache (INV-CACHE-6): it asks for the id set and nothing else, so the
+		// entity search is skipped rather than run and discarded (one origin
+		// search per expression instead of two).
+		if !idsOnly {
+			primaryJQL := rangedJQL(boundedJQL(jql, prevCursor.UpdatedSince), rng)
+			out, runErr := b.runner.Run(ctx, "search", "--jql", primaryJQL, "--all")
+			if runErr != nil {
+				return nil, classifyPJIRAErrorMessage(runErr.Error())
 			}
-			keep, imp := issueInRange(item.Updated, rng)
-			imprecise = imprecise || imp
-			if !keep {
-				continue
+			result, decodeErr := decodePJIRASearchResult(out)
+			if decodeErr != nil {
+				return nil, scriptout.WrapError(scriptout.ErrUnavailable, "pjira: decode search result: "+decodeErr.Error())
 			}
-			seenEntities[item.Key] = true
-			entities = append(entities, *toSchemaIssue(&item, asOf))
+			if result.Truncated {
+				truncated = true
+			}
+			asOf := time.Now().UTC()
+			for i := range result.Items {
+				item := result.Items[i]
+				if item.Key == "" || seenEntities[item.Key] {
+					continue
+				}
+				keep, imp := issueInRange(item.Updated, rng)
+				imprecise = imprecise || imp
+				if !keep {
+					continue
+				}
+				seenEntities[item.Key] = true
+				entities = append(entities, *toSchemaIssue(&item, asOf))
+			}
 		}
 
 		// The unconditional present-ids search (this method's own doc

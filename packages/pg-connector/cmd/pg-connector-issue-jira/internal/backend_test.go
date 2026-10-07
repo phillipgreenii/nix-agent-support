@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -836,6 +837,54 @@ func TestBackend_List_IDsOnly_OmitsEntities(t *testing.T) {
 	}
 	if len(got.PresentIDs) != 1 {
 		t.Fatalf("PresentIDs = %+v, want present_ids populated regardless of ids_only", got.PresentIDs)
+	}
+}
+
+// TestBackend_List_IDsOnly_RunsOneUnboundedSearchPerExpression pins the
+// membership-query cost the umbrella's refresh cache relies on (spec section
+// 6.7, INV-CACHE-6): an ids_only call is ONE origin search per expression —
+// the unbounded id search — never the entity search whose result would be
+// discarded, and a prior cursor's updated >= bound never narrows it.
+func TestBackend_List_IDsOnly_RunsOneUnboundedSearchPerExpression(t *testing.T) {
+	cursor := json.RawMessage(`{"updated_since":"2026-09-18T00:00:00Z"}`)
+	var jqls []string
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		jqls = append(jqls, jqlArg(args))
+		return `{"items":[{"key":"PROJ-1","summary":"a","status":"To Do"},{"key":"PROJ-2","summary":"b","status":"To Do"}],"truncated":false}`, nil
+	}}
+
+	got, err := New(fr).List(context.Background(), []string{"assignee = currentUser()", "labels = focus"}, true, cursor)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	want := []string{"assignee = currentUser()", "labels = focus"}
+	if !reflect.DeepEqual(jqls, want) {
+		t.Fatalf("searches = %q, want exactly one unbounded search per expression %q", jqls, want)
+	}
+	if !reflect.DeepEqual(got.PresentIDs, []string{"PROJ-1", "PROJ-2"}) {
+		t.Fatalf("PresentIDs = %v, want [PROJ-1 PROJ-2] deduplicated across expressions", got.PresentIDs)
+	}
+	if len(got.Entities) != 0 {
+		t.Fatalf("Entities = %+v, want none for ids_only", got.Entities)
+	}
+	if len(got.Cursor) == 0 {
+		t.Fatal("Cursor empty, want a real cursor on a successful call")
+	}
+}
+
+// TestBackend_List_IDsOnly_TruncatedFromTheIDSearch proves a truncated id
+// search still marks the membership truncated, so the umbrella reports no
+// removal from it.
+func TestBackend_List_IDsOnly_TruncatedFromTheIDSearch(t *testing.T) {
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		return `{"items":[{"key":"PROJ-1","summary":"a","status":"To Do"}],"truncated":true}`, nil
+	}}
+	got, err := New(fr).List(context.Background(), []string{"assignee = currentUser()"}, true, nil)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if !got.Truncated {
+		t.Fatal("Truncated = false, want true from the ids-only search")
 	}
 }
 

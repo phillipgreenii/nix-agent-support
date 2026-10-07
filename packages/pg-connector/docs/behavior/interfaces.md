@@ -489,6 +489,22 @@ same duration syntax (`<N>d` or a Go duration) as `cache_max_age`, tune it:
   call per entity, because no batched fetch-by-ids op exists yet: turning it on spends one `show`
   per new or aged member per pass, which is why it is opt-in.
 
+**Jira adopts the policy by configuration** (bead `pg2-cw6b3.6`). The policy is type-generic over
+`pr` and `issue` and names no backend, so `pg-connector-issue-jira` needs no policy code of its own;
+it only has to meet the contract the policy reads, and does:
+
+- `list` with `ids_only` is the membership query, a JQL key list. It answers `present_ids` and no
+  entities from ONE unbounded origin search per query expression (it does not also run the entity
+  search whose result would be discarded), and `truncated` is true when that search was truncated,
+  so a truncated membership reports no removal.
+- `show` answers the full entity (`pjira issue`, plus the operator attention facts for an issue
+  assigned to the operator), with a non-empty `id` and an RFC3339 `as_of`, so it is cached at
+  `detail` level and a `list` summary never stands in for it. A missing issue answers `not_found`,
+  which confirms a removal; any other failure withholds it.
+- The read-through (`cache_read_ttl`) applies to `issue show` for Jira as it does for `pr show`; the
+  refresher stays opt-in (`cache_refresh_after`), and a Jira `show` costs one `pjira issue` call
+  plus, for an operator-assigned issue, one `pjira search` call for the attention facts.
+
 ### `attention`/`search` — the two cross-cutting, fan-out-only capabilities
 
 Unlike `pr`/`issue`/`ci`/`scm`, `attention` and `search` are not tied to one entity type and

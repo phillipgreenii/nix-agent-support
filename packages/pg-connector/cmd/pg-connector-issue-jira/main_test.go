@@ -299,3 +299,90 @@ func TestNewDispatchTable_ListActivityUnavailableWithoutIdentity(t *testing.T) {
 		t.Errorf("result = %s, want no items", res.Result)
 	}
 }
+
+// cacheContractRunner is a pjira double for the umbrella cache contract tests
+// below: one issue that exists, one search that answers a fixed id set, and a
+// log of every pjira search so a test can count origin calls.
+func cacheContractRunner(searches *[]string) *fakeRunner {
+	return &fakeRunner{handle: func(args []string) (string, error) {
+		switch args[0] {
+		case "issue":
+			if args[len(args)-1] == "PROJ-404" {
+				return "", errorString("pjira issue -- PROJ-404: exit status 1: pjira: issue PROJ-404 not found")
+			}
+			return `{"key":"PROJ-1","summary":"hello","status":"To Do","issuetype":"Task"}`, nil
+		case "search":
+			*searches = append(*searches, args[2])
+			return `{"items":[{"key":"PROJ-1","summary":"a","status":"To Do"},{"key":"PROJ-2","summary":"b","status":"To Do"}],"truncated":false}`, nil
+		}
+		return "", nil
+	}}
+}
+
+type errorString string
+
+func (e errorString) Error() string { return string(e) }
+
+// TestCacheContract_MembershipIsOneCheapSearch proves the wire-level
+// ids_only list the umbrella's refresher sends (the membership query is a
+// JQL key list) answers present_ids with no entities from a single
+// unbounded search per expression.
+func TestCacheContract_MembershipIsOneCheapSearch(t *testing.T) {
+	var searches []string
+	table := newDispatchTable(internal.New(cacheContractRunner(&searches)))
+	ctx := scriptout.WithConfig(context.Background(), json.RawMessage(`{"queries":{"mine":["assignee = currentUser()"]}}`))
+
+	result, err := table["list"].Handle(ctx, json.RawMessage(`{"query":"mine","cursor":null,"ids_only":true}`))
+	if err != nil {
+		t.Fatalf("list ids_only: %v", err)
+	}
+	raw, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got struct {
+		Entities   []json.RawMessage `json:"entities"`
+		PresentIDs []string          `json:"present_ids"`
+		Truncated  bool              `json:"truncated"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decode: %v (%s)", err, raw)
+	}
+	if !reflect.DeepEqual(got.PresentIDs, []string{"PROJ-1", "PROJ-2"}) || len(got.Entities) != 0 || got.Truncated {
+		t.Fatalf("list ids_only = %s, want present_ids [PROJ-1 PROJ-2], no entities, not truncated", raw)
+	}
+	if !reflect.DeepEqual(searches, []string{"assignee = currentUser()"}) {
+		t.Fatalf("pjira searches = %q, want exactly one unbounded search", searches)
+	}
+}
+
+// TestCacheContract_ShowIsADetailEntityTheCacheCanKey proves the wire-level
+// show answer carries what the umbrella cache keys and ages on (a non-empty
+// id and an RFC3339 as_of) and that a missing issue answers the not_found
+// code the removal confirmation reads.
+func TestCacheContract_ShowIsADetailEntityTheCacheCanKey(t *testing.T) {
+	var searches []string
+	table := newDispatchTable(internal.New(cacheContractRunner(&searches)))
+
+	result, err := table["show"].Handle(context.Background(), json.RawMessage(`{"id":"PROJ-1"}`))
+	if err != nil {
+		t.Fatalf("show: %v", err)
+	}
+	raw, _ := json.Marshal(result)
+	var got struct {
+		ID    string `json:"id"`
+		AsOf  string `json:"as_of"`
+		Stale bool   `json:"stale"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decode: %v (%s)", err, raw)
+	}
+	if _, perr := time.Parse(time.RFC3339, got.AsOf); got.ID != "PROJ-1" || perr != nil || got.Stale {
+		t.Fatalf("show = %s, want id PROJ-1, an RFC3339 as_of and stale false", raw)
+	}
+
+	_, err = table["show"].Handle(context.Background(), json.RawMessage(`{"id":"PROJ-404"}`))
+	if code := scriptout.CodeForError(err); code != "not_found" {
+		t.Fatalf("show of a missing issue: err=%v code=%q, want not_found", err, code)
+	}
+}
