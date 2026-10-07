@@ -157,7 +157,8 @@ func composeMonReadValues(rm metricdata.ResourceMetrics, requested, subset []str
 
 // monReadDataPoints flattens one metric's current data points into the
 // {name, value, labels} wire shape. A Histogram catalog member (the
-// catalog's one, pg_router_dispatch_latency) has no single scalar projection
+// dispatch-latency histogram and the queue-wait / run-time pair that split it)
+// has no single scalar projection
 // defined by this task's Contract and is deliberately omitted rather than
 // guessed at — a later task's concern if a sink's subset ever names it.
 func monReadDataPoints(m metricdata.Metrics) []monReadValue {

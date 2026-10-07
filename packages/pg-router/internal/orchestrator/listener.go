@@ -355,7 +355,17 @@ func (l *roleListener) Offer(o eventqueue.Offering) eventqueue.OfferResult {
 	}
 	evt := o.Event
 	d := discover.DeriveContextFromQueueEvent(l.role, evt)
+	// started is the wall instant this run began; the queue's own in-flight instant
+	// (Offering.StartedAt) is preferred for the row so events.jsonl and the
+	// queue-wait/run histograms share one start (bead pg2-n7da9).
+	begun := time.Now()
 	reply, err := l.o.workOne(l.ctx, d, evt)
+	ran := time.Since(begun)
+	started := o.StartedAt
+	if started.IsZero() {
+		started = begun
+	}
+	meta := newDispatchMeta(evt, started, ran)
 	if errors.Is(err, wireclient.ErrBusy) {
 		// Decline stays eventqueue.DeclineBusy regardless of detail (INV-
 		// FAIL-1: every DeclineReason re-offers alike) — DeclineDetail is a
@@ -385,10 +395,10 @@ func (l *roleListener) Offer(o eventqueue.Offering) eventqueue.OfferResult {
 		// pre-accept decline so the queue re-offers it at the role's
 		// RetryBackoff cadence (bead pg2-yu5y2). emitResult still logs the
 		// failed attempt; the event is NOT accepted, so it is not settled.
-		l.o.emitResult(l.ctx, l.role, d.Item.ID, report.Result{}, err)
+		l.o.emitResult(l.ctx, l.role, d.Item.ID, report.Result{}, err, meta)
 		return eventqueue.OfferResult{Accepted: false, Decline: eventqueue.DeclineNone, DeclineDetail: DeclineDetailDispatchRetry}
 	}
 	l.retries.forget(evt.ID)
-	l.o.emitResult(l.ctx, l.role, d.Item.ID, l.o.buildResult(d, reply, err), err)
+	l.o.emitResult(l.ctx, l.role, d.Item.ID, l.o.buildResult(d, reply, err), err, meta)
 	return eventqueue.OfferResult{Accepted: true, Decline: eventqueue.DeclineNone}
 }

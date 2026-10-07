@@ -268,3 +268,48 @@ unaffected (a cancelled attempt never advanced the last-success gauge either).
 
 **Not decided here.** An alert on a source child stuck in flight, or on the duration histogram's
 tail, is a possible follow-up; no rule is added by this entry.
+
+### `DEC-OBS-9` — queue wait and run time are separate metrics, the event log and queue log carry the timeline, and compaction keeps a bounded history <!-- uuid: 5b0f0d5c-7a63-4d3e-9c37-2f6a1e8b9d41 -->
+
+**Decided** (router health review, 2026-10-07; bead `pg2-n7da9`, follow-up to `pg2-nimab` and
+`DEC-OBS-5`). The dispatch-latency histogram measures from the event's enqueue to the handler's
+return, so a one-at-a-time lane (`INV-CONC-1`) with a deep queue reads as a slow handler. An analysis of
+the desk-pr lane found about 98.7 percent of its latency was queue wait, and nothing could show it per
+event. Four changes make the split computable from live data:
+
+- **Start instant at in-flight.** The queue stamps the instant an offer becomes in-flight (the
+  moment `INV-CONC-1`'s one-outstanding-offer slot is taken). Wait is that instant minus the event's
+  enqueue instant (`Event.At`, the origin dispatch latency always used); run is the settle instant
+  minus it. A pass settles with a fresh clock reading, so a batched `Dispatch` does not report a zero
+  run. The pair is delivered to an optional observer extension fired right after `OnAccept`, so existing
+  observers are untouched. `INV-CONC-1` is unchanged: this only reads the slot.
+- **Metrics.** `queue_wait` and `run` (histograms), `queue_oldest_age` and `listener_in_flight`
+  (gauges); shapes in `INTF-MON`'s catalog. The histograms carry the **full** event type, not the
+  entity prefix `DEC-OBS-6` reduces it to, because `pr.changed` and `pr.reconcile` are different
+  workloads (83 percent of the desk-pr lane was reconcile). The label is bounded the same way
+  (lowercase identifier, at most 64 bytes, at most 64 distinct values, the rest `other`). The old
+  histogram is **kept and marked deprecated**: the pg-router dashboard's p50 and p95 panels (in
+  `phillipgreenii-nix-support-apps`) still query it by `sum by (le)`, so replacing it would blank them.
+  Remove it once those panels move to the new pair.
+- **`events.jsonl` dispatch rows** gain `event_type`, `change` (the event id, which for a change-driven
+  event is `<entity id>@<seq>`, so two changes to one entity differ; `bead` is the entity alone),
+  `enqueued_at`, `started_at` (RFC 3339, UTC) and `duration_ms` (whole milliseconds of handler run).
+  They are additive: every key a row already carried is unchanged, and a zero instant is omitted
+  rather than written as year one. The same fields appear on the `run-role` row and on a transiently
+  failed attempt that is handed back for retry.
+- **`queue.jsonl`** accept records carry `at` (settle) and `startedAt`, evict records carry `at` and a
+  `reason` (`retired`, `all-accepted`, `reemit`). Compaction used to drop an evicted event's whole record
+  set, and it runs at every start, so about three hours of history survived. It now folds each departed
+  event into one `archive` record (type, enqueue instant, each accept's role and instants, eviction
+  instant and reason) and keeps the newest 2048, additionally capped to one tenth of the soft log limit
+  so history is the first thing a limit-driven compaction gives up and can never hold the log above
+  its limits. A replay ignores `archive` records, so queue state and delivery are unchanged, and a
+  binary that predates them ignores the unknown kind.
+
+**Bounds.** `role` is config-bounded (`DEC-OBS-5`); `type` is bounded as above; neither adds an event
+id, bead or session as a label. The oldest-age gauge is a scan of the retained events at scrape time.
+
+**Reading the 24h wait-versus-run table.** Group `events.jsonl` dispatch rows by `role` and
+`event_type`; wait is `started_at - enqueued_at`, run is `duration_ms`. The histograms give the same
+split as a rate: `sum(rate(pg_router_queue_wait_seconds_sum[1h])) by (role, type)` over the matching
+`run` sum.

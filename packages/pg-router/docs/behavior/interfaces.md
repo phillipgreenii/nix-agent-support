@@ -522,7 +522,25 @@ sequenceDiagram
   falls in the overflow bucket). `role` is config-bounded on both (`DEC-OBS-5`); dispatch
   latency's `type` is the **entity** type (the event type's prefix before the first `.`, so
   `pr.changed` is `pr`), bounded by configuration, with one fallback value `other` for a type that
-  cannot be reduced (`DEC-OBS-6`).
+  cannot be reduced (`DEC-OBS-6`). Dispatch latency is **deprecated**: it is wait plus run with no
+  split, so it cannot say whether a listener is slow or its queue is long. The following four members
+  replace it (`DEC-OBS-9`), and it stays in the catalog, unchanged, until its consumers have moved:
+  - **queue_wait** and **run** — histograms, in seconds, per `role` **and** the **full** event
+    `type` (`pr.changed` and `pr.reconcile` are separate series), one sample per accepted dispatch.
+    **queue_wait** is the time from the event's enqueue to the instant the accepting handler's offer
+    became in-flight; **run** is that offer's own synchronous run. A run that ended in a handler error is
+    still a sample (the core counts it as accepted, `INV-FAIL-1`). Both use the bucket boundaries 0.1,
+    0.5, 1, 2.5, 5, 10, 20, 30, 45, 60, 120, 300, 600, 1200, 1800, 3600 and 7200 seconds;
+  - **queue_oldest_age** — gauge, per event `type`, in seconds: the age of the oldest retained event
+    of that type that a bound handler has not yet settled, `0` when nothing of that type is owed. A
+    histogram learns of a wait only when it ends; this shows a stuck head while it is still growing;
+  - **listener_in_flight** — gauge, per `role`: `1` while that handler has an offer outstanding, else
+    `0`, for **every** registered handler. `INV-CONC-1` caps it at one, so its time-average is the
+    handler's utilisation.
+
+  `role` is config-bounded on all four (`DEC-OBS-5`). On the two histograms `type` is the **full**
+  event type, bounded by configuration the way `DEC-OBS-6` bounds the entity type: a lowercase
+  identifier of at most 64 bytes, at most 64 distinct values, every other value `other`.
 
 - **Emission.** Observability covers **metrics and logs** (traces are a later concern). Both the
   **emission transport** and the concrete backend behind it (a scrape target, a log store) are

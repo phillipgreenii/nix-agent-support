@@ -320,6 +320,10 @@ func bootCore(ctx context.Context, cfg config.Config, o *orchestrator.Orchestrat
 	// Log-size limit gauges (bead pg2-5d3ui): limit, percent, emitters halted, and
 	// which reason (if any) the log is rejecting events for.
 	metricsOpts = append(metricsOpts, metrics.WithLogLimitStatus(func() eventqueue.LimitStatus { return q.LimitStatus() }))
+	// Oldest-pending-age (per type) and per-listener in-flight gauges (bead
+	// pg2-n7da9), read live off the queue on each collect.
+	metricsOpts = append(metricsOpts, metrics.WithQueueAges(func() map[string]time.Duration { return q.OldestPendingAgeByType() }))
+	metricsOpts = append(metricsOpts, metrics.WithListenerInFlight(func() map[string]int { return q.InFlightByListener() }))
 	// Per-source last-success / expected-interval gauges (bead pg2-tv11a,
 	// DEC-OBS-4): one series per enabled, non-excluded PULL source with a
 	// period, last-success initialised to now (process start).
@@ -714,6 +718,18 @@ func (f fanOutObserver) OnEnqueueRejected(evtType, reason string) {
 func (f fanOutObserver) OnAccept(eventID, listenerID string) {
 	f.a.OnAccept(eventID, listenerID)
 	f.b.OnAccept(eventID, listenerID)
+}
+
+// OnAcceptTiming (bead pg2-n7da9) forwards eventqueue.TimingObserver's hook to
+// whichever arms implement it — the metrics emitter feeds its wait/run
+// histograms; the activity and listener-count observers have no use for it.
+func (f fanOutObserver) OnAcceptTiming(t eventqueue.DispatchTiming) {
+	if to, ok := f.a.(eventqueue.TimingObserver); ok {
+		to.OnAcceptTiming(t)
+	}
+	if to, ok := f.b.(eventqueue.TimingObserver); ok {
+		to.OnAcceptTiming(t)
+	}
 }
 
 func (f fanOutObserver) OnUnconsumedExpired(evtType string) {

@@ -148,11 +148,39 @@ const (
 	// (daemon-mode only — Task 3.3 binding decision: drain-and-exit never
 	// registers this observable at all, not merely never observes it true).
 	MetricLiveness = "pg_router_liveness"
-	// MetricDispatchLatency is the catalog's one Histogram: the time from an
+	// MetricDispatchLatency is the catalog's original Histogram: the time from an
 	// event's enqueue to a settling dispatch outcome, in milliseconds. See
 	// RecordDispatchLatency's doc for why this task builds and exposes it
 	// without also wiring a live production call site.
+	//
+	// DEPRECATED (bead pg2-n7da9): it is wait + run with no way to tell them
+	// apart, so it cannot answer "is this listener slow, or is its queue long".
+	// MetricQueueWait and MetricRun split it. It is KEPT, unchanged, because the
+	// pg-router dashboard's p50/p95 panels still query it; remove it once those
+	// panels move to the new pair.
 	MetricDispatchLatency = "pg_router_dispatch_latency"
+	// MetricQueueWait and MetricRun are the split of MetricDispatchLatency (bead
+	// pg2-n7da9), in seconds, per role and FULL event type (pr.changed and
+	// pr.reconcile are distinct series): MetricQueueWait is the time from the
+	// event's enqueue (Event.At) to the instant the accepting listener's offer went
+	// in-flight; MetricRun is that offer's own synchronous handler run. Both are fed
+	// from eventqueue.TimingObserver, once per accepted dispatch (a handler that
+	// returned an error still counts: the queue sees it as accepted, see
+	// FailureClassHandlerError). Exposed to Prometheus as pg_router_queue_wait_seconds
+	// and pg_router_run_seconds.
+	MetricQueueWait = "pg_router_queue_wait"
+	MetricRun       = "pg_router_run"
+	// MetricQueueOldestAge is a gauge, per event type: the age in seconds of the
+	// oldest retained event of that type that a bound listener has not yet settled
+	// (eventqueue.Queue.OldestPendingAgeByType). The histograms learn of a wait only
+	// when it ends; this shows a stuck head while it is still growing. A type with
+	// nothing owed reads 0. Exposed as pg_router_queue_oldest_age_seconds.
+	MetricQueueOldestAge = "pg_router_queue_oldest_age"
+	// MetricListenerInFlight is a gauge, per role: 1 while the listener has an offer
+	// outstanding, else 0 (eventqueue.Queue.InFlightByListener). INV-CONC-1 caps it
+	// at 1; the time-average of it is the lane's utilisation. Exposed as
+	// pg_router_listener_in_flight.
+	MetricListenerInFlight = "pg_router_listener_in_flight"
 	// MetricSourceFailures counts a pull-source query failure, per source and
 	// reason (see ClassifySourceFailure; the alert sums the reason away) —
 	// the metrics half of INV-FAIL-3's "reported to logs and metrics, never a
@@ -329,6 +357,13 @@ type Emitter struct {
 	enqueueRejected metric.Int64Counter
 	dispatchRetries metric.Int64Counter
 	dispatchLatency metric.Float64Histogram
+	queueWait       metric.Float64Histogram
+	run             metric.Float64Histogram
+
+	// typeMu guards typeSeen, the bounded set of full event-type label values the
+	// wait/run histograms have minted (see eventTypeLabel).
+	typeMu   sync.Mutex
+	typeSeen map[string]struct{}
 
 	// Gate Registry instruments (gate.go's GateObserver half; see the const
 	// block above).
@@ -384,6 +419,7 @@ var (
 	_ eventqueue.GateObserver    = (*Emitter)(nil)
 	_ eventqueue.RestoreObserver = (*Emitter)(nil)
 	_ eventqueue.RejectObserver  = (*Emitter)(nil)
+	_ eventqueue.TimingObserver  = (*Emitter)(nil)
 )
 
 // Option configures an optional catalog member at construction time
@@ -400,6 +436,8 @@ type options struct {
 	poolDir       string
 	poolTTL       time.Duration
 	pullSources   map[string]time.Duration
+	queueAges     func() map[string]time.Duration
+	listenerBusy  func() map[string]int
 }
 
 // WithClock injects a clock seam (default time.Now) for deterministic tests
@@ -407,6 +445,22 @@ type options struct {
 // elapsed time since an event's OnEnqueue — mirrors eventqueue.WithClock.
 func WithClock(now func() time.Time) Option {
 	return func(o *options) { o.now = now }
+}
+
+// WithQueueAges registers MetricQueueOldestAge, an ObservableGauge reading fn
+// (typically queue.OldestPendingAgeByType) on each collect. It exports one series
+// per type in the queue's depth map, 0 for a type with nothing owed, plus any
+// type fn itself reports. Without the option the gauge is not registered.
+func WithQueueAges(fn func() map[string]time.Duration) Option {
+	return func(o *options) { o.queueAges = fn }
+}
+
+// WithListenerInFlight registers MetricListenerInFlight, an ObservableGauge
+// reading fn (typically queue.InFlightByListener) on each collect: one series per
+// registered listener, 1 while it has an offer outstanding else 0. Without the
+// option the gauge is not registered.
+func WithListenerInFlight(fn func() map[string]int) Option {
+	return func(o *options) { o.listenerBusy = fn }
 }
 
 // WithPullSources registers the per-source liveness gauges
@@ -532,11 +586,29 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 	dispatchLatency, err := m.Float64Histogram(
 		MetricDispatchLatency,
 		metric.WithUnit("ms"),
-		metric.WithDescription("time from an event's enqueue to a settling dispatch outcome, in milliseconds (STORY-OBS-1)"),
+		metric.WithDescription("DEPRECATED (use pg_router_queue_wait_seconds and pg_router_run_seconds): time from an event's enqueue to a settling dispatch outcome, in milliseconds, wait plus run with no split (STORY-OBS-1)"),
 		// Seconds-to-hours scale: latency is measured from evt.At through the
 		// synchronous handler run (bead pg2-nimab), and a re-offered event can be
 		// older than an hour (+Inf covers it).
 		metric.WithExplicitBucketBoundaries(100, 250, 500, 1000, 2500, 5000, 10000, 30000, 60000, 120000, 300000, 600000, 1200000, 1800000, 3600000),
+	)
+	if err != nil {
+		return nil, err
+	}
+	queueWait, err := m.Float64Histogram(
+		MetricQueueWait,
+		metric.WithUnit("s"),
+		metric.WithDescription("time an accepted event waited, in seconds, from its enqueue to the moment the accepting role's offer went in-flight, per role and full event type (pg2-n7da9)"),
+		metric.WithExplicitBucketBoundaries(timingBuckets...),
+	)
+	if err != nil {
+		return nil, err
+	}
+	run, err := m.Float64Histogram(
+		MetricRun,
+		metric.WithUnit("s"),
+		metric.WithDescription("synchronous handler run time of an accepted dispatch, in seconds, from the role's offer going in-flight to its return, per role and full event type; a handler that returned an error is included (pg2-n7da9)"),
+		metric.WithExplicitBucketBoundaries(timingBuckets...),
 	)
 	if err != nil {
 		return nil, err
@@ -569,7 +641,45 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 	); err != nil {
 		return nil, err
 	}
-	e := &Emitter{gateSeen: map[string]struct{}{}, srcInflight: map[string]int{}}
+	if cfg.queueAges != nil {
+		if _, err := m.Float64ObservableGauge(
+			MetricQueueOldestAge,
+			metric.WithUnit("s"),
+			metric.WithDescription("age in seconds of the oldest retained event, per type, that a bound listener has not yet settled; 0 when nothing of that type is owed (pg2-n7da9)"),
+			metric.WithFloat64Callback(func(_ context.Context, o metric.Float64Observer) error {
+				ages := cfg.queueAges()
+				seen := map[string]bool{}
+				for typ, age := range ages {
+					seen[typ] = true
+					o.Observe(age.Seconds(), metric.WithAttributes(attribute.String("type", typ)))
+				}
+				for typ := range depthFn() {
+					if !seen[typ] {
+						o.Observe(0, metric.WithAttributes(attribute.String("type", typ)))
+					}
+				}
+				return nil
+			}),
+		); err != nil {
+			return nil, err
+		}
+	}
+	if cfg.listenerBusy != nil {
+		if _, err := m.Int64ObservableGauge(
+			MetricListenerInFlight,
+			metric.WithUnit("{dispatch}"),
+			metric.WithDescription("1 while a role's listener has an offer outstanding, else 0, per role; INV-CONC-1 caps it at 1 (pg2-n7da9)"),
+			metric.WithInt64Callback(func(_ context.Context, o metric.Int64Observer) error {
+				for role, n := range cfg.listenerBusy() {
+					o.Observe(int64(n), metric.WithAttributes(attribute.String("role", role)))
+				}
+				return nil
+			}),
+		); err != nil {
+			return nil, err
+		}
+	}
+	e := &Emitter{gateSeen: map[string]struct{}{}, srcInflight: map[string]int{}, typeSeen: map[string]struct{}{}}
 	if err := e.registerSourceTiming(m, cfg.pullSources); err != nil {
 		return nil, err
 	}
@@ -675,6 +785,8 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 	e.enqueueRejected = enqueueRejected
 	e.dispatchRetries = dispatchRetries
 	e.dispatchLatency = dispatchLatency
+	e.queueWait = queueWait
+	e.run = run
 	e.gateSets = gateSets
 	e.gateClears = gateClears
 	e.gateExpiries = gateExpiries
@@ -846,6 +958,93 @@ func (e *Emitter) OnAccept(eventID, listenerID string) {
 	// sample low against the histogram's own sub-10ms buckets.
 	elapsedMS := float64(e.now().Sub(p.enqueuedAt)) / float64(time.Millisecond)
 	e.RecordDispatchLatency(elapsedMS, "accepted", listenerID, p.typ)
+}
+
+// OnAcceptTiming implements eventqueue.TimingObserver (bead pg2-n7da9): it feeds
+// the queue-wait and run-time histograms for one accepted dispatch, per role (the
+// listener id) and FULL event type. Unlike OnAccept it needs no eventID
+// correlation entry: the timing carries the type and both instants itself, so an
+// event evicted from (or never seeded into) the correlation map is still measured.
+func (e *Emitter) OnAcceptTiming(t eventqueue.DispatchTiming) {
+	e.RecordQueueWait(t.Wait(), t.ListenerID, t.EventType)
+	e.RecordRun(t.Run(), t.ListenerID, t.EventType)
+}
+
+// timingBuckets are the explicit bucket upper bounds, in seconds, of both the
+// queue-wait and the run-time histogram: sub-second to two hours. The same set
+// serves both so one panel can overlay them; a wait longer than two hours falls in
+// the overflow bucket.
+var timingBuckets = []float64{0.1, 0.5, 1, 2.5, 5, 10, 20, 30, 45, 60, 120, 300, 600, 1200, 1800, 3600, 7200}
+
+// RecordQueueWait records how long an accepted event waited before role's offer
+// went in-flight. evtType is the RAW event type; this method bounds it with
+// eventTypeLabel. Exported for direct/test use; the production call site is
+// OnAcceptTiming.
+func (e *Emitter) RecordQueueWait(wait time.Duration, role, evtType string) {
+	e.queueWait.Record(context.Background(), wait.Seconds(), metric.WithAttributes(
+		attribute.String("role", role),
+		attribute.String("type", e.eventTypeLabel(evtType)),
+	))
+}
+
+// RecordRun records one accepted dispatch's synchronous handler run time; see
+// RecordQueueWait for the labels.
+func (e *Emitter) RecordRun(run time.Duration, role, evtType string) {
+	e.run.Record(context.Background(), run.Seconds(), metric.WithAttributes(
+		attribute.String("role", role),
+		attribute.String("type", e.eventTypeLabel(evtType)),
+	))
+}
+
+// maxEventTypeLabels bounds how many distinct full event-type label values the
+// wait/run histograms will mint; UnknownEntityType collects the rest.
+const maxEventTypeLabels = 64
+
+// maxEventTypeLen caps the length of a full event-type label value.
+const maxEventTypeLen = 64
+
+// eventTypeLabel returns the label value for a FULL event type ("pr.changed",
+// not the entity prefix EntityType reduces it to — the two verbs are different
+// workloads, and telling them apart is the point of the wait/run split).
+//
+// Cardinality bound (bead pg2-n7da9), the same shape as EntityType's: the value
+// set is fixed by configuration, never by traffic. Event types are
+// config-bounded (core.Ingest rejects any type no binding declares). As a
+// defence against a type that is not a short identifier (a restored durable
+// row from an older config, a malformed type) anything not matching
+// [a-z][a-z0-9_.-]* of at most maxEventTypeLen bytes maps to the single fallback
+// UnknownEntityType, and at most maxEventTypeLabels distinct values are minted
+// per process, the rest folding into the same fallback.
+func (e *Emitter) eventTypeLabel(evtType string) string {
+	if !validEventTypeLabel(evtType) {
+		return UnknownEntityType
+	}
+	e.typeMu.Lock()
+	defer e.typeMu.Unlock()
+	if _, ok := e.typeSeen[evtType]; ok {
+		return evtType
+	}
+	if len(e.typeSeen) >= maxEventTypeLabels {
+		return UnknownEntityType
+	}
+	e.typeSeen[evtType] = struct{}{}
+	return evtType
+}
+
+func validEventTypeLabel(t string) bool {
+	if t == "" || len(t) > maxEventTypeLen {
+		return false
+	}
+	for i := 0; i < len(t); i++ {
+		c := t[i]
+		switch {
+		case c >= 'a' && c <= 'z':
+		case i > 0 && (c >= '0' && c <= '9' || c == '_' || c == '-' || c == '.'):
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // OnUnconsumedExpired increments the unconsumed-expired counter for the event's

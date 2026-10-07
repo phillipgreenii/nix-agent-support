@@ -261,8 +261,9 @@ func (o *Orchestrator) LastTick() map[string]time.Time {
 // DeriveContext+ToQueueEvent pair built for a producer-emitted event.Event.
 func (o *Orchestrator) RunOne(ctx context.Context, role roles.Role, evt eventqueue.Event) error {
 	d := discover.DeriveContextFromQueueEvent(role, evt)
+	started := time.Now()
 	reply, err := o.workOneWithID(ctx, d, evt)
-	o.emitResult(ctx, d.Role, d.Item.ID, o.buildResult(d, reply, err), err)
+	o.emitResult(ctx, d.Role, d.Item.ID, o.buildResult(d, reply, err), err, newDispatchMeta(evt, started, time.Since(started)))
 	return err
 }
 
@@ -311,7 +312,13 @@ func (o *Orchestrator) buildResult(d discover.DispatchContext, reply wireclient.
 // dispatchErr is logged at "warn" (not "info") with its message, both on the
 // slog line and (when configured) as the event log's "error" field, so a
 // future launch-failure spree is diagnosable from the log alone.
-func (o *Orchestrator) emitResult(_ context.Context, role roles.Role, beadID string, res report.Result, dispatchErr error) {
+//
+// meta (bead pg2-n7da9) adds the dispatch's identity and timeline to the row —
+// event_type, change, enqueued_at, started_at, duration_ms — so a per-listener
+// wait-vs-run table can be computed from events.jsonl alone. The fields are
+// ADDITIVE: every key the row already carried is unchanged, so an existing
+// reader (a Loki pipeline, a jq one-liner) is unaffected.
+func (o *Orchestrator) emitResult(_ context.Context, role roles.Role, beadID string, res report.Result, dispatchErr error, meta dispatchMeta) {
 	if dispatchErr != nil {
 		slog.Warn("dispatch result", "role", role.Name, "bead", beadID, "actions", res.Actions, "err", dispatchErr)
 	} else {
@@ -321,6 +328,7 @@ func (o *Orchestrator) emitResult(_ context.Context, role roles.Role, beadID str
 		fields := res.Fields()
 		fields["role"] = role.Name
 		fields["bead"] = beadID
+		meta.addTo(fields)
 		level := "info"
 		if dispatchErr != nil {
 			level = "warn"
@@ -332,6 +340,45 @@ func (o *Orchestrator) emitResult(_ context.Context, role roles.Role, beadID str
 		return
 	}
 	fmt.Printf("# dispatch %s %s: %v\n", role.Name, beadID, res.Actions)
+}
+
+// dispatchMeta is the identity and timeline of one dispatch attempt, recorded on
+// its events.jsonl "dispatch" row (bead pg2-n7da9).
+type dispatchMeta struct {
+	// EventType is the dispatched event's FULL type ("pr.changed" vs
+	// "pr.reconcile" — the verbs are different workloads).
+	EventType string
+	// Change is the event's id: the identity of THIS change, which for a
+	// change-driven event is "<entity id>@<seq>" and so distinguishes two changes
+	// to the same entity (the row's "bead" is the entity alone).
+	Change string
+	// EnqueuedAt is the event's resolved enqueue instant (Event.At), the origin of
+	// its queue wait. StartedAt is when the handler run began (the queue's
+	// in-flight instant). Duration is the handler run's wall time.
+	EnqueuedAt, StartedAt time.Time
+	Duration              time.Duration
+}
+
+func newDispatchMeta(evt eventqueue.Event, started time.Time, d time.Duration) dispatchMeta {
+	return dispatchMeta{EventType: evt.Type, Change: evt.ID, EnqueuedAt: evt.At, StartedAt: started, Duration: d}
+}
+
+// addTo merges the metadata into a row's fields. Zero instants are omitted
+// rather than written as year-1 timestamps; duration_ms is whole milliseconds.
+func (m dispatchMeta) addTo(fields map[string]any) {
+	if m.EventType != "" {
+		fields["event_type"] = m.EventType
+	}
+	if m.Change != "" {
+		fields["change"] = m.Change
+	}
+	if !m.EnqueuedAt.IsZero() {
+		fields["enqueued_at"] = m.EnqueuedAt.UTC().Format(time.RFC3339Nano)
+	}
+	if !m.StartedAt.IsZero() {
+		fields["started_at"] = m.StartedAt.UTC().Format(time.RFC3339Nano)
+		fields["duration_ms"] = m.Duration.Milliseconds()
+	}
 }
 
 func beadRefs(ids []string) []report.Ref {

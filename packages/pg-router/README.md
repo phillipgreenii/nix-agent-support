@@ -280,7 +280,8 @@ the role's prompt in `config.toml` instead; pg-router warns if any are still set
 
 `internal/metrics` builds the full OTel metric catalog (queue depth, failure rate,
 unconsumed-expired, unknown-type-rejected, throughput, backlog, liveness, dispatch
-latency, source failures, deduped) against an injected `metric.MeterProvider` — the
+latency (deprecated), queue wait and run time, oldest pending age, per-listener in-flight,
+source failures, deduped) against an injected `metric.MeterProvider` — the
 core stays unaware of any concrete monitoring backend. `run`'s own `--metrics-addr
 <host:port>` flag (or `PG_ROUTER_METRICS_ADDR`; the flag wins) opts a **daemon-mode**
 run into a real backend: `cmd/pg-router/metrics_http.go`'s `startMetricsServer` builds
@@ -297,8 +298,16 @@ Gate Registry; an eviction is itself an appended record, so without compaction i
 and every start re-reads all of it. The queue therefore compacts it down to **live state**:
 the retained events (FIFO order, resolved instants, accepts), the active gate projection, and the
 set of event types ever enqueued. `Replay(compact(L))` rebuilds exactly the state `Replay(L)` does
-(property-tested); only history a replay already discards is dropped. Delivery semantics (at-least-once,
+(property-tested); only history a replay already discards is dropped, **except** a bounded,
+timestamped history of departed events (below). Delivery semantics (at-least-once,
 INV-EVT-2) and gate persistence are unchanged.
+
+- **History kept across compaction** (bead `pg2-n7da9`, `DEC-OBS-9`). Accept records carry `at` and
+  `startedAt` and evict records carry `at` and a `reason`; compaction folds each evicted event into one
+  `archive` record (its type, enqueue instant, every accept's role and settle/start instants, eviction
+  instant and reason). The newest 2048 are kept, additionally capped to one tenth of the soft log limit
+  so history is dropped before it can keep the log over its limits. A replay ignores `archive` records, so
+  state is unchanged; an older binary ignores the unknown kind.
 
 - **When.** Once at startup, before the queue replays the log or accepts an event; and at runtime,
   from the `Expire` sweep, once the file exceeds `compact_threshold_bytes`
@@ -425,6 +434,12 @@ DIFFERENT signal from the OTLP operational logs above — see the relabel note b
 The log is written to the standard path
 `${XDG_STATE_HOME}/pg-router/events.jsonl` (no `/log` subdirectory), which matches
 the default `logSources` glob `${env:XDG_STATE_HOME}/pg-router/*.jsonl`.
+
+A `dispatch` row (`msg` `dispatch result`) carries `role`, `bead` and `actions`, plus, since bead
+`pg2-n7da9`, the dispatch's timeline: `event_type` (the full type, `pr.changed` vs `pr.reconcile`),
+`change` (the event id, `<entity id>@<seq>` for a change-driven event), `enqueued_at`, `started_at`
+(RFC 3339 UTC) and `duration_ms` (whole milliseconds of handler run). Queue wait is
+`started_at - enqueued_at`; the fields are additive and omitted when unknown.
 
 Collection into Loki is pull-based: the darwin module
 `darwin/modules/pg-router/default.nix` registers
