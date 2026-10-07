@@ -383,7 +383,7 @@ groups:
       # ~24h window and were both closed no-fix-needed, which is the signal
       # this exclusion exists to act on. `reason` is ONLY ever set by
       # OnDeclined (class=declined) and OnHandlerFailure (budget-exceeded /
-      # triager-failure) -- OnDispatchFailure never attaches it -- so a bare `reason!="at-capacity"` matcher cannot
+      # triager-failure / upstream-killed) -- OnDispatchFailure never attaches it -- so a bare `reason!="at-capacity"` matcher cannot
       # clip dispatch-failure/handler-error, nor any other declined reason
       # (e.g. capacity-unknown): those keep paging unchanged.
       #
@@ -403,7 +403,7 @@ groups:
           severity: warning
         annotations:
           summary: "pg-router failure rate for class {{ $labels.class }} role {{ $labels.role }} has been non-zero"
-          description: 'sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure|skipped-.+"}[10m])) has stayed above 0 for over 10 minutes for class {{ $labels.class }} role {{ $labels.role }} (role is set for every class as of pg2-nimab, DEC-OBS-5) -- deliveries are failing. This is the RESIDUAL rule (pg2-irowq): it keeps every failure EXCEPT the four causes handled elsewhere (pg2-o03wl: origin-unavailable has its own rule, pg-router-origin-unavailable, so an origin outage pages once) -- class=declined,reason=at-capacity (routine review-pool backpressure, pg2-mr0sl''s intentional max_sessions=1 cap, excluded per pg2-v3qn6), reason=budget-exceeded (its own rule, pg-router-budget-stops), reason=origin-unavailable (its own rule, pg-router-origin-unavailable) and reason=triager-failure (escalation-triage roles, bulkheaded by pg2-u2yub so they cannot fire this alert; their own rule, pg-router-triager-failures). See pg2-97539 for the failure-class catalog''s provenance.'
+          description: 'sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure|upstream-killed|skipped-.+"}[10m])) has stayed above 0 for over 10 minutes for class {{ $labels.class }} role {{ $labels.role }} (role is set for every class as of pg2-nimab, DEC-OBS-5) -- deliveries are failing. This is the RESIDUAL rule (pg2-irowq): it keeps every failure EXCEPT the five causes handled elsewhere (pg2-o03wl: origin-unavailable has its own rule, pg-router-origin-unavailable, so an origin outage pages once) -- class=declined,reason=at-capacity (routine review-pool backpressure, pg2-mr0sl''s intentional max_sessions=1 cap, excluded per pg2-v3qn6), reason=budget-exceeded (its own rule, pg-router-budget-stops), reason=origin-unavailable (its own rule, pg-router-origin-unavailable), reason=triager-failure (escalation-triage roles, bulkheaded by pg2-u2yub so they cannot fire this alert; their own rule, pg-router-triager-failures) and reason=upstream-killed (a gh call killed by the pg-connector 30s scriptout timeout, transient GitHub slowness healed by the 30-minute pr-sweep; pages only on a sustained burst via pg-router-upstream-killed, pg2-fy2pm). See pg2-97539 for the failure-class catalog''s provenance.'
         data:
           - refId: A
             relativeTimeRange:
@@ -414,7 +414,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure|skipped-.+"}[10m]))
+              expr: sum by (class, role) (rate(pg_router_failures_total{reason!~"at-capacity|budget-exceeded|origin-unavailable|triager-failure|upstream-killed|skipped-.+"}[10m]))
           - refId: B
             datasourceUid: __expr__
             model:
@@ -464,6 +464,70 @@ groups:
               editorMode: code
               instant: true
               expr: sum by (role) (rate(pg_router_failures_total{class="handler-error",reason="budget-exceeded"}[10m]))
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # Upstream-killed handler errors (pg2-fy2pm, operator ruling 2026-10-05,
+      # option C): a handler error whose text carries BOTH "scriptout:" and
+      # "signal: killed" -- pg-connector's 30s scriptout exec timeout SIGKILLing
+      # a slow `gh pr view` -- is counted by internal/metrics OnHandlerFailure
+      # as class=handler-error,reason=upstream-killed (precedence: triager-
+      # failure, then budget-exceeded, then upstream-killed). It is transient
+      # GitHub slowness healed by the 30-minute pr-sweep, so it no longer pages
+      # pg-router-failure-rate one at a time; THIS rule pages only on a
+      # sustained burst: >= 10 kills in 30 minutes for a role. Observed bursts
+      # (2026-10-03/04, role desk-pr): 14 in 20 min (page), 7 in 22 min (no),
+      # 3 in ~33 min (no). Suppressed singles stay visible in the metric
+      # (pg_router_failures_total{reason="upstream-killed"}).
+      #
+      # The `>= 10` lives in the PromQL expr (the queue-depth rule does the
+      # same) because the Grafana threshold evaluator has no gte; the threshold
+      # node is the usual `gt 0` over the filtered value, so an empty result
+      # (below the bar) is NoData -> OK. increase() sees a NEW series' first
+      # sample as its baseline, so the very first kill after a pg-router
+      # restart is not counted: 10 kills on a fresh series read as 9 and the
+      # 11th pages. That undercount is ACCEPTED (not pre-initialized; the
+      # Emitter does not know the role set) and pinned by the alertrules model.
+      # `for: 0m`: the 30m window already encodes "sustained"; a further hold
+      # would only delay a page that the window has already earned. Role-only
+      # cardinality (DEC-OBS-5); only `role` can be referenced in the annotation.
+      - uid: pg-router-upstream-killed
+        title: pg-router upstream calls are being killed in a sustained burst (by role)
+        condition: C
+        for: 0m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-router role {{ $labels.role }} has had 10 or more upstream calls killed in 30 minutes"
+          description: 'sum by (role) (increase(pg_router_failures_total{class="handler-error",reason="upstream-killed"}[30m])) >= 10 for role {{ $labels.role }} -- handler errors carrying both "scriptout:" and "signal: killed" (pg-connector''s 30s scriptout exec timeout killing a slow upstream call, typically gh) are piling up, which a 30-minute pr-sweep will not heal: GitHub is persistently slow or down. Isolated kills do not page; they are excluded from pg-router-failure-rate and stay visible as pg_router_failures_total{reason="upstream-killed"} (pg2-fy2pm). A fresh series after a pg-router restart undercounts by one (increase() does not count the first sample).'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 1800
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: sum by (role) (increase(pg_router_failures_total{class="handler-error",reason="upstream-killed"}[30m])) >= 10
           - refId: B
             datasourceUid: __expr__
             model:

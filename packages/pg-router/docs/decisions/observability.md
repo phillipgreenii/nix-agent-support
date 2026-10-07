@@ -97,6 +97,27 @@ Same bounds as above: the reason is a fixed constant and `role` stays config-bou
 classification of an error the core already receives, not a status stream, so `INV-FAIL-1`'s
 other clauses are unchanged.
 
+**Amended** (operator ruling, Phillip, 2026-10-05, option C; bead `pg2-fy2pm`). A `handler-error`
+whose text carries BOTH substrings of the **upstream-killed sentinel** (`scriptout:` and
+`signal: killed`, `interfaces.md`) is counted with `reason="upstream-killed"`. Precedence is
+`triager-failure`, then `budget-exceeded`, then `upstream-killed`. Why: the connector's 30s exec
+timeout SIGKILLs a slow `gh` call; those kills are transient GitHub slowness that the 30-minute PR
+sweep heals (21 of 22 failed dispatches were followed by an ok dispatch of the same PR), yet each one
+paged `pg-router-failure-rate`. Both substrings are required because bare `signal: killed` also
+matches an out-of-memory kill of any worker or ccpool session, which MUST keep paging individually.
+The residual rule now excludes `upstream-killed`; a separate rule (`pg-router-upstream-killed`,
+registered in `pg-router-probe`) pages when a role records **10 or more** such errors in a 30-minute
+window (`sum by (role) (increase(...[30m])) >= 10`, `for: 0m` because the window already encodes
+"sustained"). Of the three bursts observed 2026-10-03/04, only the 14-in-20-minute one pages (7 in 22
+minutes and 3 in about 33 do not). Isolated kills stay visible in the metric
+(`pg_router_failures_total{reason="upstream-killed"}`), not as a page. **Accepted limitation:** a
+brand-new series does not count its first increment, so the first kill after a pg-router restart is
+not counted and 10 kills on a fresh series read as 9 (the 11th pages); the series is not
+pre-initialized because the core does not know the role set. **Not covered:** a slow-GitHub failure
+that lacks the sentinel (for example `error connecting to api.github.com`) keeps paging the residual
+rule individually. Same bounds as above: the reason is a fixed constant and `role` stays
+config-bounded.
+
 ### `DEC-OBS-4` — a source is persistently failing when it has not succeeded for max(3 x its period, 30m); a pause is not a failure <!-- uuid: 91571075-a2d2-4e39-8e31-4ce6e7f020c9 -->
 
 **Decided** (operator approval, Phillip, 2026-10-05; bead `pg2-tv11a`). The core exports two gauges per

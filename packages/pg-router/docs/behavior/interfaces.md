@@ -375,7 +375,9 @@ metric catalog is the boundary working, not an oversight. The one deliberate exc
 counted under `handler-error` with `reason="budget-exceeded"` (`DEC-OBS-3`); and a handler error from
 an escalation-triage role (role name contains `triage`) is counted under `handler-error` with
 `reason="triager-failure"` instead, so triager failures never share the worker/review failure-rate
-series (`DEC-OBS-3`, amended).
+series (`DEC-OBS-3`, amended); and a handler error carrying the **upstream-killed sentinel** below (an
+upstream call killed by the connector's exec timeout) is counted with `reason="upstream-killed"` so
+isolated kills do not page individually (`DEC-OBS-3`, amended).
 
 | class            | meaning                                                       | response                                            |
 | ---------------- | ------------------------------------------------------------- | --------------------------------------------------- |
@@ -396,6 +398,19 @@ time), the error text it reports on exit **MUST begin with the stable substring
 across the process boundary, so it matches on this leading substring; the handler MAY use
 `errors.Is` on its own side. The substring is a **contract**: changing it breaks the core's
 `reason="budget-exceeded"` classification and the alert rules built on it (`DEC-OBS-3`).
+
+**Upstream-killed sentinel.** When a handler's upstream call is killed by the connector's exec
+timeout (for example a slow `gh` call SIGKILLed after 30s), the error text it reports **MUST contain
+BOTH stable substrings `scriptout:` and `signal: killed`** (for example `exit 1: unavailable:
+scriptout: pg-connector-pr-github: signal: killed`). The core cannot see a handler's own error class
+across the process boundary, so it matches on this text, and it **MUST require both substrings**:
+`signal: killed` alone is also what an out-of-memory kill of any worker or ccpool session looks
+like, and that **MUST NOT** be tagged `upstream-killed`. Precedence among `handler-error` reasons is
+**triager-failure, then budget-exceeded, then upstream-killed**. The two substrings are a
+**contract**: changing either breaks the core's `reason="upstream-killed"` classification and the
+sustained-only alert rule built on it (`DEC-OBS-3`). Other slow-GitHub failures that do not carry
+both substrings (for example `error connecting to api.github.com`) are **not** covered and keep
+counting under the residual failure-rate series.
 
 **Obligations.** A handler **MUST tolerate a duplicate event** (be idempotent) and **MUST support
 the deferred form**, so a paused or long-running handler session never pins an open call from the
@@ -461,7 +476,8 @@ sequenceDiagram
     all. **Every** delivery-side failure class carries a bounded `role` label (the handler role
     name, config-bounded: one value per configured role), so a single starved or failing role is
     visible rather than averaged away (`DEC-OBS-5`); a handler-reported error (`handler-error`)
-    carrying the **budget-stop sentinel** below is additionally labelled `reason="budget-exceeded"`
+    carrying the **budget-stop sentinel** below is additionally labelled `reason="budget-exceeded"`,
+    and one carrying the **upstream-killed sentinel** below `reason="upstream-killed"`
     (`DEC-OBS-3`). The other post-accept classes are
     **not** counted here — after acceptance the handler owns the work (`INV-FAIL-1`), so classifying
     its outcomes is the handler's own concern on the handler's own surface;

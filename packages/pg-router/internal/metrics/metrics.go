@@ -330,6 +330,29 @@ const ReasonBudgetExceeded = "budget-exceeded"
 // a triager hitting its budget is still a triager failure. (pg2-u2yub)
 const ReasonTriagerFailure = "triager-failure"
 
+// UpstreamKilledScriptoutSentinel and UpstreamKilledSignalSentinel are the two
+// documented, stable substrings whose CONJUNCTION marks a handler error as an
+// upstream call killed by the pg-connector scriptout exec timeout (30s), e.g.
+// "exit 1: unavailable: scriptout: pg-connector-pr-github: signal: killed".
+// Both MUST be present: bare "signal: killed" is also what an OOM/SIGKILL of
+// any worker or ccpool session looks like, and that MUST keep paging
+// pg-router-failure-rate individually. The core cannot see pg-desk's
+// error_class=killed across the process boundary, so it matches on text, which
+// makes the pair a contract (docs/behavior/interfaces.md, "Upstream-killed
+// sentinel"). (pg2-fy2pm)
+const (
+	UpstreamKilledScriptoutSentinel = "scriptout:"
+	UpstreamKilledSignalSentinel    = "signal: killed"
+)
+
+// ReasonUpstreamKilled is the "reason" label a FailureClassHandlerError series
+// carries when the handler error contains BOTH upstream-killed sentinels.
+// Killed gh calls are transient GitHub slowness healed by the 30-minute
+// pr-sweep, so they are excluded from pg-router-failure-rate and page only on a
+// sustained burst via pg-router-upstream-killed (>= 10 in 30m). Precedence is
+// triager-failure, then budget-exceeded, then upstream-killed. (pg2-fy2pm)
+const ReasonUpstreamKilled = "upstream-killed"
+
 // TriagerRoleMarker is the substring that marks a role name as an
 // escalation-triage role. It deliberately mirrors the handler's own
 // convention (pg-router-ccpool-handler's humanOnlyReason treats a role as
@@ -1119,7 +1142,9 @@ func (e *Emitter) OnDispatchFailure(_, listenerID string) {
 //
 // Reason (pg2-irowq, pg2-u2yub): a triage role's failures carry
 // reason=ReasonTriagerFailure (bulkhead, wins over every other reason); else a
-// budget-stop sentinel carries reason=ReasonBudgetExceeded; else no reason.
+// budget-stop sentinel carries reason=ReasonBudgetExceeded; else an error with
+// BOTH upstream-killed sentinels carries reason=ReasonUpstreamKilled (pg2-fy2pm);
+// else no reason.
 func (e *Emitter) OnHandlerFailure(_, _, listenerID string, err error) {
 	attrs := []attribute.KeyValue{
 		attribute.String("class", FailureClassHandlerError),
@@ -1132,8 +1157,17 @@ func (e *Emitter) OnHandlerFailure(_, _, listenerID string, err error) {
 		attrs = append(attrs, attribute.String("reason", ReasonTriagerFailure))
 	case err != nil && strings.Contains(err.Error(), BudgetExceededSentinel):
 		attrs = append(attrs, attribute.String("reason", ReasonBudgetExceeded))
+	case err != nil && isUpstreamKilled(err.Error()):
+		attrs = append(attrs, attribute.String("reason", ReasonUpstreamKilled))
 	}
 	e.failures.Add(context.Background(), 1, metric.WithAttributes(attrs...))
+}
+
+// isUpstreamKilled reports whether a handler error text carries BOTH
+// UpstreamKilledScriptoutSentinel and UpstreamKilledSignalSentinel.
+func isUpstreamKilled(msg string) bool {
+	return strings.Contains(msg, UpstreamKilledScriptoutSentinel) &&
+		strings.Contains(msg, UpstreamKilledSignalSentinel)
 }
 
 // OnDispatchRetry implements orchestrator.DispatchRetryObserver

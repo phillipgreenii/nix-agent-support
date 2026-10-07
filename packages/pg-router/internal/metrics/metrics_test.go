@@ -1203,7 +1203,7 @@ func TestOnHandlerFailure_TriagerFailuresAreBulkheaded(t *testing.T) {
 		reason, _ := dp.Attributes.Value("reason")
 		got[role.AsString()+"|"+reason.AsString()] += dp.Value
 		switch reason.AsString() {
-		case "at-capacity", ReasonBudgetExceeded, "origin-unavailable", ReasonTriagerFailure:
+		case "at-capacity", ReasonBudgetExceeded, "origin-unavailable", ReasonTriagerFailure, ReasonUpstreamKilled:
 		default:
 			residual += dp.Value
 		}
@@ -1264,6 +1264,100 @@ func TestOnHandlerFailure_BudgetSentinelMapsToReasonAndRoleLabel(t *testing.T) {
 	want := map[string]int64{
 		"handler-error|worker|budget-exceeded": 2,
 		"handler-error|review|":                1,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("series = %v, want %v", got, want)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("series %q = %d, want %d (all: %v)", k, got[k], v, got)
+		}
+	}
+}
+
+// handlerFailureSeries records one OnHandlerFailure per (role, err) pair and
+// returns the resulting handler-error counts keyed "role|reason".
+func handlerFailureSeries(t *testing.T, h *harness, failures []struct {
+	role string
+	err  error
+},
+) map[string]int64 {
+	t.Helper()
+	for i, f := range failures {
+		h.emitter.OnHandlerFailure(fmt.Sprintf("dsp-%d", i), "pr.reconcile", f.role, f.err)
+	}
+	s := findMetric(t, h.collect(t), MetricFailures).Data.(metricdata.Sum[int64])
+	got := map[string]int64{}
+	for _, dp := range s.DataPoints {
+		if cls, _ := dp.Attributes.Value("class"); cls.AsString() != FailureClassHandlerError {
+			t.Fatalf("unexpected class %q", cls.AsString())
+		}
+		role, _ := dp.Attributes.Value("role")
+		reason, _ := dp.Attributes.Value("reason")
+		got[role.AsString()+"|"+reason.AsString()] += dp.Value
+	}
+	return got
+}
+
+// pg2-fy2pm: a handler error whose text carries BOTH "scriptout:" and
+// "signal: killed" (the pg-connector 30s exec-timeout kill of a slow gh call)
+// maps to reason=upstream-killed with the config-bounded role label.
+func TestOnHandlerFailure_UpstreamKilledSentinel(t *testing.T) {
+	h := newHarness(t)
+	got := handlerFailureSeries(t, h, []struct {
+		role string
+		err  error
+	}{
+		{"desk-pr", errors.New(`exit 1: unavailable: scriptout: pg-connector-pr-github: signal: killed`)},
+		{"desk-pr", fmt.Errorf(`wireclient: role "desk-pr" exited 1: %w`, errors.New(`unavailable: scriptout: pg-connector-pr-github: signal: killed`))},
+	})
+	want := map[string]int64{"desk-pr|upstream-killed": 2}
+	if len(got) != len(want) || got["desk-pr|upstream-killed"] != 2 {
+		t.Fatalf("series = %v, want %v", got, want)
+	}
+}
+
+// pg2-fy2pm: bare "signal: killed" (an OOM/SIGKILL of any worker or ccpool
+// session) and a bare "scriptout:" error MUST NOT be tagged upstream-killed:
+// they keep paging pg-router-failure-rate individually.
+func TestOnHandlerFailure_UpstreamKilledRequiresBothSubstrings(t *testing.T) {
+	h := newHarness(t)
+	got := handlerFailureSeries(t, h, []struct {
+		role string
+		err  error
+	}{
+		{"worker", errors.New(`wireclient: role "worker" exited -1: signal: killed`)},
+		{"desk-pr", errors.New(`exit 1: unavailable: scriptout: pg-connector-pr-github: error connecting to api.github.com`)},
+		{"desk-pr", nil},
+	})
+	want := map[string]int64{"worker|": 1, "desk-pr|": 2}
+	if len(got) != len(want) {
+		t.Fatalf("series = %v, want %v", got, want)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("series %q = %d, want %d (all: %v)", k, got[k], v, got)
+		}
+	}
+}
+
+// pg2-fy2pm precedence: triager-failure wins over upstream-killed, and
+// budget-exceeded wins over upstream-killed (triager > budget > upstream-killed).
+func TestOnHandlerFailure_UpstreamKilledPrecedence(t *testing.T) {
+	h := newHarness(t)
+	killed := `scriptout: pg-connector-pr-github: signal: killed`
+	got := handlerFailureSeries(t, h, []struct {
+		role string
+		err  error
+	}{
+		{"alpha-escalation-triager", errors.New(`exit 1: unavailable: ` + killed)},
+		{"worker", errors.New(`exit 1: session budget exceeded: role=worker limit=time; ` + killed)},
+		{"desk-pr", errors.New(`exit 1: unavailable: ` + killed)},
+	})
+	want := map[string]int64{
+		"alpha-escalation-triager|triager-failure": 1,
+		"worker|budget-exceeded":                   1,
+		"desk-pr|upstream-killed":                  1,
 	}
 	if len(got) != len(want) {
 		t.Fatalf("series = %v, want %v", got, want)
