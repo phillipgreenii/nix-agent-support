@@ -16,33 +16,31 @@ else
   source "$(env -u GIT_DIR -u GIT_COMMON_DIR -u GIT_WORK_TREE git -C "$BATS_TEST_DIRNAME" rev-parse --path-format=absolute --git-common-dir)/../../phillipg-nix-repo-base/lib/scripts/git-fixture-harness.bash"
 fi
 
+# Suite label for gfh_setup / gfh_init_repo: names the per-suite fixture identity.
+SUITE="behavior-docs-resolve-links"
+
 setup() {
-  # Hermetic-by-construction git-fixture scrub (pg2-31f13/pg2-gucfd): the
-  # impl_repo/d5_table fixtures below `git -C` init real repos under $WS,
-  # exactly the pattern pg2-67h4y shows losing to a leaked GIT_DIR-family env
-  # var from a linked-worktree commit-hook environment. gfh_reset_env alone
-  # (not the full gfh_setup, which also creates its OWN separate repo this
-  # file does not need) is the right-sized primitive here.
-  gfh_reset_env
+  # Hermetic-by-construction git fixtures (pg2-31f13/pg2-gucfd, pg2-i120n):
+  # gfh_setup rebuilds the environment from an allowlist, neutralises HOME and
+  # the system git config, and sets GIT_CEILING_DIRECTORIES to $GFH_WORK. Every
+  # repo this suite needs comes from gfh_init_repo. Nothing in this file needs
+  # an exported variable outside the allowlist (PATH is kept), so there is
+  # nothing to gfh_save_env / gfh_restore_env around the reset.
+  gfh_setup "$SUITE"
 
-  WS="$BATS_TEST_TMPDIR/ws"
+  WS="$GFH_WORK/ws"
   mkdir -p "$WS"
-
-  GIT_CEILING_DIRECTORIES="$(cd "$WS" && pwd -P)"
-  export GIT_CEILING_DIRECTORIES
-  GIT_CONFIG_SYSTEM=/dev/null
-  export GIT_CONFIG_SYSTEM
-  HOME="$WS/home"
-  mkdir -p "$HOME"
-  export HOME
 }
 
-# impl_repo <org/repo> -- sets IMPL to a freshly git-init'd repo with that
-# origin, so `find_local_checkout` can match it against a url's org/repo.
+teardown() {
+  gfh_teardown
+}
+
+# impl_repo <org/repo> -- sets IMPL to a freshly initialised harness repo with
+# that origin, so `find_local_checkout` can match it against a url's org/repo.
 impl_repo() {
   IMPL="$WS/impl"
-  mkdir -p "$IMPL"
-  git -C "$IMPL" init -q
+  gfh_init_repo "$IMPL" "$SUITE"
   git -C "$IMPL" remote add origin "git@github.com:$1.git"
 }
 
@@ -77,8 +75,8 @@ MD
   touch "$WS/pn-workspace.toml"
   impl_repo "myorg/impl-repo"
   SIB="$WS/sib-repo"
+  gfh_init_repo "$SIB" "$SUITE"
   mkdir -p "$SIB/target"
-  git -C "$SIB" init -q
   git -C "$SIB" remote add origin git@github.com:otherorg/sib-repo.git
   printf 'carries INV-9 <!-- uuid: 22222222-2222-4222-8222-222222222222 -->\n' >"$SIB/target/file.md"
   d5_table '`INV-9`' 'a cross-repo rule' 'other · target' \
@@ -97,8 +95,8 @@ MD
   # A DECOY sibling that also claims to be myorg/myrepo but does NOT carry the
   # uuid -- if the scan preferred it over $IMPL, this would misreport a WARN.
   DECOY="$WS/decoy"
+  gfh_init_repo "$DECOY" "$SUITE"
   mkdir -p "$DECOY/docs/behavior"
-  git -C "$DECOY" init -q
   git -C "$DECOY" remote add origin git@github.com:myorg/myrepo.git
   printf 'no uuid here\n' >"$DECOY/docs/behavior/invariants.md"
   d5_table '`INV-1`' 'a rule' 'owner · docs/behavior' \
@@ -286,9 +284,10 @@ MD
 @test "regression: a GIT_DIR/GIT_INDEX_FILE leaked into the parent shell before setup is scrubbed, not honored" {
   # Simulates the pg2-67h4y hook-environment leak: GIT_DIR/GIT_INDEX_FILE
   # pointed at a bogus path BEFORE the harness's own scrub runs. If
-  # gfh_reset_env did not take effect, `git -C "$real_dir" init` (the exact
-  # shape impl_repo above uses) would operate against/create the bogus path
-  # instead of the fixture's own repo.
+  # gfh_reset_env did not take effect, a raw `git -C "$real_dir" init` would
+  # operate against/create the bogus path instead of the fixture's own repo.
+  # The raw init below is INTENTIONAL (pg2-i120n): it is the probe, so it
+  # cannot be replaced by gfh_init_repo.
   local bogus_parent bogus harness_path real_dir
   bogus_parent="$(mktemp -d)"
   bogus="$bogus_parent/leaked-gitdir"
