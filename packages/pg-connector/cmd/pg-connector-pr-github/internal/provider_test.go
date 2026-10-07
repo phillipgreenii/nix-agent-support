@@ -1270,7 +1270,7 @@ func TestNew_InstallsRateReserveAsRetryGuard(t *testing.T) {
 	if !errors.Is(err, scriptout.ErrUnavailable) {
 		t.Fatalf("guard under reserve = %v, want an unavailable verdict", err)
 	}
-	fake.fakeGH.rateLimit = defaultRateReservePoints + 1
+	fake.rateLimit = defaultRateReservePoints + 1
 	if err := fake.guard(context.Background()); err != nil {
 		t.Fatalf("guard above reserve = %v, want nil", err)
 	}

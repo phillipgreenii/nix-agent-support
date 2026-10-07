@@ -11,7 +11,6 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/attention"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/mail"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/search"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
@@ -120,7 +119,7 @@ func TestBackend_ImplementsMailAndOptionalCapabilities(t *testing.T) {
 	b := New(&fakeTransport{})
 	var _ mail.Provider = b
 	var _ attention.Provider = b
-	var _ search.Provider = b.SearchProvider()
+	_ = b.SearchProvider() // declared to return search.Provider, so the assertion is by signature
 }
 
 func TestBackend_NoDeleteShapedMethod(t *testing.T) {

@@ -42,24 +42,6 @@ func (f *fakeGH) GetPendingReview(ctx context.Context, repo string, number int) 
 
 func pendingReq() pr.PendingReviewRequest { return pr.PendingReviewRequest{ID: "foo/bar#42"} }
 
-// reviewBody is the body the fixture reviews carry.
-const reviewBody = "finding"
-
-func pendingReviewAt(commit string, comments ...github.PendingReviewComment) *github.PendingReviewNode {
-	return &github.PendingReviewNode{
-		ID: "PRR_node", DatabaseID: 5001, CommitOID: commit, Body: reviewBody, Comments: comments,
-	}
-}
-
-// reviewsOf wraps one pending review as the lookup's Reviews list (none for
-// nil).
-func reviewsOf(rev *github.PendingReviewNode) []github.PendingReviewNode {
-	if rev == nil {
-		return nil
-	}
-	return []github.PendingReviewNode{*rev}
-}
-
 // pendingCmt is a comment of a pending review anchored to originalCommit.
 func pendingCmt(id, originalCommit string) github.PendingReviewComment {
 	return github.PendingReviewComment{ID: id, DatabaseID: 1, Path: "a.go", Line: 3, Body: "x", OriginalCommitOID: originalCommit}

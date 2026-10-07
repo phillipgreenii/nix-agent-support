@@ -54,7 +54,9 @@ func TestGitEnvironIsPathAndHomeOnly(t *testing.T) {
 
 func TestGitEnvironOmitsUnsetNames(t *testing.T) {
 	t.Setenv("PATH", "/usr/bin")
-	os.Unsetenv("HOME")
+	if err := os.Unsetenv("HOME"); err != nil {
+		t.Fatal(err)
+	}
 	if got, want := envKeys(gitEnviron()), []string{"PATH"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("keys = %v, want %v", got, want)
 	}

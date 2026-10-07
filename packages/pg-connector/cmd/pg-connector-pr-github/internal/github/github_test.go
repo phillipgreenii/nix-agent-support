@@ -2019,31 +2019,6 @@ func TestListTeamPRsPopulatesTitle(t *testing.T) {
 	}
 }
 
-// pathFakeGH dispatches on the second arg (the path) — cleaner for `api`.
-type pathFakeGH struct {
-	responses map[string][]byte
-}
-
-func (f *pathFakeGH) Run(_ context.Context, args ...string) ([]byte, error) {
-	if len(args) < 2 {
-		return []byte("[]"), nil
-	}
-	if r, ok := f.responses[args[1]]; ok {
-		return r, nil
-	}
-	return []byte("[]"), nil
-}
-
-func (f *pathFakeGH) RunStdin(_ context.Context, _ []byte, args ...string) ([]byte, error) {
-	if len(args) < 2 {
-		return []byte("{}"), nil
-	}
-	if r, ok := f.responses[args[1]]; ok {
-		return r, nil
-	}
-	return []byte("{}"), nil
-}
-
 // TestGetPR_ParsesBaseSHA proves the show path decodes baseRefOid into
 // api.PR.BaseSHA (bead pg2-2j5ac.52.6.2) and requests it as a WHOLE field of
 // the --json argument (the fake runner returns canned JSON whatever the

@@ -28,7 +28,7 @@ func TestLock_PathUnderLocksDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer k.Release()
+	defer func() { _ = k.Release() }()
 	matches, _ := filepath.Glob(filepath.Join(dir, "owner__repo__3.lock"))
 	if len(matches) != 1 {
 		t.Fatalf("lock file not at the expected path: %v", matches)
@@ -54,7 +54,7 @@ func TestLock_TimeoutIsRetryableUnavailable(t *testing.T) {
 	start := time.Now()
 	second, err := l.Acquire("owner", "repo", 1)
 	if err == nil {
-		second.Release()
+		_ = second.Release()
 		t.Fatal("second holder must not get the lock")
 	}
 	if !errors.Is(err, ErrUnavailable) {
@@ -70,7 +70,7 @@ func TestLock_TimeoutIsRetryableUnavailable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("lock must be free after release: %v", err)
 	}
-	third.Release()
+	_ = third.Release()
 }
 
 func TestLock_DifferentPRsDoNotBlock(t *testing.T) {
@@ -79,12 +79,12 @@ func TestLock_DifferentPRsDoNotBlock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer a.Release()
+	defer func() { _ = a.Release() }()
 	b, err := l.Acquire("owner", "repo", 2)
 	if err != nil {
 		t.Fatalf("a different PR must not contend: %v", err)
 	}
-	b.Release()
+	_ = b.Release()
 }
 
 func TestLock_TwoConcurrentHoldersSerialize(t *testing.T) {
