@@ -1,11 +1,15 @@
 package pathspec
 
 import (
+	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/phillipgreenii/x/gitclient"
+	"github.com/phillipgreenii/x/gitfixture"
+	"github.com/phillipgreenii/x/gittest"
 )
 
 // ignoreFixture is the one fixture both TestIgnoredTable and
@@ -87,9 +91,10 @@ var wantIgnored = map[string]bool{
 	"src2/z.log": true,
 }
 
-func buildIgnoreFixture(t *testing.T) string {
+// buildIgnoreFixture populates root with the ignoreFixture tree (including
+// .git/info/exclude, created if absent) and returns its symlink-resolved path.
+func buildIgnoreFixture(t *testing.T, root string) string {
 	t.Helper()
-	root := t.TempDir()
 	must := func(err error) {
 		t.Helper()
 		if err != nil {
@@ -120,7 +125,7 @@ func buildIgnoreFixture(t *testing.T) string {
 
 // TestIgnoredTable pins the matcher's own verdicts on the fixture.
 func TestIgnoredTable(t *testing.T) {
-	root := buildIgnoreFixture(t)
+	root := buildIgnoreFixture(t, t.TempDir())
 	for rel, want := range wantIgnored {
 		if got := Ignored(root, filepath.Join(root, filepath.FromSlash(rel))); got != want {
 			t.Errorf("Ignored(%q) = %v, want %v", rel, got, want)
@@ -135,46 +140,19 @@ func TestIgnoredTable(t *testing.T) {
 }
 
 // TestGitignoreAgainstGit verifies the matcher's verdict for every fixture
-// path against the real `git check-ignore` on a `git init`-ed copy of the
-// fixture. Skips when git is not on PATH. Because git's `.git/info/exclude`
-// is created by `git init`, the fixture's exclude file is written AFTER init.
+// path against the real `git check-ignore` on an x/gittest repository holding
+// the fixture. Because git's `.git/info/exclude` is created by `git init`, the
+// fixture (which writes it) is populated AFTER the repository exists.
 func TestGitignoreAgainstGit(t *testing.T) {
-	gitBin, err := exec.LookPath("git")
-	if err != nil {
-		t.Skip("git not on PATH")
-	}
-	root := buildIgnoreFixture(t)
-	// gitCmd builds a git invocation against the FIXTURE repository with
-	// every GIT_* variable stripped from the environment. When this test
-	// runs inside a pre-commit hook, git exports GIT_DIR / GIT_INDEX_FILE /
-	// GIT_WORK_TREE for the REAL repository being committed to; inherited,
-	// they would redirect `git init` and `git check-ignore` at that
-	// repository (the same pollution this repo's bats hook strips GIT_* to
-	// avoid), so the fixture must pin its own with `-C` and a clean env.
-	gitCmd := func(args ...string) *exec.Cmd {
-		cmd := exec.Command(gitBin, append([]string{"-C", root, "-c", "core.excludesFile=/dev/null"}, args...)...)
-		cmd.Env = make([]string, 0, len(os.Environ()))
-		for _, kv := range os.Environ() {
-			if !strings.HasPrefix(kv, "GIT_") {
-				cmd.Env = append(cmd.Env, kv)
-			}
-		}
-		return cmd
-	}
-	// Turn the fake .git directory into a real repository. `git init` keeps
-	// an existing .git/info/exclude, but re-write it to be certain.
-	if out, err := gitCmd("init", "-q").CombinedOutput(); err != nil {
-		t.Fatalf("git init: %v\n%s", err, out)
-	}
-	if err := os.WriteFile(filepath.Join(root, ".git", "info", "exclude"), []byte(ignoreFixture.exclude), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	repo := gittest.New(t, gitfixture.RepoOptions{})
+	root := buildIgnoreFixture(t, repo.Dir)
 	git := func(args ...string) (bool, string) {
-		out, err := gitCmd(args...).CombinedOutput()
+		out, err := repo.Client.Run(t.Context(), append([]string{"-C", root, "-c", "core.excludesFile=/dev/null"}, args...)...)
 		if err == nil {
 			return true, string(out)
 		}
-		if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
+		var ge *gitclient.GitError
+		if errors.As(err, &ge) && ge.ExitCode == 1 {
 			return false, string(out)
 		}
 		t.Fatalf("git %v: %v\n%s", args, err, out)

@@ -13,102 +13,53 @@
 package engine_test
 
 import (
-	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
+	"github.com/phillipgreenii/x/gitfixture"
+	"github.com/phillipgreenii/x/gittest"
 )
 
-// hermeticEnviron builds a MINIMAL, EXPLICITLY ALLOWLISTED environment for the git
-// subprocesses this fixture shells out to, so that no code path here can touch a real
-// git repo/path BY CONSTRUCTION — not merely because today's known-leaky var names
-// happen to be scrubbed.
-//
-// pg2-rrhw2's original fix (this function, before pg2-8wnhc) scrubbed a DENYLIST of six
-// named vars (GIT_DIR, GIT_INDEX_FILE, GIT_WORK_TREE, GIT_PREFIX, GIT_OBJECT_DIRECTORY,
-// GIT_COMMON_DIR) out of the inherited os.Environ() — same pattern and same fix as
-// pg2-f6cgn / commit 98f8c95d in packages/pb. That denylist already missed
-// GIT_CEILING_DIRECTORIES — the SAME variable pg2-jqwrr's original bug report named as a
-// leak vector — which is not hypothetical: it is the exact failure mode ("a new
-// inheritable git-location var the list doesn't yet know about") the operator design
-// guidance behind pg2-8wnhc warned could recur, demonstrated by the very fix meant to
-// prevent it.
-//
-// `-C <dir>` only changes the working directory before git runs; it does NOT override
-// GIT_DIR and friends, which git's own repo discovery consults FIRST and which `-C`
-// cannot override. A value leaked into the environment of whatever shell/session
-// launched `go test` (a git hook context, a forgotten `export GIT_DIR=...`) silently
-// redirects every "isolated" `-C canonical` call here onto whatever repository that
-// variable names instead — this is exactly how this fixture corrupted the AMBIENT
-// repo's shared .git/config in pg2-rrhw2 (confirmed by reproduction: `GIT_DIR=<ambient>
-// /.git git -C <canonical> config user.email …` silently writes into <ambient>, not
-// <canonical>, and <canonical>/.git is never even created).
-//
-// Fixed structurally here by inverting denylist to allowlist: the subprocess
-// environment is built by ADDING only the handful of vars git demonstrably needs for
-// these local, no-network operations (init/config/commit/worktree/checkout), rather
-// than by SUBTRACTING vars known to be dangerous. Any git env var this list does not
-// name — known today, forgotten today (GIT_CEILING_DIRECTORIES), or invented by a
-// future git release — is excluded automatically, because inclusion requires an
-// explicit entry rather than someone remembering to add it to a ban list before it can
-// leak.
-//
-// HOME is a second, independent confinement layer: instead of forwarding the ambient
-// value, it is pointed at its own fresh t.TempDir(). Even a git code path this allowlist
-// has not anticipated that falls back to $HOME/<something> lands in a directory created
-// empty for this test and torn down with it — never the real user's home.
-// GIT_CONFIG_NOSYSTEM=1 is set unconditionally for the same reason: system config is
-// skipped outright, not merely redirected by GIT_CONFIG_SYSTEM (still forwarded below,
-// since callers rely on t.Setenv-ing it to "/dev/null" explicitly).
-//
-// t.Setenv alone cannot fix any of this: GIT_DIR="" is not "unset" to git — it is a
-// fatal "the empty string is not a valid path" — so the only reliable fix is to omit
-// these variables from the subprocess's OWN environment entirely.
-func hermeticEnviron(t *testing.T) []string {
+// nestedFixtureRepos maps a nestedWorktreeFixture canonical directory to the x/gittest
+// repository behind it, so the tests that mutate the fixture further (fixtureGit) run
+// through that repository's hermetic client rather than a hand-rolled subprocess.
+var nestedFixtureRepos sync.Map // canonical dir -> *gitfixture.Repo
+
+// fixtureGit runs a git subcommand in the canonical clone nestedWorktreeFixture built,
+// through its x/gittest client (allowlisted child env, fixture HOME, GIT_CEILING_DIRECTORIES
+// — hermetic by construction, so no GIT_* scrub is needed), failing the test on error.
+func fixtureGit(t *testing.T, canonical string, args ...string) {
 	t.Helper()
-	ambient := map[string]string{}
-	for _, kv := range os.Environ() {
-		if k, v, ok := strings.Cut(kv, "="); ok {
-			ambient[k] = v
-		}
+	v, ok := nestedFixtureRepos.Load(canonical)
+	if !ok {
+		t.Fatalf("fixtureGit(%s): not a nestedWorktreeFixture canonical directory", canonical)
 	}
-	env := []string{"HOME=" + t.TempDir(), "GIT_CONFIG_NOSYSTEM=1"}
-	// PATH: to locate the git binary and anything it execs. TMPDIR: git's own scratch
-	// files. GIT_CONFIG_GLOBAL/_SYSTEM: forwarded so a caller's t.Setenv override
-	// (every caller here points them at /dev/null) actually reaches the subprocess.
-	// None of these four names a git repository location.
-	for _, k := range []string{"PATH", "TMPDIR", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM"} {
-		if v, ok := ambient[k]; ok {
-			env = append(env, k+"="+v)
-		}
+	if out, err := v.(*gitfixture.Repo).Client.Run(t.Context(), args...); err != nil {
+		t.Fatalf("git -C %s %v: %v\n%s", canonical, args, err, out)
 	}
-	return env
 }
 
 // nestedWorktreeFixture builds a canonical clone on branch "main" with a linked worktree
-// on branch "feat" at <canonical>/.worktrees/feat, and returns both paths.
+// on branch "feat" at <canonical>/.worktrees/feat, and returns both paths. The clone is an
+// x/gittest repository. The two GIT_CONFIG_* overrides below are NOT part of the fixture's
+// isolation (that is by construction); they keep the CODE UNDER TEST's own git calls off
+// the operator's real global/system config.
 func nestedWorktreeFixture(t *testing.T) (canonical, worktree string) {
 	t.Helper()
 	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
 	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
-	canonical = t.TempDir()
-	git := func(args ...string) {
-		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", canonical}, args...)...)
-		cmd.Env = hermeticEnviron(t)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git -C %s %v: %v\n%s", canonical, args, err, out)
-		}
+	repo := gittest.New(t, gitfixture.RepoOptions{})
+	canonical = repo.Dir
+	nestedFixtureRepos.Store(canonical, repo)
+	t.Cleanup(func() { nestedFixtureRepos.Delete(canonical) })
+	if _, err := repo.Commit(t.Context(), "init", nil); err != nil {
+		t.Fatalf("seed commit: %v", err)
 	}
-	git("init", "-q", "-b", "main")
-	git("config", "user.email", "t@example.com")
-	git("config", "user.name", "t")
-	git("commit", "--allow-empty", "-q", "-m", "init")
 	worktree = filepath.Join(canonical, ".worktrees", "feat")
-	git("worktree", "add", "-q", "-b", "feat", worktree)
+	fixtureGit(t, canonical, "worktree", "add", "-q", "-b", "feat", worktree)
 	return canonical, worktree
 }
 
@@ -267,16 +218,8 @@ func TestIntegration_PrimaryCommitUnresolvedNeverApproves(t *testing.T) {
 // pins shut.
 func TestIntegration_PrimaryCommitMissingDirNeverApproves(t *testing.T) {
 	canonical, worktree := nestedWorktreeFixture(t)
-	git := func(args ...string) {
-		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", canonical}, args...)...)
-		cmd.Env = hermeticEnviron(t)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git -C %s %v: %v\n%s", canonical, args, err, out)
-		}
-	}
 	// Mirror production exactly: the worktree existed, and has since been cleaned up.
-	git("worktree", "remove", "--force", worktree)
+	fixtureGit(t, canonical, "worktree", "remove", "--force", worktree)
 
 	commands := []string{
 		"cd " + worktree + " && git commit -m x",
@@ -319,18 +262,10 @@ func TestIntegration_PrimaryCommitMissingDirNeverApproves(t *testing.T) {
 // another route in an auto-accepting session).
 func TestIntegration_PrimaryCommitSelfCreatedDir(t *testing.T) {
 	canonical, worktree := nestedWorktreeFixture(t)
-	git := func(args ...string) {
-		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", canonical}, args...)...)
-		cmd.Env = hermeticEnviron(t)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git -C %s %v: %v\n%s", canonical, args, err, out)
-		}
-	}
 	// Mirror TestIntegration_PrimaryCommitMissingDirNeverApproves: the path existed as
 	// a linked worktree and has since been cleaned up, so it is genuinely absent —
 	// exactly what pg2-70g51's own live-repro recipe uses `rm -rf`+`mktemp -d` for.
-	git("worktree", "remove", "--force", worktree)
+	fixtureGit(t, canonical, "worktree", "remove", "--force", worktree)
 
 	positive := []string{
 		"mkdir -p " + worktree + " && cd " + worktree + " && git init -q && git commit -q -m seed --allow-empty",
@@ -405,21 +340,13 @@ func TestIntegration_PrimaryCommitSelfCreatedDir(t *testing.T) {
 // longer the ONLY rule with something to say about this particular expression.
 func TestIntegration_PrimaryCommitSelfCreatedDir_WorktreeAdd(t *testing.T) {
 	canonical, worktree := nestedWorktreeFixture(t)
-	git := func(args ...string) {
-		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", canonical}, args...)...)
-		cmd.Env = hermeticEnviron(t)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git -C %s %v: %v\n%s", canonical, args, err, out)
-		}
-	}
 	// Mirror TestIntegration_PrimaryCommitSelfCreatedDir: the path existed as a linked
 	// worktree and has since been cleaned up, so it is genuinely absent on disk —
 	// EvaluateHook only JUDGES the command TEXT against the CURRENT real filesystem
 	// state (it never actually runs `git worktree add`), so this removal is what makes
 	// resolver.go's ErrDirNotExist/findingDirMissing branch fire for every row below,
 	// exactly as TestIntegration_PrimaryCommitMissingDirNeverApproves's own fixture does.
-	git("worktree", "remove", "--force", worktree)
+	fixtureGit(t, canonical, "worktree", "remove", "--force", worktree)
 
 	positive := []string{
 		"git worktree add " + worktree + " -b review/pg2-iorh0 main && cd " + worktree + " && git commit -q -m seed --allow-empty",

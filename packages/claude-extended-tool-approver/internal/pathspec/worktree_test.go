@@ -6,18 +6,31 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+
+	"github.com/phillipgreenii/x/gitfixture"
+	"github.com/phillipgreenii/x/gittest"
 )
 
-// git runs a git subcommand `-C dir <args...>` hermetically (hermeticGitEnviron
-// — the SAME helper realWorktreeState uses in production, per this slice's
-// "every git call in tests goes through the hermetic helper"), failing the
-// test on a non-zero exit.
+// fixtureRepos maps a running test to the x/gittest repository gitTestRepo
+// built for it, so git() can run through that repository's hermetic
+// gitclient (allowlisted child env, fixture HOME, GIT_CEILING_DIRECTORIES)
+// instead of a hand-rolled exec.Command.
+var fixtureRepos sync.Map // *testing.T -> *gitfixture.Repo
+
+// git runs a git subcommand `-C dir <args...>` through the hermetic client of
+// the x/gittest repository gitTestRepo built for t (any directory may be
+// named: `-C` re-roots the call at a linked worktree or the like), failing
+// the test on a non-zero exit. A test must call gitTestRepo(t) first.
 func git(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	cmd.Env = hermeticGitEnviron()
-	if out, err := cmd.CombinedOutput(); err != nil {
+	v, ok := fixtureRepos.Load(t)
+	if !ok {
+		t.Fatalf("git(%s %v): call gitTestRepo(t) first; no x/gittest repository is registered for this test", dir, args)
+	}
+	repo := v.(*gitfixture.Repo)
+	if out, err := repo.Client.Run(t.Context(), append([]string{"-C", dir}, args...)...); err != nil {
 		t.Fatalf("git -C %s %v: %v\n%s", dir, args, err, out)
 	}
 }
@@ -48,31 +61,27 @@ func trustRealGit(t *testing.T, home string) {
 	}
 }
 
-// gitTestRepo builds a real, throwaway git repository (t.TempDir()) with an
-// initial commit on branch "main", entirely via the hermetic git() helper
-// above. HOME is pointed at a second, separate t.TempDir() as an extra
-// isolation layer on top of hermeticGitEnviron's GIT_CONFIG_GLOBAL=/dev/null
-// (mirrors internal/engine/primarycommit_worktree_test.go's
-// nestedWorktreeFixture) — no invocation in this file ever touches the real
-// user's home directory or an ambient repository. trustRealGit additionally
-// makes that HOME trust the PATH-resolved git (trustedGitPath), so the
-// hardened probes this file exercises against real repositories still see
-// their real git as trusted.
+// gitTestRepo builds a real, throwaway x/gittest repository with an initial
+// commit on branch "main" and returns its (symlink-resolved) directory. The
+// fixture is hermetic by construction (allowlisted child env, fixture HOME,
+// GIT_CEILING_DIRECTORIES). The PROCESS HOME is pointed at a separate
+// t.TempDir() for the code under test (which runs its own git), and
+// trustRealGit additionally makes that HOME trust the PATH-resolved git
+// (trustedGitPath), so the hardened probes this file exercises against real
+// repositories still see their real git as trusted. The repository is
+// registered for git() above for the lifetime of t.
 func gitTestRepo(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	trustRealGit(t, home)
-	root := t.TempDir()
-	git(t, root, "init", "-q", "-b", "main")
-	git(t, root, "config", "user.email", "t@example.com")
-	git(t, root, "config", "user.name", "t")
-	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("hi\n"), 0o644); err != nil {
-		t.Fatal(err)
+	repo := gittest.New(t, gitfixture.RepoOptions{})
+	fixtureRepos.Store(t, repo)
+	t.Cleanup(func() { fixtureRepos.Delete(t) })
+	if _, err := repo.Commit(t.Context(), "init", map[string]string{"README.md": "hi\n"}); err != nil {
+		t.Fatalf("seed commit: %v", err)
 	}
-	git(t, root, "add", "README.md")
-	git(t, root, "commit", "-q", "-m", "init")
-	return root
+	return repo.Dir
 }
 
 // TestProbeWorktreeStateClean: a freshly added linked worktree, nothing
