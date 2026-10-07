@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -28,7 +27,7 @@ func makeRateLimitFixture(t *testing.T, resetISO string) (string, string) {
 	sessionsDir := filepath.Join(root, "sessions")
 	claudeHome := filepath.Join(root, "claude-home")
 	cwd := filepath.Join(root, "cwd")
-	slug := strings.NewReplacer("/", "-", "_", "-").Replace(cwd)
+	slug := claudeSlug(cwd)
 	projectDir := filepath.Join(claudeHome, "projects", slug)
 	for _, d := range []string{sessionsDir, projectDir, cwd} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
@@ -328,7 +327,7 @@ func makeSubagentDisruptFixture(t *testing.T) (string, string) {
 	sessionsDir := filepath.Join(root, "sessions")
 	claudeHome := filepath.Join(root, "claude-home")
 	cwd := filepath.Join(root, "cwd")
-	slug := strings.NewReplacer("/", "-", "_", "-").Replace(cwd)
+	slug := claudeSlug(cwd)
 	projectDir := filepath.Join(claudeHome, "projects", slug)
 	sessID := "sub-sess"
 	subagentsDir := filepath.Join(projectDir, sessID, "subagents")
@@ -517,7 +516,7 @@ func makeRegistryFixture(t *testing.T, status, waitingFor string, statusUpdatedA
 	sessionsDir := filepath.Join(root, "sessions")
 	claudeHome := filepath.Join(root, "claude-home")
 	cwd := filepath.Join(root, "cwd")
-	slug := strings.NewReplacer("/", "-", "_", "-").Replace(cwd)
+	slug := claudeSlug(cwd)
 	projectDir := filepath.Join(claudeHome, "projects", slug)
 	for _, d := range []string{sessionsDir, projectDir, cwd} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
@@ -594,7 +593,7 @@ func makeErrorFixture(t *testing.T, errKind, errText string, superseded bool) (s
 	sessionsDir := filepath.Join(root, "sessions")
 	claudeHome := filepath.Join(root, "claude-home")
 	cwd := filepath.Join(root, "cwd")
-	slug := strings.NewReplacer("/", "-", "_", "-").Replace(cwd)
+	slug := claudeSlug(cwd)
 	projectDir := filepath.Join(claudeHome, "projects", slug)
 	for _, d := range []string{sessionsDir, projectDir, cwd} {
 		if err := os.MkdirAll(d, 0o755); err != nil {

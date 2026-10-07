@@ -5,12 +5,24 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
+	"regexp"
 	"testing"
 	"time"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/aggregate"
 )
+
+// claudeSlugNonAlnum mirrors the production slug rule (session.slugify):
+// Claude Code names a project directory by replacing every character other than
+// a letter or digit with "-".
+var claudeSlugNonAlnum = regexp.MustCompile(`[^A-Za-z0-9]`)
+
+// claudeSlug returns the ~/.claude/projects/<slug> directory name for a session
+// cwd. Fixtures MUST use this (not a hand-rolled "/"+"_" replacer): t.TempDir()
+// roots under $TMPDIR, and a "." in it (pg-test-runner's
+// /tmp/pg-test-runner.XXXXXX) is also mapped to "-" in production, so a narrower
+// replacer puts the transcript where the poller never looks.
+func claudeSlug(cwd string) string { return claudeSlugNonAlnum.ReplaceAllString(cwd, "-") }
 
 // makeSessionFixture writes a session registry file plus a transcript with the
 // given body, and returns the dirs, the session cwd, and the transcript path so
@@ -21,7 +33,7 @@ func makeSessionFixture(t *testing.T, pid int, sessID, body string) (sessionsDir
 	sessionsDir = filepath.Join(root, "sessions")
 	claudeHome = filepath.Join(root, "claude-home")
 	cwd = filepath.Join(root, "cwd")
-	slug := strings.NewReplacer("/", "-", "_", "-").Replace(cwd)
+	slug := claudeSlug(cwd)
 	projectDir := filepath.Join(claudeHome, "projects", slug)
 	for _, d := range []string{sessionsDir, projectDir, cwd} {
 		if err := os.MkdirAll(d, 0o755); err != nil {

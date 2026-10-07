@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -71,7 +70,7 @@ func TestTickIntegration_SamplesAndPersistsLimits(t *testing.T) {
 	// sibling with the authoritative 5h reading (34%). The daemon now samples
 	// rate_limits from the Monitor's Limits observer (ADR 0029), not opts.Limits.
 	recTS := time.Now().Add(-30 * time.Minute)
-	projSlug := strings.NewReplacer("/", "-", "_", "-").Replace(dir)
+	projSlug := claudeSlug(dir)
 	projDir := filepath.Join(dir, "projects", projSlug)
 	if err := os.MkdirAll(projDir, 0o755); err != nil {
 		t.Fatalf("mkdir project dir: %v", err)

@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
+	"regexp"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -34,6 +34,14 @@ import (
 //
 // The stubPoller writes sessions directly into the DB (via WriteService)
 // on each Snapshot call so the DB-only snapshot() path can read them back.
+// claudeSlug mirrors the production slug rule (session.slugify): every character
+// other than a letter or digit becomes "-". A narrower "/"+"_" replacer misplaces
+// the transcript whenever the temp root contains "." (e.g. pg-test-runner's
+// TMPDIR=/tmp/pg-test-runner.XXXXXX).
+func claudeSlug(cwd string) string {
+	return regexp.MustCompile(`[^A-Za-z0-9]`).ReplaceAllString(cwd, "-")
+}
+
 func TestRunWith_IntegratesPollerTrackersAndState(t *testing.T) {
 	dir := shortTempDir(t)
 	paths := Paths{
@@ -404,7 +412,7 @@ func TestTickIntegration_WritesBlocksAndContributions(t *testing.T) {
 	// (auto-wired) corpus Monitor UsagePricing observer produces a non-nil active
 	// block for the session's transcript. ---
 	recTS := time.Now().Add(-30 * time.Minute)
-	projSlug := strings.NewReplacer("/", "-", "_", "-").Replace(dir)
+	projSlug := claudeSlug(dir)
 	projDir := filepath.Join(dir, "projects", projSlug)
 	if err := os.MkdirAll(projDir, 0o755); err != nil {
 		t.Fatalf("mkdir project dir: %v", err)

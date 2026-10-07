@@ -21,7 +21,7 @@ var eqPrices = usage.PriceTable{Default: usage.ModelPrices{InputPerMTok: 5, Outp
 
 // --- equivalence-test corpus builders (local to package poller) ---
 
-func eqSlug(cwd string) string { return strings.NewReplacer("/", "-", "_", "-").Replace(cwd) }
+func eqSlug(cwd string) string { return claudeSlug(cwd) }
 
 func eqUserPrompt(text string) string {
 	return fmt.Sprintf(`{"type":"user","message":{"role":"user","content":[{"type":"text","text":%q}]}}`, text)
