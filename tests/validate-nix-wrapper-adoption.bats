@@ -99,6 +99,15 @@ teardown() {
   [ "$(wc -l <"$STUB_DIR/count" | tr -d ' ')" -eq 2 ]
 }
 
+@test "default args use a narrow allowlist and never bypass permissions" {
+  STUB_ADOPT_RUNS="1" run "$SCRIPT" --repo "$TEST_DIR/repo" --out-dir "$TEST_DIR/out" --runs 1 --min-pass 1
+  [ "$status" -eq 0 ]
+  grep -qF -- "--permission-mode dontAsk" "$STUB_DIR/args.1"
+  grep -qF -- "--allowedTools Bash(pg-nix-log-wrapped *),Bash(nix *)" "$STUB_DIR/args.1"
+  if grep -qF -- "bypassPermissions" "$STUB_DIR/args.1"; then false; fi
+  if grep -qF -- "dangerously-skip-permissions" "$STUB_DIR/args.1"; then false; fi
+}
+
 @test "PG_HARNESS_CLAUDE_ARGS replaces the default permission args" {
   PG_HARNESS_CLAUDE_ARGS="--model sonnet" STUB_ADOPT_RUNS="1" run "$SCRIPT" --repo "$TEST_DIR/repo" --out-dir "$TEST_DIR/out" --runs 1 --min-pass 1
   [ "$status" -eq 0 ]

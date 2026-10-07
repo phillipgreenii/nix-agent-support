@@ -35,9 +35,25 @@
 #
 # Environment:
 #   CLAUDE_BIN                 claude executable (default: claude)
-#   PG_HARNESS_CLAUDE_ARGS     extra args for claude -p, word-split
-#                              (default: --permission-mode bypassPermissions,
-#                              matching validate-hook-router-live.sh)
+#   PG_HARNESS_CLAUDE_ARGS     explicit operator override of the claude -p
+#                              permission args, word-split (REPLACES the
+#                              default; no shell-quoting inside, so a pattern
+#                              containing a space needs editing the script)
+#                              default: --permission-mode dontAsk
+#                                       --allowedTools
+#                                       "Bash(pg-nix-log-wrapped *),Bash(nix *),
+#                                        Bash(command -v *),Read,Grep,Glob"
+#                              i.e. only the wrapper, plain nix, the `command
+#                              -v` probe the rule tells the agent to run, and
+#                              read-only tools; everything else is denied
+#                              (dontAsk), never prompted for. The flag forms
+#                              are from `claude --help` (--allowedTools takes
+#                              comma- or space-separated "Bash(git *)"-style
+#                              entries; --permission-mode lists dontAsk).
+#                              Broadening permissions (e.g. bypassPermissions
+#                              for a throwaway run) is the OPERATOR's explicit
+#                              choice via this variable and MUST NEVER become
+#                              this script's default.
 #   PG_HARNESS_TIMEOUT         per-run seconds when `timeout`/`gtimeout` exists
 #                              (default: 1800)
 #
@@ -123,9 +139,17 @@ for t in timeout gtimeout; do
   fi
 done
 
-# Word-split on purpose: an operator-supplied flag string.
-# shellcheck disable=SC2206
-claude_args=(${PG_HARNESS_CLAUDE_ARGS:---permission-mode bypassPermissions})
+# Narrowest default that still lets the run exercise the rule (see header). An
+# array, not a word-split string, because the allowlist entries contain spaces.
+claude_args=(
+  --permission-mode dontAsk
+  --allowedTools "Bash(pg-nix-log-wrapped *),Bash(nix *),Bash(command -v *),Read,Grep,Glob"
+)
+if [[ -n ${PG_HARNESS_CLAUDE_ARGS:-} ]]; then
+  # Explicit operator override; word-split on purpose, replaces the default.
+  # shellcheck disable=SC2206
+  claude_args=(${PG_HARNESS_CLAUDE_ARGS})
+fi
 
 # The fixed prompt (bead acceptance text), with the repo path filled in.
 prompt="run \`nix flake check\` in $repo"
