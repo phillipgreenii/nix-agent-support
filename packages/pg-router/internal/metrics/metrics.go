@@ -1256,7 +1256,8 @@ func (e *Emitter) RecordFailure(class string) {
 const (
 	// SourceFailureRateLimited: the backend refused because an upstream API
 	// budget is exhausted or below its configured reserve (e.g. pg-connector-pr-github's
-	// "GraphQL rate limit remaining (N) is below the configured reserve (M)").
+	// "GraphQL rate limit remaining (N) is below the configured reserve (M)", or
+	// claude -p's "You've hit your individual spend limit").
 	SourceFailureRateLimited = "rate-limited"
 	// SourceFailureUnauthenticated: the backend reported scriptout "unauthenticated".
 	SourceFailureUnauthenticated = "unauthenticated"
@@ -1298,7 +1299,11 @@ func ClassifySourceFailure(err error) string {
 	}
 	msg := strings.ToLower(err.Error())
 	switch {
-	case strings.Contains(msg, "below the configured reserve") || strings.Contains(msg, "rate limit"):
+	case strings.Contains(msg, "below the configured reserve") || strings.Contains(msg, "rate limit") ||
+		strings.Contains(msg, "spend limit") || strings.Contains(msg, "usage limit"):
+		// "spend limit" / "usage limit" is claude -p's own account-quota text
+		// (pg-connector-thread-slack surfaces its stdout envelope, pg2-ezwut);
+		// it is a budget exhaustion like the GraphQL reserve, not a dead backend.
 		return SourceFailureRateLimited
 	case strings.Contains(msg, "scriptout: unauthenticated"):
 		return SourceFailureUnauthenticated

@@ -322,6 +322,11 @@ func TestOnSourceFailurePerSource(t *testing.T) {
 // the command query's exit-status prefix.
 const rateLimitReserveErr = "produce pr-mine: command query [/nix/store/x-pg-router-source-pg-connector/bin/pg-router-source-pg-connector changes pr mine --consumer pg-router]: exit status 1: pg-connector-pr-github: scriptout: unavailable: pg-connector-pr-github: scriptout: unavailable: pg-connector-pr-github: GraphQL rate limit remaining (221) is below the configured reserve (1000)"
 
+// claudeSpendLimitErr is the shape pg-connector-thread-slack's error takes when
+// `claude -p` exits 1 because the Claude account hit its spend/session limit
+// (pg2-ezwut decodes the stdout envelope into the error; pg2-cslzd).
+const claudeSpendLimitErr = "produce thread-me: command query [/nix/store/x-pg-router-source-pg-connector/bin/pg-router-source-pg-connector changes thread involving-me --consumer pg-router]: exit status 1: pg-connector-thread-slack: scriptout: unavailable: claude -p: claude -p --output-format json: exit status 1: ; claude stdout: subtype=success result=You've hit your individual spend limit · run /usage-credits to ask your admin for a higher limit · your session limit resets 7:10pm (America/New_York)"
+
 // TestClassifySourceFailure pins the closed reason taxonomy (bead pg2-hsla6).
 // The rate-limit case MUST win over the generic "scriptout: unavailable"
 // wrapper it arrives in.
@@ -333,6 +338,9 @@ func TestClassifySourceFailure(t *testing.T) {
 	}{
 		{"rate limit reserve breach (the 2026-10-01 episode)", errors.New(rateLimitReserveErr), SourceFailureRateLimited},
 		{"plain rate limit phrasing", errors.New("HTTP 403: API rate limit exceeded"), SourceFailureRateLimited},
+		{"claude individual spend limit (the 2026-10-07 thread-me episodes)", errors.New(claudeSpendLimitErr), SourceFailureRateLimited},
+		{"claude org monthly spend limit", errors.New(strings.Replace(claudeSpendLimitErr, "individual spend limit", "org's monthly spend limit", 1)), SourceFailureRateLimited},
+		{"claude usage limit phrasing", errors.New("exit status 1: scriptout: unavailable: claude stdout: result=5-hour usage limit reached"), SourceFailureRateLimited},
 		{"scriptout unavailable", errors.New("command query [x]: exit status 1: scriptout: unavailable: backend down"), SourceFailureUnavailable},
 		{"scriptout unauthenticated", errors.New("exit status 1: scriptout: unauthenticated: token expired"), SourceFailureUnauthenticated},
 		{"context cancelled sentinel", fmt.Errorf("command query [x]: %w", context.Canceled), SourceFailureInterrupted},

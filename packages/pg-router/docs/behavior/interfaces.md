@@ -496,7 +496,8 @@ sequenceDiagram
     reader of logs. **Every failed attempt counts once**, including the final give-up attempt of a
     source with no retries configured — so a source that fails fast on every tick (the default) is
     counted on every tick. The `reason` label is one of a closed set: `rate-limited` (the backend
-    reported an exhausted or below-reserve upstream API budget), `unavailable` and `unauthenticated`
+    reported an exhausted or below-reserve upstream API budget, including a `claude -p` account spend or
+    usage limit), `unavailable` and `unauthenticated`
     (the backend's own wire-level failure classes, rate limiting excluded), `timeout` (the attempt ran out
     its time budget and its child was killed), `interrupted` (a cancellation reported from inside the
     backend, not the daemon's own), and `error` (anything else). An attempt cut short because **the
