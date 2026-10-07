@@ -28,7 +28,7 @@ stored entity), `serve` (behind the soak option only), `open`, `hide`/`unhide`/`
 links, see [`links.md`](links.md), which also holds the `<type> link add|remove` external-link
 verbs), `<type> consumer list|forget` (see [`consumer.md`](consumer.md)), `<type> changes` (see [`changes.md`](changes.md)), `<type> refresh` (see [`refresh.md`](refresh.md)), `attention list`/`attention explain` and the `pg-desk-attention` plugin (see [`attention.md`](attention.md)), `freshness` (the per-source data age, see [`freshness.md`](freshness.md)), the typed `<type> show` composite view (see [`show.md`](show.md)), `status`, `doctor`, `heartbeat`/`heartbeat-item`, and
 `import-pg-pr-annotations`, and the annotation verbs `<type> annotate|suppress|unsuppress`,
-`pr force-review` and the typed `hide`/`unhide`/`wip`/`pr feedback` forms (see
+`pr force-review`, `pr head-check` (see [`operator-commands.md`](operator-commands.md)) and the typed `hide`/`unhide`/`wip`/`pr feedback` forms (see
 [`annotate.md`](annotate.md)).
 
 **Out of scope for the whole set, named once here so no individual doc needs to repeat it as a

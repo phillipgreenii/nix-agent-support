@@ -106,10 +106,46 @@ prompts that read these shapes, in the same change:
   acts as mine.
 - **Review request** — ported verbatim from pg-router's ACL: every PR with ownership `mine` or
   `co-owned` (draft included), and every non-draft team PR, gets one `review-pr` bead. When the
-  head advances past the ledger's last-reviewed SHA, a completed bead is reopened and its
-  metadata refreshed in ONE `issue update <id> --status open --clear-assignee ...` call (the
-  previous reviewer's claim MUST NOT survive the reopen, or no worker can claim the re-review;
-  `pg2-1pt7r`; the same call also clears the bead's deferral, below). No gate.
+  head advances past the ledger's last-requested SHA AND has then stayed the PR's head for the
+  settle window (below), a completed bead is reopened and its metadata refreshed in ONE `issue
+update <id> --status open --clear-assignee ...` call (the previous reviewer's claim MUST NOT
+  survive the reopen, or no worker can claim the re-review; `pg2-1pt7r`; the same call also clears
+  the bead's deferral, below). No gate.
+- **Review settle window** (`pg2-a9yhn`) — a head that differs from the last-requested one MUST NOT
+  be acted on at once. A review is expensive (the router health review of 2026-10 measured one at
+  about 16 minutes and $2.88) and a review whose head moved before it submitted is refused at
+  submit with nothing written, so a burst of pushes MUST yield ONE review request, for the head the
+  burst ended on.
+  - The ledger's review-request row records the pending head and when a sync run first saw it
+    (`first_seen_head_sha`, `first_seen_head_at`). The bead is reopened only once that head has
+    been the PR's head for `sync.review_settle_window` (default `2m`; a Go duration; `0` disables
+    the window and restores acting on a new head at once). A further push inside the window
+    replaces the pending head and restarts the timer, so N pushes inside one window produce one
+    reopen. A push back to the head already requested drops the pending head.
+  - The window applies to the REOPEN only. The first review request of a PR is created at once: a
+    PR's first head has no earlier head to supersede, and a pending row with no bead would be
+    indistinguishable from a `plan`-mode planned row. `plan` and `apply` run the same settle
+    logic, so they agree on when a reopen happens; a run still inside the window writes nothing
+    (no bead write and no ledger write).
+  - The timer starts when sync first SAW the head, so the delay is the window plus at most one
+    polling cadence. Sync runs only on events, so a quiet PR whose last push has settled is
+    re-driven by `pg-desk reconcile` once the window elapsed (see
+    [`operator-commands.md`](operator-commands.md)); how soon after the window that is depends on
+    how often the scheduler runs `reconcile`. A deployment that wants the reopen sooner SHOULD run
+    `reconcile` more often than the window.
+  - Dedup by head SHA is unchanged and MUST be preserved: sync never re-requests a head it has
+    already requested (the same-head check below), which is why no review of an already-reviewed
+    head occurs.
+- **What the ledger's `last_reviewed_head_sha` means** (`pg2-a9yhn`, decided intended) — it is the
+  head of the last review REQUEST sync made, written when the bead is created or reopened, not the
+  head of a review that completed (the column name is historical). A request is not "dropped"
+  while its bead is open, in progress or deferred: the bead is the durable request, a killed or
+  crashed session's claim is released by the session reaping, and re-requesting the same head on
+  top of an open bead would change nothing. A worker that closes the bead without reviewing
+  (declined) is NOT asked again for the same head; the head is requested again as soon as it
+  changes (and settles), or when a person reopens the bead. Sync cannot observe whether a review
+  was posted, so it cannot key on a "last reviewed" head, and keying on one would re-review every
+  declined head on every run.
 - **Review-request lifecycle** (`pg2-kftf9.8`) — the `review-pr` bead is per PR, not per review,
   and its terminal state is reached by the worker, not by sync:
   - Exactly one `review-pr` bead exists per `(repo, number)`. A head advance REOPENS that bead

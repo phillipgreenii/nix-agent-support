@@ -120,7 +120,10 @@ let
     sync = {
       inherit (cfg.sync) mode;
     }
-    // lib.optionalAttrs (renderedSyncRetry != { }) { retry = renderedSyncRetry; };
+    // lib.optionalAttrs (renderedSyncRetry != { }) { retry = renderedSyncRetry; }
+    // lib.optionalAttrs (cfg.sync.reviewSettleWindow != null) {
+      review_settle_window = cfg.sync.reviewSettleWindow;
+    };
   }
   // lib.optionalAttrs (cfg.heartbeatPeriod != null) { heartbeat_period = cfg.heartbeatPeriod; }
   // lib.optionalAttrs (cfg.staleAfter != null) { stale_after = cfg.staleAfter; }
@@ -383,6 +386,22 @@ in
           only at the phase 11 cutover flip. Matches
           packages/pg-desk/internal/sync's own fallback to "off" when this
           key is absent from config.yaml.
+        '';
+      };
+
+      # sync.review_settle_window (bead pg2-a9yhn). Left null, pg-desk's own
+      # default applies (config.DefaultReviewSettleWindow, 2m).
+      reviewSettleWindow = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = ''
+          config.yaml's sync.review_settle_window (a Go time.ParseDuration
+          string): how long a PR head must stay unchanged before sync
+          re-requests a review of it, so a burst of pushes yields one review
+          request instead of one per intermediate head. "0" disables the
+          window. Null uses pg-desk's default, "2m". A quiet PR whose head has
+          settled is re-driven by `pg-desk reconcile`, so its schedule bounds
+          how soon after the window the review is requested.
         '';
       };
 

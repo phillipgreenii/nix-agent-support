@@ -145,12 +145,60 @@ func migrate(s *Store) error {
 		}
 	}
 
+	if err := ensureLedgerSettleColumns(s); err != nil {
+		return err
+	}
+
 	if _, err := s.sql.Exec(
 		`INSERT INTO meta (key, value) VALUES ('schema_version', ?)
 		 ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
 		fmt.Sprintf("%d", schemaVersion),
 	); err != nil {
 		return fmt.Errorf("mirror schema_version into meta: %w", err)
+	}
+	return nil
+}
+
+// ledgerSettleColumns are the review-settle bookkeeping columns added to the
+// version-1 ledger table by bead pg2-a9yhn: the head SHA a review request is
+// waiting out, and when sync first saw it. See LedgerEntry.FirstSeenHeadSHA.
+var ledgerSettleColumns = []string{"first_seen_head_sha", "first_seen_head_at"}
+
+// ensureLedgerSettleColumns adds the review-settle columns to the ledger
+// table when they are missing. It is an idempotent column ensure, NOT a rung
+// on the migration ladder: the ladder is stamped into user_version and
+// stops at schemaVersion 1 (NewSchemaVersion 2 is reserved for the explicit
+// cutover, which DROPS the ledger table), so a second rung would mis-stamp
+// the store as already cut over. It runs only for a version-1 store (migrate
+// returns before it for a version-2 store, which has no ledger).
+func ensureLedgerSettleColumns(s *Store) error {
+	have := map[string]bool{}
+	rows, err := s.sql.Query(`SELECT name FROM pragma_table_info('ledger')`)
+	if err != nil {
+		return fmt.Errorf("read ledger columns: %w", err)
+	}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("scan ledger column: %w", err)
+		}
+		have[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return fmt.Errorf("read ledger columns: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("read ledger columns: %w", err)
+	}
+	for _, col := range ledgerSettleColumns {
+		if have[col] {
+			continue
+		}
+		if _, err := s.sql.Exec(`ALTER TABLE ledger ADD COLUMN ` + col + ` TEXT`); err != nil {
+			return fmt.Errorf("add ledger.%s: %w", col, err)
+		}
 	}
 	return nil
 }

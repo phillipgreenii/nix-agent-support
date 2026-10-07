@@ -603,6 +603,57 @@ type SyncConfig struct {
 	// pg2-xb6fs). Every key is optional; see SyncRetryConfig.Resolve for the
 	// defaults.
 	Retry SyncRetryConfig `yaml:"retry,omitempty" json:"retry,omitempty"`
+	// ReviewSettleWindow is how long a PR head MUST stay unchanged before
+	// sync re-requests a review of it (bead pg2-a9yhn; a Go
+	// time.ParseDuration string; default DefaultReviewSettleWindow, "0"
+	// disables the window). See ReviewSettleWindowResolve.
+	ReviewSettleWindow string `yaml:"review_settle_window,omitempty" json:"review_settle_window,omitempty"`
+}
+
+// DefaultReviewSettleWindow is the default sync.review_settle_window (bead
+// pg2-a9yhn). A burst of pushes to one PR must not start a review of every
+// intermediate head: a review costs ~16 minutes and several dollars, and one
+// whose head moved is refused at submit. The window is measured from the
+// first sync run that SAW the new head, so it is at least the polling cadence
+// that surfaces pushes (60s for the operator's own PRs, 120s for the team's)
+// long and in practice a little longer; 2m lets a typical fixup push
+// (commit, notice a typo, push again) land inside one window while adding
+// only that much latency to the one review that follows.
+const DefaultReviewSettleWindow = 2 * time.Minute
+
+// ReviewSettleWindow returns the resolved sync.review_settle_window: the
+// default when unset, 0 (no window) for an explicit zero, and
+// DefaultReviewSettleWindow for an invalid value (finalize rejects an
+// invalid value at config load, so that fallback is reached only by a Config
+// built in code).
+func (c *Config) ReviewSettleWindow() time.Duration {
+	if c == nil {
+		return DefaultReviewSettleWindow
+	}
+	d, err := c.Sync.ResolveReviewSettleWindow()
+	if err != nil {
+		return DefaultReviewSettleWindow
+	}
+	return d
+}
+
+// ResolveReviewSettleWindow parses sync.review_settle_window. Unset is
+// DefaultReviewSettleWindow; zero is allowed and means "no window" (the head
+// is acted on as soon as it is seen); a negative or unparseable value is an
+// error.
+func (s SyncConfig) ResolveReviewSettleWindow() (time.Duration, error) {
+	v := strings.TrimSpace(s.ReviewSettleWindow)
+	if v == "" {
+		return DefaultReviewSettleWindow, nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return 0, fmt.Errorf("review_settle_window: %w", err)
+	}
+	if d < 0 {
+		return 0, fmt.Errorf("review_settle_window %q must not be negative", s.ReviewSettleWindow)
+	}
+	return d, nil
 }
 
 // Defaults for sync.retry (bead pg2-xb6fs). A transient sync failure is
@@ -813,6 +864,9 @@ func finalize(cfg *Config) error {
 	}
 	if _, _, _, err := cfg.Sync.Retry.Resolve(); err != nil {
 		return fmt.Errorf("sync.retry: %w", err)
+	}
+	if _, err := cfg.Sync.ResolveReviewSettleWindow(); err != nil {
+		return fmt.Errorf("sync: %w", err)
 	}
 	if err := validateChangeFlow(cfg); err != nil {
 		return err

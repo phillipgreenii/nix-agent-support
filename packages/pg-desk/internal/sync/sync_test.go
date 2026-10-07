@@ -773,6 +773,9 @@ func TestSync_ReviewRequest_ReopensOnHeadAdvance(t *testing.T) {
 		Repo: fixtureRepo, EntityType: "pr", EntityID: fixtureEntity, Kind: KindReviewRequest,
 		BeadID: "bd-review-existing", LastSyncedContentHash: "old-hash", LastSyncedAt: "2026-09-16T00:00:00Z",
 		LastReviewedHeadSHA: "old-sha",
+		// new-sha was first seen a day before the clock: its settle window
+		// (pg2-a9yhn) has long elapsed, so this run reopens.
+		FirstSeenHeadSHA: "new-sha", FirstSeenHeadAt: "2026-09-16T00:00:00Z",
 	}); err != nil {
 		t.Fatalf("seed review ledger: %v", err)
 	}

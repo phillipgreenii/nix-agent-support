@@ -24,22 +24,36 @@ type LedgerEntry struct {
 
 	LastSyncedContentHash string
 	LastSyncedAt          string // RFC3339 timestamp
-	LastReviewedHeadSHA   string
+	// LastReviewedHeadSHA is, for kind=review-request rows, the head SHA of
+	// the most recent REQUEST sync made (set when the bead is created or
+	// reopened), not the head of a review that completed. See the "ledger
+	// semantics" note in package sync (rules.go, ensureReviewRequest).
+	LastReviewedHeadSHA string
+
+	// FirstSeenHeadSHA and FirstSeenHeadAt (RFC3339) are the review settle
+	// window's state (bead pg2-a9yhn), used only for kind=review-request
+	// rows: the PR head sync is waiting out, and when a sync run first saw
+	// it. Both are empty when no head is pending.
+	FirstSeenHeadSHA string
+	FirstSeenHeadAt  string
 }
 
 // UpsertLedger inserts or replaces the ledger row keyed by
 // (Repo, EntityType, EntityID, Kind).
 func (s *Store) UpsertLedger(l LedgerEntry) error {
 	_, err := s.sql.Exec(
-		`INSERT INTO ledger (repo, entity_type, entity_id, kind, bead_id, last_synced_content_hash, last_synced_at, last_reviewed_head_sha)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO ledger (repo, entity_type, entity_id, kind, bead_id, last_synced_content_hash, last_synced_at, last_reviewed_head_sha, first_seen_head_sha, first_seen_head_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT (repo, entity_type, entity_id, kind) DO UPDATE SET
 		   bead_id = excluded.bead_id,
 		   last_synced_content_hash = excluded.last_synced_content_hash,
 		   last_synced_at = excluded.last_synced_at,
-		   last_reviewed_head_sha = excluded.last_reviewed_head_sha`,
+		   last_reviewed_head_sha = excluded.last_reviewed_head_sha,
+		   first_seen_head_sha = excluded.first_seen_head_sha,
+		   first_seen_head_at = excluded.first_seen_head_at`,
 		l.Repo, l.EntityType, l.EntityID, l.Kind, l.BeadID,
 		nullableString(l.LastSyncedContentHash), nullableString(l.LastSyncedAt), nullableString(l.LastReviewedHeadSHA),
+		nullableString(l.FirstSeenHeadSHA), nullableString(l.FirstSeenHeadAt),
 	)
 	if err != nil {
 		return fmt.Errorf("store: upsert ledger (%s,%s,%s,%s): %w", l.Repo, l.EntityType, l.EntityID, l.Kind, err)
@@ -56,7 +70,7 @@ func (s *Store) UpsertLedger(l LedgerEntry) error {
 // and status's own scope is the whole store, not one PR.
 func (s *Store) ListLedger() ([]LedgerEntry, error) {
 	rows, err := s.sql.Query(
-		`SELECT repo, entity_type, entity_id, kind, bead_id, last_synced_content_hash, last_synced_at, last_reviewed_head_sha
+		`SELECT repo, entity_type, entity_id, kind, bead_id, last_synced_content_hash, last_synced_at, last_reviewed_head_sha, first_seen_head_sha, first_seen_head_at
 		 FROM ledger ORDER BY repo, entity_type, entity_id, kind`,
 	)
 	if err != nil {
@@ -67,14 +81,16 @@ func (s *Store) ListLedger() ([]LedgerEntry, error) {
 	var out []LedgerEntry
 	for rows.Next() {
 		var entry LedgerEntry
-		var lastSyncedContentHash, lastSyncedAt, lastReviewedHeadSHA sql.NullString
+		var lastSyncedContentHash, lastSyncedAt, lastReviewedHeadSHA, firstSeenHeadSHA, firstSeenHeadAt sql.NullString
 		if err := rows.Scan(&entry.Repo, &entry.EntityType, &entry.EntityID, &entry.Kind, &entry.BeadID,
-			&lastSyncedContentHash, &lastSyncedAt, &lastReviewedHeadSHA); err != nil {
+			&lastSyncedContentHash, &lastSyncedAt, &lastReviewedHeadSHA, &firstSeenHeadSHA, &firstSeenHeadAt); err != nil {
 			return nil, fmt.Errorf("store: scan ledger row: %w", err)
 		}
 		entry.LastSyncedContentHash = lastSyncedContentHash.String
 		entry.LastSyncedAt = lastSyncedAt.String
 		entry.LastReviewedHeadSHA = lastReviewedHeadSHA.String
+		entry.FirstSeenHeadSHA = firstSeenHeadSHA.String
+		entry.FirstSeenHeadAt = firstSeenHeadAt.String
 		out = append(out, entry)
 	}
 	if err := rows.Err(); err != nil {
@@ -86,14 +102,14 @@ func (s *Store) ListLedger() ([]LedgerEntry, error) {
 // GetLedger returns the ledger row for
 // (repo, entityType, entityID, kind), or found=false if no such row exists.
 func (s *Store) GetLedger(repo, entityType, entityID, kind string) (entry LedgerEntry, found bool, err error) {
-	var lastSyncedContentHash, lastSyncedAt, lastReviewedHeadSHA sql.NullString
+	var lastSyncedContentHash, lastSyncedAt, lastReviewedHeadSHA, firstSeenHeadSHA, firstSeenHeadAt sql.NullString
 	row := s.sql.QueryRow(
-		`SELECT repo, entity_type, entity_id, kind, bead_id, last_synced_content_hash, last_synced_at, last_reviewed_head_sha
+		`SELECT repo, entity_type, entity_id, kind, bead_id, last_synced_content_hash, last_synced_at, last_reviewed_head_sha, first_seen_head_sha, first_seen_head_at
 		 FROM ledger WHERE repo = ? AND entity_type = ? AND entity_id = ? AND kind = ?`,
 		repo, entityType, entityID, kind,
 	)
 	if err := row.Scan(&entry.Repo, &entry.EntityType, &entry.EntityID, &entry.Kind, &entry.BeadID,
-		&lastSyncedContentHash, &lastSyncedAt, &lastReviewedHeadSHA); err != nil {
+		&lastSyncedContentHash, &lastSyncedAt, &lastReviewedHeadSHA, &firstSeenHeadSHA, &firstSeenHeadAt); err != nil {
 		if err == sql.ErrNoRows {
 			return LedgerEntry{}, false, nil
 		}
@@ -102,5 +118,7 @@ func (s *Store) GetLedger(repo, entityType, entityID, kind string) (entry Ledger
 	entry.LastSyncedContentHash = lastSyncedContentHash.String
 	entry.LastSyncedAt = lastSyncedAt.String
 	entry.LastReviewedHeadSHA = lastReviewedHeadSHA.String
+	entry.FirstSeenHeadSHA = firstSeenHeadSHA.String
+	entry.FirstSeenHeadAt = firstSeenHeadAt.String
 	return entry, true, nil
 }

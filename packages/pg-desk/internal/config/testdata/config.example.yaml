@@ -75,6 +75,7 @@ sync:
     max_retries: 5
     initial_backoff: 2m
     max_backoff: 1h
+  review_settle_window: 5m
 
 heartbeat_period: 5m
 stale_after: 30m

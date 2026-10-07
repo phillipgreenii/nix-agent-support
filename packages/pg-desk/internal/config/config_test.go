@@ -78,7 +78,7 @@ func TestConfigCoversAllSection78Keys(t *testing.T) {
 		{"UrgencyConfig", reflect.TypeOf(UrgencyConfig{}), []string{"labels", "keywords", "thresholds"}},
 		// sync.retry (bead pg2-xb6fs) postdates the section-7.8 table: the
 		// automatic-retry bounds for a recorded sync_error.
-		{"SyncConfig", reflect.TypeOf(SyncConfig{}), []string{"mode", "retry"}},
+		{"SyncConfig", reflect.TypeOf(SyncConfig{}), []string{"mode", "retry", "review_settle_window"}},
 		{"SyncRetryConfig", reflect.TypeOf(SyncRetryConfig{}), []string{"max_retries", "initial_backoff", "max_backoff"}},
 		{"ServeConfig", reflect.TypeOf(ServeConfig{}), []string{"addr", "log"}},
 		{"OpenConfig", reflect.TypeOf(OpenConfig{}), []string{"chrome_bin"}},
@@ -243,6 +243,9 @@ func TestLoadFile_FullExample(t *testing.T) {
 	}
 	if maxRetries != 5 || initialBackoff != 2*time.Minute || maxBackoff != time.Hour {
 		t.Errorf("sync.retry: got (%d, %s, %s), want (5, 2m0s, 1h0m0s)", maxRetries, initialBackoff, maxBackoff)
+	}
+	if got := cfg.ReviewSettleWindow(); got != 5*time.Minute {
+		t.Errorf("sync.review_settle_window: got %s, want 5m0s", got)
 	}
 
 	if cfg.HeartbeatPeriod != "5m" {
@@ -890,6 +893,63 @@ func TestFreshnessKeys_InvalidFail(t *testing.T) {
 			_, err := LoadFile(writeYAML(t, t.TempDir(), changeFlowBase+tc.block))
 			if err == nil || !strings.Contains(err.Error(), tc.key) {
 				t.Fatalf("LoadFile: err = %v, want an error naming %s", err, tc.key)
+			}
+		})
+	}
+}
+
+// TestReviewSettleWindow_Resolve: sync.review_settle_window defaults to
+// DefaultReviewSettleWindow when unset, honors an explicit zero (no window)
+// and rejects a negative or unparseable value (bead pg2-a9yhn).
+func TestReviewSettleWindow_Resolve(t *testing.T) {
+	for name, tc := range map[string]struct {
+		in      string
+		want    time.Duration
+		wantErr bool
+	}{
+		"unset defaults":   {in: "", want: DefaultReviewSettleWindow},
+		"blank defaults":   {in: "  ", want: DefaultReviewSettleWindow},
+		"explicit minutes": {in: "5m", want: 5 * time.Minute},
+		"explicit zero":    {in: "0", want: 0},
+		"explicit 0s":      {in: "0s", want: 0},
+		"negative":         {in: "-1m", wantErr: true},
+		"unparseable":      {in: "soon", wantErr: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := SyncConfig{ReviewSettleWindow: tc.in}.ResolveReviewSettleWindow()
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("ResolveReviewSettleWindow(%q) err = %v, wantErr %v", tc.in, err, tc.wantErr)
+			}
+			if err == nil && got != tc.want {
+				t.Fatalf("ResolveReviewSettleWindow(%q) = %s, want %s", tc.in, got, tc.want)
+			}
+		})
+	}
+	if DefaultReviewSettleWindow != 2*time.Minute {
+		t.Fatalf("DefaultReviewSettleWindow = %s, want 2m (documented in sync.md)", DefaultReviewSettleWindow)
+	}
+}
+
+// TestReviewSettleWindow_ConfigAccessor: the Config accessor falls back to
+// the default for a nil config, and returns the configured value otherwise.
+func TestReviewSettleWindow_ConfigAccessor(t *testing.T) {
+	var nilCfg *Config
+	if got := nilCfg.ReviewSettleWindow(); got != DefaultReviewSettleWindow {
+		t.Fatalf("nil config window = %s, want default", got)
+	}
+	cfg := &Config{Sync: SyncConfig{ReviewSettleWindow: "0"}}
+	if got := cfg.ReviewSettleWindow(); got != 0 {
+		t.Fatalf("explicit zero window = %s, want 0", got)
+	}
+}
+
+func TestLoadFile_ReviewSettleWindowInvalidFails(t *testing.T) {
+	for name, v := range map[string]string{"negative": "-1m", "unparseable": "soon"} {
+		t.Run(name, func(t *testing.T) {
+			p := writeYAML(t, t.TempDir(), "self_login: a\nrepos:\n  - remote: o/r\nsync:\n  review_settle_window: "+v+"\n")
+			_, err := LoadFile(p)
+			if err == nil || !strings.Contains(err.Error(), "review_settle_window") {
+				t.Fatalf("LoadFile: err = %v, want a review_settle_window validation error", err)
 			}
 		})
 	}

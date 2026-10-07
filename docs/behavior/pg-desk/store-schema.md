@@ -41,7 +41,12 @@ below. "Schema version 2 tables" describes what the cutover changes.
   write WOULD set; an `apply`-mode row carries the real `bead_id` and a content hash of the fields
   the write DID set — the same hash for the same input regardless of mode, which is what makes the
   plan/apply parity check mechanical. `last_reviewed_head_sha` is meaningful only for the
-  `review-request` kind row.
+  `review-request` kind row, where it is the head of the last review REQUEST sync made (not of a
+  completed review). The `review-request` row also carries `first_seen_head_sha` and
+  `first_seen_head_at`, the head sync is waiting out and when it first saw it (both empty when no
+  head is pending; see [`sync.md`](sync.md)'s "Review settle window"). On a version-1 store those
+  two columns are added to `ledger` by an idempotent column ensure on open (not a rung of the
+  version ladder, so `user_version` stays `1`); the cutover drops the whole table.
 - **`meta`** — schema version, last heartbeat, last run, and last sweep times. Written by
   migrations, `heartbeat`, and `sweep` (`last_sweep`, bead `pg2-gznpe`) — `last_run` is reserved in
   this same table but not yet written by any command (a separate, pre-existing gap; not this

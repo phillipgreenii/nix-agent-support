@@ -1,4 +1,4 @@
-# pg-desk — show, status, sweep, reconcile, doctor, heartbeat, heartbeat-item, freshness
+# pg-desk — show, status, sweep, reconcile, pr head-check, doctor, heartbeat, heartbeat-item, freshness
 
 ## show
 
@@ -77,7 +77,7 @@ entities' pipeline run failed (naming which).
 is otherwise driven only by the one-shot `--change removed` event, and `pr-sweep` lists only PRs
 matching the open queries, so a single failed closure would leave a merge-request anchor open
 forever. `reconcile` reads the store and re-drives, through the same `run pr <id> --change
-removed` path (so closure stays ledger-guarded and re-entrant), every PR entity that has either:
+removed` path (so closure stays ledger-guarded and re-entrant), every PR entity that has any of:
 
 - a `kind=anchor` ledger row that is not `closed` (with a non-empty bead id) whose PR a
   `--change removed` re-read reports as merged, closed, or not found; a PR still `open` is left
@@ -85,6 +85,11 @@ removed` path (so closure stays ledger-guarded and re-entrant), every PR entity 
 - a recorded `interpretation.sync_error` whose automatic retry is due (see [`sync.md`](sync.md)'s
   "Automatic retry"), re-driven regardless of PR state (a successful run clears it). A row with
   no recorded retry state yet is due.
+
+- a `kind=review-request` ledger row whose pending head has finished waiting out its settle window
+  (`sync.review_settle_window`, see [`sync.md`](sync.md)'s "Review settle window"), re-driven by an
+  ordinary `run pr <id> --change sweep` so the review of the settled head is requested without
+  waiting for an unrelated event for that PR.
 
 A `sync_error` row whose retry is not due — still backing off, exhausted, or non-transient — is
 held: `reconcile` MUST NOT re-drive it through either bullet above (its open anchor is not re-read
@@ -111,6 +116,26 @@ with candidates remaining — that case is distinguishable only by the stderr JS
 `{"event":"reconcile_budget_exhausted","processed":N,"remaining":M}`; `1` when config or store
 cannot be opened, or when any candidate's re-drive failed (naming which), even if the budget also
 ran out.
+
+## pr head-check
+
+`pg-desk pr head-check <id> --head-sha <sha>` (bead `pg2-a9yhn`) is the mid-review "has the head
+moved" check. It reads the PR's head commit now with one `pg-connector pr show <id> --fresh`,
+compares it with `--head-sha` (the commit the review started on), and exits:
+
+- `0` — the head is unchanged; the review may continue.
+- `4` — the head moved: the review is stale and SHOULD stop now. The error names the reviewed head
+  and the new one. (Without this check a review learns the head moved only when its submit is
+  refused, after all of its work is spent.)
+- `1` — the lookup failed (including a PR pg-connector does not know); nothing is known about the
+  head and the caller decides whether to continue.
+
+An abbreviated `--head-sha` of at least 7 characters matches by prefix. The verb reads and writes
+nothing in the store, needs no schema cutover, and issues the one `pg-connector` call named above.
+A review prompt SHOULD run it at the review's mid-point (about 10 minutes in) and again immediately
+before it submits, and stop early on exit `4`; the next review request, for the new head, is
+created by sync once that head settles (see [`sync.md`](sync.md)). The prompt belongs to the
+deployment that runs the review, not to this repo.
 
 ## doctor
 

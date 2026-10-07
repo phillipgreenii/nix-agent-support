@@ -537,6 +537,15 @@ func (p *Pipeline) Sweep(ctx context.Context, entities []store.Entity) error {
 // though a closed-anchor audit still runs. WithReconcileRetryAll lifts the
 // hold for an operator's manual repair.
 //
+// A PR whose review request is waiting out a head's settle window
+// (sync.review_settle_window, bead pg2-a9yhn) is also a candidate once that
+// window has elapsed: sync runs only on events, so a quiet PR whose last push
+// settled would otherwise wait for its next unrelated event before the review
+// of that head is requested. Such a candidate is re-driven by an ordinary
+// sweep run, which reopens the review bead through the same ledger-guarded
+// path. How soon after the window this happens is bounded by how often the
+// scheduler runs reconcile.
+//
 // It also audits every ledger-closed anchor once (bead pg2-a6aw6): an
 // anchor closed by an earlier review can keep stale bead metadata
 // (state=open, no closed_at); a stale one is stamped with the truthful
@@ -598,6 +607,7 @@ func (p *Pipeline) Reconcile(ctx context.Context) error {
 	// An id absent from needsPeek is not re-driven (audit-only).
 	needsPeek := map[string]bool{}
 	audit := map[string]bool{}
+	settle := map[string]bool{} // review settle window elapsed (pg2-a9yhn)
 	var order []string
 	inOrder := map[string]bool{}
 	touch := func(id string) {
@@ -615,7 +625,12 @@ func (p *Pipeline) Reconcile(ctx context.Context) error {
 		}
 		needsPeek[id] = prev && peek
 	}
+	settleWindow := p.cfg.ReviewSettleWindow()
 	for _, l := range ledger {
+		if l.Repo == repo && l.EntityType == entityTypePR && !held[l.EntityID] && sync.SettleDue(l, settleWindow, now) {
+			settle[l.EntityID] = true
+			touch(l.EntityID)
+		}
 		if l.Repo != repo || l.EntityType != entityTypePR || l.Kind != sync.KindAnchor || l.BeadID == "" {
 			continue
 		}
@@ -665,6 +680,15 @@ func (p *Pipeline) Reconcile(ctx context.Context) error {
 		if peek, redrive := needsPeek[id]; redrive {
 			if err := p.reconcileRedrive(ctx, id, peek); err != nil {
 				errs = append(errs, err)
+				continue
+			}
+		}
+		if settle[id] {
+			// Re-driven through the ordinary run path; the anchor-closure
+			// path above (if it ran) already cleared the pending head when
+			// the PR had left the open set, so this is then a cheap no-op.
+			if err := p.Run(ctx, entityTypePR, id, gather.ChangeSweep); err != nil {
+				errs = append(errs, fmt.Errorf("reconcile %s: settled review: %w", id, err))
 				continue
 			}
 		}

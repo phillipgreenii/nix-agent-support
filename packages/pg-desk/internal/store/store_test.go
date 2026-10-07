@@ -377,6 +377,8 @@ func TestLedgerRoundTrip(t *testing.T) {
 		LastSyncedContentHash: "abc123",
 		LastSyncedAt:          "2026-09-16T00:00:00Z",
 		LastReviewedHeadSHA:   "deadbeef",
+		FirstSeenHeadSHA:      "feedface",
+		FirstSeenHeadAt:       "2026-09-16T00:01:00Z",
 	}
 	if err := s.UpsertLedger(l); err != nil {
 		t.Fatalf("UpsertLedger: %v", err)
@@ -391,6 +393,73 @@ func TestLedgerRoundTrip(t *testing.T) {
 	}
 	if got != l {
 		t.Fatalf("GetLedger round-trip = %+v, want %+v", got, l)
+	}
+
+	all, err := s.ListLedger()
+	if err != nil || len(all) != 1 || all[0] != l {
+		t.Fatalf("ListLedger = %+v, %v; want exactly %+v", all, err, l)
+	}
+
+	// An upsert with the settle fields cleared must clear them (a settled or
+	// abandoned pending head is not remembered).
+	l.FirstSeenHeadSHA, l.FirstSeenHeadAt = "", ""
+	if err := s.UpsertLedger(l); err != nil {
+		t.Fatalf("UpsertLedger (clear): %v", err)
+	}
+	got, _, err = s.GetLedger(l.Repo, l.EntityType, l.EntityID, l.Kind)
+	if err != nil || got != l {
+		t.Fatalf("GetLedger after clear = %+v, %v; want %+v", got, err, l)
+	}
+}
+
+// TestOpenAddsLedgerSettleColumnsToOldStore: a version-1 store written before
+// bead pg2-a9yhn has a ledger table without the review-settle columns; Open
+// adds them (keeping existing rows, readable as empty settle state), stays at
+// user_version 1, and a second Open is a no-op.
+func TestOpenAddsLedgerSettleColumnsToOldStore(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	old := LedgerEntry{Repo: "o/r", EntityType: "pr", EntityID: "o/r#1", Kind: "review-request", BeadID: "b-1", LastReviewedHeadSHA: "aaaa"}
+	if err := s.UpsertLedger(old); err != nil {
+		t.Fatalf("UpsertLedger: %v", err)
+	}
+	for _, col := range []string{"first_seen_head_sha", "first_seen_head_at"} {
+		if _, err := s.sql.Exec(`ALTER TABLE ledger DROP COLUMN ` + col); err != nil {
+			t.Fatalf("simulate old store: drop %s: %v", col, err)
+		}
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	for i := 0; i < 2; i++ {
+		s2, err := Open(path)
+		if err != nil {
+			t.Fatalf("Open #%d: %v", i, err)
+		}
+		cols := tableColumns(t, s2, "ledger")
+		for _, want := range []string{"first_seen_head_sha", "first_seen_head_at"} {
+			found := false
+			for _, c := range cols {
+				found = found || c == want
+			}
+			if !found {
+				t.Errorf("Open #%d: ledger columns %v lack %s", i, cols, want)
+			}
+		}
+		if v, err := s2.SchemaVersion(); err != nil || v != 1 {
+			t.Errorf("Open #%d: SchemaVersion = %d, %v; want 1 (the column ensure is not a ladder rung)", i, v, err)
+		}
+		got, found, err := s2.GetLedger(old.Repo, old.EntityType, old.EntityID, old.Kind)
+		if err != nil || !found || got != old {
+			t.Errorf("Open #%d: GetLedger = %+v, found=%v, err=%v; want %+v", i, got, found, err, old)
+		}
+		if err := s2.Close(); err != nil {
+			t.Fatalf("Close #%d: %v", i, err)
+		}
 	}
 }
 

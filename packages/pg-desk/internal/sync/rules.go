@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/interpret"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
@@ -143,6 +144,22 @@ func (rc *runContext) upsertLedger(kind, beadID, contentHash, lastReviewedHeadSH
 		LastSyncedContentHash: contentHash,
 		LastSyncedAt:          rc.now,
 		LastReviewedHeadSHA:   lastReviewedHeadSHA,
+	})
+}
+
+// upsertReviewLedger writes the review-request row with explicit settle
+// state (the pending head and when it was first seen). Every other ledger
+// write clears the settle state, which is right: a created, reopened or
+// closed review request has no pending head.
+func (rc *runContext) upsertReviewLedger(beadID, contentHash, lastReviewedHeadSHA, firstSeenHeadSHA, firstSeenHeadAt string) error {
+	return rc.syncer.store.UpsertLedger(store.LedgerEntry{
+		Repo: rc.repo, EntityType: "pr", EntityID: rc.entityID, Kind: KindReviewRequest,
+		BeadID:                beadID,
+		LastSyncedContentHash: contentHash,
+		LastSyncedAt:          rc.now,
+		LastReviewedHeadSHA:   lastReviewedHeadSHA,
+		FirstSeenHeadSHA:      firstSeenHeadSHA,
+		FirstSeenHeadAt:       firstSeenHeadAt,
 	})
 }
 
@@ -554,7 +571,49 @@ func (rc *runContext) ensureCycle(ctx context.Context, unaddressed []string, act
 // from pg-router's ACL (design section 7.5): no gate (D13) — the caller
 // (reconcile) has already decided needsReview; this method only ensures
 // the bead exists and reopens/refreshes it once the head advances past the
-// ledger's last-reviewed SHA.
+// ledger's last-requested SHA AND has then stayed put for the settle window.
+//
+// # What the ledger's last_reviewed_head_sha means (bead pg2-a9yhn, item 2)
+//
+// It is the head of the last review REQUEST sync made — written when the
+// bead is created or reopened — and NOT the head of a review that completed.
+// The column name is historical. That is intended, for three reasons:
+//
+//   - Completion is not observable here. Sync sees only the bead's status;
+//     whether a review was posted, submitted, declined or skipped lives in the
+//     worker and the pending review (see docs/behavior/pg-desk/sync.md,
+//     "Review-request lifecycle"). A "last reviewed" value would have to be
+//     inferred from a closed bead, which cannot tell a posted review from a
+//     declined one.
+//   - A request that is dropped without the bead being closed (a killed or
+//     crashed session, a worker that hands the bead back, a blocked review
+//     that is deferred) is NOT lost: the bead itself is the durable request
+//     and stays open, in progress or deferred until a worker closes it, and
+//     the workspace's session reaping releases a dead claim. Re-requesting the
+//     same head on top of an open bead would change nothing.
+//   - A worker that closes the bead WITHOUT reviewing (declined) must not be
+//     asked again for the same head: the 72h trigger trace found no review of
+//     an already-reviewed head, and this deterministic dedup by head SHA is the
+//     property to preserve. A person who wants the head re-reviewed reopens the
+//     bead, or pushes; a new head is requested as soon as it settles.
+//
+// # Settle window (bead pg2-a9yhn, item 1)
+//
+// A head that differs from the last-requested one is not acted on at once: a
+// burst of pushes would otherwise start a ~16 minute review of every
+// intermediate head, and a review whose head moved is refused at submit. The
+// ledger row remembers the pending head and when a sync run first saw it
+// (first_seen_head_sha / first_seen_head_at); the bead is reopened only once
+// that head has been the PR's head for sync.review_settle_window
+// (config.DefaultReviewSettleWindow). A push inside the window moves the
+// pending head and restarts the timer, so a burst of N pushes yields one
+// request, for the head the burst ended on. The window applies to the REOPEN
+// only: the first review request of a PR is created at once (a PR's first
+// head has no earlier head to supersede, and an empty-bead pending row would
+// be indistinguishable from a plan-mode planned row). The timer is measured
+// in sync runs' own clock, so it starts when sync first saw the head, which
+// is at most one polling cadence after the push; a quiet PR is re-driven
+// after the window by `pg-desk reconcile` (see SettleDueRows).
 func (rc *runContext) ensureReviewRequest(ctx context.Context) error {
 	metadata := map[string]string{
 		"repo": rc.repo, "pr_number": strconv.Itoa(rc.prNumber),
@@ -582,8 +641,31 @@ func (rc *runContext) ensureReviewRequest(ctx context.Context) error {
 	}
 
 	if rc.ledgerReview.LastReviewedHeadSHA != "" && rc.ledgerReview.LastReviewedHeadSHA == rc.headSHA {
+		// The head is back at (or never left) the one already requested, so
+		// any pending newer head was superseded (a force-push back). Forget
+		// it: otherwise the same SHA reappearing later would inherit the old
+		// timer and be treated as settled at once.
+		if rc.ledgerReview.FirstSeenHeadSHA != "" || rc.ledgerReview.FirstSeenHeadAt != "" {
+			return rc.upsertReviewLedger(rc.reviewID, rc.ledgerReview.LastSyncedContentHash, rc.headSHA, "", "")
+		}
 		return nil // head has not advanced — nothing to do
 	}
+
+	// The head has advanced past the last request: wait for it to settle.
+	window := rc.syncer.cfg.ReviewSettleWindow()
+	if window > 0 {
+		led := rc.ledgerReview
+		firstSeenAt, parsed := parseSettleTime(led.FirstSeenHeadAt)
+		switch {
+		case led.FirstSeenHeadSHA != rc.headSHA || !parsed:
+			// A head sync has not seen before (or unreadable state): start
+			// (or restart) its timer. Nothing is written to the bead.
+			return rc.upsertReviewLedger(rc.reviewID, led.LastSyncedContentHash, led.LastReviewedHeadSHA, rc.headSHA, rc.now)
+		case rc.nowTime().Sub(firstSeenAt) < window:
+			return nil // still settling; no write, so a quiet re-run is free
+		}
+	}
+
 	if rc.mode == ModeApply {
 		// ONE update: status open + assignee cleared + deferral cleared +
 		// metadata refreshed (pg2-1pt7r). A bare Transition("open") cannot
@@ -610,4 +692,38 @@ func (rc *runContext) ensureReviewRequest(ctx context.Context) error {
 		}
 	}
 	return rc.upsertLedger(KindReviewRequest, rc.reviewID, hash, rc.headSHA)
+}
+
+// parseSettleTime parses a ledger first_seen_head_at; ok is false for an
+// empty or unreadable value.
+func parseSettleTime(v string) (time.Time, bool) {
+	if v == "" {
+		return time.Time{}, false
+	}
+	t, err := time.Parse(rfc3339, v)
+	return t, err == nil
+}
+
+// nowTime is rc.now (the run's single stamped instant) as a time.Time.
+func (rc *runContext) nowTime() time.Time {
+	t, err := time.Parse(rfc3339, rc.now)
+	if err != nil {
+		return rc.syncer.clock.Now().UTC()
+	}
+	return t
+}
+
+// SettleDue reports whether a review-request ledger row is waiting out a
+// pending head whose settle window has now elapsed, so that a sync run would
+// reopen the bead. It is false for any other row, for a zero window, and for
+// a row with no pending head.
+func SettleDue(l store.LedgerEntry, window time.Duration, now time.Time) bool {
+	if l.Kind != KindReviewRequest || l.BeadID == "" || l.FirstSeenHeadSHA == "" || window <= 0 {
+		return false
+	}
+	at, ok := parseSettleTime(l.FirstSeenHeadAt)
+	if !ok {
+		return false
+	}
+	return now.Sub(at) >= window
 }

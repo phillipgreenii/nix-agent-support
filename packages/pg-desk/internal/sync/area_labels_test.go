@@ -176,6 +176,7 @@ func TestAreaLabels_ReviewReopenAddsMissingAreaLabels(t *testing.T) {
 		Repo: fixtureRepo, EntityType: "pr", EntityID: fixtureEntity, Kind: KindReviewRequest,
 		BeadID: "bd-review-z", LastSyncedContentHash: "old", LastSyncedAt: "2026-09-16T00:00:00Z",
 		LastReviewedHeadSHA: "old-sha",
+		FirstSeenHeadSHA:    "new-sha", FirstSeenHeadAt: "2026-09-16T00:00:00Z", // settled (pg2-a9yhn)
 	}); err != nil {
 		t.Fatalf("seed ledger: %v", err)
 	}

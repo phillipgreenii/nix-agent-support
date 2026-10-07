@@ -377,6 +377,35 @@ func (g *Gatherer) Gather(ctx context.Context, entityType, entityID string, chan
 // never a hard error — the one place in this package where that call's
 // not_found branch is not folded into the generic failure path
 // [docs/behavior/pg-desk/gather.md "--change removed handling"].
+// ErrPRNotFound is CurrentHeadSHA's error for a PR pg-connector reports as
+// not found.
+var ErrPRNotFound = errors.New("gather: PR not found")
+
+// CurrentHeadSHA returns the PR's head commit as of NOW, read with one
+// `pg-connector pr show <id> --fresh` (the cached answer a plain show may
+// give is not good enough to decide whether a review's head has moved). It
+// gathers nothing else and writes nothing: it is the single-fact read
+// behind `pg-desk pr head-check` (bead pg2-a9yhn), for a long-running review
+// to ask whether its head is still the PR's head. A PR pg-connector does not
+// know is ErrPRNotFound; an empty head is an error.
+func (g *Gatherer) CurrentHeadSHA(ctx context.Context, entityID string) (string, error) {
+	raw, notFound, err := g.targetedCall(ctx, []string{"pr", "show", entityID, "--fresh"}, nil)
+	if err != nil {
+		return "", err
+	}
+	if notFound {
+		return "", fmt.Errorf("%w: %s", ErrPRNotFound, entityID)
+	}
+	show, err := decodePRShow(raw)
+	if err != nil {
+		return "", fmt.Errorf("gather: decode PR %s pr show result: %w", entityID, err)
+	}
+	if show.HeadSHA == "" {
+		return "", fmt.Errorf("gather: PR %s: pr show carries no head_sha", entityID)
+	}
+	return show.HeadSHA, nil
+}
+
 func (g *Gatherer) removedFacts(prShowRaw json.RawMessage, notFound bool, err error) (Facts, error) {
 	if notFound {
 		return Facts{RemovedState: "not_found"}, nil
