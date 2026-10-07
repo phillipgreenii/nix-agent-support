@@ -525,12 +525,17 @@ func TestChecksRollupFromContexts_FoldRules(t *testing.T) {
 	}
 }
 
+// connResp wraps one page of a pullRequest connection in the GraphQL envelope.
+func connResp(field string, total int, hasNext bool, cursor, nodes string) []byte {
+	return []byte(fmt.Sprintf(`{"data":{"rateLimit":{"cost":1},"repository":{"pullRequest":{%q:{"totalCount":%d,"pageInfo":{"hasNextPage":%t,"endCursor":%q},"nodes":[%s]}}}}}`,
+		field, total, hasNext, cursor, nodes))
+}
+
 func TestGetFiles_ParsesAndConverts(t *testing.T) {
 	gh := newFakeGH()
-	gh.responses["pr view"] = []byte(`{"files": [
+	gh.responses["api graphql"] = connResp("files", 2, false, "", `
 		{"path": "a.go", "additions": 5, "deletions": 1},
-		{"path": "b.go", "additions": 0, "deletions": 3}
-	]}`)
+		{"path": "b.go", "additions": 0, "deletions": 3}`)
 	p := NewWithRunner(gh)
 
 	files, err := p.GetFiles(context.Background(), "foo/bar", 7)
@@ -543,8 +548,30 @@ func TestGetFiles_ParsesAndConverts(t *testing.T) {
 	if files[1].Path != "b.go" || files[1].Deletions != 3 {
 		t.Fatalf("files[1] = %+v", files[1])
 	}
-	if !strings.Contains(strings.Join(gh.calls[0], " "), "files") {
-		t.Errorf("gh pr view must request the files field; args=%v", gh.calls)
+	joined := strings.Join(gh.calls[0], " ")
+	for _, want := range []string{"api graphql", "files(first: 100", "rateLimit { cost }", "owner=foo", "name=bar", "number=7"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("gh call missing %q; args=%v", want, gh.calls[0])
+		}
+	}
+}
+
+// A files connection longer than one page is read to its end, the cursor
+// threaded through.
+func TestGetFiles_PagesThroughTheConnection(t *testing.T) {
+	gh := &sequencedGH{responses: [][]byte{
+		connResp("files", 2, true, "C1", `{"path": "a.go", "additions": 1, "deletions": 0}`),
+		connResp("files", 2, false, "", `{"path": "b.go", "additions": 2, "deletions": 0}`),
+	}}
+	files, err := NewWithRunner(gh).GetFiles(context.Background(), "foo/bar", 7)
+	if err != nil {
+		t.Fatalf("GetFiles: %v", err)
+	}
+	if len(files) != 2 || files[1].Path != "b.go" {
+		t.Fatalf("files = %+v, want both pages", files)
+	}
+	if !strings.Contains(strings.Join(gh.calls[1], " "), "after=C1") {
+		t.Errorf("second page call lacks the cursor: %v", gh.calls[1])
 	}
 }
 
@@ -560,7 +587,7 @@ func TestGetFiles_ValidatesInput(t *testing.T) {
 
 func TestGetFiles_PropagatesGHError(t *testing.T) {
 	gh := newFakeGH()
-	gh.errs["pr view"] = errors.New("boom: auth required")
+	gh.errs["api graphql"] = errors.New("boom: auth required")
 	p := NewWithRunner(gh)
 
 	if _, err := p.GetFiles(context.Background(), "foo/bar", 7); err == nil {
@@ -568,12 +595,28 @@ func TestGetFiles_PropagatesGHError(t *testing.T) {
 	}
 }
 
+// A PR number GitHub cannot resolve (null pullRequest) reads like gh's own
+// unresolved-node error, so the backend's not-found classification applies.
+func TestGetFilesAndCommits_UnresolvedPRReadsAsNotFound(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["api graphql"] = []byte(`{"data":{"rateLimit":{"cost":1},"repository":{"pullRequest":null}}}`)
+	p := NewWithRunner(gh)
+	for name, run := range map[string]func() error{
+		"files":   func() error { _, err := p.GetFiles(context.Background(), "foo/bar", 7); return err },
+		"commits": func() error { _, err := p.GetCommits(context.Background(), "foo/bar", 7); return err },
+	} {
+		err := run()
+		if err == nil || !strings.Contains(err.Error(), "Could not resolve to a PullRequest") {
+			t.Errorf("%s: err = %v, want the unresolved-PR error", name, err)
+		}
+	}
+}
+
 func TestGetCommits_ParsesAndConverts(t *testing.T) {
 	gh := newFakeGH()
-	gh.responses["pr view"] = []byte(`{"commits": [
-		{"oid": "abc123", "messageHeadline": "fix bug", "authors": [{"login": "alice"}]},
-		{"oid": "def456", "messageHeadline": "no linked account", "authors": [{"login": ""}]}
-	]}`)
+	gh.responses["api graphql"] = connResp("commits", 2, false, "", `
+		{"commit": {"oid": "abc123", "messageHeadline": "fix bug", "authors": {"nodes": [{"user": {"login": "alice"}}]}}},
+		{"commit": {"oid": "def456", "messageHeadline": "no linked account", "authors": {"nodes": [{"user": null}]}}}`)
 	p := NewWithRunner(gh)
 
 	commits, err := p.GetCommits(context.Background(), "foo/bar", 7)
@@ -588,16 +631,18 @@ func TestGetCommits_ParsesAndConverts(t *testing.T) {
 	if commits[1].SHA != "def456" || commits[1].Author != "" {
 		t.Fatalf("commits[1] = %+v", commits[1])
 	}
-	if !strings.Contains(strings.Join(gh.calls[0], " "), "commits") {
-		t.Errorf("gh pr view must request the commits field; args=%v", gh.calls)
+	joined := strings.Join(gh.calls[0], " ")
+	for _, want := range []string{"api graphql", "commits(first: 100", "rateLimit { cost }", "number=7"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("gh call missing %q; args=%v", want, gh.calls[0])
+		}
 	}
 }
 
 func TestGetCommits_NoAuthorsIsEmptyAuthor(t *testing.T) {
 	gh := newFakeGH()
-	gh.responses["pr view"] = []byte(`{"commits": [
-		{"oid": "abc123", "messageHeadline": "fix bug", "authors": []}
-	]}`)
+	gh.responses["api graphql"] = connResp("commits", 1, false, "", `
+		{"commit": {"oid": "abc123", "messageHeadline": "fix bug", "authors": {"nodes": []}}}`)
 	p := NewWithRunner(gh)
 
 	commits, err := p.GetCommits(context.Background(), "foo/bar", 7)

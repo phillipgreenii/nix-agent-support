@@ -420,8 +420,58 @@ func (p *Provider) GetPR(ctx context.Context, repo string, number int) (*api.PR,
 	return &out, nil
 }
 
-// ghPRFile is the JSON shape of one entry in `gh pr view --json files`'
-// flattened array.
+// maxFiles and maxCommits cap GetFiles' and GetCommits' paging. They sit at
+// (or above) GitHub's own hard limits for a pull request (3000 files, 250
+// commits), so neither read is truncated in practice.
+const (
+	maxFiles   = 3000
+	maxCommits = 1000
+)
+
+// prFilesPageQuery reads one page of a PR's changed files. It is a document
+// this connector owns (not `gh pr view --json files`, whose query gh builds)
+// so it can select rateLimit { cost }: runGraphQL adds that cost to the call's
+// event as graphql_cost (bead pg2-ir8bs).
+const prFilesPageQuery = `
+query($owner: String!, $name: String!, $number: Int!, $after: String) {
+  rateLimit { cost }
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      files(first: 100, after: $after) {
+        totalCount
+        pageInfo { hasNextPage endCursor }
+        nodes { path additions deletions }
+      }
+    }
+  }
+}
+`
+
+// prCommitsPageQuery reads one page of a PR's commits, each with its first
+// author's linked GitHub login (empty when the author identity has no linked
+// account). Like prFilesPageQuery it selects rateLimit { cost }.
+const prCommitsPageQuery = `
+query($owner: String!, $name: String!, $number: Int!, $after: String) {
+  rateLimit { cost }
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      commits(first: 100, after: $after) {
+        totalCount
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          commit {
+            oid
+            messageHeadline
+            authors(first: 1) { nodes { user { login } } }
+          }
+        }
+      }
+    }
+  }
+}
+`
+
+// ghPRFile is the JSON shape of one node of the files connection.
 type ghPRFile struct {
 	Path      string `json:"path"`
 	Additions int    `json:"additions"`
@@ -429,46 +479,58 @@ type ghPRFile struct {
 }
 
 // GetFiles fetches a single PR's changed-file list (bead pg2-2j5ac.28.2,
-// the "files" targeted op's backing read). A dedicated `gh pr view --json
-// files` call, kept separate from GetPR's own prListFields call: folding
-// files into every GetPR call would fetch this potentially-large
-// connection on every Show, where today only "files" itself needs it.
+// the "files" targeted op's backing read). A dedicated GraphQL read, kept
+// separate from GetPR's own prListFields call: folding files into every
+// GetPR call would fetch this potentially-large connection on every Show,
+// where today only "files" itself needs it. It runs prFilesPageQuery (rather
+// than `gh pr view --json files`) so each page's rateLimit { cost } is
+// measured and logged (bead pg2-ir8bs).
 func (p *Provider) GetFiles(ctx context.Context, repo string, number int) ([]api.File, error) {
-	if err := validateRepo(repo); err != nil {
-		return nil, err
-	}
-	if number <= 0 {
-		return nil, fmt.Errorf("github: invalid PR number %d", number)
-	}
-	raw, err := p.runRead(ctx, readOpts{}, "pr", "view", fmt.Sprintf("%d", number), "--repo", repo, "--json", "files")
+	owner, name, err := splitRepo(repo, number)
 	if err != nil {
 		return nil, err
 	}
-	var resp struct {
-		Files []ghPRFile `json:"files"`
+	vars := map[string]string{"owner": owner, "name": name}
+	nodes, _, err := fetchConnection(maxFiles, "", func(after string) (connPage[ghPRFile], error) {
+		var d prQueryEnvelope[struct {
+			Files connPage[ghPRFile] `json:"files"`
+		}]
+		if err := p.runGraphQL(ctx, prFilesPageQuery, vars, number, after, &d); err != nil {
+			return connPage[ghPRFile]{}, err
+		}
+		if d.Repository.PullRequest == nil {
+			return connPage[ghPRFile]{}, errPRNotResolved(repo, number)
+		}
+		return d.Repository.PullRequest.Files, nil
+	})
+	if err != nil {
+		return nil, err
 	}
-	if err := json.Unmarshal(raw, &resp); err != nil {
-		return nil, fmt.Errorf("github: parse gh pr view --json files: %w", err)
-	}
-	out := make([]api.File, 0, len(resp.Files))
-	for _, f := range resp.Files {
+	out := make([]api.File, 0, len(nodes))
+	for _, f := range nodes {
 		out = append(out, api.File{Path: f.Path, Additions: f.Additions, Deletions: f.Deletions})
 	}
 	return out, nil
 }
 
-// ghPRCommit is the JSON shape of one entry in `gh pr view --json commits`'
-// flattened array. Authors carries every git-identity author on the
-// commit (co-authors included); GetCommits uses only the first entry's
-// login, matching pg-pr's own existing convention for a commit's "the"
-// author (packages/pg-pr/pkg/provider/vcs.EnrichedPR.CommitAuthors' doc
-// comment: "author.user.login").
+// ghPRCommit is the JSON shape of one node of the commits connection. Authors
+// carries the commit's git-identity authors (the query asks for the first
+// only); GetCommits uses that first entry's linked login, matching pg-pr's
+// own existing convention for a commit's "the" author
+// (packages/pg-pr/pkg/provider/vcs.EnrichedPR.CommitAuthors' doc comment:
+// "author.user.login"). User is null when the identity has no GitHub account.
 type ghPRCommit struct {
-	OID             string `json:"oid"`
-	MessageHeadline string `json:"messageHeadline"`
-	Authors         []struct {
-		Login string `json:"login"`
-	} `json:"authors"`
+	Commit struct {
+		OID             string `json:"oid"`
+		MessageHeadline string `json:"messageHeadline"`
+		Authors         struct {
+			Nodes []struct {
+				User *struct {
+					Login string `json:"login"`
+				} `json:"user"`
+			} `json:"nodes"`
+		} `json:"authors"`
+	} `json:"commit"`
 }
 
 // GetCommits fetches a single PR's commit list (bead pg2-2j5ac.28.2, the
@@ -477,31 +539,37 @@ type ghPRCommit struct {
 // empty (rather than erroring) when GitHub has no linked account for a
 // commit's author identity (e.g. an email with no matching GitHub user),
 // matching RequestedReviewers' own "no login means excluded/empty"
-// convention elsewhere in this file.
+// convention elsewhere in this file. Like GetFiles it runs a GraphQL
+// document this connector owns so the call's rateLimit { cost } is logged
+// (bead pg2-ir8bs).
 func (p *Provider) GetCommits(ctx context.Context, repo string, number int) ([]api.Commit, error) {
-	if err := validateRepo(repo); err != nil {
-		return nil, err
-	}
-	if number <= 0 {
-		return nil, fmt.Errorf("github: invalid PR number %d", number)
-	}
-	raw, err := p.runRead(ctx, readOpts{}, "pr", "view", fmt.Sprintf("%d", number), "--repo", repo, "--json", "commits")
+	owner, name, err := splitRepo(repo, number)
 	if err != nil {
 		return nil, err
 	}
-	var resp struct {
-		Commits []ghPRCommit `json:"commits"`
-	}
-	if err := json.Unmarshal(raw, &resp); err != nil {
-		return nil, fmt.Errorf("github: parse gh pr view --json commits: %w", err)
-	}
-	out := make([]api.Commit, 0, len(resp.Commits))
-	for _, c := range resp.Commits {
-		var author string
-		if len(c.Authors) > 0 {
-			author = c.Authors[0].Login
+	vars := map[string]string{"owner": owner, "name": name}
+	nodes, _, err := fetchConnection(maxCommits, "", func(after string) (connPage[ghPRCommit], error) {
+		var d prQueryEnvelope[struct {
+			Commits connPage[ghPRCommit] `json:"commits"`
+		}]
+		if err := p.runGraphQL(ctx, prCommitsPageQuery, vars, number, after, &d); err != nil {
+			return connPage[ghPRCommit]{}, err
 		}
-		out = append(out, api.Commit{SHA: c.OID, Author: author, Message: c.MessageHeadline})
+		if d.Repository.PullRequest == nil {
+			return connPage[ghPRCommit]{}, errPRNotResolved(repo, number)
+		}
+		return d.Repository.PullRequest.Commits, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]api.Commit, 0, len(nodes))
+	for _, n := range nodes {
+		var author string
+		if as := n.Commit.Authors.Nodes; len(as) > 0 && as[0].User != nil {
+			author = as[0].User.Login
+		}
+		out = append(out, api.Commit{SHA: n.Commit.OID, Author: author, Message: n.Commit.MessageHeadline})
 	}
 	return out, nil
 }

@@ -297,8 +297,8 @@ func TestRead_AllReadOpsRetry(t *testing.T) {
 	ctx := context.Background()
 	ops := []op{
 		{"GetPR", `{"number":7}`, func(p *Provider) error { _, e := p.GetPR(ctx, "acme/widgets", 7); return e }},
-		{"GetFiles", `{"files":[]}`, func(p *Provider) error { _, e := p.GetFiles(ctx, "acme/widgets", 7); return e }},
-		{"GetCommits", `{"commits":[]}`, func(p *Provider) error { _, e := p.GetCommits(ctx, "acme/widgets", 7); return e }},
+		{"GetFiles", `{"data":{"repository":{"pullRequest":{"files":{"totalCount":0,"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[]}}}}}`, func(p *Provider) error { _, e := p.GetFiles(ctx, "acme/widgets", 7); return e }},
+		{"GetCommits", `{"data":{"repository":{"pullRequest":{"commits":{"totalCount":0,"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[]}}}}}`, func(p *Provider) error { _, e := p.GetCommits(ctx, "acme/widgets", 7); return e }},
 		{"ListReviews", emptyConnections, func(p *Provider) error { _, e := p.ListReviews(ctx, "acme/widgets", 7); return e }},
 		{"ListComments", emptyConnections, func(p *Provider) error { _, e := p.ListComments(ctx, "acme/widgets", 7); return e }},
 		{"SearchPRs", `[]`, func(p *Provider) error { _, e := p.SearchPRs(ctx, "is:open"); return e }},

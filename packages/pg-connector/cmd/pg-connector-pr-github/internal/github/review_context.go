@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/api"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-pr-github/internal/eventlog"
 )
 
 // This file reads the full review context of one PR for `pr show`: every
@@ -134,6 +135,17 @@ func (p *Provider) runGraphQL(ctx context.Context, query string, vars map[string
 	if err := json.Unmarshal(env.Data, dest); err != nil {
 		return fmt.Errorf("github: parse graphql data: %w", err)
 	}
+	// A document that selects rateLimit { cost } reports what it just spent;
+	// add it to the call's event (graphql_cost, bead pg2-ir8bs). A document
+	// that does not select it adds nothing.
+	var rl struct {
+		RateLimit *struct {
+			Cost int `json:"cost"`
+		} `json:"rateLimit"`
+	}
+	if err := json.Unmarshal(env.Data, &rl); err == nil && rl.RateLimit != nil {
+		eventlog.AddGraphQLCost(ctx, rl.RateLimit.Cost)
+	}
 	return nil
 }
 
@@ -185,6 +197,7 @@ type gqlReview struct {
 // since deleted reports a null commit, which decodes as an empty OID.
 const reviewsPageQuery = `
 query($owner: String!, $name: String!, $number: Int!, $after: String) {
+  rateLimit { cost }
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
       reviews(first: 100, after: $after) {
@@ -332,6 +345,7 @@ const threadCommentFields = `
 // that addPullRequestReviewThreadReply takes.
 const reviewThreadsPageQuery = `
 query($owner: String!, $name: String!, $number: Int!, $after: String) {
+  rateLimit { cost }
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
       reviewThreads(first: 100, after: $after) {
@@ -357,6 +371,7 @@ query($owner: String!, $name: String!, $number: Int!, $after: String) {
 // for a thread with more than one page of them.
 const threadCommentsPageQuery = `
 query($threadId: ID!, $after: String) {
+  rateLimit { cost }
   node(id: $threadId) {
     ... on PullRequestReviewThread {
       comments(first: 100, after: $after) {
@@ -373,6 +388,7 @@ query($threadId: ID!, $after: String) {
 // comments, bot comments included.
 const issueCommentsPageQuery = `
 query($owner: String!, $name: String!, $number: Int!, $after: String) {
+  rateLimit { cost }
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
       comments(first: 100, after: $after) {

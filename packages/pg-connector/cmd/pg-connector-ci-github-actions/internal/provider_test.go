@@ -178,7 +178,7 @@ func TestListRuns_ResolverInvalidID_IsInvalidArgument(t *testing.T) {
 // doc comment) is reachable as not_found through the real resolver path,
 // not misreported as this backend being unhealthy (INV-ERR-2; bug pg2-r9iok).
 func TestListRuns_NonexistentPR_NotFound(t *testing.T) {
-	gh := newFakeGH()
+	gh := newBudgetedFakeGH()
 	gh.errs["pr view"] = errors.New("gh pr view 999999999: exit status 1: GraphQL: Could not resolve to a PullRequest with the number of 999999999. (repository.pullRequest)")
 	p := NewWithDeps(gh, newGHPRResolver(gh))
 

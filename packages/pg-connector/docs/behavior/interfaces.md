@@ -198,7 +198,8 @@ the checks rollup, `mergeable`, `review_decision`, and the totals `comment_count
 one of those is part of the fingerprint, so a new review thread, or a label added past the first
 twenty, shows as a change. `merge_state_status`, `review_requests` and CI detail are not on the
 list; a caller wanting them calls `show`. The GitHub backend logs the points each `list` call
-spent as a numeric `graphql_cost` on that call's event-log row.
+spent as a numeric `graphql_cost` on that call's event-log row; its `show`, `files` and `commits`
+rows carry `graphql_cost` as well.
 
 The outcome also carries a top-level boolean `truncated`, true when ANY queried backend's `list`
 result reported `truncated` (the umbrella previously dropped that value), so a caller that deletes

@@ -161,7 +161,12 @@ GraphQL budget, `graphql_remaining`, `graphql_reset_at`, `graphql_reserve` and `
 Every `op=list` event also carries a numeric `graphql_cost`: the points that one list call spent on
 its search requests, summed over every page of every search string (0 for an `--ids-only` call; a call
 refused below the reserve logs the cost of the one search whose response carried the reading). The row names no query, so attribute cost to one search string by
-running a single list call at a time.
+running a single list call at a time. Every `op=show`, `op=files` and `op=commits` event carries
+`graphql_cost` too (bead `pg2-ir8bs`), summed over the GraphQL documents the connector itself sends:
+every page of the files or commits connection, and for `show` the review, review-thread and
+issue-comment pages. A call refused below the reserve spent nothing and logs 0. `show`'s own `gh pr
+view` metadata read is built by gh, whose query cannot select `rateLimit`, so a `show` row's cost
+excludes that one read and is a lower bound.
 `packages/pg-connector/grafana/alerting/pr-github-alerts.yaml` alerts on auth failure, sustained
 `unavailable`, and the budget sitting under `rate_reserve_points`. Writing the log is best effort and
 never changes an op's result.
@@ -202,6 +207,12 @@ The GraphQL reserve (`config.rate_reserve_points`, default 1000) guards every pe
 2026-10-07 attribution showed pg-desk's gather, which issues about 2 `show`s plus 1 `files` and 1
 `commits` per desk-pr dispatch, was the unguarded majority of the daily spend). The reading is
 logged on the event like any guarded call. `review_submit` (a write) is deliberately unguarded.
+`pg-connector-ci-github-actions` applies the same reserve (same `config.rate_reserve_points` key and
+default) to its one GraphQL read, the `gh pr view --json headRefName` that resolves a PR id to its
+head branch for `list_runs` and `rerun_failed` (bead `pg2-ir8bs`): it takes one uncharged
+`rateLimit` probe first and answers `unavailable` without reading when the remainder is below the
+reserve; its other calls (`gh run list/view/rerun`) are REST and unguarded. That backend keeps no
+event log, so a refusal shows only as the `unavailable` answer.
 
 `pg-connector-thread-slack` follows the same pattern: it appends to
 `${XDG_STATE_HOME}/pg-connector-thread-slack/events.jsonl` (override with

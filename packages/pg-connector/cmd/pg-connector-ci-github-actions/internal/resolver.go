@@ -101,6 +101,62 @@ func parsePRID(id string) (repo string, number int, err error) {
 	return repo, n, nil
 }
 
+// defaultRateReservePoints is the GraphQL budget the resolver leaves
+// untouched when config.rate_reserve_points is absent — the same default (and
+// the same config key) pg-connector-pr-github applies, so one setting governs
+// both backends.
+const defaultRateReservePoints = 1000
+
+// rateReservePoints resolves the configured reserve from the request's own
+// config block (scriptout.ConfigFromContext); an absent block, an absent key
+// or a malformed one means the default. A local copy of the sibling backend's
+// helper: the module's layout convention forbids importing its internal/ tree.
+func rateReservePoints(config json.RawMessage) int {
+	if len(config) == 0 {
+		return defaultRateReservePoints
+	}
+	var cfg struct {
+		RateReservePoints *int `json:"rate_reserve_points"`
+	}
+	if err := scriptout.Decode(config, &cfg); err != nil || cfg.RateReservePoints == nil {
+		return defaultRateReservePoints
+	}
+	return *cfg.RateReservePoints
+}
+
+// rateLimitWire is the shape of `gh api graphql -f query='{ rateLimit {
+// remaining } }'`'s stdout.
+type rateLimitWire struct {
+	Data struct {
+		RateLimit struct {
+			Remaining int `json:"remaining"`
+		} `json:"rateLimit"`
+	} `json:"data"`
+}
+
+// checkRateReserve reads the GraphQL rate-limit remainder (an uncharged
+// query) and answers unavailable, without the caller reading anything, when it
+// is below config.rate_reserve_points. A failed or unparseable read is
+// classified like any other gh failure and also stops the caller: with no
+// reading, the guard cannot say the budget is safe.
+func (r *ghPRResolver) checkRateReserve(ctx context.Context) error {
+	raw, err := r.gh.Run(ctx, "api", "graphql", "-f", "query={ rateLimit { remaining } }")
+	if err != nil {
+		return classifyGHError(err)
+	}
+	var wire rateLimitWire
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		return fmt.Errorf("pg-connector-ci-github-actions: parse rate limit JSON: %w", err)
+	}
+	reserve := rateReservePoints(scriptout.ConfigFromContext(ctx))
+	if remaining := wire.Data.RateLimit.Remaining; remaining < reserve {
+		return scriptout.WrapError(scriptout.ErrUnavailable, fmt.Sprintf(
+			"pg-connector-ci-github-actions: GraphQL rate limit remaining (%d) is below the configured reserve (%d)", remaining, reserve,
+		))
+	}
+	return nil
+}
+
 // ghPRView is the slice of `gh pr view --json headRefName`'s shape this
 // resolver needs.
 type ghPRView struct {
@@ -120,6 +176,12 @@ func (r *ghPRResolver) Resolve(ctx context.Context, prID string) (string, string
 	repo, number, err := parsePRID(prID)
 	if err != nil {
 		return "", "", scriptout.WrapError(scriptout.ErrInvalidArgument, err.Error())
+	}
+	// The `gh pr view` below is this backend's one GraphQL read (run list /
+	// run view / logs / rerun are REST), so it is the one call the GraphQL
+	// reserve guards (bead pg2-ir8bs; same gate as pg-connector-pr-github).
+	if err := r.checkRateReserve(ctx); err != nil {
+		return "", "", err
 	}
 	raw, err := r.gh.Run(ctx, "pr", "view", strconv.Itoa(number), "--repo", repo, "--json", "headRefName")
 	if err != nil {

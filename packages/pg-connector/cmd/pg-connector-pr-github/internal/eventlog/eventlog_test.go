@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -499,11 +500,45 @@ func TestInstrument_ListRowAlwaysCarriesNumericGraphQLCost(t *testing.T) {
 	}
 }
 
-// TestInstrument_NonListRowHasNoGraphQLCost: the cost field is the list op's;
-// another op's row omits it even if something recorded a cost on its context.
-func TestInstrument_NonListRowHasNoGraphQLCost(t *testing.T) {
+// TestInstrument_CostLoggedOpsAlwaysCarryNumericGraphQLCost: show, files and
+// commits rows carry graphql_cost like list does (bead pg2-ir8bs), 0 included.
+func TestInstrument_CostLoggedOpsAlwaysCarryNumericGraphQLCost(t *testing.T) {
+	for _, op := range []string{"show", "files", "commits"} {
+		for _, spent := range []int{0, 4} {
+			t.Run(fmt.Sprintf("%s/spent %d", op, spent), func(t *testing.T) {
+				sink := &memSink{}
+				tb := scriptout.DispatchTable{op: scriptout.OpHandler{
+					SchemaVersion: 1,
+					Handle: func(ctx context.Context, _ json.RawMessage) (any, error) {
+						if spent > 0 {
+							AddGraphQLCost(ctx, spent)
+						}
+						return nil, nil
+					},
+				}}
+				tb = Instrument(tb, sink, "", fakeClock(time.Now(), time.Millisecond))
+				_, _ = tb[op].Handle(context.Background(), nil)
+				ev := sink.events[0]
+				if ev.GraphQLCost == nil || *ev.GraphQLCost != spent {
+					t.Fatalf("graphql_cost = %v, want %d", ev.GraphQLCost, spent)
+				}
+				line, _ := Line(ev)
+				var m map[string]any
+				_ = json.Unmarshal(line, &m)
+				if got, ok := m["graphql_cost"]; !ok || got != float64(spent) {
+					t.Errorf("serialized graphql_cost = %v (present %v), want %d", got, ok, spent)
+				}
+			})
+		}
+	}
+}
+
+// TestInstrument_OtherOpRowHasNoGraphQLCost: an op that does not log cost
+// (here auth_status) omits the field even if something recorded a cost on its
+// context.
+func TestInstrument_OtherOpRowHasNoGraphQLCost(t *testing.T) {
 	sink := &memSink{}
-	tb := scriptout.DispatchTable{"show": scriptout.OpHandler{
+	tb := scriptout.DispatchTable{"auth_status": scriptout.OpHandler{
 		SchemaVersion: 1,
 		Handle: func(ctx context.Context, _ json.RawMessage) (any, error) {
 			AddGraphQLCost(ctx, 5)
@@ -511,9 +546,9 @@ func TestInstrument_NonListRowHasNoGraphQLCost(t *testing.T) {
 		},
 	}}
 	tb = Instrument(tb, sink, "", fakeClock(time.Now(), time.Millisecond))
-	_, _ = tb["show"].Handle(context.Background(), nil)
+	_, _ = tb["auth_status"].Handle(context.Background(), nil)
 	if sink.events[0].GraphQLCost != nil {
-		t.Errorf("graphql_cost = %d on a show row, want omitted", *sink.events[0].GraphQLCost)
+		t.Errorf("graphql_cost = %d on an auth_status row, want omitted", *sink.events[0].GraphQLCost)
 	}
 }
 

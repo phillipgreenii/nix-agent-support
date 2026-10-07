@@ -84,15 +84,21 @@ type Event struct {
 	GraphQLResetAt   *string `json:"graphql_reset_at,omitempty"`
 	GraphQLReserve   *int    `json:"graphql_reserve,omitempty"`
 	GraphQLHeadroom  *int    `json:"graphql_headroom,omitempty"`
-	// GraphQLCost is the points an op=list call spent on its search requests,
-	// summed over every page of every search string (bead pg2-x3h8c.2). Every
-	// op=list row carries it, 0 included (the ids-only path spends none). The
-	// row carries no query name, so a reader attributes cost to one query by
-	// running a single list call at a time. The separate rate-limit probe of an
-	// ids-only call is not counted (it is uncharged); the enriched path takes no
-	// probe, its reading rides on the search response (bead pg2-cw6b3.3), so a
-	// call refused below the reserve there logs the cost of the one search that
-	// carried the reading.
+	// GraphQLCost is the points an op=list, show, files or commits call spent
+	// on GraphQL documents that select rateLimit { cost } (beads pg2-x3h8c.2,
+	// pg2-ir8bs), summed over every request of the call. Every row of those ops
+	// carries it, 0 included (the ids-only list path spends none). For list it
+	// is the search requests; for files and commits it is every page of the
+	// connection; for show it is the review, review-thread and issue-comment
+	// pages. Show's own `gh pr view` metadata read is built by gh, whose query
+	// cannot select rateLimit, so a show row's cost EXCLUDES that one read (a
+	// lower bound). The row carries no query name, so a reader attributes cost
+	// to one query by running a single list call at a time. The separate
+	// rate-limit probe is not counted (it is uncharged); the enriched list path
+	// takes no probe, its reading rides on the search response (bead
+	// pg2-cw6b3.3), so a call refused below the reserve there logs the cost of
+	// the one search that carried the reading. A show/files/commits call
+	// refused below the reserve spent nothing and logs 0.
 	GraphQLCost  *int `json:"graphql_cost,omitempty"`
 	BelowReserve bool `json:"below_reserve,omitempty"`
 }
@@ -194,6 +200,9 @@ func Instrument(table scriptout.DispatchTable, sink Sink, version string, now fu
 	}, progress, heartbeatInterval)
 }
 
+// costLoggedOps are the ops whose event rows always carry graphql_cost.
+var costLoggedOps = map[string]bool{"list": true, "show": true, "files": true, "commits": true}
+
 func buildEvent(op, version string, start, end time.Time, err error, rec *recorder) Event {
 	ev := Event{Base: evlog.NewBase(ServiceName, op, version, start, end, err)}
 	rec.mu.Lock()
@@ -209,10 +218,10 @@ func buildEvent(op, version string, start, end time.Time, err error, rec *record
 		}
 		ev.BelowReserve = headroom < 0
 	}
-	// Every op=list row carries a numeric graphql_cost, 0 when the call made
-	// no search request (ids-only), so a reader
-	// can tell "cost 0" from "cost not logged".
-	if op == "list" {
+	// Every row of a cost-logging op carries a numeric graphql_cost, 0 when
+	// the call spent nothing (ids-only list, or refused below the reserve), so
+	// a reader can tell "cost 0" from "cost not logged".
+	if costLoggedOps[op] {
 		cost := rec.cost
 		ev.GraphQLCost = &cost
 	}
