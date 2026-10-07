@@ -76,7 +76,7 @@ func TestReadDetailedJoinsStoredSnapshotAndTemplateURL(t *testing.T) {
 	}
 	if err := st.UpsertEntity(store.Entity{
 		Repo: testRepo, EntityType: "issue", EntityID: "ABC-43", AsOf: "2026-10-01T00:00:00Z",
-		Facts: `{"issue_show":{"title":"ABC-43: adopt me","state":"closed","labels":["x"],"metadata":{"k":"v"},"assignee":"bob","closed_by":"nobody"}}`,
+		Facts: `{"issue_show":{"title":"ABC-43: adopt me","state":"closed","labels":["x"],"metadata":{"k":"v"},"assignee":"bob","priority":"P1","closed_by":"nobody"}}`,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -86,13 +86,13 @@ func TestReadDetailedJoinsStoredSnapshotAndTemplateURL(t *testing.T) {
 		t.Fatalf("ReadDetailed = %+v, %v", got, err)
 	}
 	unstored, stored := got.Links[0], got.Links[1]
-	if unstored.ID != "ABC-42" || unstored.Stored || unstored.State != "" || unstored.URL != "https://tracker.example.invalid/browse/ABC-42" {
+	if unstored.ID != "ABC-42" || unstored.Stored || unstored.State != "" || unstored.Priority != "" || unstored.URL != "https://tracker.example.invalid/browse/ABC-42" {
 		t.Errorf("unstored link = %+v", unstored)
 	}
 	if unstored.Title != "" || stored.Title != "ABC-43: adopt me" {
 		t.Errorf("titles = %q (unstored), %q (stored); want \"\" and the stored title", unstored.Title, stored.Title)
 	}
-	if !stored.Stored || stored.State != "closed" || stored.Assignee != "bob" || stored.Metadata["k"] != "v" || !reflect.DeepEqual(stored.Labels, []string{"x"}) {
+	if !stored.Stored || stored.State != "closed" || stored.Assignee != "bob" || stored.Priority != "P1" || stored.Metadata["k"] != "v" || !reflect.DeepEqual(stored.Labels, []string{"x"}) {
 		t.Errorf("stored link = %+v", stored)
 	}
 }

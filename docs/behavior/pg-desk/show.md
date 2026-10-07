@@ -61,6 +61,12 @@ recorded from, so a link added on one entity appears in both entities' views. Ea
 - `state`, `labels`, `metadata` and `assignee`, read from the linked entity's own stored snapshot.
   They are present only when the linked entity has a stored row (`state` also only when the snapshot
   has one), and `assignee` is `""` when it is unclaimed;
+- `priority`, optional: the linked work item's priority as its stored snapshot carries it,
+  backend-native (`P0` to `P4` for the beads backend). It is omitted, never empty, when the linked
+  entity has no stored row, is not a work item (a PR or thread has no priority), or its snapshot
+  carries none. A rule that needs the anchor's current priority (the `anchor.priority` conflict
+  nudge) reads it here and treats an absent member as "unknown". It is additive to
+  `pg-desk.view/v1`;
 - `origins[]`: one `derived:<extractor>` entry per extractor that finds the link and one
   `external:<actor>` entry, with `at` and an optional `reason`, per actor that added it.
 
@@ -205,7 +211,7 @@ If the entity's own hydration fails or degrades, the stored view is still printe
   the store. For a PR it is always present (`runs` empty when there is no CI data); for `issue` and
   `thread` it is absent.
 
-- **INV-SHOW-7.** `links[].title` and `annotations.ready_to_land` MUST be read-only stored data:
+- **INV-SHOW-7.** `links[].title`, `links[].priority` and `annotations.ready_to_land` MUST be read-only stored data:
   they are copied from the linked entity's stored snapshot and the stored annotation, building them
   MUST NOT call the network or write to the store, and they MUST NOT carry a computed value.
 

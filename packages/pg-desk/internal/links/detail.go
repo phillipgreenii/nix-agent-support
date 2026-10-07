@@ -35,6 +35,10 @@ type Detail struct {
 	Metadata map[string]string
 	// Assignee is "" when the linked entity is unclaimed.
 	Assignee string
+	// Priority is the linked work item's stored priority, backend-native
+	// ("P0".."P4" for the beads backend); "" when the snapshot carries none
+	// (a PR or thread has no priority).
+	Priority string
 }
 
 // Detailed is ReadDetailed's answer.
@@ -140,8 +144,8 @@ func ReadDetailed(d Deps, entityType, id string) (Detailed, error) {
 	return out, nil
 }
 
-// fillFromSnapshot reads the linked entity's own title, state, labels, metadata and
-// assignee out of its stored facts.
+// fillFromSnapshot reads the linked entity's own title, state, labels, metadata,
+// assignee and priority out of its stored facts.
 func fillFromSnapshot(det *Detail, ent store.Entity) {
 	det.Stored = true
 	var f map[string]json.RawMessage
@@ -156,9 +160,11 @@ func fillFromSnapshot(det *Detail, ent store.Entity) {
 			Labels   []string          `json:"labels"`
 			Metadata map[string]string `json:"metadata"`
 			Assignee string            `json:"assignee"`
+			Priority string            `json:"priority"`
 		}
 		if json.Unmarshal(f["issue_show"], &s) == nil {
 			det.Title, det.State, det.Labels, det.Metadata, det.Assignee = s.Title, s.State, s.Labels, s.Metadata, s.Assignee
+			det.Priority = s.Priority
 		}
 	case entityTypePR:
 		var s struct {

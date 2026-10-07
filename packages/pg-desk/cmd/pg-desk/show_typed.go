@@ -149,7 +149,11 @@ type viewLink struct {
 	Labels   *[]string          `json:"labels,omitempty"`
 	Metadata *map[string]string `json:"metadata,omitempty"`
 	Assignee *string            `json:"assignee,omitempty"`
-	Origins  []viewOrigin       `json:"origins"`
+	// Priority is a linked work item's stored priority, backend-native
+	// ("P0".."P4" for the beads backend). It is omitted when the linked
+	// entity has no stored row or its snapshot carries no priority.
+	Priority string       `json:"priority,omitempty"`
+	Origins  []viewOrigin `json:"origins"`
 }
 
 type viewOrigin struct {
@@ -310,7 +314,7 @@ func buildView(cfg *config.Config, st *store.Store, repo, entityType, id string,
 	}
 	v.Links = []viewLink{}
 	for _, l := range det.Links {
-		vl := viewLink{Type: l.Type, ID: l.ID, Relation: l.Relation, Title: l.Title, URL: l.URL, State: l.State, Origins: []viewOrigin{}}
+		vl := viewLink{Type: l.Type, ID: l.ID, Relation: l.Relation, Title: l.Title, URL: l.URL, State: l.State, Priority: l.Priority, Origins: []viewOrigin{}}
 		if l.Stored {
 			labels := l.Labels
 			if labels == nil {

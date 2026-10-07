@@ -241,6 +241,64 @@ func TestTypedShowLinkToUnstoredEntityOmitsSnapshotFields(t *testing.T) {
 	t.Fatal("gone-9 link missing")
 }
 
+// links[].priority is the linked work item's stored priority (pg-decider's
+// anchor.priority rule reads it from the raw link JSON). It is omitted when the
+// snapshot carries none, for a PR or thread link, and for an unstored entity.
+func TestTypedShowLinkPriority(t *testing.T) {
+	f := newViewFixture(t)
+	if err := f.seed.UpsertEntity(store.Entity{
+		Repo: "o/r", EntityType: "issue", EntityID: "bd-1", AsOf: "2026-09-29T14:10:00Z",
+		Facts: `{"issue_show":{"id":"bd-1","title":"process feedback","state":"open","priority":"P3","labels":[],"metadata":{}}}`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	out, _, err := runTypedShowCmd(t, "pr", "5", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw struct {
+		Links []map[string]any `json:"links"`
+	}
+	if err := json.Unmarshal([]byte(out), &raw); err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, l := range raw.Links {
+		id, _ := l["id"].(string)
+		seen[id] = true
+		p, has := l["priority"]
+		if id == "bd-1" {
+			if p != "P3" {
+				t.Errorf("work item link priority = %v, want P3: %v", p, l)
+			}
+		} else if has {
+			t.Errorf("link %s carries priority %v, want none", id, p)
+		}
+	}
+	if !seen["bd-1"] || !seen["C1/1.5"] {
+		t.Fatalf("links = %v, want the work item and the thread", raw.Links)
+	}
+}
+
+func TestTypedShowLinkWithoutStoredPriorityOmitsIt(t *testing.T) {
+	newViewFixture(t)
+	out, _, err := runTypedShowCmd(t, "pr", "5", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw struct {
+		Links []map[string]any `json:"links"`
+	}
+	if err := json.Unmarshal([]byte(out), &raw); err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range raw.Links {
+		if _, has := l["priority"]; has {
+			t.Errorf("link %v carries priority though no snapshot has one", l)
+		}
+	}
+}
+
 func TestTypedShowNeverCarriesClosedBy(t *testing.T) {
 	newViewFixture(t)
 	for _, typ := range [][2]string{{"pr", "5"}, {"issue", "bd-1"}, {"thread", "C1/1.5"}} {

@@ -134,10 +134,12 @@ func anchorHasConflict(v *view.View) bool {
 	return false
 }
 
-// anchorCurrentPriority is the anchor's current priority. The view's link
-// entries do not decode a priority member, so it is read from the raw link
-// (links[].priority, "P2" or 2), then from the link metadata's "priority";
-// when the view reports none the tracker default seeds it.
+// anchorCurrentPriority is the anchor's current priority. pg-desk's composite
+// view reports it as links[].priority (docs/behavior/pg-desk/show.md, omitted
+// when the stored snapshot has none); the decoded view.Link has no such
+// member, so it is read from the raw link (links[].priority, "P2" or 2), then
+// from the link metadata's "priority"; when the view reports none the tracker
+// default seeds it.
 func anchorCurrentPriority(v *view.View, anchor workitem.Item) int {
 	var raw struct {
 		Links []struct {
