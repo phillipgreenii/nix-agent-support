@@ -891,7 +891,11 @@ render_state() {
   row="$(grep '^Title: ' <<<"$output")"
   path="${row#*bash=}"
   path="${path%% param1=*}"
-  [ "$path" = "${PLUGIN[${#PLUGIN[@]} - 1]}" ]
+  # Run from source the row names the script itself; run through the nix wrapper
+  # it names the wrapper's exported PA_SWIFTBAR_SELF store path instead. Either
+  # way it must be one existing file whose path has no whitespace.
+  [[ $path != *[[:space:]]* ]]
+  [ -f "$path" ]
 }
 
 @test "title width: PA_SWIFTBAR_SELF (set by the nix wrapper) is what the toggle row runs" {
