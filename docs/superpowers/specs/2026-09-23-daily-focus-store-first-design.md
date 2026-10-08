@@ -611,8 +611,9 @@ exit `0`. The per-verb descriptions below use this scheme.
 `show` writes nothing, never freezes anything, and has three modes (D-F22):
 
 - **No plan for the period, no `--draft`: it prints a DRAFT.** It computes the candidate set and rank
-  (§6) once, in this run, and prints the ranked table with the top `cap` marked `+` (proposed). The
-  header reads `DRAFT (not saved; reply to lock it in)` and `--json` carries the draft document (§7),
+  (§6) once, in this run, and prints a `PLAN` block, the proposed plan (the top `cap` rows, marked `+`), then the cap line,
+  then a `candidates` block with every other candidate sorted by the rank. `replan` (§7.6) prints the
+  same layout; only the source of the `PLAN` block differs. The header reads `DRAFT (not saved; reply to lock it in)` and `--json` carries the draft document (§7),
   which the caller holds and passes back. A second bare `show` is a second, independent computation:
   to keep an order, hold the draft, do not re-run `show`.
 - **`--draft <path>`: it re-renders that draft.** The ORDER, tiers, deciding keys and cap line are the
@@ -959,7 +960,15 @@ Opens a DRAFT again. It is a pure read, like `show`: it writes no row, no annota
 `focus_period`, and it does not write a `focus_run` row. The operator's words: "replan ... would pull
 new items into the plan. this means that it would reorder things, but the previous plan remains as is.
 ie, the new items and nonselected items would be ordered correctly, but stay out of the selection. we
-are a draft phase again until we approve and go back to the actual plan".
+are a draft phase again until we approve and go back to the actual plan". And, on the layout: "replan
+should look and behaving like plan, except where plan produces a list of items as the plan and the
+others are sorted below, replan will precent the existing plan as the plan and the others are sorted
+below."
+
+**Replan is the initial draft with a different source for the plan block.** Both print the same layout
+(`PLAN` block, cap line, `candidates` block sorted below), take the same reply grammar (`ok`, `-key`,
+`+key`, `cap=N`) and lock the same way (`select --apply --draft`). The initial draft FILLS the plan block
+with a proposal (the top `cap` candidates by the rank); a replan fills it with the EXISTING plan.
 
 - **The current plan is shown as the plan** (operator, 2026-10-08): a `PLAN` block first, holding the
   period's `selected` rows marked `*`, in their recorded `rank_position` order and with their recorded
