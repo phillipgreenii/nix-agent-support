@@ -545,6 +545,13 @@ it only has to meet the contract the policy reads, and does:
   assigned to the operator), with a non-empty `id` and an RFC3339 `as_of`, so it is cached at
   `detail` level and a `list` summary never stands in for it. A missing issue answers `not_found`,
   which confirms a removal; any other failure withholds it.
+- `show` and `list` carry the issue's `parent`: the Jira Epic of a child of an Epic, or the parent
+  issue of a sub-task, as the parent issue KEY (bead `pg2-upb9j`; `pjira` reports it, and an issue
+  with no parent omits it). It is the same `parent` field a beads child carries, so `pg-desk`'s
+  work-item link extractor derives an issue-to-issue `parent` link for every Jira child. `parent`
+  is part of the fingerprint, so the first poll after a connector build that maps it re-fingerprints
+  every Jira child: those entities all read as changed once, and `pg-desk` re-hydrates them in a
+  burst bounded by `hydration.max_per_poll` (an Epic and unparented issues keep their fingerprint).
 - The read-through (`cache_read_ttl`) applies to `issue show` for Jira as it does for `pr show`; the
   refresher stays opt-in (`cache_refresh_after`), and a Jira `show` costs one `pjira issue` call
   plus, for an operator-assigned issue, one `pjira search` call for the attention facts.

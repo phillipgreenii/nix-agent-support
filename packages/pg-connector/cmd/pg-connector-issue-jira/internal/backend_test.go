@@ -1359,3 +1359,81 @@ func TestJiraBackendCarriesStatusCategory(t *testing.T) {
 		})
 	}
 }
+
+// ----------------------------------------------------------------------
+// Parent mapping (bead pg2-upb9j, design item (u) of the daily-focus
+// store-first design: pjira's `parent` key becomes schema.Issue.Parent)
+// ----------------------------------------------------------------------
+
+// showJSON runs Show against a fake pjira that answers the given
+// `pjira issue` JSON, with an operator identity that matches no assignee so
+// the call stays a single pjira invocation.
+func showJSON(t *testing.T, out string) *schema.Issue {
+	t.Helper()
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		if args[0] != "issue" {
+			t.Fatalf("unexpected op: %v", args)
+		}
+		return out, nil
+	}}
+	b := New(fr)
+	b.getenv = func(string) string { return "operator@example.com" }
+	got, err := b.Show(context.Background(), "PROJ-2")
+	if err != nil {
+		t.Fatalf("Show: %v", err)
+	}
+	return got
+}
+
+// TestJiraBackendMapsParent: a child of an Epic carries the Epic's key as
+// Parent, on both Show and List (the list summary feeds the fingerprint).
+func TestJiraBackendMapsParent(t *testing.T) {
+	got := showJSON(t, `{"key":"PROJ-2","summary":"child","status":"To Do","issuetype":"Story",`+
+		`"url":"https://example.atlassian.net/browse/PROJ-2","project":"PROJ","parent":"PROJ-1"}`)
+	if got.Parent != "PROJ-1" {
+		t.Fatalf("Show Parent = %q, want PROJ-1", got.Parent)
+	}
+
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		return `{"items":[{"key":"PROJ-2","summary":"child","status":"To Do","parent":"PROJ-1"},` +
+			`{"key":"PROJ-3","summary":"orphan","status":"To Do"}],"truncated":false}`, nil
+	}}
+	res, err := New(fr).List(context.Background(), []string{"project = PROJ"}, false, nil)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	parents := map[string]string{}
+	for _, e := range res.Entities {
+		parents[e.ID] = e.Parent
+	}
+	if parents["PROJ-2"] != "PROJ-1" || parents["PROJ-3"] != "" {
+		t.Fatalf("List parents = %v, want PROJ-2 -> PROJ-1 and PROJ-3 -> empty", parents)
+	}
+}
+
+// TestJiraBackendNoParentLeavesParentEmpty: pjira omits `parent` for an issue
+// with none (an Epic itself, or an unparented issue); Parent stays empty and
+// is omitted from the wire JSON.
+func TestJiraBackendNoParentLeavesParentEmpty(t *testing.T) {
+	got := showJSON(t, `{"key":"PROJ-2","summary":"epic","status":"To Do","issuetype":"Epic"}`)
+	if got.Parent != "" {
+		t.Fatalf("Parent = %q, want empty", got.Parent)
+	}
+	raw, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), `"parent"`) {
+		t.Fatalf("wire JSON carries a parent key for a parentless issue: %s", raw)
+	}
+}
+
+// TestJiraBackendSubtaskParentIsItsParentIssue: a sub-task's Parent is its
+// parent issue's key (a story, not an epic); the backend maps the key as
+// pjira reports it and does not walk the hierarchy.
+func TestJiraBackendSubtaskParentIsItsParentIssue(t *testing.T) {
+	got := showJSON(t, `{"key":"PROJ-2","summary":"sub","status":"To Do","issuetype":"Sub-task","parent":"PROJ-7"}`)
+	if got.Parent != "PROJ-7" || got.IssueType != "Sub-task" {
+		t.Fatalf("got Parent=%q IssueType=%q, want PROJ-7 / Sub-task", got.Parent, got.IssueType)
+	}
+}

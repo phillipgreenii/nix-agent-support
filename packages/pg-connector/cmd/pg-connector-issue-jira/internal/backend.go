@@ -160,6 +160,15 @@ type pjiraIssue struct {
 	Priority       string     `json:"priority,omitempty"`
 	Project        string     `json:"project,omitempty"`
 	Assignee       *pjiraUser `json:"assignee,omitempty"`
+	// Parent is the parent issue KEY (an Epic for a child of an Epic, or a
+	// sub-task's parent), verified against phillipg-nix-repo-base's
+	// modules/jira/pkg/pjira/model.go Issue.Parent
+	// (`string json:"parent,omitempty"`, bead pg2-znupi; client.go's
+	// GetIssue and Search both request the "parent" field and flatten it to
+	// the key). Omitted by pjira, hence empty here, for an issue with no
+	// parent. toSchemaIssue maps it onto schema.Issue.Parent (bead
+	// pg2-upb9j, design item (u) of the daily-focus store-first design).
+	Parent string `json:"parent,omitempty"`
 	// Duedate is Jira's own standard duedate field (bead pg2-7wqkr's
 	// design: "deadline source is Jira's standard duedate field"),
 	// verified against phillipg-nix-repo-base's
@@ -282,6 +291,9 @@ func decodePJIRAIssue(raw string) (*pjiraIssue, error) {
 // straight through from pjiraIssue.Duedate (bead pg2-7wqkr added that
 // field — see its own doc comment for why this corrects an earlier,
 // now-stale claim that pjira carried no due date at all).
+// Parent is carried straight through from pjiraIssue.Parent (bead
+// pg2-upb9j), so a Jira child shows its Epic (or a sub-task its parent) the
+// way a bd child shows its dot-suffixed parent; no parent leaves it empty.
 // UpdatedAt/Metadata/ExternalRefs still stay empty: pjiraIssue carries
 // none of those today (verified against pjira's own `issue`/`search` JSON
 // shapes) — a future pjira addition of any of them is this backend's own
@@ -312,6 +324,7 @@ func toSchemaIssue(iss *pjiraIssue, asOf time.Time) *schema.Issue {
 		AsOf:           asOf.Format(time.RFC3339),
 		Stale:          false,
 		DueDate:        dueDate,
+		Parent:         iss.Parent,
 	}
 }
 

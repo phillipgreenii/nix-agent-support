@@ -95,6 +95,23 @@ func TestWorkItemExtractor(t *testing.T) {
 	}
 }
 
+// TestWorkItemExtractorJiraChildParent: a Jira child (bead pg2-upb9j: the Jira
+// backend now maps pjira's parent key onto schema.Issue.Parent) carries no
+// work-item metadata, so the extractor derives exactly one issue-to-issue
+// "parent" link to its epic, with the same origin as a bd child's.
+func TestWorkItemExtractorJiraChildParent(t *testing.T) {
+	p := linkPipeline(t, nil)
+	hydrate(t, p, "issue", "PROJ-2", issueWith(t,
+		`{"id":"PROJ-2","title":"child","issue_type":"Story","tracker":"PROJ","parent":"PROJ-1"}`))
+	ls := linksFrom(t, p, "issue", "PROJ-2")
+	if len(ls) != 1 {
+		t.Fatalf("links = %+v", ls)
+	}
+	if l := ls[0]; l.Relation != "parent" || l.ToType != "issue" || l.ToID != "PROJ-1" || l.Origin != "derived:work-item" {
+		t.Errorf("parent link = %+v", l)
+	}
+}
+
 func prResult(t *testing.T, branch, title, body string) gather.GatherResult {
 	show, _ := json.Marshal(map[string]string{"branch": branch, "title": title, "body": body})
 	return payloadOf(t, gather.Facts{PRShow: show, AsOf: "2026-09-16T00:00:00Z"})
