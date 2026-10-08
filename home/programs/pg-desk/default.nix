@@ -737,6 +737,38 @@ in
       package = lib.mkPackageOption pkgs "pg-desk-attention" { };
     };
 
+    # routerSource (bead pg2-wmv6p): the `pg-router-source-pg-desk` adapter,
+    # which exposes pg-desk's changes envelope as pg-router command-query
+    # items. Both packages were overlay-only until this option, so neither
+    # reached the per-user PATH. It follows pg-connector's always-installed
+    # backend precedent (home/programs/pg-connector installs its adapters
+    # whenever the program is enabled): on by default whenever pg-desk is
+    # enabled, since it is the adapter for the very tool this module installs,
+    # with an opt-out for a host that only wants the pg-desk CLI.
+    routerSource = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Install the `pg-router-source-pg-desk` adapter (pg-desk's changes
+          envelope as pg-router command-query items) alongside pg-desk, so the
+          bare name resolves on PATH. Its wrapper already carries `pg-desk` on
+          its own PATH. Set false to opt out.
+        '';
+      };
+      package = lib.mkPackageOption pkgs "pg-router-source-pg-desk" { };
+    };
+
+    # shadow (bead pg2-wmv6p): the `pg-desk-shadow` one-off measurement tool
+    # (docs/runbooks/pg-desk-shadow-compare.md), which every runbook command
+    # invokes by bare name. Default off because it is a time-boxed
+    # measurement instrument, not standing tooling: the consuming flake flips
+    # `shadow.enable` for the duration of the comparison and removes it after.
+    shadow = {
+      enable = lib.mkEnableOption "the pg-desk-shadow measurement tool (one-off shadow comparison of pg-desk's fingerprint change detection; see docs/runbooks/pg-desk-shadow-compare.md)";
+      package = lib.mkPackageOption pkgs "pg-desk-shadow" { };
+    };
+
     links = {
       issueUrlTemplate = lib.mkOption {
         type = lib.types.nullOr lib.types.str;
@@ -758,7 +790,9 @@ in
     home.packages = [
       cfg.package
     ]
-    ++ lib.optional cfg.attentionPlugin.enable cfg.attentionPlugin.package;
+    ++ lib.optional cfg.attentionPlugin.enable cfg.attentionPlugin.package
+    ++ lib.optional cfg.routerSource.enable cfg.routerSource.package
+    ++ lib.optional cfg.shadow.enable cfg.shadow.package;
 
     # Registered LAST in config order: `pg-connector attention list` breaks a
     # dedup tie at equal severity in favor of the earliest source, so the

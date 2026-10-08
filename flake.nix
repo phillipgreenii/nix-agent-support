@@ -9526,6 +9526,22 @@
                 assert !r.disabled.hasPlugin && r.disabled.hasDesk;
                 pkgs.runCommand "pg-desk-attention-registration-ok" { } "touch $out";
 
+              # home/programs/pg-desk's `routerSource` and `shadow` options
+              # (bead pg2-wmv6p): pg-router-source-pg-desk and pg-desk-shadow
+              # were overlay-only, so neither reached the per-user PATH. The
+              # adapter installs with pg-desk by default, the one-off shadow
+              # tool only when asked, and neither when pg-desk is disabled.
+              # Pure module eval, no package build.
+              test-pg-desk-tool-install =
+                let
+                  r = import ./tests/pg-desk-tool-install.nix { inherit lib pkgs; };
+                in
+                assert r.defaults.hasDesk && r.defaults.hasRouterSource && !r.defaults.hasShadow;
+                assert r.both.hasDesk && r.both.hasRouterSource && r.both.hasShadow;
+                assert r.shadowOnly.hasDesk && !r.shadowOnly.hasRouterSource && r.shadowOnly.hasShadow;
+                assert r.disabled.packages == [ ];
+                pkgs.runCommand "pg-desk-tool-install-ok" { } "touch $out";
+
               # Regression guard that the pa-monitor binary's version string is
               # actually stamped by the build-time ldflag (versionPath =
               # "main.version" in packages/pa-monitor/default.nix). Before that

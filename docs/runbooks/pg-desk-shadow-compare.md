@@ -30,6 +30,8 @@ network or `bd`/dolt writes: those are covered by the shims and the environment.
 - macOS with `/usr/bin/sandbox-exec`, `sqlite3` (3.35 or newer), `pg-desk`, `pg-connector`,
   `pg-router-source-pg-desk`, `gh` (logged in; the token is read from the login keychain) and `bd`
   (the machine `bd`, not the router wrapper's bundled copy) on `PATH`; `bgrun`/`bgcheck`; `caffeinate`.
+  `pg-desk-shadow` itself is on `PATH` only where the consuming flake sets
+  `phillipgreenii.programs.pg-desk.shadow.enable = true` (default off; correction 10).
 - The machine awake for the whole run (`caffeinate -i` below). Gaps from sleep, lid close, reboot and
   router applies WILL occur; they are recorded and excluded from misses.
 - A scratch directory on a volume with a few hundred MiB free, NOT under `~/.local/state`, for
@@ -182,9 +184,13 @@ Every claim was re-verified against current source and logs on 2026-10-07; these
    `bd` with `BD_JSON_ENVELOPE=1`. A scratch stub workspace stands in for `repos[0].beads_dir`.
 9. The sandbox profile needs `(literal "/dev/dtracehelper")` in addition to the bead's `/dev` entries:
    every macOS Go binary opens it for write at start-up (29 denials from one `bd` run).
-10. `pg-router-source-pg-desk` is not on this machine's `PATH` until the next apply, and its installed
-    wrapper (like `pg-desk`'s) prepends the real `pg-desk`; `prepare --tool-dir` finds a locally built
-    unwrapped copy, which is what the smoke exercised.
+10. `pg-router-source-pg-desk` was not on this machine's `PATH` after the apply that was expected to
+    install it (bead `pg2-wmv6p`): both it and `pg-desk-shadow` were overlay attrs only, with no module
+    installing them. `home/programs/pg-desk` now installs the adapter with `pg-desk` by default
+    (`routerSource.enable`, default true) and `pg-desk-shadow` only when
+    `phillipgreenii.programs.pg-desk.shadow.enable = true` is set in the consuming flake. The adapter's
+    installed wrapper (like `pg-desk`'s) prepends the real `pg-desk`; until that flag is applied,
+    `prepare --tool-dir` finds a locally built unwrapped copy, which is what the smoke exercised.
 11. Exit codes: the collector uses 2 (refused to start) and 4 (kill) and keeps 1 for a generic error,
     following the repo rule that exit 1 carries no branchable meaning.
 12. Baselines drifted since the filing snapshot (916 sweep rows, 879 hash-changed): 923 and 884 at
