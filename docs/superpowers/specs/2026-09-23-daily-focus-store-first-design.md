@@ -13,7 +13,8 @@
   operator on 2026-10-08 (section 12 records them verbatim): the draft-and-lock plan model (D-F22,
   which amends D-F5 and D-F18 and adds the `replan` verb), the widened open-beads bulk query (section
   4.2), and the issue closed listener (section 8 Routing). That 2026-10-08 text is the agent's
-  reading of those rulings and has had no review beyond the agent's own
+  reading of those rulings; it has had one independent read-only review, whose findings are folded in,
+  and no review by the operator.
 - **Bead**: `pg2-2j5ac.27` (this design's own tracking bead; phase 15's decompose-trigger is
   `blocked-by` it)
 - **Depends on**: the entity change flow (`docs/superpowers/specs/2026-09-29-entity-change-flow-design.md`,
@@ -51,7 +52,8 @@ Operator rulings from the 2026-09-23 design session that produced this document,
 2026-10-05 ranking session (which supersedes D-F7), and D-F12 to D-F14 from the 2026-10-06 revision
 session that reconciled this document with the landed entity change flow, D-F15 and D-F16 from the
 review that followed it, and D-F17 to D-F21, proposed by the agent from the 2026-10-07 five-dimension
-review and CONFIRMED by the operator on 2026-10-07 (each is marked, and each is the agent's
+review and CONFIRMED by the operator on 2026-10-07, and D-F22, RULED by the operator on 2026-10-08
+(each is marked, and each is the agent's
 recommendation, so the operator can reverse it without unpicking anything else). The later
 2026-10-07 review refined their mechanics without changing a confirmed decision; each refinement
 is in the row or section it touches. D-F7 was made in the
@@ -103,9 +105,12 @@ flowchart LR
     end
     W1 --> E
     W2 --> E
-    E -->|"focus rank: read-time view,\nno caching, writes nothing"| SHOW["pg-desk focus show\n(links[] resolve bead+status\nfor selected rows)"]
-    FS -.->|"which rows are selected"| SHOW
-    SHOW -->|"operator gate reply:\nok / -key / +key / cap=N"| SELECT["pg-desk focus select --apply"]
+    E -->|"focus rank: read-time view,\nnever stored, writes nothing"| SHOW["pg-desk focus show\n(links[] resolve bead+status\nfor selected rows)"]
+    E -->|"rank of new and non-selected"| REPLAN["pg-desk focus replan"]
+    FS -.->|"the locked plan: rows and frozen order"| SHOW
+    FS -.->|"fixed head of the draft"| REPLAN
+    SHOW -->|"draft document,\nheld by the caller"| SELECT["pg-desk focus select --apply --draft\n(the lock)"]
+    REPLAN -->|"draft document,\nheld by the caller"| SELECT
     SELECT --> FS
     SELECT -->|"annotate focus_selected=period"| AN
     AN --> R --> D
@@ -117,20 +122,20 @@ flowchart LR
 
 ### Retirement map
 
-| Component                   | Fate                                 | Replaced by                                                                        |
-| --------------------------- | ------------------------------------ | ---------------------------------------------------------------------------------- |
-| `df-survey` (shallow)       | Retires                              | Live read of `entity`/`interpretation` rows (§6)                                   |
-| `df-survey` (gate-apply)    | Retires                              | `pg-desk focus select --apply` (§7.2)                                              |
-| `df-survey` (deep)          | Retires                              | Not needed — `focus show`/`select` are always live, no separate deep pass          |
-| `df-deferred`               | Retires                              | `focus_selection` absence = deferred (D-F3)                                        |
-| `df-wire`                   | Retires (logic moves into a decider) | The focus decider's `focus-item` rule (§8, D-F12, D-F13)                           |
-| `df-pull`                   | Retires                              | `pg-desk focus pull` (§7.3)                                                        |
-| `df-resolve-focus`          | Retires                              | `pg-desk focus show`/existence check via `period_key`                              |
-| `df-find-pr-bead`           | Retires                              | The entity's `links[]` plus the decider's dedup-key lookup (change-flow work-item) |
-| `df-split-blockers`         | Retires                              | `pg-desk focus show`'s resolved bead+status for selected rows (§7.1, D-F9)         |
-| `df-verify-wiring`          | Retires                              | Not needed — nothing is wired (§8)                                                 |
-| `df-close-focus`            | Retires                              | `pg-desk focus close` (§7.4) plus `close.md`'s own per-bead comments (D-F10)       |
-| `df-attention`, `df-search` | Unchanged                            | n/a — unrelated (pure `pg-connector` clients already)                              |
+| Component                   | Fate                                 | Replaced by                                                                                                         |
+| --------------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| `df-survey` (shallow)       | Retires                              | Live read of `entity`/`interpretation` rows (§6)                                                                    |
+| `df-survey` (gate-apply)    | Retires                              | `pg-desk focus select --apply` (§7.2)                                                                               |
+| `df-survey` (deep)          | Retires                              | Not needed — `focus show`/`select` read every fact live (the order freezes per draft, D-F22), no separate deep pass |
+| `df-deferred`               | Retires                              | `focus_selection` absence = deferred (D-F3)                                                                         |
+| `df-wire`                   | Retires (logic moves into a decider) | The focus decider's `focus-item` rule (§8, D-F12, D-F13)                                                            |
+| `df-pull`                   | Retires                              | `pg-desk focus pull` (§7.3)                                                                                         |
+| `df-resolve-focus`          | Retires                              | `pg-desk focus show`/existence check via `period_key`                                                               |
+| `df-find-pr-bead`           | Retires                              | The entity's `links[]` plus the decider's dedup-key lookup (change-flow work-item)                                  |
+| `df-split-blockers`         | Retires                              | `pg-desk focus show`'s resolved bead+status for selected rows (§7.1, D-F9)                                          |
+| `df-verify-wiring`          | Retires                              | Not needed — nothing is wired (§8)                                                                                  |
+| `df-close-focus`            | Retires                              | `pg-desk focus close` (§7.4) plus `close.md`'s own per-bead comments (D-F10)                                        |
+| `df-attention`, `df-search` | Unchanged                            | n/a — unrelated (pure `pg-connector` clients already)                                                               |
 
 ## 4. Gather
 
@@ -535,8 +540,9 @@ Evidence (the operator's head-to-head rulings, 2026-10-05; each pair decided the
 | unstarted, due in 3 days over unstarted, no deadline, unblocks 3 others | deadline outranks unblocking             |
 
 **Cap line**: after the slot rule, the first `cap` (default 6, `--cap N` override) ranked items are
-`in_plan: true` for _display_ only. Nothing is written by the rank computation itself (there is no
-`focus rank` verb; `show`, `select`, `pull` and `explain` all call it); `focus_selection` is written
+`in_plan: true` for _display_ only (in a draft; once a plan is locked the cap line comes from the
+period's `cap` and the recorded rows, D-F22). Nothing is written by the rank computation itself (there
+is no `focus rank` verb; `show`, `select`, `replan`, `pull` and `explain` all call it); `focus_selection` is written
 only by `select`/`pull` (section 7).
 
 ## 7. The `focus` verb family
@@ -547,11 +553,19 @@ pg-desk stores. A **draft** is a document the CALLER holds and pg-desk never sto
 with no plan) and `replan` print one, `--json` carries it (members: `contract`, `mode` of `draft` or
 `plan`, `period`, `made_at`, `digest`, `base`, `cap`, the ordered rows with tier and the deciding key, the
 rows proposed for the plan, the trailing epics block), and `select --draft <path>` applies a reply to it.
-`base` is a digest of the period's persisted plan (every row's key, status, `rank_position`, `tier`
-and `cap`) at the moment the draft was made; `digest` names the draft itself (a hash over the period,
-`cap`, `base` and the ordered rows). The cycle is: draft, reply, lock (`select --apply`), and later,
+`base` is a digest of the period's persisted plan at the moment the draft was made: the period's
+`cap` and EVERY `focus_selection` row of the period, struck rows included, in `id` order, each as
+(key, `status`, `rank_position`, `tier`, `source`, `cap`); a period with no `focus_period` row or no rows
+has one constant `base` (the digest of the empty list), whether or not the verb is a `--dry-run`.
+`digest` names the draft itself (a hash over the period, `cap`, `base` and the ordered rows) and is
+RECOMPUTED when a draft is loaded: a file that no longer matches its own `digest` (an edit, a
+truncation) is a usage error, exit `1`. The draft's period is authoritative: with `--draft`, `--date`
+MAY be omitted and, when given, MUST equal the draft's period (else exit `1`), so a draft made at 23:50
+still locks into its own day after midnight. A plan-mode document (`mode: plan`) is not a draft: given
+to `select --draft` it is exit `1` with the remedy `run replan`. The cycle is: draft, reply, lock (`select --apply`), and later,
 if wanted, `replan` to draft again over the locked plan. Nothing re-sorts the plan except a `replan`
-that the operator then locks.
+that the operator then locks. The `create.md` prose keeps the draft in one per-session temporary file
+and deletes it once the lock succeeds or the operator abandons the draft.
 
 All six verbs (`show`, `select`, `replan`, `pull`, `close`, `explain`) take `--period day` (the only
 implemented value this phase; `week`/`sprint` are schema-ready, not wired, and any other value is a
@@ -572,8 +586,14 @@ focus tables (the problem named, nothing applied, matching every other typed ver
 `3` total failure; a new `6` for "period closed" (unused elsewhere in pg-desk); and a new `7` for "the
 plan changed since the draft was made" (the draft's `base` no longer matches the persisted plan, D-F22;
 `4` is `head-check`'s and `5` is the retired `df-pull`
-multi-candidate code, so neither is reused). Checks run in this order: usage and flag errors, then the
-period-closed check (`6`), then parsing of the stdin reply, then the draft's `base` (`7`). Every non-zero exit
+multi-candidate code, so neither is reused). Checks run in this order, once, and §7.2 step 1 follows it: usage and flag errors, then the
+period-closed check (`6`), then loading and validating the draft (`1`), then parsing of the stdin reply
+(`1`), then the draft's `base` (`7`), then hand-add hydration, then the write, which re-checks `base`
+INSIDE its transaction (so two locks holding one draft cannot both pass: the second exits `7` from
+there, having written nothing). A run that is doomed by an earlier check never hydrates. A non-dry-run
+`select` or `pull` that exits `1`, `6` or `7` writes no selection state and no annotation, and writes its
+one `focus_run` row in its own transaction when the store is writable (so the `usage`, `period_closed`
+and `plan_changed` outcomes of §8.2 are counted); a `--dry-run` writes no row. Every non-zero exit
 prints a one-line remedy on stderr (for example `coverage incomplete: jira-assigned failed (timeout); run
 pg-desk issue changes and re-run show; the table below is valid for the sources that listed`). The
 `create.md` prose MUST treat `show`'s `2` as a WARNING, with a valid table on stdout, and `select`'s
@@ -600,7 +620,9 @@ exit `0`. The per-verb descriptions below use this scheme.
   prints `NOTICE plan changed since this draft; select would exit 7`.
 - **A plan exists, no `--draft`: it prints the PLAN.** The selected rows appear in recorded
   `rank_position` order with their recorded `tier` and the period's `cap` line, facts live, and a
-  `plan` header (`locked <selected_at>`). Below the cap line a `not in plan` block lists the other
+  `plan` header (`locked <selected_at>`) and a cap line that says how many slots finished items still
+  hold (`cap 6: 2 of 6 slots held by finished items`; a finished row keeps its slot until the operator
+  strikes it). Below the cap line a `not in plan` block lists the other
   candidates in CURRENT rank, labelled `current rank, not frozen`, with a notice counting those that
   now rank above the plan's last row and suggesting `replan`. `--json` carries `mode: plan` and no
   proposed rows. This is the browse the bare `show` always was.
@@ -682,16 +704,25 @@ LOCK** (D-F22).
 1. Obtain the draft and **print it**. With `--draft <path>`, load that draft: the ORDER is the draft's
    and nothing is re-ranked, while every fact is read live (as `show --draft` does). Without
    `--draft`, compute a draft in this process, exactly as `replan` would (§7.6), and apply to it in
-   the same run, so the order is still computed once. `--draft` is validated before anything else
-   about the reply: an unreadable or malformed file, or a draft for another period, is a usage error
-   (exit `1`), and a draft whose `base` differs from the persisted plan's digest NOW aborts with exit
+   the same run, so the order is still computed once (a no-draft preview and a no-draft apply are two
+   independent drafts and CAN differ, which the `base` check cannot catch; that is why `create.md` MUST
+   pass `--draft`). The draft is validated by the order of §7: an unreadable, malformed, edited or
+   plan-mode file, or one for another period, is exit `1`; and, after the reply parses (step 2), a
+   draft whose `base` differs from the persisted plan's digest NOW aborts with exit
    `7` and the message `plan changed since this draft (base <old> != <new>); nothing applied; re-run
 show or replan and re-reply`, because someone locked or struck something after the draft was made.
    There is no `--expect` (withdrawn by D-F22): the `base` check is the optimistic-concurrency guard,
    and it is automatic, so a held draft cannot clobber a newer plan. A draft's rank can be hours old and
    that is intended (the operator is locking THIS order); the preview prints `draft made <age> ago`, and
    a draft row whose source has finished since is printed `finished` and is NOT selected by `ok` or
-   `+key` (a finished item is not worked; it is reported on stderr as a routine skip, exit `0`).
+   `+key` (a finished item is not worked; it is reported on stderr as a routine skip, exit `0`, and it
+   does not count toward `cap`). **Finished** is defined by the snapshot's own state, read BEFORE
+   `active`: a PR that is merged or closed, an issue the connector reports closed or done (the bead status `closed`; for Jira the connector's own
+   terminal mapping, the same one that makes the change flow emit `issue.closed`, which the
+   decomposition MUST verify fires for a Jira done transition, since the issue change kinds also include
+   `status_changed`). A
+   closed entity is also deactivated, so "inactive" without a terminal state is the only non-terminal
+   case (step 4).
 2. Parse the reply: `ok` (lock the draft as shown: with no plan it selects the rows marked `+`; over
    an existing plan it keeps every selected row and selects nothing new, because a `replan` draft
    proposes nothing, D-F22), `-<key>` (strike: the row stays and becomes
@@ -733,19 +764,33 @@ show or replan and re-reply`, because someone locked or struck something after t
 OWNER/REPO#400 (link recorded; no bead for PROJ-5)`), `--dry-run` lists merges, `show` marks the
    absorbed key `absorbed into <key>`, and `+<absorbedKey>` reverses a merge. Each merge appends an
    `absorbed` row to `focus_selection_event`.
-4. Compute the final set from the draft and the plan; rank is NEVER recomputed here (D-F22).
-   `cap` is the reply's `cap=N`, else the period's persisted `focus_period.cap`, else the default 6.
-   - **No plan yet** (the first lock): the final set is the draft's non-struck, non-absorbed rows in
-     draft order, top `cap` (`cap=N` re-takes the top N of the SAME draft order), plus force-pulled and
-     hand-added items, each of which raises the effective cap by one ONLY when it would otherwise fall
-     outside the top `cap` (matching the v2 doc's own rule).
+4. Compute the final set from the draft and the plan; rank is NEVER recomputed here (D-F22). `cap` is
+   the reply's `cap=N`, else the draft's own `cap` (resolved when the draft was made: its `--cap`, else
+   the period's persisted `cap`, else the default 6), so `ok` selects exactly the rows the operator saw
+   marked `+`, never more (`show --draft` takes no `--cap`: it is a
+   usage error there, the cap is the draft's, and `select` is where `cap=N` changes it).
+   - **No `selected` row yet** (the first lock; struck rows may exist): the final set is the draft's
+     rows marked `+`, in draft order (`cap=N` re-takes the top N of the SAME draft order), plus
+     force-pulled and hand-added items, each of which raises the effective cap by one ONLY when it would
+     otherwise fall outside the top `cap` (matching the v2 doc's own rule). A finished draft row is
+     skipped and does not count toward `cap`; a row the operator struck earlier is never proposed
+     again (it is reselected only by `+key`).
    - **A plan exists** (a lock after `replan`, or a re-run): the final set is EVERY currently `selected`
      row, in its recorded order, plus any `+key`, minus any `-key`. Nothing is added by rank, so a bare
-     `ok` can never strike and can never add. `cap=N` below the number of selected rows strikes the
-     rows with the highest `rank_position` beyond N, each with cause `cap` and shown in the CHANGES
-     block; a `cap=N` above it only raises the cap line. A row whose source is terminal stays selected
-     (shown `finished`); a row that lost candidacy for a NON-terminal reason (reassigned, hidden,
-     deactivated) is struck `dropped`, and the CHANGES block names it before it applies.
+     `ok` can never strike and can never add. `cap=N` below the number of selected, UNFINISHED rows
+     strikes the unfinished rows with the highest `rank_position` beyond N, each with cause `cap` and
+     shown in the CHANGES block; a finished row is never cap-struck and does not count toward `cap`;
+     `cap=N` above it only raises the cap line. A row whose source is terminal stays selected (shown
+     `finished`). A row that lost candidacy for a NON-terminal reason (reassigned, hidden, or inactive
+     without a terminal state) is struck `dropped`, and the CHANGES block names it before it applies.
+     Suppression by the slot rule, a correlation group or a merge is NOT a loss of candidacy and never
+     strikes: the row stays selected and `show` prints it `covered by <key>` (so an epic that gains a
+     child, a `blocked` one included, keeps its slot until the operator strikes it).
+   - **Keys.** A key known to the draft or the plan is valid with both signs. For a finished or
+     no-longer-candidate row, `+key` is a routine skip (exit `0`) and `-key` is a no-op reported on
+     stderr; a hand-add that resolves to a closed or terminal id remains a usage error (exit `1`). A
+     `+key` of a candidate that arrived after the draft is judged against the LIVE candidate set and is
+     a force-pull (`forced`), not a hand-add.
      Rows earlier added by `pull`, by a force-pull or by a hand-add, and not struck, stay in the set
      (D-F18).
 5. Reconcile `focus_selection` for this period to the final set (D-F17, D-F18): every item in the
@@ -755,8 +800,14 @@ OWNER/REPO#400 (link recorded; no bead for PROJ-5)`), `--dry-run` lists merges, 
    `struck_reason`: `operator` for an explicit `-key`, `cap` for an explicit lower `cap=` (never for
    displacement by rank, which no longer exists), `dropped` for an item that stopped being a candidate
    for a non-terminal reason. A row whose source is terminal is not in this list at all: it stays
-   `selected` and `show` prints it `finished` (§7.1). `rank_position`, `tier` and `cap` are written
-   from the draft, so the plan keeps the order it was locked in. Each flip appends a `focus_selection_event` row. Nothing is
+   `selected` and `show` prints it `finished` (§7.1). **`rank_position` is a dense per-period lock
+   sequence, not a rank**: the first lock numbers its selected rows 1..n in draft order (force-pulled
+   and hand-added rows after them, in reply order); every later add (`+key`, a hand-add, a `pull`, a
+   reselect of a struck row) takes the maximum `rank_position` over ALL of the period's rows, struck
+   included, plus one, in reply order; a row that is already `selected` is never rewritten (its
+   `source`, `rank_position`, `tier` and `cap` stay as locked), and only inserted or reselected rows are
+   written. A hand-add has no tier (`NULL`, shown `-`). So the plan keeps the order it was locked in
+   and plan-mode `show` sorts on a total order. Each flip appends a `focus_selection_event` row. Nothing is
    deleted. Get-or-create the `focus_period` row
    first if absent (§5), and persist the period's `cap`. Then write the `focus_selected` annotation of
    §5 on every affected entity (the maximum `period_key` over its selected rows, else `none`; D-F12). A
@@ -817,7 +868,13 @@ the real, day-to-day price of that trade, not a cost-free simplification.
 
 Strictly additive and outside the draft/lock cycle (§7.6): it computes the rank in its own run, takes no
 draft, and performs no strike, no re-cap and no re-sort of the plan. It IS a lock of what it adds, and
-`--top K` reads the CURRENT rank, which can differ from a draft the operator holds. A positional argument is ALWAYS a key; a count is only ever
+`--top K` reads the CURRENT rank, which can differ from a draft the operator holds. Its rows take
+`rank_position` by the rule of §7.2 step 5 (the maximum plus one, in rank order) and record the tier
+and cap of the run. **A `pull` changes the persisted plan, so it invalidates every draft held across
+it**: the held draft's `base` no longer matches and its lock exits `7`; the remedy is `replan`, which
+shows the pulled rows as the fixed head. This is deliberate (a `base` that tolerated additive rows
+would let a held draft lock a plan the operator never saw), and `create.md` MUST NOT interleave `pull`
+with a held draft. A positional argument is ALWAYS a key; a count is only ever
 `--top K`, and `--top` together with a key is a usage error, so `pull 3` can never mean either "three
 more" or "PR number 3" by guesswork. Bare invocation previews (recompute, print, change nothing —
 also "what's left today?"). `--top K` selects the top-`K` not-yet-selected candidates by current
@@ -917,8 +974,15 @@ are a draft phase again until we approve and go back to the actual plan".
   `period closed` and the plan).
 
 `pull` (§7.3) is NOT part of this cycle: it is an immediate, additive lock of named or top-ranked
-items by the rank at that moment, and it ignores any draft the operator is holding. To act on a draft's
-order, reply `+key` and lock.
+items by the rank at that moment, it ignores the CONTENT of any draft the operator is holding, and it
+invalidates that draft (exit `7` at its lock, then `replan`). To act on a draft's order, reply `+key`
+and lock.
+
+On a CLOSED period `replan` prints the plan (`mode: plan`, `period closed`) and exits `0`: there is no
+draft to make, and a plan-mode document handed to `select --draft` is exit `1` (`run replan`). A
+`show --draft` of a plan-mode document re-renders it as the plan. `replan` writes no `focus_run` row
+and no log line of its own (a draft is not an event), so abandoned drafts are not counted; the lock
+records what was locked (§8.2).
 
 ## 8. Minting: the focus decider
 
@@ -1136,9 +1200,13 @@ Following the telemetry declaration every pg-desk component carries (`docs/behav
   - `pg_desk_focus_beads{state}` with `state` in `open|claimed|held|deferred_other|blocked|closed`, and
     `pg_desk_focus_oldest_bead_age_seconds{state}` for `open` (minted and never claimed) and `held`;
   - `pg_desk_focus_pending_beads{reason}` with `reason` in
-    `unminted|hidden|suppressed|no_bead_by_design|unwatched`, and
+    `unminted|hidden|suppressed|no_bead_by_design|unwatched|source_terminal`, and
     `pg_desk_focus_oldest_pending_bead_age_seconds{reason}`; only `unminted` can page, because the other
-    reasons are legitimate permanent states and counting them would train the operator to mute the alert;
+    reasons are legitimate permanent states and counting them would train the operator to mute the alert.
+    A finished item stays `selected` (D-F22) and its bead is held by the terminal-source hold, so a row
+    whose source is terminal is counted under `source_terminal` and is EXCLUDED from `unminted`, from
+    `selected_bead_held` and from `terminal_source_bead_open` while its bead is held (the last still
+    counts a terminal source whose bead is NOT held, which is the missing-binding signal);
   - `pg_desk_focus_divergence{kind}` with `kind` in `row_without_annotation`,
     `annotation_without_row`, `stale_period`, `selected_bead_held`, `struck_bead_open_unclaimed`,
     `struck_bead_claimed` and `terminal_source_bead_open`,
@@ -1209,6 +1277,7 @@ the closed vocabulary of section 7.2 step 7; the table is the only place either 
 | No bead yet, decider not run                                          | `pending`                    | nothing to do                      | `will mint`                           | `not matched`     |
 | No bead yet, source hidden                                            | `pending (hidden)`           | nothing to do                      | `no change (source hidden)`           | `hidden`          |
 | No bead yet, kind suppressed                                          | `pending (suppressed)`       | nothing to do                      | `no change (suppressed)`              | `suppressed`      |
+| No bead yet, source terminal (finished)                               | `source done (no bead)`      | nothing to do                      | `no change (source finished)`         | `not matched`     |
 | Source is an epic or a bd task (its id is a bead id)                  | `n/a (epic or bead)`         | `no bead`                          | `no bead`                             | n/a               |
 | `open`, unclaimed, no marker or marker `released`                     | `open`                       | `will hold`                        | `bead open, no change`                | `already handled` |
 | `open`, unclaimed, no marker or marker `released`, with open children | `open (has children)`        | `no change (has open children)`    | `bead open, no change`                | `already handled` |
@@ -1239,11 +1308,11 @@ help text as `in play`, `held`, `someone else's`, `closed`, `not yet`.
 
 | Consumer                          | Today                                                                                                                              | Rewritten to                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `create.md` duplicate guard       | `df-resolve-focus <date> --status all`                                                                                             | `pg-desk focus show --date X`; nonempty selection ⇒ same use-as-is/amend operator decision                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `create.md` duplicate guard       | `df-resolve-focus <date> --status all`                                                                                             | `pg-desk focus show --json --date X`; `mode: plan` with selected rows (a bare `show` of a planless period now prints a full DRAFT, so "nonempty output" no longer means "a selection exists") ⇒ same use-as-is/amend operator decision, where "amend" is `replan`                                                                                                                                                                                                                               |
 | `create.md` gate                  | `df-survey` shallow → table → reply → `--apply-gate`                                                                               | `pg-desk focus show --json` (or `replan --json` when a plan exists) held as the draft file → table rendered from it, re-rendered with `show --draft` → reply → `pg-desk focus select --draft F` preview (its CHANGES block shown to the operator) → `pg-desk focus select --apply --draft F` with the same reply, which locks; the prose MUST NOT re-run `show` between reply and lock, and offers `replan` when the operator asks to reconsider; `show`'s exit `2` is a warning, not a failure |
 | `create.md` deep/mint/wire        | `df-survey --deep` → LLM drop/merge → `df-wire`                                                                                    | `-<key>` covers "drop"; `--merge <key>=<key>` on `focus select` (§7.2 step 3) covers "merge"; minting is the focus decider's, triggered by the selection annotation (§8), not a step of `create.md`                                                                                                                                                                                                                                                                                             |
 | `pull.md`                         | invokes `df-pull` verbatim, including its exit-`5` multi-candidate branch                                                          | invokes `pg-desk focus pull` verbatim — **not** the same exit codes: `focus pull` has no exit `5`, for the same reason `close.md` resolve (below) loses its multi-candidate case. `pull.md`'s own exit-5 handling prose is dead and should be removed, not left in place.                                                                                                                                                                                                                       |
-| `close.md` resolve                | `df-resolve-focus <date>`, exit-5 multi-candidate handling                                                                         | `pg-desk focus show --date X` existence check — no multi-candidate case exists (`period_key` is the date, exactly; the ambiguity class retires with it)                                                                                                                                                                                                                                                                                                                                         |
+| `close.md` resolve                | `df-resolve-focus <date>`, exit-5 multi-candidate handling                                                                         | `pg-desk focus show --json --date X` existence check (`mode: plan`) — no multi-candidate case exists (`period_key` is the date, exactly; the ambiguity class retires with it)                                                                                                                                                                                                                                                                                                                   |
 | `close.md` survey                 | `df-split-blockers <focus-id>`                                                                                                     | `pg-desk focus show --date X` — resolved bead+status for each selected row (D-F9), grouped by `close.md` itself                                                                                                                                                                                                                                                                                                                                                                                 |
 | `close.md` per-bead notes + close | `df-close-focus`: appends a progress note to every touched bead, then the day summary onto the focus bead, then `bd close --force` | `close.md` appends each per-bead note with `pg-connector issue comment`, then `pg-desk issue refresh <bead>` (D-F10); then `pg-desk focus close --date X` with the day summary on stdin (§7.4); no bead is closed                                                                                                                                                                                                                                                                               |
 
@@ -1383,8 +1452,30 @@ closed, human-labelled open}`: the single `update` (status `deferred`, marker `s
     `TestNewCandidatesAfterDraftShowAsNewSinceDraft` (never in the table), `TestFinishedDraftRowIsSkippedAtLock`
     (printed `finished`, not selected, exit `0`, routine skip on stderr), `TestCapShrinkStrikesHighestPositionsOnly`
     and `TestCapRaiseOnlyMovesTheLine`, `TestStaleBaseExitsSeven` (two drafts from one plan; lock one, then
-    the other exits `7` with zero writes, and `focus_run` records outcome `plan_changed`),
-    `TestDraftFromAnotherPeriodIsUsageError`, `TestMalformedDraftIsUsageError`, `TestPullIgnoresHeldDraft`,
+    the other exits `7` with zero selection and annotation writes and one `focus_run` row of outcome
+    `plan_changed`, and a `--dry-run` exit `7` writes no row), `TestBaseRecheckedInsideTransaction` (a
+    concurrent lock between the check and the write: the second exits `7` from the transaction),
+    `TestCheckOrderIsUsageThenClosedThenDraftThenReplyThenBase` (a malformed reply over a stale base is
+    `1`; a closed period over a stale base is `6`; a doomed run never hydrates),
+    `TestEditedDraftDigestMismatchIsUsageError`, `TestPlanModeDocumentToDraftFlagIsUsageError`,
+    `TestDraftPeriodIsAuthoritativeAcrossMidnight` (`--date` omitted locks into the draft's day;
+    a conflicting `--date` is `1`), `TestDraftFromAnotherPeriodIsUsageError`,
+    `TestMalformedDraftIsUsageError`, `TestPullInvalidatesHeldDraft` (a `pull` between draft and lock
+    gives exit `7`, including for a first draft whose `base` was the empty list, and `replan` then shows
+    the pulled rows as the fixed head), `TestCapPrecedenceReplyThenDraftThenPeriodThenSix` (a draft made
+    with `--cap 4` over a persisted cap of 6 locks exactly the four `+` rows),
+    `TestRankPositionIsDenseAndNeverRewritten` (first lock, `+key`, hand-add, `pull` and a reselect of a
+    struck row: positions are the maximum plus one over ALL rows, existing rows untouched, a hand-add's
+    tier is `NULL`), `TestPlanOrderIsTotalWithNullTier`, `TestOperatorStruckRowIsNotReproposed` (every
+    row struck, then `show` proposes none of them), `TestPlusAndMinusOnFinishedOrLostRow` (`+` skip
+    exit `0`, `-` no-op, a hand-add of a terminal key exit `1`), `TestFinishedRowsDoNotCountTowardCap`
+    and `TestCapShrinkNeverStrikesFinishedRow`, `TestSlotGroupAndMergeSuppressionNeverStrike` (a planned
+    epic that gains a child, a `blocked` one included, a planned PR absorbed into a correlation group, and
+    a `--merge` of a planned item: each stays selected and prints `covered by <key>`),
+    `TestFinishedIsEvaluatedBeforeActive` (a merged PR is `finished`, never `dropped`),
+    `TestPlusOfCandidateNewSinceDraftIsForced`, `TestReplanOnClosedPeriodPrintsPlan`,
+    `TestReplanWritesNoRunRow`, `TestOkOverReplanEchoesNoChange` (the echo says `no change; name items
+    with +key or use pull`),
     `TestShowPlanModeFreezesOrderAndShowsDrift` (a golden with the `not in plan` block and the replan
     suggestion), `TestRunRecordCarriesDraftDigestAgeAndDrift`, and a round trip of the draft document
     through `--json` (the contract is stable and the digest is a pure function of the document).
@@ -1393,7 +1484,11 @@ closed, human-labelled open}`: the single `update` (status `deferred`, marker `s
     assigned), the open-beads bulk query lists `blocked`, `TestFocusRoleBindsIssueClosedAndReopened`
     (the router config the deployment ships binds both, and `doctor`'s "expected empty for issue" text is
     amended), `TestFocusHoldsBeadOfClosedIssue` and the cycle closed issue, reopened issue, the held
-    bead is released while the item is still selected.
+    bead is released while the item is still selected; a reopen of an item the operator struck while it
+    was closed stays held, a reopen of a claimed bead is left running, a closed issue with no bead mints
+    nothing, a Jira done transition emits `issue.closed`, `TestFinishedRowIsNotCountedAsHeldOrUnminted`
+    (`selected_bead_held` and `unminted` exclude a terminal source; it counts under `source_terminal`),
+    and a volume check that the widened `blocked` query stays inside `hydration.max_per_poll`.
   - Verb contract: `TestFocusExitCodes` (a table of verb x documented code, asserting the code, that
     the stdout table is present where it should be, and the stderr remedy), a draft whose `base` no
     longer matches the plan exits `7` and writes nothing, `FuzzParseReply` (never panics; an error implies zero store writes) and `TestReplyGrammarTable`
@@ -1469,6 +1564,12 @@ the new watch queries and the new decider role live, not just a clean flake chec
   the source entity's `links[]` after `issue refresh`.
 - A full `select --apply` → `pull` → `show` (resolved status) → per-bead comments → `close` cycle
   runs end-to-end against the live tracker for one real day.
+- The 2026-10-08 rulings, each observed live: a draft made with `show --json` and locked with `select
+--apply --draft` writes the draft's order even after a priority is changed in between; a `pull`
+  between draft and lock gives exit `7`; `replan` shows the locked rows first and proposes nothing, and
+  a bare `ok` over it changes nothing; closing a selected issue holds its bead (the shipped router config
+  binds `issue.closed`) and reopening it releases the bead; and an epic whose only child is `blocked`
+  takes no slot of its own.
 - `close.md`'s rewritten resolve/survey/close steps produce output its unchanged steps 3-5 accept
   without modification.
 - Live decider behaviors, each observed and not inferred from a clean `flake check`: selecting the same
@@ -1604,15 +1705,22 @@ the new watch queries and the new decider role live, not just a clean flake chec
      and `issue.reopened` (section 8, Routing). The deployment's own router config lives in the private
      machine flake and was NOT read for this answer; the decomposition checks it.
 - **Agent readings of those rulings, NOT themselves ruled (the operator may overrule any of them):**
-  (i) a `replan` draft proposes nothing, so a bare `ok` over it locks the plan unchanged and never
-  fills a slot a finished item still occupies (the operator adds with `+key` or `pull`); (ii) `--expect`
-  is withdrawn in favour of the draft's `base`; (iii) a draft is carried by the caller as a document
+  (R1) a `replan` draft proposes nothing, so a bare `ok` over it locks the plan unchanged and never
+  fills a slot a finished item still occupies (the operator adds with `+key` or `pull`); (R2) `--expect`
+  is withdrawn in favour of the draft's `base`; (R3) a draft is carried by the caller as a document
   (`--draft <path>`), because "no persistence" rules out storing it in pg-desk, and a `select` given no
-  draft computes one in its own process; (iv) a finished item stays `selected` rather than being struck
-  `dropped`, and the decider's terminal-source hold, not a strike, holds its bead; (v) a draft row that
-  finished before the lock is skipped at lock, not selected; (vi) a `blocked` bead assigned to the
-  operator is a candidate in its own right, as D-F11's "every non-done assigned item" implies; (vii)
-  `pull` stays outside the cycle as an immediate additive lock.
+  draft computes one in its own process; (R4) a finished item stays `selected` rather than being struck
+  `dropped`, and the decider's terminal-source hold, not a strike, holds its bead; (R5) a draft row that
+  finished before the lock is skipped at lock, not selected; (R6) a `blocked` bead assigned to the
+  operator is a candidate in its own right, as D-F11's "every non-done assigned item" implies; (R7)
+  `pull` stays outside the cycle as an immediate additive lock that invalidates a held draft.
+  **Known remaining risks of the draft model, not designed away:** a draft is an LLM-held file, so a
+  lost or hand-edited one is a new draft or exit `1` (the `digest` check catches edits); abandoned
+  drafts leave no trace; `replan` proposing nothing is the likeliest thing to surprise the operator,
+  because "pull new items into the plan" can also be read as "propose them" (`?` marks the operator
+  accepts with `+key` would be the smallest change that serves both); and whether a Jira done
+  transition emits `issue.closed`, and how many beads the widened `blocked` query adds, are checked in
+  the decomposition.
 - **Behavior docs and code the 2026-10-08 rulings add to the decomposition** (item (q), beside (a) to
   (p) above): `docs/behavior/pg-desk/focus.md` gains the draft document contract, the plan and draft
   modes of `show`, `replan` and the exit-`7` meaning, with `INV-FOCUS-n` ids for "a draft is never
