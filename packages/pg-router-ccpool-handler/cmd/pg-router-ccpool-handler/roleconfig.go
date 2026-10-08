@@ -95,6 +95,10 @@ type roleFile struct {
 		// the handler-wide allowedTools for this role only; see
 		// roles.CCPoolConfig.ExtraAllowedTools. Absent/empty => no extra grants.
 		ExtraAllowedTools []string `json:"extraAllowedTools"`
+		// Precheck (bead pg2-nk6th.3, INV-CCH-22): opts the role in to a dispatch
+		// precheck, "review" or "ready"; see roles.CCPoolConfig.Precheck. Absent
+		// or "" => the historical behavior.
+		Precheck roles.Precheck `json:"precheck"`
 	} `json:"ccpool,omitempty"`
 	Command *struct {
 		Argv []string `json:"argv"`
@@ -193,6 +197,7 @@ func loadRole(path string) (roles.Role, error) {
 			BudgetStopEscalateAfter: stopAfter,
 			WorktreeQuietWindow:     quietWindow,
 			ExtraAllowedTools:       rf.CCPool.ExtraAllowedTools,
+			Precheck:                rf.CCPool.Precheck,
 		}
 	case "command":
 		if rf.Command == nil {

@@ -216,7 +216,7 @@ When adding any AI agent, LLM tool, or coding assistant, use this lookup order:
   declare at least one role. Reliable recipe: `pg-router config --print-defaults > cfg.toml`, then
   retype ONE existing query to the type under test. A hand-rolled ccpool role needs `actor` AND
   (`prompt` XOR `prompt_file`) AND `completion` AND `on_failure` AND `on_dispatch_fail`
-  (enums: `completion` = close-only|close-or-handback; the failure fields = unclaim|add-human).
+  (enums: `completion` = close-only|close-or-handback|close-or-triage|close-or-split-triage|close-or-release; the failure fields = unclaim|add-human).
   To prove the backing-command check actually RAN, run the same config against the unwrapped
   binary `bin/.pg-router-wrapped` under `env -i PATH=/usr/bin:/bin` — it must exit 1 with
   `backing command "<cmd>" cannot be invoked`; without that negative control, an exit 0 through

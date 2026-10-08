@@ -174,6 +174,16 @@ type ScriptBD struct {
 	ShowErrOnce map[string]error    // returns error once per id, then clears
 	CommentSeq  map[string][]int    // per-id comment_count sequence, indexed like StatusSeq (holds the last value); absent => 0
 	Labels      map[string][]string // keyed by bead id; wired into the synthesized "show" JSON's "labels" key below so beads.HasLabel can read a seeded label without a full Show[id] JSON literal.
+	// AssigneeSeq is the per-id assignee sequence, indexed like StatusSeq (it holds
+	// its last value); absent => the synthesized show carries no assignee.
+	AssigneeSeq map[string][]string
+	// DeferUntil is a per-id defer_until RFC3339 string wired into the synthesized
+	// show; absent => none.
+	DeferUntil map[string]string
+	// BlockerStatus gives a per-id `blocks` dependency on a bead of that status
+	// (e.g. "open"), rendered in `bd show --json`'s dependency shape; absent =>
+	// no dependencies.
+	BlockerStatus map[string]string
 }
 
 func (s *ScriptBD) Run(_ context.Context, args ...string) (string, error) {
@@ -220,7 +230,17 @@ func (s *ScriptBD) Run(_ context.Context, args ...string) (string, error) {
 		if cs := s.CommentSeq[id]; len(cs) > 0 {
 			comments = cs[min(i, len(cs)-1)]
 		}
-		return `{"id":"` + id + `","status":"` + seq[i] + `","labels":` + string(labels) + `,"comment_count":` + strconv.Itoa(comments) + `}`, nil
+		extra := ""
+		if as := s.AssigneeSeq[id]; len(as) > 0 {
+			extra += `,"assignee":"` + as[min(i, len(as)-1)] + `"`
+		}
+		if du, ok := s.DeferUntil[id]; ok {
+			extra += `,"defer_until":"` + du + `"`
+		}
+		if bs, ok := s.BlockerStatus[id]; ok {
+			extra += `,"dependencies":[{"id":"` + id + `-blocker","status":"` + bs + `","dependency_type":"blocks"}]`
+		}
+		return `{"id":"` + id + `","status":"` + seq[i] + `","labels":` + string(labels) + `,"comment_count":` + strconv.Itoa(comments) + extra + `}`, nil
 	case "update":
 		s.Updates = append(s.Updates, join(args))
 	case "comment":

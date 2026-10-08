@@ -123,3 +123,74 @@ func TestRunDispatch_reviewPrecheckFailsOpenWithoutConnector(t *testing.T) {
 		t.Fatalf("got exit %d reason %q, want the unchanged launch path (capacity-unknown)", code, reason)
 	}
 }
+
+// readyPrecheckEnv is precheckEnv for a `ready` role (bead pg2-nk6th.3): PATH
+// holds only a fake `bd` answering `bd show` with beadJSON (a bd-show-shaped
+// single issue), and the role opts in with precheck = "ready" under actor
+// "test-actor". A dispatch that gets past the precheck dies at the admission
+// gate (no ccpool on PATH) with reason capacity-unknown.
+func readyPrecheckEnv(t *testing.T, beadJSON string) (rolePath string) {
+	t.Helper()
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "bin")
+	if err := os.Mkdir(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "bd"), []byte("#!/bin/sh\nprintf '%s' '{\"data\":["+beadJSON+"]}'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	t.Setenv("XDG_STATE_HOME", filepath.Join(dir, "state"))
+	rolePath = filepath.Join(dir, "role.json")
+	roleJSON := `{"name":"drain","type":"ccpool","ccpool":{"actor":"test-actor","completion":"close-or-release","precheck":"ready","onFailure":"add-human","onDispatchFail":"leave","promptBody":"hello"}}`
+	if err := os.WriteFile(rolePath, []byte(roleJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return rolePath
+}
+
+func runReadyDispatch(t *testing.T, rolePath string) (code int, reason string) {
+	t.Helper()
+	restoreIn := redirectStdin(t, `{"schemaVersion":"1","id":"d-1","event":{"id":"e-1","type":"dispatch","payload":{"id":"zr-d","type":"task"}}}`)
+	defer restoreIn()
+	got := captureStdout(t, func() { code = runDispatch([]string{"--role-config", rolePath}) })
+	var reply struct {
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal([]byte(got), &reply); err != nil {
+		t.Fatalf("stdout = %q, not valid JSON: %v", got, err)
+	}
+	return code, reply.Reason
+}
+
+// TestRunDispatch_readyPrecheck proves the precheck's decline reaches the wire
+// through the real runDispatch wiring: the role's `precheck` setting is read
+// from the role file, the bead shape `bd show` really returns (including its
+// dependencies) is decoded, and an own-actor in_progress bead (the restart-
+// absorb path) is never declined.
+func TestRunDispatch_readyPrecheck(t *testing.T) {
+	const groomed = `"labels":["has-acceptance-criteria"]`
+	tests := []struct {
+		name       string
+		bead       string
+		wantReason string
+	}{
+		{"groomed open bead launches", `{"id":"zr-d","status":"open",` + groomed + `}`, busyReasonCapacityUnknown},
+		{"closed", `{"id":"zr-d","status":"closed",` + groomed + `}`, "skipped-bead-not-open"},
+		{"claimed by a peer", `{"id":"zr-d","status":"in_progress","assignee":"someone-else",` + groomed + `}`, "skipped-bead-not-open"},
+		{"human", `{"id":"zr-d","status":"open","labels":["has-acceptance-criteria","human"]}`, "skipped-bead-human"},
+		{"not groomed", `{"id":"zr-d","status":"open","labels":["x"]}`, "skipped-bead-not-groomed"},
+		{"deferred status", `{"id":"zr-d","status":"deferred",` + groomed + `}`, "skipped-bead-deferred"},
+		{"future defer_until", `{"id":"zr-d","status":"open","defer_until":"2999-01-01T00:00:00Z",` + groomed + `}`, "skipped-bead-deferred"},
+		{"open blocker, bd show dependency shape", `{"id":"zr-d","status":"open",` + groomed + `,"dependencies":[{"id":"zr-b","status":"open","issue_type":"task","dependency_type":"blocks"}]}`, "skipped-bead-blocked"},
+		{"own-actor in_progress is absorbed, not declined", `{"id":"zr-d","status":"in_progress","assignee":"test-actor","labels":["human"]}`, busyReasonCapacityUnknown},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			code, reason := runReadyDispatch(t, readyPrecheckEnv(t, tc.bead))
+			if code != conformance.ExitBusy || reason != tc.wantReason {
+				t.Fatalf("got exit %d reason %q, want ExitBusy with %q", code, reason, tc.wantReason)
+			}
+		})
+	}
+}

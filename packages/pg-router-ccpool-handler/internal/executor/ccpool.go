@@ -388,13 +388,26 @@ func (r *ccpoolRun) reclaimAbandonedWorktree(ctx context.Context, cc *roles.CCPo
 // waitFailureResult maps a wait-path error to the verb actually applied to the
 // bead: a budget hard-stop (watchdog won) always unclaimed; an external close
 // (ErrExternallyClosed) unclaimed, or escalated when it was the second
-// consecutive strike; any other failure went through fail →
+// consecutive strike; an unclaimed end of a close-or-release role
+// (ErrUnclaimedEnd) unclaimed on its first strike, escalated on its second; a
+// peer-held bead (ErrPeerHeld) no verb at all; any other failure went through fail →
 // complete.OnFailure(OnFailure). nil/ctx errors → no verb. (pg2-kj7j, INV-CCH-7)
 func (r *ccpoolRun) waitFailureResult(cc *roles.CCPoolConfig, beadID string, err error) report.Result {
 	if err == nil {
 		return report.Result{}
 	}
 	if errors.Is(err, watchdog.ErrBudgetExceeded) {
+		return failureAction(report.Unclaimed, beadID)
+	}
+	if errors.Is(err, ErrPeerHeld) {
+		// A peer holds the bead: no verb, and no on_failure (INV-CCH-28).
+		return report.Result{}
+	}
+	if errors.Is(err, ErrUnclaimedEnd) {
+		var ue *unclaimedEnd
+		if errors.As(err, &ue) && ue.escalated {
+			return failureAction(report.Escalated, beadID)
+		}
 		return failureAction(report.Unclaimed, beadID)
 	}
 	if errors.Is(err, ErrExternallyClosed) {
@@ -453,7 +466,20 @@ func (r *ccpoolRun) finishWait(ctx context.Context, cc *roles.CCPoolConfig, d Di
 	r.recordDispatchFailure(d, name, werr)
 	q := r.cleanupWorktree(ctx, cc, name, d.Item.ID, wt)
 	r.closeSettledSession(ctx, cc, d.Item.ID, name, werr, q)
+	if errors.Is(werr, ErrPeerHeld) {
+		// Another actor holds the bead (close-or-release, INV-CCH-28): the dispatch
+		// wrote nothing to it and clears nothing on it, and it is not a failure of
+		// this session, so it reports success with no verb. The settled-session
+		// close above still saw the real werr, so the row is marked incomplete.
+		return r.waitFailureResult(cc, d.Item.ID, werr), nil
+	}
 	if werr == nil {
+		if cc.Completion == roles.CloseOrRelease {
+			// A completed close-or-release dispatch (closed, or handed back after the
+			// worker claimed) resets the unclaimed-end strike count, which like
+			// pool-evicted below counts CONSECUTIVE strikes (INV-CCH-28). Best-effort.
+			_ = beads.RemoveLabel(ctx, r.deps.BD, d.Item.ID, unclaimedEndLabel)
+		}
 		// A successful completion resets the eviction strike counter so
 		// escalateEviction's two-strike count stays CONSECUTIVE, not lifetime
 		// (mirrors run()'s own pool-launch-fail removal after a successful
@@ -677,15 +703,15 @@ func (r *ccpoolRun) markIncomplete(ctx context.Context, name, beadID string) {
 // leftBeadOpen reports whether a dispatch that ended with werr left its bead
 // still to be done, so its settled row must not be absorbed by a same-event
 // same-head re-request (bead pg2-tc9c3): any failure, or a "success" of a
-// close-or-handback role whose bead is not closed -- the hand-back (the session
-// unclaimed the bead and went idle). A role whose success does not close its bead
+// close-or-handback or close-or-release role whose bead is not closed -- the
+// hand-back (the session unclaimed the bead and went idle). A role whose success does not close its bead
 // (the triage modes) and an unreadable bead both report false: the row stays
 // absorbable, today's behavior.
 func (r *ccpoolRun) leftBeadOpen(ctx context.Context, cc *roles.CCPoolConfig, beadID string, werr error) bool {
 	if werr != nil {
 		return true
 	}
-	if cc.Completion != roles.CloseOrHandback {
+	if cc.Completion != roles.CloseOrHandback && cc.Completion != roles.CloseOrRelease {
 		return false
 	}
 	iss, err := beads.ShowObj(ctx, r.deps.BD, beadID)
@@ -1159,6 +1185,13 @@ func (r *ccpoolRun) workerWaitWithWatchdog(ctx context.Context, d DispatchContex
 // before this is classified as an unexplained death. On failure it applies the
 // role's OnFailure.
 //
+// A close-or-release role (INV-CCH-28) differs in three ways: the session counts
+// as ended only when it is not active AND its transcript and subagents are quiet
+// (a bare idle keeps waiting); the claim latch is set only for a bead held by the
+// role's own actor; and an ended session whose bead is held by a peer (no write,
+// ErrPeerHeld) or never claimed (two-strike ErrUnclaimedEnd) is classified
+// before the death branch's external-close and on_failure handling.
+//
 // claimTerminal arbitrates the single-terminal race with the budget watchdog:
 // EVERY terminal outcome (success or failure) is gated through it, so exactly
 // one of {waitDone, watchdog} owns the bead's final state. The loser performs no
@@ -1168,16 +1201,26 @@ func (r *ccpoolRun) workerWaitWithWatchdog(ctx context.Context, d DispatchContex
 func (r *ccpoolRun) waitDone(ctx context.Context, claimTerminal func() bool, d DispatchContext, name string) error {
 	completion := d.Role.CCPool.Completion
 	maxWait := effectiveMaxWait(r.deps.Cfg, d.Role.CCPool)
+	actor := d.Role.CCPool.Actor
+	release := completion == roles.CloseOrRelease
 	deadline := r.deps.clock().Add(maxWait)
 	var tr complete.Tracker
 	alertedNeedsInput := false // edge latch: fire the needs_input alert at most once
 	// check reads the bead (from the role's own tracker, pg2-2grpj) and reports
 	// whether the role's completion rule is satisfied; a failed read is
 	// "not done" (transient bd hiccup, matches bash bead_status 2>/dev/null).
-	check := func() (bool, string) {
+	// ended is whether the session has ended (close-or-release only reads it, and
+	// only the !active branch below passes true: INV-CCH-28). It also returns the
+	// observation and whether the read succeeded, for the latch and the
+	// end-of-session classification.
+	check := func(ended bool) (bool, complete.Observation, bool) {
 		iss, err := beads.ShowObj(ctx, r.deps.BD, d.Item.ID)
-		obs := complete.Observation{Status: iss.Status, Labels: iss.Labels, Comments: iss.CommentCount}
-		return tr.Done(completion, obs, err == nil), iss.Status
+		obs := complete.Observation{Status: iss.Status, Labels: iss.Labels, Comments: iss.CommentCount, Assignee: iss.Assignee}
+		if release {
+			obs.FutureDefer = iss.DeferredUntilAfter(r.deps.clock())
+			obs.Blocked = iss.HasOpenBlocker()
+		}
+		return tr.Done(completion, obs, err == nil, ended), obs, err == nil
 	}
 	// won reports whether this loop owns the single terminal outcome.
 	won := func() bool { return claimTerminal == nil || claimTerminal() }
@@ -1202,17 +1245,21 @@ func (r *ccpoolRun) waitDone(ctx context.Context, claimTerminal func() bool, d D
 			}
 		}
 		// transient bd hiccup => "" => not-done, keep polling (matches bash bead_status 2>/dev/null)
-		done, status := check()
+		done, obs, _ := check(false)
 		if done {
 			if won() {
 				return nil
 			}
 			return lose()
 		}
-		tr.Observe(completion, status)
-		if !r.active(ctx, name) {
+		tr.Observe(completion, obs, actor)
+		// INV-CCH-28: a close-or-release session counts as ended only when it is
+		// not active AND its transcript and subagents are quiet; a bare idle (an
+		// orchestrator that ended its turn while an asynchronous subagent runs)
+		// keeps waiting. Every other mode treats !active as the end, as before.
+		if !r.active(ctx, name) && (!release || r.waitSessionQuiet(ctx, name, r.quietWindow(d.Role.CCPool))) {
 			// re-check-after-death: the bead may have closed as the session ended.
-			if done, _ = check(); done {
+			if done, _, _ = check(true); done {
 				if won() {
 					return nil
 				}
@@ -1233,13 +1280,24 @@ func (r *ccpoolRun) waitDone(ctx context.Context, claimTerminal func() bool, d D
 			if err := r.deps.waitPoll(ctx, r.deps.Cfg.PollInterval); err != nil {
 				return err
 			}
-			if done, _ = check(); done {
+			done, obs, ok := check(true)
+			if done {
 				if won() {
 					return nil
 				}
 				return lose()
 			}
 			if won() {
+				// INV-CCH-28: a close-or-release session that ended with the bead held
+				// by someone else writes nothing to it, ahead of every branch below
+				// (the external-close branch unclaims the bead, which would be a write
+				// to the peer's).
+				end := tr.EndKind(completion, obs, ok, actor)
+				if end == complete.EndPeer {
+					slog.Info("session ended; the bead is held by another actor: no write, no strike",
+						"session", name, "bead", d.Item.ID, "assignee", obs.Assignee, "status", obs.Status)
+					return fmt.Errorf("%s: %w", d.Item.ID, ErrPeerHeld)
+				}
 				r.captureSignature() // before any teardown (INV-CCH-9)
 				// INV-CCH-7: distinguish an EXTERNAL close (ccpool itself ended the
 				// session — idle_ttl, cap_eviction, operator) from a genuine worker
@@ -1254,6 +1312,14 @@ func (r *ccpoolRun) waitDone(ctx context.Context, claimTerminal func() bool, d D
 					_ = beads.Unclaim(ctx, r.deps.BD, d.Item.ID)
 					escalated := r.escalateEviction(ctx, d.Item.ID)
 					return fmt.Errorf("%s: %w", d.Item.ID, &externallyClosed{reason: reason, escalated: escalated})
+				}
+				if end == complete.EndUnclaimed {
+					return r.unclaimedEndResult(ctx, d, name)
+				}
+				if release && tr.SeenClaimed {
+					// The worker did claim its bead, so any earlier unclaimed-end strike
+					// is no longer consecutive (INV-CCH-28). Best-effort.
+					_ = beads.RemoveLabel(ctx, r.deps.BD, d.Item.ID, unclaimedEndLabel)
 				}
 				// Unexplained death (not an external close): close the dead row
 				// now, mirroring run()'s own not-ingested cleanup (r.deps.CC.Close
@@ -1286,7 +1352,7 @@ func (r *ccpoolRun) waitDone(ctx context.Context, claimTerminal func() bool, d D
 		}
 		if !r.deps.clock().Before(deadline) {
 			// final status check after the deadline.
-			if done, _ = check(); done {
+			if done, _, _ = check(false); done {
 				if won() {
 					return nil
 				}
@@ -1348,6 +1414,75 @@ func (e *externallyClosed) Error() string {
 
 func (e *externallyClosed) Is(target error) bool {
 	return target == ErrExternallyClosed
+}
+
+// unclaimedEndLabel counts a close-or-release role's consecutive unclaimed ends
+// on one bead (INV-CCH-28): added on the first, read on the second, which adds
+// human. It is a plain label and deliberately NOT the budget-stop: prefix, which
+// INV-CCH-11 owns.
+const unclaimedEndLabel = "drain-unclaimed-end"
+
+// ErrUnclaimedEnd wraps the end of a close-or-release session that never claimed
+// its bead and left no mark that it gave the bead back. Like ErrExternallyClosed
+// it is a returned error because waitDone's other non-failure results have no
+// carrier (a nil error means "completed" and would clear pool-evicted); the wait
+// failure mapping reports it as Unclaimed on the first strike and Escalated on
+// the second (see unclaimedEnd). It is NOT a session failure:
+// recordDispatchFailure records no dispatch_result for it, since it carries no
+// failure signature and would count in the failure metrics as a dispatch
+// failure.
+var ErrUnclaimedEnd = errors.New("session ended without claiming its bead")
+
+// unclaimedEnd is the concrete error behind ErrUnclaimedEnd: escalated says
+// whether this was the SECOND consecutive strike (human was added).
+type unclaimedEnd struct {
+	escalated bool
+}
+
+func (e *unclaimedEnd) Error() string {
+	if e.escalated {
+		return "session ended without claiming its bead (second consecutive end; escalated to human)"
+	}
+	return "session ended without claiming its bead (first end)"
+}
+
+func (e *unclaimedEnd) Is(target error) bool {
+	return target == ErrUnclaimedEnd
+}
+
+// ErrPeerHeld is the end of a close-or-release session whose bead is held by an
+// actor other than the role's own (a peer won the claim). finishWait turns it
+// into a success with no verb: no bead write, no strike (INV-CCH-28).
+var ErrPeerHeld = errors.New("bead held by another actor")
+
+// unclaimedEndResult counts one unclaimed-end strike for the bead and returns
+// the error that carries it: the first strike adds drain-unclaimed-end only, the
+// second adds human, mirroring escalateEviction. A bd hiccup reading the label
+// counts as a first strike that wrote nothing (the safe direction: no human).
+func (r *ccpoolRun) unclaimedEndResult(ctx context.Context, d DispatchContext, name string) error {
+	escalated := r.escalateUnclaimedEnd(ctx, d.Item.ID)
+	slog.Info("session ended without claiming its bead", "session", name, "bead", d.Item.ID, "escalated", escalated)
+	if r.deps.Log != nil {
+		_ = r.deps.Log.Emit("info", "unclaimed_end", "session ended without claiming its bead",
+			map[string]any{"role": d.Role.Name, "bead": d.Item.ID, "session": name, "escalated": escalated})
+	}
+	return fmt.Errorf("%s: %w", d.Item.ID, &unclaimedEnd{escalated: escalated})
+}
+
+// escalateUnclaimedEnd is the two-strike idiom of escalateLaunchFailure and
+// escalateEviction for an unclaimed end: label on the first, human on the
+// second. Returns true iff it escalated to human.
+func (r *ccpoolRun) escalateUnclaimedEnd(ctx context.Context, beadID string) bool {
+	already, err := beads.HasLabel(ctx, r.deps.BD, beadID, unclaimedEndLabel)
+	if err != nil {
+		return false // can't tell => do nothing this pass; the next unclaimed end retries
+	}
+	if already {
+		_ = beads.AddHuman(ctx, r.deps.BD, beadID)
+		return true
+	}
+	_ = beads.AddLabel(ctx, r.deps.BD, beadID, unclaimedEndLabel)
+	return false
 }
 
 // closeReason returns ccpool's recorded close reason for the session, "" when

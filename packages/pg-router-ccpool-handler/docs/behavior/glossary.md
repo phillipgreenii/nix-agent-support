@@ -24,6 +24,16 @@ Realization gaps for the build's one remaining residual.
 - **Completion policy** — how this module turns a finished handler session into the opaque outcome
   string it reports back over `INTF-HANDLER`; the core stores that string without interpreting it.
 
+- **Claim latch** — the handler's own record that a dispatched session claimed its bead: set the
+  first time the bead is read in progress. For a `close-or-release` role it is set only when the
+  bead is held by the role's own actor, so a peer's claim never sets it (`INV-CCH-28`).
+- **Session ended** — for a `close-or-release` role, a session that ccpool no longer reports
+  active AND whose transcript and subagents have been quiet for the quiet window; never a bare
+  `idle` (`INV-CCH-28`).
+- **Unclaimed end** — a session that ended, for a `close-or-release` role, without ever claiming
+  its bead and without leaving a mark that it gave the bead back; two in a row escalate the bead
+  to a human (`INV-CCH-28`).
+
 ## Source-side vocabulary
 
 - **Beads-backed source** — this module's realization of `INTF-SOURCE`'s one opaque source

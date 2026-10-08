@@ -7,10 +7,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/beads"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/config"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/eventlog"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/item"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/roles"
 )
 
 // fakePR is a scripted PRReader that records every call so a test can prove
@@ -327,5 +330,137 @@ func TestRefreshItemIssue(t *testing.T) {
 	}
 	if _, iss := RefreshItemIssue(context.Background(), bd, item.Item{ID: "o/r#1"}); iss != nil {
 		t.Fatalf("a non-bead item must yield no issue, got %+v", iss)
+	}
+}
+
+// --- the "ready" precheck (INV-CCH-22, bead pg2-nk6th.3) ---
+
+const readyActor = "pgii-pool__drain"
+
+func readyRole(cfg config.Config) roles.Role {
+	r := releaseRole(cfg)
+	r.CCPool.Actor = readyActor
+	r.CCPool.Precheck = roles.PrecheckReady
+	return r
+}
+
+// groomed is a bead a drain worker may take: open, unassigned, groomed.
+func groomed() beads.Issue {
+	return beads.Issue{ID: "zr-d", Status: "open", Labels: []string{"has-acceptance-criteria", "agent-support"}}
+}
+
+func TestPrecheckReady_SkipReasons(t *testing.T) {
+	cfg := fastCfg()
+	now := time.Unix(0, 0)
+	future := now.Add(time.Hour).UTC().Format(time.RFC3339)
+	past := now.Add(-time.Hour).UTC().Format(time.RFC3339)
+	with := func(f func(*beads.Issue)) *beads.Issue { i := groomed(); f(&i); return &i }
+	tests := []struct {
+		name string
+		bead *beads.Issue
+		want string // "" = proceeds
+	}{
+		{"unreadable bead fails open", nil, ""},
+		{"open, unassigned, groomed proceeds", with(func(*beads.Issue) {}), ""},
+		{"closed", with(func(i *beads.Issue) { i.Status = "closed" }), SkipBeadNotOpen},
+		{"in_progress by a peer", with(func(i *beads.Issue) { i.Status = "in_progress"; i.Assignee = "someone-else" }), SkipBeadNotOpen},
+		{"open but assigned to a peer", with(func(i *beads.Issue) { i.Assignee = "someone-else" }), SkipBeadClaimed},
+		{"open assigned to own actor proceeds", with(func(i *beads.Issue) { i.Assignee = readyActor }), ""},
+		{"human", with(func(i *beads.Issue) { i.Labels = append(i.Labels, "human") }), SkipBeadHuman},
+		{"human-focus-required", with(func(i *beads.Issue) { i.Labels = append(i.Labels, "human-focus-required") }), SkipBeadHuman},
+		{"needs-split-review", with(func(i *beads.Issue) { i.Labels = append(i.Labels, "needs-split-review") }), SkipBeadHuman},
+		{"escalated", with(func(i *beads.Issue) { i.Labels = append(i.Labels, "escalated") }), SkipBeadHuman},
+		{"no longer groomed", with(func(i *beads.Issue) { i.Labels = []string{"agent-support"} }), SkipBeadNotGroomed},
+		{"deferred status", with(func(i *beads.Issue) { i.Status = "deferred" }), SkipBeadDeferred},
+		{"future defer_until (DEFER-ON-EVENT)", with(func(i *beads.Issue) { i.DeferUntil = future }), SkipBeadDeferred},
+		{"past defer_until proceeds", with(func(i *beads.Issue) { i.DeferUntil = past }), ""},
+		{"unparseable defer_until fails open", with(func(i *beads.Issue) { i.DeferUntil = "tomorrow-ish" }), ""},
+		{"blocked status", with(func(i *beads.Issue) { i.Status = "blocked" }), SkipBeadBlocked},
+		{"open blocks dependency (CONVERT)", with(func(i *beads.Issue) {
+			i.Dependencies = []beads.Dependency{{ID: "zr-x", Status: "open", DependencyType: "blocks"}}
+		}), SkipBeadBlocked},
+		{"closed blocker proceeds", with(func(i *beads.Issue) {
+			i.Dependencies = []beads.Dependency{{ID: "zr-x", Status: "closed", DependencyType: "blocks"}}
+		}), ""},
+		{"parent-child edge proceeds", with(func(i *beads.Issue) {
+			i.Dependencies = []beads.Dependency{{ID: "zr-e", Status: "open", DependencyType: "parent-child"}}
+		}), ""},
+		// The restart-absorb path: the live session of an earlier dispatch must
+		// reach the absorb path whatever else the bead carries.
+		{"own-actor in_progress proceeds", with(func(i *beads.Issue) { i.Status = "in_progress"; i.Assignee = readyActor }), ""},
+		{"own-actor in_progress proceeds even if now human", with(func(i *beads.Issue) {
+			i.Status = "in_progress"
+			i.Assignee = readyActor
+			i.Labels = append(i.Labels, "human")
+		}), ""},
+		{"own-actor in_progress proceeds even if deferred and blocked", with(func(i *beads.Issue) {
+			i.Status = "in_progress"
+			i.Assignee = readyActor
+			i.DeferUntil = future
+			i.Dependencies = []beads.Dependency{{ID: "zr-x", Status: "open", DependencyType: "blocks"}}
+		}), ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			logs := captureLog(t)
+			clk := time.Unix(0, 0)
+			deps := Deps{Cfg: cfg, Now: func() time.Time { return clk }}
+			got, skipped := PrecheckReady(DispatchContext{Role: readyRole(cfg), Item: item.Item{ID: "zr-d"}}, deps, tc.bead)
+			if tc.want == "" {
+				if skipped {
+					t.Fatalf("must proceed, got skip %+v", got)
+				}
+				return
+			}
+			if !skipped || got.Reason != tc.want {
+				t.Fatalf("PrecheckReady = (%+v, %v), want skip %q", got, skipped, tc.want)
+			}
+			if !strings.HasPrefix(got.Reason, "skipped-") {
+				t.Errorf("reason %q must start with skipped- (the failure-rate alert excludes only skipped-.+)", got.Reason)
+			}
+			if !strings.Contains(logs.String(), "reason="+tc.want) || strings.Contains(logs.String(), "dispatch declined: precheck ") {
+				t.Errorf("log must carry the reason and its own message: %s", logs.String())
+			}
+		})
+	}
+}
+
+// TestPrecheck_selection: the role's precheck setting picks the check; with no
+// setting only the role named "review" is prechecked, as before.
+func TestPrecheck_selection(t *testing.T) {
+	cfg := fastCfg()
+	deps := Deps{Cfg: cfg, PR: &fakePR{merged: true}}
+	closed := &beads.Issue{ID: "zr-d", Status: "closed"}
+	mk := func(name string, p roles.Precheck) DispatchContext {
+		r := releaseRole(cfg)
+		r.Name = name
+		r.CCPool.Precheck = p
+		return DispatchContext{Role: r, Item: reviewItem()}
+	}
+	for _, tc := range []struct {
+		name string
+		dc   DispatchContext
+		want string
+	}{
+		{"ready on any role name", mk("drain", roles.PrecheckReady), SkipBeadNotOpen},
+		{"explicit review on any role name", mk("drain", roles.PrecheckReview), SkipBeadClosed},
+		{"no setting, role named review (historical)", mk("review", roles.PrecheckNone), SkipBeadClosed},
+		{"no setting, other role: never prechecked", mk("drain", roles.PrecheckNone), ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, skipped := Precheck(context.Background(), tc.dc, deps, closed)
+			if tc.want == "" {
+				if skipped {
+					t.Fatalf("must not precheck, got %+v", got)
+				}
+				return
+			}
+			if !skipped || got.Reason != tc.want {
+				t.Fatalf("Precheck = (%+v, %v), want %q", got, skipped, tc.want)
+			}
+		})
+	}
+	if _, skipped := Precheck(context.Background(), DispatchContext{Role: roles.Role{Name: "review"}}, deps, closed); skipped {
+		t.Error("a role with no ccpool block is never prechecked")
 	}
 }

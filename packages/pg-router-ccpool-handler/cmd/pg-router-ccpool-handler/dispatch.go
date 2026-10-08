@@ -256,13 +256,15 @@ func runDispatch(args []string) int {
 			slog.Info("dispatch: removed stale lock files", "removed", n)
 		}
 	}
-	// Zero-model-cost precheck (INV-CCH-22, bead pg2-5x29j): a review dispatch
-	// whose bead is closed, whose PR is merged, or whose pending review already
-	// holds content for the head launches no session. Read-only; fails open.
+	// Zero-model-cost precheck (INV-CCH-22, beads pg2-5x29j and pg2-nk6th.3): a
+	// review dispatch whose bead is closed, whose PR is merged, or whose pending
+	// review already holds content for the head, and a "ready" role's dispatch
+	// whose bead is no longer open, unclaimed, groomed, undeferred and unblocked,
+	// launch no session. Read-only; fails open.
 	// After the reconciles above so their housekeeping still runs on a decline;
 	// the decline is the same pre-accept busy reply as every other, carrying the
 	// skip's own reason so pg-router core's declined metric counts it per reason.
-	if skip, skipped := executor.PrecheckReview(ctx, dctx, deps, bead); skipped {
+	if skip, skipped := executor.Precheck(ctx, dctx, deps, bead); skipped {
 		writeBusyReply(os.Stdout, skip.Reason)
 		return conformance.ExitBusy
 	}

@@ -90,6 +90,10 @@ type CCPoolConfig struct {
 	// `git push`) belongs here, never in the handler-wide list, which would
 	// widen every role.
 	ExtraAllowedTools []string
+	// Precheck (bead pg2-nk6th.3, INV-CCH-22) opts this role in to a dispatch
+	// precheck; the zero value leaves the historical behavior (the role named
+	// "review" runs the review precheck, every other role none).
+	Precheck Precheck
 }
 
 // IsolationConfig selects how a ccpool role's WORKSPACE_ROOT is prepared before

@@ -181,7 +181,7 @@ func TestBuildDeps_BD_resolvesRoleTracker(t *testing.T) {
 	}
 	var tr complete.Tracker
 	obs := complete.Observation{Status: iss.Status, Labels: iss.Labels, Comments: iss.CommentCount}
-	if !tr.Done(role.CCPool.Completion, obs, true) {
+	if !tr.Done(role.CCPool.Completion, obs, true, false) {
 		t.Error("DoneSignal must fire once the pg2 bead closes")
 	}
 }

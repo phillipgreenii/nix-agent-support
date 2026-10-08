@@ -354,6 +354,14 @@ let
             # 2m default applies, unchanged behavior).
             inherit (roleCfg.ccpool) worktreeQuietWindow;
           }
+          // lib.optionalAttrs (roleCfg.ccpool.precheck != null) {
+            # precheck (bead pg2-nk6th.3): omitted when null, so a role that never
+            # opts in decodes to "" (the historical behavior). The role file is
+            # rendered from an EXPLICIT field list above plus these optionalAttrs,
+            # not the whole option set: an option that is not added here is
+            # silently dropped.
+            inherit (roleCfg.ccpool) precheck;
+          }
           // lib.optionalAttrs (roleCfg.ccpool.extraAllowedTools != [ ]) {
             # extraAllowedTools (bead pg2-nk6th.5): omitted when empty, so a role
             # that never sets it decodes to "no extra grants" (the handler-wide
@@ -524,8 +532,36 @@ let
                   "close-or-handback"
                   "close-or-triage"
                   "close-or-split-triage"
+                  "close-or-release"
                 ];
-                description = "Bead-done semantics (`roleFile.CCPool.Completion` / `roles.Completion`).";
+                description = ''
+                  Bead-done semantics (`roleFile.CCPool.Completion` / `roles.Completion`).
+                  `close-or-release` (bead pg2-nk6th.3, INV-CCH-28) is for a role whose
+                  session claims its bead and MAY give it back unfinished (a drain
+                  worker): done on close, or once the session has ENDED (not merely
+                  idle) with the bead open or deferred and unassigned; a session that
+                  ended without claiming earns a two-strike unclaimed end.
+                '';
+              };
+              precheck = lib.mkOption {
+                type = lib.types.nullOr (
+                  lib.types.enum [
+                    "review"
+                    "ready"
+                  ]
+                );
+                default = null;
+                description = ''
+                  Opts this role in to a zero-model-cost dispatch precheck
+                  (`roleFile.CCPool.Precheck` / `roles.Precheck`, bead pg2-nk6th.3,
+                  INV-CCH-22): `review` (bead closed, PR merged, pending review
+                  already covers the head) or `ready` (for a role that claims its
+                  own bead: the bead must still be open, unclaimed, groomed, not
+                  for a human, not deferred and not blocked; a bead the role's own
+                  actor holds `in_progress` is never declined). Default `null`
+                  leaves the historical behavior: only the role NAMED `review` is
+                  prechecked. Omitted from the rendered role file when `null`.
+                '';
               };
               beadsDir = lib.mkOption {
                 type = lib.types.str;

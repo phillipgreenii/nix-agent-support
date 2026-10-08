@@ -263,7 +263,8 @@ review`. The claim is still released (status open, assignee cleared) — the lab
   ADR 0082. The event bound on absorption is bead `pg2-uprw5`; because the event id is identical across
   re-reviews of one bead, absorption is also bounded by the item's pinned head (`pg2-afre3`).
   Absorption is bounded a third way, by the outcome (`pg2-tc9c3`): a dispatch that ends with its
-  bead still open (a hand-back, a budget hard stop, or a failure) MUST mark the row it closes as
+  bead still open (a hand-back, including one under `close-or-release` (`INV-CCH-28`), a budget
+  hard stop, or a failure) MUST mark the row it closes as
   incomplete BEFORE closing it, and an incomplete row is absent to every later dispatch, whatever
   its event id and head. After a hand-back the bead is open again at the same head and the core
   re-emits the same event; that is a re-request, not a crash-window redelivery, and absorbing the
@@ -295,7 +296,7 @@ review`. The claim is still released (status open, assignee cleared) — the lab
   and only after re-reading the session to confirm the lease is still expired:
   - **`idle` or `errored`, and quiet** (neither it nor its subagents wrote within the quiet
     window): apply the role's completion rule to its bead. A role that claims its beads
-    (close-only, close-or-handback) MUST release the claim, with a comment naming the session,
+    (close-only, close-or-handback, close-or-release) MUST release the claim, with a comment naming the session,
     only when the bead is still in progress AND claimed by that role's own actor; a bead that is
     open, closed, or claimed by someone else is not written, and a role that never claims its
     bead (the triage roles) writes nothing. If the bead cannot be read, nothing is done this
@@ -407,35 +408,64 @@ review`. The claim is still released (status open, assignee cleared) — the lab
   daemon's own credentials and so fails wherever the daemon cannot fetch; a commit already local
   is trusted as is. Bead `pg2-hh32y`.
 
-- **`INV-CCH-22`** — before a REVIEW-role dispatch preflights anything that costs a session (capacity,
-  isolation, launch), the handler MUST check, read-only and at zero model cost, that the review is
-  still worth running, and MUST decline the dispatch, launching no session and writing nothing,
-  when ANY of these holds, in this order: (a) the review bead is already closed (its status as just
-  re-read at dispatch, no further bead call); (b) the pull request the item names (`<repo>#<number>`
-  from the item's metadata) is merged; (c) the acting identity already has a pending review on that
-  pull request that holds content for the PR's live head (the connector's own `stale` verdict is
-  false: a comment anchored to the head, a body section for it, or a review of the identity at it).
-  A pending review that holds content only for an older head is stale and does NOT skip. The
-  handler cannot tell a human-edited pending review from one it wrote (the connector's pending
-  record carries no authorship marker, because create-or-append deletes nothing), so (c) is "a
-  pending review already covers the head", not "a human edited it". The decline is the pre-accept
-  busy decline of `INV-CCH-6`, carrying one reason per case: `skipped-bead-closed`,
-  `skipped-pr-merged`, `skipped-pending-review`; each decline is logged with a message distinct per
-  case and written to the event log as a `precheck_skip` record carrying role, bead, PR and reason.
-  The check MUST fail OPEN: an unreadable bead, an item that names no well-formed PR, or any
-  connector failure (binary missing, timeout, error answer, malformed answer) is logged and the
-  dispatch proceeds exactly as without this invariant. Every PR read goes through the connector's
-  read-only verbs; a PR merged-state read MAY be served from the connector's cache, which is safe
-  because a cached "open" only means the dispatch proceeds. A role other than `review` is never
-  prechecked. **Telemetry.** The handler has no metrics emitter; the declines reach
-  `pg_router_failures{class=declined,reason=skipped-*}` through the core's existing handling of a
-  busy decline's reason, and the failure-rate alert excludes the `skipped-` reasons (a declined
-  event is re-offered until it expires, `INV-EVT-4`, so a sustained rate is expected). **Trade-off.**
-  A skipped event is re-offered, each time costing one bead re-read and up to two connector reads,
-  until the source stops listing the bead or the event expires; (c) also skips a same-head
-  re-dispatch after a session that died mid-review, leaving its pending review for the human. Bead
-  `pg2-5x29j`; found by the 2026-10-07 router health review (about 11 of 50 sessions in 72 hours
-  had nothing worth reviewing).
+- **`INV-CCH-22`** — before a dispatch preflights anything that costs a session (capacity,
+  isolation, launch), a role that opts in MUST have the handler check, read-only and at zero model
+  cost, that the dispatch is still worth running, and MUST decline it, launching no session and
+  writing nothing, when the check says no. The check is chosen by the role's `precheck` setting:
+  `review` (also the default for the role named `review`, so that role is unchanged) or `ready`;
+  a role with neither is never prechecked. The decline is the pre-accept busy decline of
+  `INV-CCH-6`, carrying one reason per case; every reason starts with `skipped-`, so the failure-rate
+  alert can exclude them as routine; each decline is logged with a message distinct per case and
+  written to the event log as a `precheck_skip` record carrying role, bead, PR (review only) and
+  reason. Every check MUST fail OPEN: an unreadable bead, an item that names no well-formed PR, or
+  any connector failure (binary missing, timeout, error answer, malformed answer) is logged and the
+  dispatch proceeds exactly as without this invariant.
+  - **`review`.** Decline when ANY of these holds, in this order: (a) the review bead is already
+    closed (its status as just re-read at dispatch, no further bead call); (b) the pull request the
+    item names (`<repo>#<number>` from the item's metadata) is merged; (c) the acting identity
+    already has a pending review on that pull request that holds content for the PR's live head
+    (the connector's own `stale` verdict is false: a comment anchored to the head, a body section
+    for it, or a review of the identity at it). A pending review that holds content only for an
+    older head is stale and does NOT skip. The handler cannot tell a human-edited pending review
+    from one it wrote (the connector's pending record carries no authorship marker, because
+    create-or-append deletes nothing), so (c) is "a pending review already covers the head", not
+    "a human edited it". Reasons: `skipped-bead-closed`, `skipped-pr-merged`,
+    `skipped-pending-review`. Every PR read goes through the connector's read-only verbs; a PR
+    merged-state read MAY be served from the connector's cache, which is safe because a cached
+    "open" only means the dispatch proceeds.
+  - **`ready`** (a role that works a bead it claims itself, such as a drain worker). The check
+    reads only the bead as just re-read at dispatch (its status, assignee, labels, deferral date
+    and dependencies; no further bead call) and declines when ANY of these holds, in this order:
+    (a) the bead is not `open` (`skipped-bead-not-open`; a `deferred` or `blocked` status gets
+    `skipped-bead-deferred` or `skipped-bead-blocked` instead); (b) an actor other than the role's
+    own actor holds or is assigned the bead (`skipped-bead-claimed`); (c) the bead now carries
+    `human`, `human-focus-required`, `needs-split-review` or `escalated` (`skipped-bead-human`);
+    (d) the bead no longer carries `has-acceptance-criteria` (`skipped-bead-not-groomed`); (e) the
+    bead's deferral date is in the future (`skipped-bead-deferred`; a worker that parks a bead
+    until an event leaves exactly `open` plus a future deferral date); (f) the bead has an open
+    `blocks` dependency (`skipped-bead-blocked`; a worker that converts a bead into a prerequisite
+    leaves exactly `open` plus a blocker edge). A bead that is `in_progress` and assigned to the
+    role's own actor MUST NOT be declined, whatever else it carries: it is the live session of an
+    earlier dispatch, and the dispatch that follows a daemon restart absorbs it (`INV-CCH-2`,
+    `INV-CCH-14`). An unreadable bead (no bead came back) proceeds, and so does a deferral date
+    that does not parse as a timestamp. A dependency counts only when it was read from the single-bead
+    read; the list reads a source query uses carry a different dependency shape and are never used
+    for this check.
+
+  A role with `ready` prechecking narrows, but cannot close, the window in which a bead is taken
+  or parked between the check and the worker's own claim; a peer winning that claim is handled by
+  the completion mode of `INV-CCH-28`, not here. **Telemetry.** The handler has no metrics emitter;
+  the declines reach `pg_router_failures{class=declined,reason=skipped-*}` through the core's
+  existing handling of a busy decline's reason, and the failure-rate alert excludes the `skipped-`
+  reasons. **Trade-off.** A declined event costs one bead re-read (and, for `review`, up to two
+  connector reads). What happens next depends on the event: a review event is re-offered until
+  the source stops listing the bead or the event expires (`INV-EVT-4`), so a sustained rate of
+  declines is expected there, and (c) also skips a same-head re-dispatch after a session that died
+  mid-review, leaving its pending review for the human; a drain event is born expired, so the core
+  offers it once and drops it, and there is no retry. Bead `pg2-5x29j` (review); the `ready`
+  check and the generalisation are bead `pg2-nk6th.3`, plan `2026-10-08-drain-worker-roles`
+  section A2; found by the 2026-10-07 router health review (about 11 of 50 review sessions in 72
+  hours had nothing worth reviewing).
 
 - **`INV-CCH-23`** — the quiet window `INV-CCH-15` and `INV-CCH-17` wait for (neither the session
   nor its Agent-tool subagents have written for that long, before the worktree is removed and the
@@ -524,3 +554,66 @@ review`. The claim is still released (status open, assignee cleared) — the lab
   fallback for a session the budget did not stop, not the usual end. The default roles' waits are
   therefore 35 minutes for a 25-minute budget and 40 minutes for a 30-minute budget. Bead
   `pg2-nk6th.2`, plan `2026-10-08-drain-worker-roles` section A1.
+
+- **`INV-CCH-28`** — a role whose session claims its bead and MAY legitimately give it back
+  unfinished (a drain worker that parks, defers, converts or refuses a bead) MUST be able to use the
+  completion mode `close-or-release`, alongside `close-only`, `close-or-handback`,
+  `close-or-triage` and `close-or-split-triage`; the other modes are unchanged. A dispatch under
+  it is done when the bead is closed, or when the session has ENDED and the bead has been handed
+  back: `open` or `deferred` and unassigned.
+  - **Session ended.** A session counts as ended only when ccpool no longer reports it active AND
+    the transcript and subagent quiet check of `INV-CCH-15`/`INV-CCH-23` holds. A bare `idle`
+    MUST NOT count: ccpool maps a stop to `idle` and nothing moves it back, so an orchestrator
+    session that ends its turn while an asynchronous subagent still runs looks dead, and treating
+    that as an end would act on a bead the session still works. While the session is not yet
+    quiet, the handler keeps waiting under the same time bound as every other mode. The
+    release test runs only once the session has ended, and again after the one bounded re-read
+    that `INV-CCH-7`'s death branch already makes.
+  - **Claim latch.** The handler latches that the session claimed its bead the first time it
+    reads the bead `in_progress` AND assigned to the role's own actor. A bead held by anyone else
+    MUST NOT set the latch (a peer can win the claim between the precheck and the worker's own
+    claim, and the handler must not then treat the peer's bead as its worker's). This is a
+    property of this mode only: `close-or-handback` and `close-or-triage` keep latching on any
+    `in_progress` read.
+  - **Classification at the end of a session.** In this order:
+
+    | Bead when the session has ended                                                                 | Result                                                                           |
+    | ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+    | `closed`                                                                                        | done                                                                             |
+    | `deferred`, unassigned (a worker's refusal of a stamp)                                          | done                                                                             |
+    | `open`, unassigned, latch set                                                                   | done (a hand-back)                                                               |
+    | `open`, unassigned, no latch, and `human`, a future deferral date or an open `blocks` edge      | done (the latch was lost to a restart or a missed poll, but the worker released) |
+    | held by an actor other than the role's own, or `in_progress` with no assignee                   | peer end: NO bead write, NO strike, no verb                                      |
+    | `open`, unassigned, no latch, no `human`, not deferred, no future deferral, no open blocker     | unclaimed end                                                                    |
+    | assigned to the role's own actor (still `in_progress`, or `open`/`deferred` but not unassigned) | failure: the role's `on_failure`, as in every other mode                         |
+    | any other status                                                                                | failure: the role's `on_failure`                                                 |
+
+    A deferral date or an open blocker is read from the single-bead read only, and an unreadable
+    bead (twice in a row) is a failure.
+
+  - **Unclaimed end.** A session that ended without ever claiming its bead (it refused on a
+    check, or lost a race, or died first) earns two strikes: the first leaves the bead `open` and
+    does NOT add `human`; the second adds `human` (the role's drain query excludes it from then
+    on). The strike is carried by a plain label `drain-unclaimed-end` (never the `budget-stop:`
+    prefix, which `INV-CCH-11` owns), added on the first strike and read on the second, removed on
+    any end where the session did claim its bead and on close. The first strike reports the
+    dispatch as unclaimed, the second as escalated; neither is a session failure, so neither
+    writes a `dispatch_result` failure record. A claim made and released inside one poll interval
+    can miss the latch; the guard that the bead is `open`, not `human`, not deferred and without
+    blocker keeps a worker's own park, deferral or conversion in that window from being struck.
+    Not covered, accepted: a bead that cannot take a label because it is a read-only template
+    earns the strikes but cannot be given `human`, so it would be re-offered without bound; the
+    role's query is expected to exclude templates, and the worker's own check ends without
+    claiming one.
+  - **Absorption.** A dispatch under this mode that ends with its bead still open is a hand-back
+    for the purpose of `INV-CCH-17`: its closed row MUST be marked incomplete, so a same-event
+    re-request does not absorb the settled row.
+  - **Orphans.** `INV-CCH-18`'s orphan reconcile treats this mode as one that claims its bead (it
+    releases a claim only when the bead is `in_progress` and held by the role's own actor). The
+    release leaves the bead `open` and ready for any worker; that is accepted as the outcome of a
+    lost handler.
+
+  **Why.** `close-or-handback` reads every `open` bead after a claim as a hand-back and has no
+  notion of a bead that was never claimed, so a drain worker that could not claim its bead looked
+  like a success to it; and its latch would have made the handler add `human` to a bead a peer
+  holds. Bead `pg2-nk6th.3`, plan `2026-10-08-drain-worker-roles` section A2.

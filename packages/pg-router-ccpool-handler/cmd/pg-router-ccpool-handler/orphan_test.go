@@ -423,6 +423,8 @@ func TestReclaimIdleOrphan_beadRules(t *testing.T) {
 		wantWrites int
 	}{
 		{"close-or-handback in_progress by this actor", roles.CloseOrHandback, inProgressBy(orphanActor), 2},
+		{"close-or-release in_progress by this actor", roles.CloseOrRelease, inProgressBy(orphanActor), 2},
+		{"close-or-release in_progress by a PEER", roles.CloseOrRelease, inProgressBy("someone-else"), 0},
 		{"in_progress by ANOTHER actor", roles.CloseOnly, inProgressBy("someone-else"), 0},
 		{"already open", roles.CloseOnly, `{"id":"zr-w","status":"open"}`, 0},
 		{"already closed", roles.CloseOnly, `{"id":"zr-w","status":"closed","assignee":"` + orphanActor + `"}`, 0},
@@ -667,4 +669,19 @@ func TestReconcileOrphans_concurrentHoldersActOnce(t *testing.T) {
 		t.Fatalf("lock must be released: %v", err)
 	}
 	l.Unlock()
+}
+
+// claimsBead lists every completion mode whose session claims its bead.
+func TestClaimsBead(t *testing.T) {
+	for c, want := range map[roles.Completion]bool{
+		roles.CloseOnly:          true,
+		roles.CloseOrHandback:    true,
+		roles.CloseOrRelease:     true,
+		roles.CloseOrTriage:      false,
+		roles.CloseOrSplitTriage: false,
+	} {
+		if got := claimsBead(c); got != want {
+			t.Errorf("claimsBead(%s) = %v, want %v", c, got, want)
+		}
+	}
 }

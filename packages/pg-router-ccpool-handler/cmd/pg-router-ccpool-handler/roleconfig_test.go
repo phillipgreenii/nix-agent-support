@@ -467,3 +467,43 @@ func TestLoadRole_extraAllowedTools(t *testing.T) {
 		})
 	}
 }
+
+// TestLoadRole_precheckAndCloseOrRelease (bead pg2-nk6th.3): precheck is absent
+// by default, accepts review and ready, and rejects anything else; the
+// close-or-release completion loads.
+func TestLoadRole_precheckAndCloseOrRelease(t *testing.T) {
+	mk := func(completion, extra string) string {
+		return `{"name":"zr-drain","type":"ccpool","ccpool":{"actor":"a","completion":"` + completion + `","onFailure":"add-human","onDispatchFail":"leave","promptBody":"p"` + extra + `}}`
+	}
+	for _, tc := range []struct {
+		name, completion, extra string
+		want                    roles.Precheck
+		wantErr                 string
+	}{
+		{"absent", "close-or-release", "", roles.PrecheckNone, ""},
+		{"ready", "close-or-release", `,"precheck":"ready"`, roles.PrecheckReady, ""},
+		{"review", "close-or-handback", `,"precheck":"review"`, roles.PrecheckReview, ""},
+		{"empty", "close-only", `,"precheck":""`, roles.PrecheckNone, ""},
+		{"unknown value", "close-or-release", `,"precheck":"bogus"`, "", "invalid precheck"},
+		{"unknown completion", "close-or-bogus", "", "", "invalid completion"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			role, err := loadRole(mustWriteRoleFile(t, mk(tc.completion, tc.extra)))
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("err = %v, want %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if role.CCPool.Precheck != tc.want {
+				t.Errorf("Precheck = %q, want %q", role.CCPool.Precheck, tc.want)
+			}
+			if string(role.CCPool.Completion) != tc.completion {
+				t.Errorf("Completion = %q, want %q", role.CCPool.Completion, tc.completion)
+			}
+		})
+	}
+}

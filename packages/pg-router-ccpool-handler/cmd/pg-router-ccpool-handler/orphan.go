@@ -210,10 +210,13 @@ func emitOrphan(deps executor.Deps, level, kind, msg string, fields map[string]a
 }
 
 // claimsBead reports whether the role's completion mode claims the bead it
-// dispatches (close-only / close-or-handback). The triage modes work a bead
-// they never claim, so a reclaim writes nothing to it.
+// dispatches (close-only / close-or-handback / close-or-release). The triage
+// modes work a bead they never claim, so a reclaim writes nothing to it. For
+// close-or-release the reclaim is safe (it unclaims only a bead still held by
+// the role's own actor) but leaves the bead open and ready, which is accepted as
+// the outcome of a lost handler (INV-CCH-28).
 func claimsBead(c roles.Completion) bool {
-	return c == roles.CloseOnly || c == roles.CloseOrHandback
+	return c == roles.CloseOnly || c == roles.CloseOrHandback || c == roles.CloseOrRelease
 }
 
 // reclaimIdleOrphan handles an idle/errored orphan: bead rule, close, worktree.

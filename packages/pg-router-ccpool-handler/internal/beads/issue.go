@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"time"
 )
 
 // idPattern matches bd issue ids: alphanumerics plus `.`, `_`, `-` (hierarchical
@@ -40,6 +41,55 @@ type Issue struct {
 	// when unassigned. The orphan reconcile unclaims only a bead still assigned to
 	// the role's own actor (INV-CCH-18).
 	Assignee string `json:"assignee"`
+	// DeferUntil is bd's defer_until: an RFC3339 timestamp while the bead is
+	// deferred until a date, "" when absent or null. Read it with
+	// DeferredUntilAfter, which fails open on a value that does not parse.
+	DeferUntil string `json:"defer_until"`
+	// Dependencies is bd's dependencies array AS `bd show --json` shapes it
+	// (full issues, each with its dependency_type). It is meaningful ONLY on an
+	// Issue read through ShowObj: `bd ready`/`bd list` shape the same key as
+	// edge records, which decode into this type with every field empty, so a
+	// reader MUST NOT infer anything from Dependencies of an Issue that came
+	// from Ready or List. Only the fields below are declared: any other field
+	// of either shape (the edge records' metadata is a STRING, a show
+	// dependency's is not) would make decodeMany fail for every list read.
+	Dependencies []Dependency `json:"dependencies"`
+}
+
+// Dependency is the part of one bd dependency this module reads, as `bd show
+// --json` shapes it: the depended-on issue's id and status, and the kind of
+// edge. See Issue.Dependencies for why nothing else is declared.
+type Dependency struct {
+	ID             string `json:"id"`
+	Status         string `json:"status"`
+	DependencyType string `json:"dependency_type"`
+}
+
+// blocksType is bd's dependency_type for an ordering edge ("parent-child" and
+// the other kinds never block).
+const blocksType = "blocks"
+
+// HasOpenBlocker reports whether the issue has a `blocks` dependency on an
+// issue that is not closed. Only meaningful for an Issue read by ShowObj (see
+// Issue.Dependencies).
+func (i Issue) HasOpenBlocker() bool {
+	for _, d := range i.Dependencies {
+		if d.DependencyType == blocksType && d.ID != "" && d.Status != "closed" {
+			return true
+		}
+	}
+	return false
+}
+
+// DeferredUntilAfter reports whether defer_until is set and later than now. An
+// absent value, or one that does not parse as RFC3339, is NOT deferred: every
+// reader of this treats an unreadable value as "proceed" (fail open).
+func (i Issue) DeferredUntilAfter(now time.Time) bool {
+	if i.DeferUntil == "" {
+		return false
+	}
+	t, err := time.Parse(time.RFC3339, i.DeferUntil)
+	return err == nil && t.After(now)
 }
 
 // HasLabel reports whether the issue carries the given label.

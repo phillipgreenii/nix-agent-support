@@ -193,6 +193,11 @@ func (r *ccpoolRun) recordDispatchFailure(d DispatchContext, name string, werr e
 	if werr == nil || errors.Is(werr, context.Canceled) || errors.Is(werr, context.DeadlineExceeded) {
 		return
 	}
+	// An unclaimed end or a peer-held bead (close-or-release, INV-CCH-28) is not a
+	// session failure: it has no failure signature, and waitDone already logged it.
+	if errors.Is(werr, ErrUnclaimedEnd) || errors.Is(werr, ErrPeerHeld) {
+		return
+	}
 	pool := "default"
 	if d.Role.CCPool != nil && d.Role.CCPool.PoolDir != "" {
 		pool = d.Role.CCPool.PoolDir

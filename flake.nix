@@ -5417,6 +5417,21 @@
                           };
                         };
                       };
+                      # drain (bead pg2-nk6th.3): the close-or-release completion
+                      # and the `ready` precheck render into this role's own JSON
+                      # only; no pool of its own, so the pool-metrics wiring
+                      # asserted below is unchanged.
+                      drain = {
+                        type = "ccpool";
+                        ccpool = {
+                          actor = "drain-actor";
+                          completion = "close-or-release";
+                          onFailure = "add-human";
+                          onDispatchFail = "leave";
+                          promptBody = "drain prompt";
+                          precheck = "ready";
+                        };
+                      };
                     };
                     # Handler-wide pool (bead pg2-h5vno): the pool every role
                     # WITHOUT its own pool dispatches into (the production
@@ -5873,6 +5888,15 @@
                         # JSON; a role that never sets it carries no such key.
                         [ "$(jq -c .ccpool.extraAllowedTools "$roleWithOwnPoolHandlerDir/review.json")" = '["Skill","Bash(gh pr create:*)"]' ]
                         jq -e '.ccpool | has("extraAllowedTools") | not' "$handlerCommandDir/feedback.json" >/dev/null
+
+                        # close-or-release + precheck (bead pg2-nk6th.3): the role file
+                        # is rendered from an explicit field list, so an option not
+                        # added there is silently dropped; a role that never sets
+                        # precheck carries no such key.
+                        [ "$(jq -r .ccpool.completion "$roleWithOwnPoolHandlerDir/drain.json")" = close-or-release ]
+                        [ "$(jq -r .ccpool.precheck "$roleWithOwnPoolHandlerDir/drain.json")" = ready ]
+                        jq -e '.ccpool | has("precheck") | not' "$handlerCommandDir/feedback.json" >/dev/null
+                        jq -e '.ccpool | has("precheck") | not' "$roleWithOwnPoolHandlerDir/review.json" >/dev/null
 
                         # poolMetrics script argv (bead pg2-h5vno): the
                         # per-role pool AND the handler-wide pool (whose dir

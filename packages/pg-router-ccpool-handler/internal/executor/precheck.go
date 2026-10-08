@@ -14,6 +14,7 @@ import (
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/beads"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/item"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/query"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/roles"
 )
 
 // The three precheck skip reasons (INV-CCH-22, bead pg2-5x29j). Each is the
@@ -26,6 +27,26 @@ const (
 	SkipPRMerged      = "skipped-pr-merged"
 	SkipPendingReview = "skipped-pending-review"
 )
+
+// The "ready" precheck's skip reasons (INV-CCH-22, bead pg2-nk6th.3). They share
+// the "skipped-" prefix with the review reasons so the failure-rate alert, which
+// excludes only `skipped-.+`, treats every one as a routine decline.
+const (
+	SkipBeadNotOpen    = "skipped-bead-not-open"
+	SkipBeadClaimed    = "skipped-bead-claimed"
+	SkipBeadHuman      = "skipped-bead-human"
+	SkipBeadNotGroomed = "skipped-bead-not-groomed"
+	SkipBeadDeferred   = "skipped-bead-deferred"
+	SkipBeadBlocked    = "skipped-bead-blocked"
+)
+
+// labelHasAcceptanceCriteria marks a bead as groomed: the drain query selects
+// on it, so a bead that lost it is no longer one a drain worker may take.
+const labelHasAcceptanceCriteria = "has-acceptance-criteria"
+
+// readyExcludedLabels are the labels that take a bead out of a drain worker's
+// reach (INV-CCH-22): any of them present now declines the dispatch.
+var readyExcludedLabels = []string{beads.LabelHuman, "human-focus-required", beads.LabelNeedsSplitReview, "escalated"}
 
 // precheckEventKind is the event-log record kind written for every skip.
 const precheckEventKind = "precheck_skip"
@@ -201,6 +222,84 @@ func prIDFor(it item.Item) (id string, ok bool) {
 	return repo + "#" + num, true
 }
 
+// Precheck runs the dispatch precheck the role opted in to (INV-CCH-22): the
+// role's Precheck setting when set, else the historical default (the role named
+// "review" runs the review precheck, every other role none). It is read-only,
+// fails open, and its single caller is cmd/.../dispatch.go.
+func Precheck(ctx context.Context, d DispatchContext, deps Deps, iss *beads.Issue) (Skip, bool) {
+	if d.Role.CCPool == nil {
+		return Skip{}, false
+	}
+	switch d.Role.CCPool.Precheck {
+	case roles.PrecheckReady:
+		return PrecheckReady(d, deps, iss)
+	case roles.PrecheckReview:
+		return precheckReview(ctx, d, deps, iss)
+	}
+	return PrecheckReview(ctx, d, deps, iss)
+}
+
+// PrecheckReady decides, at zero model cost, whether a dispatch of a role that
+// works a bead it claims itself (a drain worker) should launch no session at all
+// (INV-CCH-22, bead pg2-nk6th.3). It reads only iss, the bead RefreshItemIssue
+// just fetched from `bd show` (no extra bd call), and declines when, in this
+// order:
+//
+//  1. the bead is not open (a deferred or blocked status gets its own reason);
+//  2. an actor other than the role's own holds or is assigned it;
+//  3. it carries human, human-focus-required, needs-split-review or escalated;
+//  4. it no longer carries has-acceptance-criteria;
+//  5. its defer_until is in the future (the worker's own DEFER-ON-EVENT leaves
+//     exactly open plus a future defer_until);
+//  6. it has an open blocks dependency (the worker's own CONVERT leaves exactly
+//     open plus a blocker edge).
+//
+// A bead that is in_progress and assigned to the role's own actor always
+// proceeds, whatever else it carries: it is the live session of an earlier
+// dispatch, which the absorb path re-adopts after a daemon restart. A nil iss
+// (the bead could not be read) fails open, and so does an unparseable
+// defer_until. A decline writes nothing to the bead.
+func PrecheckReady(d DispatchContext, deps Deps, iss *beads.Issue) (Skip, bool) {
+	if d.Role.CCPool == nil || iss == nil {
+		return Skip{}, false
+	}
+	actor := d.Role.CCPool.Actor
+	ownInProgress := iss.Status == "in_progress" && actor != "" && iss.Assignee == actor
+	if ownInProgress {
+		return Skip{}, false
+	}
+	decline := func(reason, detail string) (Skip, bool) {
+		return deps.skip(d, Skip{Reason: reason, Detail: detail}, ""), true
+	}
+	switch iss.Status {
+	case "open":
+	case "deferred":
+		return decline(SkipBeadDeferred, "the bead's status is deferred")
+	case "blocked":
+		return decline(SkipBeadBlocked, "the bead's status is blocked")
+	default:
+		return decline(SkipBeadNotOpen, "the bead's status is "+iss.Status+", not open")
+	}
+	if iss.Assignee != "" && iss.Assignee != actor {
+		return decline(SkipBeadClaimed, "the bead is assigned to another actor")
+	}
+	for _, l := range readyExcludedLabels {
+		if iss.HasLabel(l) {
+			return decline(SkipBeadHuman, "the bead now carries the "+l+" label")
+		}
+	}
+	if !iss.HasLabel(labelHasAcceptanceCriteria) {
+		return decline(SkipBeadNotGroomed, "the bead no longer carries "+labelHasAcceptanceCriteria)
+	}
+	if iss.DeferredUntilAfter(deps.clock()) {
+		return decline(SkipBeadDeferred, "the bead's defer_until is in the future")
+	}
+	if iss.HasOpenBlocker() {
+		return decline(SkipBeadBlocked, "the bead has an open blocks dependency")
+	}
+	return Skip{}, false
+}
+
 // PrecheckReview decides, at zero model cost, whether a review dispatch should
 // launch no session at all (INV-CCH-22, bead pg2-5x29j). It is read-only and
 // runs only for the review role. It declines when, in this order:
@@ -219,6 +318,15 @@ func prIDFor(it item.Item) (id string, ok bool) {
 // caller replies with) lands in pg-router core's declined metric by reason.
 func PrecheckReview(ctx context.Context, d DispatchContext, deps Deps, iss *beads.Issue) (Skip, bool) {
 	if d.Role.Name != reviewRoleName || d.Role.CCPool == nil {
+		return Skip{}, false
+	}
+	return precheckReview(ctx, d, deps, iss)
+}
+
+// precheckReview is PrecheckReview without the role-name gate, for a role that
+// opted in with precheck = "review".
+func precheckReview(ctx context.Context, d DispatchContext, deps Deps, iss *beads.Issue) (Skip, bool) {
+	if d.Role.CCPool == nil {
 		return Skip{}, false
 	}
 	if iss != nil && iss.Status == "closed" {
@@ -258,6 +366,18 @@ func (d Deps) skip(dc DispatchContext, s Skip, pr string) Skip {
 		msg = "dispatch declined: PR already merged"
 	case SkipPendingReview:
 		msg = "dispatch declined: pending review already covers the head"
+	case SkipBeadNotOpen:
+		msg = "dispatch declined: bead is not open"
+	case SkipBeadClaimed:
+		msg = "dispatch declined: bead is held by another actor"
+	case SkipBeadHuman:
+		msg = "dispatch declined: bead is marked for a human"
+	case SkipBeadNotGroomed:
+		msg = "dispatch declined: bead is no longer groomed"
+	case SkipBeadDeferred:
+		msg = "dispatch declined: bead is deferred"
+	case SkipBeadBlocked:
+		msg = "dispatch declined: bead is blocked"
 	default:
 		msg = "dispatch declined: precheck"
 	}
