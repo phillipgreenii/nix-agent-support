@@ -882,7 +882,9 @@ groups:
       # ROLE -> POOL MAPPING depends on the nix `pg-router-ccpool-<role>` poolDir
       # convention (home/programs/pg-router-ccpool-handler/default.nix): the review,
       # worker and feedback roles have dedicated pools named pg-router-ccpool-<role>
-      # (pool = pool dir basename); the triagers (*triager) have no poolDir and share
+      # (pool = pool dir basename), as do the drain-zr and drain-pg2 roles
+      # (pg-router-ccpool-drain-zr / pg-router-ccpool-drain-pg2, bead pg2-nk6th.6);
+      # the triagers (*triager) have no poolDir and share
       # the handler pool `pg-router-ccpool`; command roles (desk-*) have no pool at
       # all. So the mapping is EXPLICIT per role group -- mapping every role with
       # "(.*)" would invent pools like pg-router-ccpool-desk-pr. A new role with its
@@ -919,7 +921,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: (label_replace(sum by (role)(increase(pg_router_failures_total{class="declined",reason="at-capacity",role=~"review|worker|feedback"}[15m])), "pool", "pg-router-ccpool-$1", "role", "(.*)") or label_replace(sum by (role)(increase(pg_router_failures_total{class="declined",reason="at-capacity",role=~".*triager"}[15m])), "pool", "pg-router-ccpool", "", "")) > 0 and on(pool) (max by (pool)(last_over_time(ccpool_pool_capacity{dim="free"}[10m])) == 0) and on(pool) (max by (pool)(last_over_time(ccpool_pool_capacity{dim="counted"}[10m])) >= on(pool) max by (pool)(last_over_time(ccpool_pool_capacity{dim="max_sessions"}[10m]))) and on(pool) (sum by (pool)(last_over_time(ccpool_session_states{live="true",state=~"starting|ready|working"}[10m])) == 0)
+              expr: (label_replace(sum by (role)(increase(pg_router_failures_total{class="declined",reason="at-capacity",role=~"review|worker|feedback|drain-(zr|pg2)"}[15m])), "pool", "pg-router-ccpool-$1", "role", "(.*)") or label_replace(sum by (role)(increase(pg_router_failures_total{class="declined",reason="at-capacity",role=~".*triager"}[15m])), "pool", "pg-router-ccpool", "", "")) > 0 and on(pool) (max by (pool)(last_over_time(ccpool_pool_capacity{dim="free"}[10m])) == 0) and on(pool) (max by (pool)(last_over_time(ccpool_pool_capacity{dim="counted"}[10m])) >= on(pool) max by (pool)(last_over_time(ccpool_pool_capacity{dim="max_sessions"}[10m]))) and on(pool) (sum by (pool)(last_over_time(ccpool_session_states{live="true",state=~"starting|ready|working"}[10m])) == 0)
           - refId: B
             datasourceUid: __expr__
             model:

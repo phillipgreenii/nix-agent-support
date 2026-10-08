@@ -234,3 +234,95 @@ tests:
       - eval_time: 2400s
         alertname: pg-router-pool-full-idle
         exp_alerts: []
+
+  - name: drain-zr and drain-pg2 declines map to their own dedicated pools (pg2-nk6th.6)
+    interval: 1m
+    input_series:
+      # Both drain pools are full (max_sessions 1) with an idle session and at-capacity
+      # declines waiting: each fires for its own pool, with the role label kept.
+      - series: pg_router_failures_total{class="declined",reason="at-capacity",role="drain-zr"}
+        values: "0+1x40"
+      - series: ccpool_pool_capacity{pool="pg-router-ccpool-drain-zr",dim="free"}
+        values: "0x40"
+      - series: ccpool_pool_capacity{pool="pg-router-ccpool-drain-zr",dim="counted"}
+        values: "1x40"
+      - series: ccpool_pool_capacity{pool="pg-router-ccpool-drain-zr",dim="max_sessions"}
+        values: "1x40"
+      - series: ccpool_session_states{pool="pg-router-ccpool-drain-zr",state="idle",live="true"}
+        values: "1x40"
+      - series: ccpool_session_states{pool="pg-router-ccpool-drain-zr",state="working",live="true"}
+        values: "0x40"
+      - series: pg_router_failures_total{class="declined",reason="at-capacity",role="drain-pg2"}
+        values: "0+1x40"
+      - series: ccpool_pool_capacity{pool="pg-router-ccpool-drain-pg2",dim="free"}
+        values: "0x40"
+      - series: ccpool_pool_capacity{pool="pg-router-ccpool-drain-pg2",dim="counted"}
+        values: "1x40"
+      - series: ccpool_pool_capacity{pool="pg-router-ccpool-drain-pg2",dim="max_sessions"}
+        values: "1x40"
+      - series: ccpool_session_states{pool="pg-router-ccpool-drain-pg2",state="idle",live="true"}
+        values: "1x40"
+      - series: ccpool_session_states{pool="pg-router-ccpool-drain-pg2",state="working",live="true"}
+        values: "0x40"
+    promql_expr_test:
+      - expr: count(wrapped:pg_router_pool_full_idle)
+        eval_time: 1200s
+        exp_samples:
+          - labels: "{}"
+            value: 2
+    alert_rule_test:
+      - eval_time: 600s
+        alertname: pg-router-pool-full-idle
+        exp_alerts: []
+      - eval_time: 1200s
+        alertname: pg-router-pool-full-idle
+        exp_alerts:
+          - exp_labels:
+              pool: pg-router-ccpool-drain-pg2
+              role: drain-pg2
+              severity: warning
+          - exp_labels:
+              pool: pg-router-ccpool-drain-zr
+              role: drain-zr
+              severity: warning
+
+  - name: a drain pool with a working session does not fire even with demand (pg2-nk6th.6)
+    interval: 1m
+    input_series:
+      - series: pg_router_failures_total{class="declined",reason="at-capacity",role="drain-zr"}
+        values: "0+1x40"
+      - series: ccpool_pool_capacity{pool="pg-router-ccpool-drain-zr",dim="free"}
+        values: "0x40"
+      - series: ccpool_pool_capacity{pool="pg-router-ccpool-drain-zr",dim="counted"}
+        values: "1x40"
+      - series: ccpool_pool_capacity{pool="pg-router-ccpool-drain-zr",dim="max_sessions"}
+        values: "1x40"
+      - series: ccpool_session_states{pool="pg-router-ccpool-drain-zr",state="idle",live="true"}
+        values: "0x40"
+      - series: ccpool_session_states{pool="pg-router-ccpool-drain-zr",state="working",live="true"}
+        values: "1x40"
+    alert_rule_test:
+      - eval_time: 1200s
+        alertname: pg-router-pool-full-idle
+        exp_alerts: []
+      - eval_time: 2400s
+        alertname: pg-router-pool-full-idle
+        exp_alerts: []
+
+  - name: a role merely prefixed drain- but not drain-zr or drain-pg2 never maps to a pool (pg2-nk6th.6)
+    interval: 1m
+    input_series:
+      - series: pg_router_failures_total{class="declined",reason="at-capacity",role="drain-other"}
+        values: "0+1x40"
+      - series: ccpool_pool_capacity{pool="pg-router-ccpool-drain-other",dim="free"}
+        values: "0x40"
+      - series: ccpool_pool_capacity{pool="pg-router-ccpool-drain-other",dim="counted"}
+        values: "1x40"
+      - series: ccpool_pool_capacity{pool="pg-router-ccpool-drain-other",dim="max_sessions"}
+        values: "1x40"
+      - series: ccpool_session_states{pool="pg-router-ccpool-drain-other",state="idle",live="true"}
+        values: "1x40"
+    alert_rule_test:
+      - eval_time: 1200s
+        alertname: pg-router-pool-full-idle
+        exp_alerts: []

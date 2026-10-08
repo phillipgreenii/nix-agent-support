@@ -9,9 +9,9 @@ import (
 // none of its counted sessions is active and demand is waiting. The demand
 // clause is the LEFT-hand side so the alert value is the decline count (> 0) and
 // the instance carries `role`; role -> pool is mapped EXPLICITLY (review, worker,
-// feedback -> pg-router-ccpool-<role>; *triager -> pg-router-ccpool), because
+// feedback, drain-zr, drain-pg2 -> pg-router-ccpool-<role>; *triager -> pg-router-ccpool), because
 // mapping every role with "(.*)" would invent pools like pg-router-ccpool-desk-pr.
-const wantPoolFullIdleExpr = `(label_replace(sum by (role)(increase(pg_router_failures_total{class="declined",reason="at-capacity",role=~"review|worker|feedback"}[15m])), "pool", "pg-router-ccpool-$1", "role", "(.*)") or label_replace(sum by (role)(increase(pg_router_failures_total{class="declined",reason="at-capacity",role=~".*triager"}[15m])), "pool", "pg-router-ccpool", "", "")) > 0 and on(pool) (max by (pool)(last_over_time(ccpool_pool_capacity{dim="free"}[10m])) == 0) and on(pool) (max by (pool)(last_over_time(ccpool_pool_capacity{dim="counted"}[10m])) >= on(pool) max by (pool)(last_over_time(ccpool_pool_capacity{dim="max_sessions"}[10m]))) and on(pool) (sum by (pool)(last_over_time(ccpool_session_states{live="true",state=~"starting|ready|working"}[10m])) == 0)`
+const wantPoolFullIdleExpr = `(label_replace(sum by (role)(increase(pg_router_failures_total{class="declined",reason="at-capacity",role=~"review|worker|feedback|drain-(zr|pg2)"}[15m])), "pool", "pg-router-ccpool-$1", "role", "(.*)") or label_replace(sum by (role)(increase(pg_router_failures_total{class="declined",reason="at-capacity",role=~".*triager"}[15m])), "pool", "pg-router-ccpool", "", "")) > 0 and on(pool) (max by (pool)(last_over_time(ccpool_pool_capacity{dim="free"}[10m])) == 0) and on(pool) (max by (pool)(last_over_time(ccpool_pool_capacity{dim="counted"}[10m])) >= on(pool) max by (pool)(last_over_time(ccpool_pool_capacity{dim="max_sessions"}[10m]))) and on(pool) (sum by (pool)(last_over_time(ccpool_session_states{live="true",state=~"starting|ready|working"}[10m])) == 0)`
 
 func TestPoolFullIdleRule(t *testing.T) {
 	r := ruleBlock(t, "pg-router-pool-full-idle")
@@ -43,7 +43,7 @@ func TestPoolFullIdleRule(t *testing.T) {
 func TestPoolFullIdleMapsRolesExplicitly(t *testing.T) {
 	got := ruleExpr(t, ruleBlock(t, "pg-router-pool-full-idle"))
 	for _, need := range []string{
-		`role=~"review|worker|feedback"`,
+		`role=~"review|worker|feedback|drain-(zr|pg2)"`,
 		`"pool", "pg-router-ccpool-$1", "role", "(.*)"`,
 		`role=~".*triager"`,
 		`"pool", "pg-router-ccpool", "", ""`,
