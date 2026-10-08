@@ -38,9 +38,10 @@ func fixtureLine(t testing.TB, name string) []byte {
 func wantRecoveredLog(t *testing.T, dir string, fs *storefault.FS, rec store.Recovery, committed, tail []byte) {
 	t.Helper()
 	// INV-LOG-10: the unacknowledged bytes are copied and made durable BEFORE
-	// the truncate, and the truncate is made durable.
+	// the truncate, the sidecar's directory entry is made durable with them
+	// (a sync of the directory, "data" here), and the truncate is made durable.
 	sidecar := "events.jsonl.recovered-20261008T123045Z-1"
-	wantOrder := []string{"Write " + sidecar, "Sync " + sidecar, "Truncate events.jsonl", "Sync events.jsonl"}
+	wantOrder := []string{"Write " + sidecar, "Sync " + sidecar, "Sync data", "Truncate events.jsonl", "Sync events.jsonl"}
 	if got := mutating(fs); !slices.Equal(got, wantOrder) {
 		t.Errorf("recovery calls = %v, want %v", got, wantOrder)
 	}
@@ -198,6 +199,13 @@ func TestRecoverIsIdempotentAfterCrashMidRecovery(t *testing.T) {
 		}
 		if got := sidecars(t, dir); len(got) != 1 {
 			t.Fatalf("sidecars after the crash = %v, want the one already synced", got)
+		}
+		// The sidecar was durable, directory entry included, before the truncate
+		// that failed: that is what makes recovering again safe.
+		sidecar := "events.jsonl.recovered-20261008T123045Z-1"
+		wantOrder := []string{"Write " + sidecar, "Sync " + sidecar, "Sync data", "Truncate events.jsonl"}
+		if got := mutating(fs); !slices.Equal(got, wantOrder) {
+			t.Errorf("calls before the crash = %v, want %v", got, wantOrder)
 		}
 
 		// The restart recovers again, into a second sidecar, never over the first.
@@ -373,7 +381,7 @@ func TestRecoveryFailuresRefuseToStart(t *testing.T) {
 		{"reading the unacknowledged bytes", storefault.Rule{Op: storefault.OpReadAt, Nth: 2}, false},
 		{"creating the sidecar", storefault.Rule{Op: storefault.OpOpenFile, Name: "recovered"}, false},
 		{"closing the sidecar", storefault.Rule{Op: storefault.OpClose, Name: "recovered"}, false},
-		{"syncing the truncated log", storefault.Rule{Op: storefault.OpSync, Nth: 2}, true},
+		{"syncing the truncated log", storefault.Rule{Op: storefault.OpSync, Nth: 3}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -396,6 +404,54 @@ func TestRecoveryFailuresRefuseToStart(t *testing.T) {
 			}
 
 			// The next start succeeds and loses nothing.
+			_, evs, _ := openStore(t, dir, nil)
+			if !slices.Equal(ids(evs), ids(all)) {
+				t.Errorf("events after the retry = %v, want %v", ids(evs), ids(all))
+			}
+			if got := readLog(t, dir); !bytes.Equal(got, committed) {
+				t.Errorf("the log after the retry is not the committed prefix")
+			}
+		})
+	}
+}
+
+// INV-LOG-10: the sidecar is durable only once its directory entry is, so a
+// directory that cannot be synced refuses to start, and the truncate, which
+// would destroy the only other copy, has not happened.
+func TestRecoveryDirectorySyncFailureRefusesToStartAndLeavesTheLog(t *testing.T) {
+	committed, all := committedLog(t)
+	original := append(bytes.Clone(committed), []byte(`{"v":1,"id":"01J9Z3K8M2E`)...)
+
+	cases := map[string]storefault.Rule{
+		// The first sync is the sidecar's, the second the directory's; the
+		// sidecar is closed first and the directory second.
+		"syncing the directory": {Op: storefault.OpSync, Nth: 2},
+		// The log and the sidecar are opened first, the directory third.
+		"opening the directory": {Op: storefault.OpOpenFile, Nth: 3},
+		"closing the directory": {Op: storefault.OpClose, Name: "data", Nth: 2},
+	}
+	for name, rule := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := seedLog(t, original)
+			fs := storefault.New(nil)
+			fs.Inject(rule)
+			_, _, _, err := store.Open(store.Options{Dir: dir, FS: fs, Now: fixedNow})
+			if !errors.Is(err, storefault.ErrInjected) {
+				t.Fatalf("Open error = %v, want the injected failure", err)
+			}
+			if fs.Pending() != 0 {
+				t.Fatal("the fault was never reached")
+			}
+			for _, c := range fs.Calls() {
+				if c.Op == storefault.OpTruncate {
+					t.Fatalf("the log was truncated although the sidecar's directory was not synced: %v", fs.Calls())
+				}
+			}
+			if got := readLog(t, dir); !bytes.Equal(got, original) {
+				t.Errorf("the log is not byte-identical after the refused start")
+			}
+
+			// The next start recovers again and loses nothing.
 			_, evs, _ := openStore(t, dir, nil)
 			if !slices.Equal(ids(evs), ids(all)) {
 				t.Errorf("events after the retry = %v, want %v", ids(evs), ids(all))

@@ -6,6 +6,10 @@
   "required": ["defaults", "listen_port", "profiles", "tasks", "cycles"],
   "additionalProperties": false,
   "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Where an editor finds this schema, so it can validate the file. The loader ignores it: it is not a setting and does not change the configuration's digest."
+    },
     "defaults": {
       "type": "object",
       "required": ["cycle_minutes", "profile", "alert"],

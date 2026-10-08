@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"reflect"
+	"strconv"
+	"strings"
 	"testing"
 
 	"pgregory.net/rapid"
@@ -111,6 +113,15 @@ func TestScanProperty(t *testing.T) {
 			}
 		}
 
+		// (a') a valid log never repeats an event id.
+		seen := map[event.ID]bool{}
+		for _, e := range events {
+			if seen[e.ID] {
+				t.Fatalf("scan returned event id %s twice from a valid log", e.ID)
+			}
+			seen[e.ID] = true
+		}
+
 		// (b) the end of the committed prefix.
 		if end != int64(len(g.committed)) {
 			t.Fatalf("endOfLastCommitted = %d, want %d", end, len(g.committed))
@@ -127,6 +138,35 @@ func TestScanProperty(t *testing.T) {
 
 		// (c) recovery idempotence.
 		assertRecoversCleanly(t, g.data[:end], events)
+	})
+}
+
+// Property: a copy of any committed line, written right after the committed
+// prefix and before whatever tail the log has, is corruption at that line, and
+// the message names the repeated id and the line it first appeared on
+// (INV-LOG-11).
+func TestScanRepeatedIDProperty(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		g := drawLog(t)
+		if len(g.lines) == 0 {
+			t.Skip("no committed line to repeat")
+		}
+		j := rapid.IntRange(0, len(g.lines)-1).Draw(t, "repeated line")
+		ev, err := event.Decode(dropNewline(g.lines[j]))
+		if err != nil {
+			t.Fatalf("Decode: %v", err)
+		}
+		tail := g.data[len(g.committed):]
+		data := join(g.committed, g.lines[j], tail)
+
+		_, _, _, err = scan(bytes.NewReader(data))
+		var ce *CorruptError
+		if !errors.As(err, &ce) || ce.Line != len(g.lines)+1 {
+			t.Fatalf("scan error = %v, want a *CorruptError at line %d", err, len(g.lines)+1)
+		}
+		if msg := err.Error(); !strings.Contains(msg, string(ev.ID)) || !strings.Contains(msg, "line "+strconv.Itoa(j+1)) {
+			t.Fatalf("message %q should name id %s and line %d", msg, ev.ID, j+1)
+		}
 	})
 }
 

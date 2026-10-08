@@ -33,7 +33,7 @@ func wouldRecover(rep scanReport, endOfLastCommitted int64) Recovery {
 // recoverTail removes the unacknowledged end of the log (INV-LOG-9,
 // INV-LOG-10) and returns the path of the sidecar that keeps its bytes. The
 // order is the guarantee: the bytes are copied to a new sidecar and made
-// durable, and only then is the log truncated to the end of the last
+// durable, its directory entry included, and only then is the log truncated to the end of the last
 // committed record and that made durable. A crash anywhere in between leaves
 // the log as it was, so recovering again is safe: it copies the same bytes to
 // the next free sidecar name and carries on.
@@ -64,9 +64,11 @@ func recoverTail(fsys FS, log File, dir string, now time.Time, end, size int64) 
 
 // writeSidecar copies data to a new file named
 // events.jsonl.recovered-<UTC stamp>-<n>, mode 0600, with the first n that is
-// free: an earlier sidecar is never overwritten. The file is durable when it
-// returns. A sidecar that could not be completed is removed, so a partial copy
-// is never mistaken for the real one.
+// free: an earlier sidecar is never overwritten. The file, and its entry in the
+// directory, are durable when it returns. A sidecar that could not be
+// completed is removed, so a partial copy is never mistaken for the real one;
+// a complete one whose directory could not be synced is kept, since the bytes
+// it holds are whole.
 func writeSidecar(fsys FS, dir string, now time.Time, data []byte) (string, error) {
 	prefix := filepath.Join(dir, logName+".recovered-"+now.UTC().Format(sidecarStamp)+"-")
 	for n := 1; n <= maxSidecars; n++ {
@@ -81,6 +83,9 @@ func writeSidecar(fsys FS, dir string, now time.Time, data []byte) (string, erro
 		if err := fill(f, data); err != nil {
 			_ = fsys.Remove(path)
 			return "", fmt.Errorf("writing the recovery sidecar %s: %w", path, err)
+		}
+		if err := syncDir(fsys, dir); err != nil {
+			return "", fmt.Errorf("syncing the directory of the recovery sidecar %s: %w", path, err)
 		}
 		return path, nil
 	}

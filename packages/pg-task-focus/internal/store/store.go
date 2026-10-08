@@ -89,7 +89,9 @@ type Store struct {
 // the log (INV-LOG-9, INV-LOG-10) and returns the committed events in log
 // order. A log that is corrupt, or written in an unknown version, is returned
 // as a *CorruptError or *UnknownVersionError and is not modified (INV-LOG-2,
-// INV-LOG-11). The directory is created if absent, and so is an empty log.
+// INV-LOG-11). The directory is created if absent, and so is an empty log;
+// the directory is synced after the log is created, and after a recovery
+// sidecar is, so that the entries are durable (INV-LOG-10).
 func Open(opts Options) (*Store, []event.Event, Recovery, error) {
 	if opts.Dir == "" {
 		return nil, nil, Recovery{}, errors.New("the event store needs a data directory")
@@ -137,6 +139,14 @@ func (s *Store) read(log File) ([]event.Event, Recovery, error) {
 	info, err := log.Stat()
 	if err != nil {
 		return nil, Recovery{}, fmt.Errorf("reading the size of the event log: %w", err)
+	}
+	if info.Size() == 0 {
+		// A log with no bytes was just created, by this start or by one that
+		// may not have lived to sync the directory: its entry is durable only
+		// once the directory is (INV-LOG-10).
+		if err := syncDir(s.fs, s.dir); err != nil {
+			return nil, Recovery{}, fmt.Errorf("syncing the data directory %s after creating the event log: %w", s.dir, err)
+		}
 	}
 	events, end, rep, err := scan(io.NewSectionReader(log, 0, info.Size()))
 	if err != nil {

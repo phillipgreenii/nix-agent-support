@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/jsonstrict"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/schemacheck"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/schemas"
 )
@@ -139,11 +140,17 @@ func checkSchema(line []byte) error {
 type validator interface{ validate() error }
 
 // Decode reads one log line, without its newline. It is strict: an unknown
-// field, a missing required field, an instant that is not UTC with
-// milliseconds and a payload the Go semantic checks refuse are all errors.
-// The version is checked first and alone, so an unknown version is reported
-// as *UnknownVersionError whatever else the line holds; the JSON Schema comes
-// second, and the Go semantic checks last.
+// field, a repeated key, a missing required field, an instant that is not UTC
+// with milliseconds and a payload the Go semantic checks refuse are all
+// errors. The version is checked first and alone, so an unknown version is
+// reported as *UnknownVersionError whatever else the line holds; the size,
+// encoding and repeated-key checks come next, the JSON Schema after them, and
+// the Go semantic checks last.
+//
+// A line that writes v more than once is judged by every one of its v values:
+// if any is a JSON number other than the literal 1 the line is an unknown
+// version, never a torn one, whichever value comes last; otherwise it fails as
+// the repeated key it is.
 func Decode(line []byte) (Event, error) {
 	var probe struct {
 		V json.RawMessage `json:"v"`
@@ -154,14 +161,22 @@ func Decode(line []byte) (Event, error) {
 	if len(probe.V) == 0 {
 		return Event{}, errors.New("event line has no v")
 	}
+	vs, err := versionValues(line)
+	if err != nil {
+		return Event{}, fmt.Errorf("event line is not a JSON object: %w", err)
+	}
 	// Only a JSON number can name a version, and only the literal 1 is the
 	// supported one: 1.0 and 1e0 have its value but are not its form, so they
 	// are unknown versions like 2 is.
-	if c := probe.V[0]; c != '-' && (c < '0' || c > '9') {
-		return Event{}, fmt.Errorf("event v %s is not a number", probe.V)
+	for _, v := range vs {
+		if isNumber(v) && string(v) != strconv.Itoa(SchemaVersion) {
+			return Event{}, unknownVersion(string(v))
+		}
 	}
-	if string(probe.V) != strconv.Itoa(SchemaVersion) {
-		return Event{}, unknownVersion(string(probe.V))
+	for _, v := range vs {
+		if !isNumber(v) {
+			return Event{}, fmt.Errorf("event v %s is not a number", v)
+		}
 	}
 
 	if len(line) > MaxEventBytes {
@@ -171,6 +186,9 @@ func Decode(line []byte) (Event, error) {
 		return Event{}, fmt.Errorf("event line: %w", ErrInvalidUTF8)
 	}
 	if err := checkSurrogates(line); err != nil {
+		return Event{}, fmt.Errorf("event line: %w", err)
+	}
+	if err := jsonstrict.CheckNoDuplicateKeys(line); err != nil {
 		return Event{}, fmt.Errorf("event line: %w", err)
 	}
 	if err := checkSchema(line); err != nil {
@@ -251,6 +269,10 @@ func Encode(e Event) ([]byte, error) {
 		if !utf8.Valid(e.Data) {
 			return nil, ErrInvalidUTF8
 		}
+		// A key written twice would decode as its last value, silently.
+		if err := jsonstrict.CheckNoDuplicateKeys(e.Data); err != nil {
+			return nil, fmt.Errorf("event payload: %w", err)
+		}
 		raw = e.Data
 	default:
 		return nil, errors.New("event has no payload")
@@ -290,6 +312,36 @@ func Encode(e Event) ([]byte, error) {
 		return nil, err
 	}
 	return line, nil
+}
+
+// isNumber reports whether raw, one JSON value, is a number.
+func isNumber(raw json.RawMessage) bool {
+	c := raw[0]
+	return c == '-' || (c >= '0' && c <= '9')
+}
+
+// versionValues returns every value the top-level key v takes in line, a JSON
+// object, in the order written. encoding/json keeps only the last.
+func versionValues(line []byte) ([]json.RawMessage, error) {
+	dec := json.NewDecoder(bytes.NewReader(line))
+	if _, err := dec.Token(); err != nil { // the opening brace
+		return nil, err
+	}
+	var vs []json.RawMessage
+	for dec.More() {
+		key, err := dec.Token()
+		if err != nil {
+			return nil, err
+		}
+		var raw json.RawMessage
+		if err := dec.Decode(&raw); err != nil {
+			return nil, err
+		}
+		if key == "v" {
+			vs = append(vs, raw)
+		}
+	}
+	return vs, nil
 }
 
 // decodePayload decodes data strictly as the payload of type t and runs the

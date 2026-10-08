@@ -16,6 +16,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/civil"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/due"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/jsonstrict"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/schemacheck"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/zone"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/schemas"
@@ -36,6 +37,12 @@ var schema = sync.OnceValues(func() (*schemacheck.Schema, error) {
 // fields its cadence takes, and its zone is a zone name (D12); defaults.profile
 // is a defined profile; no pre-filled key is the reserved key cycle_type; and
 // public_url is an http or https URL.
+//
+// A key that an object writes twice is refused before any of that, as the one
+// problem Parse then reports: encoding/json would keep the last value and drop
+// the first without a word, so a task defined twice would lose a definition.
+// An optional top-level "$schema" string, the hint an editor reads, is
+// accepted and ignored: it is not returned and does not change the digest.
 func Parse(raw []byte) (*Config, error) {
 	s, err := schema()
 	if err != nil {
@@ -50,6 +57,18 @@ func Parse(raw []byte) (*Config, error) {
 		}
 	}
 
+	if err := jsonstrict.CheckNoDuplicateKeys(raw); err != nil {
+		var dup *jsonstrict.DuplicateKeyError
+		if !errors.As(err, &dup) {
+			return nil, whole("the configuration is not valid JSON: " + err.Error())
+		}
+		return nil, &ValidationError{Problems: []Problem{{
+			Path: dup.Pointer + "/" + escapePointer(dup.Key),
+			Message: fmt.Sprintf("the key %q is written more than once in this object; "+
+				"keep one, since only one value can apply", dup.Key),
+		}}}
+	}
+
 	tree, err := decode(raw)
 	if err != nil {
 		return nil, whole("the configuration is not valid JSON: " + err.Error())
@@ -59,6 +78,10 @@ func Parse(raw []byte) (*Config, error) {
 		p.fromSchema(violations)
 	}
 	if root, ok := tree.(map[string]any); ok {
+		// The editor hint is not a setting: whatever it says, it is not part
+		// of the configuration, so it is not in the digest. The schema has
+		// already refused one that is not a string.
+		delete(root, "$schema")
 		p.root = root
 		p.semantic()
 	}
@@ -183,41 +206,23 @@ func (p *parser) failure() *ValidationError {
 // ---- the schema's violations, in an operator's words ----
 
 // fromSchema turns the schema's violations into problems. A key that is
-// missing or not allowed is reported at the key's own pointer.
+// missing or not allowed is reported at the key's own pointer, and its name is
+// the one the violation carries, not a word of its message.
 func (p *parser) fromSchema(verr *schemacheck.ValidationError) {
 	for _, v := range verr.Violations {
 		switch {
-		case strings.HasPrefix(v.Message, "missing propert"):
-			if names := quotedNames(v.Message); len(names) > 0 {
-				for _, n := range names {
-					p.add(v.Pointer+"/"+escapePointer(n), "required key %q is missing", n)
-				}
-				continue
+		case len(v.Missing) > 0:
+			for _, n := range v.Missing {
+				p.add(v.Pointer+"/"+escapePointer(n), "required key %q is missing", n)
 			}
-		case strings.HasPrefix(v.Message, "additional propert"):
-			if names := quotedNames(v.Message); len(names) > 0 {
-				for _, n := range names {
-					p.add(v.Pointer+"/"+escapePointer(n), "%s", unknownKey(v.Pointer, n))
-				}
-				continue
+		case len(v.Unexpected) > 0:
+			for _, n := range v.Unexpected {
+				p.add(v.Pointer+"/"+escapePointer(n), "%s", unknownKey(v.Pointer, n))
 			}
+		default:
+			p.add(v.Pointer, "%s", describe(p.tree, v))
 		}
-		p.add(v.Pointer, "%s", describe(p.tree, v))
 	}
-}
-
-// quotedNames extracts the names the validator quotes in a message such as
-// "missing properties 'a', 'b'" or "additional properties 'x' not allowed".
-func quotedNames(msg string) []string {
-	i := strings.IndexByte(msg, '\'')
-	if i < 0 {
-		return nil
-	}
-	rest := strings.TrimSuffix(msg[i:], " not allowed")
-	if len(rest) < 2 || rest[0] != '\'' || rest[len(rest)-1] != '\'' {
-		return nil
-	}
-	return strings.Split(rest[1:len(rest)-1], "', '")
 }
 
 // optionsByDesign are keys an operator might expect that the product

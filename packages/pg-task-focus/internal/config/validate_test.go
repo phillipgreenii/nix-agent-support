@@ -2,9 +2,12 @@ package config_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 
@@ -83,6 +86,12 @@ func TestRule7Rejections(t *testing.T) {
 		{"carry-over-in-task", "INV-CONF-8", "/tasks/plan-day/carry_over", []string{`unknown key "carry_over"`, "no snooze, mute, acknowledge or carry-over"}},
 		{"day-start-top-level", "INV-CONF-8", "/day_start", []string{`unknown key "day_start"`, "no day start"}},
 		{"empty-task-id", "INV-CONF-10", "/tasks/", []string{"id", "must not be empty"}},
+
+		// A key written twice: encoding/json would keep the last value and drop
+		// the first without a word (INV-CONF-10).
+		{"task-defined-twice", "INV-CONF-10", "/tasks/plan-day", []string{`"plan-day"`, "more than once"}},
+		{"listen-port-twice", "INV-CONF-10", "/listen_port", []string{`"listen_port"`, "more than once"}},
+		{"due-key-twice", "INV-CONF-10", "/tasks/plan-day/due/at", []string{`"at"`, "more than once"}},
 	}
 
 	// Every fixture in invalid/ is exercised, so none is left unpinned.
@@ -152,6 +161,9 @@ func TestRule7RejectionsAreExact(t *testing.T) {
 		"default-profile-undefined":  {"/defaults/profile"},
 		"unknown-top-level-key":      {"/theme"},
 		"listen-port-missing":        {"/listen_port"},
+		"task-defined-twice":         {"/tasks/plan-day"},
+		"listen-port-twice":          {"/listen_port"},
+		"due-key-twice":              {"/tasks/plan-day/due/at"},
 	} {
 		raw, err := os.ReadFile(filepath.Join(testdata, "invalid", file+".json"))
 		if err != nil {
@@ -346,4 +358,92 @@ func TestConfigSchemaDeclaresDraft2020(t *testing.T) {
 	if _, ok := problemAt(ve, "/defaults/profile"); !ok {
 		t.Errorf("the semantic violation is missing: %v", ve)
 	}
+}
+
+// A key that is not a configuration option is reported at its own pointer, with
+// the real characters of the key in the message, whatever characters it holds:
+// the names come from the schema's typed violations, never from parsing the
+// text of a validator's message.
+func TestUnknownKeysAreReportedExactlyAsWritten(t *testing.T) {
+	for _, tc := range []struct{ key, path string }{
+		{"it's", "/it's"},
+		{`a\b`, `/a\b`},
+		{"line\nbreak", "/line\nbreak"},
+		{`a"b`, `/a"b`},
+		{"a/b", "/a~1b"},
+		{"a~b", "/a~0b"},
+		{"~/", "/~0~1"},
+		{"caf\u00e9", "/caf\u00e9"},
+		{"\u4e16\u754c", "/\u4e16\u754c"},
+		{"a', 'b", "/a', 'b"},
+		{"", "/"},
+		{" ", "/ "},
+	} {
+		t.Run(fmt.Sprintf("%q", tc.key), func(t *testing.T) {
+			_, err := config.Parse(edited(t, func(c map[string]any) { c[tc.key] = 3 }))
+			ve := validationError(t, err)
+			if len(ve.Problems) != 1 {
+				t.Fatalf("problems = %+v, want exactly one", ve.Problems)
+			}
+			p := ve.Problems[0]
+			if p.Path != tc.path {
+				t.Errorf("path = %q, want %q", p.Path, tc.path)
+			}
+			if want := fmt.Sprintf("unknown key %q", tc.key); !strings.Contains(p.Message, want) {
+				t.Errorf("message = %q, want it to contain %s", p.Message, want)
+			}
+		})
+	}
+
+	t.Run("several unknown keys in one object", func(t *testing.T) {
+		_, err := config.Parse(edited(t, func(c map[string]any) {
+			c["it's"], c["a/b"], c["a'b"] = 1, 2, 3
+			at(c, "defaults")["x'y"] = 4
+		}))
+		got := paths(validationError(t, err))
+		want := []string{"/a'b", "/a~1b", "/it's", "/defaults/x'y"}
+		sort.Strings(got)
+		sort.Strings(want)
+		if !slices.Equal(got, want) {
+			t.Errorf("paths = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("a missing key is reported at its own pointer", func(t *testing.T) {
+		_, err := config.Parse(edited(t, func(c map[string]any) { delete(at(c, "defaults", "alert"), "sound") }))
+		ve := validationError(t, err)
+		if p, ok := problemAt(ve, "/defaults/alert/sound"); !ok || !strings.Contains(p.Message, `required key "sound" is missing`) {
+			t.Errorf("problems = %v, want a missing-key Problem at /defaults/alert/sound", ve.Problems)
+		}
+	})
+}
+
+// INV-CONF-14: the checked-in schema lets an editor validate a configuration,
+// so a configuration may carry the $schema key an editor reads. The loader
+// ignores it: it is not a setting, and it does not change the digest.
+func TestParseIgnoresADollarSchemaString(t *testing.T) {
+	plain := mustParseValid(t)
+	for _, hint := range []string{"./config.schema.json", "https://example.test/pg-task-focus/config.schema.json", ""} {
+		c := mustParse(t, edited(t, func(c map[string]any) { c["$schema"] = hint }))
+		if c.Digest() != plain.Digest() {
+			t.Errorf("$schema %q changed the digest: %s vs %s", hint, c.Digest(), plain.Digest())
+		}
+		if !reflect.DeepEqual(c.Defaults(), plain.Defaults()) || c.ListenPort() != plain.ListenPort() || c.PublicURL() != plain.PublicURL() {
+			t.Errorf("$schema %q changed what Parse returns", hint)
+		}
+	}
+
+	t.Run("it must still be a string", func(t *testing.T) {
+		for name, v := range map[string]any{"a number": 3, "null": nil, "a list": []any{"x"}, "an object": map[string]any{}, "a boolean": false} {
+			_, err := config.Parse(edited(t, func(c map[string]any) { c["$schema"] = v }))
+			if err == nil {
+				t.Errorf("Parse accepted %s as $schema", name)
+				continue
+			}
+			p, ok := problemAt(validationError(t, err), "/$schema")
+			if !ok || !strings.Contains(p.Message, "wrong type") {
+				t.Errorf("%s: problems = %v, want a wrong-type Problem at /$schema", name, err)
+			}
+		}
+	})
 }

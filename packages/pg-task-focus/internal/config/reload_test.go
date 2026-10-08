@@ -33,6 +33,34 @@ func TestCheckReload(t *testing.T) {
 		}
 	})
 
+	// When there is no previous configuration, or the previous one did not
+	// define the active profile either, nothing was removed: the message says
+	// the profile is not defined, not that the reload removes it.
+	t.Run("an active profile the new configuration does not define, with nothing removed", func(t *testing.T) {
+		next := mustParse(t, edited(t, func(c map[string]any) {
+			delete(at(c, "profiles"), "on-call")
+			delete(at(c, "profiles"), "normal")
+			at(c, "profiles")["other"] = map[string]any{}
+			at(c, "defaults")["profile"] = "other"
+		}))
+		for name, prev := range map[string]*config.Config{"no previous configuration": nil, "a previous one without it": next} {
+			err := config.CheckReload(prev, next, "normal")
+			ve := validationError(t, err)
+			if len(ve.Problems) != 1 || ve.Problems[0].Path != "/profiles/normal" {
+				t.Fatalf("%s: problems = %+v, want one at /profiles/normal", name, ve.Problems)
+			}
+			msg := ve.Problems[0].Message
+			for _, frag := range []string{`"normal"`, "active profile", "not defined in the new configuration"} {
+				if !strings.Contains(msg, frag) {
+					t.Errorf("%s: message %q does not contain %q", name, msg, frag)
+				}
+			}
+			if strings.Contains(msg, "removes") {
+				t.Errorf("%s: message %q says the reload removes a profile that was never there", name, msg)
+			}
+		}
+	})
+
 	// INV-CONF-15: removing a non-active profile is allowed too.
 	t.Run("removing a profile that is not active passes", func(t *testing.T) {
 		next := mustParse(t, edited(t, func(c map[string]any) { delete(at(c, "profiles"), "on-call") }))

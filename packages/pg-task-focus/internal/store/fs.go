@@ -65,3 +65,19 @@ func (osFS) CreateTemp(dir, pattern string) (File, string, error) {
 	}
 	return f, filepath.Join(dir, filepath.Base(f.Name())), nil
 }
+
+// syncDir makes the entries of the directory dir durable: a file created or
+// renamed in it survives a crash only once the directory itself is synced. The
+// directory is opened through fsys, so the fault FS records and can fail the
+// call.
+func syncDir(fsys FS, dir string) error {
+	d, err := fsys.OpenFile(dir, os.O_RDONLY, 0)
+	if err != nil {
+		return err
+	}
+	if err := d.Sync(); err != nil {
+		_ = d.Close()
+		return err
+	}
+	return d.Close()
+}

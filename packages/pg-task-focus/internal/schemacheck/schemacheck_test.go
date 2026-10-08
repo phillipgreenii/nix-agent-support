@@ -1,6 +1,7 @@
 package schemacheck_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"os"
@@ -146,6 +147,14 @@ func TestInvalidLinesFail(t *testing.T) {
 		{"event.corrected.impossible-date.jsonl", "fields.end"},
 		{"event.corrected.bad-due-rule.jsonl", "fields.due_rule"},
 		{"period.changed.week-end-before-start.jsonl", "end"},
+		// encoding/json would keep the last of a repeated key, so the schema
+		// sees a valid line; Decode refuses it and names the key and its object.
+		{"duplicate-type.jsonl", `duplicate key "type" at /`},
+		{"duplicate-task-id.jsonl", `duplicate key "task_id" at /data`},
+		{"duplicate-due-rule-key.jsonl", `duplicate key "at" at /data/due_rule`},
+		{"duplicate-fields-key.jsonl", `duplicate key "minutes" at /data/fields`},
+		{"duplicate-v-1-then-1.jsonl", `duplicate key "v" at /`},
+		{"duplicate-v-2-then-1.jsonl", "event version 2 is not known"},
 	}
 	for _, c := range goOnly {
 		listed[c.file] = true
@@ -179,6 +188,38 @@ func TestDecodeReportsAnUnknownVersionNotASchemaFailure(t *testing.T) {
 	var uv *event.UnknownVersionError
 	if !errors.As(err, &uv) || uv.V != 2 {
 		t.Fatalf("Decode = %v, want *UnknownVersionError{V: 2}", err)
+	}
+}
+
+// INV-LOG-2: a line that writes v more than once is judged by every one of
+// its v values first, so "v":2 followed by "v":1 is an unknown version and not
+// a version 1 line, however it is ordered.
+func TestDecodeJudgesARepeatedVByAllItsValues(t *testing.T) {
+	line := fixtureLines(t, "../../testdata/events/invalid/duplicate-v-2-then-1.jsonl")["duplicate-v-2-then-1.jsonl"]
+	for name, in := range map[string][]byte{
+		"2 then 1":        line,
+		"1 then 2":        bytes.Replace(line, []byte(`"v":2,"v":1`), []byte(`"v":1,"v":2`), 1),
+		"1 then 1.0":      bytes.Replace(line, []byte(`"v":2,"v":1`), []byte(`"v":1,"v":1.0`), 1),
+		"a string then 3": bytes.Replace(line, []byte(`"v":2,"v":1`), []byte(`"v":"x","v":3`), 1),
+		"2 then a string": bytes.Replace(line, []byte(`"v":2,"v":1`), []byte(`"v":2,"v":"1"`), 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := event.Decode(in)
+			var uv *event.UnknownVersionError
+			if !errors.As(err, &uv) {
+				t.Fatalf("Decode(%.60s) = %v, want an *UnknownVersionError", in, err)
+			}
+		})
+	}
+	for name, v := range map[string]string{"1 then 1": `"v":1,"v":1`, "a string then 1": `"v":"1","v":1`, "null then 1": `"v":null,"v":1`} {
+		t.Run(name, func(t *testing.T) {
+			in := bytes.Replace(line, []byte(`"v":2,"v":1`), []byte(v), 1)
+			_, err := event.Decode(in)
+			var uv *event.UnknownVersionError
+			if err == nil || errors.As(err, &uv) {
+				t.Fatalf("Decode(%.60s) = %v, want an ordinary error, not an unknown version", in, err)
+			}
+		})
 	}
 }
 
@@ -597,6 +638,7 @@ func TestConfigFreeTextInventory(t *testing.T) {
 		"profiles.*.daily[]", "profiles.*.weekly[]", "profiles.*.sprint[]", "profiles.*.cycles[]",
 		"tasks.*.title", "tasks.*.cadence", "tasks.*.group", "tasks.*.link",
 		"tasks.*.due.at", "tasks.*.due.tz", "tasks.*.due.weekday",
+		"$schema", // an editor's hint at the schema; the loader ignores it
 		"cycles.*.title", "cycles.*.keys[]", "cycles.*.alert.sound", "cycles.*.alert.reminder_sound",
 	}
 	sameSet(t, "string properties of the configuration", schemacheck.StringFields(s, ""), notFree)
@@ -662,6 +704,104 @@ func TestEveryObjectSchemaIsClosed(t *testing.T) {
 				if !seen[pointer] {
 					t.Errorf("the allow-list names %q, which is not an object schema of %s", pointer, name)
 				}
+			}
+		})
+	}
+}
+
+// weirdNames are property names that the text of a validator's message cannot
+// carry back faithfully: quotes, a backslash, a line break, the characters a
+// JSON pointer escapes, and non-ASCII.
+var weirdNames = []string{"it's", `a\b`, "line\nbreak", `a"b`, "a/b", "a~b", "café", "a', 'b", "", " "}
+
+// A caller that needs the names of the properties at fault reads them from the
+// violation, not from its message, so every name comes back exactly as the
+// schema or the document spells it.
+func TestViolationsCarryTheNamesOfMissingAndUnexpectedProperties(t *testing.T) {
+	required, err := json.Marshal(weirdNames)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := schemacheck.Compile("names.schema.json", []byte(`{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": `+string(required)+`,
+  "additionalProperties": false,
+  "properties": {"known": {"type": "string"}}
+}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("missing", func(t *testing.T) {
+		got := violations(t, s.Validate([]byte(`{}`)))
+		if len(got) != 1 {
+			t.Fatalf("%d violations, want one: %v", len(got), got)
+		}
+		want := slices.Clone(weirdNames)
+		have := slices.Clone(got[0].Missing)
+		sort.Strings(want)
+		sort.Strings(have)
+		if !slices.Equal(have, want) || len(got[0].Unexpected) != 0 || got[0].Pointer != "" {
+			t.Errorf("violation = %+v, want Missing %q at the root and nothing unexpected", got[0], want)
+		}
+	})
+	t.Run("unexpected", func(t *testing.T) {
+		doc := map[string]any{"known": "x"}
+		for _, n := range weirdNames {
+			doc[n] = 1
+		}
+		raw, err := json.Marshal(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var unexpected []string
+		for _, v := range violations(t, s.Validate(raw)) {
+			if len(v.Missing) != 0 {
+				t.Errorf("violation %+v lists missing names, but every required name is present", v)
+			}
+			unexpected = append(unexpected, v.Unexpected...)
+		}
+		want := slices.Clone(weirdNames)
+		sort.Strings(want)
+		sort.Strings(unexpected)
+		if !slices.Equal(unexpected, want) {
+			t.Errorf("unexpected names = %q, want %q", unexpected, want)
+		}
+	})
+	t.Run("no names for any other violation", func(t *testing.T) {
+		found := false
+		for _, v := range violations(t, s.Validate([]byte(`{"known": 1}`))) {
+			if v.Pointer != "/known" {
+				continue
+			}
+			found = true
+			if len(v.Missing) != 0 || len(v.Unexpected) != 0 {
+				t.Errorf("a type violation carries names: %+v", v)
+			}
+		}
+		if !found {
+			t.Error("no violation at /known")
+		}
+	})
+}
+
+// INV-CONF-14: the checked-in schema lets an editor validate a configuration,
+// and an editor's hint is a $schema key, which the schema allows as a string.
+func TestConfigSchemaAllowsADollarSchemaString(t *testing.T) {
+	s := configSchema(t)
+	if err := s.Validate(mutated(t, func(c map[string]any) { c["$schema"] = "./config.schema.json" })); err != nil {
+		t.Errorf("a $schema string was refused: %v", err)
+	}
+	for name, v := range map[string]any{"a number": 3, "null": nil, "an object": map[string]any{}, "a list": []any{"x"}, "a boolean": true} {
+		t.Run(name, func(t *testing.T) {
+			err := s.Validate(mutated(t, func(c map[string]any) { c["$schema"] = v }))
+			found := false
+			for _, viol := range violations(t, err) {
+				found = found || viol.Pointer == "/$schema"
+			}
+			if !found {
+				t.Errorf("a non-string $schema (%s) was not refused at /$schema: %v", name, err)
 			}
 		})
 	}

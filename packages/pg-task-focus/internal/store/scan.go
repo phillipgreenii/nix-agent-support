@@ -109,6 +109,10 @@ type scanReport struct {
 //     inside an open batch, and the reuse of a committed batch id are
 //     corruption (INV-LOG-11). event.retracted names a batch only as its
 //     target_batch, which is not membership.
+//   - An event id is unique: a line that repeats the id of an earlier
+//     decoded line, committed or not, is corruption at the repeating line
+//     (an event's id is a unique ULID; INV-LOG-11). A final line with no terminating newline is torn whatever
+//     it holds, so it is not judged.
 //   - A blank line before the final line, and any line longer than
 //     event.MaxEventBytes, are corruption (INV-LOG-11, INV-LOG-27).
 //
@@ -126,6 +130,7 @@ func scan(r io.Reader) (events []event.Event, endOfLastCommitted int64, rep scan
 	s := &scanner{
 		br:        bufio.NewReaderSize(r, readBufferSize),
 		committed: make(map[event.ID]int),
+		seen:      make(map[event.ID]int),
 	}
 	if err := s.run(); err != nil {
 		return nil, 0, scanReport{}, err
@@ -161,6 +166,7 @@ type scanner struct {
 	events       []event.Event
 	committedEnd int64
 	committed    map[event.ID]int // batch id to the line of its batch.committed
+	seen         map[event.ID]int // event id to the line that first carried it
 	open         *openBatch
 	torn         *tornLine
 }
@@ -262,6 +268,12 @@ func (s *scanner) handle(line []byte, terminated bool, lineNo int, start int64) 
 		return nil
 	}
 	ev.Line = lineNo
+	if first, repeated := s.seen[ev.ID]; repeated {
+		return &CorruptError{Line: lineNo, Cause: fmt.Errorf(
+			"event id %s was already used at line %d, and event ids are unique", ev.ID, first,
+		)}
+	}
+	s.seen[ev.ID] = lineNo
 	return s.classify(ev, start, s.offset)
 }
 

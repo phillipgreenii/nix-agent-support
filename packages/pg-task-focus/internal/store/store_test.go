@@ -191,6 +191,75 @@ func TestLogIsOpenedWithOAppend(t *testing.T) {
 	}
 }
 
+// INV-LOG-10 and INV-LOG-29: a log file that has just been created is only
+// durable once its directory entry is, so a start that creates the log syncs
+// the directory, through the FS seam, after creating the file.
+func TestFirstCreationOfTheLogSyncsTheDirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "data")
+	fs := storefault.New(nil)
+	openStore(t, dir, fs)
+
+	var got []string
+	for _, c := range fs.Calls() {
+		switch {
+		case c.Op == storefault.OpOpenFile && c.Name == logPath(dir):
+			if c.Flag&os.O_CREATE == 0 {
+				t.Errorf("the log was opened with flag %#x, which lacks O_CREATE", c.Flag)
+			}
+			got = append(got, "create the log")
+		case c.Op == storefault.OpOpenFile && c.Name == dir:
+			if c.Flag != os.O_RDONLY {
+				t.Errorf("the directory was opened with flag %#x, want O_RDONLY", c.Flag)
+			}
+			got = append(got, "open the directory")
+		case c.Op == storefault.OpSync && c.Name == dir:
+			got = append(got, "sync the directory")
+		case c.Op == storefault.OpClose && c.Name == dir:
+			got = append(got, "close the directory")
+		case c.Op == storefault.OpSync:
+			t.Errorf("unexpected sync of %s on a first start", c.Name)
+		}
+	}
+	want := []string{"create the log", "open the directory", "sync the directory", "close the directory"}
+	if !slices.Equal(got, want) {
+		t.Errorf("calls = %v, want %v", got, want)
+	}
+}
+
+func TestFirstCreationOfTheLogReportsAFailedDirectorySync(t *testing.T) {
+	cases := map[string]storefault.Rule{
+		"the sync fails":              {Op: storefault.OpSync},
+		"the directory will not open": {Op: storefault.OpOpenFile, Name: "data", Nth: 2},
+	}
+	for name, rule := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "data")
+			fs := storefault.New(nil)
+			fs.Inject(rule)
+			_, _, _, err := store.Open(store.Options{Dir: dir, FS: fs, Now: fixedNow})
+			if !errors.Is(err, storefault.ErrInjected) {
+				t.Fatalf("Open error = %v, want the injected failure", err)
+			}
+			if fs.Pending() != 0 {
+				t.Fatal("the fault was never reached")
+			}
+			// The claim was released and the next start succeeds.
+			openStore(t, dir, nil)
+		})
+	}
+}
+
+// A log that already holds records was made durable by the start that created
+// it, and a clean start writes nothing, so it syncs nothing.
+func TestOpenOfAnExistingLogDoesNotSyncTheDirectory(t *testing.T) {
+	dir := seedLog(t, lines(t, plainEvent(1)))
+	fs := storefault.New(nil)
+	openStore(t, dir, fs)
+	if got := mutating(fs); len(got) != 0 {
+		t.Errorf("a clean start of an existing log wrote or synced: %v", got)
+	}
+}
+
 func TestCloseIsIdempotentAndReleasesTheClaim(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "data")
 	s, _, _, err := store.Open(store.Options{Dir: dir})

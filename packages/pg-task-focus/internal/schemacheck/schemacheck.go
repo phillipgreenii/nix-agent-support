@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
+	"github.com/santhosh-tekuri/jsonschema/v6/kind"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
 )
@@ -38,8 +39,23 @@ type Violation struct {
 	// the document itself. For a missing or an unexpected property it is the
 	// object that lacks or holds it, and Message names the property.
 	Pointer string
-	// Message says what is wrong in one sentence.
+	// Message says what is wrong in one sentence. It is for people: a caller
+	// that needs the names of the properties reads Missing and Unexpected,
+	// never the message.
 	Message string
+	// Missing lists, exactly as the schema spells them, the properties the
+	// object at Pointer lacks and the schema requires. It is empty for every
+	// other kind of violation.
+	Missing []string
+	// Unexpected lists, exactly as the document spells them, the properties
+	// the object at Pointer holds and a closed schema does not allow. It is
+	// empty for every other kind of violation.
+	Unexpected []string
+}
+
+// same reports whether two violations say the same thing at the same place.
+func (v Violation) same(o Violation) bool {
+	return v.Pointer == o.Pointer && v.Message == o.Message
 }
 
 // ValidationError lists every violation of a document. It is what Validate
@@ -121,7 +137,13 @@ func (s *Schema) Validate(doc []byte) error {
 func collect(e *jsonschema.ValidationError, p *message.Printer, out *[]Violation) {
 	if len(e.Causes) == 0 {
 		v := Violation{Pointer: pointer(e.InstanceLocation), Message: e.ErrorKind.LocalizedString(p)}
-		if !slices.Contains(*out, v) {
+		switch k := e.ErrorKind.(type) {
+		case *kind.Required:
+			v.Missing = slices.Clone(k.Missing)
+		case *kind.AdditionalProperties:
+			v.Unexpected = slices.Clone(k.Properties)
+		}
+		if !slices.ContainsFunc(*out, v.same) {
 			*out = append(*out, v)
 		}
 		return

@@ -826,3 +826,139 @@ func TestScanReadFailureIsNotCorruption(t *testing.T) {
 		})
 	}
 }
+
+// withVersionPrefix replaces the opening of an encoded line, which is
+// {"v":1, with prefix.
+func withVersionPrefix(line []byte, prefix string) []byte {
+	return bytes.Replace(line, []byte(`{"v":1,`), []byte(prefix), 1)
+}
+
+// INV-LOG-2: a line that writes v twice and names an unknown version in either
+// place is an unknown version wherever it is, never a torn tail.
+func TestScanRepeatedVersionIsJudgedByAllItsValues(t *testing.T) {
+	good := enc(t, plainEvent(1))
+	for name, prefix := range map[string]string{
+		"2 then 1":   `{"v":2,"v":1,`,
+		"1 then 2":   `{"v":1,"v":2,`,
+		"1 then 1.0": `{"v":1,"v":1.0,`,
+	} {
+		bad := withVersionPrefix(enc(t, plainEvent(2)), prefix)
+		for where, log := range map[string][]byte{
+			"as the final line":                 join(good, bad),
+			"as the final line without newline": join(good, dropNewline(bad)),
+			"mid-file":                          join(good, bad, enc(t, plainEvent(3))),
+		} {
+			t.Run(name+" "+where, func(t *testing.T) {
+				_, _, _, err := scan(bytes.NewReader(log))
+				var uv *UnknownVersionError
+				if !errors.As(err, &uv) || uv.Line != 2 {
+					t.Fatalf("scan error = %v (%T), want an *UnknownVersionError at line 2", err, err)
+				}
+				var ce *CorruptError
+				if errors.As(err, &ce) {
+					t.Errorf("an unknown version must not be reported as corruption")
+				}
+			})
+		}
+	}
+}
+
+// INV-LOG-2, INV-LOG-11: a repeated key that is not an unknown version is an
+// ordinary decode failure: a torn tail as the final line, corruption before
+// another line.
+func TestScanRepeatedKeyIsAnOrdinaryDecodeFailure(t *testing.T) {
+	good := enc(t, plainEvent(1))
+	repeated := enc(t, plainEvent(2))
+	repeated = bytes.Replace(repeated, []byte(`"type":"task.completed"`), []byte(`"type":"task.completed","type":"task.completed"`), 1)
+	if !bytes.Contains(repeated, []byte(`"type":"task.completed","type"`)) {
+		t.Fatal("the test line does not repeat type")
+	}
+
+	t.Run("the final line is a torn tail", func(t *testing.T) {
+		events, end, rep := mustScan(t, join(good, repeated))
+		wantLines(t, events, eventID(1))
+		if end != int64(len(good)) || !rep.TornTail || rep.TornLine != 2 {
+			t.Errorf("end %d, report %+v; want a torn tail at line 2 after %d committed bytes", end, rep, len(good))
+		}
+		if !strings.Contains(rep.TornCause.Error(), `duplicate key "type"`) {
+			t.Errorf("TornCause = %v, want it to name the repeated key", rep.TornCause)
+		}
+	})
+	t.Run("before another line it is corruption", func(t *testing.T) {
+		_, _, _, err := scan(bytes.NewReader(join(good, repeated, enc(t, plainEvent(3)))))
+		_ = wantCorrupt(t, err, 2)
+		if !strings.Contains(err.Error(), `duplicate key "type"`) {
+			t.Errorf("message %q should name the repeated key", err)
+		}
+	})
+}
+
+// INV-LOG-11 and the event table: an id is a unique ULID. The second line to carry an id is the corrupt
+// one, and the message names the id and the first line.
+func TestScanRefusesARepeatedEventID(t *testing.T) {
+	b1, b2 := batchID(1), batchID(2)
+	cases := []struct {
+		name string
+		log  []byte
+		line int // the line of the second occurrence
+		of   int // the line of the first
+		id   event.ID
+	}{
+		{"two plain events", join(enc(t, plainEvent(1)), enc(t, plainEvent(2)), enc(t, plainEvent(1))), 3, 1, eventID(1)},
+		{"the very next line", join(enc(t, plainEvent(1)), enc(t, plainEvent(1))), 2, 1, eventID(1)},
+		{
+			"a member of a later batch",
+			join(enc(t, plainEvent(1)), enc(t, memberEvent(1, b1)), enc(t, commitEvent(2, b1))),
+			2, 1, eventID(1),
+		},
+		{
+			"a batch.committed that reuses an event id",
+			join(enc(t, plainEvent(1)), enc(t, memberEvent(2, b1)), enc(t, commitEvent(1, b1))),
+			3, 1, eventID(1),
+		},
+		{
+			"inside a committed batch",
+			join(enc(t, memberEvent(1, b1)), enc(t, memberEvent(1, b1)), enc(t, commitEvent(2, b1))),
+			2, 1, eventID(1),
+		},
+		{
+			"inside an uncommitted trailing batch",
+			join(enc(t, plainEvent(1)), enc(t, memberEvent(2, b2)), enc(t, memberEvent(2, b2))),
+			3, 2, eventID(2),
+		},
+		{
+			"an uncommitted member that repeats a committed id",
+			join(enc(t, plainEvent(1)), enc(t, memberEvent(1, b2))),
+			2, 1, eventID(1),
+		},
+		{
+			"before an uncommitted batch's torn line, the repeat comes first",
+			join(enc(t, plainEvent(1)), enc(t, memberEvent(2, b2)), enc(t, memberEvent(1, b2)), []byte(`{"v":1,"id":"01J9Z`)),
+			3, 1, eventID(1),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			events, end, rep, err := scan(bytes.NewReader(tc.log))
+			_ = wantCorrupt(t, err, tc.line)
+			for _, want := range []string{string(tc.id), "line " + strconv.Itoa(tc.of), "unique"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("message %q should contain %q", err, want)
+				}
+			}
+			if events != nil || end != 0 || !reflect.DeepEqual(rep, scanReport{}) {
+				t.Errorf("an error must come with zero results")
+			}
+		})
+	}
+
+	t.Run("a repeated id on an unterminated final line is still a torn tail", func(t *testing.T) {
+		// The line was never acknowledged, so nothing about it is judged.
+		log := join(enc(t, plainEvent(1)), dropNewline(enc(t, plainEvent(1))))
+		events, _, rep := mustScan(t, log)
+		wantLines(t, events, eventID(1))
+		if !rep.TornTail || rep.TornLine != 2 {
+			t.Errorf("report = %+v, want a torn tail at line 2", rep)
+		}
+	})
+}

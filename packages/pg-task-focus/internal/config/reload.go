@@ -12,6 +12,9 @@ import "fmt"
 // *ValidationError, the type that reports a bad file, so a daemon reports both
 // the same way.
 //
+// When prev is nil, or never defined the active profile, nothing is removed and
+// the problem says the active profile is not defined in the new configuration.
+//
 // A document that fails Parse has no *Config and so never reaches this check.
 func CheckReload(prev, next *Config, activeProfile string) error {
 	if next == nil {
@@ -20,14 +23,22 @@ func CheckReload(prev, next *Config, activeProfile string) error {
 	if activeProfile == "" {
 		return nil
 	}
-	if _, ok := next.profiles[activeProfile]; !ok {
+	if _, ok := next.profiles[activeProfile]; ok {
+		return nil
+	}
+	// A reload removes the profile only when the previous configuration had it.
+	if _, had := prev.profile(activeProfile); had {
 		return &ValidationError{Problems: []Problem{{
 			Path: "/profiles/" + escapePointer(activeProfile),
 			Message: fmt.Sprintf("the reload removes profile %q, which is the active profile; "+
 				"switch to another profile first, or keep %q in the configuration", activeProfile, activeProfile),
 		}}}
 	}
-	return nil
+	return &ValidationError{Problems: []Problem{{
+		Path: "/profiles/" + escapePointer(activeProfile),
+		Message: fmt.Sprintf("the active profile %q is not defined in the new configuration; "+
+			"define it there, or switch to another profile first", activeProfile),
+	}}}
 }
 
 // RestartRequired lists the settings that differ between prev and next and
@@ -47,4 +58,12 @@ func RestartRequired(prev, next *Config) []string {
 		out = append(out, "public_url")
 	}
 	return out
+}
+
+// profile reports the profile called name; a nil Config defines none.
+func (c *Config) profile(name string) (Profile, bool) {
+	if c == nil {
+		return Profile{}, false
+	}
+	return c.Profile(name)
 }

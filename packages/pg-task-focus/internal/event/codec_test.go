@@ -330,6 +330,21 @@ func TestEncodeOfRawDataIsCanonical(t *testing.T) {
 	}
 }
 
+// A line the library writes is a line it reads: raw Data that repeats a key
+// would decode as its last value, so Encode refuses it as Decode does.
+func TestEncodeRefusesRawDataWithARepeatedKey(t *testing.T) {
+	e := newEvent(event.TaskCompleted{TaskID: "t"})
+	e.Payload = nil
+	e.Data = json.RawMessage(`{"task_id":"a","task_id":"b"}`)
+	line, err := event.Encode(e)
+	if err == nil || line != nil {
+		t.Fatalf("Encode = %q, %v; want no bytes and an error", line, err)
+	}
+	if !strings.Contains(err.Error(), `duplicate key "task_id"`) {
+		t.Errorf("Encode error = %v, want it to name the repeated key", err)
+	}
+}
+
 func TestEncodeDefaultsAnUnsetVersionAndType(t *testing.T) {
 	e := newEvent(event.TaskCompleted{TaskID: "t"})
 	e.V, e.Type = 0, ""
@@ -487,6 +502,38 @@ func TestDecodeRejects(t *testing.T) {
 		line := bytes.Replace(fixtures(t)["cycle.annotated"], []byte("Line one"), bytes.Repeat([]byte("a"), event.MaxEventBytes), 1)
 		if _, err := event.Decode(line); !errors.Is(err, event.ErrTooLarge) {
 			t.Errorf("Decode = %v, want ErrTooLarge", err)
+		}
+	})
+}
+
+// INV-LOG-2: a key written twice would decode as its last value, so Decode
+// refuses the line and names the key and the object that holds it.
+func TestDecodeRefusesARepeatedKey(t *testing.T) {
+	cases := map[string]struct{ from, to, want string }{
+		"type":              {`"type":"task.completed"`, `"type":"task.completed","type":"task.skipped"`, `duplicate key "type" at /`},
+		"id":                {`"v":1,`, `"v":1,"id":"01J9Z3K8M2E000000000000099",`, `duplicate key "id" at /`},
+		"data":              {`"data":{`, `"data":{},"data":{`, `duplicate key "data" at /`},
+		"a key inside data": {`"task_id":"day:2026-10-07:post-plan"`, `"task_id":"a","task_id":"day:2026-10-07:post-plan"`, `duplicate key "task_id" at /data`},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			line := bytes.Replace(fixtures(t)["task.completed"], []byte(tc.from), []byte(tc.to), 1)
+			if bytes.Equal(line, fixtures(t)["task.completed"]) {
+				t.Fatal("the test did not change the line")
+			}
+			_, err := event.Decode(line)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("Decode = %v, want an error containing %q", err, tc.want)
+			}
+			var uv *event.UnknownVersionError
+			if errors.As(err, &uv) {
+				t.Errorf("a repeated key is not an unknown version: %v", err)
+			}
+		})
+	}
+	t.Run("a line without a repeated key still decodes", func(t *testing.T) {
+		if _, err := event.Decode(fixtures(t)["task.completed"]); err != nil {
+			t.Errorf("Decode: %v", err)
 		}
 	})
 }
