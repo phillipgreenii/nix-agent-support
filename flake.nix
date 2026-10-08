@@ -1176,7 +1176,10 @@
               # reentrant test-helper-process shape, this time doubling
               # for BOTH its ccpool and pg-connector subprocess wire
               # doubles, verified via
-              # `grep -rln '^//go:build' packages/ccpool-probe`) is a
+              # `grep -rln '^//go:build' packages/ccpool-probe`;
+              # `pg-task-focus` added bead pg2-t7me1.1: no build-tagged test
+              # files, verified via
+              # `grep -rln '^//go:build' packages/pg-task-focus`) is a
               # DELIBERATE exemption: verified 2026-08-31 (and again for the
               # new module) via `grep -rln '^//go:build' packages/<module>` to
               # carry no build-tag test files. Before adding a build-tag
@@ -1241,6 +1244,7 @@
                 "ccpool-probe"
                 "pg-rescue"
                 "beads-exporter"
+                "pg-task-focus"
               ];
 
               # Subset of simpleGoLintModules with build-tagged test files
@@ -3545,6 +3549,15 @@
                 pname = "pg-decider-go-tests";
                 src = lib.cleanSource ./packages/pg-decider; # matches default.nix
                 gomod2nixToml = ./packages/pg-decider/gomod2nix.toml;
+              };
+
+              # pg-task-focus (bead pg2-t7me1.1) - whole-module Go test gate. Pattern
+              # A: flat src at the module dir, no local replace. No overlay package
+              # and no default.nix until sub-project 2 adds a `package main`.
+              pg-task-focus-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
+                pname = "pg-task-focus-go-tests";
+                src = lib.cleanSource ./packages/pg-task-focus;
+                gomod2nixToml = ./packages/pg-task-focus/gomod2nix.toml;
               };
 
               # pg-desk-shadow (bead pg2-nu7h0) - whole-module Go test gate. Pattern
