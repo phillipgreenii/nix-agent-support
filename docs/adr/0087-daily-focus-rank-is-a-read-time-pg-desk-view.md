@@ -1,7 +1,7 @@
 # The daily-focus rank is a read-time pg-desk view; minting stays in a decider
 
 **Status**: Accepted (operator ruling, 2026-10-06; revised 2026-10-07 for the defer-and-undefer
-mechanism of its strike consequence; lands with the daily-focus design, bead `pg2-2j5ac.27`)
+mechanism of its strike consequence, and 2026-10-08 for the draft-once, lock-then-replan order; lands with the daily-focus design, bead `pg2-2j5ac.27`)
 **Date**: 2026-10-06
 **Deciders**: phillipg
 
@@ -28,7 +28,10 @@ written rule disagree on the one example the rule names.
 
 1. **A read-only, side-effect-free cross-entity view over stored facts lives in pg-desk.** The
    daily-focus rank is one: it reads `entity`, `interpretation` and link rows with an injected clock,
-   writes nothing, execs nothing and mints no work. It is computed on every read and never cached.
+   writes nothing, execs nothing and mints no work. It is never cached or stored as a candidate list.
+   It is computed when a draft plan is made (revised 2026-10-08: the operator ruled that the order is
+   computed once per draft and frozen in the locked plan until a `replan`, so a draft is a document the
+   caller holds and pg-desk never stores one); every fact shown is still read live.
 2. **Only the act that creates, changes or closes work remains a decision.** Minting a bead for an
    item the operator selected is done by a pg-decider rule (kind `focus-item`), reacting to the
    `focus_selected` annotation that `focus select` and `focus pull` write. pg-desk MUST NOT contain
