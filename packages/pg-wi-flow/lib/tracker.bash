@@ -249,8 +249,12 @@ pgwf_tracker_try_claim() {
 # assigned, and the current assignee was composed under the SAME run
 # (assignee starts with "<session8>-", the leading segment of IDENT =
 # PG_WI_FLOW_IDENT), the item is this run's own dispatcher reservation and
-# is TRANSFERRED to ACTOR (`bd update ID --assignee ACTOR`) [design: ##
-# Components, Worker step 1: "claim <id> transfers the reservation"].
+# is TRANSFERRED to ACTOR (`bd update ID --assignee ACTOR --force`) [design:
+# ## Components, Worker step 1: "claim <id> transfers the reservation"].
+# Newer bd refuses to reassign an in_progress item held by another actor
+# ("cannot reassign ... held by ..."); --force overrides exactly that
+# refusal. It ALSO permits closing despite open children, so it is used ONLY
+# on this transfer, already gated by the same-session assignee-prefix check.
 # An item held by a different session (or an
 # empty IDENT) still fails, preserving the lost-race semantics of C-4.
 pgwf_tracker_claim_or_transfer() {
@@ -266,7 +270,7 @@ pgwf_tracker_claim_or_transfer() {
   assignee="$(jq -r '.assignee // .owner // empty' <<<"$item")" || return 1
   [[ $assignee == "$session"-* ]] || return 1
 
-  bd update "$id" --assignee "$actor" --actor "$actor" --json >/dev/null 2>&1
+  bd update "$id" --assignee "$actor" --force --actor "$actor" --json >/dev/null 2>&1
 }
 
 # pgwf_tracker_release ID ACTOR -- releases ID with the assignee cleared in

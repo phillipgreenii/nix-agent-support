@@ -79,6 +79,18 @@ update)
     done
     ;;
   esac
+  # Newer bd: reassigning an item held in_progress by another actor is
+  # refused unless --force is passed.
+  case " $* " in
+  *" --assignee "*)
+    for held in ${MOCK_BD_HELD_IDS:-}; do
+      if [[ $id == "$held" && " $* " != *" --force "* ]]; then
+        echo "mock bd update: cannot reassign $id: held (in_progress); pass --force" >&2
+        exit 1
+      fi
+    done
+    ;;
+  esac
   for failing in ${MOCK_BD_UPDATE_FAIL_IDS:-}; do
     if [[ $id == "$failing" ]]; then
       echo "mock bd update: refused for $id" >&2
@@ -230,15 +242,15 @@ show_fixture() {
 }
 
 @test "pgwf_tracker_claim_or_transfer: reserved by same session -> transfers assignee to the worker actor" {
-  export MOCK_BD_CLAIM_FAIL_IDS="tc-1"
+  export MOCK_BD_CLAIM_FAIL_IDS="tc-1" MOCK_BD_HELD_IDS="tc-1"
   show_fixture tc-1 '{"id":"tc-1","assignee":"abcd1234-main-dispatcher-work"}'
   run pgwf_tracker_claim_or_transfer tc-1 abcd1234-a1-worker-work abcd1234-a1-worker
   [ "$status" -eq 0 ]
-  grep -q -- "update tc-1 --assignee abcd1234-a1-worker-work --actor abcd1234-a1-worker-work" "$MOCK_BD_LOG"
+  grep -q -- "update tc-1 --assignee abcd1234-a1-worker-work --force --actor abcd1234-a1-worker-work" "$MOCK_BD_LOG"
 }
 
 @test "pgwf_tracker_claim_or_transfer: held by a foreign session -> still fails, no transfer" {
-  export MOCK_BD_CLAIM_FAIL_IDS="tc-1"
+  export MOCK_BD_CLAIM_FAIL_IDS="tc-1" MOCK_BD_HELD_IDS="tc-1"
   show_fixture tc-1 '{"id":"tc-1","assignee":"ffff0000-main-main-work"}'
   run pgwf_tracker_claim_or_transfer tc-1 abcd1234-a1-worker-work abcd1234-a1-worker
   [ "$status" -ne 0 ]
