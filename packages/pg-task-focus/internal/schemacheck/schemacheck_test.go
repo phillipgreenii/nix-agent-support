@@ -1,6 +1,7 @@
 package schemacheck_test
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -325,4 +326,238 @@ func TestFreeTextFieldsOfAnUnknownDefinitionIsEmpty(t *testing.T) {
 	if got := schemacheck.FreeTextFields(s, "task.exploded"); len(got) != 0 {
 		t.Errorf("FreeTextFields(unknown) = %v, want none", got)
 	}
+}
+
+func configSchema(t *testing.T) *schemacheck.Schema {
+	t.Helper()
+	s, err := schemacheck.Compile("config.schema.json", schemas.Config())
+	if err != nil {
+		t.Fatalf("Compile(config schema): %v", err)
+	}
+	return s
+}
+
+// validConfig is the generic example of the configuration contract: every
+// section, every optional key and one task of each cadence.
+const validConfig = `{
+  "defaults": {
+    "cycle_minutes": 25,
+    "boost_minutes": [5, 10, 25],
+    "profile": "normal",
+    "max_future_skew_seconds": 60,
+    "alert": {"sound": "Glass", "reminder_sound": "Tink", "repeat_minutes": 5},
+    "attention": {"due_soon_minutes": 30, "overtime_high_minutes": 15, "stale_pause_minutes": 45}
+  },
+  "listen_port": 49210,
+  "public_url": "https://focus.example.test",
+  "group_order": ["Start of day", "During the day", "End of day"],
+  "profiles": {
+    "normal": {
+      "daily": ["plan-day", "end-of-day-summary"],
+      "weekly": ["weekly-update"],
+      "sprint": ["capacity-check"],
+      "cycles": ["review", "deep-work"]
+    }
+  },
+  "tasks": {
+    "plan-day": {"title": "Plan the day", "cadence": "daily", "group": "Start of day", "link": "https://tasks.example.test/plan", "due": {"at": "09:00", "tz": "America/New_York"}},
+    "end-of-day-summary": {"title": "Post the summary", "cadence": "daily", "group": "End of day", "due": {"at": "17:30", "tz": "America/New_York"}},
+    "weekly-update": {"title": "Write the weekly update", "cadence": "weekly", "due": {"weekday": "thu", "at": "09:00", "tz": "America/New_York"}},
+    "capacity-check": {"title": "Do the capacity check", "cadence": "sprint", "due": {"day": 1, "at": "09:00", "tz": "America/New_York"}}
+  },
+  "cycles": {
+    "review": {"title": "Review cycle", "minutes": 25, "keys": ["pr"]},
+    "deep-work": {"title": "Deep work cycle", "minutes": 50, "keys": ["ticket", "pr"], "alert": {"sound": "Hero", "repeat_minutes": 10}}
+  }
+}`
+
+// mutated returns validConfig after f has edited it.
+func mutated(t *testing.T, f func(c map[string]any)) []byte {
+	t.Helper()
+	var c map[string]any
+	if err := json.Unmarshal([]byte(validConfig), &c); err != nil {
+		t.Fatal(err)
+	}
+	f(c)
+	out, err := json.Marshal(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func obj(m map[string]any, path ...string) map[string]any {
+	for _, p := range path {
+		m = m[p].(map[string]any)
+	}
+	return m
+}
+
+func TestConfigSchemaAcceptsTheGenericExample(t *testing.T) {
+	if err := configSchema(t).Validate([]byte(validConfig)); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}
+
+func TestConfigSchemaAcceptsTheMinimalConfig(t *testing.T) {
+	minimal := []byte(`{
+	  "defaults": {"cycle_minutes": 25, "profile": "p", "alert": {"sound": "Glass", "repeat_minutes": 5}},
+	  "listen_port": 1,
+	  "profiles": {"p": {}},
+	  "tasks": {},
+	  "cycles": {}
+	}`)
+	if err := configSchema(t).Validate(minimal); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}
+
+// TestConfigSchemaRejectsOperatorRuledOptions holds the two rulings at the
+// schema level: no option can acknowledge, mute, snooze or cap the overtime
+// sound, and none can carry an unfinished task over. Each key is tried in
+// every object of the configuration and must fail naming the object and the key.
+func TestConfigSchemaRejectsOperatorRuledOptions(t *testing.T) {
+	s := configSchema(t)
+	places := []struct {
+		pointer string
+		path    []string
+	}{
+		{"", nil},
+		{"/defaults", []string{"defaults"}},
+		{"/defaults/alert", []string{"defaults", "alert"}},
+		{"/defaults/attention", []string{"defaults", "attention"}},
+		{"/profiles/normal", []string{"profiles", "normal"}},
+		{"/tasks/plan-day", []string{"tasks", "plan-day"}},
+		{"/tasks/plan-day/due", []string{"tasks", "plan-day", "due"}},
+		{"/cycles/review", []string{"cycles", "review"}},
+		{"/cycles/deep-work/alert", []string{"cycles", "deep-work", "alert"}},
+	}
+	for _, key := range []string{"snooze_minutes", "mute", "max_repeats", "carry_over"} {
+		for _, place := range places {
+			t.Run(key+" at "+place.pointer, func(t *testing.T) {
+				doc := mutated(t, func(c map[string]any) { obj(c, place.path...)[key] = 3 })
+				err := s.Validate(doc)
+				if err == nil {
+					t.Fatalf("Validate accepted %s at %q", key, place.pointer)
+				}
+				found := false
+				for _, v := range violations(t, err) {
+					if v.Pointer == place.pointer && strings.Contains(v.Message, key) {
+						found = true
+					}
+				}
+				if !found {
+					t.Errorf("no violation at %q naming %q in:\n%v", place.pointer, key, err)
+				}
+			})
+		}
+	}
+}
+
+func TestConfigSchemaRejects(t *testing.T) {
+	s := configSchema(t)
+	cases := []struct {
+		name    string
+		edit    func(c map[string]any)
+		pointer string
+		message string
+	}{
+		{"a missing listen_port", func(c map[string]any) { delete(c, "listen_port") }, "", "listen_port"},
+		{"a missing defaults", func(c map[string]any) { delete(c, "defaults") }, "", "defaults"},
+		{"a missing profiles", func(c map[string]any) { delete(c, "profiles") }, "", "profiles"},
+		{"a missing defaults.profile", func(c map[string]any) { delete(obj(c, "defaults"), "profile") }, "/defaults", "profile"},
+		{"a missing defaults.alert", func(c map[string]any) { delete(obj(c, "defaults"), "alert") }, "/defaults", "alert"},
+		{"a missing task due", func(c map[string]any) { delete(obj(c, "tasks", "plan-day"), "due") }, "/tasks/plan-day", "due"},
+		{"a missing due tz", func(c map[string]any) { delete(obj(c, "tasks", "plan-day", "due"), "tz") }, "/tasks/plan-day/due", "tz"},
+		{"an empty due tz", func(c map[string]any) { obj(c, "tasks", "plan-day", "due")["tz"] = "" }, "/tasks/plan-day/due/tz", "minLength"},
+		{"a missing due at", func(c map[string]any) { delete(obj(c, "tasks", "plan-day", "due"), "at") }, "/tasks/plan-day/due", "at"},
+		{"a due time of 9:00", func(c map[string]any) { obj(c, "tasks", "plan-day", "due")["at"] = "9:00" }, "/tasks/plan-day/due/at", "match"},
+		{"a due time of 24:00", func(c map[string]any) { obj(c, "tasks", "plan-day", "due")["at"] = "24:00" }, "/tasks/plan-day/due/at", "match"},
+		{"a due time of 09:60", func(c map[string]any) { obj(c, "tasks", "plan-day", "due")["at"] = "09:60" }, "/tasks/plan-day/due/at", "match"},
+		{"a weekday of thursday", func(c map[string]any) { obj(c, "tasks", "weekly-update", "due")["weekday"] = "thursday" }, "/tasks/weekly-update/due/weekday", "must be one of"},
+		{"a due day of 0", func(c map[string]any) { obj(c, "tasks", "capacity-check", "due")["day"] = 0 }, "/tasks/capacity-check/due/day", "minimum"},
+		{"a cadence of monthly", func(c map[string]any) { obj(c, "tasks", "plan-day")["cadence"] = "monthly" }, "/tasks/plan-day/cadence", "must be one of"},
+		{"cycle minutes of 0", func(c map[string]any) { obj(c, "cycles", "review")["minutes"] = 0 }, "/cycles/review/minutes", "minimum"},
+		{"cycle minutes of 525601", func(c map[string]any) { obj(c, "cycles", "review")["minutes"] = 525601 }, "/cycles/review/minutes", "maximum"},
+		{"fractional cycle minutes", func(c map[string]any) { obj(c, "cycles", "review")["minutes"] = 1.5 }, "/cycles/review/minutes", "integer"},
+		{"a default cycle_minutes of 0", func(c map[string]any) { obj(c, "defaults")["cycle_minutes"] = 0 }, "/defaults/cycle_minutes", "minimum"},
+		{"a boost of 0", func(c map[string]any) { obj(c, "defaults")["boost_minutes"] = []any{5, 0} }, "/defaults/boost_minutes/1", "minimum"},
+		{"a boost of 525601", func(c map[string]any) { obj(c, "defaults")["boost_minutes"] = []any{525601} }, "/defaults/boost_minutes/0", "maximum"},
+		{"a repeat_minutes of -1", func(c map[string]any) { obj(c, "defaults", "alert")["repeat_minutes"] = -1 }, "/defaults/alert/repeat_minutes", "minimum"},
+		{"a cycle repeat_minutes of 0", func(c map[string]any) { obj(c, "cycles", "deep-work", "alert")["repeat_minutes"] = 0 }, "/cycles/deep-work/alert/repeat_minutes", "minimum"},
+		{"an attention threshold of 0", func(c map[string]any) { obj(c, "defaults", "attention")["due_soon_minutes"] = 0 }, "/defaults/attention/due_soon_minutes", "minimum"},
+		{"a negative max_future_skew_seconds", func(c map[string]any) { obj(c, "defaults")["max_future_skew_seconds"] = -1 }, "/defaults/max_future_skew_seconds", "minimum"},
+		{"a key with a space", func(c map[string]any) { obj(c, "cycles", "review")["keys"] = []any{"Has Space"} }, "/cycles/review/keys/0", "match"},
+		{"a key in upper case", func(c map[string]any) { obj(c, "cycles", "review")["keys"] = []any{"PR"} }, "/cycles/review/keys/0", "match"},
+		{"a public_url of ftp://x", func(c map[string]any) { c["public_url"] = "ftp://x" }, "/public_url", "match"},
+		{"a public_url with no host", func(c map[string]any) { c["public_url"] = "https://" }, "/public_url", "match"},
+		{"a listen_port of 0", func(c map[string]any) { c["listen_port"] = 0 }, "/listen_port", "minimum"},
+		{"a listen_port of 65536", func(c map[string]any) { c["listen_port"] = 65536 }, "/listen_port", "maximum"},
+		{"a listen_port as a string", func(c map[string]any) { c["listen_port"] = "49210" }, "/listen_port", "want integer"},
+		{"no profile at all", func(c map[string]any) { c["profiles"] = map[string]any{} }, "/profiles", "minProperties"},
+		{"a profile that lists a number", func(c map[string]any) { obj(c, "profiles", "normal")["daily"] = []any{1} }, "/profiles/normal/daily/0", "want string"},
+		{"a task title that is empty", func(c map[string]any) { obj(c, "tasks", "plan-day")["title"] = "" }, "/tasks/plan-day/title", "minLength"},
+		{"an empty task id", func(c map[string]any) { obj(c, "tasks")[""] = obj(c, "tasks", "plan-day") }, "/tasks", "additional properties"},
+		{"an unknown task field", func(c map[string]any) { obj(c, "tasks", "plan-day")["priority"] = 1 }, "/tasks/plan-day", "priority"},
+		{"an unknown top-level key", func(c map[string]any) { c["theme"] = "dark" }, "", "theme"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := s.Validate(mutated(t, c.edit))
+			if err == nil {
+				t.Fatal("Validate succeeded")
+			}
+			found := false
+			for _, v := range violations(t, err) {
+				if v.Pointer == c.pointer && strings.Contains(strings.ToLower(v.Message), strings.ToLower(c.message)) {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("no violation at %q mentioning %q in:\n%v", c.pointer, c.message, err)
+			}
+		})
+	}
+}
+
+func TestConfigSchemaLeavesTheSemanticChecksToTheLoader(t *testing.T) {
+	s := configSchema(t)
+	// Each of these is a rule that needs more than one value, or the zone
+	// database; the loader applies them after the schema.
+	cases := map[string]func(c map[string]any){
+		"a profile naming an unknown task":     func(c map[string]any) { obj(c, "profiles", "normal")["daily"] = []any{"nope"} },
+		"a task listed under another cadence":  func(c map[string]any) { obj(c, "profiles", "normal")["weekly"] = []any{"plan-day"} },
+		"a daily due rule with a weekday":      func(c map[string]any) { obj(c, "tasks", "plan-day", "due")["weekday"] = "thu" },
+		"a weekly due rule without a weekday":  func(c map[string]any) { delete(obj(c, "tasks", "weekly-update", "due"), "weekday") },
+		"a tz that is not a zone":              func(c map[string]any) { obj(c, "tasks", "plan-day", "due")["tz"] = "ET" },
+		"defaults.profile that is not defined": func(c map[string]any) { obj(c, "defaults")["profile"] = "undefined" },
+		"the reserved key cycle_type":          func(c map[string]any) { obj(c, "cycles", "review")["keys"] = []any{"cycle_type"} },
+	}
+	for name, edit := range cases {
+		t.Run(name, func(t *testing.T) {
+			if err := s.Validate(mutated(t, edit)); err != nil {
+				t.Errorf("the schema refused it, but the semantic checks own this rule: %v", err)
+			}
+		})
+	}
+}
+
+// TestConfigFreeTextInventory pins that the configuration holds no free text
+// (every string in it is an identifier, a name, a title or a setting, never
+// text the operator types at run time) and lists every string property, so a
+// new one is a deliberate choice.
+func TestConfigFreeTextInventory(t *testing.T) {
+	s := configSchema(t)
+	if got := schemacheck.FreeTextFields(s, ""); len(got) != 0 {
+		t.Errorf("the configuration schema annotates free text at %v, want none", got)
+	}
+	notFree := []string{
+		"defaults.alert.sound", "defaults.alert.reminder_sound", "defaults.profile",
+		"public_url", "group_order[]",
+		"profiles.*.daily[]", "profiles.*.weekly[]", "profiles.*.sprint[]", "profiles.*.cycles[]",
+		"tasks.*.title", "tasks.*.cadence", "tasks.*.group", "tasks.*.link",
+		"tasks.*.due.at", "tasks.*.due.tz", "tasks.*.due.weekday",
+		"cycles.*.title", "cycles.*.keys[]", "cycles.*.alert.sound", "cycles.*.alert.reminder_sound",
+	}
+	sameSet(t, "string properties of the configuration", schemacheck.StringFields(s, ""), notFree)
 }

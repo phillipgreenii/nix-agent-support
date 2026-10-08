@@ -177,8 +177,8 @@ func (s *Schema) fields(def string, pick func(map[string]any) bool) []string {
 	return out
 }
 
-// walk visits every property reachable from node through properties, items
-// and additionalProperties, following local references.
+// walk visits every property reachable from node through properties, items,
+// patternProperties and additionalProperties, following local references.
 func (s *Schema) walk(node map[string]any, prefix string, visit func(path string, prop map[string]any)) {
 	node = s.resolve(node)
 	if props, ok := node["properties"].(map[string]any); ok {
@@ -202,7 +202,19 @@ func (s *Schema) walk(node map[string]any, prefix string, visit func(path string
 		visit(path, items)
 		s.walk(items, path, visit)
 	}
-	if extra, ok := node["additionalProperties"].(map[string]any); ok {
+	// The variable keys of an object: the schemas of patternProperties and of
+	// additionalProperties both stand for "any key", written *.
+	extras := []any{node["additionalProperties"]}
+	if patterns, ok := node["patternProperties"].(map[string]any); ok {
+		for _, raw := range patterns {
+			extras = append(extras, raw)
+		}
+	}
+	for _, raw := range extras {
+		extra, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
 		path := "*"
 		if prefix != "" {
 			path = prefix + ".*"

@@ -1,0 +1,240 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "pg-task-focus configuration",
+  "description": "The configuration file. Every object is closed: an unknown key, such as snooze_minutes, mute or carry_over, is an error. Rules that need more than one value (a profile naming a known task, a due rule fitting its cadence, a name being a zone) are the semantic checks that follow this schema.",
+  "type": "object",
+  "required": ["defaults", "listen_port", "profiles", "tasks", "cycles"],
+  "additionalProperties": false,
+  "properties": {
+    "defaults": {
+      "type": "object",
+      "required": ["cycle_minutes", "profile", "alert"],
+      "additionalProperties": false,
+      "properties": {
+        "cycle_minutes": {
+          "$ref": "#/$defs/minutes"
+        },
+        "boost_minutes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/minutes"
+          }
+        },
+        "profile": {
+          "$ref": "#/$defs/name"
+        },
+        "max_future_skew_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 31536000,
+          "description": "How far an effective_at may lie in the future. Defaults to 60."
+        },
+        "alert": {
+          "type": "object",
+          "required": ["sound", "repeat_minutes"],
+          "additionalProperties": false,
+          "properties": {
+            "sound": {
+              "$ref": "#/$defs/text"
+            },
+            "reminder_sound": {
+              "$ref": "#/$defs/text"
+            },
+            "repeat_minutes": {
+              "$ref": "#/$defs/minutes"
+            }
+          }
+        },
+        "attention": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "due_soon_minutes": {
+              "$ref": "#/$defs/minutes"
+            },
+            "overtime_high_minutes": {
+              "$ref": "#/$defs/minutes"
+            },
+            "stale_pause_minutes": {
+              "$ref": "#/$defs/minutes"
+            }
+          }
+        }
+      }
+    },
+    "listen_port": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "public_url": {
+      "type": "string",
+      "pattern": "^https?://[^\\s/?#]+[^\\s]*$",
+      "description": "An http or https URL; every deep link is built from it."
+    },
+    "group_order": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/text"
+      },
+      "description": "Groups in display order; a group not listed sorts last."
+    },
+    "profiles": {
+      "type": "object",
+      "minProperties": 1,
+      "patternProperties": {
+        "^.+$": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "daily": {
+              "$ref": "#/$defs/id_list"
+            },
+            "weekly": {
+              "$ref": "#/$defs/id_list"
+            },
+            "sprint": {
+              "$ref": "#/$defs/id_list"
+            },
+            "cycles": {
+              "$ref": "#/$defs/id_list"
+            }
+          }
+        }
+      },
+      "additionalProperties": false,
+      "description": "Entries by id; an id is a non-empty string."
+    },
+    "tasks": {
+      "type": "object",
+      "patternProperties": {
+        "^.+$": {
+          "type": "object",
+          "required": ["title", "cadence", "due"],
+          "additionalProperties": false,
+          "properties": {
+            "title": {
+              "$ref": "#/$defs/text"
+            },
+            "cadence": {
+              "type": "string",
+              "enum": ["daily", "weekly", "sprint"]
+            },
+            "group": {
+              "$ref": "#/$defs/text"
+            },
+            "link": {
+              "$ref": "#/$defs/text"
+            },
+            "due": {
+              "$ref": "#/$defs/due"
+            }
+          }
+        }
+      },
+      "additionalProperties": false,
+      "description": "Entries by id; an id is a non-empty string."
+    },
+    "cycles": {
+      "type": "object",
+      "patternProperties": {
+        "^.+$": {
+          "type": "object",
+          "required": ["title"],
+          "additionalProperties": false,
+          "properties": {
+            "title": {
+              "$ref": "#/$defs/text"
+            },
+            "minutes": {
+              "$ref": "#/$defs/minutes"
+            },
+            "keys": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/key_name"
+              }
+            },
+            "alert": {
+              "$ref": "#/$defs/alert_override"
+            }
+          }
+        }
+      },
+      "additionalProperties": false,
+      "description": "Entries by id; an id is a non-empty string."
+    }
+  },
+  "$defs": {
+    "minutes": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 525600,
+      "description": "Minutes or an interval: an integer from 1 to 525600 (one year)."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "An identifier or a name; not free text."
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "description": "A title, group, link, sound or zone name; not free text."
+    },
+    "key_name": {
+      "type": "string",
+      "pattern": "^[a-z0-9_-]+$",
+      "description": "A pre-filled key name. The reserved key cycle_type is refused by the semantic checks."
+    },
+    "alert_override": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sound": {
+          "$ref": "#/$defs/text"
+        },
+        "reminder_sound": {
+          "$ref": "#/$defs/text"
+        },
+        "repeat_minutes": {
+          "$ref": "#/$defs/minutes"
+        }
+      },
+      "description": "Alert settings of one cycle type; a field left out falls back to defaults.alert. No option exists to mute, acknowledge, snooze or cap the sound."
+    },
+    "due": {
+      "type": "object",
+      "required": ["at", "tz"],
+      "additionalProperties": false,
+      "properties": {
+        "at": {
+          "type": "string",
+          "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+          "description": "A 24-hour HH:MM time."
+        },
+        "tz": {
+          "type": "string",
+          "minLength": 1,
+          "description": "An IANA zone name; whether the name is a zone is decided by the semantic checks."
+        },
+        "weekday": {
+          "type": "string",
+          "enum": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+        },
+        "day": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "A calendar day of a sprint, 1 being its first civil date."
+        }
+      },
+      "description": "The due rule. Which of weekday and day the task's cadence takes is decided by the semantic checks."
+    },
+    "id_list": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/name"
+      }
+    }
+  }
+}
