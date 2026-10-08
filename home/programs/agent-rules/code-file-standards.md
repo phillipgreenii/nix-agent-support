@@ -128,6 +128,24 @@ dir is later deleted, and every git command in the clone then fails with `fatal:
 `pg2-oixbs`, `pg2-rrhw2`, `pg2-6drqh`, `pg2-yj06c`, `pg2-zw8s7`, and again in `pg2-7byxb`
 (2026-10-06), where a hand-rolled test fixture bypassed `x/gittest`.
 
+### Ad-Hoc Throwaway Git Fixtures
+
+When an agent builds a throwaway repository by hand (an experiment, a reproduction), a failed `cd`
+MUST NOT turn the next command into a write against the real repository. A linked worktree shares
+its common `.git/config`, so a `git config user.email ...` run in the wrong directory changes the
+identity for EVERY worktree of that repository (incident 2026-10-07: a failed `cd "$T/repo"`
+followed by `git config user.email agent@example.invalid` poisoned the ZR monorepo for every
+session and stamped the placeholder as the owner of 62 beads).
+
+- The fixture MUST be addressed with `git -C "$T/repo" ...` for every git command, not by a bare
+  `cd` followed by git commands.
+- If a `cd` is used anyway it MUST be `cd "$T/repo" || exit 1`.
+- The fixture directory MUST be created and verified (`test -d`) in a step of its own before any
+  mutation. A mutating `git config`/`git remote`/`git commit` MUST NOT sit in the same command as
+  the step that creates the directory it depends on.
+- `$T` MUST be under a temporary root (`mktemp -d`); the approver refuses a repo-local
+  `user.name`/`user.email`/`protocol.*` write that is not provably under one.
+
 ## Structured Data Files
 
 MUST use `jq`/`yq`/`tq` for JSON/YAML/TOML manipulation over text-based editing (sed, awk, python).
