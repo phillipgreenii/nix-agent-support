@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
+	"regexp"
 	"testing"
 	"time"
 
@@ -129,8 +129,8 @@ func TestPerPRReadDocuments_SelectRateLimitCost(t *testing.T) {
 		"threadComment": threadCommentsPageQuery,
 		"issueComments": issueCommentsPageQuery,
 	} {
-		if !strings.Contains(q, "rateLimit { cost }") {
-			t.Errorf("%s document does not select rateLimit { cost }", name)
+		if !regexp.MustCompile(`rateLimit \{[^}]*\bcost\b`).MatchString(q) {
+			t.Errorf("%s document does not select rateLimit { cost ... }", name)
 		}
 	}
 }

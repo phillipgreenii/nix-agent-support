@@ -164,7 +164,9 @@ refused below the reserve logs the cost of the one search whose response carried
 running a single list call at a time. Every `op=show`, `op=files` and `op=commits` event carries
 `graphql_cost` too (bead `pg2-ir8bs`), summed over the GraphQL documents the connector itself sends:
 every page of the files or commits connection, and for `show` the review, review-thread and
-issue-comment pages. A call refused below the reserve spent nothing and logs 0. `show`'s own `gh pr
+issue-comment pages. A `show` refused below the reserve spent nothing and logs 0; a `files` or
+`commits` refused below the reserve logs the 1 point of the page whose response carried the reading
+(see the reserve paragraph below). `show`'s own `gh pr
 view` metadata read is built by gh, whose query cannot select `rateLimit`, so a `show` row's cost
 excludes that one read and is a lower bound.
 `packages/pg-connector/grafana/alerting/pr-github-alerts.yaml` alerts on auth failure, sustained
@@ -202,8 +204,14 @@ the last attempt's stderr and a note of the earlier attempts in `error`.
 
 The GraphQL reserve (`config.rate_reserve_points`, default 1000) guards every per-PR read of
 `pg-connector-pr-github`, not only `list` and `search`: `show`, `files`, `commits` and
-`review_pending` each take one uncharged `rateLimit` probe before their first GitHub read and answer
-`unavailable` without reading when the remainder is below the reserve (bead `pg2-8wg9a`; the
+`review_pending` each check the reserve before using any GitHub data and answer `unavailable` when the
+remainder is below it (bead `pg2-8wg9a`). `show` and `review_pending` take one uncharged `rateLimit`
+probe before their first read, so a refusal reads nothing. `files` and `commits` take NO probe: their
+own paged GraphQL documents select `rateLimit { cost remaining resetAt }` and each page's reading is
+judged before that page is used or the next requested, the same fold `list` uses (bead `pg2-msgvt`:
+the separate probe is a whole extra `gh` process, about 300ms of every `files`/`commits` call). The
+price is that a `files`/`commits` call below the reserve spends the one page that carried the reading
+(1 point) before it refuses, and returns no partial result. (The guard's origin: the
 2026-10-07 attribution showed pg-desk's gather, which issues about 2 `show`s plus 1 `files` and 1
 `commits` per desk-pr dispatch, was the unguarded majority of the daily spend). The reading is
 logged on the event like any guarded call. `review_submit` (a write) is deliberately unguarded.

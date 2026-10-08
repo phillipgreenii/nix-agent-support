@@ -71,10 +71,13 @@ type ghProvider interface {
 	// remainder and reset time (design's "Rate protection" bullet; reset
 	// added by bead pg2-ph0o4 for the backend's own event log).
 	ReadRateLimit(ctx context.Context) (github.RateLimit, error)
-	// GetFiles/GetCommits back the "files"/"commits" targeted ops (bead
-	// pg2-2j5ac.28.2's PR-facts design bullet).
-	GetFiles(ctx context.Context, repo string, number int) ([]api.File, error)
-	GetCommits(ctx context.Context, repo string, number int) ([]api.Commit, error)
+	// GetFilesGated/GetCommitsGated back the "files"/"commits" targeted ops
+	// (bead pg2-2j5ac.28.2's PR-facts design bullet). Like
+	// SearchPRsEnrichedGated, each judges the rate-limit reading carried by every
+	// page's own response with gate, so these ops take no separate probe (bead
+	// pg2-msgvt).
+	GetFilesGated(ctx context.Context, repo string, number int, gate github.RateGate) ([]api.File, error)
+	GetCommitsGated(ctx context.Context, repo string, number int, gate github.RateGate) ([]api.Commit, error)
 	// ViewerLogin resolves the authenticated viewer, whom the activity
 	// capability scopes to.
 	ViewerLogin(ctx context.Context) (string, error)
@@ -249,7 +252,7 @@ func rateReservePoints(config json.RawMessage) int {
 	return *cfg.RateReservePoints
 }
 
-// checkRateReserve is the shared "Rate protection" gate List, Search, Show, Files, Commits and PendingReview each run before their first GitHub read (bead pg2-8wg9a: the pg-desk gather's show/files/commits were the unguarded majority of the daily GraphQL spend; the rateLimit query itself is uncharged): it reads the GraphQL
+// checkRateReserve is the probing "Rate protection" gate that List's ids-only path, Search, Show and PendingReview each run before their first GitHub read (bead pg2-8wg9a: the pg-desk gather's show/files/commits were the unguarded majority of the daily GraphQL spend; the rateLimit query itself is uncharged). Files and Commits no longer probe: they gate the reading folded into their own responses (bead pg2-msgvt; the probe is a whole extra gh process, about 300ms). It reads the GraphQL
 // rate-limit state, records it on the call's event (eventlog.RecordRateLimit,
 // bead pg2-ph0o4 — the budget dipping under the reserve is what starved
 // pg-desk's My Work panel, and this is the one place every guarded call
@@ -526,10 +529,9 @@ func (b *Backend) Files(ctx context.Context, id string) (*schema.PRFilesResult, 
 	if err != nil {
 		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, err.Error())
 	}
-	if err := b.checkRateReserve(ctx); err != nil {
-		return nil, err
-	}
-	files, err := b.gh.GetFiles(ctx, repo, number)
+	// No up-front probe: the page's own rateLimit reading is gated before it is
+	// used, which saves a gh process per call (bead pg2-msgvt).
+	files, err := b.gh.GetFilesGated(ctx, repo, number, func(rl github.RateLimit) error { return enforceRateReserve(ctx, rl) })
 	if err != nil {
 		return nil, classifyGHError(err)
 	}
@@ -548,10 +550,8 @@ func (b *Backend) Commits(ctx context.Context, id string) (*schema.PRCommitsResu
 	if err != nil {
 		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, err.Error())
 	}
-	if err := b.checkRateReserve(ctx); err != nil {
-		return nil, err
-	}
-	commits, err := b.gh.GetCommits(ctx, repo, number)
+	// No up-front probe; see Files (bead pg2-msgvt).
+	commits, err := b.gh.GetCommitsGated(ctx, repo, number, func(rl github.RateLimit) error { return enforceRateReserve(ctx, rl) })
 	if err != nil {
 		return nil, classifyGHError(err)
 	}

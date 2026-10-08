@@ -69,11 +69,11 @@ func (fakeGH) ReadRateLimit(ctx context.Context) (github.RateLimit, error) {
 	return github.RateLimit{Remaining: 5000, ResetAt: "2026-10-03T14:00:00Z"}, nil
 }
 
-func (fakeGH) GetFiles(ctx context.Context, repo string, number int) ([]api.File, error) {
+func (fakeGH) GetFilesGated(ctx context.Context, repo string, number int, gate github.RateGate) ([]api.File, error) {
 	return nil, nil
 }
 
-func (fakeGH) GetCommits(ctx context.Context, repo string, number int) ([]api.Commit, error) {
+func (fakeGH) GetCommitsGated(ctx context.Context, repo string, number int, gate github.RateGate) ([]api.Commit, error) {
 	return nil, nil
 }
 

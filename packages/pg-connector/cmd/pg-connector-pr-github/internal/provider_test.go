@@ -58,6 +58,9 @@ type fakeGH struct {
 	// the rate-limit readings SearchPRsEnrichedGated offered its gate.
 	readRateLimitCalls int
 	enrichedGateCalls  int
+	// gatedReads names each folded-gate read (files/commits) that was issued,
+	// in order (bead pg2-msgvt).
+	gatedReads []string
 
 	// files/commits/filesErr/commitsErr back the Files/Commits (bead
 	// pg2-2j5ac.28.2) seam.
@@ -201,18 +204,42 @@ func (f *fakeGH) ReadRateLimit(ctx context.Context) (github.RateLimit, error) {
 	return github.RateLimit{Remaining: f.rateLimit, ResetAt: f.rateLimitResetAt}, nil
 }
 
-func (f *fakeGH) GetFiles(ctx context.Context, repo string, number int) ([]api.File, error) {
+// GetFilesGated and GetCommitsGated model the real provider: the read runs
+// first, THEN the reading carried in its response (here the fake's rateLimit,
+// the same value ReadRateLimit answers) is offered to gate; a gate refusal
+// discards the results. gatedReads records each read issued, so a test can
+// prove the fold takes no separate probe (readRateLimitCalls stays 0).
+func (f *fakeGH) GetFilesGated(ctx context.Context, repo string, number int, gate github.RateGate) ([]api.File, error) {
+	f.gatedReads = append(f.gatedReads, "GetFiles")
 	if f.filesErr != nil {
 		return nil, f.filesErr
+	}
+	if err := f.offerReading(gate); err != nil {
+		return nil, err
 	}
 	return f.files, nil
 }
 
-func (f *fakeGH) GetCommits(ctx context.Context, repo string, number int) ([]api.Commit, error) {
+func (f *fakeGH) GetCommitsGated(ctx context.Context, repo string, number int, gate github.RateGate) ([]api.Commit, error) {
+	f.gatedReads = append(f.gatedReads, "GetCommits")
 	if f.commitsErr != nil {
 		return nil, f.commitsErr
 	}
+	if err := f.offerReading(gate); err != nil {
+		return nil, err
+	}
 	return f.commits, nil
+}
+
+func (f *fakeGH) offerReading(gate github.RateGate) error {
+	if gate == nil {
+		return nil
+	}
+	remaining := f.rateLimit
+	if remaining == 0 {
+		remaining = rateLimitOrDefaultReserve
+	}
+	return gate(github.RateLimit{Remaining: remaining, ResetAt: f.rateLimitResetAt})
 }
 
 func (f *fakeGH) ViewerLogin(ctx context.Context) (string, error) {
@@ -1286,22 +1313,34 @@ func TestNew_InstallsRateReserveAsRetryGuard(t *testing.T) {
 
 // TestBackend_PerPRReads_AreGuardedByTheRateReserve (bead pg2-8wg9a): show,
 // files, commits and review_pending are the pg-desk gather's per-PR reads and
-// were the unguarded majority of the daily GraphQL spend. Each one now takes the
-// reserve check before its first GitHub read: below the reserve it answers
-// unavailable having made NO read, and above it the read runs after exactly one
-// probe. The reading lands on the call's event either way.
+// were the unguarded majority of the daily GraphQL spend. Each one is guarded by
+// the reserve: below it the call answers unavailable and above it the read
+// runs. The reading lands on the call's event either way.
+//
+// How the reading is taken differs (bead pg2-msgvt): show and review_pending
+// take one uncharged probe BEFORE their first GitHub read, so a refusal makes no
+// read; files and commits fold the reading into their own paged response
+// (judged before the page is used or the next requested) and take NO probe, so a
+// refusal discards the page that carried the reading.
 func TestBackend_PerPRReads_AreGuardedByTheRateReserve(t *testing.T) {
 	const id = "owner/repo#1"
-	ops := map[string]func(b *Backend, ctx context.Context) error{
-		"show":    func(b *Backend, ctx context.Context) error { _, err := b.Show(ctx, id); return err },
-		"files":   func(b *Backend, ctx context.Context) error { _, err := b.Files(ctx, id); return err },
-		"commits": func(b *Backend, ctx context.Context) error { _, err := b.Commits(ctx, id); return err },
-		"review_pending": func(b *Backend, ctx context.Context) error {
+	ops := map[string]struct {
+		run    func(b *Backend, ctx context.Context) error
+		folded bool // reading carried by the op's own response, no probe
+	}{
+		"show":    {run: func(b *Backend, ctx context.Context) error { _, err := b.Show(ctx, id); return err }},
+		"files":   {folded: true, run: func(b *Backend, ctx context.Context) error { _, err := b.Files(ctx, id); return err }},
+		"commits": {folded: true, run: func(b *Backend, ctx context.Context) error { _, err := b.Commits(ctx, id); return err }},
+		"review_pending": {run: func(b *Backend, ctx context.Context) error {
 			_, err := b.PendingReview(ctx, pr.PendingReviewRequest{ID: id})
 			return err
-		},
+		}},
 	}
-	for opName, run := range ops {
+	for opName, op := range ops {
+		wantProbes := 1
+		if op.folded {
+			wantProbes = 0
+		}
 		t.Run(opName+"/below reserve", func(t *testing.T) {
 			var reads []string
 			gh := &fakeGH{
@@ -1317,7 +1356,7 @@ func TestBackend_PerPRReads_AreGuardedByTheRateReserve(t *testing.T) {
 			table := eventlog.Instrument(scriptout.DispatchTable{opName: {
 				SchemaVersion: 1,
 				Handle: func(ctx context.Context, _ json.RawMessage) (any, error) {
-					return nil, run(b, scriptout.WithConfig(ctx, []byte(`{"rate_reserve_points":1000}`)))
+					return nil, op.run(b, scriptout.WithConfig(ctx, []byte(`{"rate_reserve_points":1000}`)))
 				},
 			}}, sink, "", time.Now)
 			_, err := table[opName].Handle(context.Background(), nil)
@@ -1327,8 +1366,15 @@ func TestBackend_PerPRReads_AreGuardedByTheRateReserve(t *testing.T) {
 			if len(reads) != 0 || gh.pendingCalls != 0 {
 				t.Errorf("reads = %v, pendingCalls = %d; want no GitHub read below the reserve", reads, gh.pendingCalls)
 			}
-			if gh.readRateLimitCalls != 1 {
-				t.Errorf("ReadRateLimit probes = %d, want 1", gh.readRateLimitCalls)
+			if gh.readRateLimitCalls != wantProbes {
+				t.Errorf("ReadRateLimit probes = %d, want %d", gh.readRateLimitCalls, wantProbes)
+			}
+			wantGated := 0
+			if op.folded {
+				wantGated = 1
+			}
+			if len(gh.gatedReads) != wantGated {
+				t.Errorf("folded-gate reads = %v, want %d", gh.gatedReads, wantGated)
 			}
 			ev := sink.last(t)
 			if ev.GraphQLRemaining == nil || *ev.GraphQLRemaining != 400 || !ev.BelowReserve {
@@ -1338,13 +1384,36 @@ func TestBackend_PerPRReads_AreGuardedByTheRateReserve(t *testing.T) {
 		t.Run(opName+"/above reserve", func(t *testing.T) {
 			gh := &fakeGH{rateLimit: 2500, pr: &api.PR{Repo: "owner/repo", Number: 1}, pendingData: &github.PendingReviewData{HeadSHA: "abc"}}
 			b := newTestBackend(t, gh)
-			if err := run(b, scriptout.WithConfig(context.Background(), []byte(`{"rate_reserve_points":1000}`))); err != nil {
+			if err := op.run(b, scriptout.WithConfig(context.Background(), []byte(`{"rate_reserve_points":1000}`))); err != nil {
 				t.Fatalf("err = %v, want success above the reserve", err)
 			}
-			if gh.readRateLimitCalls != 1 {
-				t.Errorf("ReadRateLimit probes = %d, want 1", gh.readRateLimitCalls)
+			if gh.readRateLimitCalls != wantProbes {
+				t.Errorf("ReadRateLimit probes = %d, want %d", gh.readRateLimitCalls, wantProbes)
 			}
 		})
+	}
+}
+
+// TestBackend_FilesAndCommits_TakeNoSeparateRateLimitProbe (bead pg2-msgvt):
+// the probe was a whole extra gh process (about 300ms p50 on every files and
+// commits call, the regression found by pg2-oq82w). Files and commits read the
+// rate limit from their own response instead: exactly one gated read per call,
+// no ReadRateLimit.
+func TestBackend_FilesAndCommits_TakeNoSeparateRateLimitProbe(t *testing.T) {
+	gh := &fakeGH{rateLimit: 2500, files: []api.File{{Path: "a.go"}}, commits: []api.Commit{{SHA: "abc"}}}
+	b := newTestBackend(t, gh)
+	ctx := scriptout.WithConfig(context.Background(), []byte(`{"rate_reserve_points":1000}`))
+	if _, err := b.Files(ctx, "owner/repo#1"); err != nil {
+		t.Fatalf("Files: %v", err)
+	}
+	if _, err := b.Commits(ctx, "owner/repo#1"); err != nil {
+		t.Fatalf("Commits: %v", err)
+	}
+	if gh.readRateLimitCalls != 0 {
+		t.Errorf("ReadRateLimit probes = %d, want 0", gh.readRateLimitCalls)
+	}
+	if got := strings.Join(gh.gatedReads, ","); got != "GetFiles,GetCommits" {
+		t.Errorf("gated reads = %q, want GetFiles,GetCommits", got)
 	}
 }
 

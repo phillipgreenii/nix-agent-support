@@ -549,7 +549,7 @@ func TestGetFiles_ParsesAndConverts(t *testing.T) {
 		t.Fatalf("files[1] = %+v", files[1])
 	}
 	joined := strings.Join(gh.calls[0], " ")
-	for _, want := range []string{"api graphql", "files(first: 100", "rateLimit { cost }", "owner=foo", "name=bar", "number=7"} {
+	for _, want := range []string{"api graphql", "files(first: 100", "rateLimit { cost remaining resetAt }", "owner=foo", "name=bar", "number=7"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("gh call missing %q; args=%v", want, gh.calls[0])
 		}
@@ -632,7 +632,7 @@ func TestGetCommits_ParsesAndConverts(t *testing.T) {
 		t.Fatalf("commits[1] = %+v", commits[1])
 	}
 	joined := strings.Join(gh.calls[0], " ")
-	for _, want := range []string{"api graphql", "commits(first: 100", "rateLimit { cost }", "number=7"} {
+	for _, want := range []string{"api graphql", "commits(first: 100", "rateLimit { cost remaining resetAt }", "number=7"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("gh call missing %q; args=%v", want, gh.calls[0])
 		}

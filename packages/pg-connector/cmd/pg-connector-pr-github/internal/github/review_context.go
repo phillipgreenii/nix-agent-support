@@ -151,9 +151,39 @@ func (p *Provider) runGraphQL(ctx context.Context, query string, vars map[string
 
 // prQueryEnvelope is the data shape of every repository.pullRequest query.
 type prQueryEnvelope[T any] struct {
+	// RateLimit is the document's own rateLimit selection when it carries one
+	// (nil when it does not select it). runGraphQL has already added its Cost to
+	// the call's event; Remaining and ResetAt feed judgeRateReading.
+	RateLimit  *rateLimitSelection `json:"rateLimit"`
 	Repository struct {
 		PullRequest *T `json:"pullRequest"`
 	} `json:"repository"`
+}
+
+// rateLimitSelection is the `rateLimit { cost remaining resetAt }` selection of
+// a document that folds the rate-limit read into its own request.
+type rateLimitSelection struct {
+	Cost      int    `json:"cost"`
+	Remaining int    `json:"remaining"`
+	ResetAt   string `json:"resetAt"`
+}
+
+// judgeRateReading offers one response's rate-limit reading to gate (bead
+// pg2-msgvt). A nil gate judges nothing. A refusal is returned as-is, and the
+// caller is a page-fetch closure, so the refused page is neither used nor
+// followed by another request: a throttled call never yields a partial result.
+// The request that carried the refusing reading has already been spent, the one
+// thing a fold cannot avoid (see SearchPRsEnrichedGated). A response with no
+// rateLimit selection is an error when gate is non-nil (fail closed), never a
+// reading of 0.
+func judgeRateReading(sel *rateLimitSelection, gate RateGate) error {
+	if gate == nil {
+		return nil
+	}
+	if sel == nil {
+		return errors.New("github: graphql response carried no rateLimit reading")
+	}
+	return gate(RateLimit{Remaining: sel.Remaining, ResetAt: sel.ResetAt})
 }
 
 // errPRNotResolved reads like gh's own unresolved-node error so the backend's

@@ -431,10 +431,12 @@ const (
 // prFilesPageQuery reads one page of a PR's changed files. It is a document
 // this connector owns (not `gh pr view --json files`, whose query gh builds)
 // so it can select rateLimit { cost }: runGraphQL adds that cost to the call's
-// event as graphql_cost (bead pg2-ir8bs).
+// event as graphql_cost (bead pg2-ir8bs). It also selects remaining and resetAt
+// so GetFilesGated can judge the GraphQL reserve from this same response
+// instead of spending a separate gh process on a probe (bead pg2-msgvt).
 const prFilesPageQuery = `
 query($owner: String!, $name: String!, $number: Int!, $after: String) {
-  rateLimit { cost }
+  rateLimit { cost remaining resetAt }
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
       files(first: 100, after: $after) {
@@ -449,10 +451,11 @@ query($owner: String!, $name: String!, $number: Int!, $after: String) {
 
 // prCommitsPageQuery reads one page of a PR's commits, each with its first
 // author's linked GitHub login (empty when the author identity has no linked
-// account). Like prFilesPageQuery it selects rateLimit { cost }.
+// account). Like prFilesPageQuery it selects rateLimit { cost remaining
+// resetAt }.
 const prCommitsPageQuery = `
 query($owner: String!, $name: String!, $number: Int!, $after: String) {
-  rateLimit { cost }
+  rateLimit { cost remaining resetAt }
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
       commits(first: 100, after: $after) {
@@ -486,6 +489,15 @@ type ghPRFile struct {
 // than `gh pr view --json files`) so each page's rateLimit { cost } is
 // measured and logged (bead pg2-ir8bs).
 func (p *Provider) GetFiles(ctx context.Context, repo string, number int) ([]api.File, error) {
+	return p.GetFilesGated(ctx, repo, number, nil)
+}
+
+// GetFilesGated is GetFiles that also judges the GraphQL rate-limit reserve
+// from the reading carried by each page's own response (bead pg2-msgvt), the
+// same fold SearchPRsEnrichedGated uses for list: no separate probe, so one gh
+// process and one round trip fewer per call. See judgeRateReading for the gate
+// contract.
+func (p *Provider) GetFilesGated(ctx context.Context, repo string, number int, gate RateGate) ([]api.File, error) {
 	owner, name, err := splitRepo(repo, number)
 	if err != nil {
 		return nil, err
@@ -496,6 +508,9 @@ func (p *Provider) GetFiles(ctx context.Context, repo string, number int) ([]api
 			Files connPage[ghPRFile] `json:"files"`
 		}]
 		if err := p.runGraphQL(ctx, prFilesPageQuery, vars, number, after, &d); err != nil {
+			return connPage[ghPRFile]{}, err
+		}
+		if err := judgeRateReading(d.RateLimit, gate); err != nil {
 			return connPage[ghPRFile]{}, err
 		}
 		if d.Repository.PullRequest == nil {
@@ -543,6 +558,12 @@ type ghPRCommit struct {
 // document this connector owns so the call's rateLimit { cost } is logged
 // (bead pg2-ir8bs).
 func (p *Provider) GetCommits(ctx context.Context, repo string, number int) ([]api.Commit, error) {
+	return p.GetCommitsGated(ctx, repo, number, nil)
+}
+
+// GetCommitsGated is GetCommits that also judges the GraphQL rate-limit reserve
+// from each page's own response; see GetFilesGated.
+func (p *Provider) GetCommitsGated(ctx context.Context, repo string, number int, gate RateGate) ([]api.Commit, error) {
 	owner, name, err := splitRepo(repo, number)
 	if err != nil {
 		return nil, err
@@ -553,6 +574,9 @@ func (p *Provider) GetCommits(ctx context.Context, repo string, number int) ([]a
 			Commits connPage[ghPRCommit] `json:"commits"`
 		}]
 		if err := p.runGraphQL(ctx, prCommitsPageQuery, vars, number, after, &d); err != nil {
+			return connPage[ghPRCommit]{}, err
+		}
+		if err := judgeRateReading(d.RateLimit, gate); err != nil {
 			return connPage[ghPRCommit]{}, err
 		}
 		if d.Repository.PullRequest == nil {
