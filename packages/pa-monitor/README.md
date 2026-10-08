@@ -278,16 +278,20 @@ An optional macOS menu bar indicator (a [SwiftBar](https://swiftbar.app) plugin)
 the current 5-hour Claude usage window and lets you flip the two pa-monitor toggles without opening
 the TUI:
 
-- **Title**: `5h 63% · 1h 52m` (usage percent, then time left until the window resets), colored
+- **Title**: ONE character, so it fits a crowded menu bar. A pie glyph shows how much of the 5h
+  window is used (`○` 0-12%, `◔` 13-37%, `◑` 38-62%, `◕` 63-87%, `●` 88% and above), colored
   green / yellow / red with the same thresholds as the cmux 5h accent (red at 80% and above, yellow
   when usage runs ahead of the time elapsed in the window, green otherwise; dimmed when the reading
-  is stale). When a 5h or 7d window is at 100% with a known future reset, it reads
-  `⛔ LIMIT · resets 23:10 (24m)` (or `⛔ 7d LIMIT · …`) in red. Gray `5h ?`, `5h –` and `5h ⚠`
-  mean no data, an expired reading, and a missing binary or unreachable daemon respectively.
-- **Dropdown**: a usage bar, the seven-day line, the reset time, session counts, a data-age row when
-  the reading is stale, and `Caffeinate` / `Auto-resume` toggle rows. A click runs an explicit
-  `pa-monitor caffeinate|auto-resume on|off` relative to the state it rendered (never `toggle`), so a
-  stale display cannot invert what you saw.
+  is stale). When a 5h or 7d window is at 100% with a known future reset, the title is a red `⛔`.
+  Gray `?`, `–` and `⚠` mean no data, an expired reading, and a missing binary or unreachable
+  daemon respectively.
+- **Dropdown**: the first row carries the detail the title omits, in the same color:
+  `5h 63% · 1h 52m left` (the time part is omitted when the reset is unknown),
+  `⛔ 5h LIMIT · resets 23:10 (24m)` (or `⛔ 7d LIMIT · …`), `5h reading expired`, or
+  `5h usage unknown`. Below it: a usage bar, the seven-day line, the reset time, session counts, a
+  data-age row when the reading is stale, and `Caffeinate` / `Auto-resume` toggle rows. A click
+  runs an explicit `pa-monitor caffeinate|auto-resume on|off` relative to the state it rendered
+  (never `toggle`), so a stale display cannot invert what you saw.
 
 The toggle rows need the `caffeinate` and `auto_resume` keys of `status --json` (above) and are
 hidden when talking to an older client. The plugin refreshes every 30 seconds.

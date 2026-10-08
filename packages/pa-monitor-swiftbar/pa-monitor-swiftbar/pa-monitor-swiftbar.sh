@@ -15,9 +15,11 @@ pa-monitor-swiftbar: Render pa-monitor's 5h usage window as SwiftBar menu bar ou
 
 Usage: pa-monitor-swiftbar [OPTIONS]
 
-Reads `pa-monitor status --json` and prints SwiftBar plugin output: a title line
-(5h usage, time left in the window, or the usage-limit countdown) and a dropdown
-with session counts and caffeinate / auto-resume toggle rows. Always exits 0.
+Reads `pa-monitor status --json` and prints SwiftBar plugin output: a ONE-character
+title (a pie glyph for the 5h usage, or a status symbol) and a dropdown whose
+first row carries the detail (5h usage and time left, or the usage-limit
+countdown), followed by session counts and caffeinate / auto-resume toggle rows.
+Always exits 0.
 
 Options:
   -h, --help     Show this help message
@@ -59,6 +61,15 @@ def bar($pct):
   (if $pct < 0 then 0 elif $pct > 100 then 100 else $pct end) as $p
   | ($p / 100 * 18 | floor) as $filled
   | ("█" * $filled) + ("░" * (18 - $filled));
+
+# One-character pie by floor(used): 0-12 empty, 13-37 quarter, 38-62 half,
+# 63-87 three quarters, 88+ full. Callers pass an already-floored number.
+def pie($used):
+  if $used <= 12 then "○"
+  elif $used <= 37 then "◔"
+  elif $used <= 62 then "◑"
+  elif $used <= 87 then "◕"
+  else "●" end;
 
 def row($text; $attrs): if $attrs == "" then $text else "\($text) | \($attrs)" end;
 
@@ -129,19 +140,20 @@ if type != "object" then error("status is not an object") else . end
 | if $limited != null then
     # State 2: limit hit.
     ($limited.reset - $now) as $left
-    | ("\(if $limited.key == "7d" then "7d " else "" end)LIMIT") as $word
-    | [ row("⛔ \($word) · resets \(clock($limited.reset)) (\(cd($left)))"; "color=#cc3333"),
+    | [ row("⛔"; "color=#cc3333"),
         "---",
+        row("⛔ \($limited.label) LIMIT · resets \(clock($limited.reset)) (\(cd($left)))"; "color=#cc3333"),
         "\($limited.label) window limit reached",
         "\(bar($limited.pct | num // 100)) \($limited.pct | num // 100 | floor)%",
-        "resets \(clock($limited.reset)) · \(cd($left)) left",
+        "resets \(clock($limited.reset))",
         "\($nlimit) session\(if $nlimit == 1 then "" else "s" end) blocked on usage limit" ]
       + (if $sevenDayLine != null and $limited.key != "7d" then [$sevenDayLine] else [] end)
       + $tail
   elif $reset != null and $reset <= $now then
     # State 3: the five-hour reading belongs to a window that already rolled.
-    [ row("5h –"; "color=#888888"),
+    [ row("–"; "color=#888888"),
       "---",
+      row("5h reading expired"; "color=#888888"),
       row("reading expired, waiting for next status-line capture"; "color=#888888") ]
     + $tail
   elif $used != null then
@@ -149,16 +161,18 @@ if type != "object" then error("status is not an object") else . end
     (if $used >= 80 then (if $stale then "#7a2b2b" else "#cc3333" end)
      elif $pace != null and $used > $pace then (if $stale then "#8a6d00" else "#e0b000" end)
      else (if $stale then "#2a6a34" else "#3a9a4a" end) end) as $color
-    | [ row("5h \($used)%\(if $remaining != null then " · \(cd($remaining))" else "" end)"; "color=\($color)"),
+    | [ row(pie($used); "color=\($color)"),
         "---",
+        row("5h \($used)%\(if $remaining != null then " · \(cd($remaining)) left" else "" end)"; "color=\($color)"),
         "\(bar($f.used_pct | num)) \($used)%" ]
       + (if $sevenDayLine != null then [$sevenDayLine] else [] end)
-      + (if $remaining != null then ["resets \(clock($reset)) · \(cd($remaining)) left"] else [] end)
+      + (if $remaining != null then ["resets \(clock($reset))"] else [] end)
       + $tail
   else
     # State 5: no data.
-    [ row("5h ?"; "color=#888888"),
+    [ row("?"; "color=#888888"),
       "---",
+      row("5h usage unknown"; "color=#888888"),
       row("no 5h usage reading yet"; "color=#888888") ]
     + $tail
   end
@@ -204,18 +218,18 @@ main() {
 
   bin=$(resolve_pa_monitor)
   if [[ -z $bin ]]; then
-    emit_message_state "5h ⚠" "pa-monitor not found"
+    emit_message_state "⚠" "pa-monitor not found"
     return 0
   fi
 
   rc=0
   status_json=$(timeout 5 "$bin" status --json 2>/dev/null) || rc=$?
   if ((rc == 127)); then
-    emit_message_state "5h ⚠" "pa-monitor not found"
+    emit_message_state "⚠" "pa-monitor not found"
     return 0
   fi
   if ((rc != 0)); then
-    emit_message_state "5h ⚠" "pa-monitor daemon unreachable"
+    emit_message_state "⚠" "pa-monitor daemon unreachable"
     return 0
   fi
 
@@ -224,7 +238,7 @@ main() {
     "$PA_SWIFTBAR_JQ_PROGRAM" 2>/dev/null) || rendered=""
   if [[ -z $rendered ]]; then
     # Any jq failure degrades to the no-data state (never a raw error).
-    emit_message_state "5h ?" "no 5h usage reading yet"
+    emit_message_state "?" "no 5h usage reading yet"
     return 0
   fi
   printf '%s\n' "$rendered"

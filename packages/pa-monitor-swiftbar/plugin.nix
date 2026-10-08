@@ -15,7 +15,7 @@ let
     "xbar.version" = "v1.0";
     "xbar.author" = "phillipgreenii";
     "xbar.desc" =
-      "5-hour Claude usage window, usage-limit countdown, and caffeinate / auto-resume toggles from pa-monitor";
+      "One-glyph 5-hour Claude usage pie (colored by pace), with usage and usage-limit detail and caffeinate / auto-resume toggles in the dropdown, from pa-monitor";
     "xbar.dependencies" = "pa-monitor";
     "swiftbar.hideRunInTerminal" = "true";
     "swiftbar.hideDisablePlugin" = "true";

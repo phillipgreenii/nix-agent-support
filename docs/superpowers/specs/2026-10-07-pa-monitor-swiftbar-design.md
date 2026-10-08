@@ -2,7 +2,25 @@
 
 Date: 2026-10-07
 Repo: `phillipgreenii-nix-agent-support` (public — no employer-specific detail in code, tags, comments or docs)
-Status: revision 3 (incorporates two independent review rounds; no blockers remain)
+Status: revision 4 (incorporates two independent review rounds; no blockers remain)
+
+> **Revision 4 (2026-10-08, operator request, bead pg2-ucet4): one-character title.** The menu bar
+> was crowded and macOS hid icons, so the title is now ONE glyph and the former title text moves to
+> the first dropdown row. Where this note disagrees with the original text below (titles in
+> sections 3.2.2, 3.2.3 and 3.2.4, the window row), THIS NOTE WINS. Colors, thresholds, states and
+> the stale rule are unchanged.
+>
+> | State                       | Title glyph (+ `\| color=...`)                                              | First dropdown row (same color)                                               |
+> | --------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+> | 4 normal                    | pie by `floor(used)`: `○` 0-12, `◔` 13-37, `◑` 38-62, `◕` 63-87, `●` 88-100 | `5h 63% · 1h 52m left` (time part omitted when `resets_at` unknown)           |
+> | 2 limit hit                 | `⛔` red `#cc3333`                                                          | `⛔ 5h LIMIT · resets 23:10 (24m)` / `⛔ 7d LIMIT · resets Mon 09:00 (3d 4h)` |
+> | 3 expired reading           | `–` gray                                                                    | `5h reading expired`                                                          |
+> | 5 no data                   | `?` gray                                                                    | `5h usage unknown`                                                            |
+> | 0 not found / 1 unreachable | `⚠` gray                                                                    | the existing message row                                                      |
+>
+> The dropdown window row keeps only the reset clock (`resets 23:10`); the countdown lives in the
+> first row so it is not repeated. `used ≥ 100` with an unknown reset (state 4) is a red `●`. No new
+> options: the old long title is removed, not kept as a mode.
 
 ## 1. Intent
 
@@ -129,6 +147,9 @@ Interface:
 | `stale`       | `captured_at` present and `now − captured_at > PA_SWIFTBAR_STALE_AFTER_S`                                          |
 
 #### 3.2.2 States (first match wins)
+
+(Title strings below are the pre-revision-4 long form; see the revision 4 note at the top for
+the one-character titles and the dropdown first row that replace them.)
 
 0. **pa-monitor not found** (binary does not resolve, or exit 127): title `5h ⚠` gray; row
    "pa-monitor not found". No toggle rows.
