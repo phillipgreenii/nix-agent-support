@@ -373,6 +373,12 @@
       "type": "string",
       "description": "A string that is a configuration snapshot or a name; not free text."
     },
+    "key_name": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[a-z0-9_-]+$",
+      "description": "A key of a cycle's annotation: lower-case letters, digits, underscore and hyphen. The reserved key cycle_type is refused by the command layer as reserved_key, not here."
+    },
     "minutes": {
       "type": "integer",
       "minimum": 1,
@@ -398,7 +404,7 @@
         "additionalProperties": false,
         "properties": {
           "key": {
-            "$ref": "#/$defs/name"
+            "$ref": "#/$defs/key_name"
           },
           "value": {
             "$ref": "#/$defs/free_text"

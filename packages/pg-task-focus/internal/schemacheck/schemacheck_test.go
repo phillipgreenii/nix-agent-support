@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -98,6 +99,16 @@ func TestInvalidLinesFail(t *testing.T) {
 		{"task.withdrawn.without-batch.jsonl", "/data", "batch"},
 		{"task.reinstated.without-batch.jsonl", "/data", "batch"},
 		{"batch.committed.without-batch.jsonl", "/data", "batch"},
+		{"batch.committed.extra-property.jsonl", "/data", "carry_over"},
+		{"cycle.stopped.extra-property.jsonl", "/data", "carry_over"},
+		{"task.materialized.due-rule-extra-property.jsonl", "/data/due_rule", "carry_over"},
+		{"cycle.annotated.kv-key-bad.jsonl", "/data/kv/0/key", "match"},
+		{"cycle.annotated.kv-key-empty.jsonl", "/data/kv/0/key", "minLength"},
+		{"event.corrected.fields-unknown-key.jsonl", "/data/fields", "carry_over"},
+		{"event.corrected.fields-minutes-zero.jsonl", "/data/fields/minutes", "minimum"},
+		{"event.corrected.fields-minutes-525601.jsonl", "/data/fields/minutes", "maximum"},
+		{"event.corrected.fields-kind-x.jsonl", "/data/fields/kind", "must be one of"},
+		{"event.corrected.fields-kv-bad-key.jsonl", "/data/fields/kv/0/key", "match"},
 	}
 	lines := fixtureLines(t, "../../testdata/events/invalid/*.jsonl")
 	listed := map[string]bool{}
@@ -461,7 +472,7 @@ func TestConfigSchemaRejectsOperatorRuledOptions(t *testing.T) {
 		{"/cycles/review", []string{"cycles", "review"}},
 		{"/cycles/deep-work/alert", []string{"cycles", "deep-work", "alert"}},
 	}
-	for _, key := range []string{"snooze_minutes", "mute", "max_repeats", "carry_over"} {
+	for _, key := range []string{"snooze_minutes", "mute", "max_repeats", "carry_over", "acknowledge", "day_start", "switched"} {
 		for _, place := range places {
 			t.Run(key+" at "+place.pointer, func(t *testing.T) {
 				doc := mutated(t, func(c map[string]any) { obj(c, place.path...)[key] = 3 })
@@ -589,4 +600,69 @@ func TestConfigFreeTextInventory(t *testing.T) {
 		"cycles.*.title", "cycles.*.keys[]", "cycles.*.alert.sound", "cycles.*.alert.reminder_sound",
 	}
 	sameSet(t, "string properties of the configuration", schemacheck.StringFields(s, ""), notFree)
+}
+
+// openObjectAllowList names the object schemas that are deliberately not
+// closed, each with the reason. It is empty of anything else: a new object
+// schema closes with additionalProperties: false or is added here on purpose.
+var openObjectAllowList = map[string]map[string]string{
+	"event.schema.json": {
+		"/properties/data": "the envelope's data is closed by the per-type definition the type discriminator selects",
+	},
+}
+
+// TestEveryObjectSchemaIsClosed walks both embedded schemas and requires
+// additionalProperties: false of every object definition, so an unknown key is
+// refused wherever it appears. A conditional or combining fragment (an if,
+// then, else, not, allOf, anyOf or oneOf entry) is not a definition and is
+// skipped, but the properties and items inside it are checked.
+func TestEveryObjectSchemaIsClosed(t *testing.T) {
+	for name, raw := range map[string][]byte{"event.schema.json": schemas.Event(), "config.schema.json": schemas.Config()} {
+		t.Run(name, func(t *testing.T) {
+			var doc any
+			if err := json.Unmarshal(raw, &doc); err != nil {
+				t.Fatal(err)
+			}
+			seen := map[string]bool{}
+			var walk func(node any, pointer string, fragment bool)
+			walk = func(node any, pointer string, fragment bool) {
+				m, ok := node.(map[string]any)
+				if !ok {
+					return
+				}
+				if !fragment && (m["type"] == "object" || m["properties"] != nil) {
+					seen[pointer] = true
+					if _, allowed := openObjectAllowList[name][pointer]; !allowed && m["additionalProperties"] != false {
+						t.Errorf("the object schema at %q does not set additionalProperties: false", pointer)
+					}
+				}
+				for _, kw := range []string{"properties", "patternProperties", "$defs"} {
+					subs, _ := m[kw].(map[string]any)
+					for key, sub := range subs {
+						walk(sub, pointer+"/"+kw+"/"+strings.NewReplacer("~", "~0", "/", "~1").Replace(key), false)
+					}
+				}
+				walk(m["items"], pointer+"/items", false)
+				walk(m["additionalProperties"], pointer+"/additionalProperties", false)
+				for _, kw := range []string{"allOf", "anyOf", "oneOf"} {
+					subs, _ := m[kw].([]any)
+					for i, sub := range subs {
+						walk(sub, pointer+"/"+kw+"/"+strconv.Itoa(i), true)
+					}
+				}
+				for _, kw := range []string{"if", "then", "else", "not"} {
+					walk(m[kw], pointer+"/"+kw, true)
+				}
+			}
+			walk(doc, "", false)
+			if len(seen) < 2 {
+				t.Fatalf("found only %d object schemas in %s: the walk is not reaching them", len(seen), name)
+			}
+			for pointer := range openObjectAllowList[name] {
+				if !seen[pointer] {
+					t.Errorf("the allow-list names %q, which is not an object schema of %s", pointer, name)
+				}
+			}
+		})
+	}
 }

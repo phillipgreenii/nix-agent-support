@@ -597,7 +597,7 @@ func TestEncodeDecodeProperty(t *testing.T) {
 		switch rapid.IntRange(0, 3).Draw(t, "payload kind") {
 		case 0:
 			kv := rapid.SliceOfN(rapid.Custom(func(t *rapid.T) event.KV {
-				return event.KV{Key: rapid.StringN(1, -1, -1).Draw(t, "key"), Value: rapid.String().Draw(t, "value")}
+				return event.KV{Key: rapid.StringMatching(`[a-z0-9_-]{1,20}`).Draw(t, "key"), Value: rapid.String().Draw(t, "value")}
 			}), 0, 6).Draw(t, "kv")
 			if len(kv) == 0 {
 				kv = nil
@@ -1001,4 +1001,21 @@ func TestDecodeReadsOnlyTheNumberOneAsTheVersion(t *testing.T) {
 			t.Errorf("Encode = %v, want *UnknownVersionError{V: 3, Raw: \"3\"}", err)
 		}
 	})
+}
+
+// TestAnnotationKeysMatchTheKeyPattern keeps the promise that a line the
+// library writes is a line it reads: the schema's key pattern is enforced by
+// Encode as well as by Decode. The reserved key cycle_type is not the schema's
+// to refuse; the command layer does that as reserved_key.
+func TestAnnotationKeysMatchTheKeyPattern(t *testing.T) {
+	for _, key := range []string{"Bad Key", "UPPER", "a.b", "a b", "é"} {
+		if line, err := event.Encode(newEvent(event.CycleAnnotated{CycleID: "c", KV: []event.KV{{Key: key, Value: "v"}}})); err == nil {
+			t.Errorf("Encode wrote %s for the key %q", line, key)
+		}
+	}
+	for _, key := range []string{"ticket", "pr_url", "a-b", "x1", "cycle_type"} {
+		if _, err := event.Encode(newEvent(event.CycleAnnotated{CycleID: "c", KV: []event.KV{{Key: key, Value: "v"}}})); err != nil {
+			t.Errorf("Encode refused the key %q: %v", key, err)
+		}
+	}
 }
