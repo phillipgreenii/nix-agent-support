@@ -115,11 +115,10 @@ flowchart TD
    design (append) removes that window. Bead `pg2-hh32y`: a finished review was lost when two
    submits in a row were killed and the role gave up.
 
-Consumer of the bead metadata (bead `pg2-vhs3e`): `pg-router-source-pg-connector list
---exclude-escalated-query` reads `review_escalation_key`, `review_escalation_head` and
-`review_escalation_prs` from the open escalation beads and stops listing the PR's `review-pr` bead
-for dispatch while its escalation covers the current head. Renaming or reshaping those keys is
-therefore a change to that adapter too.
+Consumer of the bead metadata (bead `pg2-vhs3e`): the `pg-router-source-pg-connector list`
+escalation filter that read `review_escalation_key`, `review_escalation_head` and
+`review_escalation_prs` has been removed (bead `pg2-d25eu.11`), so the adapter no longer reads
+these keys.
 
 ## Configuration
 

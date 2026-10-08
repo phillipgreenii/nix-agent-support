@@ -10,8 +10,7 @@ import (
 // ReviewEscalationQuery is the named pg-connector issue query that lists
 // every OPEN pending-review escalation bead (in every non-closed state, human
 // labelled beads included). The deployment defines it in the issue backend's
-// queries; it is the same name pg-router-review-escalator lists and
-// pg-router-source-pg-connector's --exclude-escalated-query reads.
+// queries; it is the same name pg-router-review-escalator lists.
 const ReviewEscalationQuery = "pending-review-escalations"
 
 // Metadata keys of an escalation bead, owned by pg-router-review-escalator
