@@ -19,7 +19,7 @@ pgwf_tracker_show_json() {
     echo "pg-wi-flow: bd show $id failed: $out" >&2
     return 1
   fi
-  jq -c '.data[0]' <<<"$out"
+  jq -c '(if type == "object" and has("data") then .data else . end) | if type == "array" then .[0] else . end' <<<"$out"
 }
 
 # pgwf_tracker_metadata_field ID KEY -- ID's metadata[KEY], or empty if
@@ -179,7 +179,7 @@ pgwf_tracker_ready() {
     echo "pg-wi-flow: bd ready failed: $out" >&2
     return 1
   fi
-  jq -c '.data // .' <<<"$out"
+  jq -c '(if type == "object" and has("data") then .data else . end)' <<<"$out"
 }
 
 # pgwf_tracker_list ARGS... -- `bd list ARGS... --json`'s data array
@@ -195,7 +195,7 @@ pgwf_tracker_list() {
     echo "pg-wi-flow: bd list failed: $out" >&2
     return 1
   fi
-  jq -c '.data // .' <<<"$out"
+  jq -c '(if type == "object" and has("data") then .data else . end)' <<<"$out"
 }
 
 # pgwf_tracker_ready_under PARENT_ID ARGS... -- `bd ready --parent
@@ -217,7 +217,7 @@ pgwf_tracker_open_children() {
     echo "pg-wi-flow: bd children $id failed: $out" >&2
     return 1
   fi
-  jq -c '[(.data // .)[] | select(.status != "closed")]' <<<"$out"
+  jq -c '[(if type == "object" and has("data") then .data else . end)[] | select(.status != "closed")]' <<<"$out"
 }
 
 # pgwf_tracker_dependents ID TYPE -- `bd dep list ID --direction up --type
@@ -231,7 +231,7 @@ pgwf_tracker_dependents() {
     echo "pg-wi-flow: bd dep list $id failed: $out" >&2
     return 1
   fi
-  jq -c '.data // .' <<<"$out"
+  jq -c '(if type == "object" and has("data") then .data else . end)' <<<"$out"
 }
 
 # pgwf_tracker_try_claim ID ACTOR -- `bd update ID --claim`, under ACTOR.
@@ -292,7 +292,7 @@ pgwf_tracker_any_children() {
     echo "pg-wi-flow: bd children $id failed: $out" >&2
     return 1
   fi
-  jq -c '(.data // .)' <<<"$out"
+  jq -c '(if type == "object" and has("data") then .data else . end)' <<<"$out"
 }
 
 # pgwf_tracker_update ID ACTOR ARGS... -- generic `bd update` write wrapper,
@@ -323,7 +323,7 @@ pgwf_tracker_create() {
     echo "pg-wi-flow: bd create failed: $out" >&2
     return 1
   fi
-  jq -c '.data[0]' <<<"$out"
+  jq -c '(if type == "object" and has("data") then .data else . end) | if type == "array" then .[0] else . end' <<<"$out"
 }
 
 # pgwf_tracker_add_dependency BLOCKED_ID BLOCKER_ID ACTOR -- `bd dep add
@@ -395,7 +395,7 @@ pgwf_tracker_blocks() {
     echo "pg-wi-flow: bd dep list $id --direction=up failed: $out" >&2
     return 1
   fi
-  jq -c '.data // .' <<<"$out"
+  jq -c '(if type == "object" and has("data") then .data else . end)' <<<"$out"
 }
 
 # pgwf_tracker_open_blockers_excluding ID EXCLUDE_ID -- ID's own blockers
@@ -411,7 +411,7 @@ pgwf_tracker_open_blockers_excluding() {
     return 1
   fi
   jq -c --arg x "$exclude_id" \
-    '[(.data // .)[] | select(.id != $x) | select(.status != "closed")]' <<<"$out"
+    '[(if type == "object" and has("data") then .data else . end)[] | select(.id != $x) | select(.status != "closed")]' <<<"$out"
 }
 
 # pgwf_advance_stage CONFIG_JSON ID TO_STAGE ACTOR [REASON] -- the internal

@@ -310,7 +310,7 @@ show_fixture() {
   run pgwf_cmd_claim tc-1
   [ "$status" -eq 0 ]
   [ "${lines[0]}" = "tc-1 implement $PGWF_NULL_WORKFLOW_NAME" ]
-  grep -q -- "update tc-1 --assignee abcd1234-a1-worker-implement --actor abcd1234-a1-worker-implement" "$MOCK_BD_LOG"
+  grep -q -- "update tc-1 --assignee abcd1234-a1-worker-implement --force --actor abcd1234-a1-worker-implement" "$MOCK_BD_LOG"
 }
 
 @test "cmd_claim: item held by a foreign run -> still fails (tc-qho87)" {
