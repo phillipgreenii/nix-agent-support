@@ -21,7 +21,6 @@ import (
 //	issue list --query work-beads             every fixture bead, or only the open
 //	                                          ones when the fixture sets
 //	                                          work_beads_open_only (bare)
-//	issue list --query pending-review-escalations   none (bare)
 //	issue show <bead id> [--fresh]            one bead (exit 4 when unknown)
 //	issue deps <bead id> --full               no dependencies
 //	pr review pending <id>                    no pending review
@@ -63,7 +62,6 @@ func fakeConnectorScript(fx *Fixture, callLog string) string {
 		emit("issue deps "+bd.ID+" --full", wireEnvelope(fx.issueDepsJSON(bd)))
 	}
 	emit("issue list --query work-beads", fx.workBeadsJSON())
-	emit("issue list --query pending-review-escalations", fx.escalationsJSON())
 
 	// An unknown PR or bead is "not found" (exit 4) for a targeted read, and an
 	// empty answer for a fan-out one.

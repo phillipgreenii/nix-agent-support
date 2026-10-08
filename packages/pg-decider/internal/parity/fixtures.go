@@ -554,9 +554,3 @@ func (fx *Fixture) workBeadsJSON() []byte {
 	}
 	return mustJSON(map[string]any{"entities": entities, "present_ids": ids, "sources": []any{}})
 }
-
-// escalationsJSON is the bare fan-out answer of `issue list --query
-// pending-review-escalations`: the fixtures carry no escalation bead.
-func (fx *Fixture) escalationsJSON() []byte {
-	return mustJSON(map[string]any{"entities": []any{}, "present_ids": []string{}, "sources": []any{}})
-}

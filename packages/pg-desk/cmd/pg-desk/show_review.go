@@ -14,11 +14,10 @@ var reviewNow interpret.Clock = interpret.SystemClock{}
 
 // The pending-review state of a PR in the composite view [pg2-kftf9.18,
 // pending-review investigation policy 11]. It is read from the facts the
-// generic PR hydration stored (the pg-connector `pr review pending` record
-// and the open escalation beads covering the PR); the view itself looks
-// nothing up and changes nothing. The display is an addition to the
-// escalation (formerly raised by the retired pg-router-review-escalator), never a
-// substitute.
+// generic PR hydration stored (the pg-connector `pr review pending` record);
+// the view itself looks nothing up and changes nothing. Facts stored before
+// the escalation fact was retired may still carry review_escalations or
+// digest_state; they are ignored.
 
 // Review states in viewReview.State.
 const (
@@ -26,13 +25,6 @@ const (
 	reviewStateCurrent = "current" // a pending review with something anchored to the PR head
 	reviewStateStale   = "stale"   // a pending review with nothing anchored to the PR head
 	reviewStateUnknown = "unknown" // the lookup failed or was never made, or predates the per-head counts
-)
-
-// Escalation states in viewReviewEscalation.State.
-const (
-	escalationStateNone    = "none"
-	escalationStateOpen    = "open"
-	escalationStateUnknown = "unknown"
 )
 
 // viewReview is the `review` object of a PR's pg-desk.view/v1 (absent for
@@ -68,8 +60,7 @@ type viewReview struct {
 	// has beyond the one reported; absent without a pending review.
 	ExtraPendingReviews *int `json:"extra_pending_reviews,omitempty"`
 	// Error is why State is unknown.
-	Error      string               `json:"error,omitempty"`
-	Escalation viewReviewEscalation `json:"escalation"`
+	Error string `json:"error,omitempty"`
 }
 
 // viewLastAppend is the last append to a PR's pending review: when, how many
@@ -78,14 +69,6 @@ type viewLastAppend struct {
 	At    string `json:"at"`
 	Added int    `json:"added"`
 	Head  string `json:"head,omitempty"`
-}
-
-// viewReviewEscalation is the open escalation beads for the PR. BeadIDs is
-// empty exactly when State is none or unknown.
-type viewReviewEscalation struct {
-	State   string   `json:"state"`
-	BeadIDs []string `json:"bead_ids"`
-	Error   string   `json:"error,omitempty"`
 }
 
 // buildReview derives a PR's review state from its stored facts JSON. Facts
@@ -97,16 +80,10 @@ func buildReview(factsJSON string) *viewReview {
 			Result json.RawMessage `json:"result"`
 			Error  string          `json:"error"`
 		} `json:"review_pending"`
-		ReviewEscalations *struct {
-			Open []struct {
-				ID string `json:"id"`
-			} `json:"open"`
-			Error string `json:"error"`
-		} `json:"review_escalations"`
 	}
 	_ = json.Unmarshal([]byte(factsJSON), &facts)
 
-	r := &viewReview{State: reviewStateUnknown, Escalation: viewReviewEscalation{State: escalationStateUnknown, BeadIDs: []string{}}}
+	r := &viewReview{State: reviewStateUnknown}
 
 	switch p := facts.ReviewPending; {
 	case p == nil:
@@ -117,19 +94,6 @@ func buildReview(factsJSON string) *viewReview {
 		decodeReviewRecord(r, p.Result)
 	}
 
-	switch e := facts.ReviewEscalations; {
-	case e == nil:
-		r.Escalation.Error = "escalations were not looked up; run show --refresh"
-	case e.Error != "":
-		r.Escalation.Error = e.Error
-	case len(e.Open) == 0:
-		r.Escalation.State = escalationStateNone
-	default:
-		r.Escalation.State = escalationStateOpen
-		for _, b := range e.Open {
-			r.Escalation.BeadIDs = append(r.Escalation.BeadIDs, b.ID)
-		}
-	}
 	return r
 }
 
@@ -189,9 +153,9 @@ func decodeReviewRecord(r *viewReview, raw json.RawMessage) {
 
 // renderReviewLine is the human line for the review state, e.g.
 //
-//	review: pending=yes  commit=4b1d7aa  head=9f3c1e2  comments=5 at_head=0  stale=yes  last_append=2h (+3)  escalation=bd-77
-//	review: pending=no  escalation=none
-//	review: pending=unknown (<reason>)  escalation=unknown (<reason>)
+//	review: pending=yes  commit=4b1d7aa  head=9f3c1e2  comments=5 at_head=0  stale=yes  last_append=2h (+3)
+//	review: pending=no
+//	review: pending=unknown (<reason>)
 func renderReviewLine(r *viewReview) string {
 	parts := []string{}
 	switch r.State {
@@ -209,14 +173,6 @@ func renderReviewLine(r *viewReview) string {
 		}
 	default:
 		parts = append(parts, "pending=unknown ("+oneLine(r.Error)+")")
-	}
-	switch r.Escalation.State {
-	case escalationStateOpen:
-		parts = append(parts, "escalation="+strings.Join(r.Escalation.BeadIDs, ","))
-	case escalationStateNone:
-		parts = append(parts, "escalation=none")
-	default:
-		parts = append(parts, "escalation=unknown ("+oneLine(r.Escalation.Error)+")")
 	}
 	return "review: " + strings.Join(parts, "  ")
 }

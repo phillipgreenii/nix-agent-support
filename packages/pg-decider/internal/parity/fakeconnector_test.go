@@ -115,13 +115,6 @@ func TestFixtureFakeConnectorAnswersTheGatherCalls(t *testing.T) {
 				t.Errorf("work-beads = %+v", l)
 			}
 		}},
-		{[]string{"issue", "list", "--query", "pending-review-escalations"}, 0, func(t *testing.T, out string) {
-			var l struct{ Entities []json.RawMessage }
-			mustDecode(t, []byte(out), &l)
-			if len(l.Entities) != 0 {
-				t.Errorf("escalations = %+v", l)
-			}
-		}},
 		{[]string{"issue", "show", "bd-1"}, 0, nil},
 		{[]string{"issue", "show", "bd-404"}, 4, nil},
 		{[]string{"issue", "deps", "bd-1", "--full"}, 0, nil},

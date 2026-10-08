@@ -53,8 +53,7 @@
   "review": {
     "state": "none",
     "pending": false,
-    "head_sha": "9f3c1e2",
-    "escalation": { "state": "none", "bead_ids": [] }
+    "head_sha": "9f3c1e2"
   },
   "links": [
     {

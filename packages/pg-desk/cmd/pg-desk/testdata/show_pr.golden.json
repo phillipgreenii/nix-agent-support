@@ -54,12 +54,7 @@
     "state": "unknown",
     "pending": null,
     "stale": null,
-    "error": "pending-review state was not looked up; run show --refresh",
-    "escalation": {
-      "state": "unknown",
-      "bead_ids": [],
-      "error": "escalations were not looked up; run show --refresh"
-    }
+    "error": "pending-review state was not looked up; run show --refresh"
   },
   "links": [
     {

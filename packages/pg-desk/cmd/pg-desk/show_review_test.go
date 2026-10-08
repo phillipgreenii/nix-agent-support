@@ -14,8 +14,8 @@ import (
 )
 
 // Synthetic pending-review states of a PR, as the PR hydration stores them
-// (facts keys review_pending and review_escalations, from the pg-connector
-// `pr review pending` record and the escalation query) and as `pr show`
+// (facts key review_pending, from the pg-connector
+// `pr review pending` record) and as `pr show`
 // renders them. All names, ids and commits are placeholders.
 
 const (
@@ -24,14 +24,11 @@ const (
 )
 
 // reviewFacts is PR facts for o/r#<n> carrying the given review state.
-func reviewFacts(n int, pending, escalations string) string {
+func reviewFacts(n int, pending string) string {
 	pr := fmt.Sprintf(`"pr_show":{"id":"o/r#%d","repo":"o/r","number":%d,"title":"Change %d","state":"open","draft":false,"head_sha":%q}`, n, n, n, reviewHead)
 	out := "{" + pr + `,"head_sha":"` + reviewHead + `"`
 	if pending != "" {
 		out += `,"review_pending":` + pending
-	}
-	if escalations != "" {
-		out += `,"review_escalations":` + escalations
 	}
 	return out + "}"
 }
@@ -65,14 +62,11 @@ func pendingRecord(commit string, stale bool) string {
 
 const (
 	pendingNoneRecord = `{"result":{"pending":false,"head_sha":"` + reviewHead + `","as_of":"2026-09-29T14:03:10Z"}}`
-	noEscalations     = `{"open":[]}`
-	oneEscalation     = `{"open":[{"id":"esc-77","kind":"pr","head":"` + reviewHead + `"}]}`
 	// A record written before the per-head counts: no comments_at_head, so
 	// it can be neither stale nor current. It still carries the retired
 	// digest_state key.
 	legacyPendingRecord = `{"result":{"pending":true,"head_sha":"` + reviewHead + `","review":{"review_id":"PRR_1","commit_sha":"` + reviewOld + `","stale":true,"digest_state":"unmarked"}}}`
 	lookupFailedFacts   = `{"error":"pg-connector [pr review pending o/r#15]: exit 1: unavailable: review_pending: detection_failed: more than one pending review"}`
-	queryFailedFacts    = `{"open":[],"error":"issue list --query pending-review-escalations: exit 1: query_not_recognized"}`
 	reviewViewAsOfLine  = "as_of=2026-09-29T14:03:10Z (fresh)"
 )
 
@@ -81,64 +75,57 @@ var reviewStateCases = []struct {
 	name     string
 	n        int
 	pending  string
-	escal    string
 	wantLine string
 	state    string
 	pendingP string // JSON of review.pending
 	stale    string // JSON of review.stale
-	escState string
-	escIDs   string
 }{
 	{
-		"none", 11, pendingNoneRecord, noEscalations,
-		"review: pending=no  escalation=none", "none", "false", "null", "none", "[]",
+		"none", 11, pendingNoneRecord,
+		"review: pending=no", "none", "false", "null",
 	},
 	{
-		"current", 12, pendingRecord(reviewHead, false), noEscalations,
-		"review: pending=yes  commit=9f3c1e2  head=9f3c1e2  comments=2 at_head=2  stale=no  escalation=none", "current", "true", "false", "none", "[]",
+		"current", 12, pendingRecord(reviewHead, false),
+		"review: pending=yes  commit=9f3c1e2  head=9f3c1e2  comments=2 at_head=2  stale=no", "current", "true", "false",
 	},
 	{
-		"stale", 13, pendingRecord(reviewOld, true), noEscalations,
-		"review: pending=yes  commit=4b1d7aa  head=9f3c1e2  comments=5 at_head=0  stale=yes  escalation=none", "stale", "true", "true", "none", "[]",
-	},
-	{
-		"stale-with-open-escalation", 14, pendingRecord(reviewOld, true), oneEscalation,
-		"review: pending=yes  commit=4b1d7aa  head=9f3c1e2  comments=5 at_head=0  stale=yes  escalation=esc-77", "stale", "true", "true", "open", `["esc-77"]`,
+		"stale", 13, pendingRecord(reviewOld, true),
+		"review: pending=yes  commit=4b1d7aa  head=9f3c1e2  comments=5 at_head=0  stale=yes", "stale", "true", "true",
 	},
 	{
 		// The review was created at an older head and extended to this one
 		// 5 minutes ago: current, however old its review-level commit.
-		"current-extended-with-last-append", 16, pendingRecordWith(reviewOld, 5, 2, false, `,"last_append":{"at":"2026-09-29T15:58:10Z","added":2,"head":"`+reviewHead+`"}`), noEscalations,
-		"review: pending=yes  commit=4b1d7aa  head=9f3c1e2  comments=5 at_head=2  stale=no  last_append=5m (+2)  escalation=none", "current", "true", "false", "none", "[]",
+		"current-extended-with-last-append", 16, pendingRecordWith(reviewOld, 5, 2, false, `,"last_append":{"at":"2026-09-29T15:58:10Z","added":2,"head":"`+reviewHead+`"}`),
+		"review: pending=yes  commit=4b1d7aa  head=9f3c1e2  comments=5 at_head=2  stale=no  last_append=5m (+2)", "current", "true", "false",
 	},
 	{
-		"stale-with-last-append", 17, pendingRecordWith(reviewOld, 5, 0, true, `,"last_append":{"at":"2026-09-29T14:03:10Z","added":3,"head":"`+reviewOld+`"}`), noEscalations,
-		"review: pending=yes  commit=4b1d7aa  head=9f3c1e2  comments=5 at_head=0  stale=yes  last_append=2h (+3)  escalation=none", "stale", "true", "true", "none", "[]",
+		"stale-with-last-append", 17, pendingRecordWith(reviewOld, 5, 0, true, `,"last_append":{"at":"2026-09-29T14:03:10Z","added":3,"head":"`+reviewOld+`"}`),
+		"review: pending=yes  commit=4b1d7aa  head=9f3c1e2  comments=5 at_head=0  stale=yes  last_append=2h (+3)", "stale", "true", "true",
 	},
 	{
-		"current-with-extra-pending-reviews", 18, pendingRecordWith(reviewHead, 5, 2, false, `,"extra_pending_reviews":1`), noEscalations,
-		"review: pending=yes  commit=9f3c1e2  head=9f3c1e2  comments=5 at_head=2  stale=no  extra=1  escalation=none", "current", "true", "false", "none", "[]",
+		"current-with-extra-pending-reviews", 18, pendingRecordWith(reviewHead, 5, 2, false, `,"extra_pending_reviews":1`),
+		"review: pending=yes  commit=9f3c1e2  head=9f3c1e2  comments=5 at_head=2  stale=no  extra=1", "current", "true", "false",
 	},
 	{
 		// The connector's verdict is shown, never recomputed: a different
 		// review-level commit does not make a stale: false record stale.
-		"verdict-not-recomputed-from-commits", 19, pendingRecordWith(reviewOld, 3, 1, false, ""), noEscalations,
-		"review: pending=yes  commit=4b1d7aa  head=9f3c1e2  comments=3 at_head=1  stale=no  escalation=none", "current", "true", "false", "none", "[]",
+		"verdict-not-recomputed-from-commits", 19, pendingRecordWith(reviewOld, 3, 1, false, ""),
+		"review: pending=yes  commit=4b1d7aa  head=9f3c1e2  comments=3 at_head=1  stale=no", "current", "true", "false",
 	},
 	{
 		// ...and the same commit does not make a stale: true record current.
-		"verdict-not-recomputed-same-commit", 20, pendingRecordWith(reviewHead, 3, 0, true, ""), noEscalations,
-		"review: pending=yes  commit=9f3c1e2  head=9f3c1e2  comments=3 at_head=0  stale=yes  escalation=none", "stale", "true", "true", "none", "[]",
+		"verdict-not-recomputed-same-commit", 20, pendingRecordWith(reviewHead, 3, 0, true, ""),
+		"review: pending=yes  commit=9f3c1e2  head=9f3c1e2  comments=3 at_head=0  stale=yes", "stale", "true", "true",
 	},
 	{
-		"legacy-record-without-comments-at-head", 22, legacyPendingRecord, oneEscalation,
-		"review: pending=unknown (the stored pending-review record predates the per-head comment counts; run show --refresh)  escalation=esc-77",
-		"unknown", "null", "null", "open", `["esc-77"]`,
+		"legacy-record-without-comments-at-head", 22, legacyPendingRecord,
+		"review: pending=unknown (the stored pending-review record predates the per-head comment counts; run show --refresh)",
+		"unknown", "null", "null",
 	},
 	{
-		"lookup-failed", 15, lookupFailedFacts, noEscalations,
-		"review: pending=unknown (pg-connector [pr review pending o/r#15]: exit 1: unavailable: review_pending: detection_failed: more than one pending review)  escalation=none",
-		"unknown", "null", "null", "none", "[]",
+		"lookup-failed", 15, lookupFailedFacts,
+		"review: pending=unknown (pg-connector [pr review pending o/r#15]: exit 1: unavailable: review_pending: detection_failed: more than one pending review)",
+		"unknown", "null", "null",
 	},
 }
 
@@ -147,7 +134,7 @@ func seedReviewStates(t *testing.T) {
 	fixReviewClock(t)
 	f := newViewFixture(t)
 	for _, c := range reviewStateCases {
-		f.entity("pr", fmt.Sprintf("o/r#%d", c.n), reviewFacts(c.n, c.pending, c.escal), "2026-09-29T14:03:10Z", reviewHead)
+		f.entity("pr", fmt.Sprintf("o/r#%d", c.n), reviewFacts(c.n, c.pending), "2026-09-29T14:03:10Z", reviewHead)
 	}
 }
 
@@ -189,15 +176,8 @@ func TestTypedShowPendingReviewStatesJSON(t *testing.T) {
 			if get("state") != fmt.Sprintf("%q", c.state) || get("pending") != c.pendingP || get("stale") != c.stale {
 				t.Errorf("review = %s", out)
 			}
-			var esc struct {
-				State   string          `json:"state"`
-				BeadIDs json.RawMessage `json:"bead_ids"`
-			}
-			if err := json.Unmarshal(v.Review["escalation"], &esc); err != nil {
-				t.Fatal(err)
-			}
-			if esc.State != c.escState || strings.Join(strings.Fields(string(esc.BeadIDs)), "") != c.escIDs {
-				t.Errorf("escalation = %s %s, want %s %s", esc.State, esc.BeadIDs, c.escState, c.escIDs)
+			if _, ok := v.Review["escalation"]; ok {
+				t.Errorf("the review object carries a retired escalation field: %s", out)
 			}
 			switch c.state {
 			case "current", "stale":
@@ -224,30 +204,56 @@ func TestTypedShowFailedLookupIsNeverNone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(out, "pending=no") || strings.Contains(out, "escalation=none  ") || !strings.Contains(out, "pending=unknown") {
+	if strings.Contains(out, "pending=no") || !strings.Contains(out, "pending=unknown") {
 		t.Errorf("failed lookup rendered as none:\n%s", out)
 	}
 }
 
-// Facts hydrated before the lookup existed, and a failed escalation query,
-// are unknown too, never none.
-func TestTypedShowUnhydratedAndQueryFailureAreUnknown(t *testing.T) {
-	f := newViewFixture(t)
+// Facts hydrated before the lookup existed are unknown, never none.
+func TestTypedShowUnhydratedIsUnknown(t *testing.T) {
+	newViewFixture(t)
 	fixReviewClock(t)
-	f.entity("pr", "o/r#21", reviewFacts(21, pendingNoneRecord, queryFailedFacts), "2026-09-29T14:03:10Z", reviewHead)
-	out, _, err := runTypedShowCmd(t, "pr", "o/r#21")
+	out, _, err := runTypedShowCmd(t, "pr", "5") // seeded without any review keys
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "review: pending=no  escalation=unknown (issue list --query pending-review-escalations: exit 1: query_not_recognized)") {
-		t.Errorf("failed escalation query:\n%s", out)
-	}
-	out, _, err = runTypedShowCmd(t, "pr", "5") // seeded without any review keys
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(out, "review: pending=unknown (pending-review state was not looked up; run show --refresh)  escalation=unknown (escalations were not looked up; run show --refresh)") {
+	if !strings.Contains(out, "review: pending=unknown (pending-review state was not looked up; run show --refresh)\n") {
 		t.Errorf("unhydrated facts:\n%s", out)
+	}
+}
+
+// A stored record written while the escalation fact still existed carries
+// review_escalations and digest_state keys. It decodes without error and
+// neither key is rendered, for every review state: the human line and the
+// JSON are exactly those of a record without them, with no escalation field
+// or segment anywhere.
+func TestTypedShowRetiredEscalationFactIsIgnored(t *testing.T) {
+	fixReviewClock(t)
+	f := newViewFixture(t)
+	const retired = `,"review_escalations":{"open":[{"id":"esc-77","kind":"pr","head":"` + reviewHead + `"}],"error":"issue list: exit 1"},"digest_state":"unmarked"`
+	for _, c := range reviewStateCases {
+		// The same PR number would collide, so the retired-key copy is n+100.
+		f.entity("pr", fmt.Sprintf("o/r#%d", c.n+100), strings.TrimSuffix(reviewFacts(c.n+100, c.pending), "}")+retired+"}", "2026-09-29T14:03:10Z", reviewHead)
+	}
+	for _, c := range reviewStateCases {
+		t.Run(c.name, func(t *testing.T) {
+			human, _, err := runTypedShowCmd(t, "pr", fmt.Sprintf("o/r#%d", c.n+100))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(human, "\n"+c.wantLine+"\n") {
+				t.Errorf("human output lacks %q:\n%s", c.wantLine, human)
+			}
+			js, _, err := runTypedShowCmd(t, "pr", fmt.Sprintf("o/r#%d", c.n+100), "--json")
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, retiredText := range []string{"escalation", "esc-77", "digest_state", "unmarked"} {
+				if strings.Contains(human, retiredText) || strings.Contains(js, retiredText) {
+					t.Errorf("%q leaked into the view:\nhuman:\n%s\njson:\n%s", retiredText, human, js)
+				}
+			}
+		})
 	}
 }
 
@@ -268,7 +274,7 @@ func TestTypedShowReviewIsPROnly(t *testing.T) {
 // --refresh, and the stored entity is byte-for-byte unchanged.
 func TestTypedShowReviewMakesNoStateChange(t *testing.T) {
 	f := newViewFixture(t)
-	f.entity("pr", "o/r#14", reviewFacts(14, pendingRecord(reviewOld, true), oneEscalation), "2026-09-29T14:03:10Z", reviewHead)
+	f.entity("pr", "o/r#14", reviewFacts(14, pendingRecord(reviewOld, true)), "2026-09-29T14:03:10Z", reviewHead)
 	dir := t.TempDir()
 	installFakePGConnector(t, fmt.Sprintf(`echo "$@" >> %q/calls.log; exit 99`, dir))
 	before, found, err := f.seed.GetEntity("o/r", "pr", "o/r#14")
@@ -355,30 +361,25 @@ func TestTypedShowRefreshHydratesPendingReviewThroughTheConnector(t *testing.T) 
 		name    string
 		pending string
 		exit    int
-		issues  string
 		want    string
 	}{
 		{
-			"none", `{"protocolVersion":1,"result":{"pending":false,"head_sha":"` + reviewHead + `","as_of":"2026-09-30T00:00:00Z"}}`, 0, "",
-			"review: pending=no  escalation=none",
+			"none", `{"protocolVersion":1,"result":{"pending":false,"head_sha":"` + reviewHead + `","as_of":"2026-09-30T00:00:00Z"}}`, 0,
+			"review: pending=no",
 		},
 		{
-			"stale-with-open-escalation", `{"protocolVersion":1,` + strings.TrimPrefix(pendingRecord(reviewOld, true), "{"), 0,
-			`{"entities":[{"id":"esc-77","metadata":{"review_escalation_key":"pr:o/r#5","review_escalation_head":"` + reviewHead + `"}}],"present_ids":[],"sources":[]}`,
-			"review: pending=yes  commit=4b1d7aa  head=9f3c1e2  comments=5 at_head=0  stale=yes  escalation=esc-77",
+			"stale", `{"protocolVersion":1,` + strings.TrimPrefix(pendingRecord(reviewOld, true), "{"), 0,
+			"review: pending=yes  commit=4b1d7aa  head=9f3c1e2  comments=5 at_head=0  stale=yes",
 		},
 		{
-			"lookup-failed", `{"protocolVersion":1,"error":{"code":"unavailable","message":"review_pending: detection_failed: truncated"}}`, 1, "",
-			"review: pending=unknown (pg-connector [pr review pending o/r#5]: exit 1: unavailable: review_pending: detection_failed: truncated)  escalation=none",
+			"lookup-failed", `{"protocolVersion":1,"error":{"code":"unavailable","message":"review_pending: detection_failed: truncated"}}`, 1,
+			"review: pending=unknown (pg-connector [pr review pending o/r#5]: exit 1: unavailable: review_pending: detection_failed: truncated)",
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			c := newReviewConnector(t)
 			c.pending(tc.pending, tc.exit)
-			if tc.issues != "" {
-				c.write("issues.json", tc.issues)
-			}
 			out, _ := refreshReviewView(t)
 			if !strings.Contains(out, tc.want+"\n") {
 				t.Errorf("view after refresh:\n%s\nwant line %q", out, tc.want)
@@ -387,6 +388,9 @@ func TestTypedShowRefreshHydratesPendingReviewThroughTheConnector(t *testing.T) 
 			calls := c.calls()
 			if got := strings.Count(calls, "pr review pending o/r#5"); got != 1 {
 				t.Errorf("pr review pending called %d times:\n%s", got, calls)
+			}
+			if strings.Contains(calls, "pending-review-escalations") {
+				t.Errorf("the retired escalation query was made:\n%s", calls)
 			}
 			for _, bad := range []string{"review submit", "issue create", "issue update", "issue comment", "issue close"} {
 				if strings.Contains(calls, bad) {
@@ -404,7 +408,7 @@ func TestTypedShowReviewJSONFieldsAndRetiredKeys(t *testing.T) {
 	fixReviewClock(t)
 	rec := pendingRecordWith(reviewOld, 5, 2, false,
 		`,"extra_pending_reviews":2,"digest_state":"unmarked","all_marked":false,"last_append":{"at":"2026-09-29T15:58:10Z","added":2,"head":"`+reviewHead+`"}`)
-	f.entity("pr", "o/r#31", reviewFacts(31, rec, noEscalations), "2026-09-29T14:03:10Z", reviewHead)
+	f.entity("pr", "o/r#31", reviewFacts(31, rec), "2026-09-29T14:03:10Z", reviewHead)
 	out, _, err := runTypedShowCmd(t, "pr", "o/r#31", "--json")
 	if err != nil {
 		t.Fatal(err)

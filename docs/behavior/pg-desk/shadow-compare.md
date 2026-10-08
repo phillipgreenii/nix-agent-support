@@ -95,7 +95,7 @@ directory and never starts a dolt server.
 - **pg-desk config.** A copy of the live config with `sync.mode: off`, `ticket_patterns` and the Jira
   section removed, `self_login` and `repos[0].remote` kept, `watch.pr.queries: [mine, team]` and
   `sweep.max_age: 8760h`. `repos[0].beads_dir` MUST name a beads workspace (hydration runs `issue list
---query work-beads` and the review-escalation lookup for every PR; without one every hydration degrades,
+--query work-beads` for every PR; without one every hydration degrades,
   `entity_change` returns Degraded, the poll aborts at the third consecutive degraded hydration, and
   nothing is detected). Two bd modes, recorded in the run manifest:
   - **hermetic (the default).** `beads_dir` is a scratch stub workspace and the `bd` shim answers
