@@ -66,7 +66,7 @@ func (o *Options) Defaults() error {
 		o.Queries = []string{"mine", "team"}
 	}
 	if o.BDMode == "" {
-		o.BDMode = "passthrough"
+		o.BDMode = "hermetic"
 	}
 	if o.LiveStore == "" {
 		o.LiveStore = filepath.Join(o.Home, ".local", "state", "pg-desk", "store.db")
@@ -169,7 +169,15 @@ func Prepare(ctx context.Context, o Options) (scratch.Layout, scratch.Manifest, 
 	if err != nil {
 		return l, m, fmt.Errorf("prepare: read the live pg-pr config: %w", err)
 	}
-	deskYAML, info, err := scratch.DeriveDeskConfig(liveDesk, scratch.DeskParams{Queries: o.Queries, SweepMaxAge: o.SweepMaxAge, HermeticBD: o.BDMode == "hermetic"})
+	if o.BDMode == "hermetic" {
+		if err := os.MkdirAll(l.BeadsWS(), 0o700); err != nil {
+			return l, m, err
+		}
+		if err := os.WriteFile(filepath.Join(l.BeadsWS(), "config.yaml"), []byte("# hermetic scratch beads workspace: every bd read is answered by the shim from nothing\n"), 0o600); err != nil {
+			return l, m, err
+		}
+	}
+	deskYAML, info, err := scratch.DeriveDeskConfig(liveDesk, scratch.DeskParams{Queries: o.Queries, SweepMaxAge: o.SweepMaxAge, HermeticBD: o.BDMode == "hermetic", HermeticDir: l.BeadsWS()})
 	if err != nil {
 		return l, m, err
 	}

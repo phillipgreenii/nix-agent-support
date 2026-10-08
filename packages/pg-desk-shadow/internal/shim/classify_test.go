@@ -169,7 +169,7 @@ func TestRunExecsRealOnlyForReads(t *testing.T) {
 
 func TestHermeticBD(t *testing.T) {
 	var out, errb bytes.Buffer
-	if code := Run(Options{Tool: "bd", Real: "/nonexistent", HermeticBD: true, Stdout: &out, Stderr: &errb}, fields("-C /ws list --json")); code != 0 || strings.TrimSpace(out.String()) != "[]" {
+	if code := Run(Options{Tool: "bd", Real: "/nonexistent", HermeticBD: true, Stdout: &out, Stderr: &errb}, fields("-C /ws list --json")); code != 0 || strings.TrimSpace(out.String()) != `{"data":[]}` {
 		t.Fatalf("hermetic list: %d %q", code, out.String())
 	}
 }

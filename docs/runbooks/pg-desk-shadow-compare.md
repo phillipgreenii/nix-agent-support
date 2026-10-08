@@ -48,8 +48,8 @@ pg-desk-shadow prepare --scratch "$HOME/pg-desk-shadow/phase-a-2026-10-08"
 1. runs the startup safety self-test (sandbox probe, shim self-checks);
 2. `sqlite3 -readonly <live store> ".backup"` into `<scratch>/state/pg-desk/store.db` and runs
    `pg-desk migrate --cutover` on the copy;
-3. writes the scratch `pg-desk` config (`sync.mode: off`, no ticket patterns, no Jira, the live
-   `beads_dir` kept for read-only use, `watch.pr.queries: [mine, team]`, `sweep.max_age: 8760h`) and
+3. writes the scratch `pg-desk` config (`sync.mode: off`, no ticket patterns, no Jira, `beads_dir`
+   pointing at a scratch stub workspace, `watch.pr.queries: [mine, team]`, `sweep.max_age: 8760h`) and
    the scratch `pg-pr` config (no Jira backend);
 4. builds `<scratch>/bin` (unwrapped tool binaries and the `gh`/`bd` shims) and the run manifest
    (`run.json`: build ids, bd mode, parameters, `T0`);
@@ -57,8 +57,16 @@ pg-desk-shadow prepare --scratch "$HOME/pg-desk-shadow/phase-a-2026-10-08"
    `pg-connector pr list --query <q> --fingerprints --output json`, then the seeding SQL on the
    scratch store, then the assertions (no active row without `hydrated_at`).
 
-`--bd-mode hermetic` replaces the read-only `bd` with a shim answering `list` with `[]` (use it if
-the machine `bd` writes under the live `.beads` directory, which the sandbox then denies).
+`--bd-mode hermetic` (the DEFAULT) has the `bd` shim answer every read from nothing (an empty
+`{"data":[]}` envelope) against a scratch stub workspace. `--bd-mode passthrough` uses the machine
+`bd` read-only against the live workspace, but that `bd` writes telemetry and a circuit-breaker file
+outside the scratch tree even for `list`, so the sandbox denies it and the run stops: do not use it
+unless that has changed. Other flags: `--tool-dir DIR[,DIR]` finds a tool that is not installed yet
+(for example a freshly built `pg-router-source-pg-desk`), `--list-attempts N` (default 6) retries a
+warm-up listing that exits 3, `--queries`, `--phase`, `--no-seed`.
+
+Expect the `team` warm-up listing to need a retry or two: it takes 14 to 25 seconds against a 25
+second connector backend deadline and fails on about half of its live runs too.
 
 The report states, and you MUST NOT contradict it: the REMOTE tier is effectively off because
 `hydrated_at` is seeded and `sweep.max_age` is 8760h, the local reconcile tier (30m) stays on, and
@@ -161,25 +169,54 @@ Every claim was re-verified against current source and logs on 2026-10-07; these
    row's `bead` field is the PR id itself (`<owner>/<repo>#<n>`), the same string as in `change`.
 6. `gh api graphql` is a POST with `-f query=...`, so an allowlist keyed on `-f` alone would reject
    every read: the shim inspects the GraphQL document and rejects only a `mutation`.
-7. Baselines drifted since the filing snapshot (916 sweep rows, 879 hash-changed): 923 and 884 at
-   20:05Z the same day, 95.8 percent; the report recomputes them from the copied run record.
+7. The warm-up listing of the `team` query (ten search strings) regularly exits 3 with
+   `deadline exceeded after 25s`: the live flow's own `team` listing does the same on about half its
+   runs (visible in `~/.local/state/pg-connector-pr-github/events.jsonl`). The bead's design assumed a
+   clean listing; `prepare` therefore retries (`--list-attempts`), and a shadow tick whose `team`
+   source fails is a PARTIAL tick (exit 2), classed `hydration-failed` when it explains a miss.
+8. The machine `bd` is not read-only in practice: even `bd list` writes `~/.beads/eventsData/*` and
+   `/private/tmp/beads-circuit/*.json.tmp` (717 denials in the first smoke tick, from the `.bd-wrapped`
+   process). The bead's `bd` passthrough against the live workspace therefore cannot reach zero sandbox
+   denials; the bead's own alternative (a shim answering read verbs, `list` returning an empty result)
+   is the default, with the empty result wrapped as `{"data":[]}` because the beads connector runs
+   `bd` with `BD_JSON_ENVELOPE=1`. A scratch stub workspace stands in for `repos[0].beads_dir`.
+9. The sandbox profile needs `(literal "/dev/dtracehelper")` in addition to the bead's `/dev` entries:
+   every macOS Go binary opens it for write at start-up (29 denials from one `bd` run).
+10. `pg-router-source-pg-desk` is not on this machine's `PATH` until the next apply, and its installed
+    wrapper (like `pg-desk`'s) prepends the real `pg-desk`; `prepare --tool-dir` finds a locally built
+    unwrapped copy, which is what the smoke exercised.
+11. Exit codes: the collector uses 2 (refused to start) and 4 (kill) and keeps 1 for a generic error,
+    following the repo rule that exit 1 carries no branchable meaning.
+12. Baselines drifted since the filing snapshot (916 sweep rows, 879 hash-changed): 923 and 884 at
+    20:05Z the same day, 95.8 percent; the report recomputes them from the copied run record.
 
 ## Unverified items
 
-Recorded as such until proven; the smoke fills in the third column.
-
-| Item                                                        | Why unverified                              | Smoke result |
-| ----------------------------------------------------------- | ------------------------------------------- | ------------ |
-| `gh` keychain read from a `bgrun` (non-interactive) session | Verified interactively only                 | see below    |
-| `log show` access to sandbox denials from a background run  | Needs the admin log group                   | see below    |
-| `bd` read verbs create no file under the live `.beads`      | Decides passthrough versus hermetic bd mode | see below    |
-| First-diff shape compatibility of v1 facts versus new facts | A spurious kind would be warm-up noise      | see below    |
+| Item                                                        | Result (2026-10-07 smoke)                                                                                                                                                                 |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `gh` keychain read from a `bgrun` (non-interactive) session | VERIFIED: `prepare`, three ticks and the adapter exercise ran under `bgrun`, sandboxed, with the real `HOME`                                                                              |
+| `log show` access to sandbox denials from a background run  | VERIFIED: the per-tick scan ran under `bgrun` without an access error and found the denials of the first smoke                                                                            |
+| `bd` read verbs create no file under the live `.beads`      | REFUTED (see correction 8): the machine `bd` attempts writes; the hermetic default avoids them                                                                                            |
+| First-diff shape compatibility of v1 facts versus new facts | OBSERVED, not judged: the first hydrations of seeded rows reported real changes (head, review, CI) plus a `new-entity` reconcile; the 4-tick smoke is too short to tell noise from change |
+| A multi-day run's uptime against the 95 percent criterion   | UNVERIFIED and at risk: ticks that hydrate take 90 to 150 seconds, so slots are skipped (overrun gaps count against uptime)                                                               |
+| `launchd`/sleep behavior of `caffeinate -i` with `bgrun`    | UNVERIFIED (not exercised: the smoke ran a few minutes)                                                                                                                                   |
 
 ## Smoke (agent-run, a few ticks, scratch only)
 
 `pg-desk-shadow` ships a smoke recipe an agent MAY run: `prepare` into a scratch directory under
-`$TMPDIR` prefixed `pg2-nu7h0-`, `adapter-exercise` once, `run --max-ticks N`, then `report`. The
-smoke asserts every written file is under the scratch directory, ZERO sandbox denials, ZERO write
-verbs in the shim logs, the budget read before and after, and that the report generator runs. The
-live daemons write `~/.local/state` constantly, so "no live file modified" cannot be asserted. Results
-of the 2026-10-07 smoke are recorded on bead `pg2-nu7h0`.
+`$TMPDIR` prefixed `pg2-nu7h0-`, `adapter-exercise` once, `run --max-ticks 3`, then `report`. All of it
+under `bgrun`. The smoke asserts every written file is under the scratch directory, ZERO sandbox
+denials, ZERO write verbs in the shim logs (the three deliberate self-check probes precede the
+`selfcheck-end` marker row in each shim log; count only rows after it), the budget read before and
+after, and that the report generator runs. The live daemons write `~/.local/state` constantly, so "no
+live file modified" cannot be asserted.
+
+Result of the 2026-10-07 smoke (hermetic bd mode, phase A, seeded): prepare listed 81 PRs, seeded 79
+active rows; 3 ticks (`partial`, `ok`, `partial`: the `team` listing hit the 25s deadline twice), 0 sandbox
+denials by stderr and by `log show` (the only denial lines in the window came from two unrelated
+processes), shim logs after the self-check marker 384 allowed `gh` rows, 52 allowed `bd` rows and no
+rejected row, the adapter exercise exited 0 with 4 items, the report generated; the shared token read
+4246 before the three ticks and 3793 after the adapter exercise (live flow included; the shadow's own
+lower-bound spend was 109 points over the three ticks). An EARLIER smoke attempt
+in passthrough bd mode stopped itself on the first tick with 717 denials: that evidence is why hermetic
+is the default.

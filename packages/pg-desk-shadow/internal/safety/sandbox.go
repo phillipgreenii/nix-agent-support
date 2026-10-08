@@ -19,8 +19,11 @@ const DefaultSandboxExec = "/usr/bin/sandbox-exec"
 // Profile is the sandbox profile: everything allowed except file writes,
 // which are allowed only under the scratch directory and on the few /dev
 // nodes a shell redirect needs (without them even `echo > /dev/null` fails).
+// /dev/dtracehelper is a tracing device every Go binary on macOS opens for
+// write at start-up (observed 2026-10-07: 29 denials from one bd run); it is
+// harmless and would otherwise drown the real denials.
 func Profile(scratch string) string {
-	return fmt.Sprintf(`(version 1)(allow default)(deny file-write*)(allow file-write* (subpath %q) (literal "/dev/null") (literal "/dev/tty") (regex #"^/dev/fd/"))`, resolve(scratch))
+	return fmt.Sprintf(`(version 1)(allow default)(deny file-write*)(allow file-write* (subpath %q) (literal "/dev/null") (literal "/dev/tty") (literal "/dev/dtracehelper") (regex #"^/dev/fd/"))`, resolve(scratch))
 }
 
 // Wrap returns the argv that runs argv under the sandbox profile. The profile

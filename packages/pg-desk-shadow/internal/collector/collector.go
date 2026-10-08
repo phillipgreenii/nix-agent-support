@@ -249,6 +249,9 @@ func (c *Collector) SelfCheck(ctx context.Context) error {
 	}
 	// The probes above were deliberate: forget their log rows so the run's own
 	// write-reject counter starts clean.
+	for _, tool := range []string{"gh", "bd"} {
+		shim.MarkSelfCheck(c.cfg.Layout.ShimLog(tool))
+	}
 	return c.syncShimOffsets()
 }
 
@@ -465,7 +468,12 @@ func (c *Collector) Tick(ctx context.Context, slot time.Time) (ran bool, err err
 		failed = true
 	}
 	row.CursorTo = env.Cursor.To
-	row.Sources = env.Sources
+	// A source reason can quote the failing search string (a repo slug, a
+	// login): scrub it like any other text that could leave the scratch tree.
+	for _, src := range env.Sources {
+		src.Reason = Scrub(src.Reason, m.Scrub)
+		row.Sources = append(row.Sources, src)
+	}
 
 	// Projection and its diff.
 	cur, perr := ReadProjection(ctx, c.db)

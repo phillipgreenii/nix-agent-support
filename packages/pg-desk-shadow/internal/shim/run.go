@@ -76,7 +76,7 @@ func Run(o Options, args []string) int {
 }
 
 // hermeticBD answers a read-verb `bd` call without a beads database: list and
-// ready return an empty array, show reports not found.
+// ready return an empty data envelope, show reports not found.
 func hermeticBD(args []string, o Options) int {
 	_, why := ClassifyBD(args)
 	switch why {
@@ -87,7 +87,9 @@ func hermeticBD(args []string, o Options) int {
 		_, _ = fmt.Fprintln(o.Stdout, "bd version hermetic-shim")
 		return 0
 	}
-	_, _ = fmt.Fprintln(o.Stdout, "[]")
+	// pg-connector-issue-beads runs bd with BD_JSON_ENVELOPE=1 and decodes
+	// {"data": ...}: an empty list is an empty data array.
+	_, _ = fmt.Fprintln(o.Stdout, `{"data":[]}`)
 	return 0
 }
 
@@ -163,4 +165,54 @@ func splitLines(b []byte) [][]byte {
 		}
 	}
 	return out
+}
+
+// SelfCheckMarker is the row a collector appends to a shim log after its
+// deliberate write-verb probes, so a later reader can count only the rejections
+// that came after it.
+const SelfCheckMarker = `{"marker":"selfcheck-end"}`
+
+// MarkSelfCheck appends the marker row.
+func MarkSelfCheck(path string) {
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	_, _ = f.WriteString(SelfCheckMarker + "\n")
+	_ = f.Close()
+}
+
+// RejectsAfterMarker counts the rejected rows after the last self-check marker
+// (all rows when there is none).
+func RejectsAfterMarker(path string) (writes, unknown int, err error) {
+	b, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return 0, 0, nil
+	}
+	if err != nil {
+		return 0, 0, err
+	}
+	seen := false
+	var rows [][]byte
+	for _, line := range splitLines(b) {
+		if string(line) == SelfCheckMarker {
+			rows, seen = nil, true
+			continue
+		}
+		rows = append(rows, line)
+	}
+	_ = seen
+	for _, line := range rows {
+		var r LogRow
+		if json.Unmarshal(line, &r) != nil {
+			continue
+		}
+		switch r.Verdict {
+		case RejectWrite:
+			writes++
+		case RejectUnknown:
+			unknown++
+		}
+	}
+	return writes, unknown, nil
 }

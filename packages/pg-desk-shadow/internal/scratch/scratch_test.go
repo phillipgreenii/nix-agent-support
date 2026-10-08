@@ -73,12 +73,15 @@ func TestDeriveDeskConfig(t *testing.T) {
 }
 
 func TestDeriveDeskConfigHermeticAndRefusals(t *testing.T) {
-	out, info, err := DeriveDeskConfig([]byte(liveDesk), DeskParams{Queries: []string{"mine"}, HermeticBD: true})
+	out, info, err := DeriveDeskConfig([]byte(liveDesk), DeskParams{Queries: []string{"mine"}, HermeticBD: true, HermeticDir: "/scratch/beads-ws"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := decode(t, out)["repos"].([]any)[0].(map[string]any)["beads_dir"]; ok || info.BeadsDir != "" {
-		t.Error("hermetic bd mode drops beads_dir")
+	if got := decode(t, out)["repos"].([]any)[0].(map[string]any)["beads_dir"]; got != "/scratch/beads-ws" || info.BeadsDir != "/scratch/beads-ws" {
+		t.Errorf("hermetic bd mode points beads_dir at the scratch workspace, never the live one: %v", got)
+	}
+	if _, _, err := DeriveDeskConfig([]byte(liveDesk), DeskParams{Queries: []string{"mine"}, HermeticBD: true}); err == nil {
+		t.Error("the hermetic mode needs a scratch workspace")
 	}
 	for name, doc := range map[string]string{
 		"no self_login": "repos: [{remote: a/b, beads_dir: /x}]",

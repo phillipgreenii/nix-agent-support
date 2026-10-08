@@ -100,7 +100,7 @@ func TestVerifyHermeticRefusesBeadsVars(t *testing.T) {
 
 func TestProfile(t *testing.T) {
 	prof := Profile(t.TempDir())
-	for _, want := range []string{"(version 1)", "(allow default)", "(deny file-write*)", `(literal "/dev/null")`, `(literal "/dev/tty")`, `(regex #"^/dev/fd/")`, "(subpath"} {
+	for _, want := range []string{"(version 1)", "(allow default)", "(deny file-write*)", `(literal "/dev/null")`, `(literal "/dev/tty")`, `(literal "/dev/dtracehelper")`, `(regex #"^/dev/fd/")`, "(subpath"} {
 		if !strings.Contains(prof, want) {
 			t.Errorf("profile lacks %s: %s", want, prof)
 		}

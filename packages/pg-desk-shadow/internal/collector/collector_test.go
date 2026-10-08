@@ -198,7 +198,7 @@ func TestExitCodes(t *testing.T) {
 		wantStatus string
 		wantExit   int
 	}{
-		{"exit 2 partial keeps the records", runner.Result{Exit: 2, Stdout: envelope(0, 1, `[{"query":"mine","status":"degraded","reason":"hydration_budget"}]`, record(1, "acme/api#1", "reconcile", "pg-connector", "2026-01-05T10:00:05Z"))}, nil, schema.StatusPartial, 2},
+		{"exit 2 partial keeps the records", runner.Result{Exit: 2, Stdout: envelope(0, 1, `[{"query":"mine","status":"degraded","reason":"hydration_budget; list acme/api#1 failed"}]`, record(1, "acme/api#1", "reconcile", "pg-connector", "2026-01-05T10:00:05Z"))}, nil, schema.StatusPartial, 2},
 		{"exit 3 is a failed tick with an envelope", runner.Result{Exit: 3, Stdout: envelope(4, 4, `[{"query":"mine","status":"failed","reason":"boom"}]`)}, nil, schema.StatusFailed, 3},
 		{"exit 1 has no envelope", runner.Result{Exit: 1, Stderr: "changes: store acme/api is old-schema\nmore"}, nil, schema.StatusFailed, 1},
 		{"a deadline is a failed tick", runner.Result{}, fmt.Errorf("deadline: context deadline exceeded"), schema.StatusFailed, -1},
@@ -218,6 +218,11 @@ func TestExitCodes(t *testing.T) {
 			}
 			if strings.Contains(r.Error, "acme/api") {
 				t.Errorf("error text leaks the slug: %q", r.Error)
+			}
+			for _, src := range r.Sources {
+				if strings.Contains(src.Reason, "acme/api") {
+					t.Errorf("source reason leaks: %q", src.Reason)
+				}
 			}
 			if c.wantExit == 2 && (len(r.Items) != 1 || len(r.Sources) != 1) {
 				t.Errorf("exit 2 must keep records and sources: %+v", r)

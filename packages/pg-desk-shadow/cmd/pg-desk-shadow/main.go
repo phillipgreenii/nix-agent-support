@@ -45,6 +45,7 @@ commands:
   report            generate the comparison report (idempotent); --combine, --selftest
   adapter-exercise  run pg-router-source-pg-desk once under the scratch environment
   probe             run the startup safety self-test against a prepared scratch directory
+  exec              run one command inside the scratch environment (sandbox, env allowlist, shims): a debugging aid
   shim              (internal) the gh/bd logging shim the scratch bin directory calls
 `
 
@@ -64,6 +65,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return cmdAdapter(args[1:], stdout, stderr)
 	case "probe":
 		return cmdProbe(args[1:], stdout, stderr)
+	case "exec":
+		return cmdExec(args[1:], stdout, stderr)
 	case "shim":
 		return cmdShim(args[1:], os.Stdin, stdout, stderr)
 	case "-h", "--help", "help":
@@ -88,7 +91,7 @@ func cmdPrepare(args []string, stdout, stderr io.Writer) int {
 	fs.StringVar(&o.Phase, "phase", "A", "phase tag written on every row")
 	fs.BoolVar(&o.NoSeed, "no-seed", false, "skip the warm-up seeding (phase B)")
 	fs.StringVar(&queries, "queries", "mine,team", "watched pr queries, in config order")
-	fs.StringVar(&o.BDMode, "bd-mode", "passthrough", "passthrough (read-only machine bd) or hermetic (bd answers from nothing)")
+	fs.StringVar(&o.BDMode, "bd-mode", "hermetic", "hermetic (bd answers from nothing; the default) or passthrough (the machine bd, which writes telemetry outside the scratch tree and so trips the sandbox)")
 	fs.StringVar(&o.LiveStore, "live-store", "", "live store (default ~/.local/state/pg-desk/store.db)")
 	fs.StringVar(&o.DeskConfig, "pg-desk-config", "", "live pg-desk config")
 	fs.StringVar(&o.PRConfig, "pg-pr-config", "", "live pg-pr config")
@@ -332,4 +335,35 @@ func cmdShim(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		}
 	}
 	return shim.Run(o, args[i:])
+}
+
+func cmdExec(args []string, stdout, stderr io.Writer) int {
+	fs := newFlags("exec", stderr)
+	root := fs.String("scratch", "", "prepared scratch directory")
+	timeout := fs.Duration("timeout", 2*time.Minute, "deadline")
+	if err := fs.Parse(args); err != nil {
+		return exitRefuse
+	}
+	argv := fs.Args()
+	if len(argv) == 0 {
+		_, _ = fmt.Fprintln(stderr, "exec: a command is required after the flags")
+		return exitRefuse
+	}
+	_, _, r, err := load(*root)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "exec: %v\n", err)
+		return exitRefuse
+	}
+	res, err := r.Run(context.Background(), *timeout, argv...)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "exec: %v\n", err)
+		return exitRefuse
+	}
+	_, _ = io.WriteString(stdout, res.Stdout)
+	_, _ = io.WriteString(stderr, res.Stderr)
+	if res.Denied {
+		_, _ = fmt.Fprintln(stderr, "exec: SANDBOX DENIAL in the command's output")
+		return exitKill
+	}
+	return res.Exit
 }

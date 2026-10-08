@@ -154,3 +154,8 @@ func (l Layout) MkdirAll() error {
 	}
 	return os.MkdirAll(l.RuntimeDir(), 0o700)
 }
+
+// BeadsWS is the empty scratch beads workspace of the hermetic bd mode: a
+// directory with a config.yaml marker, so pg-desk's beads_dir validation passes
+// while every `bd` read is answered by the shim from nothing.
+func (l Layout) BeadsWS() string { return l.j("beads-ws") }

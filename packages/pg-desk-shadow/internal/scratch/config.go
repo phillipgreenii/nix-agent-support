@@ -9,9 +9,12 @@ import (
 
 // DeskParams are the values the scratch pg-desk config overrides.
 type DeskParams struct {
-	Queries      []string
-	SweepMaxAge  string
-	HermeticBD   bool
+	Queries     []string
+	SweepMaxAge string
+	HermeticBD  bool
+	// HermeticDir is the scratch beads workspace written as beads_dir in the
+	// hermetic bd mode.
+	HermeticDir  string
 	ReconcileAge string
 }
 
@@ -52,8 +55,11 @@ func DeriveDeskConfig(live []byte, p DeskParams) ([]byte, DeskInfo, error) {
 	}
 	info.BeadsDir, _ = repo["beads_dir"].(string)
 	if p.HermeticBD {
-		delete(repo, "beads_dir")
-		info.BeadsDir = ""
+		if p.HermeticDir == "" {
+			return nil, DeskInfo{}, fmt.Errorf("pg-desk config: the hermetic bd mode needs a scratch beads workspace directory")
+		}
+		repo["beads_dir"] = p.HermeticDir
+		info.BeadsDir = p.HermeticDir
 	} else if info.BeadsDir == "" {
 		return nil, DeskInfo{}, fmt.Errorf("pg-desk config: repos[0].beads_dir is required unless the bd mode is hermetic (every hydration would degrade)")
 	}

@@ -87,18 +87,25 @@ directory and never starts a dolt server.
   macOS resolves through `HOME`; the sandbox, not `HOME`, is what stops writes), `TMPDIR`,
   `XDG_STATE_HOME`, `XDG_RUNTIME_DIR` (scratch: pg-desk consumer locks live in
   `$XDG_RUNTIME_DIR/pg-desk/locks`, else `os.TempDir()/pg-desk/locks`, where the live consumers' locks
-  exist), `PG_DESK_CONFIG`, `PG_PR_CONFIG`, `BEADS_DIR` and `PG_CONNECTOR_ISSUE_BEADS_DIR` (both the
-  read-only live workspace, or both absent in hermetic bd mode) and `BEADS_DOLT_AUTO_START=0`.
+  exist), `PG_DESK_CONFIG`, `PG_PR_CONFIG`, `BEADS_DIR` and `PG_CONNECTOR_ISSUE_BEADS_DIR` (both the configured
+  beads workspace: the scratch stub in hermetic bd mode, the live one read-only in passthrough mode) and
+  `BEADS_DOLT_AUTO_START=0`.
   Nothing else is inherited: the connector honours `PG_CONNECTOR_PR_GITHUB_EVENTS_FILE` and other
   overrides, so an allowlist, not a denylist.
 - **pg-desk config.** A copy of the live config with `sync.mode: off`, `ticket_patterns` and the Jira
-  section removed, `self_login` and `repos[0].remote` kept, `repos[0].beads_dir` KEPT pointing at the
-  live beads workspace for READ-ONLY use (hydration runs `issue list --query work-beads` and the
-  review-escalation lookup for every PR; without a beads dir every hydration degrades,
+  section removed, `self_login` and `repos[0].remote` kept, `watch.pr.queries: [mine, team]` and
+  `sweep.max_age: 8760h`. `repos[0].beads_dir` MUST name a beads workspace (hydration runs `issue list
+--query work-beads` and the review-escalation lookup for every PR; without one every hydration degrades,
   `entity_change` returns Degraded, the poll aborts at the third consecutive degraded hydration, and
-  nothing is detected), `watch.pr.queries: [mine, team]` and `sweep.max_age: 8760h`. The alternative
-  is the hermetic bd mode: a `bd` shim answering only read verbs with `list` returning `[]` (the PR
-  classifier ignores work beads). The choice is recorded in the run manifest.
+  nothing is detected). Two bd modes, recorded in the run manifest:
+  - **hermetic (the default).** `beads_dir` is a scratch stub workspace and the `bd` shim answers
+    every read verb from nothing (`list` returns an empty `{"data":[]}` envelope; the PR classifier
+    ignores work beads). This is the default because the machine `bd`, even for read verbs, writes
+    telemetry and a circuit-breaker file OUTSIDE the scratch tree (observed 2026-10-07: 717 sandbox
+    denials in one tick, from `~/.beads/eventsData` and `/private/tmp/beads-circuit`), so passthrough
+    cannot meet the zero-denial rule.
+  - **passthrough.** `beads_dir` is the live workspace, used read-only through the machine `bd`. Kept for
+    completeness; expect denials, which stop the run.
 - **pg-connector config.** A copy of the live `pg-pr` config (a read-only nix-store symlink in the
   live tree; the per-author search split is already live, `pg2-kn9n1`) minus the Jira backend.
 - **PATH and shims.** The machine `bd` (the router wrapper's bundled `bd` 1.3.1 failed against the
@@ -120,14 +127,17 @@ create|comment|edit|close|reopen|delete|lock|unlock|transfer|pin|unpin`, `gh rep
   `import`, `export`, `sql`, `dolt` and every other verb.
 - **Sandbox.** The collector's CHILD process tree runs under macOS `sandbox-exec` with
   `(version 1)(allow default)(deny file-write*)(allow file-write* (subpath "<scratch>")
-(literal "/dev/null") (literal "/dev/tty") (regex #"^/dev/fd/"))` (without the `/dev` entries even
-  `echo > /dev/null` fails). The PARENT collector is unsandboxed, because it must tail the live logs
+(literal "/dev/null") (literal "/dev/tty") (literal "/dev/dtracehelper") (regex #"^/dev/fd/"))`
+  (without the `/dev` entries even `echo > /dev/null` fails; `/dev/dtracehelper` is a tracing device
+  the macOS runtime opens for write at process start, which would otherwise drown the real denials). The PARENT collector is unsandboxed, because it must tail the live logs
   and read the live store. The sandbox does NOT block the network or `bd`/dolt writes: GitHub and
   beads write safety comes from the shims and `BEADS_DOLT_AUTO_START=0`. `sandbox-exec` is deprecated,
   so a startup self-test refuses to start if the tool is missing or a probe write outside the scratch
   directory succeeds.
-- **Denial detection.** Child stderr is scanned for `Operation not permitted`, and the system log is
-  read for `Sandbox ... deny ... file-write` lines of the tool tree. A denial fails the tick, is
+- **Denial detection.** Child stderr is scanned for `Operation not permitted`, and the system log
+  (`log show`, readable from a background session) is read for `Sandbox ... deny ... file-write` lines of
+  the named tool processes (a denial from an unrelated sandboxed process of the same name could
+  false-positive: restart the run). A denial fails the tick, is
   counted, and stops the run (a denial means a tool tried to write somewhere it must not).
 
 ## Warm-up: seeding the scratch store
@@ -324,6 +334,17 @@ reboot and router applies WILL occur: they are recorded and excluded from misses
   (60 rows in the first 9 hours); a `desk-pr` dispatch waited 11 to 45 minutes behind its enqueue.
 - **Budget reference** (`pg2-x3h8c.11`): list spend 660 points per hour at 11 search strings
   (`graphql_cost` 1 per string), worst hour 2,505 of 4,000, live non-list spend about 1,713 per hour.
+
+## Observed behavior of the live path (2026-10-07)
+
+- The connector's backend deadline is 25 seconds. The `team` listing (ten search strings) takes 14 to 25
+  seconds and fails with `unavailable: deadline exceeded` on roughly half of its live runs, so the
+  shadow's `team` source is degraded (exit 2) on a comparable share of ticks and the `team` warm-up
+  listing needs retries. Report (a) classes these misses `hydration-failed` (a failed or degraded
+  source), never `unexplained`.
+- A hydration (`pr show`) takes 15 to 30 seconds, so a tick that hydrates a few entities overruns the 60s
+  slot: overrun gaps count AGAINST uptime, and the stop criterion of 95 percent may need an operator
+  ruling if steady state is dominated by overruns.
 
 ## Realization-gap register
 
