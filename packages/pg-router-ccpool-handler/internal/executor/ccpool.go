@@ -596,9 +596,7 @@ func (r *ccpoolRun) closeSettledSession(ctx context.Context, cc *roles.CCPoolCon
 	// Mark BEFORE closing (like the orphan reclaim) so no re-request ever sees an
 	// unmarked handler-closed row of an attempt that left its bead open.
 	if r.leftBeadOpen(cctx, cc, beadID, werr) {
-		if err := r.deps.CC.SetMeta(cctx, name, ccpool.MetaKeyIncomplete, ccpool.FormatMetaTime(r.deps.clock())); err != nil {
-			slog.Warn("settled-session incomplete mark failed", "session", name, "bead", beadID, "err", err)
-		}
+		r.markIncomplete(cctx, name, beadID)
 	}
 	if err := r.deps.CC.Close(cctx, name, false); err != nil {
 		slog.Warn("settled-session close failed (left to idle_ttl)", "session", name, "bead", beadID, "err", err)
@@ -606,6 +604,18 @@ func (r *ccpoolRun) closeSettledSession(ctx context.Context, cc *roles.CCPoolCon
 	}
 	slog.Info("settled session closed", "session", name, "bead", beadID,
 		"state", string(row.State), "outcome", settledOutcome(werr))
+}
+
+// markIncomplete stamps ccpool.MetaKeyIncomplete on the session's row (see its
+// doc comment), best effort: a failure is logged at ERROR, naming the session,
+// because the row then stays absorbable by a same-event same-head re-request
+// (the poison loop of bead pg2-tc9c3) until the watchdog stamps it at its next
+// hard stop or idle_ttl closes it.
+func (r *ccpoolRun) markIncomplete(ctx context.Context, name, beadID string) {
+	if err := r.deps.CC.SetMeta(ctx, name, ccpool.MetaKeyIncomplete, ccpool.FormatMetaTime(r.deps.clock())); err != nil {
+		slog.Error("incomplete mark failed; the row stays absorbable by a same-head re-request",
+			"session", name, "bead", beadID, "err", err)
+	}
 }
 
 // leftBeadOpen reports whether a dispatch that ended with werr left its bead
@@ -1195,6 +1205,16 @@ func (r *ccpoolRun) waitDone(ctx context.Context, claimTerminal func() bool, d D
 				// part b — defense-in-depth alongside findSessionByName's own
 				// dead-row-is-absent fix). Best-effort: a failed Close here does
 				// not change the failure outcome already decided below.
+				//
+				// This is a failed dispatch whose bead stays open, and this Close makes
+				// the row handler-closed, which closeSettledSession's guard (row already
+				// closed) then skips: stamp it incomplete HERE, before the close, or the
+				// row stays absorbable by a same-event same-head re-request (the poison
+				// loop of bead pg2-tc9c3). Chosen over teaching closeSettledSession to
+				// mark rows that are already closed: it marks at the single place that
+				// closes the row, and leaves that guard (never touch a row someone else
+				// closed) intact.
+				r.markIncomplete(ctx, name, d.Item.ID)
 				_ = r.deps.CC.Close(ctx, name, false)
 				return r.fail(ctx, d, "session exited before completing")
 			}

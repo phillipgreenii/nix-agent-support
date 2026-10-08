@@ -36,6 +36,7 @@ type settleCC struct {
 	name       string
 	transcript string
 	state      func() ccpool.SessionState // state of the still-open row
+	rowMeta    map[string]string          // the row's meta, when a test wants List to carry it
 	preClosed  string                     // CloseReason the row already carries ("" = open)
 
 	mu     sync.Mutex
@@ -73,7 +74,7 @@ func (c *settleCC) List(context.Context) ([]ccpool.Session, error) {
 	c.mu.Lock()
 	closed := c.closed
 	c.mu.Unlock()
-	row := ccpool.Session{ExternalID: c.id, Name: c.name, TranscriptPath: c.transcript, State: c.state(), Live: true, CWD: "/repo"}
+	row := ccpool.Session{ExternalID: c.id, Name: c.name, TranscriptPath: c.transcript, State: c.state(), Live: true, CWD: "/repo", Meta: c.rowMeta}
 	switch {
 	case closed:
 		row.Live, row.CloseReason = false, "handler"
@@ -273,6 +274,67 @@ func TestSettledClose_failureMarksRowIncomplete(t *testing.T) {
 	}
 	if !slices.Equal(cc.closeOps(), incompleteOps) {
 		t.Errorf("a failed dispatch must mark the row incomplete, then close it; ops=%v", cc.closeOps())
+	}
+}
+
+// The unexplained-death branch of waitDone (the session went idle while a
+// close-only bead is still open) closes the row ITSELF, so closeSettledSession
+// later finds it already closed and skips it. That Close must therefore stamp
+// the row incomplete, or a same-event same-head redelivery re-absorbs it and
+// hard-stops instantly on its original launch time (pg2-tc9c3). End to end: the
+// first dispatch dies, then the SAME event at the SAME head arrives an hour
+// after the budget ran out of the old launch time and must launch afresh.
+func TestSettledClose_unexplainedDeathMarksRowIncomplete_redeliveryLaunchesFresh(t *testing.T) {
+	cfg := fastCfg()
+	cfg.BudgetTime = time.Hour
+	role := feedbackRole(cfg) // close-only, on_failure=unclaim
+	display := role.DisplayName(cfg.SessionPrefix, "zr-w")
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w": {"in_progress"}}}
+	cc := newSettleCC("sess-1", fixedState(ccpool.StateIdle)) // idle, bead still open: waitDone sees an unexplained death
+	// Dispatch 1 must LAUNCH (not absorb a row by name), so the row only carries the
+	// stable display name once the redelivery arrives.
+	it := item.Item{ID: "zr-w", Metadata: map[string]any{"head_sha": "h1"}}
+	dispatch := func(role roles.Role, ext string, now time.Time) error {
+		cfg := cfg
+		cfg.WorktreeDir = t.TempDir()
+		deps := newExec(&dtest.FakeCC{}, bd, cfg).deps
+		deps.CC, deps.ExternalID = cc, ext
+		clk := &dtest.ManualClock{T: now}
+		deps.Now, deps.Tick = clk.Now, clk.TickAdvancing()
+		deps.Git = &dtest.NoopGit{}
+		deps.GitOpener = (&dtest.NoopGitOpener{}).Open
+		_, err := ccpoolExecutor{}.Dispatch(context.Background(), DispatchContext{Role: role, Item: it, EventID: "review.ready:zr-w"}, deps)
+		return err
+	}
+
+	first := noBudget(role)
+	if err := dispatch(first, "sess-1", time.Unix(0, 0)); err == nil {
+		t.Fatal("the first dispatch must fail: its session exited before completing")
+	}
+	if got := cc.closeOps(); !slices.Equal(got, incompleteOps) {
+		t.Fatalf("waitDone's own close of the dead row must mark it incomplete first; ops=%v", got)
+	}
+
+	// The row as ccpool now reports it: handler-closed, idle, carrying the meta the
+	// launch stamped plus whatever the handler marked since.
+	meta := map[string]string{}
+	for k, v := range cc.EnsuredMeta {
+		meta[k] = v
+	}
+	for _, m := range cc.SetMetaCalls() {
+		meta[m.Key] = m.Value
+	}
+	cc.rowMeta, cc.name = meta, display
+	cc.Ensured = nil
+
+	// Redelivery of the same event at the same head, five hours after the launch,
+	// under a one-hour budget: absorbing the row would hard-stop instantly.
+	err := dispatch(role, "sess-2", time.Unix(0, 0).Add(5*time.Hour))
+	if errors.Is(err, watchdog.ErrBudgetExceeded) {
+		t.Fatalf("a redelivery after an unexplained death must not hard-stop on the old row's launch time: %v", err)
+	}
+	if len(cc.Ensured) != 1 || cc.Ensured[0] != "sess-2" {
+		t.Errorf("a same-event same-head redelivery after an unexplained death must launch a fresh session; Ensured=%v", cc.Ensured)
 	}
 }
 

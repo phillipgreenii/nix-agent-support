@@ -66,14 +66,20 @@ The dispatch-time reconcile does not help: it closes only sessions whose bead is
    head, so the review source re-emits the same event; absorbing the row started the budget at its
    original launch and hard-stopped instantly about every minute, and because the escalation count
    is per distinct session it never reached the human threshold. The handler now stamps
-   `pgrouter.incomplete` on a row whose dispatch ended with its bead still open (a hand-back of a
-   close-or-handback role, a failure, or a budget hard stop, where the watchdog stamps it before its
-   own close), always BEFORE the close, and an incomplete row is absent to every later dispatch.
-   Only a row whose bead was closed stays a duplicate. Chosen over purging the row on settle
-   (option (c) of `pg2-afre3`) because a non-purge close keeps the resumable transcript of a
-   session whose bead is still open, which this ADR's item 1 exists to preserve. Rows the
-   deployed handler wrote before this change carry no marker; the first absorb of one still hard
-   stops once, and that stop stamps it, so the next dispatch launches fresh.
+   `pgrouter.incomplete` on a row whose dispatch ended with its bead still open: a hand-back of a
+   close-or-handback role or a failure (stamped in `closeSettledSession`, or, when the wait's
+   unexplained-death branch closes the row itself, by that branch), and a budget hard stop (stamped
+   by the watchdog before its own close). It is always stamped BEFORE the close, and an incomplete
+   row is absent to every later dispatch. Only a row whose bead was closed stays a duplicate.
+   Chosen over purging the row on settle (option (c) of `pg2-afre3`) because a non-purge close
+   keeps the resumable transcript of a session whose bead is still open, which this ADR's item 1
+   exists to preserve. Rows the deployed handler wrote before this change carry no marker; absorbing
+   one ends in a failed dispatch, either the watchdog hard stop (finite budget) or the wait's
+   session-exited-before-completing branch (unlimited budget, or whichever wins the race), and both
+   stamp the row, so the next dispatch launches fresh. A bead that was closed in the meantime is a
+   success and stays absorbable. Residual: the stamp is best effort (a failure is logged at
+   error level), so a failed stamp leaves the row absorbable until the next failed absorb stamps
+   it, and a stamped row whose close then failed stays live, and absorbable, until `idle_ttl`.
 
 ## Consequences
 

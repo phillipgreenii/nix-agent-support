@@ -81,7 +81,11 @@ func (w *Watchdog) terminal(ctx context.Context, sessionName, beadID string, be 
 	// open, so a same-event same-head re-request must launch a fresh session rather
 	// than re-absorb this row and hard-stop instantly from its original launch time,
 	// forever (bead pg2-tc9c3). Best effort.
-	_ = w.CC.SetMeta(ctx, sessionName, ccpool.MetaKeyIncomplete, ccpool.FormatMetaTime(w.now()))
+	if err := w.CC.SetMeta(ctx, sessionName, ccpool.MetaKeyIncomplete, ccpool.FormatMetaTime(w.now())); err != nil {
+		w.emit("error", "incomplete_mark_failed", "incomplete mark failed; the row stays absorbable by a same-head re-request", map[string]any{
+			"session": sessionName, "bead": beadID, "err": err.Error(),
+		})
+	}
 	_ = w.CC.Close(ctx, sessionName, false)
 
 	_ = beads.Comment(ctx, w.BD, beadID, "interrupted — budget")

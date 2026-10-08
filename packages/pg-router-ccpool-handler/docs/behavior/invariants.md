@@ -267,8 +267,10 @@ review`. The claim is still released (status open, assignee cleared) — the lab
   incomplete BEFORE closing it, and an incomplete row is absent to every later dispatch, whatever
   its event id and head. After a hand-back the bead is open again at the same head and the core
   re-emits the same event; that is a re-request, not a crash-window redelivery, and absorbing the
-  row would start its time budget at the original launch and hard-stop instantly, forever. Only a
-  row whose dispatch completed the bead (closed) stays a duplicate. A role whose success leaves
+  row would start its time budget at the original launch and hard-stop instantly, forever. The
+  mark is best effort (a failure is logged at error level), and a row written before this rule
+  carries none: absorbing it ends in a failed dispatch, which marks it, so the next dispatch
+  launches afresh. Only a row whose dispatch completed the bead (closed) stays a duplicate. A role whose success leaves
   its bead open by design (the triage roles), and a bead that cannot be read, leave the row
   absorbable.
 - **`INV-CCH-18`** — a session the handler launched MUST NOT stay unsupervised once its handler is

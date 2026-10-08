@@ -987,6 +987,63 @@ func TestDispatch_sameEventSameHead_afterHandback_launchesFreshSession(t *testin
 	}
 }
 
+// TestDispatch_legacyHandlerClosedRow_absorbOnceThenStamped pins the migration
+// claim of ADR 0082 item 4 (pg2-tc9c3): a handler-closed row the deployed handler
+// wrote carries no incomplete marker, so one same-event same-head request still
+// absorbs it, but that absorb ends in a failed dispatch (the watchdog hard stop
+// under a finite budget, the wait's unexplained-death branch otherwise), and BOTH
+// stamp the row, so the next dispatch launches afresh instead of looping.
+func TestDispatch_legacyHandlerClosedRow_absorbOnceThenStamped(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		budget budget.Budget
+	}{
+		{"finite budget", budget.Budget{Time: time.Hour, Thresholds: budget.Thresholds{Reminder: 70, Cancel: 90, Hard: 100}}},
+		{"unlimited budget", budget.Budget{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := fastCfg()
+			cfg.WorktreeDir = t.TempDir()
+			role := reviewRole(cfg)
+			role.CCPool.Budget = tc.budget
+			display := role.DisplayName(cfg.SessionPrefix, "zr-c")
+			legacy := ccpool.Session{
+				ExternalID: "att-1", Name: display, Live: false, State: ccpool.StateIdle, CloseReason: "handler",
+				Meta: map[string]string{
+					ccpool.MetaKeyEventID: "review.ready:zr-c", ccpool.MetaKeyHeadSHA: "h1",
+					ccpool.MetaKeyLaunchedAt: ccpool.FormatMetaTime(time.Unix(0, 0).Add(-5 * time.Hour)),
+				},
+			}
+			if crashOrphaned(legacy) {
+				t.Fatal("precondition: an unmarked handler-closed row is absorbable")
+			}
+			bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-c": {"in_progress"}}}
+			cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{legacy}}}
+			d := DispatchContext{
+				Role: role, EventID: "review.ready:zr-c",
+				Item: item.Item{ID: "zr-c", Metadata: map[string]any{"repo": "o/r", "pr_number": "7", "head_sha": "h1"}},
+			}
+			deps := newExec(cc, bd, cfg).deps
+			deps.ExternalID = "att-2"
+			deps.Git = &dtest.NoopGit{}
+			deps.GitOpener = (&dtest.NoopGitOpener{}).Open
+			if _, err := (ccpoolExecutor{}).Dispatch(context.Background(), d, deps); err == nil {
+				t.Fatal("absorbing the legacy row of an open bead must end in a failed dispatch")
+			}
+			if len(cc.Ensured) != 0 {
+				t.Errorf("the first same-head request still absorbs the legacy row; Ensured=%v", cc.Ensured)
+			}
+			stamped := false
+			for _, m := range cc.SetMetaCalls() {
+				stamped = stamped || (m.ExternalID == "att-1" && m.Key == ccpool.MetaKeyIncomplete)
+			}
+			if !stamped {
+				t.Errorf("the failed absorb must stamp the legacy row so the next dispatch launches afresh; SetMeta=%v", cc.SetMetaCalls())
+			}
+		})
+	}
+}
+
 // TestDispatch_deadNameMatch_createsFreshSession is the dispatch-level,
 // end-to-end version of fix (a): a dispatch whose stable display name
 // matches only a DEAD prior row must Ensure a brand-new session under its own
