@@ -291,7 +291,6 @@ defaults:
   boost_minutes: [5, 10, 25]
   profile: normal
   max_future_skew_seconds: 60
-  day_start: "00:00"
   alert:
     sound: Glass
     reminder_sound: Tink
@@ -381,7 +380,7 @@ cycles:
 7. **Validation.** The daemon MUST reject the whole config if: a profile names an unknown task or
    cycle, or lists a task under a cadence other than its own; a due rule's fields do not match its
    cadence or are missing; a `weekday` is not one of `mon` to `sun`; a `day` is less than 1; an
-   `at` or `defaults.day_start` is not a valid `HH:MM`; a `tz` is not an IANA identifier; a duration or interval is not
+   `at` is not a valid `HH:MM`; a `tz` is not an IANA identifier; a duration or interval is not
    positive; `defaults.profile` is not defined; a key name is not `[a-z0-9_-]+` or is `cycle_type`. A bad config at first start is a hard failure. A bad reload keeps the
    previous config and reports through `/healthz`; a reload that removes the active profile is a
    bad reload.
@@ -392,9 +391,6 @@ cycles:
    URL) are top-level keys, validated by the schema. The daemon builds every deep link from
    `public_url`. A change to either takes effect only on restart; a reload that sees one reports it
    through `/healthz`.
-10. **Day start.** `defaults.day_start` (a 24-hour `HH:MM` time, default `00:00`, read in the zone
-    of the day period being left) is the earliest time a daily rollover MAY be backdated to
-    (periods rule 5). It does not move the civil date a day period covers.
 
 ## Periods, profiles and rollover
 
@@ -428,10 +424,11 @@ read-only; a **change** control opens a modal.
    to a task, `overrides` win. Then the new
    `period.changed` events and the new periods' `task.materialized` events follow, from the active
    profile.
-5. **Backdating.** `effective_at` MAY backdate the change (the operator forgot to change the day
-   yesterday), so the missed times are correct. It MUST NOT precede the start of the period being
-   left: for a day, its start date at `defaults.day_start`; for a week or a sprint, its start date
-   at 00:00; both in the period's own zone. Anything earlier is `invalid_timeline`.
+5. **Backdating.** `effective_at` MAY backdate the change by any amount (the operator forgot to
+   change the day yesterday, or last week), so the missed times are correct. There is no lower
+   bound and no setting for one; only the future-skew rule and the timeline apply: candidate
+   replay (event log rule 9) still refuses a time that would make the log impossible, as
+   `invalid_timeline`.
 6. **Undo** is one batch retraction, subject to rule 8.5 of the event log: it is rejected once a
    later live event references the new periods' tasks, and the refusal names those events.
 7. **Profile change.** `POST /profile/change` leaves completed, skipped and missed tasks alone. For
@@ -587,8 +584,7 @@ code from the closed set below, and a `trace_id` member. Responses carry a `trac
 | `503`  | `store_unavailable` (the outcome is unknown; retry with the same `id`), `not_ready`                                                                                                                                                                                                                                               |
 
 An override naming an unknown or already resolved task is rejected as `unknown_task` or
-`task_already_resolved`; a backdated period change that precedes the left period's start is
-`invalid_timeline`. Every successful mutation response returns the ids of the events it appended and
+`task_already_resolved`; a backdated period change that candidate replay finds impossible is `invalid_timeline`. Every successful mutation response returns the ids of the events it appended and
 its batch id, so a client can undo it.
 
 Enforcement: a contract test MUST fail if a registered route is missing from the spec or a spec path
@@ -1055,7 +1051,7 @@ raised.
 | 28  | Interrupted cycles                        | An interrupted (paused) cycle stays visible and dimmed beside the focus cycle; a Switch action swaps the focus (one batch: pause the running cycle, resume the chosen one); a dimmed cycle can also be stopped (operator, 2026-10-08).                                                                                                              |
 | 29  | Reminder cadence                          | Reminder sounds and notifications are counted in a cycle's running time: pausing silences them and resuming continues the count, so a cycle resumed part-way through an interval reminds when that interval completes (operator, 2026-10-08, refining row 7).                                                                                       |
 | 30  | Torn tail                                 | A final line that ends in a newline but does not parse is a torn tail like any other: recovered to a sidecar, not refused (operator, 2026-10-08). The sidecar keeps the bytes. This includes a complete line that is valid JSON of a known version but fails its schema, for example one written by a newer binary after a rollback                 |
-| 31  | Backdating bound                          | A daily rollover MAY be backdated to the day's configurable start time (`defaults.day_start`, default 00:00); a week or sprint rollover to midnight of its start date (operator, 2026-10-08; recorded as read by the plan).                                                                                                                         |
+| 31  | Backdating                                | A period change MAY be backdated as far as needed to fix the date; there is no lower bound and no `day_start` setting. Candidate replay still refuses an impossible timeline (operator, 2026-10-08: "no restrictions, let me do what is necessary to fix the date").                                                                                |
 
 ## Open items for the implementation plans
 
