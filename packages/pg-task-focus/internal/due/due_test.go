@@ -405,7 +405,7 @@ func TestResolveSprintDayProperty(t *testing.T) {
 
 		got, err := due.Resolve(due.Sprint, rule, start, end)
 		if day > span {
-			noMatch(t, err)
+			_ = noMatch(t, err)
 			return
 		}
 		if err != nil {
@@ -441,7 +441,7 @@ func TestResolveWeeklyFirstOccurrenceProperty(t *testing.T) {
 			}
 		}
 		if first == nil {
-			noMatch(t, err)
+			_ = noMatch(t, err)
 			return
 		}
 		if err != nil {
