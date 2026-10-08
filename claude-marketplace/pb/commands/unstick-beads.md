@@ -67,6 +67,12 @@ Write each result to a file in WORKDIR and record the counts in `progress.txt`.
 - **Ready:** `bd -C ROOT ready -n 0 --json`.
 - **DRAINABLE:** the subset of ready that `/pb:drain-beads` would actually claim. Exclude
   `human`-labelled beads, epics, and anything else its claim query excludes.
+- **Operator identities:** resolve the list per `beads-lifecycle` B-8 (the pg-desk config key
+  `focus.operator_identities`, else git `user.name` and `user.email`) and write it, one per
+  line, to `WORKDIR/operator-identities.txt`. Do NOT copy it anywhere else. Then write to
+  `WORKDIR/triage-operator-assigned.txt` the id of every `open` bead whose `assignee`, trimmed
+  of surrounding whitespace, EQUALS one of those lines exactly (case-sensitive). Those are
+  deliberate operator assignments (B-8), not stranded claims.
 - **Gate check:** run `pb gate check --dry-run --json` from the session cwd (it has no `-C`)
   and write the output to `WORKDIR/probes/gate-check.json`. Workers use it instead of
   hand-comparing gate patch-ids.
@@ -87,12 +93,20 @@ Export row shape. It is the ONLY source for claim state, because `bd list` JSON 
 **TARGETS** = open beads not in ready, plus `status=deferred` beads, narrowed by `$ARGUMENTS`
 if given.
 
-- REMOVE from TARGETS any open bead with a non-empty `assignee`; it goes to Stage 2 only.
+- REMOVE from TARGETS any open bead with a non-empty `assignee`; it goes to Stage 2 only,
+  EXCEPT an operator-assigned bead (`triage-operator-assigned.txt`), which goes nowhere: it is
+  not reviewed, not a Stage 2 candidate, and only counts in the report.
 - `in_progress` beads are never TARGETS; they also go to Stage 2.
 
 ## Stage 2 — claim liveness (in parallel with the batches)
 
-The candidates are every `in_progress` bead and every open bead with a non-empty `assignee`.
+The candidates are every `in_progress` bead and every open bead with a non-empty `assignee`,
+MINUS every bead in `WORKDIR/triage-operator-assigned.txt` (B-8: a deliberate operator
+assignment MUST NOT be reported as stranded or released, and MUST NOT be handed to the Stage 2
+subagent). An `in_progress` bead is never exempt, whatever its assignee. Stage 2 releases only
+claims whose assignee is a session actor id; if `operator-identities.txt` could not be
+resolved, list the open assigned beads whose assignee is not a session actor id in the report
+instead of releasing them.
 
 - If PERMISSIONS do not allow releasing dead claims, list the candidates in the report and do
   nothing else.
@@ -245,6 +259,7 @@ When the last worker hands back, check `followups.txt`:
    - closed beads, as id plus reason;
    - undeferred, retargeted, de-labelled, and dependency-fixed beads;
    - claims released;
+   - operator-assigned open beads left alone (B-8), as a count only (they are not a defect);
    - new beads filed;
    - **needs you**: one line per item, starting with an action verb (grant, decide, run,
      approve, publish, schedule), naming the bead ids. Beads that need the same action are
