@@ -190,6 +190,10 @@ distinction come from the behavior-docs method
   that this build does not recognize (e.g. a future capability this build has no opinion on) MUST
   NOT be treated as a mismatch by omission.
 
+  A capability's own schema version moves only with that capability's own wire shape: for example
+  the `issue` capability's additive `status_category` field moved `issue` from schema version 7 to
+  8 (bead `pg2-mj0jv`) and left every other capability's version, and `protocolVersion`, untouched.
+
   ```mermaid
   flowchart TD
       recv["backend response received"] --> pv{"protocolVersion matches?"}

@@ -68,7 +68,13 @@ import "encoding/json"
 // OperatorUpdatedAt facts below (time-based attention rules over the
 // operator's own assigned issues) — same "any field-shape change bumps the
 // version" precedent as every earlier bump on this constant.
-const IssueSchemaVersion = 7
+//
+// Bumped 7 -> 8 by bead pg2-mj0jv, which added the StatusCategory field
+// below (the tracker's own status category, so a consumer can tell started
+// and finished work apart without listing status names) — same "any
+// field-shape change bumps the version" precedent as every earlier bump on
+// this constant.
+const IssueSchemaVersion = 8
 
 // Issue is the issue capability's shared JSON wire shape, returned by the
 // issue capability's "show" and "create" ops and carried by
@@ -81,6 +87,19 @@ type Issue struct {
 	Title string `json:"title"`
 	State string `json:"state"`
 	URL   string `json:"url"`
+
+	// StatusCategory is the tracker's own coarse grouping of State, with a
+	// closed value set: "new" (not started), "indeterminate" (in progress)
+	// or "done" (finished). It is what lets a consumer decide whether work
+	// has started or finished without enumerating every status NAME a
+	// workflow may use (an issue in a custom "Complete" status is still
+	// category "done"). Empty when the backend has no such notion (the
+	// beads backend always leaves it empty) or the tracker reports none
+	// (Jira's legacy "No Category") — a consumer MUST then fall back to its
+	// own state-name rules. Added by bead pg2-mj0jv (daily-focus design
+	// item (r)); the Jira backend carries pjira's status_category through
+	// unchanged.
+	StatusCategory string `json:"status_category,omitempty"`
 
 	// Priority is the issue's priority string exactly as ITS OWN tracker
 	// represents it — e.g. bd's "P0".."P4", not a fixed cross-backend

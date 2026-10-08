@@ -158,3 +158,45 @@ func TestIssueDepsResult_IDsPopulatedRegardlessOfFull_EntitiesOmittedWhenEmpty(t
 		t.Fatalf("Entities = %+v", out.Entities)
 	}
 }
+
+// TestIssueSchemaVersion_PinnedAtEightAndRegistered pins the issue
+// capability's schema version at 8 (bead pg2-mj0jv bumped 7 -> 8 for the
+// StatusCategory field) and that CurrentSchemaVersions derives from the
+// constant rather than carrying its own copy.
+func TestIssueSchemaVersion_PinnedAtEightAndRegistered(t *testing.T) {
+	if IssueSchemaVersion != 8 {
+		t.Fatalf("IssueSchemaVersion = %d, want 8 (7 -> 8 by bead pg2-mj0jv)", IssueSchemaVersion)
+	}
+	if got := CurrentSchemaVersions["issue"]; got != IssueSchemaVersion {
+		t.Fatalf(`CurrentSchemaVersions["issue"] = %d, want %d`, got, IssueSchemaVersion)
+	}
+}
+
+// TestIssue_StatusCategory_JSONRoundTrip: each closed value round-trips under
+// the wire key status_category, and an empty category is omitted entirely
+// (the beads backend never sets it).
+func TestIssue_StatusCategory_JSONRoundTrip(t *testing.T) {
+	for _, cat := range []string{"new", "indeterminate", "done"} {
+		raw, err := json.Marshal(Issue{ID: "i", StatusCategory: cat})
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		if !strings.Contains(string(raw), `"status_category":"`+cat+`"`) {
+			t.Fatalf("category %q missing from %s", cat, raw)
+		}
+		var out Issue
+		if err := json.Unmarshal(raw, &out); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if out.StatusCategory != cat {
+			t.Fatalf("round trip: StatusCategory = %q, want %q", out.StatusCategory, cat)
+		}
+	}
+	raw, err := json.Marshal(Issue{ID: "i"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(raw), "status_category") {
+		t.Fatalf("empty StatusCategory must be omitted, got %s", raw)
+	}
+}

@@ -146,6 +146,10 @@ list`/`search` accept no such flag — see "Cross-cutting capabilities" above) t
   fails, which still uses the ordinary error envelope (`INV-WIRE-2`).
 - **`auth_status` op** — the optional auth-preflight op a backend answers only if its concrete
   provider implements `AuthChecker` (`INV-AUTH-1`).
+- **Status category** — an `issue` entity's `status_category`: the tracker's own coarse grouping of
+  its status name, one of `new`, `indeterminate` or `done`, or absent when the backend has none (the
+  beads backend never sets one; Jira's legacy "No Category" maps to absent). It is what a consumer
+  reads to tell started from finished work without listing status names.
 - **`vocabulary`** — a per-entity-type, per-backend map of a backend's own accepted values for a
   field this set does not pin to one cross-backend enum (e.g. an issue backend's own transition
   target-state names), declared in that backend's own `capabilities` response.

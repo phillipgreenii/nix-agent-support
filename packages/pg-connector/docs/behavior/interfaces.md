@@ -145,6 +145,19 @@ current head SHA (the most recent run's), at most 10 per `list_runs` call, so a 
 succeeded triggers no job fetches. A failed job fetch leaves that run's `jobs` omitted rather than
 failing the listing.
 
+**`issue` status category** (`schema.Issue.StatusCategory`, `IssueSchemaVersion` 7 → 8, bead
+`pg2-mj0jv`) — `show`, `list` and `create` answers gain an additive, optional `status_category`, the
+tracker's own coarse grouping of the issue's `state`, with a closed value set: `new` (not started),
+`indeterminate` (in progress) or `done` (finished). It lets a consumer tell started and finished work
+apart without listing workflow-specific status names (an issue in a custom `Complete` status is still
+category `done`). The Jira `issue` backend carries `pjira`'s `status_category` through unchanged; the
+beads backend never sets it. An absent field means "this backend has no category for the issue" (Jira's
+legacy "No Category", or a `pjira` that predates the field), never a category of its own, and a
+consumer MUST then fall back to its own state-name rules. `state` itself is unchanged. Because the
+field is ordinary entity content, adding it changes every Jira issue's `list --fingerprints` value
+once, so the first listing after a Jira backend starts carrying it reports every Jira issue as
+changed.
+
 ### `review_submit` — saving at an earlier head
 
 A review is written against the commit its author read. When the PR has since moved on, the

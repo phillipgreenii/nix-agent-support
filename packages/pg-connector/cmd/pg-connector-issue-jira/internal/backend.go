@@ -145,15 +145,21 @@ var PriorityVocabulary = []string{"Highest", "High", "Medium", "Low", "Lowest"}
 // (which predates pjira's rename from "jira" and does not carry
 // project/assignee).
 type pjiraIssue struct {
-	Key       string     `json:"key"`
-	Summary   string     `json:"summary"`
-	Status    string     `json:"status"`
-	IssueType string     `json:"issuetype"`
-	Labels    []string   `json:"labels"`
-	URL       string     `json:"url"`
-	Priority  string     `json:"priority,omitempty"`
-	Project   string     `json:"project,omitempty"`
-	Assignee  *pjiraUser `json:"assignee,omitempty"`
+	Key     string `json:"key"`
+	Summary string `json:"summary"`
+	Status  string `json:"status"`
+	// StatusCategory is pjira's `status_category` (pjira model.go
+	// Issue.StatusCategory): Jira's status category key reduced to the closed
+	// set new, indeterminate, done, empty when Jira reports none (its legacy
+	// "undefined"/"No Category") or pjira predates the field. Carried onto
+	// schema.Issue.StatusCategory unchanged (bead pg2-mj0jv).
+	StatusCategory string     `json:"status_category,omitempty"`
+	IssueType      string     `json:"issuetype"`
+	Labels         []string   `json:"labels"`
+	URL            string     `json:"url"`
+	Priority       string     `json:"priority,omitempty"`
+	Project        string     `json:"project,omitempty"`
+	Assignee       *pjiraUser `json:"assignee,omitempty"`
 	// Duedate is Jira's own standard duedate field (bead pg2-7wqkr's
 	// design: "deadline source is Jira's standard duedate field"),
 	// verified against phillipg-nix-repo-base's
@@ -293,18 +299,19 @@ func toSchemaIssue(iss *pjiraIssue, asOf time.Time) *schema.Issue {
 		dueDate = *iss.Duedate
 	}
 	return &schema.Issue{
-		ID:        iss.Key,
-		Title:     iss.Summary,
-		State:     iss.Status,
-		URL:       iss.URL,
-		Priority:  iss.Priority,
-		Labels:    iss.Labels,
-		IssueType: iss.IssueType,
-		Tracker:   iss.Project,
-		Assignee:  assignee,
-		AsOf:      asOf.Format(time.RFC3339),
-		Stale:     false,
-		DueDate:   dueDate,
+		ID:             iss.Key,
+		Title:          iss.Summary,
+		State:          iss.Status,
+		URL:            iss.URL,
+		StatusCategory: iss.StatusCategory,
+		Priority:       iss.Priority,
+		Labels:         iss.Labels,
+		IssueType:      iss.IssueType,
+		Tracker:        iss.Project,
+		Assignee:       assignee,
+		AsOf:           asOf.Format(time.RFC3339),
+		Stale:          false,
+		DueDate:        dueDate,
 	}
 }
 

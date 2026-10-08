@@ -1313,3 +1313,49 @@ func TestBackend_Show_ActivityFieldsDoNotChangeOutput(t *testing.T) {
 		t.Fatalf("Show output changed by activity fields:\n with:    %s\n without: %s", jw, jo)
 	}
 }
+
+// TestJiraBackendCarriesStatusCategory (bead pg2-mj0jv, daily-focus design
+// item (r)): pjira's status_category rides onto schema.Issue.StatusCategory
+// unchanged for each of its closed values, and an absent key (pjira omits it
+// for Jira's legacy "No Category", or predates the field) stays empty — on
+// both the show path and the list path.
+func TestJiraBackendCarriesStatusCategory(t *testing.T) {
+	cases := []struct {
+		name, field, want string
+	}{
+		{"new", `"status_category":"new",`, "new"},
+		{"indeterminate", `"status_category":"indeterminate",`, "indeterminate"},
+		{"done", `"status_category":"done",`, "done"},
+		{"absent", ``, ""},
+	}
+	for _, c := range cases {
+		t.Run("show/"+c.name, func(t *testing.T) {
+			raw := `{"key":"PROJ-1","summary":"s","status":"Complete",` + c.field +
+				`"issuetype":"Task","labels":[],"url":"https://example.atlassian.net/browse/PROJ-1"}`
+			b := New(&fakeRunner{handle: func([]string) (string, error) { return raw, nil }})
+			got, err := b.Show(context.Background(), "PROJ-1")
+			if err != nil {
+				t.Fatalf("Show: %v", err)
+			}
+			if got.StatusCategory != c.want {
+				t.Fatalf("StatusCategory = %q, want %q", got.StatusCategory, c.want)
+			}
+			// The status NAME is untouched by the category.
+			if got.State != "Complete" {
+				t.Fatalf("State = %q, want Complete", got.State)
+			}
+		})
+		t.Run("list/"+c.name, func(t *testing.T) {
+			raw := `{"items":[{"key":"PROJ-1","summary":"s","status":"Complete",` + c.field +
+				`"issuetype":"Task","labels":[]}],"truncated":false}`
+			b := New(&fakeRunner{handle: func([]string) (string, error) { return raw, nil }})
+			got, err := b.List(context.Background(), []string{"project = PROJ"}, false, nil)
+			if err != nil {
+				t.Fatalf("List: %v", err)
+			}
+			if len(got.Entities) != 1 || got.Entities[0].StatusCategory != c.want {
+				t.Fatalf("Entities = %+v, want one entity with StatusCategory %q", got.Entities, c.want)
+			}
+		})
+	}
+}

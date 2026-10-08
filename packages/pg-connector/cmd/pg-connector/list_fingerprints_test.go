@@ -116,6 +116,36 @@ func TestRun_IssueList_Fingerprints_HonorsBackendDeclaredExcludes(t *testing.T) 
 	}
 }
 
+// TestRun_IssueList_Fingerprints_StatusCategoryChangesFingerprint (bead
+// pg2-mj0jv): status_category is ordinary entity content, not a volatile
+// field, so an issue that gains or changes a category fingerprints
+// differently. This is why the first poll after the Jira connector starts
+// carrying it re-hydrates every Jira issue at once.
+func TestRun_IssueList_Fingerprints_StatusCategoryChangesFingerprint(t *testing.T) {
+	reply := func(category string) string {
+		field := ""
+		if category != "" {
+			field = `"status_category":"` + category + `",`
+		}
+		return `{"protocolVersion":1,"schemaVersion":8,"result":{"entities":[{"id":"tp-1","title":"t","state":"Complete",` +
+			field + `"as_of":"2026-10-05T00:00:00Z","stale":false}],"present_ids":["tp-1"],"cursor":null,"truncated":false}}`
+	}
+	none, _ := listIssueFingerprints(t, "backend-issue-fp-cat-none", reply(""))
+	done, _ := listIssueFingerprints(t, "backend-issue-fp-cat-done", reply("done"))
+	done2, _ := listIssueFingerprints(t, "backend-issue-fp-cat-done2", reply("done"))
+	started, _ := listIssueFingerprints(t, "backend-issue-fp-cat-started", reply("indeterminate"))
+	if none.Fingerprints["tp-1"] == done.Fingerprints["tp-1"] {
+		t.Fatalf("gaining a status category left the fingerprint equal: %q", none.Fingerprints["tp-1"])
+	}
+	if done.Fingerprints["tp-1"] == started.Fingerprints["tp-1"] {
+		t.Fatalf("changing the status category left the fingerprint equal: %q", done.Fingerprints["tp-1"])
+	}
+	if done.Fingerprints["tp-1"] != done2.Fingerprints["tp-1"] {
+		t.Fatalf("an unchanged category must fingerprint identically: %q vs %q",
+			done.Fingerprints["tp-1"], done2.Fingerprints["tp-1"])
+	}
+}
+
 func TestRun_IssueList_Truncated_PropagatesFromBackend(t *testing.T) {
 	yes, raw := listIssueFingerprints(t, "backend-issue-trunc-yes", issueListReply("open", "t", nil, true))
 	if !yes.Truncated {
