@@ -50,6 +50,11 @@ let
   # clear assertion instead of a silent no-op.
   hasLaunchdRegistry = options.phillipgreenii.programs ? launchdServices;
   isDarwin = pkgs.stdenv.hostPlatform.isDarwin;
+
+  # SwiftBar menu bar plugin (packages/pa-monitor-swiftbar). The wrapper is a
+  # function of this module's config (it bakes in cfg.package and the stale
+  # threshold), so it is built here rather than being a fixed overlay attr.
+  swiftbarPlugin = import ../../../packages/pa-monitor-swiftbar/plugin.nix { inherit lib pkgs; };
 in
 {
   options.phillipgreenii.programs.pa-monitor = {
@@ -68,6 +73,40 @@ in
       the systemd --user unit lives in nixos/modules/pa-monitor, which
       reads this flag across `config.home-manager.users.<u>`.
     '';
+
+    swiftbar = {
+      enable = lib.mkEnableOption ''
+        the pa-monitor SwiftBar menu bar plugin: the current 5-hour usage window,
+        the usage-limit countdown, and one-click caffeinate / auto-resume toggles.
+        Darwin only. Requires `enable`: the plugin wrapper bakes in
+        `''${package}/bin/pa-monitor`. This module only installs the plugin file;
+        installing SwiftBar and pointing its PluginDirectory at the same
+        directory as `pluginDir` is the composing flake's job
+      '';
+
+      package = lib.mkPackageOption pkgs "pa-monitor-swiftbar" { };
+
+      pluginDir = lib.mkOption {
+        type = lib.types.str;
+        default = "Library/Application Support/SwiftBar/Plugins";
+        description = ''
+          SwiftBar's plugin directory, relative to the home directory. The
+          composing flake MUST set SwiftBar's PluginDirectory from this same
+          string so the two cannot drift.
+        '';
+      };
+
+      staleAfterS = lib.mkOption {
+        type = lib.types.ints.positive;
+        default = cfg.settings.stale_after_s or 600;
+        defaultText = lib.literalExpression "config.phillipgreenii.programs.pa-monitor.settings.stale_after_s or 600";
+        description = ''
+          Age in seconds after which the plugin renders the usage reading as stale
+          (dimmed colors and a data-age row). Defaults to pa-monitor's own
+          `stale_after_s` setting, else 600.
+        '';
+      };
+    };
 
     settings = lib.mkOption {
       inherit (tomlFormat) type;
@@ -117,6 +156,27 @@ in
     # there is no read-then-write recursion over home-manager.users.
     (lib.mkIf (cfg.daemon.enable && otelSettings != { }) {
       phillipgreenii.programs.pa-monitor.settings = otelSettings;
+    })
+    # SwiftBar menu bar plugin. The ENTRY is darwin-only (mkIf: home.file is a
+    # real HM option on every platform, unlike the launchd registry below); the
+    # assertion requires `enable` because the wrapper bakes in
+    # `${cfg.package}/bin/pa-monitor`.
+    {
+      assertions = [
+        {
+          assertion = !cfg.swiftbar.enable || cfg.enable;
+          message = "phillipgreenii.programs.pa-monitor.swiftbar.enable requires phillipgreenii.programs.pa-monitor.enable: the plugin wrapper bakes in the pa-monitor package.";
+        }
+      ];
+    }
+    (lib.mkIf (cfg.swiftbar.enable && isDarwin) {
+      home.file."${cfg.swiftbar.pluginDir}/${swiftbarPlugin.pluginFileName}".source =
+        swiftbarPlugin.mkPluginWrapper
+          {
+            script = cfg.swiftbar.package;
+            paMonitor = cfg.package;
+            staleAfterS = cfg.swiftbar.staleAfterS;
+          };
     })
     # LaunchAgent registration via the HM-scoped launchdServices registry
     # (personal ADR 0055, amending ADR 0049). The wrapper still lands at

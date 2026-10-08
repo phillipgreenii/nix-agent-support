@@ -578,6 +578,17 @@
               pkgs = final;
               inherit bashBuilders;
             }).wtdone.script;
+          # pa-monitor-swiftbar: the internal (public = false) renderer behind the
+          # pa-monitor SwiftBar menu bar plugin. Single mkBashScript tool, so -- same
+          # rationale as wtdone above -- it takes `.pa-monitor-swiftbar.script`
+          # directly. The plugin WRAPPER is not an overlay attr: it is a function
+          # (packages/pa-monitor-swiftbar/plugin.nix) the Home-Manager module calls
+          # with its own config.
+          pa-monitor-swiftbar =
+            (import ./packages/pa-monitor-swiftbar {
+              pkgs = final;
+              inherit bashBuilders;
+            }).pa-monitor-swiftbar.script;
           # pg-rescue-flake-lock-conflict (bead pg2-3ybxg): the deterministic
           # flake.lock-only rebase-conflict handler for pg-rescue. Single
           # mkBashScript tool, so -- same rationale as wtdone above -- it takes
@@ -9030,6 +9041,12 @@
                                 type = lib.types.attrsOf lib.types.anything;
                                 default = { };
                               };
+                              # The SwiftBar plugin entry (swiftbar.enable) writes home.file; an
+                              # undeclared option errors even under mkIf false, so it is stubbed.
+                              home.file = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
                               # pg2-sgs4y: the daemon LaunchAgent now registers from this HM module via
                               # personal's phillipgreenii.programs.launchdServices.userAgents (not in
                               # this flake's inputs), so daemon.enable also reads xdg.stateHome and
@@ -9151,6 +9168,11 @@
                           default = [ ];
                         };
                         xdg.configFile = lib.mkOption {
+                          type = lib.types.attrsOf lib.types.anything;
+                          default = { };
+                        };
+                        # The SwiftBar plugin entry writes home.file (see test-pa-monitor-swiftbar-hm-render).
+                        home.file = lib.mkOption {
                           type = lib.types.attrsOf lib.types.anything;
                           default = { };
                         };
@@ -9299,6 +9321,143 @@
                 assert builtins.length (failedAssertions darwinNoRegistry) == 1;
                 assert (settingsOf linux) == { };
                 pkgs.runCommand "pa-monitor-hm-launchd-ok" { } "touch $out";
+
+              # Wrapper check for the pa-monitor SwiftBar plugin (design: docs/superpowers/
+              # specs/2026-10-07-pa-monitor-swiftbar-design.md). Builds the SAME
+              # mkPluginWrapper function the Home-Manager module calls, with defaults, and
+              # asserts shebang, every metadata tag (present, non-empty, hide tags true,
+              # exact count), PA_MONITOR_BIN exported before exec, an executable exec
+              # target, and the executable bit on the wrapper store file itself (which the
+              # pure-eval render test below cannot see).
+              test-pa-monitor-swiftbar-plugin =
+                (import ./packages/pa-monitor-swiftbar/plugin.nix { inherit lib pkgs; }).mkWrapperCheck
+                  {
+                    script = pkgs.pa-monitor-swiftbar;
+                    paMonitor = pkgs.pa-monitor;
+                  };
+
+              # Home-Manager render guard for `swiftbar.*` on home/programs/pa-monitor:
+              # enabled on darwin -> the wrapper lands at the plugin path with the baked
+              # pa-monitor binary and configured stale value; disabled or non-darwin ->
+              # absent; enabled without `enable` -> the assertion fails. Pure module eval
+              # (the wrapper's source text is read from its passthru, never built). Stubs
+              # mirror test-pa-monitor-hm-launchd above.
+              test-pa-monitor-swiftbar-hm-render =
+                let
+                  stubOptions =
+                    { lib, ... }:
+                    {
+                      options = {
+                        phillipgreenii.programs.claude-code.enable = lib.mkEnableOption "claude (stub for pa-monitor eval test)";
+                        home.packages = lib.mkOption {
+                          type = lib.types.listOf lib.types.anything;
+                          default = [ ];
+                        };
+                        home.file = lib.mkOption {
+                          type = lib.types.attrsOf lib.types.anything;
+                          default = { };
+                        };
+                        xdg.configFile = lib.mkOption {
+                          type = lib.types.attrsOf lib.types.anything;
+                          default = { };
+                        };
+                        xdg.stateHome = lib.mkOption {
+                          type = lib.types.str;
+                          default = "/Users/tester/.local/state";
+                        };
+                        assertions = lib.mkOption {
+                          type = lib.types.listOf lib.types.anything;
+                          default = [ ];
+                        };
+                      };
+                    };
+                  evalWith =
+                    {
+                      pkgs' ? pkgs,
+                      cfg,
+                    }:
+                    (lib.evalModules {
+                      specialArgs = {
+                        pkgs = pkgs';
+                        inherit lib;
+                        osConfig = null;
+                      };
+                      modules = [
+                        ./home/programs/pa-monitor/default.nix
+                        stubOptions
+                        cfg
+                      ];
+                    }).config;
+
+                  pluginPath = "Library/Application Support/SwiftBar/Plugins/pa-monitor.30s.sh";
+                  failedAssertions = c: lib.filter (a: !a.assertion) c.assertions;
+                  on = {
+                    phillipgreenii.programs.pa-monitor = {
+                      enable = true;
+                      swiftbar.enable = true;
+                    };
+                  };
+
+                  enabled = evalWith { cfg = on; };
+                  customised = evalWith {
+                    cfg = {
+                      phillipgreenii.programs.pa-monitor = {
+                        enable = true;
+                        swiftbar = {
+                          enable = true;
+                          pluginDir = "plugins-elsewhere";
+                          staleAfterS = 90;
+                        };
+                      };
+                    };
+                  };
+                  fromSettings = evalWith {
+                    cfg = lib.recursiveUpdate on {
+                      phillipgreenii.programs.pa-monitor.settings.stale_after_s = 300;
+                    };
+                  };
+                  disabled = evalWith {
+                    cfg = {
+                      phillipgreenii.programs.pa-monitor.enable = true;
+                    };
+                  };
+                  linux = evalWith {
+                    pkgs' = pkgs // {
+                      stdenv = {
+                        hostPlatform.isDarwin = false;
+                      };
+                    };
+                    cfg = on;
+                  };
+                  withoutEnable = evalWith {
+                    cfg = {
+                      phillipgreenii.programs.pa-monitor.swiftbar.enable = true;
+                    };
+                  };
+                  textOf = c: path: c.home.file.${path}.source.text;
+                  # needles embed store paths; hasInfix rejects string context in its pattern
+                  has = needle: lib.hasInfix (builtins.unsafeDiscardStringContext needle);
+                in
+                # enabled on darwin: exactly one entry, at the default plugin path
+                assert builtins.attrNames enabled.home.file == [ pluginPath ];
+                assert has "export PA_MONITOR_BIN=${pkgs.pa-monitor}/bin/pa-monitor" (textOf enabled pluginPath);
+                assert has "export PA_SWIFTBAR_STALE_AFTER_S=600\n" (textOf enabled pluginPath);
+                assert has "exec ${pkgs.pa-monitor-swiftbar}/bin/pa-monitor-swiftbar" (textOf enabled pluginPath);
+                assert failedAssertions enabled == [ ];
+                # pluginDir and staleAfterS are honoured
+                assert builtins.attrNames customised.home.file == [ "plugins-elsewhere/pa-monitor.30s.sh" ];
+                assert has "export PA_SWIFTBAR_STALE_AFTER_S=90" (
+                  textOf customised "plugins-elsewhere/pa-monitor.30s.sh"
+                );
+                # staleAfterS defaults to pa-monitor's own stale_after_s setting
+                assert has "export PA_SWIFTBAR_STALE_AFTER_S=300" (textOf fromSettings pluginPath);
+                # disabled, or non-darwin: no entry
+                assert disabled.home.file == { };
+                assert linux.home.file == { };
+                assert failedAssertions linux == [ ];
+                # swiftbar.enable without enable: the assertion fails
+                assert builtins.length (failedAssertions withoutEnable) == 1;
+                pkgs.runCommand "pa-monitor-swiftbar-hm-render-ok" { } "touch $out";
 
               # Rendering guard for home/programs/pg-connector (bead pg2-9tql6):
               # evaluates the module (tests/pg-connector-home-render.nix) and
@@ -9889,6 +10048,13 @@
               inherit pkgs;
               bashBuilders = pkgs._agentSupportBashBuilders;
             }).checks
+            # test-pa-monitor-swiftbar (bats suite of the SwiftBar renderer). Same
+            # one-line idiom as wtdone above: the overlay attr takes only the script
+            # derivation, so without this the suite would run in no gate at all.
+            // (import ./packages/pa-monitor-swiftbar {
+              inherit pkgs;
+              bashBuilders = pkgs._agentSupportBashBuilders;
+            }).checks
             # test-pg-rescue-flake-lock-conflict (bead pg2-3ybxg). Same
             # one-line idiom as wtdone above: the overlay attr takes only the
             # script derivation, so without this the bats suite would run in
@@ -10050,6 +10216,10 @@
             # the same reason, so `nix build .#wtdone` resolves via
             # flake.packages.<system>.
             inherit (pkgs) wtdone;
+            # pa-monitor-swiftbar is likewise an overlay-only attr (single
+            # mkBashScript tool, public = false) -- re-exported so
+            # `nix build .#pa-monitor-swiftbar` resolves via flake.packages.<system>.
+            inherit (pkgs) pa-monitor-swiftbar;
             # pg-rescue-flake-lock-conflict is likewise an overlay-only attr
             # (single mkBashScript tool) -- re-exported so
             # `nix build .#pg-rescue-flake-lock-conflict` resolves via
