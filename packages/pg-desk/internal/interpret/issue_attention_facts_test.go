@@ -138,3 +138,48 @@ func TestDeriveIssueAttentionFacts(t *testing.T) {
 		}
 	})
 }
+
+// TestAttentionDoneAgreesWithCategory: when the stored facts carry the
+// tracker's status category it decides Done and StatusCategory, whatever the
+// status is called and whatever the configured name lists say; without one
+// the name lists still decide.
+func TestAttentionDoneAgreesWithCategory(t *testing.T) {
+	show := func(state, category string) string {
+		c := ""
+		if category != "" {
+			c = `,"status_category":"` + category + `"`
+		}
+		return `{"issue_show":{"state":"` + state + `"` + c + `}}`
+	}
+	defaultCfg := (*config.Config)(nil)
+	listed := &config.Config{Jira: &config.JiraConfig{InProgressStatuses: []string{"Review"}, DoneStatuses: []string{"Review"}}}
+	tests := []struct {
+		name         string
+		state, cat   string
+		cfg          *config.Config
+		wantCategory string
+		wantDone     bool
+	}{
+		{"done category with a name no list knows", "Complete", "done", defaultCfg, IssueStatusCategoryDone, true},
+		{"done category with Won't Do", "Won't Do", "done", defaultCfg, IssueStatusCategoryDone, true},
+		{"done category beats a config that does not list it", "Shipped", "done", &config.Config{Jira: &config.JiraConfig{DoneStatuses: []string{"Other"}}}, IssueStatusCategoryDone, true},
+		{"indeterminate category is in progress", "Doing", "indeterminate", defaultCfg, IssueStatusCategoryInProgress, false},
+		{"indeterminate beats a done-listed name", "Review", "indeterminate", listed, IssueStatusCategoryInProgress, false},
+		{"new category is other, even for a terminal-looking name", "Done", "new", defaultCfg, IssueStatusCategoryOther, false},
+		{"category is case-insensitive", "Complete", "DONE", defaultCfg, IssueStatusCategoryDone, true},
+		{"no category falls back to the done list", "CLOSED", "", defaultCfg, IssueStatusCategoryDone, true},
+		{"no category falls back to the in-progress list", "In Progress", "", defaultCfg, IssueStatusCategoryInProgress, false},
+		{"no category and an unlisted name is other", "Complete", "", defaultCfg, IssueStatusCategoryOther, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := DeriveIssueAttentionFacts(show(tc.state, tc.cat), tc.cfg)
+			if err != nil {
+				t.Fatalf("DeriveIssueAttentionFacts: %v", err)
+			}
+			if got.StatusCategory != tc.wantCategory || got.Done != tc.wantDone {
+				t.Errorf("StatusCategory=%q Done=%v, want %q %v", got.StatusCategory, got.Done, tc.wantCategory, tc.wantDone)
+			}
+		})
+	}
+}

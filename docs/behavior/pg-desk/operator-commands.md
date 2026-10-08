@@ -195,6 +195,14 @@ has been cut over to the change-flow schema:
   does. A violated bound fails `doctor`.
 - **Repeated degraded hydrations.** The entities whose hydration degraded or failed on at least two
   consecutive attempts, per type, with their count and the time the run began. A report, not a gate.
+- **Jira issues lacking a status category.** One line, `jira status category: N active Jira issues
+lack a status category`, counting the active `issue` entities whose id is shaped like a ticket key
+  (`ticket_patterns`, the same test `run issue` uses to tell a Jira key from a beads id) and whose
+  stored `issue_show` carries no recognized `status_category` (`new`, `indeterminate`, `done`). Such
+  an issue is classified and attention-evaluated by status NAME instead (see [`changes.md`](changes.md)'s
+  "What counts as a terminal issue"), so a count that stays above zero means an older `pjira`, a
+  degraded decode or a legacy "No Category" status. An entity never hydrated is not counted. With no
+  `ticket_patterns` no issue is recognized as Jira, so the count is 0. A report, not a gate.
 - **Router roles** (only with `--router-config`): per type, the decider roles bound to it. A role
   binds to a type when any of its `binds` entries starts with `<type>.` — exact string comparison, no
   wildcard. The list is expected empty for `issue` and `thread` until their deciders exist. A report,

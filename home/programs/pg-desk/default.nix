@@ -353,7 +353,9 @@ in
         config.yaml's jira block (high_priority_values, incident_labels,
         incident_issue_types, in_progress_statuses, done_statuses), rendered verbatim;
         in_progress_statuses defaults to "In Progress"; done_statuses defaults to
-        Done, Closed, Resolved, Cancelled and Canceled (due-date rules skip those). Carries no organization identifiers by construction (an opaque
+        Done, Closed, Resolved, Cancelled and Canceled (due-date rules skip those). Both lists are only
+        a fallback for an issue whose stored facts carry no tracker status category; a Jira status
+        category, when present, decides instead. Carries no organization identifiers by construction (an opaque
         passthrough of whatever this option is given).
       '';
     };

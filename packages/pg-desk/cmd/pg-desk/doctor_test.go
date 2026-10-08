@@ -697,3 +697,49 @@ func TestDoctorWorkBeadsReachOkWhenLedgerHasNoChildren(t *testing.T) {
 		t.Errorf("stdout: %s", stdout)
 	}
 }
+
+// seedIssueEntity writes one issue entity with the given facts; active false
+// writes it deactivated.
+func seedIssueEntity(t *testing.T, st *store.Store, id, facts string, active bool) {
+	t.Helper()
+	e := store.Entity{Repo: "o/r", EntityType: "issue", EntityID: id, Facts: facts, AsOf: doctorNow.Format(time.RFC3339)}
+	if _, err := st.WriteEntityStateWithLog(e, 0, doctorNow.Format(time.RFC3339), active, []string{"opened"}, "test", doctorNow.Format(time.RFC3339)); err != nil {
+		t.Fatalf("seed issue %s: %v", id, err)
+	}
+}
+
+// TestDoctorCountsActiveJiraIssuesWithoutStatusCategory: the report counts
+// only ACTIVE issue entities shaped like a ticket key whose stored issue_show
+// has no status category; beads ids, inactive rows, never-hydrated rows and
+// rows with a category are not counted. It is a report line, never a failure.
+func TestDoctorCountsActiveJiraIssuesWithoutStatusCategory(t *testing.T) {
+	cfg := openTestConfig("o/r")
+	cfg.TicketPatterns = []string{`[A-Z][A-Z0-9]+-[0-9]+`}
+	seed := newSchemaDoctor(t, cfg)
+	seedIssueEntity(t, seed, "ABC-1", `{"issue_show":{"state":"Complete"}}`, true)                        // counted
+	seedIssueEntity(t, seed, "ABC-2", `{"issue_show":{"state":"To Do","status_category":"new"}}`, true)   // has category
+	seedIssueEntity(t, seed, "ABC-3", `{"issue_show":{"state":"Complete"}}`, false)                       // inactive
+	seedIssueEntity(t, seed, "ABC-4", `{}`, true)                                                         // never hydrated
+	seedIssueEntity(t, seed, "ABC-5", `{"issue_show":{"state":"Doing","status_category":"weird"}}`, true) // unrecognized: counted
+	seedIssueEntity(t, seed, "pg2-abc", `{"issue_show":{"state":"open"}}`, true)                          // beads id, not Jira
+
+	stdout, err := runDoctorCmd(t)
+	if err != nil {
+		t.Fatalf("a report, not a gate: %v\n%s", err, stdout)
+	}
+	if !strings.Contains(stdout, "2 active Jira issues lack a status category") {
+		t.Errorf("stdout lacks the count of 2:\n%s", stdout)
+	}
+}
+
+func TestDoctorStatusCategoryLineIsZeroWithoutTicketPatterns(t *testing.T) {
+	seed := newSchemaDoctor(t, openTestConfig("o/r"))
+	seedIssueEntity(t, seed, "ABC-1", `{"issue_show":{"state":"Complete"}}`, true)
+	stdout, err := runDoctorCmd(t)
+	if err != nil {
+		t.Fatalf("doctor: %v\n%s", err, stdout)
+	}
+	if !strings.Contains(stdout, "0 active Jira issues lack a status category") {
+		t.Errorf("stdout lacks the zero count:\n%s", stdout)
+	}
+}

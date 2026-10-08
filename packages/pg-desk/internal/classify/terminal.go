@@ -9,8 +9,12 @@ import (
 // its source system, which is spec 6.1 condition (a) for being active:
 //
 //   - pr: pr_show.state is closed or merged;
-//   - issue: issue_show.state is one of the terminal issue states (the same
-//     set the issue classifier maps to closed);
+//   - issue: the issue is terminal by the same rule the issue classifier maps
+//     to closed: issue_show.status_category is "done" when the tracker sent
+//     one, otherwise issue_show.state is one of the terminal state names.
+//     Rollout: a stored done-category Jira issue whose name is not in that
+//     set (for example "Complete") becomes terminal here the moment its
+//     facts carry the category, so the next hydration deactivates it;
 //   - thread: thread_show.last_reply_at is older than window at now (window
 //     <= 0 means the 7 day default).
 //
@@ -25,7 +29,7 @@ func SourceTerminal(entityType string, facts json.RawMessage, now time.Time, win
 		return ok && o.hasShow && (o.state == "closed" || o.state == "merged")
 	case "issue":
 		v := decodeIssueFacts(facts)
-		return v.show != nil && v.state != "" && issueIsTerminal(v.state)
+		return v.show != nil && v.terminal()
 	case "thread":
 		if window <= 0 {
 			window = localDefaultThreadWindow

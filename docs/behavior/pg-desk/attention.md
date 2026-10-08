@@ -112,7 +112,8 @@ reason so that severity and summary say why.
 
 An `issue` entity needs no interpretation row: it is projected from its stored facts, and its
 rules read those facts and the injected clock. Which statuses mean "In Progress" comes from
-configuration (`jira.in_progress_statuses`, matched case-insensitively), not from the tracker.
+the tracker's status category when the stored facts carry one (`indeterminate` is In Progress), and otherwise
+from configuration (`jira.in_progress_statuses`, matched case-insensitively).
 
 | Rule kind                 | Raises when                                                                                                                                                                                                                    | Default severity |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------- |
@@ -127,10 +128,12 @@ configuration (`jira.in_progress_statuses`, matched case-insensitively), not fro
   evaluating clock's zone, so an issue due today is `issue.due-soon` until the day ends. The
   `issue.due-soon` window is measured to that due moment. At the due moment itself the issue is
   `issue.overdue`: the two rules never raise for one issue at once.
-- **Done issues never raise a due-date rule.** An issue whose status is one of
-  `jira.done_statuses` (matched case-insensitively; default `Done`, `Closed`, `Resolved`,
-  `Cancelled`, `Canceled`, which also covers beads' `closed`) is skipped, as is one with no due
-  date, one whose due date cannot be read, or one with no known status (INV-ATTNEVAL-6).
+- **Done issues never raise a due-date rule.** An issue whose tracker status category is `done`
+  is skipped whatever the status is called; with no category in the stored facts (beads, a legacy
+  "No Category" status, an older `pjira`), one whose status is one of `jira.done_statuses`
+  (matched case-insensitively; default `Done`, `Closed`, `Resolved`, `Cancelled`, `Canceled`,
+  which also covers beads' `closed`) is skipped. So is one with no due date, one whose due date cannot be read, or one with no
+  known status (INV-ATTNEVAL-6).
 - **What counts as an update by the operator.** The operator's own comment or status transition.
   An update by anyone else, or by a bot, never resets the clock.
 - **Where the age is measured from.** The later of the operator's last update and the moment the

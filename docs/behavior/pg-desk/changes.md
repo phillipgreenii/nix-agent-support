@@ -8,7 +8,7 @@ change-log records past its cursor as the `pg-desk.changes/v1` envelope (entity-
 6.2, 9.2, 9.3). Besides the list-and-diff core it keeps the watched set
 honest: an entity that dropped out of every watched query is confirmed by one `show` read and then becomes
 closed, merged or removed, an entity terminal in
-its source system stops being active, a rolling sweep re-hydrates the active entities by age, and
+its source system (for a Jira issue, one whose status category is `done`) stops being active, a rolling sweep re-hydrates the active entities by age, and
 a per-poll hydration budget bounds the detail reads (design 6.1, 8.4, 8.5).
 
 ```mermaid
@@ -105,7 +105,7 @@ flowchart LR
 ## Active entities, removal and source-terminal deactivation
 
 An entity is **active** while BOTH hold (design 6.1): it is non-terminal in its source system
-(open PR; issue not in a terminal state; thread with a reply inside `watch.thread.active_window`)
+(open PR; issue not terminal, see "What counts as a terminal issue" below; thread with a reply inside `watch.thread.active_window`)
 AND at least one currently watched query still returns it. Only active entities are swept or
 replayed by `--reset`.
 
@@ -134,12 +134,12 @@ replayed by `--reset`.
   through the hydrate path with change kind `removed` and no list fingerprint, so the stored
   `list_fp` never moves) before deactivating it, and the outcome decides what is logged:
 
-  | The read shows                                                      | Logged                                                        | Entity                                             |
-  | ------------------------------------------------------------------- | ------------------------------------------------------------- | -------------------------------------------------- |
-  | the entity terminal (merged / closed PR; issue in a terminal state) | the classifier's `merged` or `closed` (origin `pg-connector`) | inactive                                           |
-  | `not_found`                                                         | one `removed`                                                 | inactive                                           |
-  | the entity still open (it merely left a query)                      | one `removed`                                                 | inactive                                           |
-  | a failed or degraded read                                           | nothing                                                       | active, membership untouched, read again next call |
+  | The read shows                                           | Logged                                                        | Entity                                             |
+  | -------------------------------------------------------- | ------------------------------------------------------------- | -------------------------------------------------- |
+  | the entity terminal (merged / closed PR; terminal issue) | the classifier's `merged` or `closed` (origin `pg-connector`) | inactive                                           |
+  | `not_found`                                              | one `removed`                                                 | inactive                                           |
+  | the entity still open (it merely left a query)           | one `removed`                                                 | inactive                                           |
+  | a failed or degraded read                                | nothing                                                       | active, membership untouched, read again next call |
 
   Exactly one read is issued per candidate per call. The confirmation reads do not count against
   `hydration.max_per_poll`: they run in the membership phase, before the hydration budget, and
@@ -149,11 +149,33 @@ replayed by `--reset`.
   keeps no timer, counter or queue for it.
 
 - **Source-terminal deactivation.** After every successful hydration (added/changed, sweep or
-  reset) an entity that is terminal in its source system (closed or merged PR, issue in a terminal
-  state, thread with no reply inside `watch.thread.active_window`) is set inactive through a
+  reset) an entity that is terminal in its source system (closed or merged PR, terminal issue, thread with no reply inside `watch.thread.active_window`) is set inactive through a
   compare-and-set write so the sweep stops re-hydrating it. No `removed` record is appended: the
   classifier already logged `closed`/`merged` where it saw the transition. `closed`/`merged` never
   implies the entity left every watched query, and `removed` never implies it was closed.
+
+### What counts as a terminal issue
+
+One rule serves both the classifier (the `closed` and `reopened` records) and source-terminal
+deactivation:
+
+- When the issue's stored facts carry the tracker's **status category** (`issue_show.status_category`,
+  one of `new`, `indeterminate`, `done`), the category decides: `done` is terminal, the others are
+  not, whatever the status is called ("Complete", "Released", "Won't Do"). The `jira.done_statuses`
+  list is not consulted.
+- When there is no category (the beads backend never has one; Jira omits it for a legacy "No
+  Category" status or when an older `pjira` is on `PATH`), the status NAME decides: `closed`,
+  `done`, `resolved`, `cancelled`, `canceled` and `wontfix`, case-insensitive.
+- `closed` and `reopened` compare the two snapshots' terminal-ness, not their status strings, so
+  an issue whose status string is unchanged can still be `closed`. **Rollout:** an issue stored as
+  "Complete" before categories were carried, whose next hydration arrives with category `done`,
+  logs `closed` (without `status_changed`, since the status did not change) and is deactivated. The
+  same happens once to every stored done-category Jira issue on its next hydration, so a
+  one-time burst of `closed` records and deactivations after the category first arrives is expected.
+- A category that disappears is not a movement: when the old snapshot had a category and the new
+  one has none (an older `pjira` on `PATH`, a degraded decode), no `closed`, `reopened` or `opened`
+  is logged, so the name fallback cannot misread "Complete" as reopened. `status_changed` is still
+  logged when the status strings differ.
 
 ## Rolling age sweep: two tiers (design 8.4)
 

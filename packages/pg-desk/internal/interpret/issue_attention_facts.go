@@ -7,13 +7,21 @@ import (
 	"strings"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/classify"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/gather"
 )
 
 // Status categories an issue's status maps to. The set is deliberately tiny:
-// the first time-based issue rule only needs to know whether work is in
-// progress, and the connector exposes no tracker-native status category.
+// the time-based issue rules only need to know whether work is in progress
+// or finished.
+//
+// These are pg-desk's own three values (in_progress|done|other), NOT the
+// tracker-native status category the connector exposes
+// (schema.Issue.StatusCategory: new|indeterminate|done). The mapping, when
+// the connector supplies a category, is indeterminate -> in_progress,
+// done -> done, new -> other; when it does not, the configured
+// jira.in_progress_statuses and jira.done_statuses name lists decide.
 const (
 	IssueStatusCategoryInProgress = "in_progress"
 	IssueStatusCategoryDone       = "done"
@@ -27,9 +35,16 @@ const (
 type IssueAttentionFacts struct {
 	// Status is the tracker's status name, as stored.
 	Status string
-	// StatusCategory is IssueStatusCategoryInProgress when Status is one of
-	// config jira.in_progress_statuses (case-insensitive), else
-	// IssueStatusCategoryOther.
+	// StatusCategory is pg-desk's own coarse category of Status (see the
+	// IssueStatusCategory constants; it is NOT the tracker-native
+	// new|indeterminate|done value, though it is derived from that value when
+	// present). When the stored facts carry the tracker's status category it
+	// decides: indeterminate is IssueStatusCategoryInProgress, done is
+	// IssueStatusCategoryDone, new is IssueStatusCategoryOther, and the
+	// configured status-name lists are ignored. Otherwise it is
+	// IssueStatusCategoryInProgress when Status is one of config
+	// jira.in_progress_statuses (case-insensitive), else
+	// IssueStatusCategoryOther (or Done, see Done).
 	StatusCategory string
 	// Assignee is the issue's assignee as the tracker names them; empty when
 	// unassigned.
@@ -38,10 +53,12 @@ type IssueAttentionFacts struct {
 	// when StatusCategory is in progress and the time is known; the zero time
 	// otherwise.
 	InProgressSince time.Time
-	// Done is true when Status is one of config jira.done_statuses
-	// (case-insensitive): the issue needs nothing more, so a due date no
-	// longer matters. StatusCategory is then IssueStatusCategoryDone, unless
-	// the status is also listed as in progress (in progress wins).
+	// Done is true when the issue needs nothing more, so a due date no longer
+	// matters: the tracker's status category is done when the stored facts
+	// carry one, otherwise Status is one of config jira.done_statuses
+	// (case-insensitive). StatusCategory is then IssueStatusCategoryDone,
+	// unless (names only) the status is also listed as in progress (in
+	// progress wins).
 	Done bool
 	// DueDateKnown is true when the connector supplied a due date that
 	// parses; DueDate is then valid. When false, DueDate being zero means
@@ -77,6 +94,19 @@ type issueAttentionShow struct {
 	DueDate           string `json:"due_date"`
 }
 
+// statusFromTrackerCategory maps the tracker-native category kind (via
+// classify.IssueStatusKind) onto this package's categories.
+func statusFromTrackerCategory(kind classify.IssueStatus) string {
+	switch kind {
+	case classify.IssueStatusInProgress:
+		return IssueStatusCategoryInProgress
+	case classify.IssueStatusDone:
+		return IssueStatusCategoryDone
+	default:
+		return IssueStatusCategoryOther
+	}
+}
+
 // DeriveIssueAttentionFacts decodes a stored entity's facts JSON (a
 // gather.IssueFacts document) and derives IssueAttentionFacts under cfg. It
 // is pure and reads no clock. A document with no issue_show, or one that does
@@ -100,19 +130,25 @@ func DeriveIssueAttentionFacts(factsJSON string, cfg *config.Config) (IssueAtten
 		StatusCategory: IssueStatusCategoryOther,
 		Assignee:       show.Assignee,
 	}
-	for _, s := range cfg.InProgressStatuses() {
-		if show.State != "" && strings.EqualFold(strings.TrimSpace(s), strings.TrimSpace(show.State)) {
-			out.StatusCategory = IssueStatusCategoryInProgress
-			break
-		}
-	}
-	for _, d := range cfg.DoneStatuses() {
-		if show.State != "" && strings.EqualFold(strings.TrimSpace(d), strings.TrimSpace(show.State)) {
-			out.Done = true
-			if out.StatusCategory != IssueStatusCategoryInProgress {
-				out.StatusCategory = IssueStatusCategoryDone
+	if kind, present := classify.IssueStatusKind(json.RawMessage(factsJSON)); present {
+		// The tracker's own category decides; the name lists are not read.
+		out.StatusCategory = statusFromTrackerCategory(kind)
+		out.Done = kind == classify.IssueStatusDone
+	} else {
+		for _, s := range cfg.InProgressStatuses() {
+			if show.State != "" && strings.EqualFold(strings.TrimSpace(s), strings.TrimSpace(show.State)) {
+				out.StatusCategory = IssueStatusCategoryInProgress
+				break
 			}
-			break
+		}
+		for _, d := range cfg.DoneStatuses() {
+			if show.State != "" && strings.EqualFold(strings.TrimSpace(d), strings.TrimSpace(show.State)) {
+				out.Done = true
+				if out.StatusCategory != IssueStatusCategoryInProgress {
+					out.StatusCategory = IssueStatusCategoryDone
+				}
+				break
+			}
 		}
 	}
 	out.DueDate, out.DueDateOnly, out.DueDateKnown = parseDueDate(show.DueDate)

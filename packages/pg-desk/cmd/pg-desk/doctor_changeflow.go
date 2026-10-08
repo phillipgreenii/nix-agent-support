@@ -2,15 +2,18 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"sort"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/changes"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/classify"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/gather"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/ticketkey"
 )
 
 // doctorProbeQuery asks pg-connector whether it recognizes a watched query,
@@ -35,7 +38,8 @@ const consumerStalledMultiple = 3
 //   - the sweep sizing bound active_count / N x poll_interval <= D, only
 //     when --router-config supplies the poll interval;
 //   - and, reported but never a failure, the entities with repeated degraded
-//     hydrations and (with --router-config) the decider roles bound per type.
+//     hydrations, the active Jira issues stored without a status category,
+//     and (with --router-config) the decider roles bound per type.
 //
 // An unmigrated store is REPORTED as such and the new-schema checks are
 // skipped: doctor never refuses or crashes on it, and the old-schema lines
@@ -78,6 +82,7 @@ func doctorChangeFlow(ctx context.Context, w io.Writer, cfg *config.Config, rc *
 	doctorStalledConsumers(w, checkCfg, rc, flow, now, failures)
 	doctorSweepBound(w, checkCfg, rc, flow, failures)
 	doctorRepeatedDegraded(w, flow)
+	doctorIssueStatusCategory(w, st, checkCfg)
 	if rc != nil {
 		doctorRouterRoles(w, rc)
 	}
@@ -216,6 +221,48 @@ func doctorRepeatedDegraded(w io.Writer, flow changes.Flow) {
 	if !found {
 		fmt.Fprintln(w, "    none")
 	}
+}
+
+// doctorIssueStatusCategory reports how many ACTIVE Jira issue entities carry
+// no status category in their stored facts. Report-only, never a failure: the
+// classifier and attention facts fall back to state-name rules for such an
+// issue, so a count that stays above zero means an older pjira, a degraded
+// decode, or a legacy "No Category" status. Which issues are Jira is decided
+// the way `pg-desk run issue` tells a ticket key from a beads id
+// (config ticket_patterns, ticketkey.MatchesShape); with none configured no
+// issue is recognized as Jira and the count is 0.
+func doctorIssueStatusCategory(w io.Writer, st *store.Store, cfg *config.Config) {
+	entities, err := st.ListEntities()
+	if err != nil {
+		fmt.Fprintf(w, "  jira status category: skipped (list entities: %v)\n", err)
+		return
+	}
+	n := countActiveJiraIssuesWithoutCategory(entities, cfg.TicketPatterns)
+	fmt.Fprintf(w, "  jira status category: %d active Jira issues lack a status category\n", n)
+}
+
+// countActiveJiraIssuesWithoutCategory counts the active issue entities whose
+// id is shaped like a Jira ticket key (patterns) and whose stored issue_show
+// carries no recognized status category (classify.IssueStatusKind). An entity
+// never hydrated (no issue_show yet) is not counted: it lacks every fact, not
+// just this one.
+func countActiveJiraIssuesWithoutCategory(entities []store.Entity, patterns []string) int {
+	n := 0
+	for _, e := range entities {
+		if e.EntityType != "issue" || e.Inactive || !ticketkey.MatchesShape(e.EntityID, patterns) {
+			continue
+		}
+		var facts struct {
+			IssueShow json.RawMessage `json:"issue_show"`
+		}
+		if json.Unmarshal([]byte(e.Facts), &facts) != nil || len(facts.IssueShow) == 0 {
+			continue
+		}
+		if _, present := classify.IssueStatusKind(json.RawMessage(e.Facts)); !present {
+			n++
+		}
+	}
+	return n
 }
 
 // doctorRouterRoles lists which decider roles bind to each type. The list is

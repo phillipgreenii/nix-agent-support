@@ -561,15 +561,20 @@ type JiraConfig struct {
 	IncidentLabels     []string `yaml:"incident_labels,omitempty" json:"incident_labels,omitempty"`
 	IncidentIssueTypes []string `yaml:"incident_issue_types,omitempty" json:"incident_issue_types,omitempty"`
 	// InProgressStatuses names the tracker status values that mean "work is
-	// in progress" (matched case-insensitively). Jira's own status category
-	// is not exposed by the connector, so a deployment whose workflow names
-	// differ lists them here; empty means DefaultInProgressStatuses. Attention
+	// in progress" (matched case-insensitively). It is the FALLBACK for an
+	// issue whose stored facts carry no tracker status category (beads, a
+	// legacy "No Category" status, an older pjira); when the connector
+	// supplies the category (schema.Issue.StatusCategory) it decides and this
+	// list is not read. Empty means DefaultInProgressStatuses. Attention
 	// rules over issues read the derived category, never a status name.
 	InProgressStatuses []string `yaml:"in_progress_statuses,omitempty" json:"in_progress_statuses,omitempty"`
 	// DoneStatuses names the tracker status values that mean "nothing more
 	// to do" (matched case-insensitively), for any issue tracker the desk
 	// watches (Jira, beads). A due-date attention rule never raises on an
-	// issue in one of these. Empty means DefaultDoneStatuses.
+	// issue in one of these. Like InProgressStatuses it is the FALLBACK for an
+	// issue with no stored tracker status category; a category of done makes
+	// an issue done whatever its name, and the change classifier never reads
+	// this list (it has its own name fallback). Empty means DefaultDoneStatuses.
 	DoneStatuses []string `yaml:"done_statuses,omitempty" json:"done_statuses,omitempty"`
 }
 
