@@ -3,6 +3,7 @@ package store
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/event"
 )
@@ -532,6 +534,190 @@ func TestScanVeryLongLine(t *testing.T) {
 				t.Errorf("message %q should state the limit", err)
 			}
 		})
+	}
+}
+
+// INV-LOG-2, INV-LOG-11, INV-LOG-27: a line longer than the limit is
+// corruption even when it claims an unknown version. This is accepted
+// behaviour: the scan never buffers such a line to read its v, so memory stays
+// bounded; both outcomes refuse to start and lose nothing.
+func TestScanOversizeLineBeatsUnknownVersion(t *testing.T) {
+	p := func(n int) []byte { return enc(t, plainEvent(n)) }
+	over := []byte(`{"v":2,"x":"` + strings.Repeat("a", event.MaxEventBytes) + `"}`)
+	cases := []struct {
+		name string
+		log  []byte
+		line int
+	}{
+		{"mid-file, newline-terminated", join(p(1), over, []byte("\n"), p(2)), 2},
+		{"the final line, newline-terminated", join(p(1), over, []byte("\n")), 2},
+		{"the final line with no newline", join(p(1), over), 2},
+		{"the first line", join(over, []byte("\n"), p(1)), 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			events, end, rep, err := scan(bytes.NewReader(tc.log))
+			ce := wantCorrupt(t, err, tc.line)
+			var uv *UnknownVersionError
+			if errors.As(err, &uv) {
+				t.Errorf("an oversize line is a CorruptError, not an UnknownVersionError: %v", err)
+			}
+			if !errors.Is(ce, event.ErrTooLarge) {
+				t.Errorf("cause = %v, want it to wrap event.ErrTooLarge", ce.Cause)
+			}
+			if !strings.Contains(err.Error(), "longer than") {
+				t.Errorf("message %q should say the line is longer than the limit", err)
+			}
+			if events != nil || end != 0 || !reflect.DeepEqual(rep, scanReport{}) {
+				t.Errorf("an error must come with zero results")
+			}
+		})
+	}
+}
+
+// INV-LOG-9, INV-LOG-11, INV-LOG-27: CRLF line endings are accepted because
+// encoding/json treats a trailing \r as white space. The library never writes
+// CRLF; this pins what a hand-edited or foreign-tool log does. The \r counts
+// toward the size limit.
+func TestScanAcceptsCRLFLineEndings(t *testing.T) {
+	crlf := func(e event.Event) []byte { return append(dropNewline(enc(t, e)), '\r', '\n') }
+
+	t.Run("two valid CRLF lines", func(t *testing.T) {
+		data := join(crlf(plainEvent(1)), crlf(plainEvent(2)))
+		events, end, rep := mustScan(t, data)
+		wantLines(t, events, eventID(1), eventID(2))
+		if end != int64(len(data)) {
+			t.Errorf("endOfLastCommitted = %d, want the input length %d", end, len(data))
+		}
+		if rep.TornTail || rep.Lines != 2 || rep.Size != int64(len(data)) {
+			t.Errorf("report = %+v, want two lines, the full size and no torn tail", rep)
+		}
+	})
+	t.Run("a lone CRLF as the final line is a blank torn tail", func(t *testing.T) {
+		committed := join(crlf(plainEvent(1)), crlf(plainEvent(2)))
+		events, end, rep := mustScan(t, join(committed, []byte("\r\n")))
+		wantLines(t, events, eventID(1), eventID(2))
+		if end != int64(len(committed)) {
+			t.Errorf("endOfLastCommitted = %d, want %d", end, len(committed))
+		}
+		if !rep.TornTail || rep.TornLine != 3 || rep.TornStart != int64(len(committed)) || rep.TornBytes != 2 {
+			t.Errorf("report = %+v, want a torn tail of 2 bytes at line 3, offset %d", rep, len(committed))
+		}
+		if !errors.Is(rep.TornCause, errBlankLine) {
+			t.Errorf("TornCause = %v, want the blank-line cause", rep.TornCause)
+		}
+	})
+	t.Run("a CRLF blank line mid-file is corrupt", func(t *testing.T) {
+		_, _, _, err := scan(bytes.NewReader(join(crlf(plainEvent(1)), []byte("\r\n"), crlf(plainEvent(2)))))
+		ce := wantCorrupt(t, err, 2)
+		if !strings.Contains(ce.Error(), "blank") {
+			t.Errorf("message %q should say the line is blank", ce)
+		}
+	})
+	t.Run("the carriage return counts toward the size limit", func(t *testing.T) {
+		overhead := len(dropNewline(enc(t, annotatedEvent(1, "n")))) - 1
+		atLimit := dropNewline(enc(t, annotatedEvent(1, strings.Repeat("n", event.MaxEventBytes-overhead))))
+		if len(atLimit) != event.MaxEventBytes {
+			t.Fatalf("the test line is %d bytes, want exactly %d", len(atLimit), event.MaxEventBytes)
+		}
+		_, _, _, err := scan(bytes.NewReader(join(atLimit, []byte("\r\n"))))
+		ce := wantCorrupt(t, err, 1)
+		if !errors.Is(ce, event.ErrTooLarge) {
+			t.Errorf("cause = %v, want it to wrap event.ErrTooLarge", ce.Cause)
+		}
+	})
+}
+
+// INV-LOG-9, INV-LOG-11: every offset the scan reports is a byte count, never
+// a count of runes or characters, so recovery truncates at the right place in
+// a log whose text is not ASCII.
+func TestScanOffsetsCountBytesNotRunes(t *testing.T) {
+	const text = "héllo ☃ 𝄞"
+	b := batchID(1)
+	committed := enc(t, annotatedEvent(1, text))
+	open1 := enc(t, event.Event{Envelope: envelope(2), Payload: event.TaskSkipped{TaskID: testTask, Reason: text, Batch: b}})
+	open2 := enc(t, event.Event{Envelope: envelope(3), Payload: event.TaskSkipped{TaskID: testTask, Reason: text + "!", Batch: b}})
+	full := enc(t, annotatedEvent(4, text))
+	cut := bytes.Index(full, []byte("☃"))
+	if cut < 0 {
+		t.Fatalf("the encoded line %q does not hold the snowman as UTF-8", full)
+	}
+	tail := full[:cut+1] // ends inside the three bytes of ☃
+	if utf8.RuneCount(committed) == len(committed) {
+		t.Fatalf("the fixture must hold multi-byte text")
+	}
+
+	data := join(committed, open1, open2, tail)
+	events, end, rep := mustScan(t, data)
+	wantLines(t, events, eventID(1))
+	if want := int64(len(committed)); end != want {
+		t.Errorf("endOfLastCommitted = %d, want %d bytes", end, want)
+	}
+	if want := int64(len(committed)); rep.UncommittedStart != want {
+		t.Errorf("UncommittedStart = %d, want %d bytes", rep.UncommittedStart, want)
+	}
+	if rep.UncommittedEvents != 2 || rep.UncommittedLine != 2 || rep.UncommittedBatch != b {
+		t.Errorf("report = %+v, want 2 uncommitted events of batch %s from line 2", rep, b)
+	}
+	if want := int64(len(committed) + len(open1) + len(open2)); rep.TornStart != want {
+		t.Errorf("TornStart = %d, want %d bytes", rep.TornStart, want)
+	}
+	if want := int64(len(tail)); rep.TornBytes != want {
+		t.Errorf("TornBytes = %d, want %d bytes", rep.TornBytes, want)
+	}
+	if rep.TornLine != 4 || rep.Size != int64(len(data)) {
+		t.Errorf("TornLine = %d, Size = %d; want 4 and %d", rep.TornLine, rep.Size, len(data))
+	}
+}
+
+// INV-LOG-9, INV-LOG-27: the scan's read buffer is reused for every line, so
+// a returned event must hold no slice of it. A correction's fields are a
+// json.RawMessage, the one payload value that is bytes of the line itself.
+func TestScanDoesNotAliasItsBuffer(t *testing.T) {
+	corrected := event.Event{Envelope: envelope(2), Payload: event.EventCorrected{
+		Target: eventID(100),
+		Fields: map[string]json.RawMessage{
+			"note":  json.RawMessage(`"the corrected note"`),
+			"label": json.RawMessage(`"the corrected label"`),
+		},
+		Reason: "typo",
+	}}
+	// The first line is the largest, so the buffer is as big as it will get
+	// and every later line overwrites it from the start instead of getting a
+	// new array (a grown buffer would leave the earlier line's bytes intact
+	// and hide an alias).
+	originals := []event.Event{annotatedEvent(1, strings.Repeat("a", 200*1024)), corrected}
+	for i := 3; i <= 6; i++ {
+		// Large lines of a different byte, so a slice of the buffer that
+		// still pointed at the correction's line would now show these bytes.
+		originals = append(originals, annotatedEvent(i, strings.Repeat(string(rune('a'+i)), 100*1024)))
+	}
+	originals = append(originals, event.Event{Envelope: envelope(7), Payload: event.EventCorrected{
+		Target: eventID(101),
+		Fields: map[string]json.RawMessage{"note": json.RawMessage(`"another corrected note"`)},
+	}})
+	var want [][]byte
+	for _, e := range originals {
+		want = append(want, enc(t, e))
+	}
+	data := join(want...)
+
+	events, end, rep := mustScan(t, data)
+	if len(events) != len(originals) || end != int64(len(data)) || rep.TornTail {
+		t.Fatalf("scan returned %d events, end %d of %d, torn %v", len(events), end, len(data), rep.TornTail)
+	}
+	// The input must not be what the events point into either.
+	for i := range data {
+		data[i] = 'X'
+	}
+	for i, e := range events {
+		got, err := event.Encode(e)
+		if err != nil {
+			t.Fatalf("Encode of returned event %d: %v", i+1, err)
+		}
+		if !bytes.Equal(append(got, '\n'), want[i]) {
+			t.Errorf("returned event %d no longer encodes to its line:\n got %.120s\nwant %.120s", i+1, got, want[i])
+		}
 	}
 }
 
