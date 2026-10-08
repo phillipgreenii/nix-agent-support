@@ -10,10 +10,10 @@ import (
 // ReviewEscalationQuery is the named pg-connector issue query that lists
 // every OPEN pending-review escalation bead (in every non-closed state, human
 // labelled beads included). The deployment defines it in the issue backend's
-// queries; it is the same name pg-router-review-escalator lists.
+// queries. The retired pg-router-review-escalator listed the same name.
 const ReviewEscalationQuery = "pending-review-escalations"
 
-// Metadata keys of an escalation bead, owned by pg-router-review-escalator
+// Metadata keys of an escalation bead, written by the retired pg-router-review-escalator
 // and restated here as literals (the exec-not-import discipline of this
 // package): the dedupe key, the head a per-PR bead was raised for, and the
 // PRs a roll-up bead covers.
@@ -94,8 +94,8 @@ func (g *Gatherer) lookupPendingReview(ctx context.Context, entityID string) *Re
 // lookupReviewEscalations lists the open escalation beads and keeps those
 // covering this PR. Only a fully successful list is trusted: a degraded
 // fan-out (exit 2) could be missing the very bead that covers the PR, so it
-// is a failure, the same rule pg-router-review-escalator applies before it
-// would create a duplicate.
+// is a failure (the retired pg-router-review-escalator applied the same rule
+// before it would create a duplicate).
 func (g *Gatherer) lookupReviewEscalations(ctx context.Context, entityID string, f *Facts) *ReviewEscalationsFact {
 	res, err := g.run(ctx, []string{"issue", "list", "--query", ReviewEscalationQuery}, g.issueBeadsDirEnv())
 	if err != nil {

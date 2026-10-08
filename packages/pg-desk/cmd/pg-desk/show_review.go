@@ -17,7 +17,8 @@ var reviewNow interpret.Clock = interpret.SystemClock{}
 // generic PR hydration stored (the pg-connector `pr review pending` record
 // and the open escalation beads covering the PR); the view itself looks
 // nothing up and changes nothing. The display is an addition to the
-// escalation raised by pg-router-review-escalator, never a substitute.
+// escalation (formerly raised by the retired pg-router-review-escalator), never a
+// substitute.
 
 // Review states in viewReview.State.
 const (

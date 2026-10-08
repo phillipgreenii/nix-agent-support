@@ -680,8 +680,9 @@ This amendment records S29, S30, S31, S32, S33, S34, S35.
   entity rule), and on ADR 0062's pg-connector Tier-1 umbrella and Tier-2 backend architecture.
 - Consistent with ADR 0064's pg-pr retirement: the flow does not depend on pg-pr, and the review
   role's `pg-pr review submit` call is one of the removals the flow makes.
-- The pending-review escalation host is recorded in the Deciders cluster's Consequences; its
-  behavior is documented in `packages/pg-router-review-escalator/docs/behavior/README.md`.
+- The pending-review escalation host is recorded in the Deciders cluster's Consequences; the package
+  and its behavior doc were removed (bead `pg2-d25eu.13`) after the escalator was superseded (see the
+  amendment of 2026-10-06).
 - Tracked under program epic `pg2-2j5ac.52`, docket `pg2-2j5ac.52.2`. The design questions Q-A and
   Q-B were answered in bead `pg2-2j5ac.52.1` (S25, S26), the exit-code ruling was made on
   escalation bead `pg2-2j5ac.52.24` (S27) and the mergeability ruling on the `pg2-2j5ac.52.6`

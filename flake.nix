@@ -351,12 +351,6 @@
           pg-router-disk-watchdog = final.callPackage ./packages/pg-router-disk-watchdog {
             inherit (goBuilders) mkGoApp;
           };
-          # pg-router-review-escalator: Pattern A (ADR 0008), a stdlib-only module that
-          # execs pg-connector (pr review submit, issue ...) and the operator's push
-          # command as subprocesses (bead pg2-kftf9.15); no local `replace`/modRoot.
-          pg-router-review-escalator = final.callPackage ./packages/pg-router-review-escalator {
-            inherit (goBuilders) mkGoApp;
-          };
           # beads-exporter: Pattern A (ADR 0008), a zero-dependency module that
           # execs a pinned, read-only bd (by the absolute path its config file
           # names) and serves hand-rolled Prometheus text. No local
@@ -1244,7 +1238,6 @@
                 "pg-desk-shadow"
                 "pg-router-probe"
                 "pg-router-disk-watchdog"
-                "pg-router-review-escalator"
                 "ccpool-probe"
                 "pg-rescue"
                 "beads-exporter"
@@ -4002,17 +3995,6 @@
 
                     touch "$out"
                   '';
-
-              # pg-router-review-escalator (bead pg2-kftf9.15) - table-driven suite over
-              # the escalation policy (dedupe, re-notify interval with a fake clock,
-              # auto-close, loud failure on each delivery path, systemic roll-up) with a
-              # fake tracker, notifier and Runner. No testDeps: nothing real is exec'd
-              # except `sh` in the ExecRunner test.
-              pg-router-review-escalator-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
-                pname = "pg-router-review-escalator-go-tests";
-                src = lib.cleanSource ./packages/pg-router-review-escalator; # matches default.nix
-                gomod2nixToml = ./packages/pg-router-review-escalator/gomod2nix.toml;
-              };
 
               # ccpool-probe (docket pg2-93e5s, packet 2) — fixture-driven
               # unit/integration suite (needs-input/zombie-drift checks,
@@ -10194,7 +10176,6 @@
               pg-desk-shadow
               pg-router-probe
               pg-router-disk-watchdog
-              pg-router-review-escalator
               beads-exporter
               beads-exporter-contract
               ccpool-probe
