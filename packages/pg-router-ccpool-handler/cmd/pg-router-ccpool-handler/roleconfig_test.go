@@ -426,3 +426,44 @@ func TestLoadRole_worktreeQuietWindow(t *testing.T) {
 		})
 	}
 }
+
+// TestLoadRole_extraAllowedTools (bead pg2-nk6th.5): absent/empty => no extra
+// grants; a list is carried through in order; a blank entry is rejected.
+func TestLoadRole_extraAllowedTools(t *testing.T) {
+	mk := func(extra string) string {
+		return `{"name":"zr-drain","type":"ccpool","ccpool":{"actor":"a","completion":"close-only","onFailure":"unclaim","onDispatchFail":"unclaim","promptBody":"p"` + extra + `}}`
+	}
+	for _, tc := range []struct {
+		name, extra string
+		want        []string
+		wantErr     bool
+	}{
+		{"absent", "", nil, false},
+		{"empty list", `,"extraAllowedTools":[]`, []string{}, false},
+		{"ordered list", `,"extraAllowedTools":["Skill","Bash(git push:*)","Bash(gh pr create:*)"]`, []string{"Skill", "Bash(git push:*)", "Bash(gh pr create:*)"}, false},
+		{"blank entry rejected", `,"extraAllowedTools":["Skill"," "]`, nil, true},
+		{"empty entry rejected", `,"extraAllowedTools":[""]`, nil, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			role, err := loadRole(mustWriteRoleFile(t, mk(tc.extra)))
+			if tc.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "extraAllowedTools") {
+					t.Fatalf("err = %v, want an extraAllowedTools error", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := role.CCPool.ExtraAllowedTools
+			if len(got) != len(tc.want) {
+				t.Fatalf("ExtraAllowedTools = %q, want %q", got, tc.want)
+			}
+			for i := range tc.want {
+				if got[i] != tc.want[i] {
+					t.Errorf("ExtraAllowedTools[%d] = %q, want %q", i, got[i], tc.want[i])
+				}
+			}
+		})
+	}
+}

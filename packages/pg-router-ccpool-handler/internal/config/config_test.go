@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -131,5 +132,69 @@ func TestValidateQuietWindowOverride(t *testing.T) {
 func TestDefault_quietWindowStaysTwoMinutes(t *testing.T) {
 	if got := Default().WorktreeQuietWindow; got != 2*time.Minute {
 		t.Errorf("default WorktreeQuietWindow = %v, want 2m", got)
+	}
+}
+
+// TestMergeAllowedTools (bead pg2-nk6th.5): the role's extra grants follow the
+// handler-wide list in order, a grant already present is dropped (first
+// occurrence wins), and no extras returns the base verbatim.
+func TestMergeAllowedTools(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		base  string
+		extra []string
+		want  string
+	}{
+		{"no extras returns base verbatim", " Read , Edit ", nil, " Read , Edit "},
+		{"empty extras returns base verbatim", "Read,Edit", []string{}, "Read,Edit"},
+		{"extras follow base in order", "Read,Edit", []string{"Skill", "Bash(gh pr view:*)"}, "Read,Edit,Skill,Bash(gh pr view:*)"},
+		{"extra already in base is dropped", "Read,Edit,Bash(bd:*)", []string{"Bash(bd:*)", "Skill"}, "Read,Edit,Bash(bd:*),Skill"},
+		{"duplicate extras collapse to first", "Read", []string{"Skill", "Agent", "Skill"}, "Read,Skill,Agent"},
+		{"duplicate within base collapses", "Read,Edit,Read", []string{"Skill"}, "Read,Edit,Skill"},
+		{"empty base", "", []string{"Skill"}, "Skill"},
+		{"blank extras ignored", "Read", []string{"", "  ", "Skill"}, "Read,Skill"},
+		{"extra is trimmed before comparing", "Read", []string{" Read ", " Skill "}, "Read,Skill"},
+		{"comma inside parens is not a separator", "Read,Bash(echo a,b:*)", []string{"Bash(echo a,b:*)", "Skill"}, "Read,Bash(echo a,b:*),Skill"},
+		{"extra holding several grants is split and deduped", "Read", []string{"Skill,Read,Agent"}, "Read,Skill,Agent"},
+		{"narrow gh grants stay distinct from a prefix grant", "Bash(gh pr:*)", []string{"Bash(gh pr view:*)"}, "Bash(gh pr:*),Bash(gh pr view:*)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := MergeAllowedTools(tc.base, tc.extra); got != tc.want {
+				t.Errorf("MergeAllowedTools(%q, %q) = %q, want %q", tc.base, tc.extra, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestMergeAllowedTools_defaultNeverGainsGitPush pins the bead's invariant:
+// `git push` is NOT in the handler-wide default list (a role that needs it gets
+// it through extraAllowedTools only), and merging a role's extras leaves the
+// default untouched for every other role.
+func TestMergeAllowedTools_defaultNeverGainsGitPush(t *testing.T) {
+	base := Default().AllowedTools
+	for _, g := range SplitAllowedTools(base) {
+		if strings.Contains(g, "git push") {
+			t.Errorf("handler-wide default AllowedTools contains %q; git push MUST be granted per role only", g)
+		}
+	}
+	_ = MergeAllowedTools(base, []string{"Bash(git push:*)"})
+	if Default().AllowedTools != base {
+		t.Error("merging mutated the default AllowedTools")
+	}
+}
+
+func TestSplitAllowedTools(t *testing.T) {
+	got := SplitAllowedTools(" Read, Bash(a,b:*) ,,Edit ")
+	want := []string{"Read", "Bash(a,b:*)", "Edit"}
+	if len(got) != len(want) {
+		t.Fatalf("SplitAllowedTools = %q, want %q", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("SplitAllowedTools[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+	if got := SplitAllowedTools(""); len(got) != 0 {
+		t.Errorf("SplitAllowedTools(\"\") = %q, want none", got)
 	}
 }

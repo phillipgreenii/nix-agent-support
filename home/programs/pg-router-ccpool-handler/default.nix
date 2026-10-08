@@ -354,6 +354,12 @@ let
             # 2m default applies, unchanged behavior).
             inherit (roleCfg.ccpool) worktreeQuietWindow;
           }
+          // lib.optionalAttrs (roleCfg.ccpool.extraAllowedTools != [ ]) {
+            # extraAllowedTools (bead pg2-nk6th.5): omitted when empty, so a role
+            # that never sets it decodes to "no extra grants" (the handler-wide
+            # allowedTools applies unchanged).
+            inherit (roleCfg.ccpool) extraAllowedTools;
+          }
           // lib.optionalAttrs (roleCfg.ccpool.beadsDir != "") {
             # beadsDir (bead pg2-2grpj): omitted when unset, like poolDir.
             inherit (roleCfg.ccpool) beadsDir;
@@ -531,6 +537,33 @@ let
                   tracker for the escalation triager. Every handler-side bd
                   call for the role (completion polling, on_failure, unclaim,
                   comment) resolves against it. Empty (default) keeps repoRoot.
+                '';
+              };
+              extraAllowedTools = lib.mkOption {
+                type = lib.types.listOf lib.types.str;
+                default = [ ];
+                example = [
+                  "Skill"
+                  "Bash(git push:*)"
+                  "Bash(gh pr create:*)"
+                ];
+                description = ''
+                  Per-role tool grants (`roleFile.CCPool.ExtraAllowedTools`, bead
+                  pg2-nk6th.5), merged onto the handler-wide
+                  `launchConfig.allowedTools` (+ `launchConfig.extraAllowedTools`)
+                  for THIS role's `ccpool new --allowed-tools` only: the
+                  handler-wide grants come first, then these in order, with
+                  duplicates dropped. Each entry is one grant in the same syntax
+                  `allowedTools` uses. Default `[ ]` adds nothing, leaving the
+                  handler-wide list unchanged for the role.
+
+                  Put a grant only one role needs here, never in the handler-wide
+                  list, which would widen every role. In particular `git push`
+                  MUST NOT go into the handler-wide list. Prefix grants are
+                  coarse: `Bash(git -C:*)` permits `git -C <path> push`, and
+                  `Bash(gh pr:*)` also permits `gh pr merge`/`edit`, so prefer
+                  narrow grants such as `Bash(gh pr create:*)`; a "no push / no
+                  merge" rule for a prefix grant stays prompt-enforced only.
                 '';
               };
               onFailure = lib.mkOption {

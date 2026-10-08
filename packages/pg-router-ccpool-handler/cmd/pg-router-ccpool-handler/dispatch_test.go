@@ -212,3 +212,37 @@ func TestBuildDeps_lockDirUnderHandlerStateDir(t *testing.T) {
 		t.Errorf("default LockDir = %q, want /xdg/pg-router-ccpool-handler/locks", deps.LockDir)
 	}
 }
+
+// TestBuildDeps_mergesRoleExtraAllowedTools (bead pg2-nk6th.5) proves buildDeps
+// merges a ccpool role's ExtraAllowedTools onto the handler-wide AllowedTools
+// for that role's runner only: handler-wide grants first, then the role's own,
+// duplicates dropped; a sibling role with none, and the caller's cfg, are
+// untouched.
+func TestBuildDeps_mergesRoleExtraAllowedTools(t *testing.T) {
+	cfg := config.Default()
+	cfg.AllowedTools = "Read,Bash(bd:*)"
+	zr := roles.Role{Name: "zr-drain", CCPool: &roles.CCPoolConfig{
+		ExtraAllowedTools: []string{"Skill", "Bash(bd:*)", "Bash(git push:*)", "Bash(gh pr view:*)", "Skill"},
+	}}
+	plain := roles.Role{Name: "review", CCPool: &roles.CCPoolConfig{}}
+
+	zrCLI, ok := buildDeps(cfg, zr).CC.(*ccpool.CLIRunner)
+	if !ok {
+		t.Fatalf("Deps.CC is not a *ccpool.CLIRunner")
+	}
+	const want = "Read,Bash(bd:*),Skill,Bash(git push:*),Bash(gh pr view:*)"
+	if zrCLI.AllowedTools != want {
+		t.Errorf("zr runner AllowedTools = %q, want %q", zrCLI.AllowedTools, want)
+	}
+	plainDeps := buildDeps(cfg, plain)
+	if got := plainDeps.CC.(*ccpool.CLIRunner).AllowedTools; got != "Read,Bash(bd:*)" {
+		t.Errorf("role without extras AllowedTools = %q, want the handler-wide list unchanged", got)
+	}
+	if cfg.AllowedTools != "Read,Bash(bd:*)" {
+		t.Errorf("caller cfg.AllowedTools mutated to %q", cfg.AllowedTools)
+	}
+	// A command role (no CCPool block) must not panic and keeps the list.
+	if got := buildDeps(cfg, roles.Role{Name: "cmd", Type: "command"}).CC.(*ccpool.CLIRunner).AllowedTools; got != cfg.AllowedTools {
+		t.Errorf("command role AllowedTools = %q, want %q", got, cfg.AllowedTools)
+	}
+}

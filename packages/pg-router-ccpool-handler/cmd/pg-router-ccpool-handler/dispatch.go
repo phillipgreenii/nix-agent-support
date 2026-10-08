@@ -366,6 +366,12 @@ func stampExternalID(role roles.Role, prefix, beadID string, now func() time.Tim
 // each of those call sites' own doc comments on that pre-existing,
 // unchanged-by-this-bead posture).
 func buildDeps(cfg config.Config, role roles.Role) executor.Deps {
+	// Per-role tool grants (bead pg2-nk6th.5): cfg is a by-value parameter, so
+	// merging the role's ExtraAllowedTools onto the handler-wide AllowedTools
+	// here scopes the grants to this role's runner (and its Deps.Cfg) only.
+	if role.CCPool != nil {
+		cfg.AllowedTools = config.MergeAllowedTools(cfg.AllowedTools, role.CCPool.ExtraAllowedTools)
+	}
 	cc := ccpool.NewCLIRunner(cfg)
 	if role.CCPool != nil && role.CCPool.PoolDir != "" {
 		cc = ccpool.NewCLIRunnerForPool(cfg, role.CCPool.PoolDir)

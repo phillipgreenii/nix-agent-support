@@ -91,6 +91,10 @@ type roleFile struct {
 		// (pollInterval, worktreeQuietMax) are checked at dispatch, where both
 		// are loaded (config.Config.ValidateQuietWindowOverride).
 		WorktreeQuietWindow string `json:"worktreeQuietWindow"`
+		// ExtraAllowedTools (bead pg2-nk6th.5): per-role tool grants merged onto
+		// the handler-wide allowedTools for this role only; see
+		// roles.CCPoolConfig.ExtraAllowedTools. Absent/empty => no extra grants.
+		ExtraAllowedTools []string `json:"extraAllowedTools"`
 	} `json:"ccpool,omitempty"`
 	Command *struct {
 		Argv []string `json:"argv"`
@@ -157,6 +161,11 @@ func loadRole(path string) (roles.Role, error) {
 				return roles.Role{}, fmt.Errorf("role config %s: worktreeQuietWindow %q must be > 0 (omit it to use the handler default)", path, rf.CCPool.WorktreeQuietWindow)
 			}
 		}
+		for i, g := range rf.CCPool.ExtraAllowedTools {
+			if strings.TrimSpace(g) == "" {
+				return roles.Role{}, fmt.Errorf("role config %s: extraAllowedTools[%d] is empty", path, i)
+			}
+		}
 		// isolation.prefetch (bead pg2-hh32y) checks a commit out inside the
 		// worktree this handler created, so it is valid ONLY with the
 		// worktree strategy, and its templates must parse.
@@ -183,6 +192,7 @@ func loadRole(path string) (roles.Role, error) {
 
 			BudgetStopEscalateAfter: stopAfter,
 			WorktreeQuietWindow:     quietWindow,
+			ExtraAllowedTools:       rf.CCPool.ExtraAllowedTools,
 		}
 	case "command":
 		if rf.Command == nil {

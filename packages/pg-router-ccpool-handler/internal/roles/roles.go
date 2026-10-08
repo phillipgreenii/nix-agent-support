@@ -81,6 +81,15 @@ type CCPoolConfig struct {
 	// least config.QuietWindowOverrideMinPolls x PollInterval, and no more than
 	// WorktreeQuietMax.
 	WorktreeQuietWindow time.Duration
+	// ExtraAllowedTools (bead pg2-nk6th.5) are tool grants, in the same syntax
+	// as config.Config.AllowedTools (e.g. "Bash(gh pr create:*)"), merged onto
+	// the handler-wide AllowedTools for THIS role's dispatches only
+	// (config.MergeAllowedTools, applied in buildDeps): handler-wide grants
+	// first, then these in order, duplicates dropped. Empty (the default) leaves
+	// the handler-wide list unchanged. A grant that only one role needs (e.g.
+	// `git push`) belongs here, never in the handler-wide list, which would
+	// widen every role.
+	ExtraAllowedTools []string
 }
 
 // IsolationConfig selects how a ccpool role's WORKSPACE_ROOT is prepared before

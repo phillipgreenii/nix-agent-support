@@ -5422,6 +5422,12 @@
                           onFailure = "unclaim";
                           onDispatchFail = "leave";
                           promptBody = "review prompt";
+                          # extraAllowedTools (bead pg2-nk6th.5): a per-role list
+                          # renders into this role's own JSON only.
+                          extraAllowedTools = [
+                            "Skill"
+                            "Bash(gh pr create:*)"
+                          ];
                           pool = {
                             enable = true;
                             dir = "/tmp/pg2-mr0sl-review-pool";
@@ -5879,6 +5885,12 @@
                         # opted in) must carry no such key at all.
                         [ "$(jq -r .ccpool.poolDir "$roleWithOwnPoolHandlerDir/review.json")" = /tmp/pg2-mr0sl-review-pool ]
                         jq -e '.ccpool | has("poolDir") | not' "$handlerCommandDir/feedback.json" >/dev/null
+
+                        # extraAllowedTools (bead pg2-nk6th.5): a role that sets
+                        # it renders the list in order under that role's own
+                        # JSON; a role that never sets it carries no such key.
+                        [ "$(jq -c .ccpool.extraAllowedTools "$roleWithOwnPoolHandlerDir/review.json")" = '["Skill","Bash(gh pr create:*)"]' ]
+                        jq -e '.ccpool | has("extraAllowedTools") | not' "$handlerCommandDir/feedback.json" >/dev/null
 
                         # poolMetrics script argv (bead pg2-h5vno): the
                         # per-role pool AND the handler-wide pool (whose dir

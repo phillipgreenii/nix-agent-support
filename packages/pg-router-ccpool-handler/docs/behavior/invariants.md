@@ -484,3 +484,18 @@ review`. The claim is still released (status open, assignee cleared) — the lab
   removed. Removal MUST NOT weaken the lock's mutual exclusion: a taker that had the file open
   when it was removed MUST retry on the file that now exists rather than report a lock it does not
   hold. A removal that fails is logged-and-ignored, never a dispatch failure. Bead `pg2-bjhoq`.
+
+- **`INV-CCH-25`** — the tool grants a dispatched session starts with are the handler-wide list
+  plus, for a role that sets them, that role's own extra grants, and no other role sees them. The
+  merged list MUST be the handler-wide grants first in their original order, then the role's grants
+  in the order given, with a grant that already appears (in the handler-wide list or earlier in the
+  role's) dropped, so no grant repeats. A role that sets none MUST get the handler-wide list
+  unchanged. A blank grant in a role config MUST be rejected when the role is loaded. A grant only
+  one role needs, `git push` above all, MUST be given to that role and MUST NOT be added to the
+  handler-wide list, which would widen every role. **Why.** The session runs deny-by-default
+  (`dontAsk`, no prompt), so a role whose protocol needs a tool the handler-wide list lacks would
+  have it denied, and widening the one handler-wide list widens every role. **Accepted limitation.**
+  A grant is a prefix match: `Bash(git -C:*)` also permits `git -C <path> push`, and `Bash(gh pr:*)`
+  also permits `gh pr merge`, so a rule such as "no push" or "no merge" behind a prefix grant is
+  enforced by the role's prompt only; give a narrow grant (`Bash(gh pr create:*)`) where one
+  exists. Bead `pg2-nk6th.5`, plan `2026-10-08-drain-worker-roles` section A4.

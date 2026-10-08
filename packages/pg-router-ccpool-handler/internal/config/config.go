@@ -303,6 +303,67 @@ func defaultAllowedTools(prTool string) string {
 	return baseAllowedTools + ",Bash(" + prTool + ":*)"
 }
 
+// SplitAllowedTools splits an --allowed-tools value into its individual
+// grants. The separator is a comma, but only a comma OUTSIDE parentheses
+// separates grants: a grant such as `Bash(echo a,b:*)` keeps its inner comma.
+// Each grant is whitespace-trimmed and empty pieces are dropped.
+func SplitAllowedTools(list string) []string {
+	var out []string
+	depth, start := 0, 0
+	flush := func(end int) {
+		if g := strings.TrimSpace(list[start:end]); g != "" {
+			out = append(out, g)
+		}
+	}
+	for i, r := range list {
+		switch r {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case ',':
+			if depth == 0 {
+				flush(i)
+				start = i + 1
+			}
+		}
+	}
+	flush(len(list))
+	return out
+}
+
+// MergeAllowedTools merges a role's own extra grants onto the handler-wide
+// allowedTools value (bead pg2-nk6th.5): the handler-wide grants come first in
+// their original order, then each extra grant in the order given, comma-joined.
+// A grant that is already present (in base or earlier in extra) is dropped, so
+// the first occurrence wins and the result never repeats a grant. With no
+// extra grants the base value is returned verbatim (byte-for-byte), so a role
+// that sets none is unchanged.
+func MergeAllowedTools(base string, extra []string) string {
+	if len(extra) == 0 {
+		return base
+	}
+	seen := map[string]bool{}
+	var merged []string
+	add := func(g string) {
+		if g = strings.TrimSpace(g); g != "" && !seen[g] {
+			seen[g] = true
+			merged = append(merged, g)
+		}
+	}
+	for _, g := range SplitAllowedTools(base) {
+		add(g)
+	}
+	for _, e := range extra {
+		for _, g := range SplitAllowedTools(e) {
+			add(g)
+		}
+	}
+	return strings.Join(merged, ",")
+}
+
 // Default returns this module's own baseline Config. Values mirror
 // packages/pg-router/internal/config.Default()'s corresponding fields as of
 // the 2026-09-11 move, so a deployment that supplies no overrides observes
