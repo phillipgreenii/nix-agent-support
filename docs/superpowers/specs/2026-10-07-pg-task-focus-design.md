@@ -311,7 +311,7 @@ of the batch it closes.
     and the result: a retry with the same `id` and hash returns the original `changed: false`
     result, a different hash under that `id` is `409 id_conflict`, and nothing is written to the
     log. After a restart the cache is gone and the request is evaluated again against the present
-    state. A repeated `start` with the same `id` returns the original result like any other request.
+    state. A repeated `start` with the same `id` returns the original result like any other request. A dry run reads and writes neither the index nor the no-op cache.
 12. **State version.** The state `version` is the pair (`log_lines`, `config_generation`): the number
     of lines in the log, and a counter seeded at each start with the start time in milliseconds and advanced on each
     successful config reload, so a pair never recurs across a restart. `state_version` (the dry-run
@@ -518,8 +518,7 @@ read-only; a **change** control opens a modal.
     cycle that spans a rollover is harmless. A period change never stops a cycle by itself and
     never prefills a stop time. The dry run lists the blocking cycles (`blocking_cycles`: id,
     title, status and start) and still returns the full preview, and the change modal then blocks
-    confirmation and shows each one with Stop and End at actions. A stopped cycle never blocks and
-    belongs to the date on which it started.
+    confirmation and shows each one with Stop and End at actions. A stopped cycle never blocks.
 
 ## Work cycles and the timer
 
@@ -689,7 +688,7 @@ identity field). `503` is an unavailable store. `cycle_stopped` is 409 because t
 existing stop event, not because its own content is wrong.
 
 A message cites only the ids of events that are stored (the event a request would have added is
-"the new event"), and every instant in a message is given in UTC (RFC 3339 with `Z`) followed,
+"the new event", and a cycle it would create "the new cycle"), and every instant in a message is given in UTC (RFC 3339 with `Z`) followed,
 in parentheses, by the same instant in the active day period's zone with its identifier once a
 day period exists (for example `2026-10-07T14:00:00Z (10:00 America/New_York)`), so no zone is
 ever implicit.
@@ -711,7 +710,7 @@ ever implicit.
 | `409`  | `interrupted_cycle_not_running`     | A start with `interrupts` whose interrupted cycle is not running at that instant                                                                                                                                                                                                                                                                            |
 | `409`  | `cycle_active`                      | A period change while any cycle is running or paused now, whatever its `effective_at`; the details name the cycles                                                                                                                                                                                                                                          |
 | `409`  | `cycle_segments_overlap`            | Two segments, or a pause and a resume, of one cycle would overlap (for example a break inside an existing pause)                                                                                                                                                                                                                                            |
-| `409`  | `break_ends_at_stop`                | A back-filled break would end at or after the instant the cycle was stopped; the message points at "end at"                                                                                                                                                                                                                                                 |
+| `409`  | `break_ends_at_stop`                | A back-filled break would start or end at or after the instant the cycle was stopped; the message points at "end at"                                                                                                                                                                                                                                        |
 | `409`  | `clock_behind_log`                  | No `effective_at` was given and the clock reads earlier than the newest recorded event of the entity                                                                                                                                                                                                                                                        |
 | `409`  | `task_already_resolved`             | The task is already completed or skipped, found from the present state or because a change would leave two live resolutions; the message names the resolving events                                                                                                                                                                                         |
 | `409`  | `task_withdrawn`                    | A completion or skip of a withdrawn task, unless its `effective_at` precedes the withdrawal                                                                                                                                                                                                                                                                 |
@@ -730,7 +729,7 @@ ever implicit.
 | `422`  | `empty_running_segment`             | A pause, interrupt, switch or stop effective at (or, found by a correction, before) the start or resume that opened the running segment, so the segment has no length                                                                                                                                                                                       |
 | `422`  | `cycle_event_before_start`          | A pause, resume, boost, stop or annotation that sorts before its cycle's start, including an event of a cycle that has no live start                                                                                                                                                                                                                        |
 | `422`  | `resolution_before_materialization` | A completion or skip effective before the task's materialization                                                                                                                                                                                                                                                                                            |
-| `422`  | `period_out_of_order`               | A period change whose `start` is later than the current one but whose effective instant sorts before an existing change of the same kind                                                                                                                                                                                                                    |
+| `422`  | `period_out_of_order`               | A period change that sorts, by effective instant, before an existing change of the same kind whose `start` is lower than its own (the order is violated although its `start` is later)                                                                                                                                                                      |
 | `503`  | `store_unavailable`                 | The outcome is unknown; retry with the same `id`. The body carries `store` (`state`, `reason`, `since`)                                                                                                                                                                                                                                                     |
 | `503`  | `not_ready`                         | Replay has not finished or the first writability check has not passed                                                                                                                                                                                                                                                                                       |
 
