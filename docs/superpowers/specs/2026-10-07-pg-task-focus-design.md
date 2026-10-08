@@ -215,8 +215,8 @@ The log is one UTF-8 file of newline-delimited JSON, at
    corruption (refuse to start).
 8. **Corrections and retractions.**
    1. They are applied in log order; for several corrections of one target the last wins.
-   2. A target MUST precede the event that corrects or retracts it in the log. An unknown target is
-      rejected as `404 unknown_event`.
+   2. A target MUST precede the event that corrects or retracts it in the log. An unknown target,
+      or a batch id that matches no batch, is rejected as `404 unknown_event`.
    3. A correction MUST NOT change `type` or any identity field (`cycle_id`, `task_id`, `target`,
       `batch`, `interrupts`, `definition`, `kind`, `start`, `cadence`, `period`, `profile`). A
       correction MUST NOT target `event.corrected`, `event.retracted` or `batch.committed`. A
@@ -224,7 +224,9 @@ The log is one UTF-8 file of newline-delimited JSON, at
    4. A retraction MAY target any event except `batch.committed`, including a correction or another
       retraction (so every correction is undoable). A retraction of a lone `task.materialized` or
       `period.changed` MUST be rejected, and so MUST any retraction that would leave a task whose
-      period has no live `period.changed`; a whole batch is retracted with `batch`.
+      period has no live `period.changed`; a whole batch is retracted with `batch`. An event that carries a `batch` MUST be retracted
+      only through that batch, never alone (a lone retraction would leave, for example, a task open
+      in a period that was already left).
    5. A retraction of a batch MUST be rejected (`409 batch_has_dependents`) when a later live event
       references an entity that batch created (for example a task completed in the new period). A
       late completion or skip of a task that the batch marked `missed` is NOT a dependent:
@@ -243,6 +245,7 @@ The log is one UTF-8 file of newline-delimited JSON, at
     `skipped`, `missed` or `withdrawn`.
     - `completed` and `skipped` are the operator's resolutions. A task MAY be completed or skipped from `open` or `missed`; a late completion of a missed task is allowed and supersedes the `missed`. A second completion or skip of a resolved task is rejected (`409 task_already_resolved`).
     - A `withdrawn` task MUST be reinstated before it can be completed or skipped (`409 task_withdrawn`).
+    - `task.missed` and `task.withdrawn` are system markers, not resolutions. A live `completed` or `skipped` supersedes them regardless of `effective_at` order (so a task that rolled over at 00:05 can still be completed with an `effective_at` of 16:00 the day before), and they are exempt from the ordering checks of rules 9 and 13.
     - A rollover only touches tasks that are `open` when it is validated.
 
 11. **Idempotency.** The CLI and the web UI MUST send an event `id` on every mutation (the connector
@@ -253,12 +256,15 @@ The log is one UTF-8 file of newline-delimited JSON, at
     appends nothing; with a different hash it is rejected (`409 id_conflict`). For a batch the
     request `id` is the batch id. A request without an id gets one assigned and no idempotency.
 12. **State version.** The state `version` is the pair (`log_lines`, `config_generation`): the number
-    of lines in the log, and a counter that advances on each successful config reload (it starts at
-    0 on every start). Clients compare versions only for inequality and refetch on any change;
-    `expected_version` and `stale_preview` compare both.
+    of lines in the log, and a counter seeded at each start with the start time in milliseconds and advanced on each
+    successful config reload, so a pair never recurs across a restart. `state_version` (the dry-run
+    value and `expected_version`) is this pair; the `state_version` gauge reports `log_lines`.
+    Clients compare versions only for inequality and refetch on any change; `expected_version` and
+    `stale_preview` compare both.
 13. **Ordering.** An entity's domain events (a cycle's by `cycle_id`, a task's by `task_id`) are
     ordered by `effective_at`, then by log position, never by `id`. Corrections and retractions
-    apply by log position. Timestamps carry at least millisecond precision. A result that would
+    apply by log position. Timestamps carry at least millisecond precision. `task.missed` and
+    `task.withdrawn` are exempt (rule 10). A result that would
     need a different order for events at the same instant is rejected as `invalid_timeline`
     (for example a back-filled break that ends at the instant the cycle stopped; use "end at").
 14. **Append failure.** On any error from a write or an fsync, the daemon MUST truncate
@@ -380,7 +386,8 @@ cycles:
    semantic checks above.
 9. **Listener and URL.** `listen_port` (required) and `public_url` (optional; an `http` or `https`
    URL) are top-level keys, validated by the schema. The daemon builds every deep link from
-   `public_url`.
+   `public_url`. A change to either takes effect only on restart; a reload that sees one reports it
+   through `/healthz`.
 
 ## Periods, profiles and rollover
 
@@ -402,7 +409,8 @@ read-only; a **change** control opens a modal.
    events and their tasks, materialized from the now-active profile. There is no `profile` in
    `period.changed`. Each kind changes independently: changing the day affects only daily tasks.
 3. **Dry run.** `dry_run` returns, without appending, the open tasks of each period being left, the
-   tasks the new periods would materialize (and any that could not be, with the reason), and a
+   tasks the new periods would materialize (and any that could not be, with the reason), the tasks a requested profile change
+   would add, withdraw or reinstate in the periods that remain current, and a
    `state_version`. The web UI and `period roll` MUST carry it back as `expected_version` (other
    clients MAY); if it is present and stale the request is rejected (`409 stale_preview`), so what
    the operator confirmed is what happens.
@@ -434,9 +442,10 @@ read-only; a **change** control opens a modal.
    until it is rolled over.
 10. A running cycle is unaffected by a period change, and belongs to the date on which it started.
     The dry run MUST, however, list any running or paused cycle that started in a period being left
-    (for example one left running when the laptop was closed), with an "End at" action prefilled
-    with the cycle's last recorded activity time. It MUST NOT stop the cycle unless the operator
-    chooses that.
+    (for example one left running when the laptop was closed), with an "End at" action. The
+    action shows where its prefilled time comes from (the cycle's last recorded activity) and is
+    editable; when nothing was recorded after the cycle's last event, it is left blank and the
+    operator MUST enter a time. It MUST NOT stop the cycle unless the operator chooses that.
 
 ## Work cycles and the timer
 
@@ -487,10 +496,10 @@ Allowed operations by state:
    durations are never a guess. Overtime is shown in the UI as a negative remaining time.
 7. **Fixing a forgotten pause.** The operator's example is forgetting to pause for lunch. Two named
    operations cover it without hand-editing events. **Back-fill a break**
-   (`POST /cycles/{id}/breaks` with `{from, to}`) appends a `cycle.paused` at `from` and a
+   (`POST /cycles/break` with `{cycle_id, from, to}`) appends a `cycle.paused` at `from` and a
    `cycle.resumed` at `to` as one batch; both are times on the cycle's day in the zone the preview
    shows, and `to` MUST be strictly earlier than the cycle's stop if it has one. **End at**
-   (`POST /cycles/{id}/stop` with `effective_at`) stops a cycle at an earlier time. Both are
+   (`POST /cycles/stop` with `effective_at`) stops a cycle at an earlier time. Both are
    validated by candidate replay (event log rule 9), and the editor shows a before-and-after
    timeline, with the zone and date, before the operator confirms.
 8. **Next task.** The state exposes `next`: the open task with the earliest due time (ties broken by
@@ -574,7 +583,7 @@ All paths are under `/api/v1` except `/healthz`, `/readyz` and `/metrics`.
 | Periods   | `POST /periods/change` (one or more changes as one batch; see "Periods, profiles and rollover")                                                                                                                                                                                                                                                                                       |
 | Profile   | `POST /profile/change` with `{profile, dry_run?, expected_version?}`                                                                                                                                                                                                                                                                                                                  |
 | Tasks     | `POST /tasks/{id}/complete`, `POST /tasks/{id}/skip` (`reason` required); both accept `effective_at`                                                                                                                                                                                                                                                                                  |
-| Cycles    | `POST /cycles/start` (`type`, optional `minutes`), `POST /cycles/{pause,resume,boost,stop,annotate}`, `POST /cycles/{id}/breaks` (`{from, to}`); every one accepts `effective_at` and `id`, except `annotate`, which accepts `id` only                                                                                                                                                |
+| Cycles    | `POST /cycles/start` (`type`, optional `minutes`), and `POST /cycles/{pause,resume,boost,stop,annotate,break}`, each taking `cycle_id` in the body (optional for `pause`, `boost` and `stop`, which default to the running cycle; `break` takes `{cycle_id, from, to}`); every one accepts `effective_at` and `id`, except `annotate`, which accepts `id` only                        |
 | Editor    | `GET /events` (`from`, `to`, `type`, `view=corrected\|original`), `POST /events/{id}/correct`, `POST /events/{id}/retract`, `POST /batches/{id}/retract`                                                                                                                                                                                                                              |
 | Config    | `GET /config` (the resolved, validated config)                                                                                                                                                                                                                                                                                                                                        |
 | Connector | `GET /calendar?from&to&calendar`, `GET /attention`                                                                                                                                                                                                                                                                                                                                    |
@@ -626,18 +635,18 @@ decision, to be restated in the ADR.
 
 One binary, `pg-task-focus`, with `serve` (the daemon) and thin client subcommands:
 
-| Verb                                    | Maps to                                                                                                                                                                                                                      |
-| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `status`                                | `GET /state`; prints short task names, `Next:`, and "running 1h15m since the last pause" style lines                                                                                                                         |
-| `status --watch`                        | `GET /stream`; emits NDJSON, one full state object per line, schema-checked, for the SwiftBar plugin                                                                                                                         |
-| `period change` / `period roll`         | `POST /periods/change`; `roll` changes every ended kind after a dry run, prefilling `start` as today and `end` as `start` plus the previous period's length, and accepts `--profile`                                         |
-| `profile change [--dry-run]`            | `POST /profile/change`                                                                                                                                                                                                       |
-| `task done <name>` / `task skip <name>` | complete or skip; `<name>` is a definition name or unique prefix resolved against the current periods                                                                                                                        |
-| `cycle start <type>`                    | start; an unknown type lists the valid types in its error                                                                                                                                                                    |
-| `cycle pause,resume,boost,stop,note`    | cycle endpoints; every mutating cycle and task verb accepts `--at <time>` (a time today in the host zone, validated like `effective_at`); `break --from <time> --to <time>`, `note --last` and `--kv key=value` (repeatable) |
-| `events list,correct,retract`           | editor endpoints                                                                                                                                                                                                             |
-| `undo`                                  | retracts the most recent live event or batch appended by a user request (found through `GET /events`), subject to event log rule 8.5                                                                                         |
-| `check`                                 | offline log verification (see "Failure handling")                                                                                                                                                                            |
+| Verb                                    | Maps to                                                                                                                                                                                                                                                                               |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `status`                                | `GET /state`; prints short task names, `Next:`, and "running 1h15m since the last pause" style lines                                                                                                                                                                                  |
+| `status --watch`                        | `GET /stream`; emits NDJSON, one full state object per line, schema-checked, for the SwiftBar plugin                                                                                                                                                                                  |
+| `period change` / `period roll`         | `POST /periods/change`; `roll` changes every ended kind after a dry run, prefilling `start` as today and `end` as `start` plus the previous period's length, and accepts `--profile`                                                                                                  |
+| `profile change [--dry-run]`            | `POST /profile/change`                                                                                                                                                                                                                                                                |
+| `task done <name>` / `task skip <name>` | complete or skip; `<name>` is a definition name or unique prefix resolved against the current periods                                                                                                                                                                                 |
+| `cycle start <type>`                    | start; an unknown type lists the valid types in its error                                                                                                                                                                                                                             |
+| `cycle pause,resume,boost,stop,note`    | cycle endpoints; every mutating cycle and task verb except `note` accepts `--at <time>` (a time today in the host zone, `yesterday HH:MM`, or an RFC 3339 instant, validated like `effective_at`); `break --from <time> --to <time>`, `note --last` and `--kv key=value` (repeatable) |
+| `events list,correct,retract`           | editor endpoints                                                                                                                                                                                                                                                                      |
+| `undo`                                  | retracts the most recent live event or batch appended by a user request (found through `GET /events`), subject to event log rule 8.5                                                                                                                                                  |
+| `check`                                 | offline log verification (see "Failure handling")                                                                                                                                                                                                                                     |
 
 Every client verb has `--json`, and its output MUST validate against a checked-in JSON Schema. If
 the daemon is not reachable the CLI MUST say so, write one line to stderr and exit non-zero. Exit
@@ -687,7 +696,7 @@ which designs mockups; the deep-link scheme is fixed here as `<public_url>/#/tas
 
 The plugin uses the CLI only and sends `X-Client: swiftbar`. The menu-bar title shows the
 highest-priority state, in this order: overtime (`<type> +04:10`, with an icon), running
-(`<type> 12:30`), paused (`⏸ <type>`), a resume offer (`Resume <title>?`), an ended period ("New day:
+(`<type> 12:30`), paused (`⏸ <type>`, or `⏸ <type> · Resume?` when a `resume_offer` names that cycle), a resume offer for another cycle (`Resume <title>?`), an ended period ("New day:
 roll over", or the week or sprint equivalent), the next due task (`Next: <task> 22m`), then `idle`.
 While a cycle runs or is paused, the title MUST also append the `next` task when it is overdue or
 due within `due_soon_minutes` (`Deep 12:30 · Post plan 8m`); an overdue task reads "overdue 12m",
@@ -808,8 +817,9 @@ defensive guard `pg-desk-serve` uses.
   its `event_id` and `event_type`. Startup logs at Info: replay start and end
   with the event count and duration, the config digest, and the version. A startup failure MUST be
   logged at Error with its cause and line number, and flushed (the OTel shutdown MUST run before
-  the process exits). The log source's `errorAlert` threshold MUST be 0, so a refusal to start
-  alerts at once, not after the default ten errors.
+  the process exits). The log source's `errorAlert` threshold MUST be the smallest the option
+  allows (1, because it takes positive integers and fires on a count above it), not the default
+  10; a single startup Error is covered by the Daemon down alert.
 - Loki labels MUST be only `service_name` and `level`; ids, routes and event types are fields,
   never labels.
 - **Privacy**: logs, span attributes, metric labels and health output MUST NOT contain any
@@ -835,8 +845,8 @@ with `increase()` or `rate()`.
 | Startup and health gauges                         | `ready` (0 during replay, 1 when serving), `start_timestamp_seconds`, `build_info{version,schema_version,go_version}` (value 1), `startup_recovery{kind}` (`torn_tail`, `uncommitted_batch`: this process's count at startup), `store_size_bytes`, `store_writable` (a periodic probe that creates and removes a temp file in the data directory and opens `events.jsonl` for append without writing), `replay_duration_seconds`, `replay_event_count`, `last_append_timestamp_seconds`, `config_valid`, `last_config_reload_success_timestamp_seconds`, `sse_clients`, `state_version`                                                 |
 | Gauges derived from the projection (restart-safe) | `tasks{cadence,status}` (`open`, `completed`, `skipped`, `missed`, `withdrawn`), `tasks_overdue{cadence}` (a subset of `open` with a due time in the past), `task_resolutions{cadence,outcome}` (`completed`, `skipped`, `missed`, `withdrawn`: live resolution events in the whole log), `task_resolutions_30d{cadence,outcome}` (those whose `effective_at` is in the last 30 days, the basis for a current miss rate), `cycle_active{type}`, `cycle_overtime_seconds{type}`, `cycle_paused_seconds{type}`, `cycle_seconds_in_active_day{type}`, `attention_items{type,severity}`, `next_reminder_timestamp_seconds`                  |
 
-At startup the daemon MUST add 0 to every counter series of every closed label set, so each series
-is present on the first scrape (otherwise the first-ever increment has no baseline and
+At startup the daemon MUST add 0 to every series of the counters an alert reads (`append_failures_total`
+for each `stage`, and `alert_failures_total`), so each is present on the first scrape (otherwise the first-ever increment has no baseline and
 `increase()` misses it), and a test MUST assert that. The names above are the final exposition
 names, and the alert-rule test MUST assert against the real scraped output, not against declared
 constants.
@@ -881,18 +891,18 @@ the gauge said at the time. The authoritative history is the log.
 Alert rules follow the `pg-desk` `grafana/alerting` precedent (a `uid`, `for`, `noDataState`,
 `execErrState`, a severity, and an annotation naming the remedy):
 
-| Alert                             | Expression                                                 | `for` | `noDataState` | Severity |
-| --------------------------------- | ---------------------------------------------------------- | ----- | ------------- | -------- |
-| Daemon down                       | `up{job="pg-task-focus"} < 1`                              | 5m    | Alerting      | critical |
-| Not ready (stuck replay)          | `pg_task_focus_ready == 0`                                 | 2m    | OK            | critical |
-| Store unwritable                  | `pg_task_focus_store_writable == 0`                        | 2m    | OK            | critical |
-| Append failures                   | `increase(pg_task_focus_append_failures_total[10m]) > 0`   | 0m    | OK            | critical |
-| Config reload failing             | `pg_task_focus_config_valid == 0`                          | 10m   | OK            | warning  |
-| Restart loop (runs, then crashes) | `changes(pg_task_focus_start_timestamp_seconds[30m]) >= 3` | 0m    | OK            | critical |
-| Startup recovery                  | `pg_task_focus_startup_recovery > 0`                       | 0m    | OK            | warning  |
-| Sound failing                     | `increase(pg_task_focus_alert_failures_total[1h]) > 0`     | 0m    | OK            | warning  |
-| Slow replay (a sizing flag)       | `pg_task_focus_replay_duration_seconds > 5`                | 0m    | OK            | info     |
-| Stuck overtime                    | `max(pg_task_focus_cycle_overtime_seconds) > 3600`         | 5m    | OK            | warning  |
+| Alert                             | Expression                                                                                     | `for` | `noDataState` | Severity |
+| --------------------------------- | ---------------------------------------------------------------------------------------------- | ----- | ------------- | -------- |
+| Daemon down                       | `up{job="pg-task-focus"} < 1`                                                                  | 5m    | Alerting      | critical |
+| Not ready (stuck replay)          | `pg_task_focus_ready == 0`                                                                     | 2m    | OK            | critical |
+| Store unwritable                  | `pg_task_focus_store_writable == 0`                                                            | 2m    | OK            | critical |
+| Append failures                   | `increase(pg_task_focus_append_failures_total[10m]) > 0`                                       | 0m    | OK            | critical |
+| Config reload failing             | `pg_task_focus_config_valid == 0`                                                              | 10m   | OK            | warning  |
+| Restart loop (runs, then crashes) | `changes(pg_task_focus_start_timestamp_seconds[30m]) >= 3`                                     | 0m    | OK            | critical |
+| Startup recovery                  | `pg_task_focus_startup_recovery > 0 and time() - pg_task_focus_start_timestamp_seconds < 3600` | 0m    | OK            | warning  |
+| Sound failing                     | `increase(pg_task_focus_alert_failures_total[1h]) > 0`                                         | 0m    | OK            | warning  |
+| Slow replay (a sizing flag)       | `pg_task_focus_replay_duration_seconds > 5`                                                    | 0m    | OK            | info     |
+| Stuck overtime                    | `max(pg_task_focus_cycle_overtime_seconds) > 3600`                                             | 5m    | OK            | warning  |
 
 All telemetry stays on the local machine.
 
@@ -917,34 +927,34 @@ All telemetry stays on the local machine.
 
 ## Failure handling
 
-| Condition                                                          | Required behavior                                                                                                                                                                                                                                                                                                               |
-| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Append or fsync fails                                              | The mutation returns `503` (`store_unavailable`): the outcome is unknown, so the client retries with the same `id`. The daemon rolls the file back (event log rule 14); if it cannot, it enters read-only mode until restart. Reads keep working, `append_failures_total` increments and the alert fires.                       |
-| Torn final line or uncommitted trailing batch after a crash        | Recover by copying the bytes to a sidecar and truncating the log (event log rule 7), report it in `startup_recovery`, and log a warning.                                                                                                                                                                                        |
-| Torn line or uncommitted batch anywhere but the tail               | Corruption: refuse to start, logging the cause and line number at Error. `pg-task-focus check` diagnoses it offline.                                                                                                                                                                                                            |
-| An unknown event `v`                                               | Refuse to start, same logging.                                                                                                                                                                                                                                                                                                  |
-| Refusing to start under launchd                                    | A daemon that refuses to start never serves `/metrics`, so this shows as the Daemon down alert plus the Error log line (flushed before exit, with `errorAlert` threshold 0), not as the restart-loop alert, which covers a daemon that runs and then crashes. The existing `launchd-health` module covers `keepAlive` services. |
-| A second daemon, or a stale lock                                   | The data-directory lock is advisory and held by the live process; a second daemon refuses to start.                                                                                                                                                                                                                             |
-| A correction, retraction or `effective_at` yields an invalid state | Reject with `422 invalid_timeline` (or the relevant `409`) and the reason, before appending (event log rule 9).                                                                                                                                                                                                                 |
-| Bad config at first start                                          | Hard failure. A bad reload keeps the previous config and reports through `/healthz` and `config_valid`.                                                                                                                                                                                                                         |
-| Sound playback fails                                               | Log and count it; never affect cycle state.                                                                                                                                                                                                                                                                                     |
-| Crash while a cycle runs                                           | The timer is derived from the log, so the cycle is still running after restart; reminders resume with one catch-up alert.                                                                                                                                                                                                       |
+| Condition                                                          | Required behavior                                                                                                                                                                                                                                                                                                                          |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Append or fsync fails                                              | The mutation returns `503` (`store_unavailable`): the outcome is unknown, so the client retries with the same `id`. The daemon rolls the file back (event log rule 14); if it cannot, it enters read-only mode until restart. Reads keep working, `append_failures_total` increments and the alert fires.                                  |
+| Torn final line or uncommitted trailing batch after a crash        | Recover by copying the bytes to a sidecar and truncating the log (event log rule 7), report it in `startup_recovery`, and log a warning.                                                                                                                                                                                                   |
+| Torn line or uncommitted batch anywhere but the tail               | Corruption: refuse to start, logging the cause and line number at Error. `pg-task-focus check` diagnoses it offline.                                                                                                                                                                                                                       |
+| An unknown event `v`                                               | Refuse to start, same logging.                                                                                                                                                                                                                                                                                                             |
+| Refusing to start under launchd                                    | A daemon that refuses to start never serves `/metrics`, so this shows as the Daemon down alert plus the Error log line (flushed before exit, with the smallest `errorAlert` threshold), not as the restart-loop alert, which covers a daemon that runs and then crashes. The existing `launchd-health` module covers `keepAlive` services. |
+| A second daemon, or a stale lock                                   | The data-directory lock is advisory and held by the live process; a second daemon refuses to start.                                                                                                                                                                                                                                        |
+| A correction, retraction or `effective_at` yields an invalid state | Reject with `422 invalid_timeline` (or the relevant `409`) and the reason, before appending (event log rule 9).                                                                                                                                                                                                                            |
+| Bad config at first start                                          | Hard failure. A bad reload keeps the previous config and reports through `/healthz` and `config_valid`.                                                                                                                                                                                                                                    |
+| Sound playback fails                                               | Log and count it; never affect cycle state.                                                                                                                                                                                                                                                                                                |
+| Crash while a cycle runs                                           | The timer is derived from the log, so the cycle is still running after restart; reminders resume with one catch-up alert.                                                                                                                                                                                                                  |
 
 ## Testing
 
-| Layer                  | What it covers                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Domain, table-driven   | Projection from events; timer math; the state-by-operation table; the interrupt stack with backdated `effective_at`; rollover, bootstrap and batch undo (including `batch_has_dependents`); the task state rules; correction and retraction rules, including retraction of a retraction; profile change with withdrawal and reinstatement; alert scheduling (expiry, reminder cadence, silence rules, one catch-up after sleep)                                                  |
-| Domain, property-based | Replay is deterministic and equals the incrementally built projection; a correction applied twice changes nothing; elapsed time is never negative and equals the sum of segments                                                                                                                                                                                                                                                                                                 |
-| Zones                  | Rejection of abbreviations and offsets; the nonexistent and repeated civil-time rules on both transition days of a whole-hour zone and in a half-hour-shift zone; a week that spans a transition; a rule zone that differs from the period zone; host-zone discovery from `TZ` and `/etc/localtime`                                                                                                                                                                              |
-| Store                  | Torn last line and uncommitted batch (recovery truncates, then appends cleanly), mid-file corruption, fsync failure and rollback (and read-only mode when rollback fails), the data-directory lock, large replay, the id-to-hash idempotency index                                                                                                                                                                                                                               |
-| Contract               | Route-to-spec parity, response validation, event, config and CLI-output schema fixtures                                                                                                                                                                                                                                                                                                                                                                                          |
-| Security               | Host and Origin matrix (absent, `null`, allowed, foreign, `localhost` versus `127.0.0.1`), content type enforcement, no CORS headers                                                                                                                                                                                                                                                                                                                                             |
-| Streaming              | `/stream` outlives the server write timeout, heartbeats arrive, `version` advances on a mutation and a config reload                                                                                                                                                                                                                                                                                                                                                             |
-| Observability          | The metrics catalog (names, types, labels), a cardinality guard, the privacy canary, an alert-rule test that parses the rules file and asserts every referenced metric exists in the catalog (the `pg-desk` `alertrules` precedent), a dashboard test that does the same for every panel expression, a first-scrape test that every counter series is present, a test that the alert and dashboard expressions resolve against real scraped output, and a log-source format test |
-| Connector              | The repository's conformance-test pattern, the Notes format with a reference parser, a fake daemon, daemon-down returning `unavailable`, `Group` and `Stale` fields                                                                                                                                                                                                                                                                                                              |
-| End to end             | A real daemon with a fake clock, fake `SoundPlayer` and temp store, driven through the CLI over a scripted day                                                                                                                                                                                                                                                                                                                                                                   |
-| Nix                    | Module render tests, the launchd module, the observability registrations, and the config JSON Schema check                                                                                                                                                                                                                                                                                                                                                                       |
+| Layer                  | What it covers                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Domain, table-driven   | Projection from events; timer math; the state-by-operation table; the interrupt stack with backdated `effective_at`; rollover, bootstrap and batch undo (including `batch_has_dependents`); the task state rules; correction and retraction rules, including retraction of a retraction; profile change with withdrawal and reinstatement; alert scheduling (expiry, reminder cadence, silence rules, one catch-up after sleep)                                                         |
+| Domain, property-based | Replay is deterministic and equals the incrementally built projection; a correction applied twice changes nothing; elapsed time is never negative and equals the sum of segments                                                                                                                                                                                                                                                                                                        |
+| Zones                  | Rejection of abbreviations and offsets; the nonexistent and repeated civil-time rules on both transition days of a whole-hour zone and in a half-hour-shift zone; a week that spans a transition; a rule zone that differs from the period zone; host-zone discovery from `TZ` and `/etc/localtime`                                                                                                                                                                                     |
+| Store                  | Torn last line and uncommitted batch (recovery truncates, then appends cleanly), mid-file corruption, fsync failure and rollback (and read-only mode when rollback fails), the data-directory lock, large replay, the id-to-hash idempotency index                                                                                                                                                                                                                                      |
+| Contract               | Route-to-spec parity, response validation, event, config and CLI-output schema fixtures                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Security               | Host and Origin matrix (absent, `null`, allowed, foreign, `localhost` versus `127.0.0.1`), content type enforcement, no CORS headers                                                                                                                                                                                                                                                                                                                                                    |
+| Streaming              | `/stream` outlives the server write timeout, heartbeats arrive, `version` advances on a mutation and a config reload                                                                                                                                                                                                                                                                                                                                                                    |
+| Observability          | The metrics catalog (names, types, labels), a cardinality guard, the privacy canary, an alert-rule test that parses the rules file and asserts every referenced metric exists in the catalog (the `pg-desk` `alertrules` precedent), a dashboard test that does the same for every panel expression, a first-scrape test that the alerted counter series are present, a test that the alert and dashboard expressions resolve against real scraped output, and a log-source format test |
+| Connector              | The repository's conformance-test pattern, the Notes format with a reference parser, a fake daemon, daemon-down returning `unavailable`, `Group` and `Stale` fields                                                                                                                                                                                                                                                                                                                     |
+| End to end             | A real daemon with a fake clock, fake `SoundPlayer` and temp store, driven through the CLI over a scripted day                                                                                                                                                                                                                                                                                                                                                                          |
+| Nix                    | Module render tests, the launchd module, the observability registrations, and the config JSON Schema check                                                                                                                                                                                                                                                                                                                                                                              |
 
 ## Build order
 
@@ -970,7 +980,8 @@ Sub-projects 3, 4 and 5 are independent of each other once sub-project 2 lands.
 ## Review resolutions
 
 Four independent reviews (completeness, correctness, UX, observability) were run on the first
-draft, and again on the second. Their accepted findings are folded into this draft. Findings that needed a ruling were ruled on by
+draft, again on the second, and as a narrow verification pass on the third. Their accepted
+findings are folded into this draft. Findings that needed a ruling were ruled on by
 the operator (decision log rows 7 and 24). Findings deliberately not adopted:
 
 - **A temporary acknowledge or mute for the overtime sound** (UX review). Rejected by the operator:
@@ -1028,7 +1039,7 @@ raised.
 4. The daemon's fixed port, checked free at plan time.
 5. SwiftBar streaming syntax.
 6. The macOS notification mechanism and the set of allowed sound names.
-7. Final metric names and the dashboard layout.
+7. The dashboard layout.
 8. Whether replay time ever warrants a snapshot (the `replay_duration_seconds` metric will say; no
    snapshot is designed now), and whether a `report` command is needed for authoritative history.
 9. Whether the connector backend is launched per call (affects where its signals live).
