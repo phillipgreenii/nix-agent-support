@@ -9454,6 +9454,9 @@
                 assert builtins.attrNames enabled.home.file == [ pluginPath ];
                 assert has "export PA_MONITOR_BIN=${pkgs.pa-monitor}/bin/pa-monitor" (textOf enabled pluginPath);
                 assert has "export PA_SWIFTBAR_STALE_AFTER_S=600\n" (textOf enabled pluginPath);
+                assert has "export PA_SWIFTBAR_SELF=${pkgs.pa-monitor-swiftbar}/bin/pa-monitor-swiftbar\n" (
+                  textOf enabled pluginPath
+                );
                 assert has "exec ${pkgs.pa-monitor-swiftbar}/bin/pa-monitor-swiftbar" (textOf enabled pluginPath);
                 assert failedAssertions enabled == [ ];
                 # pluginDir and staleAfterS are honoured

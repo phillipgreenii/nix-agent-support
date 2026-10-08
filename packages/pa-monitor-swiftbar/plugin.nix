@@ -15,7 +15,7 @@ let
     "xbar.version" = "v1.0";
     "xbar.author" = "phillipgreenii";
     "xbar.desc" =
-      "One-glyph 5-hour Claude usage pie (colored by pace), with usage and usage-limit detail and caffeinate / auto-resume toggles in the dropdown, from pa-monitor";
+      "5-hour Claude usage from pa-monitor, colored by pace: by default a wide title (5h 63% · 1h 52m, or ⛔ LIMIT · resets 23:10 (24m) when a limit is hit), or a narrow one-glyph pie with the detail in the first dropdown row; a Title row in the dropdown switches between wide and narrow (stored in $XDG_STATE_HOME/pa-monitor-swiftbar/title-width). The dropdown also has session counts and caffeinate / auto-resume toggles";
     "xbar.dependencies" = "pa-monitor";
     "swiftbar.hideRunInTerminal" = "true";
     "swiftbar.hideDisablePlugin" = "true";
@@ -53,6 +53,10 @@ let
         # The pa-monitor client must match the running daemon, so the Nix build bakes it in.
         export PA_MONITOR_BIN=${lib.escapeShellArg "${paMonitor}/bin/pa-monitor"}
         export PA_SWIFTBAR_STALE_AFTER_S=${lib.escapeShellArg (toString staleAfterS)}
+        # The dropdown's Title row re-invokes the renderer (SwiftBar `bash=`) to
+        # switch the title width. Hand it the renderer's store path: it has no
+        # whitespace, unlike this wrapper's installed path under "Application Support".
+        export PA_SWIFTBAR_SELF=${lib.escapeShellArg "${script}/bin/pa-monitor-swiftbar"}
         exec ${lib.escapeShellArg "${script}/bin/pa-monitor-swiftbar"} "$@"
       '';
     in
@@ -99,6 +103,16 @@ let
       [ "$export_line" -lt "$exec_line" ] || fail "PA_MONITOR_BIN export must precede exec"
       grep -qF 'export PA_MONITOR_BIN=${paMonitor}/bin/pa-monitor' "$w" || fail "PA_MONITOR_BIN not baked to the pa-monitor package"
       grep -q '^export PA_SWIFTBAR_STALE_AFTER_S=600$' "$w" || fail "default stale threshold not baked"
+
+      # The Title toggle row re-invokes the renderer through this exported path:
+      # it must be the renderer store path, whitespace-free, set before the exec.
+      self_line=$(grep -n '^export PA_SWIFTBAR_SELF=' "$w" | head -n1 | cut -d: -f1)
+      [ -n "$self_line" ] || fail "no PA_SWIFTBAR_SELF export"
+      [ "$self_line" -lt "$exec_line" ] || fail "PA_SWIFTBAR_SELF export must precede exec"
+      grep -qxF 'export PA_SWIFTBAR_SELF=${script}/bin/pa-monitor-swiftbar' "$w" || fail "PA_SWIFTBAR_SELF is not the renderer store path"
+      self=$(sed -n 's|^export PA_SWIFTBAR_SELF=||p' "$w")
+      case "$self" in *[[:space:]]*) fail "PA_SWIFTBAR_SELF contains whitespace" ;; esac
+      [ -x "$self" ] || fail "PA_SWIFTBAR_SELF $self is not an executable file"
 
       target=$(sed -n 's|^exec \([^ ]*\) .*|\1|p' "$w")
       [ -x "$target" ] || fail "exec target $target is not an executable file"

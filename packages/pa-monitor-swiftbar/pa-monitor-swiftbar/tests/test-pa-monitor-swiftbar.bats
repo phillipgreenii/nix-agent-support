@@ -10,6 +10,13 @@ setup() {
   TEST_DIR="$(mktemp -d)"
   export HOME="$TEST_DIR/home"
   mkdir -p "$HOME"
+  # Never touch the real ~/.local/state: every test gets its own state root.
+  # The title width defaults to wide in production, but most of this suite was
+  # written against the narrow shape, so every test starts in narrow mode; the
+  # title-width tests at the end set the mode they mean (or remove the file).
+  export XDG_STATE_HOME="$TEST_DIR/xdg-state"
+  TITLE_WIDTH_FILE="$XDG_STATE_HOME/pa-monitor-swiftbar/title-width"
+  set_width narrow
 
   local scripts_dir="${SCRIPTS_DIR:-}"
   if [[ -z $scripts_dir ]]; then
@@ -41,6 +48,12 @@ STUBEOF
 
 teardown() {
   rm -rf "$TEST_DIR"
+}
+
+# set_width MODE -> write the setting file exactly as the plugin does.
+set_width() {
+  mkdir -p "$(dirname "$TITLE_WIDTH_FILE")"
+  printf '%s\n' "$1" >"$TITLE_WIDTH_FILE"
 }
 
 # at OFFSET -> ISO-8601 UTC instant NOW+OFFSET seconds.
@@ -646,4 +659,338 @@ caffeinate_row() { printf '%s\n' "$output" | grep '^Caffeinate:'; }
   status ".rate_limits.five_hour = {used_pct: 50, resets_at: \"$(at 6720)\"}"
   plugin
   [ "$(printf '%s\n' "$output" | tail -n1)" = "Refresh | refresh=true" ]
+}
+
+# --- title width: wide / narrow toggle (bead pg2-fiw4h) ----------------------
+# wide = the pre-pg2-ucet4 title and dropdown layout, the default; narrow = the
+# one-character title with the detail in the first dropdown row. The setting is
+# $XDG_STATE_HOME/pa-monitor-swiftbar/title-width (isolated per test).
+
+# line N -> the Nth output line.
+line() { printf '%s\n' "$output" | sed -n "${1}p"; }
+
+# render_state NAME -> sets up the fixture for one named state and renders it.
+render_state() {
+  case "$1" in
+  normal) status ".rate_limits.five_hour = {used_pct: 50, resets_at: \"$(at 6720)\"}" ;;
+  limit) status ".rate_limits.five_hour = {used_pct: 100, resets_at: \"$(at 1440)\"}" ;;
+  expired) status ".rate_limits.five_hour = {used_pct: 30, resets_at: \"$(at -10)\"}" ;;
+  nodata) status "del(.rate_limits)" ;;
+  esac
+  case "$1" in
+  unreachable) run env STUB_RC=2 PA_SWIFTBAR_NOW="$NOW" PA_MONITOR_BIN="$STUB" "${PLUGIN[@]}" ;;
+  notfound) run env PA_SWIFTBAR_NOW="$NOW" PA_MONITOR_BIN="$TEST_DIR/does-not-exist" "${PLUGIN[@]}" ;;
+  malformed)
+    printf 'not json' >"$TEST_DIR/status.json"
+    plugin
+    ;;
+  *) plugin ;;
+  esac
+}
+
+@test "title width: no setting file reads as wide" {
+  rm -f "$TITLE_WIDTH_FILE"
+  render_state normal
+  [ "$status" -eq 0 ]
+  [ "$(title)" = "5h 50% · 1h 52m | color=#3a9a4a" ]
+}
+
+@test "title width: an empty file reads as wide" {
+  : >"$TITLE_WIDTH_FILE"
+  render_state normal
+  [ "$(title)" = "5h 50% · 1h 52m | color=#3a9a4a" ]
+}
+
+@test "title width: an unrecognised value reads as wide" {
+  local v
+  for v in "huge" "Narrow" "narrow-ish" "0" "wide narrow"; do
+    set_width "$v"
+    render_state normal
+    [ "$status" -eq 0 ]
+    [ "$(title)" = "5h 50% · 1h 52m | color=#3a9a4a" ] || {
+      echo "value '$v' did not read as wide" >&2
+      return 1
+    }
+  done
+}
+
+@test "title width: surrounding whitespace around narrow is ignored" {
+  printf '  narrow  \n' >"$TITLE_WIDTH_FILE"
+  render_state normal
+  [ "$(title)" = "◑ | color=#3a9a4a" ]
+}
+
+@test "title width: a missing state directory reads as wide, not an error" {
+  rm -rf "$XDG_STATE_HOME"
+  render_state normal
+  [ "$status" -eq 0 ]
+  [ "$(title)" = "5h 50% · 1h 52m | color=#3a9a4a" ]
+}
+
+@test "wide normal: old title, no duplicate detail row, window row with the countdown" {
+  set_width wide
+  status ".rate_limits.five_hour = {used_pct: 50.9, resets_at: \"$(at 6720)\"} | .rate_limits.seven_day = {used_pct: 42.5, resets_at: \"$(at 273600)\"}"
+  plugin
+  [ "$status" -eq 0 ]
+  [ "$(line 1)" = "5h 50% · 1h 52m | color=#3a9a4a" ]
+  [ "$(line 2)" = "---" ]
+  [ "$(line 3)" = "█████████░░░░░░░░░ 50%" ]
+  [ "$(line 4)" = "7d: 42% · resets Sun 02:46" ]
+  [ "$(line 5)" = "resets Thu 00:38 · 1h 52m left" ]
+  # The detail appears once, in the title; nothing in the dropdown repeats it.
+  [[ $output != *$'\n5h 50%'* ]]
+}
+
+@test "wide normal: colors follow the same thresholds (yellow, red, stale variants)" {
+  set_width wide
+  status ".rate_limits.five_hour = {used_pct: 63.4, resets_at: \"$(at 6720)\"}"
+  plugin
+  [ "$(title)" = "5h 63% · 1h 52m | color=#e0b000" ]
+  used_at 80
+  [ "$(title)" = "5h 80% · 1h 52m | color=#cc3333" ]
+  status ".rate_limits.captured_at = \"$(at -601)\" | .rate_limits.five_hour = {used_pct: 90, resets_at: \"$(at 6720)\"}"
+  plugin
+  [ "$(title)" = "5h 90% · 1h 52m | color=#7a2b2b" ]
+  [[ $output == *"reading 10 min old"* ]]
+}
+
+@test "wide normal: unknown resets_at drops the countdown from the title and the window row" {
+  set_width wide
+  status ".rate_limits.five_hour = {used_pct: 63}"
+  plugin
+  [ "$(title)" = "5h 63% | color=#3a9a4a" ]
+  [[ $output != *"left"* && $output != *"resets"* ]]
+}
+
+@test "wide normal: used 100 with an unknown reset is a red 5h 100%, not the limit state" {
+  set_width wide
+  status ".rate_limits.five_hour = {used_pct: 100}"
+  plugin
+  [ "$(title)" = "5h 100% | color=#cc3333" ]
+}
+
+@test "wide limit hit on 5h: LIMIT with the reset clock and countdown, window row with the countdown" {
+  set_width wide
+  render_state limit
+  [ "$(line 1)" = "⛔ LIMIT · resets 23:10 (24m) | color=#cc3333" ]
+  [ "$(line 2)" = "---" ]
+  [ "$(line 3)" = "5h window limit reached" ]
+  [ "$(line 4)" = "██████████████████ 100%" ]
+  [ "$(line 5)" = "resets 23:10 · 24m left" ]
+  [[ $output == *"0 sessions blocked on usage limit"* ]]
+}
+
+@test "wide limit hit on 7d: the 7d prefix, weekday clock and Dd Hh countdown" {
+  set_width wide
+  status ".rate_limits.seven_day = {used_pct: 100, resets_at: \"$(at 273600)\"}"
+  plugin
+  [ "$(title)" = "⛔ 7d LIMIT · resets Sun 02:46 (3d 4h) | color=#cc3333" ]
+  [[ $output == *$'\nresets Sun 02:46 · 3d 4h left\n'* ]]
+}
+
+@test "wide limit hit: the later reset wins, stale stays red, 99.9 is not a limit" {
+  set_width wide
+  status ".rate_limits.five_hour = {used_pct: 100, resets_at: \"$(at 1440)\"} | .rate_limits.seven_day = {used_pct: 100, resets_at: \"$(at 273600)\"}"
+  plugin
+  [[ $(title) == "⛔ 7d LIMIT"* ]]
+  status ".rate_limits.captured_at = \"$(at -601)\" | .rate_limits.five_hour = {used_pct: 100, resets_at: \"$(at 1440)\"}"
+  plugin
+  [ "$(title)" = "⛔ LIMIT · resets 23:10 (24m) | color=#cc3333" ]
+  status ".rate_limits.five_hour = {used_pct: 99.9, resets_at: \"$(at 1440)\"}"
+  plugin
+  [[ $(title) == "5h 99% · 24m | "* ]]
+}
+
+@test "wide expired reading: 5h dash title, then the explanatory row" {
+  set_width wide
+  render_state expired
+  [ "$(line 1)" = "5h – | color=#888888" ]
+  [ "$(line 2)" = "---" ]
+  [ "$(line 3)" = "reading expired, waiting for next status-line capture | color=#888888" ]
+  [[ $output != *"█"* && $output != *"left"* ]]
+}
+
+@test "wide no data: 5h question-mark title, then the note" {
+  set_width wide
+  render_state nodata
+  [ "$(line 1)" = "5h ? | color=#888888" ]
+  [ "$(line 2)" = "---" ]
+  [ "$(line 3)" = "no 5h usage reading yet | color=#888888" ]
+}
+
+@test "wide malformed JSON degrades to the 5h question-mark title" {
+  set_width wide
+  render_state malformed
+  [ "$status" -eq 0 ]
+  [ "$(line 1)" = "5h ? | color=#888888" ]
+  [ "$(line 3)" = "no 5h usage reading yet | color=#888888" ]
+}
+
+@test "wide not found and unreachable: 5h warning title and the message row" {
+  set_width wide
+  render_state notfound
+  [ "$(line 1)" = "5h ⚠ | color=#888888" ]
+  [ "$(line 3)" = "pa-monitor not found | color=#888888" ]
+  render_state unreachable
+  [ "$(line 1)" = "5h ⚠ | color=#888888" ]
+  [ "$(line 3)" = "pa-monitor daemon unreachable | color=#888888" ]
+  [[ $output != *"Caffeinate"* ]]
+  run env STUB_RC=127 PA_SWIFTBAR_NOW="$NOW" PA_MONITOR_BIN="$STUB" "${PLUGIN[@]}"
+  [ "$(line 1)" = "5h ⚠ | color=#888888" ]
+}
+
+@test "wide keeps the sessions row, data-age row, and caffeinate / auto-resume rows unchanged" {
+  set_width wide
+  status ".rate_limits.captured_at = \"$(at -840)\" | .rate_limits.five_hour = {used_pct: 50, resets_at: \"$(at 6720)\"} | .sessions = [{status: \"working\"}, {status: \"blocked\"}, {status: \"idle\"}] | .caffeinate = {mode: true, process: \"holding\"} | .auto_resume = true"
+  plugin
+  [[ $output == *$'\n1 working · 1 blocked · 1 idle\n'* ]]
+  [[ $output == *$'\nreading 14 min old | color=#888888\n'* ]]
+  [[ $output == *"Caffeinate: on (holding) | checked=true bash=$STUB param1=caffeinate param2=off terminal=false refresh=true"* ]]
+  [[ $output == *"Auto-resume: on | checked=true bash=$STUB param1=auto-resume param2=off terminal=false refresh=true"* ]]
+}
+
+@test "narrow: the Title row is the only addition to the pre-toggle dropdown, just above Refresh" {
+  set_width narrow
+  render_state normal
+  [ "$(title)" = "◑ | color=#3a9a4a" ]
+  [ "$(line 3)" = "5h 50% · 1h 52m left | color=#3a9a4a" ]
+  [ "$(line 5)" = "resets Thu 00:38" ]
+  local n
+  n=$(printf '%s\n' "$output" | wc -l | tr -d ' ')
+  [[ "$(line $((n - 1)))" == "Title: narrow (click for wide) | bash="* ]]
+  [ "$(line "$n")" = "Refresh | refresh=true" ]
+}
+
+@test "title width: the toggle row shows the mode and the action, in every state, both widths" {
+  local mode state other
+  for mode in wide narrow; do
+    set_width "$mode"
+    if [ "$mode" = wide ]; then other=narrow; else other=wide; fi
+    for state in normal limit expired nodata malformed notfound unreachable; do
+      render_state "$state"
+      [ "$status" -eq 0 ]
+      [[ $output == *$'\nTitle: '"$mode"' (click for '"$other"') | bash='*" param1=--set-title-width param2=$other terminal=false refresh=true"$'\n'* ]] || {
+        echo "no toggle row for $mode/$state" >&2
+        return 1
+      }
+      # Refresh stays the last line.
+      [ "$(printf '%s\n' "$output" | tail -n1)" = "Refresh | refresh=true" ]
+    done
+  done
+}
+
+@test "title width: no setting file shows the wide mode in the toggle row" {
+  rm -f "$TITLE_WIDTH_FILE"
+  render_state normal
+  [[ $output == *$'\nTitle: wide (click for narrow) | bash='* ]]
+}
+
+@test "title width: the toggle row runs this script by its own path" {
+  render_state normal
+  local row path
+  row="$(grep '^Title: ' <<<"$output")"
+  path="${row#*bash=}"
+  path="${path%% param1=*}"
+  [ "$path" = "${PLUGIN[${#PLUGIN[@]} - 1]}" ]
+}
+
+@test "title width: PA_SWIFTBAR_SELF (set by the nix wrapper) is what the toggle row runs" {
+  status ".rate_limits.five_hour = {used_pct: 50, resets_at: \"$(at 6720)\"}"
+  run env PA_SWIFTBAR_SELF=/nix/store/abc-pa-monitor-swiftbar/bin/pa-monitor-swiftbar PA_SWIFTBAR_NOW="$NOW" PA_MONITOR_BIN="$STUB" "${PLUGIN[@]}"
+  [[ $output == *"| bash=/nix/store/abc-pa-monitor-swiftbar/bin/pa-monitor-swiftbar param1=--set-title-width "* ]]
+}
+
+@test "title width: a script path with whitespace is quoted in the toggle row" {
+  status ".rate_limits.five_hour = {used_pct: 50, resets_at: \"$(at 6720)\"}"
+  run env PA_SWIFTBAR_SELF="/tmp/with space/pa-monitor-swiftbar" PA_SWIFTBAR_NOW="$NOW" PA_MONITOR_BIN="$STUB" "${PLUGIN[@]}"
+  [[ $output == *'| bash="/tmp/with space/pa-monitor-swiftbar" param1=--set-title-width '* ]]
+}
+
+@test "--set-title-width writes the file, prints nothing, and never calls pa-monitor" {
+  rm -rf "$XDG_STATE_HOME"
+  run env PA_MONITOR_BIN="$TEST_DIR/does-not-exist" "${PLUGIN[@]}" --set-title-width narrow
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ "$(cat "$TITLE_WIDTH_FILE")" = "narrow" ]
+  # Exactly `narrow` plus one newline.
+  [ "$(wc -c <"$TITLE_WIDTH_FILE" | tr -d ' ')" -eq 7 ]
+  run "${PLUGIN[@]}" --set-title-width wide
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TITLE_WIDTH_FILE")" = "wide" ]
+  [ "$(wc -c <"$TITLE_WIDTH_FILE" | tr -d ' ')" -eq 5 ]
+}
+
+@test "--set-title-width is atomic: no temp file is left beside the setting" {
+  rm -rf "$XDG_STATE_HOME"
+  run "${PLUGIN[@]}" --set-title-width narrow
+  [ "$status" -eq 0 ]
+  [ "$(ls -A "$XDG_STATE_HOME/pa-monitor-swiftbar")" = "title-width" ]
+  run "${PLUGIN[@]}" --set-title-width wide
+  [ "$(ls -A "$XDG_STATE_HOME/pa-monitor-swiftbar")" = "title-width" ]
+}
+
+@test "--set-title-width rejects an unknown mode and a missing value with exit 2, writing nothing" {
+  rm -rf "$XDG_STATE_HOME"
+  run "${PLUGIN[@]}" --set-title-width huge
+  [ "$status" -eq 2 ]
+  run "${PLUGIN[@]}" --set-title-width
+  [ "$status" -eq 2 ]
+  run "${PLUGIN[@]}" --set-title-width Wide
+  [ "$status" -eq 2 ]
+  [ ! -e "$TITLE_WIDTH_FILE" ]
+  [ ! -e "$XDG_STATE_HOME/pa-monitor-swiftbar" ]
+}
+
+@test "--set-title-width with a bad value keeps the existing setting" {
+  set_width narrow
+  run "${PLUGIN[@]}" --set-title-width huge
+  [ "$status" -eq 2 ]
+  [ "$(cat "$TITLE_WIDTH_FILE")" = "narrow" ]
+}
+
+@test "--set-title-width with XDG_STATE_HOME unset falls back to HOME/.local/state" {
+  run env -u XDG_STATE_HOME HOME="$TEST_DIR/home2" "${PLUGIN[@]}" --set-title-width narrow
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEST_DIR/home2/.local/state/pa-monitor-swiftbar/title-width")" = "narrow" ]
+}
+
+@test "--set-title-width reports an unwritable state directory and exits non-zero" {
+  : >"$TEST_DIR/blocker"
+  run env XDG_STATE_HOME="$TEST_DIR/blocker" "${PLUGIN[@]}" --set-title-width narrow
+  [ "$status" -ne 0 ]
+}
+
+@test "title width: clicking the toggle row's action flips the next render, and back" {
+  rm -f "$TITLE_WIDTH_FILE"
+  render_state normal
+  [ "$(title)" = "5h 50% · 1h 52m | color=#3a9a4a" ]
+  run "${PLUGIN[@]}" --set-title-width narrow
+  [ "$status" -eq 0 ]
+  plugin
+  [ "$(title)" = "◑ | color=#3a9a4a" ]
+  [ "$(line 3)" = "5h 50% · 1h 52m left | color=#3a9a4a" ]
+  run "${PLUGIN[@]}" --set-title-width wide
+  plugin
+  [ "$(title)" = "5h 50% · 1h 52m | color=#3a9a4a" ]
+}
+
+@test "title width: the setter works with only the isolated tool set on PATH" {
+  mkdir -p "$TEST_DIR/minimal"
+  local tool
+  for tool in bash mkdir mktemp mv rm dirname; do
+    ln -s "$(command -v "$tool")" "$TEST_DIR/minimal/$tool"
+  done
+  rm -rf "$XDG_STATE_HOME"
+  run env PATH="$TEST_DIR/minimal" "${PLUGIN[@]}" --set-title-width narrow
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TITLE_WIDTH_FILE")" = "narrow" ]
+}
+
+@test "--help documents the title width setting and --set-title-width" {
+  run "${PLUGIN[@]}" --help
+  [ "$status" -eq 0 ]
+  [[ $output == *"--set-title-width"* ]]
+  [[ $output == *"title-width"* ]]
+  [[ $output == *"wide"* && $output == *"narrow"* ]]
+  [[ $output == *"PA_SWIFTBAR_SELF"* ]]
 }

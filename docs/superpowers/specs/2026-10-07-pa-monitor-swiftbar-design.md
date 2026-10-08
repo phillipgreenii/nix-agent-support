@@ -2,7 +2,7 @@
 
 Date: 2026-10-07
 Repo: `phillipgreenii-nix-agent-support` (public — no employer-specific detail in code, tags, comments or docs)
-Status: revision 4 (incorporates two independent review rounds; no blockers remain)
+Status: revision 5 (incorporates two independent review rounds; no blockers remain)
 
 > **Revision 4 (2026-10-08, operator request, bead pg2-ucet4): one-character title.** The menu bar
 > was crowded and macOS hid icons, so the title is now ONE glyph and the former title text moves to
@@ -21,6 +21,34 @@ Status: revision 4 (incorporates two independent review rounds; no blockers rema
 > The dropdown window row keeps only the reset clock (`resets 23:10`); the countdown lives in the
 > first row so it is not repeated. `used ≥ 100` with an unknown reset (state 4) is a red `●`. No new
 > options: the old long title is removed, not kept as a mode.
+
+> **Revision 5 (2026-10-08, operator request, bead pg2-fiw4h): the title width is a setting.**
+> Revision 4's "removed, not kept as a mode" is SUPERSEDED: the old long title returns as the
+> `wide` mode and revision 4's one-character form is the `narrow` mode. THIS NOTE WINS over
+> revision 4 and over the original text where they disagree. Data, thresholds, colors, session
+> counts, and the caffeinate / auto-resume rows are unchanged.
+>
+> - **Default and storage.** The default is `wide`. The setting is the file
+>   `$XDG_STATE_HOME/pa-monitor-swiftbar/title-width` (default `~/.local/state`), contents `wide`
+>   or `narrow` plus a newline. A missing, empty or unrecognised value MUST read as `wide`.
+> - **Wide rendering** is the title as it was before revision 4:
+>   `5h 63% · 1h 52m` (time omitted when the reset is unknown), `⛔ LIMIT · resets 23:10 (24m)` or
+>   `⛔ 7d LIMIT · resets Mon 09:00 (3d 4h)` for a limit hit, `5h –` (expired), `5h ?` (no data),
+>   and `5h ⚠` (not found, unreachable). The dropdown has no duplicated first-row detail, and the
+>   window row is `resets 23:10 · 1h 52m left` again.
+> - **Narrow rendering** is exactly revision 4's output.
+> - **Toggle row (Strategy: the setting is the strategy, the row is its Command).** Every
+>   rendering, message-only states included, carries `Title: wide (click for narrow)` (or the
+>   reverse) just above `Refresh`. Its click re-invokes the renderer as
+>   `--set-title-width wide|narrow` with `terminal=false refresh=true`. The write is atomic (temp
+>   file in the same directory, then rename); a bad or missing value exits 2 and writes nothing.
+>   The setter is the one path that does not exit 0.
+> - **Self path.** SwiftBar's `bash=` breaks on whitespace and the plugin directory lives under
+>   `Application Support`, so the nix plugin wrapper exports `PA_SWIFTBAR_SELF` (the renderer's
+>   whitespace-free store path) and the row targets it; a bare run falls back to `$0`, quoted when
+>   it contains whitespace. The `test-pa-monitor-swiftbar-plugin` and
+>   `test-pa-monitor-swiftbar-hm-render` checks assert the export.
+> - Sibling toggles of the same shape: lat-menubar (pg2-b4sxs) and host-activity (pg2-47mxc).
 
 ## 1. Intent
 
@@ -148,8 +176,9 @@ Interface:
 
 #### 3.2.2 States (first match wins)
 
-(Title strings below are the pre-revision-4 long form; see the revision 4 note at the top for
-the one-character titles and the dropdown first row that replace them.)
+(Title strings below are the pre-revision-4 long form, which revision 5 restores as the `wide`
+mode; see the revision 4 and 5 notes at the top for the one-character `narrow` titles, the
+dropdown first row, and the width setting.)
 
 0. **pa-monitor not found** (binary does not resolve, or exit 127): title `5h ⚠` gray; row
    "pa-monitor not found". No toggle rows.
