@@ -139,7 +139,9 @@ func TestWaitDone_workerTimeoutAddsHumanNoUnclaim(t *testing.T) {
 	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w": {"in_progress"}}}
 	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: "pg-router-worker-zr-w", Live: true, State: ccpool.StateWorking}}}}
 	e := newExec(cc, bd, cfg)
-	d := DispatchContext{Role: workerRole(cfg), Item: item.Item{ID: "zr-w"}}
+	// noBudget: a time budget would raise the wait to budget+10m (INV-CCH-27)
+	// and make this loop to a 35m manual-clock deadline instead of MaxWait.
+	d := DispatchContext{Role: noBudget(workerRole(cfg)), Item: item.Item{ID: "zr-w"}}
 	if err := e.waitDone(context.Background(), nil, d, "pg-router-worker-zr-w"); err == nil {
 		t.Fatal("timeout should be failure")
 	}
@@ -380,6 +382,79 @@ func TestWaitDone_needsInputWaitsUntilMaxWait(t *testing.T) {
 	}
 	if cc.ListIdx < 10 {
 		t.Errorf("needs_input must keep waiting to MaxWait; listIdx=%d (stopped early?)", cc.ListIdx)
+	}
+}
+
+// INV-CCH-27: the wait deadline is max(MaxWait, budget.time + 10m) when the
+// role has a time budget, else MaxWait.
+func TestEffectiveMaxWait(t *testing.T) {
+	cases := []struct {
+		name       string
+		maxWait    time.Duration
+		budgetTime time.Duration
+		want       time.Duration
+	}{
+		{"no time budget keeps MaxWait", 30 * time.Minute, 0, 30 * time.Minute},
+		{"budget below MaxWait keeps MaxWait", 30 * time.Minute, 5 * time.Minute, 30 * time.Minute},
+		{"budget+10m == MaxWait", 30 * time.Minute, 20 * time.Minute, 30 * time.Minute},
+		{"budget+10m just past MaxWait", 30 * time.Minute, 20*time.Minute + time.Second, 30*time.Minute + time.Second},
+		{"default review budget (25m)", 30 * time.Minute, 25 * time.Minute, 35 * time.Minute},
+		{"default worker budget (30m)", 30 * time.Minute, 30 * time.Minute, 40 * time.Minute},
+		{"budget above MaxWait", 30 * time.Minute, 2 * time.Hour, 2*time.Hour + 10*time.Minute},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := config.Default()
+			cfg.MaxWait = tc.maxWait
+			cc := &roles.CCPoolConfig{Budget: budget.Budget{Time: tc.budgetTime}}
+			if got := effectiveMaxWait(cfg, cc); got != tc.want {
+				t.Errorf("effectiveMaxWait(MaxWait=%s, budget.time=%s) = %s, want %s", tc.maxWait, tc.budgetTime, got, tc.want)
+			}
+		})
+	}
+	// Only the time dimension extends the wait: token/cost limits do not.
+	cfg := config.Default()
+	if got := effectiveMaxWait(cfg, &roles.CCPoolConfig{Budget: budget.Budget{Tokens: 1_000_000, Cost: 500}}); got != cfg.MaxWait {
+		t.Errorf("a role with only token/cost budgets must keep MaxWait, got %s", got)
+	}
+}
+
+// INV-CCH-27 through waitDone: the loop keeps polling to the derived deadline
+// (not Cfg.MaxWait) and the failure text names the wait actually applied. The
+// manual clock advances a poll interval per poll, so a one-minute interval
+// reaches a 35m deadline in ~35 polls with no real sleeping.
+func TestWaitDone_usesDerivedWaitAndReportsIt(t *testing.T) {
+	cases := []struct {
+		name       string
+		budgetTime time.Duration
+		wantText   string
+		minPolls   int
+		maxPolls   int
+	}{
+		{"budget beyond MaxWait waits budget+10m", 25 * time.Minute, "not complete within 35m0s", 35, 36},
+		{"no time budget waits MaxWait", 0, "not complete within 30m0s", 30, 31},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := fastCfg()
+			cfg.MaxWait = 30 * time.Minute
+			cfg.PollInterval = time.Minute
+			bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w": {"in_progress"}}}
+			cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: "pg-router-worker-zr-w", Live: true, State: ccpool.StateWorking}}}}
+			e := newExec(cc, bd, cfg)
+			role := workerRole(cfg)
+			role.CCPool.Budget = budget.Budget{Time: tc.budgetTime}
+			d := DispatchContext{Role: role, Item: item.Item{ID: "zr-w"}}
+			err := e.waitDone(context.Background(), nil, d, "pg-router-worker-zr-w")
+			if err == nil || !strings.Contains(err.Error(), tc.wantText) {
+				t.Fatalf("error must contain %q, got %v", tc.wantText, err)
+			}
+			// Each poll reads the session list twice (the liveness checks), so
+			// the list count bounds the polls made before the deadline.
+			if cc.ListIdx < 2*tc.minPolls || cc.ListIdx > 2*tc.maxPolls+2 {
+				t.Errorf("listIdx=%d, want the loop to run to the derived deadline (%d-%d polls)", cc.ListIdx, tc.minPolls, tc.maxPolls)
+			}
+		})
 	}
 }
 
@@ -1406,8 +1481,14 @@ func TestWaitDone_noNeedsInput_noAlert(t *testing.T) {
 
 func dispatchWorker(t *testing.T, cc *dtest.FakeCC, bd *dtest.ScriptBD, cfg config.Config, ext string) (report.Result, error) {
 	t.Helper()
+	return dispatchWorkerRole(t, cc, bd, cfg, workerRole(cfg), ext)
+}
+
+// dispatchWorkerRole is dispatchWorker for a caller-supplied worker role.
+func dispatchWorkerRole(t *testing.T, cc *dtest.FakeCC, bd *dtest.ScriptBD, cfg config.Config, role roles.Role, ext string) (report.Result, error) {
+	t.Helper()
 	cfg.WorktreeDir = t.TempDir() // isolate the per-bead worktree to a throwaway dir
-	d := DispatchContext{Role: workerRole(cfg), Item: item.Item{ID: "zr-w"}}
+	d := DispatchContext{Role: role, Item: item.Item{ID: "zr-w"}}
 	deps := newExec(cc, bd, cfg).deps
 	deps.ExternalID = ext
 	deps.Git = &dtest.NoopGit{}                    // never shell out to real git in tests
@@ -1872,7 +1953,9 @@ func TestDispatch_waitFailWorkerTimeout_escalated(t *testing.T) {
 	cfg := fastCfg() // worker on_failure = add-human
 	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w": {"in_progress"}}}
 	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{{{ExternalID: "pg-router-worker-zr-w", Live: true, State: ccpool.StateWorking}}}}
-	res, _ := dispatchWorker(t, cc, bd, cfg, "pg-router-worker-zr-w")
+	// noBudget: with the default time budget the watchdog's hard stop (25m)
+	// fires before the derived wait (35m, INV-CCH-27) and reports Unclaimed.
+	res, _ := dispatchWorkerRole(t, cc, bd, cfg, noBudget(workerRole(cfg)), "pg-router-worker-zr-w")
 	if v := verbOf(res); v != report.Escalated {
 		t.Errorf("worker timeout must report Escalated, got %q", v)
 	}

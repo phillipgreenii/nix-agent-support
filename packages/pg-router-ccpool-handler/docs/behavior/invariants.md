@@ -510,3 +510,17 @@ review`. The claim is still released (status open, assignee cleared) — the lab
   The explained branches (clean completion, budget hard stop, external or handler close) MUST NOT
   log it. **Why.** Review sessions sometimes die mid-run while usage-limit windows are reached, and
   nothing recorded whether the two line up. Bead `pg2-n3ila`.
+
+- **`INV-CCH-27`** — how long a dispatch waits for its session's bead to complete before giving up
+  and applying the role's `on_failure` MUST NOT be shorter than the role's time budget plus ten
+  minutes. The wait is the longer of the handler-wide maximum wait (30 minutes unless the
+  deployment changes it) and the role's time budget plus ten minutes; a role with no time budget
+  waits the handler-wide maximum, unchanged. The wait is derived only: there is no per-role setting
+  for it. The failure recorded when the wait runs out MUST name the wait actually applied, not the
+  handler-wide maximum. **Why.** A role whose time budget outlasts the handler-wide maximum
+  (a long-running worker) would otherwise be failed, and its bead flagged for a person, while a
+  live session still held the bead and the budget watchdog had not yet stopped it. The ten minutes
+  let the budget's hard stop and the session's wrap-up land first, so the wait expiring is the
+  fallback for a session the budget did not stop, not the usual end. The default roles' waits are
+  therefore 35 minutes for a 25-minute budget and 40 minutes for a 30-minute budget. Bead
+  `pg2-nk6th.2`, plan `2026-10-08-drain-worker-roles` section A1.

@@ -18,6 +18,7 @@ import (
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/budget"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/ccpool"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/complete"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/config"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/failsig"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/item"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/prompt"
@@ -410,6 +411,23 @@ func (r *ccpoolRun) waitFailureResult(cc *roles.CCPoolConfig, beadID string, err
 		return failureAction(report.Escalated, beadID)
 	}
 	return report.Result{}
+}
+
+// budgetWaitMargin is how long past a role's time budget waitDone keeps waiting
+// (INV-CCH-27): the budget watchdog's hard stop and the session's own wrap-up
+// need room to land before the wait gives up and applies on_failure.
+const budgetWaitMargin = 10 * time.Minute
+
+// effectiveMaxWait is waitDone's deadline for a ccpool role: max(Cfg.MaxWait,
+// budget.time + 10m) when the role has a time budget, else Cfg.MaxWait
+// unchanged (INV-CCH-27). Derived only: no per-role knob. Without it a role
+// whose time budget is longer than MaxWait would be failed (on_failure) while
+// its live session still held the bead.
+func effectiveMaxWait(cfg config.Config, cc *roles.CCPoolConfig) time.Duration {
+	if cc == nil || cc.Budget.Time <= 0 {
+		return cfg.MaxWait
+	}
+	return max(cfg.MaxWait, cc.Budget.Time+budgetWaitMargin)
 }
 
 // budgetUnlimited reports whether a budget imposes no finite bound (so no watchdog
@@ -1149,7 +1167,8 @@ func (r *ccpoolRun) workerWaitWithWatchdog(ctx context.Context, d DispatchContex
 // (pg2-c1vp)
 func (r *ccpoolRun) waitDone(ctx context.Context, claimTerminal func() bool, d DispatchContext, name string) error {
 	completion := d.Role.CCPool.Completion
-	deadline := r.deps.clock().Add(r.deps.Cfg.MaxWait)
+	maxWait := effectiveMaxWait(r.deps.Cfg, d.Role.CCPool)
+	deadline := r.deps.clock().Add(maxWait)
 	var tr complete.Tracker
 	alertedNeedsInput := false // edge latch: fire the needs_input alert at most once
 	// check reads the bead (from the role's own tracker, pg2-2grpj) and reports
@@ -1275,7 +1294,7 @@ func (r *ccpoolRun) waitDone(ctx context.Context, claimTerminal func() bool, d D
 			}
 			if won() {
 				r.captureSignature() // INV-CCH-9
-				return r.fail(ctx, d, fmt.Sprintf("not complete within %s", r.deps.Cfg.MaxWait))
+				return r.fail(ctx, d, fmt.Sprintf("not complete within %s", maxWait))
 			}
 			return lose()
 		}

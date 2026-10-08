@@ -262,7 +262,6 @@ func TestAbsorb_usesLaunchedAtAsWatchdogStart(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := fastCfg()
-			cfg.MaxWait = 300 * time.Millisecond // manual-clock time; the loop advances it by PollInterval per poll
 			t0 := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
 			clk := &dtest.ManualClock{T: t0}
 			bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w": {"in_progress"}}}
@@ -283,9 +282,16 @@ func TestAbsorb_usesLaunchedAtAsWatchdogStart(t *testing.T) {
 			deps.Git = &dtest.NoopGit{}
 			deps.GitOpener = (&dtest.NoopGitOpener{}).Open
 			d := timeBudgetDispatch(cfg)
-			res, err := (ccpoolExecutor{}).Dispatch(context.Background(), d, deps)
+			// The wait deadline is the budget + 10m (INV-CCH-27), so an
+			// under-budget absorb is never ended by it within a test: it runs
+			// for a short wall-clock window (a few hundred manual-clock
+			// polls, far under the budget) and is then cancelled. Only the
+			// over-budget case ends itself, by the watchdog's hard stop.
+			ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+			defer cancel()
+			res, err := (ccpoolExecutor{}).Dispatch(ctx, d, deps)
 			if err == nil {
-				t.Fatal("expected a failure (budget stop or not-complete)")
+				t.Fatal("expected a failure (budget stop) or a cancelled wait")
 			}
 			stopped := errors.Is(err, watchdog.ErrBudgetExceeded)
 			if stopped != tc.wantStop {

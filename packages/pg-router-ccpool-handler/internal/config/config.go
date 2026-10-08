@@ -51,7 +51,9 @@ type Config struct {
 	// created under (worktree isolation, the default).
 	WorktreeDir string
 	// MaxWait bounds how long a ccpool session may run before it is
-	// considered stuck (waitDone's deadline).
+	// considered stuck (waitDone's deadline). It is the FLOOR of that
+	// deadline: a role with a time budget waits max(MaxWait, budget.time +
+	// 10m) (executor.effectiveMaxWait, INV-CCH-27).
 	MaxWait time.Duration
 	// WorktreeQuietWindow is how long a finished dispatch's session (its
 	// transcript plus every subagents/*.jsonl beside it) must have shown no
@@ -389,7 +391,7 @@ func Default() Config {
 		ConfirmIngest:       90 * time.Second,
 		BudgetTokens:        0,                // unlimited until ccpool N3
 		BudgetCost:          0,                // unlimited until ccpool N3
-		BudgetTime:          25 * time.Minute, // strictly < MaxWait (30m)
+		BudgetTime:          25 * time.Minute, // strictly < MaxWait (30m); the effective wait is 35m
 		ReminderPct:         0.725,
 		CancelPct:           0.90,
 		HardPct:             1.00,
