@@ -112,7 +112,7 @@ zones.
 - Every stored instant MUST be an RFC 3339 timestamp in UTC (`2026-10-07T13:30:00.000Z`), with at least millisecond precision.
 - Every computation that depends on a civil date or a wall-clock time MUST name an IANA time zone
   identifier (for example `America/New_York`). The config has **no default zone**.
-- A zone MUST be an IANA identifier present in the embedded time zone database. Abbreviations
+- A zone MUST be an IANA identifier that `time.LoadLocation` resolves, with `time/tzdata` linked, in its exact letter case (`america/new_york` is rejected even where the host's file system would accept it). Abbreviations
   (`ET`, `EST`, `PST`) and bare UTC offsets (`-05:00`) MUST be rejected at config load and at API
   input, because an abbreviation is ambiguous and an offset ignores daylight saving rules.
 - The daemon MUST embed the time zone database (the Go `time/tzdata` package) so that lookups
@@ -211,7 +211,7 @@ The log is one UTF-8 file of newline-delimited JSON, at
    terminate them with a `batch.committed` event, all written and fsynced together.
 7. **Crash recovery.** On startup, a torn final line (one with no terminating newline, or one that
    ends in a newline but does not parse as a valid event; a line with an unknown `v` is neither,
-   see rule 1), and trailing events of a batch that has no
+   see the `v` field of the envelope), and trailing events of a batch that has no
    `batch.committed`, were never acknowledged to any client. The daemon MUST copy those bytes to a
    sidecar file, fsync it, truncate `events.jsonl` to the end of the last committed record, fsync
    it, and only then accept appends. A torn line or an uncommitted batch anywhere but the tail is
@@ -381,7 +381,7 @@ cycles:
 7. **Validation.** The daemon MUST reject the whole config if: a profile names an unknown task or
    cycle, or lists a task under a cadence other than its own; a due rule's fields do not match its
    cadence or are missing; a `weekday` is not one of `mon` to `sun`; a `day` is less than 1; an
-   `at` is not a valid `HH:MM`; a `tz` is not an IANA identifier; a duration or interval is not
+   `at` or `defaults.day_start` is not a valid `HH:MM`; a `tz` is not an IANA identifier; a duration or interval is not
    positive; `defaults.profile` is not defined; a key name is not `[a-z0-9_-]+` or is `cycle_type`. A bad config at first start is a hard failure. A bad reload keeps the
    previous config and reports through `/healthz`; a reload that removes the active profile is a
    bad reload.
@@ -472,13 +472,14 @@ stateDiagram-v2
 
 Allowed operations by state:
 
-| Operation  | Running | Paused | Stopped |
-| ---------- | ------- | ------ | ------- |
-| `pause`    | yes     | no     | no      |
-| `resume`   | no      | yes    | no      |
-| `boost`    | yes     | yes    | no      |
-| `stop`     | yes     | yes    | no      |
-| `annotate` | yes     | yes    | yes     |
+| Operation                | Running | Paused                        | Stopped |
+| ------------------------ | ------- | ----------------------------- | ------- |
+| `pause`                  | yes     | no                            | no      |
+| `resume`                 | no      | yes                           | no      |
+| `boost`                  | yes     | yes                           | no      |
+| `stop`                   | yes     | yes                           | no      |
+| `annotate`               | yes     | yes                           | yes     |
+| `switch` (to this cycle) | no      | yes, while another cycle runs | no      |
 
 `resume` of a paused cycle while another cycle is running is rejected (`409 cycle_already_running`);
 `switch` is the operation that swaps them.
@@ -497,9 +498,10 @@ Allowed operations by state:
    cycle has a **Switch** action that makes it the focus and dims the running cycle. A switch is
    one batch: a `cycle.paused` for the running cycle and a `cycle.resumed` for the chosen cycle,
    both at the same `effective_at`, then `batch.committed`; it is rejected as `no_running_cycle`
-   when nothing runs (use `resume`), `cycle_not_paused` when the chosen cycle is not paused, and
+   when no cycle runs at that instant (use `resume`; the cycle paused is the one running at the
+   request's `effective_at`), `cycle_not_paused` when the chosen cycle is not paused, and
    `unknown_cycle` for an unknown id. A dimmed cycle can also be stopped, boosted or annotated
-   while it is dimmed. A paused cycle accrues no running time, so it never plays a sound.
+   while it is dimmed. A paused cycle accrues no running time, so it never plays a sound. A switch also records that the chosen cycle displaced the paused one (a `cycle.paused` and a `cycle.resumed` of different cycles in one batch at one instant are a switch; a break back-fill pauses and resumes the same cycle and is not), so the paused cycle joins the interrupt stack and the `resume_offer` names it once the displacing cycle is stopped; any resume or stop clears the link, and a pause made by hand never sets it. While another cycle runs, the `resume_offer`'s action is Switch (a plain `resume` would be `cycle_already_running`); the offer ends when its cycle is switched to, resumed or stopped.
 2. **Stale pauses.** A paused cycle that has been paused longer than `stale_pause_minutes`
    (default 45) becomes an attention item, so an interrupted cycle is not forgotten.
 3. **Timer math is derived, never ticked.** `elapsed` is the sum of a cycle's running segments (an
@@ -537,10 +539,11 @@ Allowed operations by state:
 3. Reminders are counted in the cycle's running time, not in wall-clock time. A paused cycle
    accrues no running time, so it plays no sound and sends no notification; resuming it continues
    the count where it stopped (a cycle that had run 3 of 5 minutes toward its next reminder plays
-   it after 2 more running minutes). Reminders end when the cycle is stopped, or when a boost ends
-   overtime (entering overtime again plays the `sound` again).
+   it after 2 more running minutes). A boost that leaves the cycle in overtime does not move the next
+   reminder. Reminders end when the cycle is stopped, or when a boost ends overtime (entering
+   overtime again plays the `sound` again).
 4. After the host wakes from sleep the daemon MUST play at most one catch-up alert, never a burst
-   for the missed intervals.
+   for the missed intervals; when the sleep spanned the expiry itself, the catch-up is the expiry.
 5. Alerts are derived from the projection and are NOT events in the log. They are observable
    through metrics.
 6. Sound playback goes through the `SoundPlayer` interface (a macOS implementation using the system
@@ -575,13 +578,13 @@ schema declaring `$schema`) defines:
 Errors MUST use RFC 9457 `application/problem+json`, with an extension member `reason` carrying a
 code from the closed set below, and a `trace_id` member. Responses carry a `traceresponse` header.
 
-| Status | `reason` codes                                                                                                                                                                                                                                                                  |
-| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `400`  | `invalid_request`, `invalid_zone`, `unknown_profile`, `unknown_cycle_type`, `reserved_key`                                                                                                                                                                                      |
-| `404`  | `unknown_task`, `unknown_cycle`, `unknown_event`                                                                                                                                                                                                                                |
-| `409`  | `no_running_cycle` (no `cycle_id` given and none running), `cycle_not_running` (the named cycle is stopped), `cycle_not_paused`, `cycle_already_running`, `task_already_resolved`, `task_withdrawn`, `period_unchanged`, `id_conflict`, `stale_preview`, `batch_has_dependents` |
-| `422`  | `invalid_timeline`, `invalid_correction`, `future_effective_at`                                                                                                                                                                                                                 |
-| `503`  | `store_unavailable` (the outcome is unknown; retry with the same `id`), `not_ready`                                                                                                                                                                                             |
+| Status | `reason` codes                                                                                                                                                                                                                                                                                                                    |
+| ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `400`  | `invalid_request`, `invalid_zone`, `unknown_profile`, `unknown_cycle_type`, `reserved_key`                                                                                                                                                                                                                                        |
+| `404`  | `unknown_task`, `unknown_cycle`, `unknown_event`                                                                                                                                                                                                                                                                                  |
+| `409`  | `no_running_cycle` (no `cycle_id` given and none running, or a switch with no cycle running at its instant), `cycle_not_running` (the named cycle is stopped), `cycle_not_paused`, `cycle_already_running`, `task_already_resolved`, `task_withdrawn`, `period_unchanged`, `id_conflict`, `stale_preview`, `batch_has_dependents` |
+| `422`  | `invalid_timeline`, `invalid_correction`, `future_effective_at`                                                                                                                                                                                                                                                                   |
+| `503`  | `store_unavailable` (the outcome is unknown; retry with the same `id`), `not_ready`                                                                                                                                                                                                                                               |
 
 An override naming an unknown or already resolved task is rejected as `unknown_task` or
 `task_already_resolved`; a backdated period change that precedes the left period's start is
@@ -657,7 +660,7 @@ One binary, `pg-task-focus`, with `serve` (the daemon) and thin client subcomman
 
 | Verb                                              | Maps to                                                                                                                                                                                                                                                                                                                                              |
 | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `status`                                          | `GET /state`; prints short task names, `Next:`, and "running 1h15m since the last pause" style lines                                                                                                                                                                                                                                                 |
+| `status`                                          | `GET /state`; prints short task names, `Next:`, and "running 1h15m since the last pause" style lines, then the dimmed cycles                                                                                                                                                                                                                         |
 | `status --watch`                                  | `GET /stream`; emits NDJSON, one full state object per line, schema-checked, for the SwiftBar plugin                                                                                                                                                                                                                                                 |
 | `period change` / `period roll`                   | `POST /periods/change`; `roll` changes every ended kind after a dry run, prefilling `start` as today and `end` as `start` plus the previous period's length, and accepts `--profile`                                                                                                                                                                 |
 | `profile change [--dry-run]`                      | `POST /profile/change`                                                                                                                                                                                                                                                                                                                               |
@@ -721,7 +724,7 @@ roll over", or the week or sprint equivalent), the next due task (`Next: <task> 
 While a cycle runs or is paused, the title MUST also append the `next` task when it is overdue or
 due within `due_soon_minutes` (`Deep 12:30 · Post plan 8m`); an overdue task reads "overdue 12m",
 never a negative time. Every lower-priority state MUST appear in the dropdown. The plugin never
-rolls anything over itself. The dropdown offers pause, resume, stop, boost, a dimmed row with a switch action for each paused cycle, complete next task (the
+rolls anything over itself. The dropdown offers pause, resume, stop, boost, a dimmed row with switch and stop actions for each paused cycle, complete next task (the
 `next` task), and open the web UI. The same overtime also reaches the menu bar through the attention
 feed once sub-project 4 lands; that duplication is accepted. A streaming plugin driven by
 `status --watch` lets the timer tick without starting a process each second. It departs from the
@@ -962,19 +965,19 @@ All telemetry stays on the local machine.
 
 ## Testing
 
-| Layer                  | What it covers                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Domain, table-driven   | Projection from events; timer math; the state-by-operation table; the interrupt stack with backdated `effective_at`; rollover, bootstrap and batch undo (including `batch_has_dependents`); the task state rules; correction and retraction rules, including retraction of a retraction; profile change with withdrawal and reinstatement; alert scheduling (expiry, reminder cadence, silence rules, one catch-up after sleep)                                                         |
-| Domain, property-based | Replay is deterministic and equals the incrementally built projection; a correction applied twice changes nothing; elapsed time is never negative and equals the sum of segments                                                                                                                                                                                                                                                                                                        |
-| Zones                  | Rejection of abbreviations and offsets; the nonexistent and repeated civil-time rules on both transition days of a whole-hour zone and in a half-hour-shift zone; a week that spans a transition; a rule zone that differs from the period zone; host-zone discovery from `TZ` and `/etc/localtime`                                                                                                                                                                                     |
-| Store                  | Torn last line and uncommitted batch (recovery truncates, then appends cleanly), mid-file corruption, fsync failure and rollback (and read-only mode when rollback fails), the data-directory lock, large replay, the id-to-hash idempotency index                                                                                                                                                                                                                                      |
-| Contract               | Route-to-spec parity, response validation, event, config and CLI-output schema fixtures                                                                                                                                                                                                                                                                                                                                                                                                 |
-| Security               | Host and Origin matrix (absent, `null`, allowed, foreign, `localhost` versus `127.0.0.1`), content type enforcement, no CORS headers                                                                                                                                                                                                                                                                                                                                                    |
-| Streaming              | `/stream` outlives the server write timeout, heartbeats arrive, `version` advances on a mutation and a config reload                                                                                                                                                                                                                                                                                                                                                                    |
-| Observability          | The metrics catalog (names, types, labels), a cardinality guard, the privacy canary, an alert-rule test that parses the rules file and asserts every referenced metric exists in the catalog (the `pg-desk` `alertrules` precedent), a dashboard test that does the same for every panel expression, a first-scrape test that the alerted counter series are present, a test that the alert and dashboard expressions resolve against real scraped output, and a log-source format test |
-| Connector              | The repository's conformance-test pattern, the Notes format with a reference parser, a fake daemon, daemon-down returning `unavailable`, `Group` and `Stale` fields                                                                                                                                                                                                                                                                                                                     |
-| End to end             | A real daemon with a fake clock, fake `SoundPlayer` and temp store, driven through the CLI over a scripted day                                                                                                                                                                                                                                                                                                                                                                          |
-| Nix                    | Module render tests, the launchd module, the observability registrations, and the config JSON Schema check                                                                                                                                                                                                                                                                                                                                                                              |
+| Layer                  | What it covers                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Domain, table-driven   | Projection from events; timer math; the state-by-operation table; the interrupt stack with backdated `effective_at`; switch batches and dimmed cycles; running-time reminders across pause, resume, boost and sleep; rollover, bootstrap and batch undo (including `batch_has_dependents`); the task state rules; correction and retraction rules, including retraction of a retraction; profile change with withdrawal and reinstatement; alert scheduling (expiry, reminder cadence, silence rules, one catch-up after sleep) |
+| Domain, property-based | Replay is deterministic and equals the incrementally built projection; a correction applied twice changes nothing; elapsed time is never negative and equals the sum of segments                                                                                                                                                                                                                                                                                                                                                |
+| Zones                  | Rejection of abbreviations and offsets; the nonexistent and repeated civil-time rules on both transition days of a whole-hour zone and in a half-hour-shift zone; a week that spans a transition; a rule zone that differs from the period zone; host-zone discovery from `TZ` and `/etc/localtime`                                                                                                                                                                                                                             |
+| Store                  | Torn last line (with and without its newline) and uncommitted batch (recovery truncates, then appends cleanly), mid-file corruption, fsync failure and rollback (and read-only mode when rollback fails), the data-directory lock, large replay, the id-to-hash idempotency index                                                                                                                                                                                                                                               |
+| Contract               | Route-to-spec parity, response validation, event, config and CLI-output schema fixtures                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Security               | Host and Origin matrix (absent, `null`, allowed, foreign, `localhost` versus `127.0.0.1`), content type enforcement, no CORS headers                                                                                                                                                                                                                                                                                                                                                                                            |
+| Streaming              | `/stream` outlives the server write timeout, heartbeats arrive, `version` advances on a mutation and a config reload                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Observability          | The metrics catalog (names, types, labels), a cardinality guard, the privacy canary, an alert-rule test that parses the rules file and asserts every referenced metric exists in the catalog (the `pg-desk` `alertrules` precedent), a dashboard test that does the same for every panel expression, a first-scrape test that the alerted counter series are present, a test that the alert and dashboard expressions resolve against real scraped output, and a log-source format test                                         |
+| Connector              | The repository's conformance-test pattern, the Notes format with a reference parser, a fake daemon, daemon-down returning `unavailable`, `Group` and `Stale` fields                                                                                                                                                                                                                                                                                                                                                             |
+| End to end             | A real daemon with a fake clock, fake `SoundPlayer` and temp store, driven through the CLI over a scripted day                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Nix                    | Module render tests, the launchd module, the observability registrations, and the config JSON Schema check                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 ## Build order
 
@@ -1051,7 +1054,7 @@ raised.
 | 27  | Deep links                                | `<public_url>/#/tasks/<task_id>` and `<public_url>/#/cycles/<cycle_id>`, built by the daemon.                                                                                                                                                                                                                                                       |
 | 28  | Interrupted cycles                        | An interrupted (paused) cycle stays visible and dimmed beside the focus cycle; a Switch action swaps the focus (one batch: pause the running cycle, resume the chosen one); a dimmed cycle can also be stopped (operator, 2026-10-08).                                                                                                              |
 | 29  | Reminder cadence                          | Reminder sounds and notifications are counted in a cycle's running time: pausing silences them and resuming continues the count, so a cycle resumed part-way through an interval reminds when that interval completes (operator, 2026-10-08, refining row 7).                                                                                       |
-| 30  | Torn tail                                 | A final line that ends in a newline but does not parse is a torn tail like any other: recovered to a sidecar, not refused (operator, 2026-10-08).                                                                                                                                                                                                   |
+| 30  | Torn tail                                 | A final line that ends in a newline but does not parse is a torn tail like any other: recovered to a sidecar, not refused (operator, 2026-10-08). The sidecar keeps the bytes. This includes a complete line that is valid JSON of a known version but fails its schema, for example one written by a newer binary after a rollback                 |
 | 31  | Backdating bound                          | A daily rollover MAY be backdated to the day's configurable start time (`defaults.day_start`, default 00:00); a week or sprint rollover to midnight of its start date (operator, 2026-10-08; recorded as read by the plan).                                                                                                                         |
 
 ## Open items for the implementation plans
