@@ -1240,8 +1240,9 @@ func TestGit_ConfigEditFlagClassifiedAsWrite(t *testing.T) {
 // break every row here.
 func TestGit_ConfigOrdinaryWrite_Approve(t *testing.T) {
 	approve := []string{
-		"git config user.email a@b.c",
-		"git config user.name Someone",
+		// A repo-local `user.email`/`user.name` write used to be listed here; it is now
+		// refused outside a provable temp repo (config_shared_write_test.go). The
+		// --global spelling and the unset keep their Approve.
 		"git config --global user.email a@b.c",
 		"git config commit.gpgsign true",
 		"git config branch.main.remote origin",
@@ -1252,7 +1253,7 @@ func TestGit_ConfigOrdinaryWrite_Approve(t *testing.T) {
 		"git config init.defaultBranch main",
 		"git config alias.st status",
 		"git config --unset user.email",
-		"git config set user.email a@b.c",
+		"git config set commit.gpgsign true",
 		// The row TestGit_Modifying_Approve pins; kept here too so this test alone
 		// documents why it must not become an Ask.
 		"git config x y",
@@ -1360,8 +1361,9 @@ func TestGit_ConfigRedirectedContext(t *testing.T) {
 		why  string
 	}{
 		{"GIT_DIR=/other git config --get user.email", hookio.Approve, "a READ under a redirect matches the read-only policy"},
-		{"GIT_DIR=/other git config user.email a@b.c", hookio.Ask, "a WRITE under a redirect keeps the redirect Ask"},
-		{"GIT_WORK_TREE=/other git config user.email a@b.c", hookio.Ask, "same for GIT_WORK_TREE"},
+		{"GIT_DIR=/other git config commit.gpgsign true", hookio.Ask, "a WRITE under a redirect keeps the redirect Ask"},
+		{"GIT_WORK_TREE=/other git config commit.gpgsign true", hookio.Ask, "same for GIT_WORK_TREE"},
+		{"GIT_DIR=/other git config user.email a@b.c", hookio.Reject, "a shared-key write under a non-temp redirect is refused outright (pg2-7nfcx), outranking the redirect Ask"},
 		{"GIT_DIR=/other git config core.hooksPath /tmp/h", hookio.Reject, "a gated key is gated regardless of the redirect (escalated by pg2-3zgcf, 2026-09-07)"},
 		{"GIT_DIR=/other git config remote.origin.url https://evil.invalid/x.git", hookio.Reject, "a redirect must not soften the redirect-class Reject"},
 	}

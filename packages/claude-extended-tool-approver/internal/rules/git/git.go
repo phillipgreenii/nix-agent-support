@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -1528,11 +1529,14 @@ func gatedConfigKey(args []string) (string, configGateClass, bool) {
 // redirect Ask, which is why hasRedirectEnvVar is still consulted below.
 //
 // ORDINARY WRITES ARE UNTOUCHED, and that is a requirement rather than a
-// side effect: `user.email`, `commit.gpgsign` and `branch.<name>.remote` keep
+// side effect: `commit.gpgsign` and `branch.<name>.remote` keep
 // their Approve with their existing `"modifying git command"` reason, and
 // TestGit_Modifying_Approve's `git config x y` row still passes. A blanket
 // Ask/Reject on every `git config` write would be the wrong fix — a large
-// false-positive surface over routine traffic.
+// false-positive surface over routine traffic. THE ONE NARROW EXCEPTION is a
+// repo-local write of `user.name`/`user.email`/`protocol.<n>.allow` outside a
+// provable temp repo, which is Reject (pg2-7nfcx, configLocalSharedWrite): those
+// keys are shared by every worktree and silently change later commands.
 //
 // TEXT VS PARSED: every test here reads PARSED tokens (post-unquote
 // cmdparse.ParsedCommand.Args) and the rule runs only when
@@ -1546,6 +1550,20 @@ func (r *Rule) configVerdict(envs []cmdparse.EnvAssignment, rest []string, cwd s
 	if configIsRead(args) {
 		return hookio.RuleResult{Decision: hookio.Approve, Reason: "read-only git config", Module: r.Name()}
 	}
+	if key, ok := configLocalSharedWrite(args); ok && (hasRedirectEnvVar(envs, cwd) || !temproot.Under(cwd)) {
+		return hookio.RuleResult{
+			Decision: hookio.Reject,
+			Reason: "git: writing `" + key + "` to the repo-local config is prohibited unless the repository is " +
+				"PROVABLY a temporary fixture — a linked worktree shares its common `.git/config`, so a write made " +
+				"in the wrong directory lands in every worktree of the real repository (incident 2026-10-07: " +
+				"`cd \"$T/repo\"` failed, the following `git config user.email agent@example.invalid` ran in a ZR " +
+				"monorepo worktree and replaced the operator's identity for every ZR session). A preceding bare `cd` " +
+				"does NOT count as proof, because it may have failed. Address the fixture explicitly: " +
+				"`git -C \"$T/repo\" config " + key + " <value>` with $T under a temporary root. Unsetting the key " +
+				"is not refused",
+			Module: r.Name(),
+		}
+	}
 	if key, class, ok := gatedConfigKey(args); ok {
 		return r.configGateResult(key, class)
 	}
@@ -1553,6 +1571,77 @@ func (r *Rule) configVerdict(envs []cmdparse.EnvAssignment, rest []string, cwd s
 		return hookio.RuleResult{Decision: hookio.Ask, Reason: "git command with redirected context", Module: r.Name()}
 	}
 	return hookio.RuleResult{Decision: hookio.Approve, Reason: "modifying git command", Module: r.Name()}
+}
+
+// configSharedWriteKeys are the keys whose repo-local value is shared by EVERY
+// worktree of a repository AND silently changes what later commands do: the
+// commit identity (a placeholder identity replaces the operator's for every
+// session, and `bd create` stamps it as the bead owner) and `protocol.<n>.allow`
+// (`always` re-enables the `ext::` command-running transport repo-wide). Keyed
+// like gatedConfigKeys — configKeyID's `<section>.<name>`, lowercased, with any
+// subsection dropped, so `protocol.ext.allow` is `protocol.allow`.
+var configSharedWriteKeys = map[string]bool{
+	"user.name": true, "user.email": true, "protocol.allow": true,
+}
+
+// Long-flag abbreviation minimums for the scope-selecting `git config` options
+// configLocalSharedWrite keys on. `--gl` and `--sy` are the measured minimums
+// recorded beside configWriteFlags above; `--fil` and `--bl` are the measured
+// minimums in configValueFlags. NOT matching an abbreviation is the SAFE direction
+// here — the write is then treated as repo-local and refused — so a missed
+// spelling over-refuses rather than lets a write through.
+const (
+	minAbbrevConfigGlobal = len("gl")
+	minAbbrevConfigSystem = len("sy")
+	minAbbrevConfigFile   = len("fil")
+	minAbbrevConfigBlob   = len("bl")
+)
+
+// configLocalSharedWrite reports the key of a REPO-LOCAL write to a
+// configSharedWriteKeys member (pg2-7nfcx). args are already configElideFlagValues'd
+// and already known not to be a read.
+//
+// "REPO-LOCAL" is the default scope, `--local` and `--worktree`; `--global`,
+// `--system`, `--file`/`-f` and `--blob` write somewhere other than the repository
+// config and keep their existing verdicts. An UNSET (`--unset`, `--unset-all`,
+// `git config unset`) is exempt: it removes the poisoned value, which is the repair,
+// and the existing gate still applies to `protocol.allow`.
+//
+// The caller decides whether the repository is a provable temp fixture; this
+// function only recognises the shape.
+func configLocalSharedWrite(args []string) (string, bool) {
+	args = cmdparse.ConfigStripDashDash(args)
+	for _, f := range []struct {
+		name   string
+		minLen int
+	}{
+		{"global", minAbbrevConfigGlobal},
+		{"system", minAbbrevConfigSystem},
+		{"file", minAbbrevConfigFile},
+		{"blob", minAbbrevConfigBlob},
+	} {
+		if _, ok := hasAbbrevLongFlag(args, f.name, f.minLen); ok {
+			return "", false
+		}
+	}
+	if slices.Contains(args, "-f") {
+		return "", false
+	}
+	if _, ok := hasAbbrevLongFlag(args, "unset", minAbbrevUnset); ok {
+		return "", false
+	}
+	if _, ok := hasAbbrevLongFlag(args, "unset-all", minAbbrevUnsetAll); ok {
+		return "", false
+	}
+	if sub, _ := cmdparse.FirstOperand(args); sub == "unset" {
+		return "", false
+	}
+	for _, op := range cmdparse.Operands(args) {
+		if _, id, ok := configKeyID(op); ok && configSharedWriteKeys[id] {
+			return op, true
+		}
+	}
+	return "", false
 }
 
 // configGateResult turns a gated key and its class into the verdict. The mapping
