@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -18,6 +19,7 @@ import (
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/report"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/roles"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/usage"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/watchdog"
 )
 
 // Settled-session close (INV-CCH-17, ADR 0082): after a dispatch reaches a
@@ -38,15 +40,32 @@ type settleCC struct {
 
 	mu     sync.Mutex
 	closed bool
+	ops    []string // "meta:<key>" / "close", in call order
+}
+
+func (c *settleCC) SetMeta(ctx context.Context, externalID, key, value string) error {
+	c.mu.Lock()
+	c.ops = append(c.ops, "meta:"+key)
+	c.mu.Unlock()
+	return c.FakeCC.SetMeta(ctx, externalID, key, value)
+}
+
+// closeOps is ops without the supervision-lease refreshes, which tick alongside
+// every dispatch and are not what these tests pin.
+func (c *settleCC) closeOps() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return slices.DeleteFunc(slices.Clone(c.ops), func(op string) bool { return op == "meta:"+ccpool.MetaKeyLeaseUntil })
 }
 
 func (c *settleCC) Close(ctx context.Context, externalID string, purge bool) error {
 	err := c.FakeCC.Close(ctx, externalID, purge)
+	c.mu.Lock()
+	c.ops = append(c.ops, "close")
 	if err == nil {
-		c.mu.Lock()
 		c.closed = true
-		c.mu.Unlock()
 	}
+	c.mu.Unlock()
 	return err
 }
 
@@ -151,6 +170,110 @@ func TestSettledClose_successHandbackToOpen(t *testing.T) {
 		t.Fatalf("handback is a success: %v", err)
 	}
 	assertClosedOnceNonPurge(t, cc.FakeCC, "sess-1")
+}
+
+// incompleteOps is the SetMeta/Close order closeSettledSession must produce for a
+// dispatch that left its bead open: mark the row incomplete, THEN close it, so no
+// same-event same-head re-request ever finds an unmarked handler-closed row of that
+// attempt (pg2-tc9c3).
+var incompleteOps = []string{"meta:" + ccpool.MetaKeyIncomplete, "close"}
+
+// A hand-back (the session unclaimed the bead and went idle) leaves the bead open:
+// the closed row is marked incomplete, and the marked row then reads as ABSENT to
+// a same-event same-head re-request (crashOrphaned).
+func TestSettledClose_handbackMarksRowIncomplete(t *testing.T) {
+	cfg := fastCfg()
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w": {"in_progress", "open"}}}
+	cc := newSettleCC("sess-1", func() ccpool.SessionState {
+		if bd.Idx["zr-w"] >= 2 {
+			return ccpool.StateIdle
+		}
+		return ccpool.StateWorking
+	})
+	if _, err := dispatchWith(t, cc, bd, cfg, noBudget(workerRole(cfg)), "sess-1", &dtest.ManualClock{T: time.Unix(0, 0)}); err != nil {
+		t.Fatalf("handback is a success: %v", err)
+	}
+	if !slices.Equal(cc.closeOps(), incompleteOps) {
+		t.Fatalf("a hand-back must mark the row incomplete, then close it; ops=%v", cc.closeOps())
+	}
+	row := ccpool.Session{State: ccpool.StateIdle, CloseReason: "handler", Meta: map[string]string{}}
+	for _, m := range cc.SetMetaCalls() {
+		row.Meta[m.Key] = m.Value
+	}
+	if !crashOrphaned(row) {
+		t.Errorf("the handed-back row, as the handler wrote it, must be ABSENT to a re-request; meta=%v", row.Meta)
+	}
+}
+
+// A completed dispatch (bead closed) keeps its row absorbable: a crash-window
+// redelivery of finished work must still find it (INV-EVT-2, INV-CCH-17).
+func TestSettledClose_closedBeadLeavesRowAbsorbable(t *testing.T) {
+	cfg := fastCfg()
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w": {"in_progress", "closed"}}}
+	cc := newSettleCC("sess-1", func() ccpool.SessionState {
+		if bd.Idx["zr-w"] >= 2 {
+			return ccpool.StateIdle
+		}
+		return ccpool.StateWorking
+	})
+	if _, err := dispatchWith(t, cc, bd, cfg, noBudget(workerRole(cfg)), "sess-1", &dtest.ManualClock{T: time.Unix(0, 0)}); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(cc.closeOps(), []string{"close"}) {
+		t.Errorf("a completed dispatch must close the row without marking it; ops=%v", cc.closeOps())
+	}
+}
+
+// leftBeadOpen decides whether a settled row is marked incomplete.
+func TestLeftBeadOpen_cases(t *testing.T) {
+	cases := []struct {
+		name       string
+		werr       error
+		completion roles.Completion
+		status     string // "" = the bead cannot be read
+		want       bool
+	}{
+		{"failure", errors.New("not complete"), roles.CloseOnly, "closed", true},
+		{"budget stop", watchdog.ErrBudgetExceeded, roles.CloseOrHandback, "open", true},
+		{"hand-back: close-or-handback, bead open", nil, roles.CloseOrHandback, "open", true},
+		{"hand-back: close-or-handback, bead re-claimed", nil, roles.CloseOrHandback, "in_progress", true},
+		{"success: close-or-handback, bead closed", nil, roles.CloseOrHandback, "closed", false},
+		{"success: close-only (bead is closed by definition)", nil, roles.CloseOnly, "", false},
+		{"success: triage leaves the bead open by design", nil, roles.CloseOrTriage, "open", false},
+		{"success: split-triage leaves the bead open by design", nil, roles.CloseOrSplitTriage, "open", false},
+		{"cannot read the bead: stays absorbable", nil, roles.CloseOrHandback, "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			bd := &dtest.ScriptBD{}
+			if tc.status != "" {
+				bd.StatusSeq = map[string][]string{"zr-w": {tc.status}}
+			}
+			r := newExec(&dtest.FakeCC{}, bd, fastCfg())
+			if got := r.leftBeadOpen(context.Background(), &roles.CCPoolConfig{Completion: tc.completion}, "zr-w", tc.werr); got != tc.want {
+				t.Errorf("leftBeadOpen = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// A failed dispatch (here the add-human on_failure after not completing) is marked
+// incomplete too, before its close.
+func TestSettledClose_failureMarksRowIncomplete(t *testing.T) {
+	cfg := fastCfg()
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-w": {"in_progress"}}}
+	cc := newSettleCC("sess-1", func() ccpool.SessionState {
+		if failureApplied(bd) {
+			return ccpool.StateIdle
+		}
+		return ccpool.StateWorking
+	})
+	if _, err := dispatchWith(t, cc, bd, cfg, noBudget(workerRole(cfg)), "sess-1", &dtest.ManualClock{T: time.Unix(0, 0)}); err == nil {
+		t.Fatal("expected a not-complete failure")
+	}
+	if !slices.Equal(cc.closeOps(), incompleteOps) {
+		t.Errorf("a failed dispatch must mark the row incomplete, then close it; ops=%v", cc.closeOps())
+	}
 }
 
 // onFailure outcomes: the worker never completes within MaxWait while still

@@ -593,12 +593,37 @@ func (r *ccpoolRun) closeSettledSession(ctx context.Context, cc *roles.CCPoolCon
 	}
 	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), closeSettledSessionTimeout)
 	defer cancel()
+	// Mark BEFORE closing (like the orphan reclaim) so no re-request ever sees an
+	// unmarked handler-closed row of an attempt that left its bead open.
+	if r.leftBeadOpen(cctx, cc, beadID, werr) {
+		if err := r.deps.CC.SetMeta(cctx, name, ccpool.MetaKeyIncomplete, ccpool.FormatMetaTime(r.deps.clock())); err != nil {
+			slog.Warn("settled-session incomplete mark failed", "session", name, "bead", beadID, "err", err)
+		}
+	}
 	if err := r.deps.CC.Close(cctx, name, false); err != nil {
 		slog.Warn("settled-session close failed (left to idle_ttl)", "session", name, "bead", beadID, "err", err)
 		return
 	}
 	slog.Info("settled session closed", "session", name, "bead", beadID,
 		"state", string(row.State), "outcome", settledOutcome(werr))
+}
+
+// leftBeadOpen reports whether a dispatch that ended with werr left its bead
+// still to be done, so its settled row must not be absorbed by a same-event
+// same-head re-request (bead pg2-tc9c3): any failure, or a "success" of a
+// close-or-handback role whose bead is not closed -- the hand-back (the session
+// unclaimed the bead and went idle). A role whose success does not close its bead
+// (the triage modes) and an unreadable bead both report false: the row stays
+// absorbable, today's behavior.
+func (r *ccpoolRun) leftBeadOpen(ctx context.Context, cc *roles.CCPoolConfig, beadID string, werr error) bool {
+	if werr != nil {
+		return true
+	}
+	if cc.Completion != roles.CloseOrHandback {
+		return false
+	}
+	iss, err := beads.ShowObj(ctx, r.deps.BD, beadID)
+	return err == nil && iss.Status != "closed"
 }
 
 // settledOutcome labels a dispatch's terminal outcome for closeSettledSession's
@@ -778,6 +803,11 @@ func (r *ccpoolRun) findSessionByName(ctx context.Context, name, eventID, headSH
 //     redelivery of that same dispatch finds exactly this row and must still
 //     absorb it (INV-EVT-2) rather than launch a second session for an
 //     already-settled bead.
+//   - ... unless that row is marked incomplete (ccpool.MetaKeyIncomplete): its
+//     dispatch ended with the bead still open (hand-back, budget hard stop,
+//     failure), so a same-event same-head re-request is a retry, not a duplicate,
+//     and the row is ABSENT (bead pg2-tc9c3). Only a row whose bead was closed by
+//     the settled session stays absorbable.
 //   - Any OTHER row ccpool has ALREADY explicitly closed (CloseReason != "" --
 //     idle_ttl/cap_eviction/operator, or a handler close of a non-terminal row
 //     such as waitDone's own dead-row cleanup) has nothing left to absorb:
@@ -804,6 +834,14 @@ func crashOrphaned(s ccpool.Session) bool {
 	// settled duplicate: a redelivered dispatch must launch afresh rather than
 	// absorb it and fail on its stale outcome.
 	if s.Meta[ccpool.MetaKeyOrphanReclaimed] != "" {
+		return true
+	}
+	// A row whose dispatch ended without completing its bead (hand-back, budget
+	// hard stop, failure) is a finished attempt, not a settled duplicate: the bead
+	// is open again, so a re-request with the SAME event id and head must launch
+	// afresh instead of re-absorbing the row and hard-stopping instantly on its
+	// original launch time (bead pg2-tc9c3, ADR 0082).
+	if s.Meta[ccpool.MetaKeyIncomplete] != "" {
 		return true
 	}
 	settled := s.State == ccpool.StateIdle || s.State == ccpool.StateErrored

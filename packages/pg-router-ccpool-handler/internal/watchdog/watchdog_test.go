@@ -32,6 +32,7 @@ type fakeCC struct {
 	cancels int
 	closed  []string
 	list    []ccpool.Session
+	ops     []string // "meta:<key>" / "close", in call order
 }
 
 func (f *fakeCC) Ensure(context.Context, string, string, string, map[string]string, map[string]string) error {
@@ -46,6 +47,7 @@ func (f *fakeCC) Send(_ context.Context, _, prompt string, m ccpool.SendMode) er
 func (f *fakeCC) Cancel(context.Context, string) error { f.cancels++; return nil }
 func (f *fakeCC) Close(_ context.Context, n string, _ bool) error {
 	f.closed = append(f.closed, n)
+	f.ops = append(f.ops, "close")
 	return nil
 }
 func (f *fakeCC) List(context.Context) ([]ccpool.Session, error) { return f.list, nil }
@@ -54,7 +56,10 @@ func (f *fakeCC) Capacity(context.Context) (ccpool.Capacity, error) {
 	return ccpool.Capacity{Free: 1}, nil
 }
 
-func (f *fakeCC) SetMeta(context.Context, string, string, string) error { return nil }
+func (f *fakeCC) SetMeta(_ context.Context, _, key, _ string) error {
+	f.ops = append(f.ops, "meta:"+key)
+	return nil
+}
 
 type recBD struct{ calls []string }
 

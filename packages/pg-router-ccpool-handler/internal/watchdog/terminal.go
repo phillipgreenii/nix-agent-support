@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/beads"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/ccpool"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/gitenv"
 	"github.com/phillipgreenii/x/gitclient"
 )
@@ -76,6 +77,11 @@ func (w *Watchdog) terminal(ctx context.Context, sessionName, beadID string, be 
 		}
 	}
 
+	// Mark the row incomplete BEFORE closing it: a budget hard stop leaves the bead
+	// open, so a same-event same-head re-request must launch a fresh session rather
+	// than re-absorb this row and hard-stop instantly from its original launch time,
+	// forever (bead pg2-tc9c3). Best effort.
+	_ = w.CC.SetMeta(ctx, sessionName, ccpool.MetaKeyIncomplete, ccpool.FormatMetaTime(w.now()))
 	_ = w.CC.Close(ctx, sessionName, false)
 
 	_ = beads.Comment(ctx, w.BD, beadID, "interrupted — budget")

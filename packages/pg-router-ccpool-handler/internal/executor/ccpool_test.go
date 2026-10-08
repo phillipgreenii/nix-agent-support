@@ -26,6 +26,7 @@ import (
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/report"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/roles"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/usage"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/watchdog"
 	"github.com/phillipgreenii/x/gitclient"
 )
 
@@ -658,6 +659,9 @@ func TestCrashOrphaned_cases(t *testing.T) {
 		{"live and idle", ccpool.Session{Live: true, State: ccpool.StateIdle}, false},
 		{"orphan-reclaimed idle row is abandoned work, not a duplicate (INV-CCH-18)", ccpool.Session{Live: false, State: ccpool.StateIdle, CloseReason: "handler", Meta: map[string]string{ccpool.MetaKeyOrphanReclaimed: "2026-10-06T12:00:00Z"}}, true},
 		{"orphan-reclaimed marker on a still-live row is ignored", ccpool.Session{Live: true, State: ccpool.StateIdle, Meta: map[string]string{ccpool.MetaKeyOrphanReclaimed: "2026-10-06T12:00:00Z"}}, false},
+		{"handler-closed idle row of an attempt that left its bead open is absent (pg2-tc9c3)", ccpool.Session{Live: false, State: ccpool.StateIdle, CloseReason: "handler", Meta: map[string]string{ccpool.MetaKeyIncomplete: "2026-10-08T07:54:03Z"}}, true},
+		{"handler-closed errored row of an attempt that left its bead open is absent (pg2-tc9c3)", ccpool.Session{Live: false, State: ccpool.StateErrored, CloseReason: "handler", Meta: map[string]string{ccpool.MetaKeyIncomplete: "2026-10-08T07:54:03Z"}}, true},
+		{"incomplete marker on a still-live row is ignored", ccpool.Session{Live: true, State: ccpool.StateIdle, Meta: map[string]string{ccpool.MetaKeyIncomplete: "2026-10-08T07:54:03Z"}}, false},
 		{"purge_pending handler-closed settled idle row is never absorbed (INV-CCH-20)", ccpool.Session{Live: false, State: ccpool.StateIdle, CloseReason: "handler", Meta: map[string]string{ccpool.MetaKeyPurgePending: "1"}}, true},
 		{"purge_pending still-live row is absent too (its non-purge close failed)", ccpool.Session{Live: true, State: ccpool.StateIdle, Meta: map[string]string{ccpool.MetaKeyPurgePending: "1"}}, true},
 	}
@@ -935,6 +939,51 @@ func TestDispatch_sameEventSameHead_absorbsSettledRow(t *testing.T) {
 	_, _ = (ccpoolExecutor{}).Dispatch(context.Background(), d, deps)
 	if len(cc.Ensured) != 0 {
 		t.Errorf("a same-event same-head redelivery must absorb, not launch; Ensured=%v", cc.Ensured)
+	}
+}
+
+// TestDispatch_sameEventSameHead_afterHandback_launchesFreshSession is the
+// pg2-tc9c3 regression (the same-head variant of pg2-afre3). After a hand-back
+// the review bead is open again at the SAME head, so review-source re-emits the
+// SAME event (review.ready:<bead>) at the SAME head_sha. The handler-closed row of
+// the handed-back attempt is marked incomplete and must NOT be re-absorbed:
+// absorbing it measured the budget from its original launch (five hours ago here)
+// and hard-stopped instantly, forever. A fresh session must launch, inside a fresh
+// budget, with no "session budget exceeded".
+func TestDispatch_sameEventSameHead_afterHandback_launchesFreshSession(t *testing.T) {
+	cfg := fastCfg()
+	cfg.WorktreeDir = t.TempDir()
+	cfg.BudgetTime = time.Hour // finite: an absorbed row launched five hours ago is over budget
+	role := reviewRole(cfg)
+	display := role.DisplayName(cfg.SessionPrefix, "zr-c")
+	launched := time.Unix(0, 0).Add(-5 * time.Hour)
+	old := ccpool.Session{
+		ExternalID: "att-1", Name: display, Live: false, State: ccpool.StateIdle, CloseReason: "handler",
+		Meta: map[string]string{
+			ccpool.MetaKeyEventID: "review.ready:zr-c", ccpool.MetaKeyHeadSHA: "h1",
+			ccpool.MetaKeyLaunchedAt: ccpool.FormatMetaTime(launched),
+			ccpool.MetaKeyIncomplete: ccpool.FormatMetaTime(launched.Add(30 * time.Minute)),
+		},
+	}
+	bd := &dtest.ScriptBD{StatusSeq: map[string][]string{"zr-c": {"in_progress", "closed"}}}
+	cc := &dtest.FakeCC{ListSeq: [][]ccpool.Session{
+		{old}, // findSessionByName: only the handed-back attempt's row exists
+		{old, {ExternalID: "att-2", Name: display, Live: true, State: ccpool.StateIdle}},
+	}}
+	d := DispatchContext{
+		Role: role, EventID: "review.ready:zr-c",
+		Item: item.Item{ID: "zr-c", Metadata: map[string]any{"repo": "o/r", "pr_number": "7", "head_sha": "h1"}},
+	}
+	deps := newExec(cc, bd, cfg).deps
+	deps.ExternalID = "att-2"
+	deps.Git = &dtest.NoopGit{}
+	deps.GitOpener = (&dtest.NoopGitOpener{}).Open
+	_, err := (ccpoolExecutor{}).Dispatch(context.Background(), d, deps)
+	if errors.Is(err, watchdog.ErrBudgetExceeded) {
+		t.Fatalf("a re-request after a hand-back must not hard-stop on the old row's launch time: %v", err)
+	}
+	if got := cc.Ensured; len(got) != 1 || got[0] != "att-2" {
+		t.Errorf("a same-event same-head re-request after a hand-back must launch a fresh session; Ensured=%v", got)
 	}
 }
 

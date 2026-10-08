@@ -262,6 +262,15 @@ review`. The claim is still released (status open, assignee cleared) — the lab
   the purge-on-teardown of `phillipgreenii-nix-agent-support` ADR 0015 to a non-purge close; see
   ADR 0082. The event bound on absorption is bead `pg2-uprw5`; because the event id is identical across
   re-reviews of one bead, absorption is also bounded by the item's pinned head (`pg2-afre3`).
+  Absorption is bounded a third way, by the outcome (`pg2-tc9c3`): a dispatch that ends with its
+  bead still open (a hand-back, a budget hard stop, or a failure) MUST mark the row it closes as
+  incomplete BEFORE closing it, and an incomplete row is absent to every later dispatch, whatever
+  its event id and head. After a hand-back the bead is open again at the same head and the core
+  re-emits the same event; that is a re-request, not a crash-window redelivery, and absorbing the
+  row would start its time budget at the original launch and hard-stop instantly, forever. Only a
+  row whose dispatch completed the bead (closed) stays a duplicate. A role whose success leaves
+  its bead open by design (the triage roles), and a bead that cannot be read, leave the row
+  absorbable.
 - **`INV-CCH-18`** — a session the handler launched MUST NOT stay unsupervised once its handler is
   gone. While a handler is alive it MUST keep a supervision lease on its session: the lease is
   stamped when the session is launched (covering the whole launch wait, so a session still

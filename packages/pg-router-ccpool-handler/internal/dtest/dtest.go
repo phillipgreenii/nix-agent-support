@@ -205,6 +205,11 @@ func (s *ScriptBD) Run(_ context.Context, args ...string) (string, error) {
 			s.Idx = map[string]int{}
 		}
 		seq := s.StatusSeq[id]
+		if len(seq) == 0 {
+			// Nothing scripted for this bead: an unreadable bead (bd error), as in
+			// production, rather than an index panic.
+			return "", errors.New("dtest: no status scripted for " + id)
+		}
 		i := s.Idx[id]
 		if i >= len(seq) {
 			i = len(seq) - 1

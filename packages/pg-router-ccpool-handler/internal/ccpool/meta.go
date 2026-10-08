@@ -31,6 +31,15 @@ const (
 	// absorbing: its work was abandoned, so a redelivered dispatch must launch
 	// afresh. Never a --label.
 	MetaKeyOrphanReclaimed = "pgrouter.orphan_reclaimed"
+	// MetaKeyIncomplete marks a session whose dispatch ended WITHOUT completing its
+	// bead (RFC3339 UTC of the marking): a hand-back (the bead returned to open), a
+	// budget hard stop, or a failed dispatch. Such a row is a finished attempt, not a
+	// settled duplicate: the bead is still open, so a later dispatch carrying the
+	// SAME event id and head (review-source re-emits review.ready:<bead> at an
+	// unchanged head after a hand-back) is a re-request that needs a fresh session.
+	// Absorbing the row would measure the time budget from its original launch and
+	// hard-stop instantly, forever (bead pg2-tc9c3). Never a --label.
+	MetaKeyIncomplete = "pgrouter.incomplete"
 	// MetaKeyEventID is the id of the pg-router event whose dispatch launched
 	// the session (bead pg2-uprw5, ADR 0082). A redelivery of the SAME accepted
 	// event carries the same id; a later, legitimate re-dispatch for the same

@@ -1,6 +1,6 @@
 # A gated dispatcher closes the sessions it settles
 
-**Status**: Accepted (amends 0072); item 4 bounded by an event-id check (2026-10-06, bead `pg2-uprw5`) and a pinned-head check (2026-10-07, bead `pg2-afre3`)
+**Status**: Accepted (amends 0072); item 4 bounded by an event-id check (2026-10-06, bead `pg2-uprw5`) a pinned-head check (2026-10-07, bead `pg2-afre3`) and an outcome check (2026-10-08, bead `pg2-tc9c3`)
 **Date**: 2026-10-05
 **Deciders**: Phillip Green II
 
@@ -60,6 +60,20 @@ The dispatch-time reconcile does not help: it closes only sessions whose bead is
    row is absorbed only when the head also matches. A dispatch with no `head_sha` (a worker or
    feedback bead) applies no head bound; a row with no recorded head (older build) is not absorbed.
    The event id is deliberately left unchanged: it is the core's dedup key (INV-EVT-3).
+   **Bounded by outcome (2026-10-08, bead `pg2-tc9c3`):** event id and head together still cannot
+   tell a crash-window redelivery from a re-request after a HAND-BACK. The review session unclaims
+   its bead and goes idle, the handler closes the row, and the bead is open again at the same
+   head, so the review source re-emits the same event; absorbing the row started the budget at its
+   original launch and hard-stopped instantly about every minute, and because the escalation count
+   is per distinct session it never reached the human threshold. The handler now stamps
+   `pgrouter.incomplete` on a row whose dispatch ended with its bead still open (a hand-back of a
+   close-or-handback role, a failure, or a budget hard stop, where the watchdog stamps it before its
+   own close), always BEFORE the close, and an incomplete row is absent to every later dispatch.
+   Only a row whose bead was closed stays a duplicate. Chosen over purging the row on settle
+   (option (c) of `pg2-afre3`) because a non-purge close keeps the resumable transcript of a
+   session whose bead is still open, which this ADR's item 1 exists to preserve. Rows the
+   deployed handler wrote before this change carry no marker; the first absorb of one still hard
+   stops once, and that stop stamps it, so the next dispatch launches fresh.
 
 ## Consequences
 

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -76,6 +77,20 @@ func TestTerminal_closesSession(t *testing.T) {
 	wd.terminal(context.Background(), "s", "zr-1", &BudgetError{})
 	if len(cc.closed) != 1 || cc.closed[0] != "s" {
 		t.Fatalf("hard stop must close session s exactly once; closed=%v", cc.closed)
+	}
+}
+
+// TestTerminal_marksRowIncompleteBeforeClose: a budget hard stop leaves its bead
+// open, so the row it closes must be marked incomplete FIRST -- a same-event
+// same-head re-request must not re-absorb it and hard-stop instantly from its
+// original launch time, forever (pg2-tc9c3; ccpool.MetaKeyIncomplete).
+func TestTerminal_marksRowIncompleteBeforeClose(t *testing.T) {
+	cc := &fakeCC{}
+	wd := newWD(&fakeReader{seq: []usage.Snapshot{{}}}, cc, &recBD{}, tokBudget(1000))
+	wd.terminal(context.Background(), "s", "zr-1", &BudgetError{})
+	want := []string{"meta:" + ccpool.MetaKeyIncomplete, "close"}
+	if !slices.Equal(cc.ops, want) {
+		t.Errorf("hard stop must mark the row incomplete, then close it; ops=%v want %v", cc.ops, want)
 	}
 }
 
