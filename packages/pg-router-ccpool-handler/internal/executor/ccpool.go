@@ -550,6 +550,11 @@ type quietResult struct {
 // closeSettledSessionTimeout bounds the settled-session close.
 const closeSettledSessionTimeout = time.Minute
 
+// deathUsageLimitTimeout bounds the usage-limit reading logOnDeath takes on the
+// unexplained-death path: short, because the reading is evidence only and must
+// never hold up the failure it accompanies.
+const deathUsageLimitTimeout = 5 * time.Second
+
 // closeSettledSession closes (non-purge, --reason handler) the session name
 // that this dispatch launched or absorbed, once the dispatch has reached a
 // terminal outcome and the session has settled (INV-CCH-17, ADR 0082). Without
@@ -614,6 +619,29 @@ func (r *ccpoolRun) closeSettledSession(ctx context.Context, cc *roles.CCPoolCon
 	}
 	slog.Info("settled session closed", "session", name, "bead", beadID,
 		"state", string(row.State), "outcome", settledOutcome(werr))
+}
+
+// logUsageLimitOnDeath records, once, whether an account usage window was at its
+// limit when a session died unexplained, so a later operator can tell whether
+// such deaths line up with the usage-limit windows (INV-CCH-26). Observe-only:
+// it classifies nothing and changes nothing, and a failed or slow read is
+// logged and dropped, never an error of the death path. The read uses a fresh
+// bounded context because ctx may already be cancelled by then.
+func (r *ccpoolRun) logUsageLimitOnDeath(ctx context.Context, name, beadID string) {
+	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), deathUsageLimitTimeout)
+	defer cancel()
+	capacity, err := r.deps.CC.Capacity(cctx)
+	if err != nil {
+		slog.Warn("usage_limit_reading_error", "session", name, "bead", beadID, "err", err.Error())
+		return
+	}
+	ul := capacity.UsageLimit
+	if ul == nil {
+		slog.Info("session died; usage-limit reading", "session", name, "bead", beadID, "usage_limit_present", false)
+		return
+	}
+	slog.Info("session died; usage-limit reading", "session", name, "bead", beadID, "usage_limit_present", true,
+		"window", ul.Window, "used_pct", ul.UsedPct, "resets_at", ul.ResetsAt)
 }
 
 // markIncomplete stamps ccpool.MetaKeyIncomplete on the session's row (see its
@@ -1232,6 +1260,7 @@ func (r *ccpoolRun) waitDone(ctx context.Context, claimTerminal func() bool, d D
 				if reason == "" {
 					_ = r.deps.CC.Close(ctx, name, false)
 				}
+				r.logUsageLimitOnDeath(ctx, name, d.Item.ID)
 				return r.fail(ctx, d, "session exited before completing")
 			}
 			return lose()

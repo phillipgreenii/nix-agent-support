@@ -499,3 +499,14 @@ review`. The claim is still released (status open, assignee cleared) — the lab
   also permits `gh pr merge`, so a rule such as "no push" or "no merge" behind a prefix grant is
   enforced by the role's prompt only; give a narrow grant (`Bash(gh pr create:*)`) where one
   exists. Bead `pg2-nk6th.5`, plan `2026-10-08-drain-worker-roles` section A4.
+
+- **`INV-CCH-26`** — when a session dies unexplained (the death branch of `INV-CCH-7` that applies
+  `on_failure`, not an external or handler close), the handler MUST log the pool's usage-limit
+  reading once, at that moment: whether an account usage window was at its limit and, if so, which
+  window, its used percentage and when it resets. The reading is observe-only evidence for an
+  operator deciding how such deaths should be classified: it MUST NOT change the failure text, the
+  failure class, the incomplete marker, any metric or the return value, and the death path MUST NOT
+  wait on it beyond a short fixed bound. A reading that fails or times out is logged and dropped.
+  The explained branches (clean completion, budget hard stop, external or handler close) MUST NOT
+  log it. **Why.** Review sessions sometimes die mid-run while usage-limit windows are reached, and
+  nothing recorded whether the two line up. Bead `pg2-n3ila`.
