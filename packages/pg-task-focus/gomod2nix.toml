@@ -2,6 +2,7 @@ schema = 3
 cachePackages = [
   'github.com/santhosh-tekuri/jsonschema/v6',
   'github.com/santhosh-tekuri/jsonschema/v6/kind',
+  'golang.org/x/sys/unix',
   'golang.org/x/text/feature/plural',
   'golang.org/x/text/language',
   'golang.org/x/text/message',
@@ -13,6 +14,10 @@ cachePackages = [
   [mod.'github.com/santhosh-tekuri/jsonschema/v6']
     version = 'v6.0.3'
     hash = 'sha256-r/1mhajjfamfJZpu+CeUYr7bTQGQEkmF2f4UcSQZEbA='
+
+  [mod.'golang.org/x/sys']
+    version = 'v0.47.0'
+    hash = 'sha256-TpbRyWWqHjddP6QzUgAbaLd2EE0S+GYNRUIDJd18r98='
 
   [mod.'golang.org/x/text']
     version = 'v0.14.0'
