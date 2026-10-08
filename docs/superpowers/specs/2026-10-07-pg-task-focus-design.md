@@ -10,16 +10,11 @@ RFC 2119.
 
 ## Open questions for the operator
 
-This is a decision the reviews surfaced that only the operator can make. The text below follows the
-conservative default shown, and changes if the operator rules otherwise.
+None outstanding. The two questions the first round of reviews raised were ruled on by the operator
+and are recorded in the decision log:
 
-1. **Carry-over.** The operator ruled that changing a period marks incomplete tasks "not done" by
-   default. "By default" implies an alternative. Proposal: let the period-change modal also offer
-   **carry over** for chosen tasks (the task stays open in the new period under a new instance).
-   Default in this draft: **not included**; the outcomes are `missed` or `skipped` only.
-
-Resolved since the first draft: the UX review proposed a way to quiet the overtime sound. The
-operator ruled it out (decision log, row 7): there is no acknowledge, mute or snooze.
+- Quieting the overtime sound: ruled out (row 7). There is no acknowledge, mute or snooze.
+- A carry-over option on period change: ruled out (row 24). The outcomes are `missed` or `skipped`.
 
 ## Summary
 
@@ -59,6 +54,8 @@ is public and MUST NOT carry any such detail (see this repository's `CLAUDE.md`,
 - Cycle suggestions, streaks, scores or a guided morning wizard.
 - Quieting the overtime sound. There is no acknowledge, mute, snooze or repeat cap: the reminder
   repeats until the cycle is stopped (operator ruling, decision log row 7).
+- Carrying an unfinished task over into the next period. A task that is still open when its period
+  is rolled over is `missed` or `skipped`, never carried (operator ruling, decision log row 24).
 
 ## Glossary
 
@@ -884,8 +881,8 @@ Sub-projects 3, 4 and 5 are independent of each other once sub-project 2 lands.
 ## Review resolutions
 
 Four independent reviews (completeness, correctness, UX, observability) were run on the first draft.
-Their accepted findings are folded into this draft. Findings that needed a ruling are under "Open
-questions for the operator". Findings deliberately not adopted:
+Their accepted findings are folded into this draft. Findings that needed a ruling were ruled on by
+the operator (decision log rows 7 and 24). Findings deliberately not adopted:
 
 - **A temporary acknowledge or mute for the overtime sound** (UX review). Rejected by the operator:
   the sound is short and repeats until the cycle is stopped.
@@ -899,35 +896,36 @@ questions for the operator". Findings deliberately not adopted:
 
 ## Decision log
 
-Rulings 1 to 17 are the operator's, made in the design conversation on 2026-10-07. Rulings 18 and on
+Rulings 1 to 17 are the operator's, made in the design conversation on 2026-10-07. Rulings 18 to 23
 are design decisions made while resolving the reviews, awaiting the operator's confirmation when
-this spec is approved.
+this spec is approved. Ruling 24 is the operator's, on a question the reviews raised.
 
-| #   | Decision                                  | Ruling                                                                                                                                                                                                                       |
-| --- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | Relationship to `/daily-focus`, `pg-desk` | Standalone app with its own daemon and store; a thin integration is defined later.                                                                                                                                           |
-| 2   | On-call weeks                             | Named profiles; switching a profile is an explicit change like changing a period.                                                                                                                                            |
-| 3   | Editing mistakes                          | The log stays append-only; edits are correction events.                                                                                                                                                                      |
-| 4   | Due times                                 | A relative rule per task, with an IANA `tz` on every rule and no default zone.                                                                                                                                               |
-| 5   | Concurrent cycles                         | One running cycle at a time, with an interrupt stack.                                                                                                                                                                        |
-| 6   | Timer expiry                              | Notify and keep counting overtime; the cycle ends only when stopped.                                                                                                                                                         |
-| 7   | Expiry sound                              | A short sound at expiry, then the same or a different short sound every configurable number of minutes until the cycle is stopped. No acknowledge, mute or snooze (clarified by the operator after the reviews, 2026-10-07). |
-| 8   | Overtime visibility                       | Overtime is also an attention item.                                                                                                                                                                                          |
-| 9   | Architecture                              | A single-writer daemon with an HTTP/JSON API.                                                                                                                                                                                |
-| 10  | API definition                            | Contract-first: OpenAPI 3.1 and JSON Schema; RFC 9457 errors.                                                                                                                                                                |
-| 11  | Observability                             | Logs, metrics, traces, dashboards and alerts are required.                                                                                                                                                                   |
-| 12  | Connector binary                          | One binary for calendar and attention.                                                                                                                                                                                       |
-| 13  | Browser exposure                          | Behind the operator's local reverse proxy; machine clients use loopback directly; `public_url` is an option.                                                                                                                 |
-| 14  | Key/value pairs                           | The work tracker parses them from the calendar notes.                                                                                                                                                                        |
-| 15  | Existing `work-timer` log                 | Left alone; this app is separate.                                                                                                                                                                                            |
-| 16  | Name                                      | `pg-task-focus`.                                                                                                                                                                                                             |
-| 17  | Spec location                             | This file in the specs directory, referenced from the epic bead, because it does not fit in a bead.                                                                                                                          |
-| 18  | Week and sprint end                       | `end` is required for week and sprint; there is no sprint-length setting.                                                                                                                                                    |
-| 19  | Work-in-progress limit                    | Not tracked; no `wip_limit`.                                                                                                                                                                                                 |
-| 20  | Hindsight fixes                           | Named "back-fill a break" and "end at" operations, validated by candidate replay.                                                                                                                                            |
-| 21  | Guidance                                  | The state exposes `next`, a persistent resume offer and a stale-pause attention item.                                                                                                                                        |
-| 22  | Crash recovery                            | Truncate to the last committed record, copying the removed bytes to a sidecar.                                                                                                                                               |
-| 23  | Calendar segment ids                      | The id of the event that opened the segment.                                                                                                                                                                                 |
+| #   | Decision                                  | Ruling                                                                                                                                                                                                                                                                                                       |
+| --- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | Relationship to `/daily-focus`, `pg-desk` | Standalone app with its own daemon and store; a thin integration is defined later.                                                                                                                                                                                                                           |
+| 2   | On-call weeks                             | Named profiles; switching a profile is an explicit change like changing a period.                                                                                                                                                                                                                            |
+| 3   | Editing mistakes                          | The log stays append-only; edits are correction events.                                                                                                                                                                                                                                                      |
+| 4   | Due times                                 | A relative rule per task, with an IANA `tz` on every rule and no default zone.                                                                                                                                                                                                                               |
+| 5   | Concurrent cycles                         | One running cycle at a time, with an interrupt stack.                                                                                                                                                                                                                                                        |
+| 6   | Timer expiry                              | Notify and keep counting overtime; the cycle ends only when stopped.                                                                                                                                                                                                                                         |
+| 7   | Expiry sound                              | A short sound at expiry, then the same or a different short sound every configurable number of minutes until the cycle is stopped. No acknowledge, mute or snooze. Pausing a cycle silences the sound and resuming an overtime cycle continues it (clarified by the operator after the reviews, 2026-10-07). |
+| 8   | Overtime visibility                       | Overtime is also an attention item.                                                                                                                                                                                                                                                                          |
+| 9   | Architecture                              | A single-writer daemon with an HTTP/JSON API.                                                                                                                                                                                                                                                                |
+| 10  | API definition                            | Contract-first: OpenAPI 3.1 and JSON Schema; RFC 9457 errors.                                                                                                                                                                                                                                                |
+| 11  | Observability                             | Logs, metrics, traces, dashboards and alerts are required.                                                                                                                                                                                                                                                   |
+| 12  | Connector binary                          | One binary for calendar and attention.                                                                                                                                                                                                                                                                       |
+| 13  | Browser exposure                          | Behind the operator's local reverse proxy; machine clients use loopback directly; `public_url` is an option.                                                                                                                                                                                                 |
+| 14  | Key/value pairs                           | The work tracker parses them from the calendar notes.                                                                                                                                                                                                                                                        |
+| 15  | Existing `work-timer` log                 | Left alone; this app is separate.                                                                                                                                                                                                                                                                            |
+| 16  | Name                                      | `pg-task-focus`.                                                                                                                                                                                                                                                                                             |
+| 17  | Spec location                             | This file in the specs directory, referenced from the epic bead, because it does not fit in a bead.                                                                                                                                                                                                          |
+| 18  | Week and sprint end                       | `end` is required for week and sprint; there is no sprint-length setting.                                                                                                                                                                                                                                    |
+| 19  | Work-in-progress limit                    | Not tracked; no `wip_limit`.                                                                                                                                                                                                                                                                                 |
+| 20  | Hindsight fixes                           | Named "back-fill a break" and "end at" operations, validated by candidate replay.                                                                                                                                                                                                                            |
+| 21  | Guidance                                  | The state exposes `next`, a persistent resume offer and a stale-pause attention item.                                                                                                                                                                                                                        |
+| 22  | Crash recovery                            | Truncate to the last committed record, copying the removed bytes to a sidecar.                                                                                                                                                                                                                               |
+| 23  | Calendar segment ids                      | The id of the event that opened the segment.                                                                                                                                                                                                                                                                 |
+| 24  | Carry-over                                | None: a task still open at rollover is `missed` or `skipped`, never carried into the next period (operator, 2026-10-07).                                                                                                                                                                                     |
 
 ## Open items for the implementation plans
 
