@@ -13,13 +13,15 @@ setup() {
   local scripts_dir_saved="${SCRIPTS_DIR:-}"
   local test_support_saved="${TEST_SUPPORT:-}"
 
-  if [[ -n $test_support_saved ]]; then
-    # shellcheck disable=SC1091
-    source "$test_support_saved/git-fixture-harness.bash"
-  else
-    # shellcheck disable=SC1091
-    source "$("$(env -u GIT_DIR -u GIT_COMMON_DIR -u GIT_WORK_TREE git -C "$BATS_TEST_DIRNAME" rev-parse --show-toplevel)/tests/support/find-gfh-dir.sh")/git-fixture-harness.bash"
+  # GFH_LIB is the one required file (tc-4ehow); nix package checks inject
+  # TEST_SUPPORT (the directory holding it) instead, so alias that.
+  local gfh_lib="${GFH_LIB:-${TEST_SUPPORT:+$TEST_SUPPORT/git-fixture-harness.bash}}"
+  if [[ -z $gfh_lib ]]; then
+    echo "GFH_LIB is not set: commit via the run-unit-tests hook, run under the workspace .envrc (direnv, or direnv exec <workspace-root> ...), or export GFH_LIB=<path to git-fixture-harness.bash>." >&2
+    return 1
   fi
+  # shellcheck disable=SC1090,SC1091
+  source "$gfh_lib"
 
   command -v lsof >/dev/null 2>&1 || skip "lsof not on PATH"
 
@@ -39,6 +41,7 @@ setup() {
   if [[ -n $test_support_saved ]]; then
     export TEST_SUPPORT="$test_support_saved"
   fi
+  export GFH_LIB="$gfh_lib"
 
   TEST_DIR="$GFH_REPO"
   cd "$TEST_DIR" || return 1

@@ -8,13 +8,15 @@
 # resolve-links.sh's own header for the Q1/Q2 rulings and for why this check
 # is deliberately separate from tests/behavior-docs-real-corpus.sh.
 
-if [[ -n ${GFH_LIB:-} ]]; then
-  # shellcheck disable=SC1090
-  source "$GFH_LIB"
-else
-  # shellcheck disable=SC1090
-  source "$("$(env -u GIT_DIR -u GIT_COMMON_DIR -u GIT_WORK_TREE git -C "$BATS_TEST_DIRNAME" rev-parse --show-toplevel)/tests/support/find-gfh-dir.sh")/git-fixture-harness.bash"
+# GFH_LIB is the one required file (tc-4ehow): no filesystem search. The plain
+# (non-exported) copy survives gfh_setup's env scrub for later tests.
+if [[ -z ${GFH_LIB:-} ]]; then
+  echo "GFH_LIB is not set: commit via the run-unit-tests hook, run under the workspace .envrc (direnv, or direnv exec <workspace-root> ...), or export GFH_LIB=<path to git-fixture-harness.bash>." >&2
+  exit 1
 fi
+GFH_HARNESS_FILE="$GFH_LIB"
+# shellcheck disable=SC1090
+source "$GFH_HARNESS_FILE"
 
 # Suite label for gfh_setup / gfh_init_repo: names the per-suite fixture identity.
 SUITE="behavior-docs-resolve-links"
@@ -293,11 +295,7 @@ MD
   bogus="$bogus_parent/leaked-gitdir"
   real_dir="$WS/regression-repo"
   mkdir -p "$real_dir"
-  if [[ -n ${GFH_LIB:-} ]]; then
-    harness_path="$GFH_LIB"
-  else
-    harness_path="$("$(env -u GIT_DIR -u GIT_COMMON_DIR -u GIT_WORK_TREE git -C "$BATS_TEST_DIRNAME" rev-parse --show-toplevel)/tests/support/find-gfh-dir.sh")/git-fixture-harness.bash"
-  fi
+  harness_path="$GFH_HARNESS_FILE"
 
   run env GIT_DIR="$bogus" GIT_INDEX_FILE="$bogus/index" HARNESS_PATH="$harness_path" REAL_DIR="$real_dir" bash -c '
     # Capture REAL_DIR into a plain (non-exported) local BEFORE gfh_reset_env

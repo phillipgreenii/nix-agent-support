@@ -84,6 +84,28 @@ teardown() { gfh_teardown; }
   lag the canonical copy and lack the primitives above; a suite that needs one MUST re-vendor the
   canonical file rather than hand-roll the fixture.
 
+Cross-repo test dependencies (the harness lives in `nix-repo-base`, a different repo from the
+tests that use it; tc-4ehow):
+
+- A test that needs a file from ANOTHER repo MUST read it from a purpose-named environment
+  variable naming that one file (`GFH_LIB` for `git-fixture-harness.bash`), never from a guessed
+  sibling path, `pn` discovery, `find`, or a `nix` call. A test MUST NOT mention a sibling repo's
+  directory name.
+- The variable MUST have a locked nix default (`pkgs.git-fixture-harness`), set by the
+  `run-unit-tests` hook, the nix `checks.*`, and the dev shell, so a commit or CI works with no
+  local checkout of the provider. A local checkout MAY override it via the workspace-root
+  `.envrc` (direnv); the tests behave the same either way.
+- A test whose variable is unset MUST fail at once with one line naming the variable and the
+  ways to set it (the `GFH_LIB is not set: ...` message used by the existing suites).
+- A repo that adds its own `.envrc` MUST call `source_up_if_exists`, or the workspace `.envrc`
+  stops loading.
+- Agent workarounds: ad-hoc `bats` MUST run as `direnv exec <workspace-root> bats ...` or with
+  `GFH_LIB` exported; an agent that changes the harness AND its tests together MUST commit with
+  `GFH_LIB=<local file> git commit ...`; in a workforest set the workspace `.envrc` points at
+  the CANONICAL `nix-repo-base`, so a set that changes the harness MUST export `GFH_LIB` to the
+  set's own copy. After a provider change lands, consumers' locked default and CI keep the OLD
+  harness until the consumer's flake lock is bumped (provider, then lock bump, then consumer).
+
 Both libraries are hermetic BY CONSTRUCTION: the fixture lives under a temp root, `HOME` and the
 system git config are neutralised, and the environment is rebuilt from an allowlist rather than
 scrubbed against a list of known-leaky `GIT_*` names. A test therefore MUST NOT:

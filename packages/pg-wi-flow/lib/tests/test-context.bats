@@ -12,13 +12,15 @@
 bats_require_minimum_version 1.5.0
 
 load_git_fixture_harness() {
-  if [[ -n ${TEST_SUPPORT:-} ]]; then
-    # shellcheck disable=SC1091 # nix-provided test-support path
-    source "$TEST_SUPPORT/git-fixture-harness.bash"
-  else
-    # shellcheck disable=SC1091 # local run: sibling phillipg-nix-repo-base checkout (pg2-xy4w7)
-    source "$("$(env -u GIT_DIR -u GIT_COMMON_DIR -u GIT_WORK_TREE git -C "$BATS_TEST_DIRNAME" rev-parse --show-toplevel)/tests/support/find-gfh-dir.sh")/git-fixture-harness.bash"
+  # GFH_LIB is the one required file (tc-4ehow); nix package checks inject
+  # TEST_SUPPORT (the directory holding it) instead, so alias that.
+  local gfh_lib="${GFH_LIB:-${TEST_SUPPORT:+$TEST_SUPPORT/git-fixture-harness.bash}}"
+  if [[ -z $gfh_lib ]]; then
+    echo "GFH_LIB is not set: commit via the run-unit-tests hook, run under the workspace .envrc (direnv, or direnv exec <workspace-root> ...), or export GFH_LIB=<path to git-fixture-harness.bash>." >&2
+    return 1
   fi
+  # shellcheck disable=SC1090,SC1091
+  source "$gfh_lib"
 }
 
 setup() {

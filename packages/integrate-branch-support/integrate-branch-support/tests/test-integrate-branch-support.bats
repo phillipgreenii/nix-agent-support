@@ -12,13 +12,15 @@ setup() {
   local scripts_dir_saved="${SCRIPTS_DIR:-}"
   local test_support_saved="${TEST_SUPPORT:-}"
 
-  if [[ -n $test_support_saved ]]; then
-    # shellcheck disable=SC1091
-    source "$test_support_saved/git-fixture-harness.bash"
-  else
-    # shellcheck disable=SC1091
-    source "$("$(env -u GIT_DIR -u GIT_COMMON_DIR -u GIT_WORK_TREE git -C "$BATS_TEST_DIRNAME" rev-parse --show-toplevel)/tests/support/find-gfh-dir.sh")/git-fixture-harness.bash"
+  # GFH_LIB is the one required file (tc-4ehow); nix package checks inject
+  # TEST_SUPPORT (the directory holding it) instead, so alias that.
+  local gfh_lib="${GFH_LIB:-${TEST_SUPPORT:+$TEST_SUPPORT/git-fixture-harness.bash}}"
+  if [[ -z $gfh_lib ]]; then
+    echo "GFH_LIB is not set: commit via the run-unit-tests hook, run under the workspace .envrc (direnv, or direnv exec <workspace-root> ...), or export GFH_LIB=<path to git-fixture-harness.bash>." >&2
+    return 1
   fi
+  # shellcheck disable=SC1090,SC1091
+  source "$gfh_lib"
 
   # Hermetic-by-construction git fixture (GIT_CEILING_DIRECTORIES + env
   # allowlist reset + fresh HOME + hooks disabled): see pg2-31f13/pg2-gucfd.
@@ -37,6 +39,7 @@ setup() {
   if [[ -n $test_support_saved ]]; then
     export TEST_SUPPORT="$test_support_saved"
   fi
+  export GFH_LIB="$gfh_lib"
 
   BIN="${SCRIPTS_DIR}/integrate-branch-support.sh"
   TEST_DIR="$GFH_REPO"
@@ -893,11 +896,7 @@ land_commit() {
   local bogus_parent bogus harness_path
   bogus_parent="$(mktemp -d)"
   bogus="$bogus_parent/leaked-gitdir"
-  if [[ -n ${TEST_SUPPORT:-} ]]; then
-    harness_path="$TEST_SUPPORT/git-fixture-harness.bash"
-  else
-    harness_path="$("$(env -u GIT_DIR -u GIT_COMMON_DIR -u GIT_WORK_TREE git -C "$BATS_TEST_DIRNAME" rev-parse --show-toplevel)/tests/support/find-gfh-dir.sh")/git-fixture-harness.bash"
-  fi
+  harness_path="${GFH_LIB:-${TEST_SUPPORT:+$TEST_SUPPORT/git-fixture-harness.bash}}"
 
   run env GIT_DIR="$bogus" GIT_INDEX_FILE="$bogus/index" HARNESS_PATH="$harness_path" bash -c '
     source "$HARNESS_PATH"

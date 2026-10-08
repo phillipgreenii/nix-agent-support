@@ -797,6 +797,11 @@
                   exit 1
                 fi
 
+                # Cross-repo test dependency (tc-4ehow): tests read the
+                # git-fixture-harness ONLY from GFH_LIB. Default to the LOCKED nix
+                # copy; a caller (or the workspace .envrc) MAY override it.
+                export GFH_LIB="''${GFH_LIB:-${pkgs.git-fixture-harness}/lib/scripts/git-fixture-harness.bash}"
+
                 exec pg-test-runner --labels unit --files "$@"
               '';
             }
@@ -982,6 +987,15 @@
           phillipgreenii.devshell.extraInputs = [
             pkgs.go
             pkgs.nodejs
+            # GFH_LIB default for ad-hoc `bats` in the dev shell (tc-4ehow): the
+            # LOCKED git-fixture-harness. nix develop re-applies it on entry, so
+            # re-export GFH_LIB inside the shell to use a local copy. A setup hook
+            # because the devshell module has no env option.
+            (pkgs.makeSetupHook { name = "gfh-lib-env-hook"; } (
+              pkgs.writeText "gfh-lib-env-hook.sh" ''
+                export GFH_LIB="''${GFH_LIB:-${pkgs.git-fixture-harness}/lib/scripts/git-fixture-harness.bash}"
+              ''
+            ))
           ];
 
           # Exclude generated protobuf Go from treefmt. pa-monitor's *.pb.go are

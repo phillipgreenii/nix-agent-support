@@ -10,21 +10,24 @@
 setup() {
   # Capture what the suite needs across gfh_setup: gfh_reset_env rebuilds the
   # exported environment from an allowlist, so SCRIPTS_DIR / SCRIPT_UNDER_TEST /
-  # TEST_SUPPORT (injected by the nix check, or computed below for a local
-  # `bats tests/` run) MUST be saved BEFORE it and restored AFTER it
+  # TEST_SUPPORT (injected by the nix check) and GFH_LIB (local runs) MUST be
+  # saved BEFORE it and restored AFTER it
   # (code-file-standards "Tests That Need Git"; pg2-emjgm).
   if [[ -z ${SCRIPTS_DIR:-} ]]; then
     SCRIPTS_DIR="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
   fi
-  if [[ -z ${TEST_SUPPORT:-} ]]; then
-    # Local run: the sibling phillipg-nix-repo-base checkout (the nix check
-    # injects TEST_SUPPORT from the base flake's git-fixture-harness package;
-    # pg2-xy4w7).
-    TEST_SUPPORT="$("$(env -u GIT_DIR -u GIT_COMMON_DIR -u GIT_WORK_TREE git -C "$BATS_TEST_DIRNAME" rev-parse --show-toplevel)/tests/support/find-gfh-dir.sh")"
+  # GFH_LIB is the one required file (tc-4ehow); the nix check injects
+  # TEST_SUPPORT (the directory holding it) instead, so alias that.
+  if [[ -z ${GFH_LIB:-} && -n ${TEST_SUPPORT:-} ]]; then
+    GFH_LIB="$TEST_SUPPORT/git-fixture-harness.bash"
   fi
-  # shellcheck disable=SC1091
-  source "$TEST_SUPPORT/git-fixture-harness.bash"
-  gfh_save_env SCRIPTS_DIR SCRIPT_UNDER_TEST TEST_SUPPORT
+  if [[ -z ${GFH_LIB:-} ]]; then
+    echo "GFH_LIB is not set: commit via the run-unit-tests hook, run under the workspace .envrc (direnv, or direnv exec <workspace-root> ...), or export GFH_LIB=<path to git-fixture-harness.bash>." >&2
+    return 1
+  fi
+  # shellcheck disable=SC1090,SC1091
+  source "$GFH_LIB"
+  gfh_save_env SCRIPTS_DIR SCRIPT_UNDER_TEST TEST_SUPPORT GFH_LIB
 
   # Hermetic-by-construction git fixture (GIT_CEILING_DIRECTORIES + env
   # allowlist reset + fresh HOME + hooks disabled + per-suite identity): a
