@@ -152,7 +152,16 @@ transitions on 2026-10-05 alone, every one a transient `pr-team` storm (worst 30
 failures in about 30 ticks), too noisy to escalate. Real outages (the 2026-09-28 bd outage; the
 2026-10-01/02 GraphQL rate-limit-reserve episode; `thread-me`'s 2026-10-01 run of six consecutive
 failed 30m ticks) leave a source silent far longer than 3 periods. That earlier rule stays as the
-desktop-only early signal and is not escalated.
+early signal and is not escalated.
+
+**Amendment, 2026-10-08 (operator ruling, Phillip: "non-zero failure rate is too tight").**
+`pg-router-source-failure-rate` no longer fires on any failure. It now alerts on the failure ratio
+over 1h: `increase(source_failures[1h]) / increase(source_duration_seconds_count[1h]) > 0.5`, with at
+least 3 failures in that hour, sustained for 15m (title: `pg-router event source failure ratio is
+high (by source)`). The denominator counts every attempt that ran to its own end, success or failure
+(DEC-OBS-8), so the quotient is a true ratio. A 7-day backtest on live data: the old rule was
+active in 7 sources (576 five-minute steps for `pr-team` alone); the new one in 2 (`pr-team` 183
+steps, `review-source` 1). The rule's uid, `noDataState: OK`, and severity are unchanged.
 
 **Threshold.** `max(3 x period, 30m)`: three missed periods, with a 30-minute floor so a fast source
 (10s to 1m) needs a genuine half-hour outage. The comparison is strict, and `for: 5m` is added on top.

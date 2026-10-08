@@ -5,7 +5,14 @@ import (
 	"testing"
 )
 
-const wantSourceFailureExpr = `sum by (source) (rate(pg_router_source_failures_total[10m]))`
+// wantSourceFailureExpr is the failure RATIO over 1h (failures / attempts),
+// guarded by a minimum of 3 failures. The denominator,
+// pg_router_source_duration_seconds_count, is recorded for every attempt that
+// ran to its own end, success or failure, so the quotient is a true ratio. The
+// rule fires above 0.5 (threshold node C), sustained for 15m. It replaced the
+// earlier `rate(...[10m]) > 0` for 10m, which flapped on every transient
+// upstream 502/504 (operator ruling, Phillip, 2026-10-08).
+const wantSourceFailureExpr = `sum by (source) (increase(pg_router_source_failures_total[1h])) / sum by (source) (increase(pg_router_source_duration_seconds_count[1h])) and on(source) sum by (source) (increase(pg_router_source_failures_total[1h])) >= 3`
 
 // pg-router-source-failure-rate keeps noDataState: OK on purpose (pg2-vicjc):
 // the source-failures counter is created lazily, so an absent series is the
@@ -17,7 +24,12 @@ func TestSourceFailureRateRule(t *testing.T) {
 	if got := ruleExpr(t, r); got != wantSourceFailureExpr {
 		t.Errorf("source-failure-rate expr:\n got %q\nwant %q", got, wantSourceFailureExpr)
 	}
-	for _, need := range []string{"for: 10m", "noDataState: OK", "execErrState: Error", "severity: warning", "{{ $labels.source }}"} {
+	for _, need := range []string{
+		"title: pg-router event source failure ratio is high (by source)",
+		"for: 15m", "noDataState: OK", "execErrState: Error", "severity: warning", "{{ $labels.source }}",
+		// the 1h window needs a 1h query range, and the ratio threshold is 0.5
+		"relativeTimeRange: { from: 3600, to: 0 }", "params: [0.5]",
+	} {
 		if !strings.Contains(r, need) {
 			t.Errorf("source-failure-rate rule lost %q", need)
 		}

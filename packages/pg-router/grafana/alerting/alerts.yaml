@@ -700,8 +700,24 @@ groups:
       # unreachable /metrics endpoint is already covered by
       # pg-router-liveness-down (noDataState: Alerting), so no separate
       # liveness signal is added here. A source that failed once and then
-      # recovers keeps its series at a flat rate of 0, which the threshold
-      # (> 0) correctly reads as healthy.
+      # recovers keeps its series flat, so its 1h increase falls to 0 and the
+      # failure ratio reads as healthy.
+      #
+      # Ratio, not "any failure" (Phillip, 2026-10-08: "non-zero failure rate is
+      # too tight"). The rule used to fire on rate(...[10m]) > 0 for 10m, which
+      # flapped on every transient upstream 502/504 (576 five-minute steps for
+      # pr-team alone over 7 days, 7 sources affected). It now follows the
+      # standard symptom-based pattern: alert on the failure RATIO over a window,
+      # guarded by a minimum count so one failed poll of a slow source cannot
+      # trip it. Numerator: pg_router_source_failures_total. Denominator:
+      # pg_router_source_duration_seconds_count, which is recorded for EVERY
+      # attempt that ran to its own end, success or failure (internal/metrics
+      # MetricSourceDuration), so failures/attempts is a true ratio. Both exclude
+      # a router-shutdown cancellation. Fires when MORE THAN HALF of a source's
+      # attempts failed over the last hour AND at least 3 failed, sustained for
+      # 15m. Backtest over 7 days of live data: pr-team 183 five-minute steps,
+      # review-source 1, every other source 0. The escalation-grade signal stays
+      # pg-router-source-persistent-failure (DEC-OBS-4).
       #
       # Counting contract (pg2-jgbnp, pg2-hsla6): every failed attempt counts
       # once, including a fail-fast source's give-up, and the series carries a
@@ -713,25 +729,25 @@ groups:
       # reason matcher here. The 2026-10-01/02 episode (~740 pr-mine/pr-team
       # failures, zero alert) predates the pg2-jgbnp binary; see pg2-hsla6.
       - uid: pg-router-source-failure-rate
-        title: pg-router event source failure rate is non-zero (by source)
+        title: pg-router event source failure ratio is high (by source)
         condition: C
-        for: 10m
+        for: 15m
         noDataState: OK
         execErrState: Error
         labels:
           severity: warning
         annotations:
           summary: "pg-router source {{ $labels.source }} has been failing to produce events"
-          description: "sum by (source) (rate(pg_router_source_failures_total[10m])) has stayed above 0 for over 10 minutes for source {{ $labels.source }} -- a query's own command is failing, which is invisible to pg_router_failures_total (dispatch-side only). Added alongside the pg-router-probe/ccpool-probe self-monitoring system (2026-09-22) specifically so a probe's own failure to run is not itself a silent gap."
+          description: "More than half of source {{ $labels.source }}'s query attempts failed over the last hour (at least 3 failures), sustained for 15 minutes -- a query's own command is failing, which is invisible to pg_router_failures_total (dispatch-side only). Ratio = increase(pg_router_source_failures_total[1h]) / increase(pg_router_source_duration_seconds_count[1h])."
         data:
           - refId: A
-            relativeTimeRange: { from: 600, to: 0 }
+            relativeTimeRange: { from: 3600, to: 0 }
             datasourceUid: prometheus
             model:
               refId: A
               editorMode: code
               instant: true
-              expr: sum by (source) (rate(pg_router_source_failures_total[10m]))
+              expr: sum by (source) (increase(pg_router_source_failures_total[1h])) / sum by (source) (increase(pg_router_source_duration_seconds_count[1h])) and on(source) sum by (source) (increase(pg_router_source_failures_total[1h])) >= 3
           - refId: B
             datasourceUid: __expr__
             model: { refId: B, type: reduce, expression: A, reducer: last }
@@ -741,7 +757,7 @@ groups:
               refId: C
               type: threshold
               expression: B
-              conditions: [{ evaluator: { type: gt, params: [0] } }]
+              conditions: [{ evaluator: { type: gt, params: [0.5] } }]
 
       # Persistent source failure (bead pg2-tv11a, DEC-OBS-4; operator approval
       # Phillip, 2026-10-05). pg-router-source-failure-rate above fires on ANY

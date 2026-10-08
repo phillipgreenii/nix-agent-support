@@ -70,9 +70,10 @@ func TestPersistentFailureAnnotations(t *testing.T) {
 	}
 }
 
-// pg-router-source-failure-rate stays the unchanged desktop-only early signal;
-// the persistent rule must not have replaced or altered it, and neither is
-// registered with pg-router-probe from this repo.
+// pg-router-source-failure-rate stays the early-warning ratio signal (its expr
+// is pinned by wantSourceFailureExpr); the persistent rule must not have
+// replaced or altered it, and neither is registered with pg-router-probe from
+// this repo.
 func TestSourceFailureRateStaysUnchangedAlongsidePersistentRule(t *testing.T) {
 	if got := ruleExpr(t, ruleBlock(t, "pg-router-source-failure-rate")); got != wantSourceFailureExpr {
 		t.Errorf("source-failure-rate expr changed:\n got %q\nwant %q", got, wantSourceFailureExpr)
