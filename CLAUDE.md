@@ -81,6 +81,18 @@ consumer; `darwin/modules/pa-monitor` keeps only the system-scope Grafana wiring
 - OTel settings come from `osConfig.phillipgreenii.observability` read null-safely (`osConfig ? null`),
   not from `home-manager.sharedModules`.
 
+### pa-monitor SwiftBar plugin (`phillipgreenii.programs.pa-monitor.swiftbar`)
+
+`swiftbar.enable` installs a generated SwiftBar plugin file via `home.file` (darwin only, requires
+`pa-monitor.enable`). The wrapper is a FUNCTION (`packages/pa-monitor-swiftbar/plugin.nix`
+`mkPluginWrapper`), not an overlay attr, because it bakes in the module's `cfg.package` and
+`swiftbar.staleAfterS`; the renderer behind it is the internal `pa-monitor-swiftbar` package.
+Because this module now writes `home.file`, any eval test that loads it against a stub option set
+MUST also stub `home.file` (an undeclared option errors even under `mkIf false`):
+`test-pa-monitor-config-gating`, `test-pa-monitor-hm-launchd` and
+`test-pa-monitor-swiftbar-hm-render` do. Installing SwiftBar and setting its PluginDirectory is the
+consuming flake's job. Design: `docs/superpowers/specs/2026-10-07-pa-monitor-swiftbar-design.md`.
+
 ## Status Line (`home/programs/claude-status-line`)
 
 Full contract (part-script protocol, ordering convention, glyph/width/locale mechanics) moved to

@@ -272,6 +272,44 @@ window's authoritative `used_percentage` is at the cap (the 5h or weekly limit i
 a live countdown to the window reset (`resets_at - now`); the banner is blank when no limit is
 active.
 
+## SwiftBar menu bar plugin
+
+An optional macOS menu bar indicator (a [SwiftBar](https://swiftbar.app) plugin) shows, at a glance,
+the current 5-hour Claude usage window and lets you flip the two pa-monitor toggles without opening
+the TUI:
+
+- **Title**: `5h 63% · 1h 52m` (usage percent, then time left until the window resets), colored
+  green / yellow / red with the same thresholds as the cmux 5h accent (red at 80% and above, yellow
+  when usage runs ahead of the time elapsed in the window, green otherwise; dimmed when the reading
+  is stale). When a 5h or 7d window is at 100% with a known future reset, it reads
+  `⛔ LIMIT · resets 23:10 (24m)` (or `⛔ 7d LIMIT · …`) in red. Gray `5h ?`, `5h –` and `5h ⚠`
+  mean no data, an expired reading, and a missing binary or unreachable daemon respectively.
+- **Dropdown**: a usage bar, the seven-day line, the reset time, session counts, a data-age row when
+  the reading is stale, and `Caffeinate` / `Auto-resume` toggle rows. A click runs an explicit
+  `pa-monitor caffeinate|auto-resume on|off` relative to the state it rendered (never `toggle`), so a
+  stale display cannot invert what you saw.
+
+The toggle rows need the `caffeinate` and `auto_resume` keys of `status --json` (above) and are
+hidden when talking to an older client. The plugin refreshes every 30 seconds.
+
+Enable it from Home-Manager (darwin only; requires `enable = true`):
+
+```nix
+{
+  phillipgreenii.programs.pa-monitor = {
+    enable = true;
+    swiftbar.enable = true;
+    # swiftbar.pluginDir   = "Library/Application Support/SwiftBar/Plugins"; # home-relative (default)
+    # swiftbar.staleAfterS = 600; # default: settings.stale_after_s, else 600
+  };
+}
+```
+
+This only installs the generated plugin file (`pa-monitor.30s.sh`, with the pa-monitor binary baked
+in so the client matches the daemon) at `~/<pluginDir>`. Installing SwiftBar and setting its
+PluginDirectory is the consuming flake's job, and MUST use the same string as `swiftbar.pluginDir`.
+The renderer itself is the internal `pa-monitor-swiftbar` package (`packages/pa-monitor-swiftbar`).
+
 ## Labels
 
 Generic label keys (the contract) populated by built-in detectors and shell-out decorators:
