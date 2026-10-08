@@ -9,8 +9,12 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/schemacheck"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/schemas"
 )
 
 // SchemaVersion is the only event version this library reads or writes.
@@ -88,6 +92,26 @@ func ValidReason(s string) (string, error) {
 	return trimmed, nil
 }
 
+// lineSchema compiles the embedded event schema once.
+var lineSchema = sync.OnceValues(func() (*schemacheck.Schema, error) {
+	return schemacheck.Compile("event.schema.json", schemas.Event())
+})
+
+// checkSchema validates one encoded line against the event schema. It is the
+// first of the two structural checks a line passes; the Go semantic checks
+// follow it and decide what a schema cannot, such as a blank reason or a date
+// that does not exist.
+func checkSchema(line []byte) error {
+	schema, err := lineSchema()
+	if err != nil {
+		return fmt.Errorf("the embedded event schema does not compile: %w", err)
+	}
+	if err := schema.Validate(line); err != nil {
+		return fmt.Errorf("event line: %w", err)
+	}
+	return nil
+}
+
 // validator is implemented by every payload struct of this package.
 type validator interface{ validate() error }
 
@@ -95,7 +119,8 @@ type validator interface{ validate() error }
 // field, a missing required field, an instant that is not UTC with
 // milliseconds and a payload the Go semantic checks refuse are all errors.
 // The version is checked first and alone, so an unknown version is reported
-// as *UnknownVersionError whatever else the line holds.
+// as *UnknownVersionError whatever else the line holds; the JSON Schema comes
+// second, and the Go semantic checks last.
 func Decode(line []byte) (Event, error) {
 	var probe struct {
 		V json.RawMessage `json:"v"`
@@ -119,6 +144,9 @@ func Decode(line []byte) (Event, error) {
 	}
 	if !utf8.Valid(line) {
 		return Event{}, fmt.Errorf("event line: %w", ErrInvalidUTF8)
+	}
+	if err := checkSchema(line); err != nil {
+		return Event{}, err
 	}
 	var env Envelope
 	if err := strictUnmarshal(line, &env); err != nil {
@@ -215,6 +243,11 @@ func Encode(e Event) ([]byte, error) {
 	}
 	if len(line) > MaxEventBytes {
 		return nil, ErrTooLarge
+	}
+	// A line the library writes MUST be a line it reads, so the line passes
+	// the schema before it leaves.
+	if err := checkSchema(line); err != nil {
+		return nil, err
 	}
 	return line, nil
 }

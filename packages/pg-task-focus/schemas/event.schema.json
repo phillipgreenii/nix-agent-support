@@ -1,0 +1,837 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "pg-task-focus event line",
+  "description": "One line of the event log. The envelope is closed, and the data object is discriminated on type; each type's data is closed too.",
+  "type": "object",
+  "required": ["v", "id", "at", "effective_at", "type", "data"],
+  "additionalProperties": false,
+  "properties": {
+    "v": {
+      "const": 1
+    },
+    "id": {
+      "$ref": "#/$defs/ulid"
+    },
+    "at": {
+      "$ref": "#/$defs/instant"
+    },
+    "effective_at": {
+      "$ref": "#/$defs/instant"
+    },
+    "req_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "period.changed",
+        "profile.changed",
+        "task.materialized",
+        "task.completed",
+        "task.skipped",
+        "task.missed",
+        "task.withdrawn",
+        "task.reinstated",
+        "cycle.started",
+        "cycle.paused",
+        "cycle.resumed",
+        "cycle.boosted",
+        "cycle.stopped",
+        "cycle.annotated",
+        "event.corrected",
+        "event.retracted",
+        "batch.committed"
+      ]
+    },
+    "data": {
+      "type": "object"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "period.changed"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/period.changed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "profile.changed"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/profile.changed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "task.materialized"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/task.materialized"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "task.completed"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/task.completed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "task.skipped"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/task.skipped"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "task.missed"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/task.missed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "task.withdrawn"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/task.withdrawn"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "task.reinstated"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/task.reinstated"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "cycle.started"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/cycle.started"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "cycle.paused"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/cycle.paused"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "cycle.resumed"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/cycle.resumed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "cycle.boosted"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/cycle.boosted"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "cycle.stopped"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/cycle.stopped"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "cycle.annotated"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/cycle.annotated"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "event.corrected"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/event.corrected"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "event.retracted"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/event.retracted"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "batch.committed"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/batch.committed"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "ulid": {
+      "type": "string",
+      "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+      "description": "A ULID: 26 upper-case Crockford base32 characters."
+    },
+    "instant": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+      "description": "An RFC 3339 UTC instant with exactly three fractional digits and a literal Z."
+    },
+    "date": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+      "description": "A civil date, YYYY-MM-DD. Whether the date exists in the calendar is decided by the Go check."
+    },
+    "time_of_day": {
+      "type": "string",
+      "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+      "description": "A 24-hour HH:MM time of day."
+    },
+    "weekday": {
+      "type": "string",
+      "enum": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "A non-empty identifier or snapshot value; not free text."
+    },
+    "text": {
+      "type": "string",
+      "description": "A string that is a configuration snapshot or a name; not free text."
+    },
+    "minutes": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 525600,
+      "description": "Minutes, an integer from 1 to one year."
+    },
+    "free_text": {
+      "type": "string",
+      "x-free-text": true,
+      "description": "Text the operator typed. Valid UTF-8 and the size limit are checked in Go."
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1,
+      "x-free-text": true,
+      "description": "A skip or override reason. Blank (empty or only white space) is decided by the Go check event.ValidReason; the schema only requires one character."
+    },
+    "kv": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["key", "value"],
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "$ref": "#/$defs/name"
+          },
+          "value": {
+            "$ref": "#/$defs/free_text"
+          }
+        }
+      },
+      "description": "Key and value pairs; keys may repeat and order is kept."
+    },
+    "due_rule": {
+      "type": "object",
+      "required": ["at", "tz"],
+      "additionalProperties": false,
+      "properties": {
+        "at": {
+          "$ref": "#/$defs/time_of_day"
+        },
+        "tz": {
+          "$ref": "#/$defs/name"
+        },
+        "weekday": {
+          "$ref": "#/$defs/weekday"
+        },
+        "day": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "description": "The due rule as resolved. Which of weekday and day fits which cadence is decided by the Go check."
+    },
+    "period.changed": {
+      "type": "object",
+      "required": ["kind", "start", "tz", "batch"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["day", "week", "sprint"]
+        },
+        "start": {
+          "$ref": "#/$defs/date"
+        },
+        "tz": {
+          "$ref": "#/$defs/name"
+        },
+        "batch": {
+          "$ref": "#/$defs/ulid"
+        },
+        "end": {
+          "$ref": "#/$defs/date"
+        },
+        "label": {
+          "$ref": "#/$defs/free_text"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "enum": ["day"]
+              }
+            },
+            "required": ["kind"]
+          },
+          "then": {
+            "properties": {
+              "end": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "enum": ["week", "sprint"]
+              }
+            },
+            "required": ["kind"]
+          },
+          "then": {
+            "required": ["end"]
+          }
+        }
+      ]
+    },
+    "profile.changed": {
+      "type": "object",
+      "required": ["profile", "batch"],
+      "additionalProperties": false,
+      "properties": {
+        "profile": {
+          "$ref": "#/$defs/name"
+        },
+        "batch": {
+          "$ref": "#/$defs/ulid"
+        }
+      }
+    },
+    "task.materialized": {
+      "type": "object",
+      "required": [
+        "task_id",
+        "definition",
+        "cadence",
+        "period",
+        "title",
+        "due",
+        "due_rule",
+        "batch"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "task_id": {
+          "$ref": "#/$defs/name"
+        },
+        "definition": {
+          "$ref": "#/$defs/name"
+        },
+        "cadence": {
+          "type": "string",
+          "enum": ["daily", "weekly", "sprint"]
+        },
+        "period": {
+          "$ref": "#/$defs/date"
+        },
+        "title": {
+          "$ref": "#/$defs/text"
+        },
+        "due": {
+          "$ref": "#/$defs/instant"
+        },
+        "due_rule": {
+          "$ref": "#/$defs/due_rule"
+        },
+        "batch": {
+          "$ref": "#/$defs/ulid"
+        },
+        "group": {
+          "$ref": "#/$defs/text"
+        },
+        "link": {
+          "$ref": "#/$defs/text"
+        }
+      }
+    },
+    "task.completed": {
+      "type": "object",
+      "required": ["task_id"],
+      "additionalProperties": false,
+      "properties": {
+        "task_id": {
+          "$ref": "#/$defs/name"
+        }
+      }
+    },
+    "task.skipped": {
+      "type": "object",
+      "required": ["task_id", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "task_id": {
+          "$ref": "#/$defs/name"
+        },
+        "reason": {
+          "$ref": "#/$defs/reason"
+        },
+        "batch": {
+          "$ref": "#/$defs/ulid"
+        }
+      }
+    },
+    "task.missed": {
+      "type": "object",
+      "required": ["task_id", "batch"],
+      "additionalProperties": false,
+      "properties": {
+        "task_id": {
+          "$ref": "#/$defs/name"
+        },
+        "batch": {
+          "$ref": "#/$defs/ulid"
+        }
+      }
+    },
+    "task.withdrawn": {
+      "type": "object",
+      "required": ["task_id", "batch"],
+      "additionalProperties": false,
+      "properties": {
+        "task_id": {
+          "$ref": "#/$defs/name"
+        },
+        "batch": {
+          "$ref": "#/$defs/ulid"
+        }
+      }
+    },
+    "task.reinstated": {
+      "type": "object",
+      "required": ["task_id", "batch"],
+      "additionalProperties": false,
+      "properties": {
+        "task_id": {
+          "$ref": "#/$defs/name"
+        },
+        "batch": {
+          "$ref": "#/$defs/ulid"
+        }
+      }
+    },
+    "cycle.started": {
+      "type": "object",
+      "required": ["cycle_id", "type", "title", "planned_minutes"],
+      "additionalProperties": false,
+      "properties": {
+        "cycle_id": {
+          "$ref": "#/$defs/name"
+        },
+        "type": {
+          "$ref": "#/$defs/name"
+        },
+        "title": {
+          "$ref": "#/$defs/text"
+        },
+        "planned_minutes": {
+          "$ref": "#/$defs/minutes"
+        },
+        "interrupts": {
+          "$ref": "#/$defs/name"
+        }
+      }
+    },
+    "cycle.paused": {
+      "type": "object",
+      "required": ["cycle_id"],
+      "additionalProperties": false,
+      "properties": {
+        "cycle_id": {
+          "$ref": "#/$defs/name"
+        },
+        "batch": {
+          "$ref": "#/$defs/ulid"
+        }
+      }
+    },
+    "cycle.resumed": {
+      "type": "object",
+      "required": ["cycle_id"],
+      "additionalProperties": false,
+      "properties": {
+        "cycle_id": {
+          "$ref": "#/$defs/name"
+        },
+        "batch": {
+          "$ref": "#/$defs/ulid"
+        }
+      }
+    },
+    "cycle.boosted": {
+      "type": "object",
+      "required": ["cycle_id", "minutes"],
+      "additionalProperties": false,
+      "properties": {
+        "cycle_id": {
+          "$ref": "#/$defs/name"
+        },
+        "minutes": {
+          "$ref": "#/$defs/minutes"
+        }
+      }
+    },
+    "cycle.stopped": {
+      "type": "object",
+      "required": ["cycle_id"],
+      "additionalProperties": false,
+      "properties": {
+        "cycle_id": {
+          "$ref": "#/$defs/name"
+        }
+      }
+    },
+    "cycle.annotated": {
+      "type": "object",
+      "required": ["cycle_id"],
+      "additionalProperties": false,
+      "properties": {
+        "cycle_id": {
+          "$ref": "#/$defs/name"
+        },
+        "note": {
+          "$ref": "#/$defs/free_text"
+        },
+        "kv": {
+          "$ref": "#/$defs/kv"
+        }
+      }
+    },
+    "event.corrected": {
+      "type": "object",
+      "required": ["target", "fields"],
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "$ref": "#/$defs/ulid"
+        },
+        "fields": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "effective_at": {
+              "$ref": "#/$defs/instant"
+            },
+            "kind": {
+              "type": "string",
+              "enum": ["day", "week", "sprint"]
+            },
+            "start": {
+              "$ref": "#/$defs/date"
+            },
+            "end": {
+              "$ref": "#/$defs/date"
+            },
+            "tz": {
+              "$ref": "#/$defs/name"
+            },
+            "label": {
+              "$ref": "#/$defs/free_text"
+            },
+            "batch": {
+              "$ref": "#/$defs/ulid"
+            },
+            "profile": {
+              "$ref": "#/$defs/name"
+            },
+            "task_id": {
+              "$ref": "#/$defs/name"
+            },
+            "definition": {
+              "$ref": "#/$defs/name"
+            },
+            "cadence": {
+              "type": "string",
+              "enum": ["daily", "weekly", "sprint"]
+            },
+            "period": {
+              "$ref": "#/$defs/date"
+            },
+            "title": {
+              "$ref": "#/$defs/text"
+            },
+            "group": {
+              "$ref": "#/$defs/text"
+            },
+            "link": {
+              "$ref": "#/$defs/text"
+            },
+            "due": {
+              "$ref": "#/$defs/instant"
+            },
+            "due_rule": {
+              "$ref": "#/$defs/due_rule"
+            },
+            "reason": {
+              "$ref": "#/$defs/reason"
+            },
+            "cycle_id": {
+              "$ref": "#/$defs/name"
+            },
+            "type": {
+              "$ref": "#/$defs/name"
+            },
+            "planned_minutes": {
+              "$ref": "#/$defs/minutes"
+            },
+            "interrupts": {
+              "$ref": "#/$defs/name"
+            },
+            "minutes": {
+              "$ref": "#/$defs/minutes"
+            },
+            "note": {
+              "$ref": "#/$defs/free_text"
+            },
+            "kv": {
+              "$ref": "#/$defs/kv"
+            },
+            "target": {
+              "$ref": "#/$defs/ulid"
+            },
+            "target_batch": {
+              "$ref": "#/$defs/ulid"
+            }
+          },
+          "description": "Replacement values by whole key. Declares both the replaceable keys and the identity keys, each with its type: a stored line that carries an identity key passes the schema and is refused by the rules layer as invalid_correction."
+        },
+        "reason": {
+          "$ref": "#/$defs/free_text"
+        }
+      }
+    },
+    "event.retracted": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "$ref": "#/$defs/ulid"
+        },
+        "target_batch": {
+          "$ref": "#/$defs/ulid"
+        },
+        "reason": {
+          "$ref": "#/$defs/free_text"
+        }
+      },
+      "oneOf": [
+        {
+          "required": ["target"]
+        },
+        {
+          "required": ["target_batch"]
+        }
+      ],
+      "description": "Exactly one of target and target_batch. A retraction never carries batch."
+    },
+    "batch.committed": {
+      "type": "object",
+      "required": ["batch"],
+      "additionalProperties": false,
+      "properties": {
+        "batch": {
+          "$ref": "#/$defs/ulid"
+        }
+      }
+    }
+  }
+}
