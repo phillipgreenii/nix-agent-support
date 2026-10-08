@@ -86,7 +86,10 @@ func (w *Watchdog) terminal(ctx context.Context, sessionName, beadID string, be 
 			"session": sessionName, "bead": beadID, "err": err.Error(),
 		})
 	}
-	_ = w.CC.Close(ctx, sessionName, false)
+	// An absorbed row the handler already closed is not closed again: a second
+	// non-purge close re-stamps it and appends another close event, once per
+	// re-dispatch (bead pg2-92rfu).
+	_, _ = ccpool.CloseIfOpen(ctx, w.CC, sessionName, false)
 
 	_ = beads.Comment(ctx, w.BD, beadID, "interrupted — budget")
 	iss, stops, counted := w.recordBudgetStop(ctx, sessionName, beadID)

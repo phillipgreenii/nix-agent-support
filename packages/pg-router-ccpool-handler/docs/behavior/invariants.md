@@ -273,6 +273,13 @@ review`. The claim is still released (status open, assignee cleared) — the lab
   launches afresh. Only a row whose dispatch completed the bead (closed) stays a duplicate. A role whose success leaves
   its bead open by design (the triage roles), and a bead that cannot be read, leave the row
   absorbable.
+  A session is closed once: a failed absorb of a row that is already closed and whose session is
+  gone (the budget hard stop or the wait's unexplained-death branch on a handler-closed row) MUST
+  NOT close it again, because a second close re-stamps the row and appends another close event
+  for the same session (`pg2-92rfu`, 268 for one session before the marker existed). A row that
+  carries a close reason but whose session is still live is a failed teardown, and is closed
+  again. A worktree that an earlier dispatch already removed is reported once as already removed,
+  not as a failed cleanup left for the sweep.
 - **`INV-CCH-18`** — a session the handler launched MUST NOT stay unsupervised once its handler is
   gone. While a handler is alive it MUST keep a supervision lease on its session: the lease is
   stamped when the session is launched (covering the whole launch wait, so a session still

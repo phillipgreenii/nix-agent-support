@@ -80,6 +80,16 @@ The dispatch-time reconcile does not help: it closes only sessions whose bead is
    success and stays absorbable. Residual: the stamp is best effort (a failure is logged at
    error level), so a failed stamp leaves the row absorbable until the next failed absorb stamps
    it, and a stamped row whose close then failed stays live, and absorbable, until `idle_ttl`.
+   **Closed once (2026-10-08, bead `pg2-92rfu`):** the field loop behind `pg2-tc9c3` also recorded
+   268 close events for one session, because the watchdog hard stop and the death branch each
+   called `ccpool close` on the row the handler had already closed, and `ccpool` re-stamps and
+   re-logs a close each time (deliberately, so a failed teardown can be retried). Both now skip
+   the close for a row that carries a reason and is no longer live (`ccpool.CloseIfOpen`); a row
+   with a reason that is still live is a failed teardown and is closed again. The worktree
+   cleanup likewise reports a worktree that is already gone as "already removed" at INFO instead
+   of a failed open left for the sweep. Not changed: that a hard stop unclaims the bead, which
+   the review source then re-offers on its next tick; bounding that cadence is a budget-policy
+   decision (a per-bead backoff after a budget stop), left to the operator.
 
 ## Consequences
 

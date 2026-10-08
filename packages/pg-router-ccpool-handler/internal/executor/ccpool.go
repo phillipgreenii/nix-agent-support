@@ -514,6 +514,16 @@ func (r *ccpoolRun) cleanupWorktree(ctx context.Context, cc *roles.CCPoolConfig,
 	}
 	q := quietResult{checked: true, quiet: true}
 	wm, err := r.deps.gitOpener()(ctx, wt)
+	if errors.Is(err, fs.ErrNotExist) {
+		// The path is already gone (an earlier dispatch of this bead removed the
+		// worktree, and this one absorbed that dispatch's row): there is nothing to
+		// remove and nothing a later sweep could retry, so say so once at INFO
+		// instead of a failed open that every re-dispatch repeats as "left for next
+		// sweep" (bead pg2-92rfu). No branch is touched: a concurrent dispatch of
+		// the same bead owns the anchor branch it is creating.
+		slog.Info("dispatch: worktree cleanup: already removed", "session", name, "worktree", wt)
+		return q
+	}
 	if err != nil {
 		slog.Warn("dispatch: worktree cleanup: open failed (left for next sweep)",
 			"session", name, "worktree", wt, "err", err)
@@ -1190,7 +1200,8 @@ func (r *ccpoolRun) waitDone(ctx context.Context, claimTerminal func() bool, d D
 				// role's configured on_failure and escalate via the two-strike
 				// idiom; only an unexplained death or the handler's own close still
 				// applies on_failure below.
-				if reason := r.closeReason(ctx, name); externalCloseReasons[reason] {
+				reason := r.closeReason(ctx, name)
+				if externalCloseReasons[reason] {
 					_ = beads.Comment(ctx, r.deps.BD, d.Item.ID,
 						fmt.Sprintf("released: ccpool closed the session (%s) before the bead completed; retrying", reason))
 					_ = beads.Unclaim(ctx, r.deps.BD, d.Item.ID)
@@ -1215,7 +1226,12 @@ func (r *ccpoolRun) waitDone(ctx context.Context, claimTerminal func() bool, d D
 				// closes the row, and leaves that guard (never touch a row someone else
 				// closed) intact.
 				r.markIncomplete(ctx, name, d.Item.ID)
-				_ = r.deps.CC.Close(ctx, name, false)
+				// A row that already carries a close reason (the handler's own settled
+				// close, absorbed again) is not closed a second time: that re-stamps it
+				// and appends another close event per re-dispatch (bead pg2-92rfu).
+				if reason == "" {
+					_ = r.deps.CC.Close(ctx, name, false)
+				}
 				return r.fail(ctx, d, "session exited before completing")
 			}
 			return lose()
