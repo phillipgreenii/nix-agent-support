@@ -1,7 +1,7 @@
 # pg-task-focus design
 
-**Status**: Draft 2 for review (revised after four independent reviews: completeness, correctness,
-UX, observability)
+**Status**: Approved by the operator on 2026-10-08 (draft 5), then amended the same day by the
+operator's rulings 28 to 31 in the decision log
 **Date**: 2026-10-07
 **Deciders**: operator (every ruling is recorded under "Decision log")
 
@@ -115,8 +115,9 @@ zones.
 - A zone MUST be an IANA identifier present in the embedded time zone database. Abbreviations
   (`ET`, `EST`, `PST`) and bare UTC offsets (`-05:00`) MUST be rejected at config load and at API
   input, because an abbreviation is ambiguous and an offset ignores daylight saving rules.
-- The daemon MUST embed the time zone database (the Go `time/tzdata` package) so behavior does not
-  depend on the host's zone files.
+- The daemon MUST embed the time zone database (the Go `time/tzdata` package) so that lookups
+  work on a host with no usable zone files. Go prefers the host's zone files when it has them, so
+  tests MUST pin only transitions that are stable across tz database releases.
 - A civil time that does not exist (skipped when clocks go forward) MUST resolve to the first valid
   instant after the gap: with a 02:00 to 03:00 gap, `02:30` resolves to `03:00` local time (it is
   not shifted by the length of the gap). A civil time that occurs twice (repeated when clocks go
@@ -206,9 +207,11 @@ The log is one UTF-8 file of newline-delimited JSON, at
    interrupted cycle's most recent start or resume; otherwise the request is rejected as
    `invalid_timeline`. There is never a state in which the pause is recorded and the start is not.
 6. **Batches.** A mutation that appends more than one event (a period or profile change, a
-   rollover, a break back-fill, a batch retraction) MUST give them a shared `batch` id and MUST
+   rollover, a break back-fill, a cycle switch, a batch retraction) MUST give them a shared `batch` id and MUST
    terminate them with a `batch.committed` event, all written and fsynced together.
-7. **Crash recovery.** On startup, a torn final line, and trailing events of a batch that has no
+7. **Crash recovery.** On startup, a torn final line (one with no terminating newline, or one that
+   ends in a newline but does not parse as a valid event; a line with an unknown `v` is neither,
+   see rule 1), and trailing events of a batch that has no
    `batch.committed`, were never acknowledged to any client. The daemon MUST copy those bytes to a
    sidecar file, fsync it, truncate `events.jsonl` to the end of the last committed record, fsync
    it, and only then accept appends. A torn line or an uncommitted batch anywhere but the tail is
@@ -288,6 +291,7 @@ defaults:
   boost_minutes: [5, 10, 25]
   profile: normal
   max_future_skew_seconds: 60
+  day_start: "00:00"
   alert:
     sound: Glass
     reminder_sound: Tink
@@ -388,6 +392,9 @@ cycles:
    URL) are top-level keys, validated by the schema. The daemon builds every deep link from
    `public_url`. A change to either takes effect only on restart; a reload that sees one reports it
    through `/healthz`.
+10. **Day start.** `defaults.day_start` (a 24-hour `HH:MM` time, default `00:00`, read in the zone
+    of the day period being left) is the earliest time a daily rollover MAY be backdated to
+    (periods rule 5). It does not move the civil date a day period covers.
 
 ## Periods, profiles and rollover
 
@@ -423,7 +430,8 @@ read-only; a **change** control opens a modal.
    profile.
 5. **Backdating.** `effective_at` MAY backdate the change (the operator forgot to change the day
    yesterday), so the missed times are correct. It MUST NOT precede the start of the period being
-   left.
+   left: for a day, its start date at `defaults.day_start`; for a week or a sprint, its start date
+   at 00:00; both in the period's own zone. Anything earlier is `invalid_timeline`.
 6. **Undo** is one batch retraction, subject to rule 8.5 of the event log: it is rejected once a
    later live event references the new periods' tasks, and the refusal names those events.
 7. **Profile change.** `POST /profile/change` leaves completed, skipped and missed tasks alone. For
@@ -454,6 +462,8 @@ stateDiagram-v2
     [*] --> Running: cycle.started
     Running --> Paused: cycle.paused
     Running --> Paused: another cycle.started (interrupts)
+    Running --> Paused: switch to another paused cycle
+    Paused --> Running: switch (this cycle becomes the focus)
     Paused --> Running: cycle.resumed
     Running --> Stopped: cycle.stopped
     Paused --> Stopped: cycle.stopped
@@ -470,7 +480,8 @@ Allowed operations by state:
 | `stop`     | yes     | yes    | no      |
 | `annotate` | yes     | yes    | yes     |
 
-`resume` of a paused cycle while another cycle is running is rejected (`409 cycle_already_running`).
+`resume` of a paused cycle while another cycle is running is rejected (`409 cycle_already_running`);
+`switch` is the operation that swaps them.
 `pause`, `boost` and `stop` accept an optional `cycle_id` that defaults to the running cycle;
 `resume` and `annotate` require it unless exactly one candidate exists.
 
@@ -480,7 +491,15 @@ Allowed operations by state:
    `resume_offer` naming the most recent interrupted cycle that is still paused. The UI, CLI and
    menu bar MUST show it persistently ("Resume `<title>`?") until the cycle is resumed or stopped;
    the app never resumes a cycle on its own. Starting a cycle type that is not in the active
-   profile is allowed; the state flags it `not_in_profile`.
+   profile is allowed; the state flags it `not_in_profile`. An interrupted cycle is never hidden:
+   the running cycle is the **focus**, and every paused cycle that is not stopped stays visible
+   beside it, **dimmed** (the state lists them as `dimmed`, most recently paused first). A dimmed
+   cycle has a **Switch** action that makes it the focus and dims the running cycle. A switch is
+   one batch: a `cycle.paused` for the running cycle and a `cycle.resumed` for the chosen cycle,
+   both at the same `effective_at`, then `batch.committed`; it is rejected as `no_running_cycle`
+   when nothing runs (use `resume`), `cycle_not_paused` when the chosen cycle is not paused, and
+   `unknown_cycle` for an unknown id. A dimmed cycle can also be stopped, boosted or annotated
+   while it is dimmed. A paused cycle accrues no running time, so it never plays a sound.
 2. **Stale pauses.** A paused cycle that has been paused longer than `stale_pause_minutes`
    (default 45) becomes an attention item, so an interrupted cycle is not forgotten.
 3. **Timer math is derived, never ticked.** `elapsed` is the sum of a cycle's running segments (an
@@ -511,14 +530,15 @@ Allowed operations by state:
 1. The **daemon** plays the sound, so it works with no browser tab open. It runs as a launchd user
    agent, which can reach the user's audio session.
 2. The daemon sends one macOS notification and plays the short `sound` once when a running cycle
-   enters overtime. It then plays the short `reminder_sound` every `repeat_minutes` for as long as
-   the cycle stays in overtime, until the operator stops the cycle. There is no acknowledge, mute,
+   enters overtime. It then plays the short `reminder_sound` and sends a notification each time the cycle has run a further `repeat_minutes` of
+   **running time** in overtime, until the operator stops the cycle. There is no acknowledge, mute,
    snooze or repeat cap. The daemon sends macOS notifications **only** for overtime; due and overdue
    tasks are conveyed through the UI and the attention feed, never by notification.
-3. Reminders end when the cycle is stopped. They also end, because overtime itself ends, when the
-   cycle is paused (a paused cycle is not running, so no time accrues) or boosted out of overtime.
-   Resuming an overtime cycle re-arms them, and the first reminder then plays after one full
-   `repeat_minutes`, not immediately.
+3. Reminders are counted in the cycle's running time, not in wall-clock time. A paused cycle
+   accrues no running time, so it plays no sound and sends no notification; resuming it continues
+   the count where it stopped (a cycle that had run 3 of 5 minutes toward its next reminder plays
+   it after 2 more running minutes). Reminders end when the cycle is stopped, or when a boost ends
+   overtime (entering overtime again plays the `sound` again).
 4. After the host wakes from sleep the daemon MUST play at most one catch-up alert, never a burst
    for the missed intervals.
 5. Alerts are derived from the projection and are NOT events in the log. They are observable
@@ -577,17 +597,17 @@ separately); events, config and CLI output MUST be validated against their schem
 
 All paths are under `/api/v1` except `/healthz`, `/readyz` and `/metrics`.
 
-| Area      | Endpoints                                                                                                                                                                                                                                                                                                                                                                             |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| State     | `GET /state`: the header (current day, week, sprint, profile and zones, the date-moved-on banner), task instances per period with status, due time and zone, `next`, the running cycle (elapsed, remaining or overtime, computed at read time), the interrupt stack, `resume_offer`, `version` and `config_generation`. `GET /stream`: server-sent events carrying the new `version`. |
-| Periods   | `POST /periods/change` (one or more changes as one batch; see "Periods, profiles and rollover")                                                                                                                                                                                                                                                                                       |
-| Profile   | `POST /profile/change` with `{profile, dry_run?, expected_version?}`                                                                                                                                                                                                                                                                                                                  |
-| Tasks     | `POST /tasks/{id}/complete`, `POST /tasks/{id}/skip` (`reason` required); both accept `effective_at`                                                                                                                                                                                                                                                                                  |
-| Cycles    | `POST /cycles/start` (`type`, optional `minutes`), and `POST /cycles/{pause,resume,boost,stop,annotate,break}`, each taking `cycle_id` in the body (optional for `pause`, `boost` and `stop`, which default to the running cycle; `break` takes `{cycle_id, from, to}`); every one accepts `id`, and every one except `annotate` and `break` also accepts `effective_at`              |
-| Editor    | `GET /events` (`from`, `to`, `type`, `view=corrected\|original`), `POST /events/{id}/correct`, `POST /events/{id}/retract`, `POST /batches/{id}/retract`                                                                                                                                                                                                                              |
-| Config    | `GET /config` (the resolved, validated config)                                                                                                                                                                                                                                                                                                                                        |
-| Connector | `GET /calendar?from&to&calendar`, `GET /attention`                                                                                                                                                                                                                                                                                                                                    |
-| Ops       | `GET /healthz` (liveness), `GET /readyz` (readiness), `GET /metrics`                                                                                                                                                                                                                                                                                                                  |
+| Area      | Endpoints                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| State     | `GET /state`: the header (current day, week, sprint, profile and zones, the date-moved-on banner), task instances per period with status, due time and zone, `next`, the running cycle, which is the focus (elapsed, remaining or overtime, computed at read time), the `dimmed` cycles (every paused cycle that is not stopped, most recently paused first), the interrupt stack, `resume_offer`, `version` and `config_generation`. `GET /stream`: server-sent events carrying the new `version`. |
+| Periods   | `POST /periods/change` (one or more changes as one batch; see "Periods, profiles and rollover")                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Profile   | `POST /profile/change` with `{profile, dry_run?, expected_version?}`                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Tasks     | `POST /tasks/{id}/complete`, `POST /tasks/{id}/skip` (`reason` required); both accept `effective_at`                                                                                                                                                                                                                                                                                                                                                                                                |
+| Cycles    | `POST /cycles/start` (`type`, optional `minutes`), and `POST /cycles/{pause,resume,boost,stop,switch,annotate,break}`, each taking `cycle_id` in the body (optional for `pause`, `boost` and `stop`, which default to the running cycle; `break` takes `{cycle_id, from, to}`; `switch` takes `{to}`, the paused cycle that becomes the focus, and pauses the running one); every one accepts `id`, and every one except `annotate` and `break` also accepts `effective_at`                         |
+| Editor    | `GET /events` (`from`, `to`, `type`, `view=corrected\|original`), `POST /events/{id}/correct`, `POST /events/{id}/retract`, `POST /batches/{id}/retract`                                                                                                                                                                                                                                                                                                                                            |
+| Config    | `GET /config` (the resolved, validated config)                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Connector | `GET /calendar?from&to&calendar`, `GET /attention`                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Ops       | `GET /healthz` (liveness), `GET /readyz` (readiness), `GET /metrics`                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
 Conventions:
 
@@ -635,18 +655,18 @@ decision, to be restated in the ADR.
 
 One binary, `pg-task-focus`, with `serve` (the daemon) and thin client subcommands:
 
-| Verb                                       | Maps to                                                                                                                                                                                                                                                                               |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `status`                                   | `GET /state`; prints short task names, `Next:`, and "running 1h15m since the last pause" style lines                                                                                                                                                                                  |
-| `status --watch`                           | `GET /stream`; emits NDJSON, one full state object per line, schema-checked, for the SwiftBar plugin                                                                                                                                                                                  |
-| `period change` / `period roll`            | `POST /periods/change`; `roll` changes every ended kind after a dry run, prefilling `start` as today and `end` as `start` plus the previous period's length, and accepts `--profile`                                                                                                  |
-| `profile change [--dry-run]`               | `POST /profile/change`                                                                                                                                                                                                                                                                |
-| `task done <name>` / `task skip <name>`    | complete or skip; `<name>` is a definition name or unique prefix resolved against the current periods                                                                                                                                                                                 |
-| `cycle start <type>`                       | start; an unknown type lists the valid types in its error                                                                                                                                                                                                                             |
-| `cycle pause,resume,boost,stop,break,note` | cycle endpoints; every mutating cycle and task verb except `note` accepts `--at <time>` (a time today in the host zone, `yesterday HH:MM`, or an RFC 3339 instant, validated like `effective_at`); `break --from <time> --to <time>`, `note --last` and `--kv key=value` (repeatable) |
-| `events list,correct,retract`              | editor endpoints                                                                                                                                                                                                                                                                      |
-| `undo`                                     | retracts the most recent live event or batch appended by a user request (found through `GET /events`), subject to event log rule 8.5                                                                                                                                                  |
-| `check`                                    | offline log verification (see "Failure handling")                                                                                                                                                                                                                                     |
+| Verb                                              | Maps to                                                                                                                                                                                                                                                                                                                                              |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `status`                                          | `GET /state`; prints short task names, `Next:`, and "running 1h15m since the last pause" style lines                                                                                                                                                                                                                                                 |
+| `status --watch`                                  | `GET /stream`; emits NDJSON, one full state object per line, schema-checked, for the SwiftBar plugin                                                                                                                                                                                                                                                 |
+| `period change` / `period roll`                   | `POST /periods/change`; `roll` changes every ended kind after a dry run, prefilling `start` as today and `end` as `start` plus the previous period's length, and accepts `--profile`                                                                                                                                                                 |
+| `profile change [--dry-run]`                      | `POST /profile/change`                                                                                                                                                                                                                                                                                                                               |
+| `task done <name>` / `task skip <name>`           | complete or skip; `<name>` is a definition name or unique prefix resolved against the current periods                                                                                                                                                                                                                                                |
+| `cycle start <type>`                              | start; an unknown type lists the valid types in its error                                                                                                                                                                                                                                                                                            |
+| `cycle pause,resume,boost,stop,switch,break,note` | cycle endpoints; every mutating cycle and task verb except `note` accepts `--at <time>` (a time today in the host zone, `yesterday HH:MM`, or an RFC 3339 instant, validated like `effective_at`); `switch <cycle>` (a paused cycle's id or unique title prefix), `break --from <time> --to <time>`, `note --last` and `--kv key=value` (repeatable) |
+| `events list,correct,retract`                     | editor endpoints                                                                                                                                                                                                                                                                                                                                     |
+| `undo`                                            | retracts the most recent live event or batch appended by a user request (found through `GET /events`), subject to event log rule 8.5                                                                                                                                                                                                                 |
+| `check`                                           | offline log verification (see "Failure handling")                                                                                                                                                                                                                                                                                                    |
 
 Every client verb has `--json`, and its output MUST validate against a checked-in JSON Schema. If
 the daemon is not reachable the CLI MUST say so, write one line to stderr and exit non-zero. Exit
@@ -666,7 +686,7 @@ timer ticks client-side from server timestamps. Its four areas:
   recently used reasons offered.
 - **Cycle panel**: a type picker with a duration override; once running, the timer with pause,
   resume, stop and boost buttons, a note field, and key/value rows pre-filled from the type's
-  `keys`. The `resume_offer` shows here.
+  `keys`. The running cycle is the focus; every paused cycle that is not stopped stays visible below it, dimmed, with a Switch button (it makes that cycle the focus and dims the running one) and a Stop button (a dimmed cycle can be stopped without switching to it). The `resume_offer` shows here.
 - **Editor view**: the events as a table showing the corrected view, with the original events one
   click away; correct and retract actions; and the named operations "Insert break (from, to)" and
   "End at (time)" with a before-and-after timeline preview.
@@ -701,7 +721,7 @@ roll over", or the week or sprint equivalent), the next due task (`Next: <task> 
 While a cycle runs or is paused, the title MUST also append the `next` task when it is overdue or
 due within `due_soon_minutes` (`Deep 12:30 · Post plan 8m`); an overdue task reads "overdue 12m",
 never a negative time. Every lower-priority state MUST appear in the dropdown. The plugin never
-rolls anything over itself. The dropdown offers pause, resume, stop, boost, complete next task (the
+rolls anything over itself. The dropdown offers pause, resume, stop, boost, a dimmed row with a switch action for each paused cycle, complete next task (the
 `next` task), and open the web UI. The same overtime also reaches the menu bar through the attention
 feed once sub-project 4 lands; that duplication is accepted. A streaming plugin driven by
 `status --watch` lets the timer tick without starting a process each second. It departs from the
@@ -997,38 +1017,42 @@ the operator (decision log rows 7 and 24). Findings deliberately not adopted:
 
 Rulings 1 to 17 are the operator's, made in the design conversation on 2026-10-07. Rulings 18 to 23
 and 25 to 27 are design decisions made while resolving the reviews, awaiting the operator's
-confirmation when this spec is approved. Ruling 24 is the operator's, on a question the reviews
+confirmation when this spec is approved. Rulings 28 to 31 are the operator's, made on 2026-10-08 while reviewing the implementation plan. Ruling 24 is the operator's, on a question the reviews
 raised.
 
-| #   | Decision                                  | Ruling                                                                                                                                                                                                                                                                                                       |
-| --- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 1   | Relationship to `/daily-focus`, `pg-desk` | Standalone app with its own daemon and store; a thin integration is defined later.                                                                                                                                                                                                                           |
-| 2   | On-call weeks                             | Named profiles; switching a profile is an explicit change like changing a period.                                                                                                                                                                                                                            |
-| 3   | Editing mistakes                          | The log stays append-only; edits are correction events.                                                                                                                                                                                                                                                      |
-| 4   | Due times                                 | A relative rule per task, with an IANA `tz` on every rule and no default zone.                                                                                                                                                                                                                               |
-| 5   | Concurrent cycles                         | One running cycle at a time, with an interrupt stack.                                                                                                                                                                                                                                                        |
-| 6   | Timer expiry                              | Notify and keep counting overtime; the cycle ends only when stopped.                                                                                                                                                                                                                                         |
-| 7   | Expiry sound                              | A short sound at expiry, then the same or a different short sound every configurable number of minutes until the cycle is stopped. No acknowledge, mute or snooze. Pausing a cycle silences the sound and resuming an overtime cycle continues it (clarified by the operator after the reviews, 2026-10-07). |
-| 8   | Overtime visibility                       | Overtime is also an attention item.                                                                                                                                                                                                                                                                          |
-| 9   | Architecture                              | A single-writer daemon with an HTTP/JSON API.                                                                                                                                                                                                                                                                |
-| 10  | API definition                            | Contract-first: OpenAPI 3.1 and JSON Schema; RFC 9457 errors.                                                                                                                                                                                                                                                |
-| 11  | Observability                             | Logs, metrics, traces, dashboards and alerts are required.                                                                                                                                                                                                                                                   |
-| 12  | Connector binary                          | One binary for calendar and attention.                                                                                                                                                                                                                                                                       |
-| 13  | Browser exposure                          | Behind the operator's local reverse proxy; machine clients use loopback directly; `public_url` is an option.                                                                                                                                                                                                 |
-| 14  | Key/value pairs                           | The work tracker parses them from the calendar notes.                                                                                                                                                                                                                                                        |
-| 15  | Existing `work-timer` log                 | Left alone; this app is separate.                                                                                                                                                                                                                                                                            |
-| 16  | Name                                      | `pg-task-focus`.                                                                                                                                                                                                                                                                                             |
-| 17  | Spec location                             | This file in the specs directory, referenced from the epic bead, because it does not fit in a bead.                                                                                                                                                                                                          |
-| 18  | Week and sprint end                       | `end` is required for week and sprint; there is no sprint-length setting.                                                                                                                                                                                                                                    |
-| 19  | Work-in-progress limit                    | Not tracked; no `wip_limit`.                                                                                                                                                                                                                                                                                 |
-| 20  | Hindsight fixes                           | Named "back-fill a break" and "end at" operations, validated by candidate replay.                                                                                                                                                                                                                            |
-| 21  | Guidance                                  | The state exposes `next`, a persistent resume offer and a stale-pause attention item.                                                                                                                                                                                                                        |
-| 22  | Crash recovery                            | Truncate to the last committed record, copying the removed bytes to a sidecar.                                                                                                                                                                                                                               |
-| 23  | Calendar segment ids                      | The id of the event that opened the segment.                                                                                                                                                                                                                                                                 |
-| 24  | Carry-over                                | None: a task still open at rollover is `missed` or `skipped`, never carried into the next period (operator, 2026-10-07).                                                                                                                                                                                     |
-| 25  | Failed appends                            | Roll the file back; if that fails, enter read-only mode until restart. A `503` means the outcome is unknown.                                                                                                                                                                                                 |
-| 26  | Profile switch inside a period change     | Batch order is rollover, profile change (current periods only), then the new periods from the new profile.                                                                                                                                                                                                   |
-| 27  | Deep links                                | `<public_url>/#/tasks/<task_id>` and `<public_url>/#/cycles/<cycle_id>`, built by the daemon.                                                                                                                                                                                                                |
+| #   | Decision                                  | Ruling                                                                                                                                                                                                                                                                                                                                              |
+| --- | ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Relationship to `/daily-focus`, `pg-desk` | Standalone app with its own daemon and store; a thin integration is defined later.                                                                                                                                                                                                                                                                  |
+| 2   | On-call weeks                             | Named profiles; switching a profile is an explicit change like changing a period.                                                                                                                                                                                                                                                                   |
+| 3   | Editing mistakes                          | The log stays append-only; edits are correction events.                                                                                                                                                                                                                                                                                             |
+| 4   | Due times                                 | A relative rule per task, with an IANA `tz` on every rule and no default zone.                                                                                                                                                                                                                                                                      |
+| 5   | Concurrent cycles                         | One running cycle at a time, with an interrupt stack.                                                                                                                                                                                                                                                                                               |
+| 6   | Timer expiry                              | Notify and keep counting overtime; the cycle ends only when stopped.                                                                                                                                                                                                                                                                                |
+| 7   | Expiry sound                              | A short sound at expiry, then the same or a different short sound every configurable number of minutes until the cycle is stopped. No acknowledge, mute or snooze. Pausing a cycle silences the sound and resuming an overtime cycle continues it (clarified by the operator after the reviews, 2026-10-07); reminders count running time (row 29). |
+| 8   | Overtime visibility                       | Overtime is also an attention item.                                                                                                                                                                                                                                                                                                                 |
+| 9   | Architecture                              | A single-writer daemon with an HTTP/JSON API.                                                                                                                                                                                                                                                                                                       |
+| 10  | API definition                            | Contract-first: OpenAPI 3.1 and JSON Schema; RFC 9457 errors.                                                                                                                                                                                                                                                                                       |
+| 11  | Observability                             | Logs, metrics, traces, dashboards and alerts are required.                                                                                                                                                                                                                                                                                          |
+| 12  | Connector binary                          | One binary for calendar and attention.                                                                                                                                                                                                                                                                                                              |
+| 13  | Browser exposure                          | Behind the operator's local reverse proxy; machine clients use loopback directly; `public_url` is an option.                                                                                                                                                                                                                                        |
+| 14  | Key/value pairs                           | The work tracker parses them from the calendar notes.                                                                                                                                                                                                                                                                                               |
+| 15  | Existing `work-timer` log                 | Left alone; this app is separate.                                                                                                                                                                                                                                                                                                                   |
+| 16  | Name                                      | `pg-task-focus`.                                                                                                                                                                                                                                                                                                                                    |
+| 17  | Spec location                             | This file in the specs directory, referenced from the epic bead, because it does not fit in a bead.                                                                                                                                                                                                                                                 |
+| 18  | Week and sprint end                       | `end` is required for week and sprint; there is no sprint-length setting.                                                                                                                                                                                                                                                                           |
+| 19  | Work-in-progress limit                    | Not tracked; no `wip_limit`.                                                                                                                                                                                                                                                                                                                        |
+| 20  | Hindsight fixes                           | Named "back-fill a break" and "end at" operations, validated by candidate replay.                                                                                                                                                                                                                                                                   |
+| 21  | Guidance                                  | The state exposes `next`, a persistent resume offer and a stale-pause attention item.                                                                                                                                                                                                                                                               |
+| 22  | Crash recovery                            | Truncate to the last committed record, copying the removed bytes to a sidecar.                                                                                                                                                                                                                                                                      |
+| 23  | Calendar segment ids                      | The id of the event that opened the segment.                                                                                                                                                                                                                                                                                                        |
+| 24  | Carry-over                                | None: a task still open at rollover is `missed` or `skipped`, never carried into the next period (operator, 2026-10-07).                                                                                                                                                                                                                            |
+| 25  | Failed appends                            | Roll the file back; if that fails, enter read-only mode until restart. A `503` means the outcome is unknown.                                                                                                                                                                                                                                        |
+| 26  | Profile switch inside a period change     | Batch order is rollover, profile change (current periods only), then the new periods from the new profile.                                                                                                                                                                                                                                          |
+| 27  | Deep links                                | `<public_url>/#/tasks/<task_id>` and `<public_url>/#/cycles/<cycle_id>`, built by the daemon.                                                                                                                                                                                                                                                       |
+| 28  | Interrupted cycles                        | An interrupted (paused) cycle stays visible and dimmed beside the focus cycle; a Switch action swaps the focus (one batch: pause the running cycle, resume the chosen one); a dimmed cycle can also be stopped (operator, 2026-10-08).                                                                                                              |
+| 29  | Reminder cadence                          | Reminder sounds and notifications are counted in a cycle's running time: pausing silences them and resuming continues the count, so a cycle resumed part-way through an interval reminds when that interval completes (operator, 2026-10-08, refining row 7).                                                                                       |
+| 30  | Torn tail                                 | A final line that ends in a newline but does not parse is a torn tail like any other: recovered to a sidecar, not refused (operator, 2026-10-08).                                                                                                                                                                                                   |
+| 31  | Backdating bound                          | A daily rollover MAY be backdated to the day's configurable start time (`defaults.day_start`, default 00:00); a week or sprint rollover to midnight of its start date (operator, 2026-10-08; recorded as read by the plan).                                                                                                                         |
 
 ## Open items for the implementation plans
 
