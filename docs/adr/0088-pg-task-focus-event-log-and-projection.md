@@ -121,9 +121,12 @@ R", a cycle ran for 187 minutes, a day rolled over with these tasks missed. Four
 
 ### Neutral
 
-- The library adds two third-party modules, a JSON Schema 2020-12 validator (to check events and the
-  configuration against checked-in schemas) and `pgregory.net/rapid` for property tests, in test code
-  only, as operator-accepted dependency choices of 2026-10-08.
+- The library adds four modules beyond the standard library: a JSON Schema 2020-12 validator
+  (`github.com/santhosh-tekuri/jsonschema/v6`, to check events and the configuration against
+  checked-in schemas), `golang.org/x/text` (which the validator's message printer needs, used
+  directly), `golang.org/x/sys` (the directory lock's `flock`) and `pgregory.net/rapid` for property
+  tests, in test code only. The validator and `rapid` are operator-accepted dependency choices of
+  2026-10-08.
 - The daemon, the CLI, the web UI, the connector backend and the menu-bar plugin consume the library
   in later sub-projects; the daemon's loopback and no-authentication decision is restated by
   sub-project 2's amendment to this ADR.

@@ -117,7 +117,8 @@ _Includes:_ none.
 
 **Counterparty:** `ACTOR-HOST` (kind: actor;
 essential participant: without a durable file there is no product). **What crosses:** one line of
-JSON per event, appended; the whole file read at startup and by the offline check. The file is
+JSON per event, appended; the whole file read at startup and by the offline check (which takes the
+data directory or the log file). The file is
 `events.jsonl` in the service's data directory (the user's data home, in a `pg-task-focus`
 directory; the host's data-home convention decides where). **What must hold:** `INV-LOG-1`,
 `INV-LOG-2`, `INV-LOG-3`, `INV-LOG-9`, `INV-LOG-10`, `INV-LOG-11`, `INV-LOG-20`, `INV-LOG-29`.
@@ -226,8 +227,12 @@ the service that hosts the library, not by the log.
   a line. The only truncations are crash recovery (`INV-LOG-9`, `INV-LOG-10`) and the rollback of a
   failed append (`INV-LOG-21`), each back to the end of the last committed record.
 - **`INV-LOG-2`** <!-- uuid: fd98b33c-01f4-4e0c-9a0f-090cc7dc9289 --> — The service MUST refuse to start on an event version it does
-  not know, and MUST NOT treat such a line as a torn tail. An event with a field the version does
-  not define is not a valid event.
+  not know, and MUST NOT treat such a line as a torn tail. A `v` that is not a JSON number, or is
+  absent, is not a recognised version: that line is an ordinary decode failure. A line whose
+  top-level `v` is any JSON number other than the literal `1` (`1.0` and `1e0` included) is an
+  unknown version, even if `v` appears more than once, so `"v":2` beside `"v":1` is an unknown
+  version whichever comes last. Any other duplicate key is a decode error. An event with a field
+  the version does not define is not a valid event.
 - **`INV-LOG-3`** <!-- uuid: f5d2ba85-c500-41f0-85f5-7dd9fb7af843 --> — Every stored instant MUST be an RFC 3339 timestamp in UTC with
   millisecond precision (`2026-10-07T13:30:00.000Z`). An instant a client supplies is truncated to
   milliseconds before it is validated or stored.
@@ -271,13 +276,17 @@ the service that hosts the library, not by the log.
   file and make it durable, then truncate the log to the end of the last committed record and make
   that durable, and only then accept requests. The sidecar is named
   `events.jsonl.recovered-<UTC yyyymmddThhmmssZ>-<n>`, MUST NOT overwrite an earlier sidecar, and
-  MUST keep the bytes, so nothing is lost. A recovery MUST be reported (logged and counted), never
+  MUST keep the bytes, so nothing is lost. The sidecar's directory entry is made durable by a
+  directory fsync before the log is truncated. A recovery MUST be reported (logged and counted), never
   silent, and a crash in the middle of recovery MUST be survivable by recovering again.
 - **`INV-LOG-11`** <!-- uuid: 335e87a5-ee00-46cb-8f42-40502d2a4626 --> — A torn or unparsable line, or an uncommitted batch, anywhere
   but the tail MUST be treated as corruption: the service refuses to start and names the cause and
   the 1-based line number. Corruption also includes an event line longer than the size limit
-  (`INV-LOG-27`), an interleaved batch, a `batch.committed` with no open batch, a reused batch id
-  and a blank line before the final line; a blank final line is a torn tail.
+  (`INV-LOG-27`), an interleaved batch, a `batch.committed` with no open batch, a reused batch id,
+  a repeated event id (ids are unique) and a blank line before the final line; a blank final line
+  is a torn tail. The size limit is checked before the version, so an over-limit line is corruption
+  even when it carries an unknown `v`. CRLF line endings are accepted on read, because a trailing
+  carriage return is JSON white space; the library never writes them.
 
 ### Validation and the expressive error
 
@@ -390,4 +399,4 @@ the service that hosts the library, not by the log.
 - **`INV-LOG-30`** <!-- uuid: 7479ece7-0bb6-4b3c-968c-2035fe6c13ba --> — An offline check MUST report a log's line count, batches, the
   recoveries it would perform, the line of any corruption and, after replay, any impossible timeline
   with its specific code and message, without modifying the log and without taking the write lock,
-  even while a service has the log open.
+  even while a service has the log open. The check takes the data directory or the log file itself.
