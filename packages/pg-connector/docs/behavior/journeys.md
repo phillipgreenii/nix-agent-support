@@ -464,24 +464,38 @@ flowchart TD
   convention directly? Unresolved as of this writing; not blocking, since every consumer today
   already reads the JSON body rather than branching on the wire-level exit code.
 
-- **`OQ-REVHEAD-1`** <!-- uuid: 61b91b5b-82ce-4904-bbba-a8036d1e02a7 --> — Is the host operation
-  that appends a comment to a pending review at an explicit commit, by diff position (the one
-  `INV-REVHEAD-2` relies on, as opposed to the line-and-side one used for the live head),
-  deprecated or scheduled for removal in the host's schema? Not settled: no schema description or
-  introspection result is available offline, so the schema version was NOT checked. A scratch-repo
-  spike (2026-10-07) showed it accepted, anchoring the comment at the named commit and re-mapping
-  its current line, and the anchoring surviving submission of the review. To settle in live
-  verification: introspect the operation's and its input fields' deprecation state and record the
-  schema date here.
-- **`OQ-REVHEAD-2`** <!-- uuid: 0b3c7e52-9a4d-4f18-8e6b-5d2c1a7f9e30 --> — A pending review that
-  was started at a THIRD commit (neither the live head nor `head_sha`), then appended to with the
-  explicit commit `head_sha`: does each comment stay anchored at `head_sha`? The spike covered a
-  review started at `head_sha` itself, and showed that one review can hold comments at two commits.
-  Intended (`INV-REVHEAD-2`) and implemented as "yes"; not observed.
-- **`OQ-REVHEAD-3`** <!-- uuid: c4d8a1f6-3e07-4b92-a5d0-7f1e8b2c6a49 --> — Positions are computed
-  from the difference between the base branch's CURRENT tip and `head_sha`, because that is what
-  the host's compare read offers; the host's own diff view may use the commit the PR diverged
-  from. For an advanced base, a renamed file (a `LEFT` comment named by the old path is sent under
-  the new path), and a second file in the same diff, whether the two agree is not observed. Until
-  settled, an advanced base or a rename MAY refuse a comment (`anchor_rejected`) or shift it; the
-  backend does not detect a shifted comment. To settle in live verification.
+- **`OQ-REVHEAD-1`** <!-- uuid: 61b91b5b-82ce-4904-bbba-a8036d1e02a7 --> — **Settled
+  (2026-10-08, live introspection and the real verb against a scratch repository).** Is the host
+  operation that appends a comment to a pending review at an explicit commit, by diff position
+  (the one `INV-REVHEAD-2` relies on, as opposed to the line-and-side one used for the live head),
+  deprecated or scheduled for removal in the host's schema? No. Introspecting the host's GraphQL
+  schema on 2026-10-08 (the host publishes no schema version number, so the date is the record)
+  showed `addPullRequestReviewComment` not deprecated, with none of its input fields deprecated
+  (`pullRequestReviewId`, `commitOID`, `path`, `position`, `body`, `inReplyTo`); the only deprecated
+  mutations were the classic-projects ones. The host also accepted a variable declared
+  `GitObjectID!` for `commitOID` and `Int!` for `position` in the mutation document the backend
+  sends. What introspection cannot show is a future removal; a later deprecation is detectable by
+  repeating the introspection, and is not guarded against by the backend.
+- **`OQ-REVHEAD-2`** <!-- uuid: 0b3c7e52-9a4d-4f18-8e6b-5d2c1a7f9e30 --> — **Settled
+  (2026-10-08, scratch repository).** A pending review that was started at a THIRD commit (neither
+  the live head nor `head_sha`), then appended to with the explicit commit `head_sha`: does each
+  comment stay anchored at `head_sha`? Yes. A pending review started at the live head (a third
+  commit) and then appended to at each of two earlier commits kept its review-level commit at the
+  live head, while each appended comment was recorded against the commit named in its own request,
+  and the host re-mapped each comment's current line (a line 5 at the earlier commit showed as
+  line 6 after a line was inserted above it). A review that an earlier-head save itself creates
+  carries `head_sha` as its review-level commit and counts as stale for the live head
+  (`INV-REVHEAD-3`).
+- **`OQ-REVHEAD-3`** <!-- uuid: c4d8a1f6-3e07-4b92-a5d0-7f1e8b2c6a49 --> — **Settled for the
+  situations observed (2026-10-08, scratch repository).** Positions are computed from the
+  difference between the base branch's CURRENT tip and `head_sha`, because that is what the host's
+  compare read offers; the host's own diff view may use the commit the PR diverged from. Observed
+  with the base branch advanced by a commit that edits the top of a file the PR also edits, a file
+  renamed with a content change, and a second file in the same difference: the two agreed in every
+  case. Each comment landed on the line it named, on both sides (`RIGHT` on an added line and on a
+  context line, `LEFT` on a removed line), in each file independently. A `LEFT` comment named by
+  the OLD path of a renamed file, and one named by the NEW path, both landed on the old line under
+  the new path; a `RIGHT` comment named by the OLD path of a renamed file failed alone as
+  `anchor_rejected` while the others landed. Not observed, and so still not guaranteed: an advance
+  of the base that changes where the PR diverged from it (for example a merge of the base into the
+  PR), and a patch the host omits.

@@ -171,8 +171,9 @@ cap look like). In short:
 difference between the base branch's CURRENT tip and `head_sha`. When the base branch has advanced
 since `head_sha` in a way that changes where the two histories diverge, those positions can differ
 from the ones the host's own diff view used, and a comment can be refused or land a line away; the
-backend does not detect a landed-but-shifted comment. The three situations this set does not
-settle by observation are listed under the open questions `OQ-REVHEAD-1` to `OQ-REVHEAD-3`.
+backend does not detect a landed-but-shifted comment. A live check on 2026-10-08 found the two
+in agreement for an advanced base, a renamed file and a second file; the cases it did not cover
+are recorded, with the other earlier-head questions, under `OQ-REVHEAD-1` to `OQ-REVHEAD-3`.
 
 ### `list` — named-query resolution and `query_not_recognized`
 
