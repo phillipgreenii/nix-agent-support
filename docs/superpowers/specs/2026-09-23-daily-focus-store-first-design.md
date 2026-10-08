@@ -12,8 +12,8 @@
   NOT read the folded text line by line. The three questions that review raised were RULED by the
   operator on 2026-10-08 (section 12 records them verbatim): the draft-and-lock plan model (D-F22,
   which amends D-F5 and D-F18 and adds the `replan` verb), the widened open-beads bulk query (section
-  4.2), and the issue closed listener (section 8 Routing). That 2026-10-08 text is the agent's
-  reading of those rulings; it has had one independent read-only review, whose findings are folded in,
+  4.2), and the issue closed listener (section 8 Routing). That 2026-10-08 text (D-F22, D-F23, the unified plan and replan layout, the Jira status category and
+  the routing correction) is the agent's reading of those rulings; it has had one independent read-only review, whose findings are folded in,
   and no review by the operator.
 - **Bead**: `pg2-2j5ac.27` (this design's own tracking bead; phase 15's decompose-trigger is
   `blocked-by` it)
@@ -69,7 +69,7 @@ precedent already set twice earlier in the same session; it is superseded, kept 
 | D-F5  | Gate replies and pull selections reference candidates by their own `(entity_type, entity_id)` — the same key already exists for a PR/Jira/bead item — never a derived positional handle. Every FACT shown (title, due date, priority, status) is read live from current `entity`/`interpretation` rows, so a priority or due-date change is never hidden from the operator. **Amended 2026-10-08 by D-F22 for the ORDER only:** the order is computed once per draft and frozen until the operator locks the plan or asks for a `replan`; the old rule that every `show`/`select` recomputes the order is withdrawn. The positional-handle rejection stands (keys remain the only handle).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | D-F6  | `focus_selection` and `focus_period` (§5) use an internal surrogate primary key (`id INTEGER PRIMARY KEY AUTOINCREMENT`) with a `UNIQUE` constraint carrying the natural key, diverging deliberately from every existing pg-desk table, which all use a composite natural-column primary key with no surrogate. `focus_selection` references `focus_period` by its surrogate `id` (a real foreign key, not a repeated `period_type`/`period_key` pair) and references `entity` by its own composite key (`repo, entity_type, entity_id`) — `entity` already is the table that establishes an `(entity_type, entity_id)` pair is valid, so `focus_selection` gets that validation from a real foreign key rather than untyped text columns.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | D-F7  | **SUPERSEDED 2026-10-05 by D-F11 (candidate set and epic slot rule).** Original text, kept for provenance: epic candidacy narrows to "owned by me AND has an open/in_progress child" — the "OR a recently-closed child" half of today's rule is dropped as a recorded loss, because expressing it would need a per-epic follow-up query the static named-query model (§4) cannot do. **Made in the operator's absence.**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| D-F8  | **DONE** (bead `pg2-t9zzg`, closed). `schema.Issue` gained an `Owner` field (bd's `owner` key — the responsible human), distinct from `Assignee`, which carries bd's claim/actor identity, not ownership; and pg-desk's issue ownership classifier reads it through the configured self-owner identity. "Assigned or owned by the operator" (D-F11) therefore reuses `interpretation.ownership` for issues; nothing new is built for it here.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| D-F8  | **DONE** (bead `pg2-t9zzg`, closed). `schema.Issue` gained an `Owner` field (bd's `owner` key — the responsible human), distinct from `Assignee`, which carries bd's claim/actor identity, not ownership; and pg-desk's issue ownership classifier reads it through the configured self-owner identity. "Assigned or owned by the operator" (D-F11) therefore reused `interpretation.ownership` for issues. **Amended 2026-10-08 by D-F23:** focus candidacy for beads and Jira reads the assignee against an identity list, not the owner, so the `Owner` field stays on the schema but the focus design no longer uses it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | D-F9  | There is no separate `focus split` verb. `pg-desk focus show` resolves each already-selected row's associated bead and current status unconditionally, folded into its existing per-item output, from the entity's view: the linked work item appears in the view's `links[]` with its state, labels, metadata and assignee. The link exists because the minted bead's own metadata names the source entity (D-F13), which the generic source-entity extractor recognizes; no tracker call is made at `show` time. The watch queries MUST cover the minted beads (a watched bead is one some `watch.issue.queries` name lists; section 4.2), with one nuance recorded in section 4.2: a CLOSED focus bead leaves the open-beads query and reaches `links[]` only through the change flow's removal-confirmation read. `close.md`'s survey step becomes a `focus show` call, not a dedicated verb.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | D-F10 | `focus close`'s per-bead progress note is appended by `close.md` itself via `pg-connector issue comment` (→ `bd comment`), not by pg-desk and not via today's `bd update --append-notes` (→ bd's separate NOTES field), followed by `pg-desk issue refresh <bead>` so the store sees the write (change-flow S10: external writes go straight through pg-connector by the actor, then refresh). pg-desk MUST NOT execute tracker write verbs (G5). Comments are the better mechanism for this content: bd captures `created_at`/`author` on each comment natively, where NOTES is one unstructured, unbounded-growth text field the caller must manually date-tag (exactly what `df-close-focus.sh`'s `[daily-focus <date>] <progress>` prefix exists to work around). The `[daily-focus <date>]` tag's PURPOSE splits in two — recording that a bead was part of a day's focus (now redundant; `focus_selection` already durably and queryably records this) vs. carrying forward what actually happened for whoever reads the bead next (not redundant; pg-desk's store holds no narrative text). Only the first purpose retires.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | D-F11 | **Ranking model, ruled by the operator 2026-10-05** (focused ranking session; supersedes D-F7 and the v2 ranking ported unchanged). Candidate set: everything non-done ASSIGNED to the operator (authored or assigned PRs, assigned Jira issues, beads ASSIGNED to the operator; amended 2026-10-08, the owner field is not used, see D-F23), with no started/ownership filter that hides an item. Slot rule: an epic and its children never use more than one slot; a child takes the slot and the epic is listed only when it is incomplete with no open child. Started: bead in_progress, Jira In Progress category, any open assigned PR. Rank: strict lexicographic tiers, no weights: overdue first (started first, then most overdue), then started, then not started; inside the started and not-started tiers the keys are a due date inside the 7-day horizon, then unblocks, then priority, then age. Placement: the rank is a read-time pure computation inside pg-desk, computed when a draft is made (D-F22) and never stored as a candidate list; a router-triggered idempotent decider only mints beads for the selected items (this replaces the provisional 2026-10-02 answer that a decider computes the rank). The head-to-head evidence is in section 6.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
@@ -79,12 +79,12 @@ precedent already set twice earlier in the same session; it is superseded, kept 
 | D-F15 | **The selection is a reserved view member (operator, 2026-10-06, later in the review session).** The `focus_selected` annotation is surfaced to deciders as a dedicated `annotations.focus_selected` member of `show`'s composite view (and of pg-decider's view reader), beside `ready_to_land`; the decider namespace, documented as written by deciders, is not reused, and no generic other-keys map is added.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | D-F16 | **A strike takes the focus bead out of play (operator, 2026-10-06; mechanism revised by the operator on 2026-10-07 to avoid bead churn).** The 2026-10-06 ruling was that a strike must not leave a bead that a worker can still claim for an item taken out of focus, and that a reselect brings the item back. The 2026-10-07 revision fixes the mechanism: a bead that is part of the plan is undeferred and in play; a struck bead is unlinked from the current focus and given an INDEFINITE defer; a reselect undefers it. Nothing is closed or reopened, and every tool that looks for a focus bead MUST look at deferred ones too, so a held bead is never recreated (D-F19). A source that is hidden or suppressed freezes its bead as it was (section 8), the one exception to "a strike takes the bead out of play".                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | D-F17 | **CONFIRMED (operator, 2026-10-07; proposed by the agent): selection history is kept and explainable.** `focus_selection` rows are never deleted: a strike sets `status='struck'`, `struck_at` and `struck_reason`, and each row records `source` (`ranked`, `forced`, `handadded`, `pulled`), `rank_position`, `tier` and `cap` as of the selecting run (a record of what was shown when the plan was locked; for a selected row that record IS its place in the frozen plan, D-F22, and it is never an input to a later rank of any other item). The flip-by-flip history of one item is the append-only `focus_selection_event` table (section 5), NOT the change log: a change-log row records neither the annotation key nor its value, and the log is pruned. A new read-only verb, `pg-desk focus explain <key>` (section 7.5), answers "why was this ranked, selected, struck, minted or held" from the live rows, the way `attention explain` does for ADR 0081's view.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| D-F18 | **CONFIRMED (operator, 2026-10-07; proposed by the agent): what counts as a strike.** An item is struck when it was `selected` in the period's rows and is absent from the new final set for a reason the operator can see in the lock preview: an explicit `-key`, an explicit lower `cap=`, or a non-terminal loss of candidacy (reassigned, hidden, deactivated); the row records which in `struck_reason` (`operator`, `cap`, `dropped`). **Amended 2026-10-08 by D-F22 (the operator's ruling on the former open question 1):** RANK DRIFT NEVER STRIKES, so a bare `ok` can no longer hold a bead because a new overdue item outranked it (the original text struck any selected item absent from a recomputed final set "for ANY reason", which included displacement by rank), and an item whose source finished (a merged or closed PR, a done issue) stays `selected` and is shown as `finished`, never struck; the decider's terminal-source hold (section 8) already holds its bead (sections 7.1 and 7.2). Rows added by `pull`, by a force-pull (`+key` of an existing candidate) or by a hand-add (`source` `pulled`, `forced` or `handadded`) persist across later `select` runs unless explicitly struck, so an ordinary re-run of `create` cannot silently hold added work. The cap in force is persisted on the period, so a re-run without `cap=` keeps it. Because a strike now takes a bead out of play, `select` MUST show every strike and its cause BEFORE it applies (a `--dry-run` preview, which `create.md` runs first, section 7.2). The annotation holds the MOST RECENT period key in which the item is selected, defined as the maximum `period_key` over the item's `selected` rows in every period (else `none`), written in the same transaction as the table change; it never means "selected today" (that is read from the table). A day rolling over holds nothing by itself: an item selected yesterday and not today keeps its bead and its annotation until it is struck, and `-key` on such an item writes `none` and holds as usual.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| D-F18 | **CONFIRMED (operator, 2026-10-07; proposed by the agent): what counts as a strike.** An item is struck when it was `selected` in the period's rows and is absent from the new final set for a reason the operator can see in the lock preview: an explicit `-key`, an explicit lower `cap=`, or a non-terminal loss of candidacy (reassigned, hidden, deactivated); the row records which in `struck_reason` (`operator`, `cap`, `dropped`). **Amended 2026-10-08 by D-F22 (the operator's ruling on the former open question 1):** RANK DRIFT NEVER STRIKES, so a bare `ok` can no longer hold a bead because a new overdue item outranked it (the original text struck any selected item absent from a recomputed final set "for ANY reason", which included displacement by rank), and an item whose source finished (a merged or closed PR, a done issue) stays `selected` and is shown as `finished`, never struck; the decider's terminal-source hold (section 8) already holds its bead (sections 7.1 and 7.2). Rows added by `pull`, by a force-pull (`+key` of an existing candidate) or by a hand-add (`source` `pulled`, `forced` or `handadded`) persist across later `select` runs unless explicitly struck, so an ordinary re-run of `create` cannot silently hold added work. The cap in force is persisted on the period, so a re-run without `cap=` keeps it. Because a strike now takes a bead out of play, `select` MUST show every strike and its cause BEFORE it applies (a `--dry-run` preview, which `create.md` runs first, section 7.2). The annotation holds the MOST RECENT period key in which the item is selected, defined as the maximum `period_key` over the item's `selected` rows in every period (else `none`), computed from the committed table and written right after it (step 5 of section 7.2 gives the order); it never means "selected today" (that is read from the table). A day rolling over holds nothing by itself: an item selected yesterday and not today keeps its bead and its annotation until it is struck, and `-key` on such an item writes `none` and holds as usual.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | D-F19 | **CONFIRMED (operator, 2026-10-07; mechanism per the operator's direction, details proposed by the agent): hold and release mechanics.** A focus bead is in play (open or claimed) or held. HELD means all three of: status `deferred`, metadata `focus_hold=struck`, and an empty assignee. (An earlier draft added "with no end date"; the decider's view carries no deferral date, so that condition cannot be observed and is dropped. The hold itself sets no end date, so a bead the rule held is indefinitely deferred.) A strike of an open, unclaimed bead with no open children is ONE `update` setting status `deferred` and `focus_hold=struck`; a reselect of a held bead is ONE `update` setting status `open`, clearing the deferral, and `focus_hold=released` (the connector's metadata merges and has no unset). Both are `update` actions, to which the action layer adds `Status` and `ClearDefer` fields (the connector already accepts both; an earlier draft also added `ClearAssignee`, which no path uses, so it is dropped); the decider never emits `close` or `reopen` for a focus bead. A claimed bead is never deferred, a bead deferred without the marker is someone else's and is left alone, and the marker alone never triggers a release, so a live claim is never wiped. Every hold and release re-reads the bead live first, because the decider's view is the stored snapshot. Spiked against real `bd` 1.2.2 on 2026-10-07: `--status deferred` with no date hides the bead from `bd ready` and keeps it in `bd list`; defer plus metadata, and undefer plus clear, each work in one call; a deferred claimed bead keeps its assignee. Nothing in the rule depends on who closed an item, so change-flow S26 holds, but the behavior docs word the decider's reading of a work item more narrowly ("open or closed" only) and need amending (section 12 item (h)). Consequences for other tools (section 8): a narrow watch query for held beads, a dedup query that lists focus beads, `/pb:unstick-beads` excluding the `focus-item` label, and a periodic re-evaluation binding.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | D-F20 | **CONFIRMED (operator, 2026-10-07; proposed by the agent): the operator-facing verb contract.** `focus select` gains `--dry-run`, and every echoed row names its downstream bead consequence in a closed vocabulary (section 7.2 step 7). `focus show` prints a coverage header and a closed-vocabulary bead column, and every verb has `--json` for the LLM command prose that consumes it (section 7.1; the contract string is `pg-desk.focus/v1`, carried in a `contract` member as `show.md`'s own contract is, with no separate `schemaVersion`). Exit codes follow pg-desk's scheme: `1` usage or an old-schema store, `2` partial, `3` total failure, `6` period closed, and `7` for a plan that changed since the draft was made (section 7; `4` is already `head-check`'s). **Amended 2026-10-08 by D-F22:** exit `7` guards the draft's `base` against the persisted plan instead of an `--expect` table digest, and `--expect` is withdrawn; there is a sixth verb, `replan` (section 7.6).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | D-F21 | **CONFIRMED (operator, 2026-10-07; proposed by the agent): observability is part of the design.** Every new component declares what it emits and logs (the telemetry-declaration convention of `docs/behavior/pg-desk/README.md`): section 8.2 specifies the verbs' durable run record and structured stderr line, the `/metrics` families computed from the store at scrape time and their alert rules, a `doctor` focus block, the decider's rule id and counters, and a rank-regression parity check.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | D-F22 | **RULED (operator, 2026-10-08): the plan is drafted, locked and re-planned, and the order is computed once per draft.** The operator's words, verbatim: "as i'm making a plan, the computation for the initial order should happen only once until i lock the plan in or i ask for a recalcuation"; and on the mechanics, "1A, 2A, 3A, 4 i don't think we want a recalc, i think what i want is to \"replan\" which would pull new items into the plan. this means that it would reorder things, but the previous plan remains as is. ie, the new items and nonselected items would be ordered correctly, but stay out of the selection. we are a draft phase again until we approve and go back to the actual plan which is using the asme freeze rules as before. 5 the draft only lives until the plan is created. it needs not persistence." The model, in design-pattern terms: a draft is a Memento the CALLER holds and pg-desk never stores. (1) A **draft** is a document: the order, tiers and cap line computed once, plus a `base` digest of the period's persisted plan, a `made_at` and a `digest` naming it. It has no table and no `meta` key; it ends when the plan is locked or the caller drops it, and the `create.md` prose holds it and hands it back with `--draft` (section 7). (2) **Lock** is `select --apply`. A locked plan freezes the ORDER, TIER and CAP LINE of its selected rows (their recorded `rank_position`, `tier` and `cap`); title, due date, priority and status stay live, and drift shows as a notice, not a re-sort (fork 1A). (3) **`replan`** (a new verb, section 7.6) opens a draft again over a locked plan: the selected rows stay exactly as they are, every other candidate, new ones included, is ordered afresh and proposed for nothing, and nothing joins the plan until the reply names it (`+key`) and the operator locks. (4) Candidates that arrive while a draft is held are not in it and show as `new since draft` (fork 2A); a draft row whose source finishes stays visible, marked `finished`, and is not struck at lock (fork 3A); a finished item is shown in the plan, is never struck, and is NOT counted toward the cap (operator, 2026-10-08, "finished is not struct and can be shown in the plan, but it shouldn't be counted towards the cap"). (5) Rank drift alone never strikes anything (amends D-F18). (6) `--expect` is withdrawn, and exit `7` now means the persisted plan changed since the draft's `base`. A `select` given no `--draft` computes a draft inside its own process and applies it in the same run, so the order is computed once there too. |
-| D-F23 | **RULED (operator, 2026-10-08): a bead is a focus candidate when it is ASSIGNED to the operator, not when it is owned.** The operator, verbatim: "for beads, the assigned is the one i was thinking about." Context: D-F8 built the bd `owner` field and D-F11 said "assigned or owned"; in this tracker 232 of 233 open beads are owned by the operator and none is assigned to the operator (bd's assignee is a claim marker, set to a session actor id only while a session works the bead), so ownership admitted almost every open bead, agent work included. Consequences: the bead watch query matches `--assignee` (section 4.2); the candidate rule reads the assignee against a LIST of operator identities, because the assignee defaults to the actor's display name while the owner is an email (section 6); an unassigned bead can still be added to a plan with `+key` (a hand-add); and today no bead is a candidate until the operator assigns it, with the claim rules needing an exception for a deliberate operator assignment (section 12 item (s)). PR candidacy is unchanged (authorship, `mine` or `co-owned`, or a review request) and Jira candidacy is unchanged (membership of the assigned-to-me query).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| D-F23 | **RULED (operator, 2026-10-08): a bead is a focus candidate when it is ASSIGNED to the operator, not when it is owned.** The operator, verbatim: "for beads, the assigned is the one i was thinking about." Context: D-F8 built the bd `owner` field and D-F11 said "assigned or owned"; in this tracker 232 of 233 open beads are owned by the operator and none is assigned to the operator (bd's assignee is a claim marker, set to a session actor id only while a session works the bead), so ownership admitted almost every open bead, agent work included. Consequences: the bead watch query matches `--assignee` (section 4.2); the candidate rule reads the assignee against a LIST of operator identities, because the assignee defaults to the actor's display name while the owner is an email (section 6); an unassigned bead can still be added to a plan with `+key` (a hand-add); candidacy is for ENTRY only, so a bead already in the plan is never struck when a worker claims it (the assignee becomes a session actor id) or it is deferred; and today no bead is a candidate until the operator assigns it, with the claim rules needing an exception for a deliberate operator assignment (section 12 item (s)). PR candidacy is unchanged (authorship, `mine` or `co-owned`, or a review request) and Jira candidacy is unchanged (membership of the assigned-to-me query).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 
 ## 3. Architecture overview
 
@@ -165,20 +165,23 @@ Two cautions carry over:
 pg-router already runs one `desk-<type>-changes` query per watched type (change-flow S22); what a
 type watches is pg-desk configuration: `watch.issue.queries` is a list of named `pg-connector issue
 list` queries, each listed with `--fingerprints` and hydrated when added or changed. Daily-focus
-adds no pg-router feed, no feed schedule and no `issue.changed` routing of its own. The deployment's
-`watch.issue.queries` MUST include three named queries (the names here are illustrative; the real
-names are deployment configuration):
+adds no pg-router feed and no feed schedule of its own (the focus decider role binds the per-type
+`<type>.changed` event the change flow already emits, section 8 Routing). The deployment's
+`watch.issue.queries` MUST include two named queries (the names here are illustrative; the real
+names are deployment configuration), and the narrow held-bead query below is a third entry:
 
 - **An assigned-to-me Jira query**: Jira issues assigned to the operator (today's `issue-jira-mine`
-  query). Together with the bead query below it realizes D-F11's candidate set for issues.
-- **An assigned-to-me bead query**: beads whose ASSIGNEE is the operator (`--assignee <identity>`,
-  D-F23; an earlier draft also matched the owner field, which the operator ruled out on 2026-10-08).
+  query). It GATHERS them; candidacy is decided at rank time by matching the stored assignee against
+  the operator identity list (section 6, D-F23), so the rank is a pure function of stored rows and
+  does not read which query listed an entity.
 - **An open-beads bulk query**: every `open`, `in_progress` or `blocked` bead, with no type filter
   (`blocked` added by the operator's ruling of 2026-10-08, "B", so a `blocked` child still counts as
   an open child of its epic and the epic keeps one slot, section 6). Its purpose
-  is narrower than the first two: landing every child issue's `parent` field, and every epic itself,
-  in the store so the focus-rank step (§6) can answer "does this epic have an open child" with a
-  pure in-store join, no per-epic query. It is the same "one bulk bead query, deduped by id" trick
+  is landing every bead with its `assignee` (the bead candidate set is the assigned subset, D-F23:
+  a separate `--assignee` query would be redundant, and a display name with a space cannot be written
+  in the connector's whitespace-split query grammar), every child issue's `parent` field, and every
+  epic itself, in the store so the focus-rank step (§6) can answer "does this epic have an open child"
+  with a pure in-store join, no per-epic query. It is the same "one bulk bead query, deduped by id" trick
   `df-survey` uses today, running continuously.
 
 PR candidate gathering (`pr-mine`/`pr-team`) needs no change — D-F1. Volume is bounded by the
@@ -376,7 +379,7 @@ agent) serialize per entity and last writer wins; the later run's echo shows wha
 is a FUNCTION of the table, so every verb and `--repair` write the same thing: the maximum
 `period_key` over the entity's `selected` rows in every period, else `none` (D-F18). A strike in
 period P therefore writes `none` only when no other `selected` row remains for the entity, and the
-function, computed in the transaction of the table change under the per-entity lock, is what makes the
+function, computed from the committed table under the per-entity lock, is what makes the
 table and the annotation unable to diverge except through a failed annotation write, which `--repair`
 mends. It never means "selected today".
 A struck selection sets `focus_selected=none`, because `annotate` today has no generic removal form (only paired verbs for
@@ -415,17 +418,25 @@ ownership filter that hides an assigned item:
   list the operator among the snapshot's review requests (surfaced by `pr-mine` or `pr-team`); every
   other `pr-team` PR is NOT a candidate, because "started" below makes every open candidate PR rank
   ahead of unstarted work, and a team-wide PR list would swamp the plan,
-- Jira issues assigned to the operator (surfaced by the assigned-to-me Jira watch query, §4.2), and
-- beads whose ASSIGNEE is one of the operator's configured identities (D-F23, operator 2026-10-08;
-  the owner field is NOT read). Ownership elsewhere, for contrast: a PR is the operator's by
-  AUTHORSHIP (`interpretation.ownership` is `mine` when the PR author is the configured self,
-  `co-owned` when a self-authored commit is on its branch, else `team`), a Jira issue by
-  assignee-to-me query membership, and a bead by assignee. The identity is a LIST because the bd
-  assignee defaults to the actor's display name (git `user.name`) while the owner is an email, so a
-  single `self_issue_owner` string cannot match both; the decomposition adds the list key.
+- Jira issues and beads whose ASSIGNEE is one of the operator's configured identities (D-F23,
+  operator 2026-10-08; the owner field is NOT read). One rule for both, evaluated at rank time over
+  stored `entity` rows (a Jira issue is gathered by the assigned-to-me query of §4.2 and a bead by the
+  open-beads bulk query, but candidacy never reads which query listed it). The identities are a LIST
+  under one key (`focus.operator_identities`; the decomposition names it): the bd assignee defaults to
+  the actor's display name (git `user.name`), the Jira connector's assignee is the display name, else
+  the email, and the bd owner is an email, so a single `self_issue_owner` string cannot match them
+  all. A match is the stored assignee TRIMMED of surrounding whitespace and compared exactly and
+  case-sensitively, as `classifyOwnership` compares today; a session actor id never matches, and an
+  empty list yields no Jira and no bead candidates (a `doctor` gate, §8.2). Ownership elsewhere, for
+  contrast: a PR is the operator's by AUTHORSHIP (`interpretation.ownership` is `mine` when the PR
+  author is the configured self, `co-owned` when a self-authored commit is on its branch, else `team`).
+  **Candidacy is for ENTRY, never for staying:** a bead whose assignee later changes (a worker claims
+  it, so the assignee becomes a session actor id) or that is deferred is no longer a new candidate, but
+  a row already in the plan stays `selected` and `show` prints it `claimed by <actor>` or `deferred`;
+  such a row is never struck by the change (D-F18), and the operator strikes it with `-key`.
 
 Three exclusions, all applied before the slot rule: an entity whose own metadata carries `source_id`
-is NEVER a candidate (it is a minted focus bead; without this rule a bead assigned or owned by the
+is NEVER a candidate (it is a minted focus bead; without this rule a bead assigned to the
 operator would take a second slot for the same work, and could be selected so the decider would mint
 a bead for a bead); a bead whose metadata carries a `dedup_key` is NEVER a candidate either (it is a
 work item some decider minted for a PR, such as a review or CI-fix bead, which `bd` may default to the
@@ -451,7 +462,7 @@ child implies working on its epic, so the epic does not need a slot. "Child" mea
 (the child's `parent` field names the epic), and an inactive entity (`active = 0`) is not an open
 child. Each open child assigned to the operator is its own candidate, so the operator can focus on two
 or three children of one epic and each takes its own slot; the epic is not in the ranked slots while
-it has any open child (an open child owned by someone else counts; a HIDDEN child does not, because a
+it has any open child (an open child assigned to someone else, or to nobody, counts; a HIDDEN child does not, because a
 hidden entity is ignored for decisions and logic). Pinned edge cases: an open descendant counts
 through nested epics (A's child epic B with an open child C: A and B are both in the trailing block and
 C takes the slot), and the in-plan indicator counts open descendants in the plan transitively; only the
@@ -462,7 +473,9 @@ operator's ruling of 2026-10-08, section 4.2), so a `blocked` child IS an open c
 not take a second slot. A `blocked` child assigned to the operator is also a candidate in its own
 right, because D-F11's candidate set is every non-done assigned item (an agent reading of the ruling,
 section 12); a `deferred` child is neither. Such an epic is shown instead in a
-trailing block below the cap line, "epics with children in play", sorted by (kind, key) so the block and
+trailing block below the cap line, "epics with children in play" (an epic is listed there whether or
+not it is itself assigned to the operator, because an assigned child is what puts it there, D-F23),
+sorted by (kind, key) so the block and
 the digest are deterministic, not counted against
 `cap`, each with an indicator of how many of its open children are in the plan (a join over the same
 `parent` field the slot rule already reads; if it proves non-trivial the decomposition drops the
@@ -477,7 +490,7 @@ the epic is then listed as it would be with no child.
 Progress `indeterminate` and Done `done`, plus a legacy "no category" that counts as not started). The
 connector carries the native category into the issue snapshot (a connector change, section 12 item
 (r)); an earlier draft matched a configured name list, `jira.in_progress_statuses`, because the connector
-exposed no category, and that list stays only for the attention rules that already use it; any open candidate PR, whether
+exposed no category, and that list stays for the attention rules that already use it and as the fallback when a snapshot carries no category (counted in `rank_inputs`, section 8.2); any open candidate PR, whether
 authored or review-assigned. Consequence to
 keep visible: every open assigned PR is started, so PRs rank above non-overdue unstarted beads and
 Jira issues.
@@ -566,7 +579,8 @@ rows proposed for the plan, the trailing epics block), and `select --draft <path
 `cap` and EVERY `focus_selection` row of the period, struck rows included, in `id` order, each as
 (key, `status`, `rank_position`, `tier`, `source`, `cap`); a period with no `focus_period` row or no rows
 has one constant `base` (the digest of the empty list), whether or not the verb is a `--dry-run`.
-`digest` names the draft itself (a hash over the period, `cap`, `base` and the ordered rows) and is
+`digest` names the draft itself (a hash over the period, `mode`, `cap`, `base`, the ordered rows, the
+`+` proposal flags and the epics block; `made_at` is outside it) and is
 RECOMPUTED when a draft is loaded: a file that no longer matches its own `digest` (an edit, a
 truncation) is a usage error, exit `1`. The draft's period is authoritative: with `--draft`, `--date`
 MAY be omitted and, when given, MUST equal the draft's period (else exit `1`), so a draft made at 23:50
@@ -612,7 +626,10 @@ already means total failure in `changes` and `refresh`, and it is withdrawn. Rou
 item already selected, or no longer a candidate) are reported on stderr and are NOT a partial: they
 exit `0`. The per-verb descriptions below use this scheme.
 
-### 7.1 `pg-desk focus show [--date YYYY-MM-DD] [--cap N] [--all] [--draft <path>] [--json]`
+### 7.1 `pg-desk focus show [--date YYYY-MM-DD] [--cap N] [--all] [--draft <path>] [--save-draft <path>] [--json]`
+
+`--save-draft <path>` writes the draft document (the same one `--json` prints) to a file while printing
+the table, so a terminal user can hold a draft without redirecting JSON; `replan` takes it too.
 
 `show` writes nothing, never freezes anything, and has three modes (D-F22):
 
@@ -633,7 +650,7 @@ exit `0`. The per-verb descriptions below use this scheme.
   `plan` header (`locked <selected_at>`) and a cap line that counts only UNFINISHED rows against the cap
   (`cap 6: 4 in plan, 2 open slots; 2 finished, not counted`; operator, 2026-10-08: a finished item is
   shown in the plan, is not struck, and is not counted toward the cap, so finishing work frees its
-  slot). Below the cap line a `not in plan` block lists the other
+  slot). Below the cap line a `candidates` block lists the other
   candidates in CURRENT rank, labelled `current rank, not frozen`, with a notice counting those that
   now rank above the plan's last row and suggesting `replan`. `--json` carries `mode: plan` and no
   proposed rows. This is the browse the bare `show` always was.
@@ -644,8 +661,14 @@ truncates. Below the cap line, an "epics with children in play" block lists
 each epic that has an open child, unranked, with how many of its descendants are in the plan (§6).
 
 **Layout (normative: a human and the `create.md` prose both consume it).** Fixed section order:
-scope, notices, coverage, digest, table, cap line, epics block, `new since draft` block (draft
-mode) or `not in plan` block (plan mode), finished block, struck block, carried-over block, footer. The table has a leading `MARK` column (`*` selected, `+` proposed, would
+scope, notices, coverage, a `candidates:` count line per source, digest, the `PLAN` table (a finished
+row is marked `finished` INSIDE it), cap line, the `candidates` table (every mode: the other
+candidates sorted by the rank; the draft's own proposals are in `PLAN`), epics block, `new since
+draft` block (when a held draft is re-rendered), struck block (which also holds a struck row whose
+source later finished, as `finished today`), carried-over block, footer. The initial draft, `replan`
+and plan mode share this skeleton and differ only in what fills `PLAN`. The per-source line reads like
+`candidates: pr 5, jira 3, bead 0 (assignee match [name, email]; 233 open beads are not assigned to
+you; assign one or use +key)`, so an empty source says why. The tables have a leading `MARK` column (`*` selected, `+` proposed, would
 be selected on `ok`, `-` struck, blank otherwise, so "in the plan" and "selected" are two separate
 facts), then rank, tier, the key that put this row ahead of the row BELOW it, due date, priority, the
 bead column (below), the key and the title. Each row carries its `(stale)` mark when its stored
@@ -668,8 +691,9 @@ candidate set is exit `0` and prints `no candidates`, distinct from `3`.
 
 **Rows of the period that are no longer ranked are still shown.** Every `focus_selection` row of the
 period appears even when its entity is no longer a candidate: an item that finished (a merged or
-closed PR, a done issue) stays `selected` and is listed in a `finished today` block with its outcome
-(D-F18, D-F22: finishing is not a strike), an item the operator struck in a `struck by you` block, and
+closed PR, a done issue) stays `selected` and is shown INSIDE the `PLAN` table marked `finished`, with its outcome
+(D-F18, D-F22: finishing is not a strike; it appears once, never also in another block), a struck row
+whose source later finished in the struck block as `finished today`, an item the operator struck in a `struck by you` block, and
 an item struck by a lower `cap=` or by a non-terminal loss of candidacy in the struck block with its
 cause. Rank drift never moves a row into the struck block. So `close.md`'s survey, which reads this output, can tell finished work from dropped work.
 A `carried over` block lists every item whose `focus_selected` annotation names an EARLIER period and
@@ -717,7 +741,10 @@ LOCK** (D-F22).
    `--draft`, compute a draft in this process, exactly as `replan` would (§7.6), and apply to it in
    the same run, so the order is still computed once (a no-draft preview and a no-draft apply are two
    independent drafts and CAN differ, which the `base` check cannot catch; that is why `create.md` MUST
-   pass `--draft`). The draft is validated by the order of §7: an unreadable, malformed, edited or
+   pass `--draft`, and why a `--apply` without it prints `WARNING: no --draft; the order was computed
+   now and may differ from what you saw` on stderr and records `fresh_order: true` in `focus_run`).
+   The coverage state the draft was computed under (any degraded or failed source) is recorded in
+   `focus_run` too, so a lock over incomplete data is visible afterwards. The draft is validated by the order of §7: an unreadable, malformed, edited or
    plan-mode file, or one for another period, is exit `1`; and, after the reply parses (step 2), a
    draft whose `base` differs from the persisted plan's digest NOW aborts with exit
    `7` and the message `plan changed since this draft (base <old> != <new>); nothing applied; re-run
@@ -794,8 +821,14 @@ OWNER/REPO#400 (link recorded; no bead for PROJ-5)`), `--dry-run` lists merges, 
      strikes the unfinished rows with the highest `rank_position` beyond N, each with cause `cap` and
      shown in the CHANGES block; a finished row is never cap-struck and does not count toward `cap`;
      `cap=N` above it only raises the cap line. A row whose source is terminal stays selected (shown
-     `finished`). A row that lost candidacy for a NON-terminal reason (reassigned, hidden, or inactive
-     without a terminal state) is struck `dropped`, and the CHANGES block names it before it applies.
+     `finished`). A row that lost candidacy for a NON-terminal reason is struck `dropped`, and the CHANGES block
+     names it before it applies; the closed list of those reasons is: a PR or Jira issue reassigned to
+     someone else (a PR no longer `mine`, `co-owned` or review-requested of the operator, a Jira issue
+     whose assignee now names another person), an entity hidden, and an entity inactive without a
+     terminal state. A BEAD never becomes `dropped`: a worker claiming it (the assignee becomes a
+     session actor id), a defer (`deferred`, including a held focus bead) and a release do not strike
+     it, the row stays `selected` and shows `claimed by <actor>` or `deferred`, and only `-key` strikes
+     it.
      Suppression by the slot rule, a correlation group or a merge is NOT a loss of candidacy and never
      strikes: the row stays selected and `show` prints it `covered by <key>` (so an epic that gains a
      child, a `blocked` one included, keeps its slot until the operator strikes it).
@@ -826,8 +859,14 @@ OWNER/REPO#400 (link recorded; no bead for PROJ-5)`), `--dry-run` lists merges, 
    §5 on every affected entity (the maximum `period_key` over its selected rows, else `none`; D-F12). A
    `-key` on an item selected in an EARLIER period (annotation present, no row this period) strikes
    that row of the earlier period when it exists, or writes `none` when no row remains `selected`, so a
-   strike always holds the bead. The whole of step 5 plus the `focus_run` row is one store
-   transaction, and the stderr line of §8.2 is printed from it.
+   strike always holds the bead. **Write order:** the table rows, the `focus_selection_event` rows, the
+   `focus_period` row and the `focus_run` row commit in ONE store transaction (the `base` re-check of
+   §7 is inside it); then each entity's `focus_selected` annotation is written under pg-desk's
+   per-entity lock, its value computed from the committed table; then the `focus_run` row's
+   `counts_json` is updated with the per-entity `{outcome, seq}` (the `seq` exists only after the
+   annotation write). A crash between the steps leaves rows without annotations, which
+   `--repair` mends and the `row_without_annotation` divergence names (§8.2); the stderr line of §8.2
+   is printed from the final record.
 6. **Nothing is minted here.** `select` writes selection state only. The annotation is what a
    router-triggered focus decider reacts to (§8); `select` does not wait for it, and a bead appears
    after the decider's next run. This is the G5 boundary: pg-desk MUST NOT contain the `focus-item`
@@ -835,7 +874,7 @@ OWNER/REPO#400 (link recorded; no bead for PROJ-5)`), `--dry-run` lists merges, 
 7. Print the CHANGES block and the echo table. The **CHANGES block** comes first (and is all that a
    preview prints): every row the run will newly select (`will mint`, `will release`) and every row it
    will strike (`will hold`, `left running`), each with its CAUSE (`you`, `cap`, `no longer a
-candidate: reassigned|hidden|inactive`), so a strike is visible BEFORE it takes a bead out of play. A
+candidate: reassigned|hidden|inactive`, never for a bead), so a strike is visible BEFORE it takes a bead out of play. A
    bare `ok` over an existing plan strikes nothing for rank or for a finished source, so its CHANGES block
    is empty unless the plan holds a row that lost candidacy. The **echo
    table** names the resolved entity and title for every applied token explicitly (e.g.
@@ -877,7 +916,7 @@ a reply is more keystrokes than v2's short `p3`/`j5`/`e2` handles. §13 records 
 mechanism was rejected (it required freezing exactly the data the operator wants live); this is
 the real, day-to-day price of that trade, not a cost-free simplification.
 
-### 7.3 `pg-desk focus pull [--date YYYY-MM-DD] [--top K | key...] [--dry-run]`
+### 7.3 `pg-desk focus pull [--date YYYY-MM-DD] [--top K | key...] [--dry-run] [--json]`
 
 Strictly additive and outside the draft/lock cycle (§7.6): it computes the rank in its own run, takes no
 draft, and performs no strike, no re-cap and no re-sort of the plan. It IS a lock of what it adds, and
@@ -913,7 +952,7 @@ a side effect of what's supposed to be a no-op preview. Worth having natively (n
 caller simply not invoking the verb) because a selection leads to a minted bead, a real, visible,
 not-cheaply-undone action.
 
-### 7.4 `pg-desk focus close --date YYYY-MM-DD [--dry-run]` (day summary on stdin)
+### 7.4 `pg-desk focus close --date YYYY-MM-DD [--dry-run] [--json]` (day summary on stdin)
 
 Writes `closed_at`/`close_note` onto the `focus_period` row (creating it if absent) — the
 `close_note` is where today's day-summary-onto-the-focus-bead text goes, since there is no more
@@ -1058,8 +1097,8 @@ decider rule (change-flow section 7, G5), registered in `pg-decider` and routed 
     operator ruled on 2026-10-08 that the focus role MUST listen for it, mirroring the PR (see Routing
     below), so a terminal issue re-runs the focus decider when the change flow sees it close. A reopened
     entity returns as a `reconcile` record, not a `reopened` one (the classifier reports only
-    `reconcile` for an entity that was inactive), and the role's reconcile binding is what releases the
-    held bead. The `terminal_source_bead_open` divergence gauge of section 8.2 remains the signal that
+    `reconcile` for an entity that was inactive), and the role's `<type>.changed` binding, which carries
+    `reconcile` as a kind, is what releases the held bead. The `terminal_source_bead_open` divergence gauge of section 8.2 remains the signal that
     the listener is missing or the role is still in `plan`.
     Anything else is left alone, with the skip reason "already handled" (`claimed`, `blocked`,
     `pinned`, `hooked`, closed, or deferred by someone else; section 8.3): a claimed bead is never
@@ -1106,10 +1145,11 @@ show` says `deferred by someone else`. A later strike overwrites `released` with
     narrowly, so they need amending (section 12 item (h)).
   - **A claimed strike is re-evaluated.** The strike leaves a claimed bead alone, and if the worker
     later releases it (open, unassigned) nothing would otherwise re-trigger the decider, so the item
-    taken out of focus would stay claimable. The focus decider role therefore also binds the change
-    flow's periodic reconcile record (the local reconcile tier of `docs/behavior/pg-desk/changes.md`
-    re-routes every active entity on its reconcile age), so a struck item is re-evaluated at least that
-    often. Until that binding exists, a strike of a claimed bead is best-effort, and `focus show` and
+    taken out of focus would stay claimable. The focus decider role's `<type>.changed` binding
+    therefore also receives the change flow's periodic `reconcile` kind (the local reconcile tier of
+    `docs/behavior/pg-desk/changes.md` re-routes every active entity on its reconcile age, and
+    `reconcile` is a kind inside the `<type>.changed` event, not a separate event type), so a struck
+    item is re-evaluated at least that often. Until that binding exists, a strike of a claimed bead is best-effort, and `focus show` and
     `doctor` flag "struck item with a bead in play" (section 8.2).
   - **Every tool that looks for a focus bead MUST look at deferred ones, through a NARROW query, not by
     widening the bulk ones.** (1) A watch query for held focus beads (`--label focus-item --status
@@ -1162,9 +1202,10 @@ apply` are two commands, so there is no mode flag to switch: the router role tha
   names were the adapter's choice and keeps per-kind events only as an alternative). A decider never
   branches on the kind (it re-derives from the view, G6), so the closed listener of the operator's
   2026-10-08 ruling ("there should be closed listener for issues as well. we should mirror what PR
-  does") is a role that binds `issue.changed` (every issue change, `closed` included) and the change
-  flow's periodic reconcile record (so a claimed strike is re-evaluated, and so a reopened entity,
-  which returns as `reconcile`, is re-evaluated). The PR side needs no new binding: the focus rule
+  does") is a role that binds `issue.changed` (every issue change, `closed` and the periodic `reconcile`
+  kind included, so a claimed strike is re-evaluated and a reopened entity, which returns as
+  `reconcile`, is re-evaluated; there is no separate `*.reconcile` event to bind, and the lag `doctor`
+  reports is that of the single `<type>.changed` consumer). The PR side needs no new binding: the focus rule
   rides the PR decider role, which binds `pr.changed`. A role that bound a per-kind name such as
   `issue.closed` would never be dispatched and the loader's orphan check would reject it, so those
   names elsewhere in this document mean "a change carrying that kind". The focus decider ALSO needs
@@ -1269,6 +1310,20 @@ Following the telemetry declaration every pg-desk component carries (`docs/behav
   `pg_router_failures_total{role="<focus role>"}`, covered by the existing `pg-router-failure-rate` rule,
   plus the escalation `human` bead (INV-DECIDER-18). Dashboard panels live in
   `phillipgreenii-nix-support-apps`' `pg-desk-metrics.json` (section 12 item (m)).
+- **The 2026-10-08 model, observed** (added by the third review, because a held draft and an
+  assignee-keyed candidate set are invisible by default): series `pg_desk_focus_candidates{source}`
+  (`pr|jira|bead`, as printed by `show`'s per-source line), `pg_desk_focus_plan_rows{state}` (`in_plan`,
+  `finished`, `open_slots`), `pg_desk_focus_last_lock_draft_age_seconds` and
+  `pg_desk_focus_last_lock_drift_rows` (from the last `focus_run`, so a stale-draft lock is a series and
+  not only a SQL query), and `pg_desk_focus_jira_status_category_absent`; `rank_inputs` gains
+  `status_category_absent`. ALERT RULES, each with an `internal/alertrules` test: `pg-desk-focus-terminal-source-bead-open`
+  (`terminal_source_bead_open > 0` for 1h; the signal that the issue closed listener is missing or the
+  role is in `plan`), `pg-desk-watch-listing-degraded` (`pg_desk_watch_listing_status{status!="ok"} > 0`
+  for 30m), `pg-desk-focus-rank-degraded` (a sustained non-zero `pg_desk_focus_rank_degraded_inputs`),
+  and `pg-desk-focus-consumer-lag` (the single `<type>.changed` consumer of the focus role).
+  `doctor` GATE: the operator identity list is EMPTY (zero Jira and bead candidates, forever, with no
+  other symptom). `doctor` REPORTS: open beads exist and bead candidates are `0` (the empty set D-F23
+  creates until a bead is assigned), and active Jira issues that lack a status category.
 - **`doctor` and `status`** gain a `focus:` block. Every line states whether it is a `gate` or a
   `report`, the count and a one-line remedy. GATES: a selection older than `focus.pending_gate_age`
   (default 30m) with its annotation set and no bead (the missing-role and `plan`-mode case; `doctor`
@@ -1288,10 +1343,11 @@ Following the telemetry declaration every pg-desk component carries (`docs/behav
   transitions, so the counters line gains an additive `transitions` object
   (`{"hold":{"applied":1,"skipped-stale":1}}`), and every skip of a source that has a focus bead emits a
   counter even when no action was planned, so strikes that never take effect are visible. The line
-  volume is one per active entity per `sweep.reconcile_age` once the role binds the reconcile record.
+  volume is one per active entity per `sweep.reconcile_age` once the role binds `<type>.changed`.
 - **Rank regression** is detected by golden fixtures under `internal/focus/testdata/rank/`, ported from
   the retired `df-survey` suites and carrying a documented diff list for the deliberate changes (D-F2,
-  D-F11). The differential check in the pattern of `pg-decider-parity` runs ONCE at cutover, as a
+  D-F11, D-F23's assignee-only bead candidates, the Jira status category, and the widened `blocked`
+  query). The differential check in the pattern of `pg-decider-parity` runs ONCE at cutover, as a
   runbook step (§11), because its oracle, `df-survey`, retires with the cutover; it is not a standing
   gate. The standing gate is a committed set of scrubbed RECORDED snapshots per backend (Jira, bd,
   GitHub PR) run through the rank in a `pg-desk-focus-rank-gate` check in the pattern of
@@ -1418,7 +1474,7 @@ view from the applied writes and asserting a second run writes nothing (INV-DECI
 
 - Rank, with an injected clock: `TestFocusRankBoundaries` (due equal to `--date`, a day before, `+7`,
   `+8`, a date-only value against an offset timestamp, empty, garbage), `TestFocusDefaultDateIsInjectedClockLocalDay`, `TestFocusRankStableAcrossRepeatedCalls` (shuffled input, identical order),
-  `TestEpicSlotOneChildHidesEpic`, `TestEpicWithNoOpenChildIsCandidate`, `TestEpicChildOwnedBySomeoneElse`,
+  `TestEpicSlotOneChildHidesEpic`, `TestEpicWithNoOpenChildIsCandidate`, `TestEpicChildAssignedToSomeoneElseOrNobodyCounts`,
   `TestEpicChildNotInStoreYet`, `TestInactiveEntitiesExcluded`, `TestMintedBeadIsNeverACandidate`,
   `TestHiddenEntityIsNotACandidate`, `TestCorrelatedDueDateInheritance`, `TestStartedDefinitionPerType`,
   `TestCapLineAndForcePullRaisesCap`, `TestUnblocksZeroForIssuesUntilHydrationEnabled`, and one
@@ -1522,9 +1578,9 @@ closed, human-labelled open}`: the single `update` (status `deferred`, marker `s
     through `--json` (the contract is stable and the digest is a pure function of the document).
   - Slot rule and closed listener (the 2026-10-08 rulings): `TestEpicSlotBlockedChildCountsAsOpen`
     (an epic whose only child is `blocked` takes no slot of its own, and the child is a candidate when
-    assigned), the open-beads bulk query lists `blocked`, `TestFocusRoleBindsIssueChangedAndReconcile`
-    (the router config the deployment ships binds `issue.changed` and the reconcile record for the focus
-    role, every emitted type is bound, and `doctor`'s "expected empty for issue" text is amended),
+    assigned), the open-beads bulk query lists `blocked`, `TestFocusRoleBindsIssueAndPrChanged`
+    (the router config the deployment ships binds `issue.changed` and `pr.changed` for the focus role,
+    binds no `*.reconcile`, `*.closed` or `*.merged` name, every emitted type is bound, and `doctor`'s "expected empty for issue" text is amended),
     `TestIssueClosedKindFollowsJiraStatusCategory` (a Jira status in category `done` with a name outside
     the old six, such as "Complete" or "Released", yields `closed`; a status named "Done" whose category
     is not `done` does not; all three categories and the empty one are table rows),
@@ -1536,6 +1592,34 @@ closed, human-labelled open}`: the single `update` (status `deferred`, marker `s
     nothing, `TestFinishedRowIsNotCountedAsHeldOrUnminted`
     (`selected_bead_held` and `unminted` exclude a terminal source; it counts under `source_terminal`),
     and a volume check that the widened `blocked` query stays inside `hydration.max_per_poll`.
+  - Candidacy by assignee, and the empty set (D-F23): `TestBeadCandidateAssigneeIdentityList` (the
+    display name, the email, surrounding whitespace, case-sensitivity, a multi-word name, an actor-id
+    assignee is out, an empty list yields none), `TestBeadWithOwnerButNoAssigneeIsNotACandidate`,
+    `TestBlockedAssignedChildIsCandidate`, `TestJiraCandidacyUsesAssigneeIdentityList` (rank reads
+    stored rows, never query membership), `TestAssignedBeadClaimedByWorkerStaysInPlan` (the assignee
+    becomes a session actor id: the row stays `selected`, prints `claimed by <actor>`, is not struck),
+    `TestDeferredPlanRowStaysSelected`, `TestBeadNeverDropped`, `TestEmptyCandidateSetExitsZero` (exit
+    `0`, `no candidates`, distinct from `3`), `TestNoBeadCandidatesLineNamesIdentities` (the per-source
+    `candidates:` line says how many open beads are unassigned), `TestEmptyIdentityListIsADoctorGate`,
+    `TestOpenBeadsButZeroBeadCandidatesIsADoctorReport`.
+  - Layout and cap line: `TestInitialDraftAndReplanShareSkeleton` (the same section headers in the same
+    order; only the `PLAN` source differs), `TestCapLineTextWithFinishedRows` (the exact string
+    `cap 6: 4 in plan, 2 open slots; 2 finished, not counted`),
+    `TestInitialDraftCapLineWithFewerCandidatesThanCap`, `TestFinishedShownOnceInsidePlan` (never also
+    in another block), `TestStruckThenFinishedRowIsInStruckBlock`, `TestDraftDigestCoversProposalFlagsModeAndEpics`,
+    `TestSelectWithoutDraftWarnsAndRecordsFreshOrder`, `TestSaveDraftWritesTheJsonDocument`,
+    `TestLockOverDegradedSourceRecordsCoverage`, the `show --draft` notices (`drift`, `plan changed`)
+    and the `carried over`, `NOTE: writing into period` and `--all` footer cases as goldens.
+  - Write order (§7.2 step 5): `TestRowsCommitBeforeAnnotationsAndRunRecordIsFinalizedLast` (kill the
+    process between the steps: rows present, `row_without_annotation` reported, `--repair` mends it,
+    the run record's `counts_json` completes after the annotation `seq`s exist).
+  - Jira status category chain (item (r)): `TestPjiraStatusCategoryDecoded` (in the base repository,
+    including `undefined` mapped to empty), `TestSourceTerminalFollowsJiraCategory` (it deactivates),
+    `TestCategoryRolloutEmitsClosedForAlreadyStoredDoneIssue` (the state string is unchanged and
+    terminal-ness changes), `TestFinishedFollowsJiraCategory`, `TestStartedWithAbsentCategory` and
+    `TestRankInputsCountsAbsentCategory`, `TestAttentionDoneAgreesWithCategory` (or the documented
+    divergence), and a burst re-hydration test bounded by `hydration.max_per_poll`.
+  - Alert rules of §8.2 each have an `internal/alertrules` rule test.
   - Verb contract: `TestFocusExitCodes` (a table of verb x documented code, asserting the code, that
     the stdout table is present where it should be, and the stderr remedy), a draft whose `base` no
     longer matches the plan exits `7` and writes nothing, `FuzzParseReply` (never panics; an error implies zero store writes) and `TestReplyGrammarTable`
@@ -1602,7 +1686,9 @@ the new watch queries and the new decider role live, not just a clean flake chec
   precedes everything below; none of it is meaningful on the pre-cutover code.
 - `pg-desk focus show --date <today>` produces the same candidate set `df-survey` would have,
   modulo the recorded narrowing of D-F2's PR repo scope, and the deliberate widening of D-F11's
-  candidate set (everything assigned to the operator, with the epic slot rule) over `df-survey`'s.
+  candidate set (everything assigned to the operator, with the epic slot rule) over `df-survey`'s, and
+  the D-F23 narrowing of beads to those ASSIGNED to the operator (so the bead side differs from
+  `df-survey` by design; assign at least one bead before comparing).
 - The three watch queries of §4.2 are each run live at least once (`pg-desk issue changes`, or the
   router's `run-query` equivalent) with a confirmed non-trivial outcome — real `entity` rows
   landing for an epic and a plain bd task, not just a clean `nix flake check`.
@@ -1616,7 +1702,12 @@ the new watch queries and the new decider role live, not just a clean flake chec
   between draft and lock gives exit `7`; `replan` shows the locked rows first and proposes nothing, and
   a bare `ok` over it changes nothing; closing a selected issue holds its bead (the shipped router config
   binds `issue.changed` for the focus role) and its return releases the bead; and an epic whose only child is `blocked`
-  takes no slot of its own.
+  takes no slot of its own. Also observed live: before the check, the operator assigns at least one bead
+  (otherwise the bead query returns nothing and the `candidates:` line says so); that bead appears as a
+  candidate, and after a worker claims it the plan row stays and shows `claimed by <actor>`; a Jira
+  issue in a done-category status whose name is not one of the old six (for example "Complete") is read
+  as `closed` through `pjira`; a finished plan row frees its slot (the cap line reports it); and an
+  initial draft and a replan print the same layout.
 - `close.md`'s rewritten resolve/survey/close steps produce output its unchanged steps 3-5 accept
   without modification.
 - Live decider behaviors, each observed and not inferred from a clean `flake check`: selecting the same
@@ -1634,10 +1725,9 @@ the new watch queries and the new decider role live, not just a clean flake chec
   disable `df-wire`, so the
   old and new mechanisms cannot both mint for the same item; (2) run `focus show` once and compare it
   with `df-survey` through the one-time differential check of section 8.2, accepting the recorded
-  differences (D-F2,
-  D-F11) and noting that the `scope:` header names the single repository; (3) handle an in-flight v2
+  differences (D-F2, D-F11, D-F23, the Jira status category and the `blocked` widening) and noting that the `scope:` header names the single repository; (3) handle an in-flight v2
   day: an existing per-day focus bead (the v2 bead labelled `daily-focus`) is excluded from the
-  candidates, or closed at this step, so it cannot take a slot as an operator-owned bead or epic; it
+  candidates, or closed at this step, so it cannot take a slot as an operator-assigned bead or epic; it
   is never imported, and today's selection
   is made with `focus select` so `create.md`'s duplicate guard sees a row; (4) flip the decider role
   from `plan` to `apply`. Rollback is the reverse: flip the role back to `plan`, re-enable `df-wire`,
@@ -1677,7 +1767,7 @@ the new watch queries and the new decider role live, not just a clean flake chec
   the rule by bead state, the narrow held-bead watch query and a dedup query that lists focus beads (section 8; the bulk
   queries are NOT widened), `/pb:unstick-beads` (its Stage 1 and Stage 3 target selection, not only its
   worker prompt) and any other undeferring or closing sweep taught to exclude the `focus-item` label, and
-  the focus role bound to the periodic reconcile record. Nothing in the rule depends on who closed an
+  the focus role bound to `<type>.changed`, which carries the periodic reconcile kind. Nothing in the rule depends on who closed an
   item, so S26 holds, but the decider's behavior docs say it reads only "open or closed", so they MUST be
   amended: `work-items.md` (the same-context text and `INV-DECIDER-5`), the action table of
   `plan-and-apply.md` (`update` gains status, deferral and assignee clearing) and `INV-DECIDER-2`; (i) the new behavior docs and rows the repository rule
@@ -1685,7 +1775,7 @@ the new watch queries and the new decider role live, not just a clean flake chec
   telemetry declaration of §8.2) and its `README.md` row, `store-schema.md`, `serve.md` (the metrics
   families), `operator-commands.md` (the `doctor` focus block), `plan-and-apply.md` and the decider
   README (today "only `pr` has a decider"); (j) the router role for the focus decider, binding `issue.changed`,
-  `pr.changed` and the reconcile record (§8 Routing), with the deployment's `watch.issue.queries` and
+  and `pr.changed` (§8 Routing; `reconcile` arrives as a kind inside them), with the deployment's `watch.issue.queries` and
   `watch.pr.queries` set, which they are not today; (k) the cross-document gap that per-source freshness has
   no recorder once `heartbeat` is removed (§4.2), to be closed in the change-flow design or declared
   deferred there; (l) the change-flow Phase 10 guard `TestNoDecisionLogicInPgDesk` (§8), which this
@@ -1806,25 +1896,41 @@ the new watch queries and the new decider role live, not just a clean flake chec
      better thing to check brecause i think it is only 3 values, right?", then "yes" to the agent's
      answer (three categories) and its proposal: the connector carries the native category, the
      classifier treats category `done` as terminal for Jira, the bead status `closed` stays the bead
-     rule, and "started" uses the category `indeterminate` (section 6). Item (r).
+     rule, and "started" uses the category `indeterminate` (section 6). Item (r). Confirmed again by
+     the operator the same day, after being asked whether to keep the status-name list as an
+     override: "use status category as it keeps from having to list specific status."
   6. **`reopened` is effectively unreachable for a closed entity**, because the classifier reports only
-     `reconcile` for an entity that was inactive; the release on return rides the reconcile binding.
+     `reconcile` for an entity that was inactive; the release on return rides the `<type>.changed` binding.
 - **Behavior docs and code the 2026-10-08 rulings add to the decomposition** (item (q), beside (a) to
   (p) above): `docs/behavior/pg-desk/focus.md` gains the draft document contract, the plan and draft
   modes of `show`, `replan` and the exit-`7` meaning, with `INV-FOCUS-n` ids for "a draft is never
   stored", "rank drift never strikes" and "a lock writes the draft's order"; the `create.md` and
-  `pull.md` prose follows section 9; the router role of item (j) binds `issue.changed`; item (r), the Jira status category: the
-  Jira backend of `pg-connector` (`pg-connector-issue-jira`, today `State: iss.Status`, the status
-  name only) adds the native category to the issue snapshot as a closed value (`new`, `indeterminate`,
-  `done`, or empty), the shared issue schema and `docs/behavior` for it gain the field, the classifier
-  (`internal/classify/issue.go`, `issueIsTerminal`) treats category `done` as terminal for Jira while
-  keeping the state-name rule for beads, and the focus rank's "started" test reads the category; an
-  absent category (an older snapshot, a backend that has none) falls back to the state-name rule, so a
-  mixed store never misclassifies, and a snapshot written before the connector change is re-hydrated by
-  the age sweep (§4.2); and the deployment's open-beads bulk query gains
+  `pull.md` prose follows section 9; the router role of item (j) binds `issue.changed`; item (r), the Jira status category, a CHAIN across
+  repositories, in this order (the first links must land before any selection exists): (1) `pjira`
+  (in the base repository, `modules/jira/pkg/pjira`; its `Issue` has no category field today) requests
+  and decodes Jira's `statusCategory` and exposes `status_category` with the closed values `new`,
+  `indeterminate`, `done`, mapping Jira's legacy `undefined` ("No Category") to empty; (2) the Jira
+  backend of `pg-connector` (`pg-connector-issue-jira`, today `State: iss.Status`, the status name
+  only) decodes it and carries it on the shared issue schema, whose schema version and `docs/behavior`
+  gain the field; (3) the classifier (`internal/classify/issue.go`) treats category `done` as terminal
+  for Jira while keeping the state-name rule for beads, comparing TERMINAL-NESS before and after and
+  not the state string (an issue already stored as "Complete" whose category arrives as `done` has the
+  same state string and would otherwise yield no `closed` record), and `classify.SourceTerminal`
+  (`classify/terminal.go`), which `deactivateIfTerminal` calls with the state only, gains the category
+  argument; (4) the focus rank's "started" and "finished" tests read the category; an absent category
+  (an older snapshot, a backend that has none) falls back to the previous name rules
+  (`jira.in_progress_statuses` for started, the state-name set for terminal), is counted as
+  `rank_inputs.status_category_absent`, and prints a `doctor` report line ("N active Jira issues lack a
+  status category"); (5) the attention rules' `DeriveIssueAttentionFacts` prefers the category when
+  present, and its field, whose values `in_progress|done|other` collide in name with the native ones,
+  is renamed or documented, so a "Complete" issue is not finished for focus yet still raising due-date
+  alerts; (6) the behavior docs that define "issue in a terminal state" (`changes.md`, `gather.md`,
+  `interpret.md`, `attention.md`) are reworded. Adding the field changes every Jira list fingerprint at
+  once, so the first poll after the connector change is a BURST re-hydration bounded by
+  `hydration.max_per_poll`, not a slow age sweep. And the deployment's open-beads bulk query gains
   `blocked`; and item (s), assignment as the bead candidacy rule (D-F23): a list key of operator
-  identities (the display name and the email) for the assignee match, the assigned-to-me bead watch
-  query (`--assignee`), and an exception in the bead-claim rules. Those rules treat an `open` bead with a
+  identities (the display name and the email) for the assignee match of beads and Jira, and an
+  exception in the bead-claim rules. Those rules treat an `open` bead with a
   non-empty assignee as stranded (the `beads-lifecycle` skill's B-5 and B-6: a claim in the operator's
   name is the thing they guard against, and a machine `bd` wrapper may refuse one from a non-interactive
   session), but here an assignee equal to an operator identity on an open bead is a deliberate
