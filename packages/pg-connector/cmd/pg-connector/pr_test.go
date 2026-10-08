@@ -614,11 +614,11 @@ func TestReviewSubmitNotFoundExits4(t *testing.T) {
 }
 
 func TestReviewSubmitStdinParsedIntoWireArgs(t *testing.T) {
-	args, err := readReviewSubmitArgs(strings.NewReader(`{"id":"ignored","head_sha":"abc","body":"b","comments":[{"path":"a.go","line":3,"side":"RIGHT","body":"c"}],"supersede_pending":true}`), "pr-9", "")
+	args, err := readReviewSubmitArgs(strings.NewReader(`{"id":"ignored","head_sha":"abc","body":"b","comments":[{"path":"a.go","line":3,"side":"RIGHT","body":"c"}]}`), "pr-9", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if args["id"] != "pr-9" || args["head_sha"] != "abc" || args["supersede_pending"] != true {
+	if args["id"] != "pr-9" || args["head_sha"] != "abc" {
 		t.Fatalf("args = %+v", args)
 	}
 	if cs, ok := args["comments"].([]any); !ok || len(cs) != 1 {
@@ -654,7 +654,7 @@ func TestReviewSubmitStatusesAllExit0(t *testing.T) {
 				"review_submit": `{"protocolVersion":1,"schemaVersion":4,"result":` + result + `}`,
 			}, `{}`)
 			writeConfigFor(t, name)
-			stdout, _, code := executePrWithStdin(t, `{"head_sha":"abc","body":"b","supersede_pending":true}`, []string{"pr", "review", "submit", "pr-1"})
+			stdout, _, code := executePrWithStdin(t, `{"head_sha":"abc","body":"b"}`, []string{"pr", "review", "submit", "pr-1"})
 			if code != 0 {
 				t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
 			}

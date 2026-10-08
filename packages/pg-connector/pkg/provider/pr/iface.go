@@ -94,15 +94,11 @@ type ReviewComment struct {
 
 // ReviewSubmitRequest is the review_submit op's input (contract 9.1). ID is
 // the PR id, in the same style as every other pr op's args.
-//
-// SupersedePending is accepted and ignored: the op never deletes, replaces or
-// submits a review, but a caller that still sends the field keeps working.
 type ReviewSubmitRequest struct {
-	ID               string          `json:"id"`
-	HeadSHA          string          `json:"head_sha"`
-	Body             string          `json:"body"`
-	Comments         []ReviewComment `json:"comments"`
-	SupersedePending bool            `json:"supersede_pending,omitempty"`
+	ID       string          `json:"id"`
+	HeadSHA  string          `json:"head_sha"`
+	Body     string          `json:"body"`
+	Comments []ReviewComment `json:"comments"`
 }
 
 // review_submit statuses. Every one is a well-formed result and exits 0; the

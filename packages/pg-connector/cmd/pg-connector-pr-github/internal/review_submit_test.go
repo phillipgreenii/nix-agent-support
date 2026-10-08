@@ -855,12 +855,13 @@ func TestSubmitHeadCheckUsesTheReadUnderTheLock(t *testing.T) {
 	}
 }
 
-func TestSubmitSupersedePendingIsAcceptedAndIgnored(t *testing.T) {
+// TestSubmitNeverReplacesAnExistingPendingReview: a run appends to the
+// existing pending review and leaves its body and identity alone; nothing is
+// deleted or replaced.
+func TestSubmitNeverReplacesAnExistingPendingReview(t *testing.T) {
 	f := newSubmitFixture(t)
 	hand := f.host.addPending(headB, "keep me")
-	r := req("", point("main.go", 3, "x"))
-	r.SupersedePending = true
-	res := f.mustSubmit(r)
+	res := f.mustSubmit(req("", point("main.go", 3, "x")))
 	if res.Status != pr.StatusAppend || len(f.host.pending) != 1 || hand.body != "keep me" || len(hand.comments) != 1 {
 		t.Fatalf("result = %+v pending = %+v", res, f.host.pending)
 	}

@@ -30,17 +30,17 @@ func TestReviewSubmit_DispatchRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatal("review_submit missing for capable provider")
 	}
-	args := `{"id":"pr-1","head_sha":"abc","body":"hi","comments":[{"path":"a.go","line":3,"side":"RIGHT","body":"c"},{"thread_id":"PRRT_1","body":"r"}],"supersede_pending":true}`
+	args := `{"id":"pr-1","head_sha":"abc","body":"hi","comments":[{"path":"a.go","line":3,"side":"RIGHT","body":"c"},{"thread_id":"PRRT_1","body":"r"}]}`
 	out, err := entry.Handle(context.Background(), json.RawMessage(args))
 	if err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
 	want := ReviewSubmitRequest{
-		ID: "pr-1", HeadSHA: "abc", Body: "hi", SupersedePending: true,
+		ID: "pr-1", HeadSHA: "abc", Body: "hi",
 		Comments: []ReviewComment{{Path: "a.go", Line: 3, Side: "RIGHT", Body: "c"}, {ThreadID: "PRRT_1", Body: "r"}},
 	}
 	if p.got.ID != want.ID || p.got.HeadSHA != want.HeadSHA || p.got.Body != want.Body ||
-		!p.got.SupersedePending || len(p.got.Comments) != 2 || p.got.Comments[0] != want.Comments[0] || p.got.Comments[1] != want.Comments[1] {
+		len(p.got.Comments) != 2 || p.got.Comments[0] != want.Comments[0] || p.got.Comments[1] != want.Comments[1] {
 		t.Fatalf("request = %#v, want %#v", p.got, want)
 	}
 	raw, _ := json.Marshal(out)
@@ -55,6 +55,25 @@ func TestReviewSubmit_DispatchRoundTrip(t *testing.T) {
 	}
 	if m["review_id"] != "r1" || m["state"] != "pending" {
 		t.Errorf("output = %s", raw)
+	}
+}
+
+// TestReviewSubmit_RetiredFieldIsStillDecoded records how a request that still
+// carries the retired supersede_pending field behaves: the decoder is the
+// lenient encoding/json one (no DisallowUnknownFields), so the field is
+// silently dropped, the request is otherwise unchanged, and the op never sees
+// it. It is neither rejected nor acted on.
+func TestReviewSubmit_RetiredFieldIsStillDecoded(t *testing.T) {
+	p := &fakeReviewProvider{res: ReviewSubmitResult{Status: StatusNoChange, State: StateNone, Body: BodyAbsent}}
+	entry := NewDispatchTable(p)["review_submit"]
+	args := `{"id":"pr-1","head_sha":"abc","body":"hi","comments":[{"path":"a.go","line":3,"body":"c"}],"supersede_pending":true}`
+	if _, err := entry.Handle(context.Background(), json.RawMessage(args)); err != nil {
+		t.Fatalf("a request still carrying the retired field must not be rejected: %v", err)
+	}
+	want := ReviewSubmitRequest{ID: "pr-1", HeadSHA: "abc", Body: "hi", Comments: []ReviewComment{{Path: "a.go", Line: 3, Body: "c"}}}
+	if p.got.ID != want.ID || p.got.HeadSHA != want.HeadSHA || p.got.Body != want.Body ||
+		len(p.got.Comments) != 1 || p.got.Comments[0] != want.Comments[0] {
+		t.Fatalf("request = %#v, want %#v", p.got, want)
 	}
 }
 

@@ -25,7 +25,7 @@ prerequisite results (`docs/superpowers/specs/2026-09-29-pending-review-handling
 `docs/superpowers/specs/2026-09-30-pending-review-prerequisites-results.md`). It changes none of
 S1 to S28; like `review submit`, it follows `INV-EXIT-1`'s Targeted scheme (S27).
 
-**Amended 2026-10-03** (bead `pg2-kftf9.13`): section 9.1 makes `supersede_pending` conditional (the
+**Amended 2026-10-03** (bead `pg2-kftf9.13`): section 9.1 makes its supersede request flag conditional (the
 guarded supersede: a stale pending review is replaced only when the bot marker is on the body and
 every comment and a content digest carried in the marker verifies; otherwise it is left untouched
 and `blocked_human_pending` is reported), adds the output fields `status`, `reason`, `message`,
@@ -264,7 +264,7 @@ This cluster records S4, S5, S6, S7, S19, S22, S27, S28.
   well-formed result, including a `no_change` outcome, which the JSON output's `status` reports
   (rewritten in place 2026-10-03, bead `pg2-kftf9.13`, and again 2026-10-06, bead `pg2-8qui6`: it
   named `blocked_human_pending`, an outcome create-or-append retired, and before that a review that
-  posted when the `supersede_pending` delete failed); a run in which some comments did not land is
+  posted when the guarded supersede's delete failed); a run in which some comments did not land is
   an error (exit 1), not a result;
   4 = `not_found`; 1 = any other error. The source adapter translates pg-desk's codes into
   pg-router's command-query contract instead of mirroring them: pg-desk 0 or 2 becomes exit 0,
