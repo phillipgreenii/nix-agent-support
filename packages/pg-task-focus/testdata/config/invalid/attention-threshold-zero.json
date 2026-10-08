@@ -1,0 +1,108 @@
+{
+  "defaults": {
+    "cycle_minutes": 25,
+    "boost_minutes": [5, 10, 25],
+    "profile": "normal",
+    "max_future_skew_seconds": 60,
+    "alert": {
+      "sound": "Glass",
+      "reminder_sound": "Tink",
+      "repeat_minutes": 5
+    },
+    "attention": {
+      "due_soon_minutes": 0,
+      "overtime_high_minutes": 15,
+      "stale_pause_minutes": 45
+    }
+  },
+  "listen_port": 49210,
+  "public_url": "https://focus.example.test",
+  "group_order": ["Start of day", "During the day", "End of day"],
+  "profiles": {
+    "normal": {
+      "daily": ["plan-day", "post-plan", "end-of-day-summary"],
+      "weekly": ["weekly-update"],
+      "sprint": ["capacity-check"],
+      "cycles": ["notifications", "review", "deep-work"]
+    },
+    "on-call": {
+      "daily": ["plan-day", "post-plan", "end-of-day-summary"],
+      "weekly": ["weekly-update"],
+      "sprint": ["capacity-check"],
+      "cycles": ["notifications", "review", "page-response"]
+    }
+  },
+  "tasks": {
+    "plan-day": {
+      "title": "Plan the day",
+      "cadence": "daily",
+      "group": "Start of day",
+      "due": {
+        "at": "09:00",
+        "tz": "America/New_York"
+      }
+    },
+    "post-plan": {
+      "title": "Post the plan for the day",
+      "cadence": "daily",
+      "group": "Start of day",
+      "due": {
+        "at": "09:30",
+        "tz": "America/New_York"
+      }
+    },
+    "end-of-day-summary": {
+      "title": "Post the end-of-day summary",
+      "cadence": "daily",
+      "group": "End of day",
+      "due": {
+        "at": "17:30",
+        "tz": "America/New_York"
+      }
+    },
+    "weekly-update": {
+      "title": "Write the weekly status update",
+      "cadence": "weekly",
+      "due": {
+        "weekday": "thu",
+        "at": "09:00",
+        "tz": "America/New_York"
+      }
+    },
+    "capacity-check": {
+      "title": "Do the capacity check and post planning input",
+      "cadence": "sprint",
+      "due": {
+        "day": 1,
+        "at": "09:00",
+        "tz": "America/New_York"
+      }
+    }
+  },
+  "cycles": {
+    "notifications": {
+      "title": "Notification cycle",
+      "minutes": 25,
+      "keys": []
+    },
+    "review": {
+      "title": "Review cycle",
+      "minutes": 25,
+      "keys": ["pr"]
+    },
+    "page-response": {
+      "title": "Page response",
+      "minutes": 25,
+      "keys": ["incident"]
+    },
+    "deep-work": {
+      "title": "Deep work cycle",
+      "minutes": 50,
+      "keys": ["ticket", "pr"],
+      "alert": {
+        "sound": "Hero",
+        "repeat_minutes": 10
+      }
+    }
+  }
+}
