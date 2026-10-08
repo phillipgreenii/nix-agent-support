@@ -20,13 +20,35 @@ import (
 // SchemaVersion is the only event version this library reads or writes.
 const SchemaVersion = 1
 
-// UnknownVersionError is what Decode returns for a line whose v is not
-// SchemaVersion. It is never an ordinary decode failure, which the store would
-// take for a torn tail: an unknown version refuses to start.
-type UnknownVersionError struct{ V int }
+// UnknownVersionError is what Decode returns for a line whose v is a JSON
+// number other than the literal 1. It is never an ordinary decode failure,
+// which the store would take for a torn tail: an unknown version refuses to
+// start. A v that is not a number at all (a string, null, a boolean, missing)
+// is an ordinary error, not this one.
+//
+// Raw is the version as the line wrote it ("2", "2.0", "1e0",
+// "99999999999999999999"); V is the same value as an int when it is an integer
+// that fits one, and 0 otherwise.
+type UnknownVersionError struct {
+	V   int
+	Raw string
+}
 
 func (e *UnknownVersionError) Error() string {
-	return fmt.Sprintf("event version %d is not known: this build reads only version %d", e.V, SchemaVersion)
+	shown := e.Raw
+	if shown == "" {
+		shown = strconv.Itoa(e.V)
+	}
+	return fmt.Sprintf("event version %s is not known: this build reads only version %d", shown, SchemaVersion)
+}
+
+// unknownVersion reports the version a line wrote as raw JSON number text.
+func unknownVersion(raw string) *UnknownVersionError {
+	v, err := strconv.Atoi(raw)
+	if err != nil {
+		v = 0
+	}
+	return &UnknownVersionError{V: v, Raw: raw}
 }
 
 // Envelope is the part of an event every line carries. Data is the raw
@@ -55,8 +77,9 @@ const MaxEventBytes = 262144
 // ErrTooLarge reports text or an encoded event longer than MaxEventBytes.
 var ErrTooLarge = errors.New("event text is too large: an event line is at most 262144 bytes")
 
-// ErrInvalidUTF8 reports text that is not valid UTF-8. Such text is refused,
-// never rewritten: json.Marshal would store the replacement character in its
+// ErrInvalidUTF8 reports text that is not valid UTF-8, including a lone
+// surrogate escape such as \ud800, which decodes to U+FFFD. Such text is
+// refused, never rewritten: json.Marshal would store the replacement character in its
 // place, and a stored note must be exactly what the operator wrote.
 var ErrInvalidUTF8 = errors.New("event text is not valid UTF-8")
 
@@ -131,12 +154,14 @@ func Decode(line []byte) (Event, error) {
 	if len(probe.V) == 0 {
 		return Event{}, errors.New("event line has no v")
 	}
-	v, err := strconv.Atoi(string(probe.V))
-	if err != nil {
-		return Event{}, fmt.Errorf("event v %s is not an integer", probe.V)
+	// Only a JSON number can name a version, and only the literal 1 is the
+	// supported one: 1.0 and 1e0 have its value but are not its form, so they
+	// are unknown versions like 2 is.
+	if c := probe.V[0]; c != '-' && (c < '0' || c > '9') {
+		return Event{}, fmt.Errorf("event v %s is not a number", probe.V)
 	}
-	if v != SchemaVersion {
-		return Event{}, &UnknownVersionError{V: v}
+	if string(probe.V) != strconv.Itoa(SchemaVersion) {
+		return Event{}, unknownVersion(string(probe.V))
 	}
 
 	if len(line) > MaxEventBytes {
@@ -144,6 +169,9 @@ func Decode(line []byte) (Event, error) {
 	}
 	if !utf8.Valid(line) {
 		return Event{}, fmt.Errorf("event line: %w", ErrInvalidUTF8)
+	}
+	if err := checkSurrogates(line); err != nil {
+		return Event{}, fmt.Errorf("event line: %w", err)
 	}
 	if err := checkSchema(line); err != nil {
 		return Event{}, err
@@ -187,7 +215,7 @@ func Encode(e Event) ([]byte, error) {
 		env.V = SchemaVersion
 	case SchemaVersion:
 	default:
-		return nil, &UnknownVersionError{V: env.V}
+		return nil, unknownVersion(strconv.Itoa(env.V))
 	}
 	if _, err := ParseID(string(env.ID)); err != nil {
 		return nil, fmt.Errorf("event id: %w", err)
@@ -228,6 +256,12 @@ func Encode(e Event) ([]byte, error) {
 		return nil, errors.New("event has no payload")
 	}
 
+	// A lone surrogate escape (\ud800 on its own) is valid JSON that decodes to
+	// U+FFFD, which would rewrite the text, so it is refused like invalid UTF-8.
+	if err := checkSurrogates(raw); err != nil {
+		return nil, err
+	}
+
 	// Decoding the payload again validates it and puts its keys in the
 	// canonical order, so the line written is a line Decode accepts.
 	p, err := decodePayload(env.Type, raw)
@@ -241,6 +275,12 @@ func Encode(e Event) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("event: %w", err)
 	}
+	// json.Marshal escapes U+2028 and U+2029 inside the strings it writes, but
+	// copies a json.RawMessage (the values of a correction's fields) as it is.
+	// Either character can only be inside a string of a valid line, so the
+	// escape is safe to apply to the whole line.
+	line = bytes.ReplaceAll(line, []byte("\u2028"), []byte(`\u2028`))
+	line = bytes.ReplaceAll(line, []byte("\u2029"), []byte(`\u2029`))
 	if len(line) > MaxEventBytes {
 		return nil, ErrTooLarge
 	}
@@ -377,4 +417,68 @@ func stringsValid(v reflect.Value) bool {
 		}
 	}
 	return true
+}
+
+// checkSurrogates refuses a lone surrogate escape in a JSON string: \ud800 to
+// \udbff must be followed by \udc00 to \udfff, and \udc00 to \udfff must
+// follow such a high surrogate. Go decodes a lone one to U+FFFD, which Encode
+// would then write as text the operator never typed. The error wraps
+// ErrInvalidUTF8. Malformed escapes are left to the JSON parser.
+func checkSurrogates(b []byte) error {
+	inString := false
+	for i := 0; i < len(b); i++ {
+		c := b[i]
+		if !inString {
+			inString = c == '"'
+			continue
+		}
+		switch c {
+		case '"':
+			inString = false
+		case '\\':
+			i++
+			if i >= len(b) || b[i] != 'u' {
+				continue
+			}
+			r, ok := hex4(b, i+1)
+			if !ok {
+				continue
+			}
+			i += 4
+			switch {
+			case r >= 0xD800 && r <= 0xDBFF:
+				if i+6 < len(b) && b[i+1] == '\\' && b[i+2] == 'u' {
+					if lo, ok := hex4(b, i+3); ok && lo >= 0xDC00 && lo <= 0xDFFF {
+						i += 6
+						continue
+					}
+				}
+				return fmt.Errorf("the escape %s at byte %d is a high surrogate with no low surrogate after it: %w", b[i-5:i+1], i-5, ErrInvalidUTF8)
+			case r >= 0xDC00 && r <= 0xDFFF:
+				return fmt.Errorf("the escape %s at byte %d is a low surrogate with no high surrogate before it: %w", b[i-5:i+1], i-5, ErrInvalidUTF8)
+			}
+		}
+	}
+	return nil
+}
+
+// hex4 parses the four hex digits of b at start.
+func hex4(b []byte, start int) (rune, bool) {
+	if start+4 > len(b) {
+		return 0, false
+	}
+	var r rune
+	for _, c := range b[start : start+4] {
+		switch {
+		case c >= '0' && c <= '9':
+			r = r<<4 | rune(c-'0')
+		case c >= 'a' && c <= 'f':
+			r = r<<4 | rune(c-'a'+10)
+		case c >= 'A' && c <= 'F':
+			r = r<<4 | rune(c-'A'+10)
+		default:
+			return 0, false
+		}
+	}
+	return r, true
 }

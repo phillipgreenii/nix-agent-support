@@ -126,6 +126,35 @@ func TestInvalidLinesFail(t *testing.T) {
 			}
 		})
 	}
+	// A line the schema accepts and only a Go check refuses: the schema checks
+	// the shape of a value and the Go check its meaning, so each of these
+	// passes Validate and fails Decode with the path of the field at fault.
+	goOnly := []struct{ file, message string }{
+		{"event.corrected.blank-reason.jsonl", "fields.reason"},
+		{"event.corrected.impossible-instant.jsonl", "fields.effective_at"},
+		{"event.corrected.impossible-date.jsonl", "fields.end"},
+		{"event.corrected.bad-due-rule.jsonl", "fields.due_rule"},
+		{"period.changed.week-end-before-start.jsonl", "end"},
+	}
+	for _, c := range goOnly {
+		listed[c.file] = true
+		t.Run(c.file, func(t *testing.T) {
+			line, ok := lines[c.file]
+			if !ok {
+				t.Fatalf("no fixture testdata/events/invalid/%s", c.file)
+			}
+			if err := s.Validate(line); err != nil {
+				t.Errorf("Validate: %v, but only a Go check is meant to refuse this line", err)
+			}
+			_, err := event.Decode(line)
+			if err == nil {
+				t.Fatal("Decode succeeded, want an error")
+			}
+			if !strings.Contains(err.Error(), c.message) {
+				t.Errorf("Decode = %v, want it to name %q", err, c.message)
+			}
+		})
+	}
 	for file := range lines {
 		if !listed[file] {
 			t.Errorf("fixture testdata/events/invalid/%s is not in the table", file)

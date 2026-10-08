@@ -440,6 +440,12 @@ func TestDecodeRejects(t *testing.T) {
 			data(o)["kv"] = []any{map[string]any{"key": "a", "value": "b", "extra": "c"}}
 		}},
 
+		{"week period whose end is before its start", "period.changed.week", func(o map[string]any) { data(o)["end"] = "2026-10-04" }},
+		{"sprint period whose end is before its start", "period.changed.week", func(o map[string]any) {
+			data(o)["kind"] = "sprint"
+			data(o)["end"] = "2026-10-04"
+		}},
+
 		{"correction without fields", "event.corrected", func(o map[string]any) { delete(data(o), "fields") }},
 		{"correction without a target", "event.corrected", func(o map[string]any) { delete(data(o), "target") }},
 		{"correction of a target that is not an id", "event.corrected", func(o map[string]any) { data(o)["target"] = "x" }},
@@ -633,6 +639,366 @@ func TestEncodeDecodeProperty(t *testing.T) {
 		again, err := event.Encode(back)
 		if err != nil || !bytes.Equal(again, line) {
 			t.Fatalf("encode(decode(line)) = %s, %v; want %s", again, err, line)
+		}
+	})
+}
+
+// TestPeriodEndMayEqualStartButNotPrecedeIt pins the one boundary the docs
+// leave open: a week or sprint that ends the day it starts is allowed, one that
+// ends before it starts is not.
+func TestPeriodEndMayEqualStartButNotPrecedeIt(t *testing.T) {
+	for _, kind := range []string{"week", "sprint"} {
+		o := fixtureObject(t, "period.changed.week")
+		data(o)["kind"] = kind
+		data(o)["end"] = data(o)["start"]
+		if _, err := event.Decode(marshal(t, o)); err != nil {
+			t.Errorf("%s ending the day it starts: Decode = %v, want it accepted", kind, err)
+		}
+	}
+	d := func(day int) *civil.Date { return &civil.Date{Year: 2026, Month: 10, Day: day} }
+	bad := newEvent(event.PeriodChanged{Kind: "week", Start: *d(11), End: d(5), TZ: "America/New_York", Batch: "01J9Z3K8M2B000000000000001"})
+	if line, err := event.Encode(bad); err == nil {
+		t.Errorf("Encode wrote %s, but Decode would refuse a week that ends before it starts", line)
+	}
+}
+
+// correctionLine is the event.corrected fixture with fields replaced by the
+// given JSON object.
+func correctionLine(t *testing.T, fields string) []byte {
+	t.Helper()
+	o := fixtureObject(t, "event.corrected")
+	data(o)["fields"] = json.RawMessage(fields)
+	return marshal(t, o)
+}
+
+func TestDecodeChecksTheReplacementValuesOfACorrection(t *testing.T) {
+	cases := []struct{ name, fields, path string }{
+		{"a blank reason", `{"reason":"  "}`, "fields.reason"},
+		{"a no-break-space reason", `{"reason":"\u00a0"}`, "fields.reason"},
+		{"an ideographic-space reason", `{"reason":"\u3000\t"}`, "fields.reason"},
+		{"an instant that does not exist", `{"effective_at":"2026-13-45T25:61:00.000Z"}`, "fields.effective_at"},
+		{"a due instant that does not exist", `{"due":"2026-02-30T09:00:00.000Z"}`, "fields.due"},
+		{"a start that does not exist", `{"start":"2026-02-30"}`, "fields.start"},
+		{"an end that does not exist", `{"end":"2026-02-30"}`, "fields.end"},
+		{"a period that does not exist", `{"period":"2026-00-10"}`, "fields.period"},
+		{"a zone that is not IANA", `{"tz":"ET"}`, "fields.tz"},
+		{"a due rule with an unknown zone", `{"due_rule":{"at":"09:00","tz":"Not/AZone"}}`, "fields.due_rule"},
+		{"a due rule with both weekday and day", `{"due_rule":{"at":"09:00","tz":"America/New_York","weekday":"thu","day":2}}`, "fields.due_rule"},
+		{"a daily due rule for a weekly cadence", `{"cadence":"weekly","due_rule":{"at":"09:00","tz":"America/New_York"}}`, "fields.due_rule"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			line := correctionLine(t, c.fields)
+			_, err := event.Decode(line)
+			if err == nil {
+				t.Fatalf("Decode accepted %s", line)
+			}
+			if !strings.Contains(err.Error(), c.path) {
+				t.Errorf("Decode = %v, want it to name %q", err, c.path)
+			}
+		})
+	}
+
+	t.Run("a blank reason is refused by Encode too", func(t *testing.T) {
+		e := newEvent(event.EventCorrected{Target: "01J9Z3K8M2E000000000000002", Fields: map[string]json.RawMessage{"reason": json.RawMessage(`"  "`)}})
+		if line, err := event.Encode(e); err == nil {
+			t.Errorf("Encode wrote %s", line)
+		}
+	})
+	t.Run("a due rule is checked against the cadence being replaced", func(t *testing.T) {
+		ok := `{"cadence":"weekly","due_rule":{"at":"09:00","tz":"America/New_York","weekday":"thu"}}`
+		if _, err := event.Decode(correctionLine(t, ok)); err != nil {
+			t.Errorf("Decode of a weekly rule for a weekly cadence: %v", err)
+		}
+	})
+	t.Run("a correct replacement of every kind is accepted", func(t *testing.T) {
+		line := fixtures(t)["event.corrected.replacements"]
+		e, err := event.Decode(line)
+		if err != nil {
+			t.Fatalf("Decode: %v", err)
+		}
+		again, err := event.Encode(e)
+		if err != nil || !bytes.Equal(again, line) {
+			t.Errorf("Encode(Decode(line)) = %s, %v; want the line back", again, err)
+		}
+	})
+	t.Run("an empty fields object is left to the rules layer", func(t *testing.T) {
+		if _, err := event.Decode(correctionLine(t, `{}`)); err != nil {
+			t.Errorf("Decode of fields {}: %v", err)
+		}
+	})
+	t.Run("an empty note, label, group and link are accepted", func(t *testing.T) {
+		if _, err := event.Decode(correctionLine(t, `{"note":"","label":"","group":"","link":""}`)); err != nil {
+			t.Errorf("Decode: %v", err)
+		}
+	})
+}
+
+func hasRawSeparator(b []byte) bool {
+	return bytes.Contains(b, []byte("\u2028")) || bytes.Contains(b, []byte("\u2029"))
+}
+
+func TestEncodeNeverWritesARawLineSeparator(t *testing.T) {
+	const ls, ps = "\u2028", "\u2029"
+	notes := map[string]string{
+		"U+2028": "a" + ls + "b", "U+2029": "a" + ps + "b", "both": ls + ps, "only U+2028": ls,
+	}
+	for name, note := range notes {
+		t.Run("cycle.annotated note with "+name, func(t *testing.T) {
+			want := newEvent(event.CycleAnnotated{CycleID: "c", Note: note, KV: []event.KV{{Key: "k", Value: note}}})
+			line, err := event.Encode(want)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if hasRawSeparator(line) {
+				t.Errorf("raw separator in %q", line)
+			}
+			back, err := event.Decode(line)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := back.Payload.(event.CycleAnnotated); got.Note != note || got.KV[0].Value != note {
+				t.Errorf("text changed: %+v", got)
+			}
+		})
+		t.Run("correction fields note with "+name, func(t *testing.T) {
+			// A raw separator is valid JSON inside a string, so a line that a
+			// person edited, or a RawMessage a caller built, can carry one.
+			raw := json.RawMessage(`"` + note + `"`)
+			e := newEvent(event.EventCorrected{Target: "01J9Z3K8M2E000000000000002", Fields: map[string]json.RawMessage{"note": raw}})
+			line, err := event.Encode(e)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if hasRawSeparator(line) {
+				t.Errorf("raw separator in %q", line)
+			}
+			back, err := event.Decode(line)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got string
+			if err := json.Unmarshal(back.Payload.(event.EventCorrected).Fields["note"], &got); err != nil || got != note {
+				t.Errorf("note = %q, %v; want %q", got, err, note)
+			}
+			again, err := event.Encode(back)
+			if err != nil || !bytes.Equal(again, line) {
+				t.Errorf("encode(decode(line)) = %s, %v; want the line back", again, err)
+			}
+		})
+		t.Run("a stored line with a raw separator in correction fields, "+name, func(t *testing.T) {
+			line := correctionLine(t, `{"note":"`+note+`"}`)
+			e, err := event.Decode(line)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out, err := event.Encode(e)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if hasRawSeparator(out) {
+				t.Errorf("raw separator in %q", out)
+			}
+		})
+	}
+	t.Run("an escaped separator in correction fields stays escaped", func(t *testing.T) {
+		line := correctionLine(t, `{"note":"a\u2028b"}`)
+		e, err := event.Decode(line)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, err := event.Encode(e)
+		if err != nil || hasRawSeparator(out) || !bytes.Contains(out, []byte(`a\u2028b`)) {
+			t.Errorf("Encode = %q, %v", out, err)
+		}
+	})
+
+	t.Run("property", func(t *testing.T) {
+		text := rapid.StringOfN(rapid.SampledFrom([]rune{'a', 'é', '\u2028', '\u2029', '\n', ' '}), 0, 12, -1)
+		rapid.Check(t, func(t *rapid.T) {
+			note := text.Draw(t, "note")
+			raw := json.RawMessage(`"` + strings.NewReplacer("\n", `\n`).Replace(note) + `"`)
+			for name, p := range map[string]event.Payload{
+				"annotated":  event.CycleAnnotated{CycleID: "c", Note: note},
+				"correction": event.EventCorrected{Target: "01J9Z3K8M2E000000000000002", Fields: map[string]json.RawMessage{"note": raw}},
+			} {
+				line, err := event.Encode(newEvent(p))
+				if err != nil {
+					t.Fatalf("%s: Encode: %v", name, err)
+				}
+				if hasRawSeparator(line) || bytes.ContainsAny(line, "\n\r") {
+					t.Fatalf("%s: raw separator or line break in %q", name, line)
+				}
+				if _, err := event.Decode(line); err != nil {
+					t.Fatalf("%s: Decode(%s): %v", name, line, err)
+				}
+			}
+		})
+	})
+}
+
+func TestDecodeRefusesALoneSurrogateEscape(t *testing.T) {
+	annotated := func(note string) []byte {
+		return bytes.Replace(fixtures(t)["cycle.annotated"], []byte(`"note":"Line one\nline two\ttabbed, café, <b>&</b>, separator:\u2028."`), []byte(`"note":"`+note+`"`), 1)
+	}
+	lone := map[string]string{
+		"a high surrogate":                    `a\ud800b`,
+		"the last high surrogate":             `\udbff`,
+		"a low surrogate":                     `x\udc00`,
+		"the last low surrogate":              `\udfffy`,
+		"a high surrogate at the end":         `abc\ud83d`,
+		"two high surrogates":                 `\ud800\ud800`,
+		"a low then a high surrogate":         `\ude00\ud83d`,
+		"a high surrogate and a plain escape": `\ud83d\u0041`,
+		"an upper-case hex escape":            `\uD800`,
+	}
+	for name, note := range lone {
+		t.Run(name, func(t *testing.T) {
+			line := annotated(note)
+			if !bytes.Contains(line, []byte(note)) {
+				t.Fatalf("the test line does not carry %s", note)
+			}
+			if _, err := event.Decode(line); !errors.Is(err, event.ErrInvalidUTF8) {
+				t.Errorf("Decode = %v, want ErrInvalidUTF8", err)
+			}
+		})
+	}
+
+	t.Run("in every kind of string", func(t *testing.T) {
+		const esc = `\ud800`
+		o := map[string]string{
+			"kv value":              strings.Replace(string(fixtures(t)["cycle.annotated"]), `"value":"EX-1"`, `"value":"`+esc+`"`, 1),
+			"kv key":                strings.Replace(string(fixtures(t)["cycle.annotated"]), `"key":"ticket"`, `"key":"`+esc+`"`, 1),
+			"skip reason":           strings.Replace(string(fixtures(t)["task.skipped"]), "Out sick", esc, 1),
+			"correction note":       string(correctionLine(t, `{"note":"`+esc+`"}`)),
+			"correction reason":     string(correctionLine(t, `{"reason":"x`+esc+`"}`)),
+			"correction kv":         string(correctionLine(t, `{"kv":[{"key":"k","value":"`+esc+`"}]}`)),
+			"correction top reason": strings.Replace(string(fixtures(t)["event.corrected"]), "Typed the wrong length", esc, 1),
+		}
+		for name, line := range o {
+			if !strings.Contains(line, esc) {
+				t.Fatalf("%s: the test line does not carry the escape", name)
+			}
+			if _, err := event.Decode([]byte(line)); !errors.Is(err, event.ErrInvalidUTF8) {
+				t.Errorf("%s: Decode = %v, want ErrInvalidUTF8", name, err)
+			}
+		}
+	})
+
+	t.Run("a valid surrogate pair decodes", func(t *testing.T) {
+		e, err := event.Decode(annotated(`a\ud83d\ude00b \uD83D\uDE00`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := e.Payload.(event.CycleAnnotated).Note; got != "a\U0001f600b \U0001f600" {
+			t.Errorf("note = %q", got)
+		}
+	})
+	t.Run("a literal U+FFFD decodes and is kept", func(t *testing.T) {
+		line := annotated("a\ufffdb")
+		e, err := event.Decode(line)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := e.Payload.(event.CycleAnnotated).Note; got != "a\ufffdb" {
+			t.Errorf("note = %q", got)
+		}
+		out, err := event.Encode(e)
+		if err != nil || !bytes.Contains(out, []byte("a\ufffdb")) {
+			t.Errorf("Encode = %s, %v", out, err)
+		}
+	})
+	t.Run("an escaped U+FFFD decodes", func(t *testing.T) {
+		if _, err := event.Decode(annotated(`a\ufffdb`)); err != nil {
+			t.Errorf("Decode: %v", err)
+		}
+	})
+	t.Run("an escaped backslash before u d800 is plain text", func(t *testing.T) {
+		e, err := event.Decode(annotated(`a\\ud800b`))
+		if err != nil {
+			t.Fatalf("Decode: %v", err)
+		}
+		if got := e.Payload.(event.CycleAnnotated).Note; got != `a\ud800b` {
+			t.Errorf("note = %q", got)
+		}
+	})
+
+	t.Run("Encode refuses the same in raw data and in correction fields", func(t *testing.T) {
+		e := newEvent(event.CycleAnnotated{CycleID: "c"})
+		e.Payload = nil
+		e.Data = json.RawMessage(`{"cycle_id":"c","note":"a\ud800b"}`)
+		if line, err := event.Encode(e); !errors.Is(err, event.ErrInvalidUTF8) || line != nil {
+			t.Errorf("Encode(Data) = %q, %v; want no bytes and ErrInvalidUTF8", line, err)
+		}
+		c := newEvent(event.EventCorrected{Target: "01J9Z3K8M2E000000000000002", Fields: map[string]json.RawMessage{"note": json.RawMessage(`"a\ud800b"`)}})
+		if line, err := event.Encode(c); !errors.Is(err, event.ErrInvalidUTF8) || line != nil {
+			t.Errorf("Encode(fields) = %q, %v; want no bytes and ErrInvalidUTF8", line, err)
+		}
+	})
+}
+
+func TestDecodeReadsOnlyTheNumberOneAsTheVersion(t *testing.T) {
+	// A numeric version other than the literal 1 is an unknown version, which
+	// stops the store; anything else that is not a version is an ordinary
+	// decode failure, which the store may take for a torn tail.
+	unknown := map[string]struct {
+		v   int
+		raw string
+	}{
+		"2": {2, "2"}, "0": {0, "0"}, "-1": {-1, "-1"}, "-0": {0, "-0"},
+		"2.0": {0, "2.0"}, "1.0": {0, "1.0"}, "1e0": {0, "1e0"}, "1E0": {0, "1E0"}, "10e-1": {0, "10e-1"},
+		"99999999999999999999":  {0, "99999999999999999999"},
+		"-99999999999999999999": {0, "-99999999999999999999"},
+		"1.5":                   {0, "1.5"},
+	}
+	for in, want := range unknown {
+		t.Run("v "+in, func(t *testing.T) {
+			for _, rest := range []string{`}`, `,"id":"x"}`} {
+				_, err := event.Decode([]byte(`{"v":` + in + rest))
+				var uv *event.UnknownVersionError
+				if !errors.As(err, &uv) {
+					t.Fatalf("Decode = %v, want *UnknownVersionError", err)
+				}
+				if uv.V != want.v || uv.Raw != want.raw {
+					t.Errorf("UnknownVersionError = {V: %d, Raw: %q}, want {V: %d, Raw: %q}", uv.V, uv.Raw, want.v, want.raw)
+				}
+				if !strings.Contains(err.Error(), want.raw) {
+					t.Errorf("Error() = %q does not show the version %s", err, want.raw)
+				}
+			}
+		})
+	}
+	for _, in := range []string{`"2"`, `"1"`, `null`, `true`, `false`, `[1]`, `[]`, `{}`, `{"a":1}`, `""`} {
+		t.Run("v "+in, func(t *testing.T) {
+			_, err := event.Decode([]byte(`{"v":` + in + `}`))
+			if err == nil {
+				t.Fatal("Decode succeeded")
+			}
+			var uv *event.UnknownVersionError
+			if errors.As(err, &uv) {
+				t.Errorf("Decode = %v: only a numeric version is an unknown version", err)
+			}
+		})
+	}
+	t.Run("a missing v", func(t *testing.T) {
+		_, err := event.Decode([]byte(`{"id":"x"}`))
+		var uv *event.UnknownVersionError
+		if err == nil || errors.As(err, &uv) {
+			t.Errorf("Decode = %v, want an ordinary error", err)
+		}
+	})
+	t.Run("the literal 1 is the supported version", func(t *testing.T) {
+		if _, err := event.Decode(fixtures(t)["task.completed"]); err != nil {
+			t.Errorf("Decode: %v", err)
+		}
+	})
+	t.Run("Encode of an unknown version carries the number", func(t *testing.T) {
+		e := newEvent(event.TaskCompleted{TaskID: "t"})
+		e.V = 3
+		_, err := event.Encode(e)
+		var uv *event.UnknownVersionError
+		if !errors.As(err, &uv) || uv.V != 3 || uv.Raw != "3" {
+			t.Errorf("Encode = %v, want *UnknownVersionError{V: 3, Raw: \"3\"}", err)
 		}
 	})
 }

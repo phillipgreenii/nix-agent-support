@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/civil"
@@ -374,6 +375,9 @@ func (p PeriodChanged) validate() error {
 	if p.Start == (civil.Date{}) {
 		return errors.New("start is required")
 	}
+	if p.End != nil && p.End.Compare(p.Start) < 0 {
+		return fmt.Errorf("end %s is before start %s", p.End, p.Start)
+	}
 	if _, err := zone.Load(p.TZ); err != nil {
 		return fmt.Errorf("tz: %w", err)
 	}
@@ -502,6 +506,102 @@ func (p EventCorrected) validate() error {
 	}
 	if p.Fields == nil {
 		return errors.New("fields is required")
+	}
+	return checkCorrectionFields(p.Fields)
+}
+
+// checkCorrectionFields runs, on the replacement values of a correction, the
+// Go checks the event type's own data would get: the schema has already
+// settled each value's shape, and these settle its meaning. A failure names
+// the field as fields.<key>. Whether a key may be corrected at all, and
+// whether the correction changes anything, is the correction rules' concern.
+func checkCorrectionFields(fields map[string]json.RawMessage) error {
+	keys := make([]string, 0, len(fields))
+	for k := range fields {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if err := checkCorrectionField(k, fields); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func checkCorrectionField(key string, fields map[string]json.RawMessage) error {
+	raw := fields[key]
+	path := "fields." + key
+	switch key {
+	case "reason":
+		var s string
+		if err := json.Unmarshal(raw, &s); err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
+		if _, err := ValidReason(s); err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
+	case "note", "label", "group", "link":
+		var s string
+		if err := json.Unmarshal(raw, &s); err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
+		if err := ValidText(s); err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
+	case "effective_at", "due":
+		var i Instant
+		if err := json.Unmarshal(raw, &i); err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
+	case "start", "end", "period":
+		var d civil.Date
+		if err := json.Unmarshal(raw, &d); err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
+	case "tz":
+		var s string
+		if err := json.Unmarshal(raw, &s); err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
+		if _, err := zone.Load(s); err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
+	case "kv":
+		var kv []KV
+		if err := strictUnmarshal(raw, &kv); err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
+		for i, e := range kv {
+			if e.Key == "" {
+				return fmt.Errorf("%s[%d].key is required", path, i)
+			}
+			if err := ValidText(e.Key, e.Value); err != nil {
+				return fmt.Errorf("%s[%d]: %w", path, i, err)
+			}
+		}
+	case "due_rule":
+		var r due.Rule
+		if err := json.Unmarshal(raw, &r); err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
+		// The rule fits the cadence the correction replaces with it, or, when
+		// the correction does not name one, at least one of the three.
+		cadences := []due.Cadence{due.Daily, due.Weekly, due.Sprint}
+		var named due.Cadence
+		if c, ok := fields["cadence"]; ok && json.Unmarshal(c, &named) == nil && named != "" {
+			cadences = []due.Cadence{named}
+		}
+		var err error
+		for _, c := range cadences {
+			if err = r.Validate(c); err == nil {
+				return nil
+			}
+		}
+		if len(cadences) > 1 {
+			err = errors.New("a due rule takes at and tz, plus weekday for a weekly cadence or day for a sprint one, and never both")
+		}
+		return fmt.Errorf("%s: %w", path, err)
 	}
 	return nil
 }
