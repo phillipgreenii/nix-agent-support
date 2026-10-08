@@ -927,3 +927,75 @@ func (b *Backend) Deps(ctx context.Context, id string, full bool) (*schema.Issue
 	}
 	return &schema.IssueDepsResult{IDs: []string{}}, nil
 }
+
+// Compile-time check that Backend also implements the optional children
+// capability (bead pg2-sii5c, the Jira half of daily-focus design item (t)),
+// so issue.NewDispatchTable registers the op and `children` appears in this
+// backend's capabilities.ops.
+var _ issue.ChildrenLister = (*Backend)(nil)
+
+// jiraKeyRE is the shape of a Jira issue key (project key, hyphen, number).
+// It is matched before any pjira call so that an id of another backend's
+// shape (a bead id) answers not_found without a network round trip, and so
+// the key that reaches the JQL below can never carry JQL syntax.
+var jiraKeyRE = regexp.MustCompile(`(?i)^[A-Z][A-Z0-9_]*-[0-9]+$`)
+
+// Children implements issue.ChildrenLister via `pjira search --jql 'parent =
+// "<KEY>" AND statusCategory != Done' --all` (bead pg2-sii5c): the NON-CLOSED
+// direct children of a Jira key, where closed means Jira's Done status
+// category (the same notion the schema's StatusCategory carries). The
+// children it returns carry Parent (bead pg2-upb9j) because the search path
+// maps it like List does.
+//
+// A key that is not Jira-shaped answers not_found without calling pjira, and
+// a Jira-shaped key is resolved with `pjira issue` first, so an unknown key
+// answers not_found as well: an empty search result would be
+// indistinguishable from "no children" and would stop DispatchTargeted's
+// try-each resolution from falling through to the next backend. The search
+// then runs against the key pjira reports, not the caller's spelling.
+//
+// Fail closed: any pjira failure, a decode failure and a truncated result
+// are returned as errors (a truncated result cannot prove it lists every
+// child), never as a possibly-short list.
+func (b *Backend) Children(ctx context.Context, id string) (*schema.IssueChildrenResult, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "issue: id required")
+	}
+	if !jiraKeyRE.MatchString(id) {
+		return nil, scriptout.WrapError(scriptout.ErrNotFound, "issue "+id+" not found: not a Jira issue key")
+	}
+	out, err := b.runner.Run(ctx, "issue", "--", id)
+	if err != nil {
+		return nil, classifyPJIRAErrorMessage(err.Error())
+	}
+	parent, decodeErr := decodePJIRAIssue(out)
+	if decodeErr != nil {
+		return nil, scriptout.WrapError(scriptout.ErrUnavailable, "pjira: decode issue: "+decodeErr.Error())
+	}
+	if !jiraKeyRE.MatchString(parent.Key) {
+		return nil, scriptout.WrapError(scriptout.ErrUnavailable, "pjira: issue key "+parent.Key+" is not a Jira key")
+	}
+	jql := fmt.Sprintf(`parent = "%s" AND statusCategory != Done ORDER BY key ASC`, parent.Key)
+	searchOut, err := b.runner.Run(ctx, "search", "--jql", jql, "--all")
+	if err != nil {
+		return nil, classifyPJIRAErrorMessage(err.Error())
+	}
+	result, decodeErr := decodePJIRASearchResult(searchOut)
+	if decodeErr != nil {
+		return nil, scriptout.WrapError(scriptout.ErrUnavailable, "pjira: decode search result: "+decodeErr.Error())
+	}
+	if result.Truncated {
+		return nil, scriptout.WrapError(scriptout.ErrUnavailable, "pjira: children search of "+parent.Key+" was truncated; the list may be incomplete")
+	}
+	asOf := time.Now().UTC()
+	children := make([]schema.Issue, 0, len(result.Items))
+	for i := range result.Items {
+		item := result.Items[i]
+		if item.Key == "" {
+			continue
+		}
+		children = append(children, *toSchemaIssue(&item, asOf))
+	}
+	return &schema.IssueChildrenResult{Children: children}, nil
+}

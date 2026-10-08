@@ -1437,3 +1437,122 @@ func TestJiraBackendSubtaskParentIsItsParentIssue(t *testing.T) {
 		t.Fatalf("got Parent=%q IssueType=%q, want PROJ-7 / Sub-task", got.Parent, got.IssueType)
 	}
 }
+
+// ----------------------------------------------------------------------
+// Children (bead pg2-sii5c, the Jira half of design item (t))
+// ----------------------------------------------------------------------
+
+// childrenFake answers `pjira issue -- <key>` for the keys in known and
+// `pjira search` with searchOut, recording the JQL of each search.
+func childrenFake(known map[string]string, searchOut string, jqls *[]string) *fakeRunner {
+	return &fakeRunner{handle: func(args []string) (string, error) {
+		switch args[0] {
+		case "issue":
+			key := args[len(args)-1]
+			if _, ok := known[key]; !ok {
+				return "", errors.New("pjira issue -- " + key + ": exit status 1: pjira: issue " + key + " not found")
+			}
+			return `{"key":"` + key + `","summary":"epic","status":"To Do","issuetype":"Epic"}`, nil
+		case "search":
+			*jqls = append(*jqls, args[2])
+			return searchOut, nil
+		}
+		return "", errors.New("unexpected op: " + args[0])
+	}}
+}
+
+// TestJiraChildren covers the three outcomes of the children op: the
+// non-closed direct children of a Jira key (carrying Parent), an empty list
+// for a key with none, and not_found for a key Jira does not own.
+func TestJiraChildren(t *testing.T) {
+	known := map[string]string{"PROJ-1": "", "PROJ-9": ""}
+
+	t.Run("children", func(t *testing.T) {
+		var jqls []string
+		fr := childrenFake(known, `{"truncated":false,"items":[`+
+			`{"key":"PROJ-2","summary":"one","status":"To Do","status_category":"new","parent":"PROJ-1"},`+
+			`{"key":"PROJ-3","summary":"two","status":"In Progress","status_category":"indeterminate","parent":"PROJ-1"}]}`, &jqls)
+		got, err := New(fr).Children(context.Background(), "PROJ-1")
+		if err != nil {
+			t.Fatalf("Children: %v", err)
+		}
+		if len(got.Children) != 2 || got.Children[0].ID != "PROJ-2" || got.Children[1].ID != "PROJ-3" ||
+			got.Children[0].Parent != "PROJ-1" || got.Children[1].State != "In Progress" {
+			t.Fatalf("children = %+v", got.Children)
+		}
+		if len(jqls) != 1 || jqls[0] != `parent = "PROJ-1" AND statusCategory != Done ORDER BY key ASC` {
+			t.Fatalf("search JQL = %q, want the parent clause excluding the Done category", jqls)
+		}
+	})
+
+	t.Run("none", func(t *testing.T) {
+		var jqls []string
+		fr := childrenFake(known, `{"truncated":false,"items":[]}`, &jqls)
+		got, err := New(fr).Children(context.Background(), "PROJ-9")
+		if err != nil {
+			t.Fatalf("Children: %v", err)
+		}
+		if got.Children == nil || len(got.Children) != 0 {
+			t.Fatalf("children = %#v, want a non-nil empty list", got.Children)
+		}
+	})
+
+	t.Run("non-Jira key", func(t *testing.T) {
+		var jqls []string
+		fr := childrenFake(known, `{"truncated":false,"items":[]}`, &jqls)
+		_, err := New(fr).Children(context.Background(), "pg2-2j5ac.52")
+		if !errors.Is(err, scriptout.ErrNotFound) {
+			t.Fatalf("err = %v, want errors.Is(err, ErrNotFound)", err)
+		}
+		if len(fr.calls) != 0 {
+			t.Fatalf("a non-Jira key must not reach pjira, got %v", fr.calls)
+		}
+	})
+
+	t.Run("unknown Jira key", func(t *testing.T) {
+		var jqls []string
+		fr := childrenFake(known, `{"truncated":false,"items":[]}`, &jqls)
+		_, err := New(fr).Children(context.Background(), "PROJ-404")
+		if !errors.Is(err, scriptout.ErrNotFound) {
+			t.Fatalf("err = %v, want errors.Is(err, ErrNotFound)", err)
+		}
+		if len(jqls) != 0 {
+			t.Fatalf("an unknown key must not be searched, got %v", jqls)
+		}
+	})
+
+	t.Run("empty id", func(t *testing.T) {
+		fr := &fakeRunner{}
+		_, err := New(fr).Children(context.Background(), "  ")
+		if !errors.Is(err, scriptout.ErrInvalidArgument) || len(fr.calls) != 0 {
+			t.Fatalf("err = %v calls = %v, want invalid_argument and no pjira call", err, fr.calls)
+		}
+	})
+}
+
+// TestJiraChildrenFailsClosed: a pjira failure, an undecodable search and a
+// truncated search are errors, never a (possibly short) list.
+func TestJiraChildrenFailsClosed(t *testing.T) {
+	known := map[string]string{"PROJ-1": ""}
+	var jqls []string
+
+	truncated := childrenFake(known, `{"truncated":true,"items":[{"key":"PROJ-2","summary":"one","status":"To Do"}]}`, &jqls)
+	if _, err := New(truncated).Children(context.Background(), "PROJ-1"); !errors.Is(err, scriptout.ErrUnavailable) {
+		t.Fatalf("truncated: err = %v, want ErrUnavailable", err)
+	}
+
+	garbled := childrenFake(known, `not json`, &jqls)
+	if _, err := New(garbled).Children(context.Background(), "PROJ-1"); !errors.Is(err, scriptout.ErrUnavailable) {
+		t.Fatalf("garbled: err = %v, want ErrUnavailable", err)
+	}
+
+	down := &fakeRunner{handle: func(args []string) (string, error) {
+		if args[0] == "issue" {
+			return `{"key":"PROJ-1","summary":"epic","status":"To Do"}`, nil
+		}
+		return "", errors.New("pjira: network down")
+	}}
+	if _, err := New(down).Children(context.Background(), "PROJ-1"); !errors.Is(err, scriptout.ErrUnavailable) {
+		t.Fatalf("search failure: err = %v, want ErrUnavailable", err)
+	}
+}

@@ -387,47 +387,50 @@ func TestCacheContract_ShowIsADetailEntityTheCacheCanKey(t *testing.T) {
 	}
 }
 
-// TestIssueChildrenUnsupportedBackendIsUnknownOp (bead pg2-nd60k): this
-// backend does not implement the optional children op, so it is absent from
-// capabilities.ops and a call answers the wire-level unknown_op error (no
-// eighth error code exists for it).
-func TestIssueChildrenUnsupportedBackendIsUnknownOp(t *testing.T) {
-	table := newDispatchTable(newTestBackend())
-	if _, ok := table["children"]; ok {
-		t.Fatal("children must not be registered for a backend without issue.ChildrenLister")
-	}
-	for _, op := range table.Ops() {
-		if op == "children" {
-			t.Fatalf("capabilities ops = %v must not advertise children", table.Ops())
+// TestIssueChildrenJira (bead pg2-sii5c): this backend implements the
+// optional children op, so it is registered with the issue schema version,
+// advertised in capabilities.ops, and a request round-trips to the
+// {"children": [...]} result; a non-Jira key answers not_found so the
+// umbrella's try-each resolution falls through to the next backend.
+func TestIssueChildrenJira(t *testing.T) {
+	table := newDispatchTable(internal.New(&fakeRunner{handle: func(args []string) (string, error) {
+		switch args[0] {
+		case "issue":
+			return `{"key":"PROJ-1","summary":"epic","status":"To Do","issuetype":"Epic"}`, nil
+		case "search":
+			return `{"truncated":false,"items":[{"key":"PROJ-2","summary":"kid","status":"To Do","parent":"PROJ-1"}]}`, nil
 		}
+		return "", nil
+	}}))
+	entry, ok := table["children"]
+	if !ok {
+		t.Fatal("children missing from this binary's dispatch table")
+	}
+	if entry.SchemaVersion != schema.IssueSchemaVersion {
+		t.Fatalf("children schema version = %d, want %d", entry.SchemaVersion, schema.IssueSchemaVersion)
+	}
+	found := false
+	for _, op := range table.Ops() {
+		found = found || op == "children"
+	}
+	if !found {
+		t.Fatalf("capabilities ops = %v, want children", table.Ops())
 	}
 
-	origStdin, origStdout := os.Stdin, os.Stdout
-	defer func() { os.Stdin, os.Stdout = origStdin, origStdout }()
-	inR, inW, err := os.Pipe()
+	result, err := entry.Handle(context.Background(), json.RawMessage(`{"id":"PROJ-1"}`))
 	if err != nil {
-		t.Fatalf("pipe: %v", err)
+		t.Fatalf("children: %v", err)
 	}
-	outR, outW, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("pipe: %v", err)
+	got, ok := result.(*schema.IssueChildrenResult)
+	if !ok {
+		t.Fatalf("result type = %T, want *schema.IssueChildrenResult", result)
 	}
-	os.Stdin, os.Stdout = inR, outW
-	if _, err := inW.WriteString(`{"op":"children","args":{"id":"PROJ-1"}}`); err != nil {
-		t.Fatalf("write request: %v", err)
+	if len(got.Children) != 1 || got.Children[0].ID != "PROJ-2" || got.Children[0].Parent != "PROJ-1" {
+		t.Fatalf("children = %+v", got.Children)
 	}
-	_ = inW.Close()
-	scriptout.ServeLoop(table)
-	_ = outW.Close()
-	raw, err := io.ReadAll(outR)
-	if err != nil {
-		t.Fatalf("read response: %v", err)
-	}
-	var resp scriptout.Response
-	if err := json.Unmarshal(raw, &resp); err != nil {
-		t.Fatalf("decode response: %v (stdout=%s)", err, raw)
-	}
-	if resp.Error == nil || resp.Error.Code != "unknown_op" {
-		t.Fatalf("response = %s, want error.code unknown_op", raw)
+
+	_, err = entry.Handle(context.Background(), json.RawMessage(`{"id":"pg2-abc"}`))
+	if code := scriptout.CodeForError(err); code != "not_found" {
+		t.Fatalf("children of a non-Jira key: err=%v code=%q, want not_found", err, code)
 	}
 }
