@@ -47,6 +47,11 @@ STUBEOF
 }
 
 teardown() {
+  # A failed test prints the last `run` output (TAP diagnostics on fd 3), so a
+  # sandbox-only failure shows what the plugin actually printed.
+  if [[ -z ${BATS_TEST_COMPLETED:-} ]]; then
+    printf '# status=%s output:\n# %s\n' "${status:-?}" "${output//$'\n'/$'\n# '}" >&3
+  fi
   rm -rf "$TEST_DIR"
 }
 
