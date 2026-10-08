@@ -132,3 +132,40 @@ func TestProduce_timeoutKillWithLiveContextStillCountsAsFailure(t *testing.T) {
 		t.Fatalf("ends = %+v, want one non-shutdown end", obs.ends)
 	}
 }
+
+// A failure whose error says "context canceled" or "deadline exceeded" while
+// the router's OWN context is still live is not a shutdown: a per-call
+// deadline (the attempt's own timeout) or a cancellation a backend reported
+// from inside its process tree is a genuine source failure and must still be
+// counted (pg2-g8yji — only the parent run-context cancellation qualifies).
+func TestProduce_nonShutdownCancellationErrorsWithLiveContextStillCount(t *testing.T) {
+	cases := map[string]error{
+		"per-call deadline":        context.DeadlineExceeded,
+		"backend-reported cancel":  errors.New("command query [x]: context canceled"),
+		"wrapped per-call timeout": errors.New("command query [x]: context deadline exceeded"),
+	}
+	for name, runErr := range cases {
+		t.Run(name, func(t *testing.T) {
+			obs := &recordingSourceFailureObserver{}
+			src := query.Source{Name: "bad", Query: cancelOnRunQuery{
+				Meta:   query.Meta{EmitTypes: []string{"work.ready"}},
+				cancel: func() {}, // the router's own ctx is NOT cancelled
+				err:    runErr,
+			}}
+			rpt, err := produce(context.Background(), query.Env{}, query.SourceSet{src}, newQueue(t),
+				core.NewBindings("work.ready"), Cadence{}, realSleep, time.Now, obs, nil)
+			if err != nil {
+				t.Fatalf("produce err = %v, want nil (the failure is isolated to the source)", err)
+			}
+			if want := []string{"bad"}; !equalStrings(obs.sources, want) {
+				t.Fatalf("failures = %v, want %v", obs.sources, want)
+			}
+			if rpt.SourceErrors["bad"] == nil {
+				t.Fatal("SourceErrors[bad] must be set")
+			}
+			if len(obs.ends) != 1 || obs.ends[0].shutdown {
+				t.Fatalf("ends = %+v, want one non-shutdown end", obs.ends)
+			}
+		})
+	}
+}
