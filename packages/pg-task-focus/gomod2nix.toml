@@ -1,3 +1,9 @@
 schema = 3
+cachePackages = [
+  'pgregory.net/rapid'
+]
 
 [mod]
+  [mod.'pgregory.net/rapid']
+    version = 'v1.3.0'
+    hash = 'sha256-GmWX33UKjofHgHDw8QiwxSaeDjqT81Tb2m+ChtC+ueg='
