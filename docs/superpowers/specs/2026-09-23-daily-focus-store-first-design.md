@@ -466,9 +466,12 @@ review it: close it, or create the children that finish it. A child that is not 
 (hydration is capped, §4.2) is unknown, not absent: `focus show`'s coverage header (§7.1) says so, and
 the epic is then listed as it would be with no child.
 
-**Started** (D-F11): a bead with state `in_progress`; a Jira issue whose status is one of the
-configured `jira.in_progress_statuses` (case-insensitive; the connector exposes no tracker-native
-status category, so the name list is the only available signal); any open candidate PR, whether
+**Started** (D-F11): a bead with state `in_progress`; a Jira issue whose status category is
+`indeterminate` (Jira's In Progress category; Jira has exactly three categories, To Do `new`, In
+Progress `indeterminate` and Done `done`, plus a legacy "no category" that counts as not started). The
+connector carries the native category into the issue snapshot (a connector change, section 12 item
+(r)); an earlier draft matched a configured name list, `jira.in_progress_statuses`, because the connector
+exposed no category, and that list stays only for the attention rules that already use it; any open candidate PR, whether
 authored or review-assigned. Consequence to
 keep visible: every open assigned PR is started, so PRs rank above non-overdue unstarted beads and
 Jira issues.
@@ -718,12 +721,12 @@ show or replan and re-reply`, because someone locked or struck something after t
    a draft row whose source has finished since is printed `finished` and is NOT selected by `ok` or
    `+key` (a finished item is not worked; it is reported on stderr as a routine skip, exit `0`, and it
    does not count toward `cap`). **Finished** is defined by the snapshot's own state, read BEFORE
-   `active`: a PR that is merged or closed, an issue the connector reports closed or done (the bead status `closed`; for Jira the classifier's terminal-state set,
-   the same one that makes the change flow emit the `closed` kind. That set is HARDCODED to the status
-   names `closed`, `done`, `resolved`, `cancelled`, `canceled` and `wontfix` and ignores both the
-   configured `jira.done_statuses` and the status category, so a done-category status with another name
+   `active`: a PR that is merged or closed, an issue the connector reports closed or done (the bead status `closed`; for Jira the status CATEGORY `done`, which is also
+   what makes the change flow emit the `closed` kind once the classifier uses it (section 12 item (r)).
+   Today the classifier matches the hardcoded status names `closed`, `done`, `resolved`, `cancelled`,
+   `canceled` and `wontfix` and ignores the category, so a done-category status with another name
    ("Complete", "Released", "Won't Do") yields `status_changed` only and never `closed`; verified
-   2026-10-08, and an item of section 12). A
+   2026-10-08, and the operator ruled the category is the right check). A
    closed entity is also deactivated, so "inactive" without a terminal state is the only non-terminal
    case (step 4).
 2. Parse the reply: `ok` (lock the draft as shown: with no plan it selects the rows marked `+`; over
@@ -1507,8 +1510,11 @@ closed, human-labelled open}`: the single `update` (status `deferred`, marker `s
     assigned), the open-beads bulk query lists `blocked`, `TestFocusRoleBindsIssueChangedAndReconcile`
     (the router config the deployment ships binds `issue.changed` and the reconcile record for the focus
     role, every emitted type is bound, and `doctor`'s "expected empty for issue" text is amended),
-    `TestIssueTerminalStatesHonourConfiguredDoneStatuses` (a done-category Jira status with a name
-    outside the hardcoded six yields `closed`), `TestFocusHoldsBeadOfClosedIssue` and the cycle closed
+    `TestIssueClosedKindFollowsJiraStatusCategory` (a Jira status in category `done` with a name outside
+    the old six, such as "Complete" or "Released", yields `closed`; a status named "Done" whose category
+    is not `done` does not; all three categories and the empty one are table rows),
+    `TestJiraBackendCarriesStatusCategory`, `TestStartedFollowsJiraStatusCategory` (`indeterminate`
+    is started under any status name), `TestAbsentCategoryFallsBackToStateName`, `TestFocusHoldsBeadOfClosedIssue` and the cycle closed
     issue, then the entity returns as `reconcile` (not `reopened`, which the classifier does not produce
     for an inactive entity), the held bead is released while the item is still selected; a return of an item the operator struck while it
     was closed stays held, a return of a claimed bead is left running, a closed issue with no bead mints
@@ -1779,16 +1785,26 @@ the new watch queries and the new decider role live, not just a clean flake chec
      cap handle the volume, but this is the operator's to confirm as the intended candidate set.
   5. **A Jira done status counts as `closed` only under six names** (`closed`, `done`, `resolved`,
      `cancelled`, `canceled`, `wontfix`), hardcoded, ignoring `jira.done_statuses` and the status
-     category; the decomposition either honours the configuration or documents the six, and checks the
-     deployed workflow's done status name.
+     category. RULED 2026-10-08: the operator, "i would have though status category would have been a
+     better thing to check brecause i think it is only 3 values, right?", then "yes" to the agent's
+     answer (three categories) and its proposal: the connector carries the native category, the
+     classifier treats category `done` as terminal for Jira, the bead status `closed` stays the bead
+     rule, and "started" uses the category `indeterminate` (section 6). Item (r).
   6. **`reopened` is effectively unreachable for a closed entity**, because the classifier reports only
      `reconcile` for an entity that was inactive; the release on return rides the reconcile binding.
 - **Behavior docs and code the 2026-10-08 rulings add to the decomposition** (item (q), beside (a) to
   (p) above): `docs/behavior/pg-desk/focus.md` gains the draft document contract, the plan and draft
   modes of `show`, `replan` and the exit-`7` meaning, with `INV-FOCUS-n` ids for "a draft is never
   stored", "rank drift never strikes" and "a lock writes the draft's order"; the `create.md` and
-  `pull.md` prose follows section 9; the router role of item (j) binds `issue.changed`; the Jira terminal-state set honours the
-  configured done statuses (verification 5); and the deployment's open-beads bulk query gains
+  `pull.md` prose follows section 9; the router role of item (j) binds `issue.changed`; item (r), the Jira status category: the
+  Jira backend of `pg-connector` (`pg-connector-issue-jira`, today `State: iss.Status`, the status
+  name only) adds the native category to the issue snapshot as a closed value (`new`, `indeterminate`,
+  `done`, or empty), the shared issue schema and `docs/behavior` for it gain the field, the classifier
+  (`internal/classify/issue.go`, `issueIsTerminal`) treats category `done` as terminal for Jira while
+  keeping the state-name rule for beads, and the focus rank's "started" test reads the category; an
+  absent category (an older snapshot, a backend that has none) falls back to the state-name rule, so a
+  mixed store never misclassifies, and a snapshot written before the connector change is re-hydrated by
+  the age sweep (§4.2); and the deployment's open-beads bulk query gains
   `blocked`.
 - **Public-repo scrub: done in this revision.** The draft no longer names the employer's private
   repositories, tickets or machine flake. Re-scan the whole file case-insensitively for the
