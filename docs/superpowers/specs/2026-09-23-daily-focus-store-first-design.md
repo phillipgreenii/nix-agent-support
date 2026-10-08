@@ -718,10 +718,12 @@ show or replan and re-reply`, because someone locked or struck something after t
    a draft row whose source has finished since is printed `finished` and is NOT selected by `ok` or
    `+key` (a finished item is not worked; it is reported on stderr as a routine skip, exit `0`, and it
    does not count toward `cap`). **Finished** is defined by the snapshot's own state, read BEFORE
-   `active`: a PR that is merged or closed, an issue the connector reports closed or done (the bead status `closed`; for Jira the connector's own
-   terminal mapping, the same one that makes the change flow emit `issue.closed`, which the
-   decomposition MUST verify fires for a Jira done transition, since the issue change kinds also include
-   `status_changed`). A
+   `active`: a PR that is merged or closed, an issue the connector reports closed or done (the bead status `closed`; for Jira the classifier's terminal-state set,
+   the same one that makes the change flow emit the `closed` kind. That set is HARDCODED to the status
+   names `closed`, `done`, `resolved`, `cancelled`, `canceled` and `wontfix` and ignores both the
+   configured `jira.done_statuses` and the status category, so a done-category status with another name
+   ("Complete", "Released", "Won't Do") yields `status_changed` only and never `closed`; verified
+   2026-10-08, and an item of section 12). A
    closed entity is also deactivated, so "inactive" without a terminal state is the only non-terminal
    case (step 4).
 2. Parse the reply: `ok` (lock the draft as shown: with no plan it selects the rows marked `+`; over
@@ -1028,14 +1030,19 @@ decider rule (change-flow section 7, G5), registered in `pg-decider` and routed 
     anchor cascade closes only `work`-relation children and the focus bead's relation is `source`.
     That hold is a deliberate exception to INV-DECIDER-25 (rules outside the anchor group MUST NOT
     create, reopen or update a work item for a terminal PR), which section 12 item (h) amends. A
-    reselect of a terminal source holds, never releases. For a PR, the PR decider role already binds
-    `pr.closed` and `pr.merged` (a LISTENER, not the reconcile tier: the local reconcile re-routes
-    only ACTIVE entities, and a closed PR is deactivated). For an ISSUE the same `closed` change kind
-    exists and `desk-issue-changes` emits `issue.closed`, but no role bound it; the operator ruled on
-    2026-10-08 that the focus role MUST bind it, mirroring the PR (see Routing below), so a terminal
-    issue re-routes the focus decider the moment the change flow sees it close. The
-    `terminal_source_bead_open` divergence gauge of section 8.2 remains the signal that the binding is
-    missing or the role is still in `plan`.
+    reselect of a terminal source holds, never releases. A PR's close or merge is
+    heard by an EVENT listener, not by the reconcile tier: the local reconcile re-routes only ACTIVE
+    entities and a closed PR is deactivated, so the one route is the change event that carries the
+    `closed` or `merged` kind. The router delivers one `<type>.changed` event per changed entity, with
+    the kinds in its metadata (the 2026-10-05 per-type check design; the per-kind event names of the
+    change-flow design's example config were the adapter's choice, not a ruling, and are shorthand for
+    those kinds). For an ISSUE the same `closed` kind exists, but no deployed decider role listens; the
+    operator ruled on 2026-10-08 that the focus role MUST listen for it, mirroring the PR (see Routing
+    below), so a terminal issue re-runs the focus decider when the change flow sees it close. A reopened
+    entity returns as a `reconcile` record, not a `reopened` one (the classifier reports only
+    `reconcile` for an entity that was inactive), and the role's reconcile binding is what releases the
+    held bead. The `terminal_source_bead_open` divergence gauge of section 8.2 remains the signal that
+    the listener is missing or the role is still in `plan`.
     Anything else is left alone, with the skip reason "already handled" (`claimed`, `blocked`,
     `pinned`, `hooked`, closed, or deferred by someone else; section 8.3): a claimed bead is never
     deferred, because a deferred bead keeps its assignee (the stranded shape of the claim rules) and a
@@ -1131,17 +1138,26 @@ apply` are two commands, so there is no mode flag to switch: the router role tha
   the nix build rather than skipping), and gives it a non-vacuity check and a planted-violation
   self-test. The vocabulary allowed in pg-desk is `focus`, `focus_selected`, `source_type`,
   `source_id`.
-- **Routing.** No router role binds any `issue.*` kind today (`doctor` expects that list empty for
-  `issue`), and `desk-issue-changes` emits only `issue.opened` and `issue.closed`. The deployment
-  therefore needs a role for the focus decider that binds `issue.annotation_changed`,
-  `pr.annotation_changed`, `issue.closed` and `issue.reopened` (the closed listener of the operator's
-  2026-10-08 ruling: "there should be closed listener for issues as well. we should mirror what PR
-  does"; the PR side needs no new binding, because the focus rule rides the PR decider role, which
-  already binds `pr.closed`, `pr.merged` and `pr.reopened`) and the change flow's periodic reconcile
-  record (so a claimed strike is re-evaluated, section 8), the `desk-issue-changes` query's `emits`
-  widened to include `issue.annotation_changed` and `issue.reopened` (it already emits
-  `issue.closed`), and a decider identity for the failure-annotation namespace; a new or
-  changed `[[query]]`/`[[role]]` pair MUST be exercised live (section 11).
+- **Routing.** The router matches `binds` and `emits` by exact string, and the source adapter emits ONE
+  event per changed entity typed `<type>.changed`, with the change kinds in `metadata.kinds` (it
+  declares `emit "<type>.changed"`; the 2026-10-05 per-type check design records that the per-kind
+  names were the adapter's choice and keeps per-kind events only as an alternative). A decider never
+  branches on the kind (it re-derives from the view, G6), so the closed listener of the operator's
+  2026-10-08 ruling ("there should be closed listener for issues as well. we should mirror what PR
+  does") is a role that binds `issue.changed` (every issue change, `closed` included) and the change
+  flow's periodic reconcile record (so a claimed strike is re-evaluated, and so a reopened entity,
+  which returns as `reconcile`, is re-evaluated). The PR side needs no new binding: the focus rule
+  rides the PR decider role, which binds `pr.changed`. A role that bound a per-kind name such as
+  `issue.closed` would never be dispatched and the loader's orphan check would reject it, so those
+  names elsewhere in this document mean "a change carrying that kind". The focus decider ALSO needs
+  the annotation write to route: the `focus_selected` annotation emits `annotation_changed`, which
+  arrives as the same `<type>.changed` event, so one binding per type covers the minting trigger, the
+  closed listener and the reopen. **The deployment today is the older coarse shape** (verified
+  2026-10-08): the issue feeds emit `issue.changed`, a coarse `desk-issue` role binds it and runs the
+  old `pg-desk run issue` path, no `desk-issue-changes` or `desk-pr-changes` query exists, no decider
+  role is wired for issues or PRs, and no `watch.issue.queries` or `watch.pr.queries` is set, so the
+  change flow's pipeline is not live. The focus role therefore lands with the change-flow cutover, not
+  before it. A new or changed `[[query]]`/`[[role]]` pair MUST be exercised live (section 11).
 - **After the write.** The decider's apply step runs `pg-desk issue refresh <bead>` (change-flow
   S10) so the new bead's entity row, and therefore the derived link, is visible without waiting for
   the next poll. The audit trail is a comment on the bead, as for every decider.
@@ -1488,12 +1504,15 @@ closed, human-labelled open}`: the single `update` (status `deferred`, marker `s
     through `--json` (the contract is stable and the digest is a pure function of the document).
   - Slot rule and closed listener (the 2026-10-08 rulings): `TestEpicSlotBlockedChildCountsAsOpen`
     (an epic whose only child is `blocked` takes no slot of its own, and the child is a candidate when
-    assigned), the open-beads bulk query lists `blocked`, `TestFocusRoleBindsIssueClosedAndReopened`
-    (the router config the deployment ships binds both, and `doctor`'s "expected empty for issue" text is
-    amended), `TestFocusHoldsBeadOfClosedIssue` and the cycle closed issue, reopened issue, the held
-    bead is released while the item is still selected; a reopen of an item the operator struck while it
-    was closed stays held, a reopen of a claimed bead is left running, a closed issue with no bead mints
-    nothing, a Jira done transition emits `issue.closed`, `TestFinishedRowIsNotCountedAsHeldOrUnminted`
+    assigned), the open-beads bulk query lists `blocked`, `TestFocusRoleBindsIssueChangedAndReconcile`
+    (the router config the deployment ships binds `issue.changed` and the reconcile record for the focus
+    role, every emitted type is bound, and `doctor`'s "expected empty for issue" text is amended),
+    `TestIssueTerminalStatesHonourConfiguredDoneStatuses` (a done-category Jira status with a name
+    outside the hardcoded six yields `closed`), `TestFocusHoldsBeadOfClosedIssue` and the cycle closed
+    issue, then the entity returns as `reconcile` (not `reopened`, which the classifier does not produce
+    for an inactive entity), the held bead is released while the item is still selected; a return of an item the operator struck while it
+    was closed stays held, a return of a claimed bead is left running, a closed issue with no bead mints
+    nothing, `TestFinishedRowIsNotCountedAsHeldOrUnminted`
     (`selected_bead_held` and `unminted` exclude a terminal source; it counts under `source_terminal`),
     and a volume check that the widened `blocked` query stays inside `hydration.max_per_poll`.
   - Verb contract: `TestFocusExitCodes` (a table of verb x documented code, asserting the code, that
@@ -1575,7 +1594,7 @@ the new watch queries and the new decider role live, not just a clean flake chec
 --apply --draft` writes the draft's order even after a priority is changed in between; a `pull`
   between draft and lock gives exit `7`; `replan` shows the locked rows first and proposes nothing, and
   a bare `ok` over it changes nothing; closing a selected issue holds its bead (the shipped router config
-  binds `issue.closed`) and reopening it releases the bead; and an epic whose only child is `blocked`
+  binds `issue.changed` for the focus role) and its return releases the bead; and an epic whose only child is `blocked`
   takes no slot of its own.
 - `close.md`'s rewritten resolve/survey/close steps produce output its unchanged steps 3-5 accept
   without modification.
@@ -1644,8 +1663,9 @@ the new watch queries and the new decider role live, not just a clean flake chec
   requires in the SAME change: `docs/behavior/pg-desk/focus.md` (with `INV-FOCUS-n` ids and the
   telemetry declaration of §8.2) and its `README.md` row, `store-schema.md`, `serve.md` (the metrics
   families), `operator-commands.md` (the `doctor` focus block), `plan-and-apply.md` and the decider
-  README (today "only `pr` has a decider"); (j) the router role and the `desk-issue-changes` `emits`
-  widening for the focus decider (§8 Routing); (k) the cross-document gap that per-source freshness has
+  README (today "only `pr` has a decider"); (j) the router role for the focus decider, binding `issue.changed`,
+  `pr.changed` and the reconcile record (§8 Routing), with the deployment's `watch.issue.queries` and
+  `watch.pr.queries` set, which they are not today; (k) the cross-document gap that per-source freshness has
   no recorder once `heartbeat` is removed (§4.2), to be closed in the change-flow design or declared
   deferred there; (l) the change-flow Phase 10 guard `TestNoDecisionLogicInPgDesk` (§8), which this
   change owns if Phase 10 has not landed it; (m) added by the second 2026-10-07 review: a
@@ -1712,11 +1732,14 @@ the new watch queries and the new decider role live, not just a clean flake chec
   3. **Whether anything re-routes a terminal ISSUE after `issue.closed`.** The operator: "there should
      be closed listener for issues as well. we should mirror what PR does, so does it have a listener
      or does the reconcile phase handle it?" The answer, from the change-flow design and
-     `docs/behavior/pg-desk/changes.md`: a PR uses a LISTENER (the PR decider binds `pr.closed`,
-     `pr.merged` and `pr.reopened`), and the reconcile tier cannot cover it because it re-routes only
-     active entities and a closed entity is deactivated. Applied: the focus role binds `issue.closed`
-     and `issue.reopened` (section 8, Routing). The deployment's own router config lives in the private
-     machine flake and was NOT read for this answer; the decomposition checks it.
+     `docs/behavior/pg-desk/changes.md`: a PR uses a LISTENER, not the reconcile tier, which cannot
+     cover it because it re-routes only active entities and a closed entity is deactivated. **Corrected
+     the same day after the deployment was read:** the first answer named per-kind bindings
+     (`pr.closed`, `pr.merged`, `pr.reopened`) taken from the change-flow design's example config; the
+     router actually delivers `<type>.changed` events with the kinds in metadata, so the listener is a
+     binding of `issue.changed` (and the PR decider's `pr.changed`), and the deployed router has no
+     per-kind PR binding to mirror. The ruling stands as the operator gave it: the focus decider is
+     re-run when an issue closes. Applied in section 8, Routing.
 - **Agent readings of those rulings, NOT themselves ruled (the operator may overrule any of them):**
   (R1) a `replan` draft proposes nothing, so a bare `ok` over it locks the plan unchanged and never
   fills a slot a finished item freed (the cap line shows the open slots; the operator adds with `+key`
@@ -1727,20 +1750,46 @@ the new watch queries and the new decider role live, not just a clean flake chec
   `dropped`, and the decider's terminal-source hold, not a strike, holds its bead; (R5) a draft row that
   finished before the lock is skipped at lock, not selected; (R6) a `blocked` bead assigned to the
   operator is a candidate in its own right, as D-F11's "every non-done assigned item" implies; (R7)
-  `pull` stays outside the cycle as an immediate additive lock that invalidates a held draft.
+  `pull` stays outside the cycle as an immediate additive lock that invalidates a held draft;
+  (R8) the candidate set is every non-done bead OWNED by the operator, per D-F8, although verification
+  4 shows that is almost every open bead.
   **Known remaining risks of the draft model, not designed away:** a draft is an LLM-held file, so a
   lost or hand-edited one is a new draft or exit `1` (the `digest` check catches edits); abandoned
   drafts leave no trace; `replan` proposing nothing is the likeliest thing to surprise the operator,
   because "pull new items into the plan" can also be read as "propose them" (`?` marks the operator
-  accepts with `+key` would be the smallest change that serves both); and whether a Jira done
-  transition emits `issue.closed`, and how many beads the widened `blocked` query adds, are checked in
-  the decomposition.
+  accepts with `+key` would be the smallest change that serves both).
+- **Verified 2026-10-08 (three read-only verifiers; this section's findings replace the earlier "to be
+  checked" notes):**
+  1. **The deployed router predates this design's event names.** It emits `issue.changed`,
+     `pr.changed` and `pr.reconcile`, binds them in coarse `desk-issue` and `desk-pr` roles that run the
+     old `pg-desk run` path, has no `desk-issue-changes` or `desk-pr-changes` query, wires no
+     `pg-decider` role for issues or PRs, and sets no `watch.issue.queries` or `watch.pr.queries`. The
+     adapter emits `<type>.changed` with the kinds in metadata, so section 8 Routing binds that type
+     and not per-kind names. The change-flow pipeline is not live; this design lands with its cutover.
+  2. **The three watch queries of §4.2 do not exist.** The nearest, `work-beads`, is title-filtered
+     and already lists `blocked`. The assigned-to-me Jira query exists under another name and is not
+     watched.
+  3. **Widening to `blocked` is a no-op on today's data.** The tracker stores status `blocked` on 0
+     beads; the 76 beads `bd blocked` reports are blocked through dependency edges and have status
+     `open`, so they already count as open children (233 open, 3 in progress, 25 deferred, 0 stored
+     blocked). The widening matters only if something starts writing the status.
+  4. **An owner-based bead query is not selective.** 232 of 233 open beads are OWNED by the operator
+     and none is ASSIGNED to the operator (the assignee is set only while a session works a bead), so
+     D-F8's "assigned or owned" admits about 232 candidates, 75 of them dependency-blocked. The rank and
+     cap handle the volume, but this is the operator's to confirm as the intended candidate set.
+  5. **A Jira done status counts as `closed` only under six names** (`closed`, `done`, `resolved`,
+     `cancelled`, `canceled`, `wontfix`), hardcoded, ignoring `jira.done_statuses` and the status
+     category; the decomposition either honours the configuration or documents the six, and checks the
+     deployed workflow's done status name.
+  6. **`reopened` is effectively unreachable for a closed entity**, because the classifier reports only
+     `reconcile` for an entity that was inactive; the release on return rides the reconcile binding.
 - **Behavior docs and code the 2026-10-08 rulings add to the decomposition** (item (q), beside (a) to
   (p) above): `docs/behavior/pg-desk/focus.md` gains the draft document contract, the plan and draft
   modes of `show`, `replan` and the exit-`7` meaning, with `INV-FOCUS-n` ids for "a draft is never
   stored", "rank drift never strikes" and "a lock writes the draft's order"; the `create.md` and
-  `pull.md` prose follows section 9; the router role and `emits` of item (j) gain `issue.closed` and
-  `issue.reopened`; and the deployment's open-beads bulk query gains `blocked`.
+  `pull.md` prose follows section 9; the router role of item (j) binds `issue.changed`; the Jira terminal-state set honours the
+  configured done statuses (verification 5); and the deployment's open-beads bulk query gains
+  `blocked`.
 - **Public-repo scrub: done in this revision.** The draft no longer names the employer's private
   repositories, tickets or machine flake. Re-scan the whole file case-insensitively for the
   employer name, its abbreviation, private repository names, PR and ticket numbers before it
