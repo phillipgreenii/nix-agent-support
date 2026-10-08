@@ -760,3 +760,193 @@ func TestIssueShowCacheFallback_ServesStaleOnBackendUnavailable(t *testing.T) {
 		t.Fatalf("cache-fallback issue.ID = %q, want issue-1", issue2.ID)
 	}
 }
+
+// ---- issue children (bead pg2-nd60k) ----
+
+const (
+	unknownOpResponse = `{"protocolVersion":1,"schemaVersion":1,"error":{"code":"unknown_op","message":"no such op"}}`
+	notFoundResponse  = `{"protocolVersion":1,"schemaVersion":1,"error":{"code":"not_found","message":"no such issue"}}`
+	childrenResponse  = `{"protocolVersion":1,"schemaVersion":1,"result":{"children":[` +
+		`{"id":"bd-1.1","title":"kid one","state":"open"},{"id":"bd-1.2","title":"kid two","state":"deferred"}]}}`
+)
+
+func writeIssueConfigForBackends(t *testing.T, backends ...string) {
+	t.Helper()
+	dir := t.TempDir()
+	cfg := dir + "/config.yaml"
+	body := "connector:\n  issue:\n"
+	for _, b := range backends {
+		body += "    - " + b + "\n"
+	}
+	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("PG_PR_CONFIG", cfg)
+	t.Setenv("XDG_STATE_HOME", dir)
+}
+
+func decodeChildren(t *testing.T, stdout string) []schema.Issue {
+	t.Helper()
+	var resp scriptout.Response
+	if err := json.Unmarshal([]byte(stdout), &resp); err != nil {
+		t.Fatalf("decode response: %v (stdout=%s)", err, stdout)
+	}
+	var result schema.IssueChildrenResult
+	if err := scriptout.Decode(resp.Result, &result); err != nil {
+		t.Fatalf("decode IssueChildrenResult: %v (stdout=%s)", err, stdout)
+	}
+	return result.Children
+}
+
+func TestRun_IssueChildren_Success(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-issue-children", map[string]string{"children": childrenResponse}, unknownOpResponse)
+	writeIssueConfigFor(t, "backend-issue-children")
+
+	stdout, _, code := executePr(t, []string{"issue", "children", "bd-1"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	kids := decodeChildren(t, stdout)
+	if len(kids) != 2 || kids[0].ID != "bd-1.1" || kids[1].State != "deferred" {
+		t.Fatalf("children = %+v", kids)
+	}
+}
+
+func TestRun_IssueChildren_HumanOutput(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-issue-children-human", map[string]string{"children": childrenResponse}, unknownOpResponse)
+	writeIssueConfigFor(t, "backend-issue-children-human")
+
+	stdout, _, code := executePr(t, []string{"--output", "human", "issue", "children", "bd-1"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	for _, want := range []string{"children (2):", `[bd-1.1] "kid one" [open]`, `[bd-1.2] "kid two" [deferred]`} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("human output missing %q; stdout=%s", want, stdout)
+		}
+	}
+}
+
+func TestRun_IssueChildren_NoChildrenIsSuccessWithEmptyList(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-issue-children-none", map[string]string{
+		"children": `{"protocolVersion":1,"schemaVersion":1,"result":{"children":[]}}`,
+	}, unknownOpResponse)
+	writeIssueConfigFor(t, "backend-issue-children-none")
+
+	stdout, _, code := executePr(t, []string{"issue", "children", "bd-1"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	if kids := decodeChildren(t, stdout); len(kids) != 0 {
+		t.Fatalf("children = %+v, want none", kids)
+	}
+}
+
+// TestRun_IssueChildren_BackendErrorFailsClosed: any backend error is a
+// non-zero exit with the error on the wire, never an empty success.
+func TestRun_IssueChildren_BackendErrorFailsClosed(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-issue-children-down", map[string]string{
+		"children": `{"protocolVersion":1,"schemaVersion":1,"error":{"code":"unavailable","message":"bd down"}}`,
+	}, unknownOpResponse)
+	writeIssueConfigFor(t, "backend-issue-children-down")
+
+	stdout, _, code := executePr(t, []string{"issue", "children", "bd-1"})
+	if code == 0 {
+		t.Fatalf("exit code = 0, want non-zero; stdout=%s", stdout)
+	}
+	if !strings.Contains(stdout, `"unavailable"`) {
+		t.Fatalf("stdout = %s, want the unavailable error", stdout)
+	}
+}
+
+// TestRun_IssueChildren_BypassesEntityCache: children is a live
+// read. The fake backend answers children only; a cache-served answer would
+// need a prior show, and the call must leave no issue cache entry behind.
+func TestRun_IssueChildren_BypassesEntityCache(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-issue-children-live", map[string]string{"children": childrenResponse}, unknownOpResponse)
+	writeIssueConfigFor(t, "backend-issue-children-live")
+	stateDir := os.Getenv("XDG_STATE_HOME")
+
+	for i := 0; i < 2; i++ {
+		if _, _, code := executePr(t, []string{"issue", "children", "bd-1"}); code != 0 {
+			t.Fatalf("call %d exit code = %d", i, code)
+		}
+	}
+	// The default entity cache lives under XDG_STATE_HOME; a live read must
+	// not have created any file there.
+	entries, err := os.ReadDir(stateDir)
+	if err != nil {
+		t.Fatalf("read state dir: %v", err)
+	}
+	for _, e := range entries {
+		if e.Name() != "config.yaml" {
+			t.Fatalf("children wrote %q under XDG_STATE_HOME; it must bypass the entity cache", e.Name())
+		}
+	}
+}
+
+// TestIssueChildrenBeadsWithJiraRegistered: with a Jira-style backend (no
+// children op, answers unknown_op) registered BEFORE the beads backend, a
+// bead id still resolves against beads. Without skipping unknown_op the
+// first backend's answer would end the call.
+func TestIssueChildrenBeadsWithJiraRegistered(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-issue-jira-like", map[string]string{}, unknownOpResponse)
+	writeOpAwareFakeBackend(t, "backend-issue-beads-like", map[string]string{"children": childrenResponse}, notFoundResponse)
+	writeIssueConfigForBackends(t, "backend-issue-jira-like", "backend-issue-beads-like")
+
+	stdout, _, code := executePr(t, []string{"issue", "children", "bd-1"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	if kids := decodeChildren(t, stdout); len(kids) != 2 || kids[0].ID != "bd-1.1" {
+		t.Fatalf("children = %+v", kids)
+	}
+
+	// Pinning the backend that lacks the op reports unknown_op, not a skip.
+	stdout, _, code = executePr(t, []string{"issue", "children", "bd-1", "--backend", "backend-issue-jira-like"})
+	if code == 0 || !strings.Contains(stdout, `"unknown_op"`) {
+		t.Fatalf("pinned to the backend without the op: code = %d, stdout=%s; want non-zero unknown_op", code, stdout)
+	}
+}
+
+// TestIssueChildren_NoBackendImplementsOpIsUnknownOp: every registered
+// backend lacking the op fails the call with unknown_op (fail closed).
+func TestIssueChildren_NoBackendImplementsOpIsUnknownOp(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-issue-no-children-a", map[string]string{}, unknownOpResponse)
+	writeOpAwareFakeBackend(t, "backend-issue-no-children-b", map[string]string{}, unknownOpResponse)
+	writeIssueConfigForBackends(t, "backend-issue-no-children-a", "backend-issue-no-children-b")
+
+	stdout, _, code := executePr(t, []string{"issue", "children", "bd-1"})
+	if code == 0 || !strings.Contains(stdout, `"unknown_op"`) {
+		t.Fatalf("code = %d, stdout=%s; want non-zero unknown_op", code, stdout)
+	}
+}
+
+// TestIssueChildren_UnknownIDWithOneBackendLackingOpIsNotFound: a not_found
+// from the backend that does implement the op wins over the other backend's
+// unknown_op, since it says the id is unknown.
+func TestIssueChildren_UnknownIDWithOneBackendLackingOpIsNotFound(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-issue-lacks-op", map[string]string{}, unknownOpResponse)
+	writeOpAwareFakeBackend(t, "backend-issue-has-op", map[string]string{"children": notFoundResponse}, unknownOpResponse)
+	writeIssueConfigForBackends(t, "backend-issue-has-op", "backend-issue-lacks-op")
+
+	stdout, _, code := executePr(t, []string{"issue", "children", "zz-9"})
+	if code == 0 || !strings.Contains(stdout, `"not_found"`) {
+		t.Fatalf("code = %d, stdout=%s; want non-zero not_found", code, stdout)
+	}
+}
+
+// TestIssueChildren_OtherErrorShortCircuits: an error that is neither
+// not_found nor unknown_op ends the call; the next backend is never tried.
+func TestIssueChildren_OtherErrorShortCircuits(t *testing.T) {
+	writeOpAwareFakeBackend(t, "backend-issue-erroring", map[string]string{
+		"children": `{"protocolVersion":1,"schemaVersion":1,"error":{"code":"unavailable","message":"bd down"}}`,
+	}, unknownOpResponse)
+	writeOpAwareFakeBackend(t, "backend-issue-healthy", map[string]string{"children": childrenResponse}, unknownOpResponse)
+	writeIssueConfigForBackends(t, "backend-issue-erroring", "backend-issue-healthy")
+
+	stdout, _, code := executePr(t, []string{"issue", "children", "bd-1"})
+	if code == 0 || !strings.Contains(stdout, `"unavailable"`) || strings.Contains(stdout, "bd-1.1") {
+		t.Fatalf("code = %d, stdout=%s; want the first backend's unavailable error and no children", code, stdout)
+	}
+}

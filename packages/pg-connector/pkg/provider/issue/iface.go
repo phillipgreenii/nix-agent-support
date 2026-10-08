@@ -174,3 +174,22 @@ type Provider interface {
 	// of ownership, silently defeats that resolution policy.
 	Deps(ctx context.Context, id string, full bool) (*schema.IssueDepsResult, error)
 }
+
+// ChildrenLister is an OPTIONAL issue provider capability (bead pg2-nd60k,
+// daily-focus design item (t)): a backend that can list an issue's direct
+// children implements it, and NewDispatchTable then registers the read-only
+// "children" op. It is asserted via a type-check rather than folded into
+// Provider, as pkg/provider.AuthChecker is, so a backend that does not
+// implement it (today issue-jira) has the op absent from its
+// capabilities.ops and a call answers the wire-level unknown_op error — no
+// new error code exists for it.
+type ChildrenLister interface {
+	// Children returns the NON-CLOSED direct children of issue id (the
+	// beads backend: open, in_progress, blocked and deferred). A success
+	// with an empty list means "no children"; any failure is an error, and
+	// a caller MUST treat it as "unknown", never as "no children". For an
+	// id the backend does NOT recognize at all it MUST answer not_found, so
+	// DispatchTargeted's multi-instance try-each resolution policy can fall
+	// through to the next registered backend.
+	Children(ctx context.Context, id string) (*schema.IssueChildrenResult, error)
+}

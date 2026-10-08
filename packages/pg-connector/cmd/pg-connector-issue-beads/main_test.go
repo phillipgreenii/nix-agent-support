@@ -339,3 +339,80 @@ func TestNewDispatchTable_ListActivityConformance(t *testing.T) {
 		t.Errorf("no-config error code = %q, want unavailable", res.ErrorCode)
 	}
 }
+
+// serveOnce runs one request through scriptout.ServeLoop against table, as
+// main() would, and returns the exit code and the decoded response.
+func serveOnce(t *testing.T, table scriptout.DispatchTable, request string) (int, scriptout.Response) {
+	t.Helper()
+	origStdin, origStdout := os.Stdin, os.Stdout
+	defer func() { os.Stdin, os.Stdout = origStdin, origStdout }()
+	inR, inW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	outR, outW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stdin, os.Stdout = inR, outW
+	if _, err := inW.WriteString(request); err != nil {
+		t.Fatalf("write request: %v", err)
+	}
+	_ = inW.Close()
+	code := scriptout.ServeLoop(table)
+	_ = outW.Close()
+	raw, err := io.ReadAll(outR)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	var resp scriptout.Response
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		t.Fatalf("decode response: %v (stdout=%s)", err, raw)
+	}
+	return code, resp
+}
+
+// TestIssueChildrenBeads (bead pg2-nd60k) proves this binary advertises and
+// serves the optional children op end to end: it is in capabilities.ops
+// (derived from the table), carries the current issue schema version, and a
+// request round-trips to a {"children": [...]} result of the non-closed
+// direct children.
+func TestIssueChildrenBeads(t *testing.T) {
+	backend := internal.New(&fakeRunner{handle: func(args []string) (string, error) {
+		switch args[0] {
+		case "show":
+			return `{"data":[{"id":"tp-1","title":"parent","status":"open","priority":2}],"schema_version":1}`, nil
+		case "list":
+			return `{"data":[{"id":"tp-1.1","title":"kid","status":"in_progress","priority":2,"parent":"tp-1","labels":["l"]}],"schema_version":1}`, nil
+		}
+		return `{"data":{"error":"unsupported op in this fake"},"schema_version":1}`, nil
+	}})
+	table := newDispatchTable(backend)
+
+	entry, ok := table["children"]
+	if !ok {
+		t.Fatal("children missing from this binary's dispatch table")
+	}
+	if entry.SchemaVersion != schema.IssueSchemaVersion {
+		t.Fatalf("children schema version = %d, want %d", entry.SchemaVersion, schema.IssueSchemaVersion)
+	}
+	found := false
+	for _, op := range table.Ops() {
+		found = found || op == "children"
+	}
+	if !found {
+		t.Fatalf("capabilities ops = %v, want children", table.Ops())
+	}
+
+	code, resp := serveOnce(t, table, `{"op":"children","args":{"id":"tp-1"}}`)
+	if code != 0 || resp.Error != nil {
+		t.Fatalf("code = %d, error = %+v", code, resp.Error)
+	}
+	var result schema.IssueChildrenResult
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	if len(result.Children) != 1 || result.Children[0].ID != "tp-1.1" || result.Children[0].State != "in_progress" {
+		t.Fatalf("children = %+v", result.Children)
+	}
+}

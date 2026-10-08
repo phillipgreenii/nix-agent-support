@@ -120,6 +120,29 @@ func Dispatch(ctx context.Context, reg *Registry, entityType, op string, args an
 // EVERY Tier-1 verb" bullet, threaded onto every id-keyed targeted op the
 // same way Dispatch's own pinned path handles the id-less case above.
 func DispatchTargeted(ctx context.Context, reg *Registry, entityType, op string, args any, pinned string) (*scriptout.Response, error) {
+	return dispatchTargeted(ctx, reg, entityType, op, args, pinned, false)
+}
+
+// DispatchTargetedOptional is DispatchTargeted for an OPTIONAL op: one only
+// some backends of the capability implement (issue children, an
+// issue.ChildrenLister). It differs in one respect: a backend answering
+// unknown_op does not implement the op at all, so it is skipped like a
+// not_found backend and the next registered one is tried, instead of the
+// unknown_op short-circuiting the whole call. Every other error still
+// short-circuits unchanged. Without this, with both issue backends
+// registered, an id that reaches a backend lacking the op first would answer
+// unknown_op and never try the backend that implements it.
+//
+// When no backend produces an answer, the aggregate is a not_found if any
+// backend answered not_found (the id is unknown to every backend that could
+// have answered), otherwise the last unknown_op (no registered backend
+// implements the op). Either way the caller gets an error, so a fail-closed
+// consumer fails closed. A pin still skips the loop entirely.
+func DispatchTargetedOptional(ctx context.Context, reg *Registry, entityType, op string, args any, pinned string) (*scriptout.Response, error) {
+	return dispatchTargeted(ctx, reg, entityType, op, args, pinned, true)
+}
+
+func dispatchTargeted(ctx context.Context, reg *Registry, entityType, op string, args any, pinned string, skipUnknownOp bool) (*scriptout.Response, error) {
 	backends, err := resolveBackends(reg, entityType)
 	if err != nil {
 		return nil, err
@@ -133,17 +156,31 @@ func DispatchTargeted(ctx context.Context, reg *Registry, entityType, op string,
 	}
 	var resp *scriptout.Response
 	var callErr error
+	var notFoundResp *scriptout.Response
+	var notFoundErr error
 	for _, b := range backends {
 		resp, callErr = invokeOne(ctx, reg, b, op, args)
-		if callErr == nil || !errors.Is(callErr, scriptout.ErrNotFound) {
-			// Success, or any error other than not_found: short-circuit
-			// immediately and return as-is — never swallowed to fall
-			// through to the next backend.
+		if callErr == nil {
+			return resp, nil
+		}
+		switch {
+		case errors.Is(callErr, scriptout.ErrNotFound):
+			// not_found: try the next registered backend.
+			notFoundResp, notFoundErr = resp, callErr
+		case skipUnknownOp && errors.Is(callErr, scriptout.ErrUnknownOp):
+			// This backend does not implement the optional op: try the
+			// next registered backend.
+		default:
+			// Any other error: short-circuit immediately and return as-is
+			// — never swallowed to fall through to the next backend.
 			return resp, callErr
 		}
-		// not_found: try the next registered backend.
 	}
-	// Every registered backend answered not_found: that is the aggregate
-	// targeted-op result.
+	// Every registered backend answered not_found (or, for an optional op,
+	// unknown_op): that is the aggregate targeted-op result. An optional
+	// op's not_found wins over unknown_op, since it says the id is unknown.
+	if notFoundErr != nil {
+		return notFoundResp, notFoundErr
+	}
 	return resp, callErr
 }

@@ -386,3 +386,48 @@ func TestCacheContract_ShowIsADetailEntityTheCacheCanKey(t *testing.T) {
 		t.Fatalf("show of a missing issue: err=%v code=%q, want not_found", err, code)
 	}
 }
+
+// TestIssueChildrenUnsupportedBackendIsUnknownOp (bead pg2-nd60k): this
+// backend does not implement the optional children op, so it is absent from
+// capabilities.ops and a call answers the wire-level unknown_op error (no
+// eighth error code exists for it).
+func TestIssueChildrenUnsupportedBackendIsUnknownOp(t *testing.T) {
+	table := newDispatchTable(newTestBackend())
+	if _, ok := table["children"]; ok {
+		t.Fatal("children must not be registered for a backend without issue.ChildrenLister")
+	}
+	for _, op := range table.Ops() {
+		if op == "children" {
+			t.Fatalf("capabilities ops = %v must not advertise children", table.Ops())
+		}
+	}
+
+	origStdin, origStdout := os.Stdin, os.Stdout
+	defer func() { os.Stdin, os.Stdout = origStdin, origStdout }()
+	inR, inW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	outR, outW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stdin, os.Stdout = inR, outW
+	if _, err := inW.WriteString(`{"op":"children","args":{"id":"PROJ-1"}}`); err != nil {
+		t.Fatalf("write request: %v", err)
+	}
+	_ = inW.Close()
+	scriptout.ServeLoop(table)
+	_ = outW.Close()
+	raw, err := io.ReadAll(outR)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	var resp scriptout.Response
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		t.Fatalf("decode response: %v (stdout=%s)", err, raw)
+	}
+	if resp.Error == nil || resp.Error.Code != "unknown_op" {
+		t.Fatalf("response = %s, want error.code unknown_op", raw)
+	}
+}

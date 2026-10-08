@@ -19,7 +19,8 @@ import (
 // NewDispatchTable builds the issue capability's op-dispatch table for p:
 // show, create, comment, transition, list, update, close, and deps
 // always; auth_status only when p
-// also implements pkg/provider.AuthChecker, asserted via a type-check
+// also implements pkg/provider.AuthChecker, and children only when p
+// implements ChildrenLister (iface.go), each asserted via a type-check
 // rather than folded into the Provider interface. Every handler passes p's
 // returned error straight through unwrapped — a well-behaved Provider
 // implementation (built by a Tier-2 issue backend packet) is responsible
@@ -183,6 +184,24 @@ func NewDispatchTable(p Provider) scriptout.DispatchTable {
 					return scriptout.AuthStatus{State: scriptout.AuthMissing, Detail: err.Error()}, nil
 				}
 				return scriptout.AuthStatus{State: scriptout.AuthOK}, nil
+			},
+		}
+	}
+
+	// children (bead pg2-nd60k) is optional the same way: a provider not
+	// implementing ChildrenLister leaves the op out of the table, so it is
+	// absent from capabilities.ops and a call answers unknown_op.
+	if cl, ok := p.(ChildrenLister); ok {
+		table["children"] = scriptout.OpHandler{
+			SchemaVersion: schema.IssueSchemaVersion,
+			Handle: func(ctx context.Context, args json.RawMessage) (any, error) {
+				var a struct {
+					ID string `json:"id"`
+				}
+				if err := scriptout.Decode(args, &a); err != nil {
+					return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "decode children args: "+err.Error())
+				}
+				return cl.Children(ctx, a.ID)
 			},
 		}
 	}

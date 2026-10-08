@@ -1280,3 +1280,124 @@ func TestBackend_List_DeclaresLastCheckedAtFingerprintExclude(t *testing.T) {
 		}
 	}
 }
+
+// ----------------------------------------------------------------------
+// Children (bead pg2-nd60k)
+// ----------------------------------------------------------------------
+
+// childrenRunner answers Children's two bd reads: the parent-existence
+// `show` and the `list --parent=...` listing.
+func childrenRunner(parentExists bool, listOut string) *fakeRunner {
+	return &fakeRunner{handle: func(args []string) (string, error) {
+		switch args[0] {
+		case "show":
+			if !parentExists {
+				return `{"data":{"error":"no issues found matching the provided IDs"},"schema_version":1}`,
+					errors.New("bd show: exit status 1: no issue found matching")
+			}
+			return `{"data":[{"id":"tp-1","title":"parent","status":"open","priority":2}],"schema_version":1}`, nil
+		case "list":
+			return listOut, nil
+		}
+		return "", fmt.Errorf("unexpected bd call %v", args)
+	}}
+}
+
+// TestBackend_Children_ListsNonClosedDirectChildren pins the argv (read-only,
+// --parent= joined, --limit 0, no --all so closed children stay out) and the
+// decoded entities.
+func TestBackend_Children_ListsNonClosedDirectChildren(t *testing.T) {
+	fr := childrenRunner(true, `{"data":[`+
+		`{"id":"tp-1.1","title":"a","status":"open","priority":1,"parent":"tp-1","labels":["x"]},`+
+		`{"id":"tp-1.2","title":"b","status":"deferred","priority":2}],"schema_version":1}`)
+	got, err := New(fr).Children(context.Background(), "tp-1")
+	if err != nil {
+		t.Fatalf("Children: %v", err)
+	}
+	if len(got.Children) != 2 || got.Children[0].ID != "tp-1.1" || got.Children[0].State != "open" ||
+		got.Children[1].ID != "tp-1.2" || got.Children[1].State != "deferred" {
+		t.Fatalf("Children = %+v", got.Children)
+	}
+	if len(got.Children[0].Labels) != 1 || got.Children[0].Labels[0] != "x" {
+		t.Fatalf("labels not carried: %+v", got.Children[0])
+	}
+	list := fr.calls[len(fr.calls)-1]
+	want := []string{"list", "--parent=tp-1", "--readonly", "--json", "--limit", "0"}
+	if strings.Join(list, " ") != strings.Join(want, " ") {
+		t.Fatalf("list argv = %v, want %v", list, want)
+	}
+	if containsArg(list, "--all") {
+		t.Fatalf("list argv %v must not pass --all (closed children are excluded)", list)
+	}
+}
+
+// TestBackend_Children_NoChildrenIsEmptyNonNilList: success with an empty
+// array means "no children" and must encode as [], not null.
+func TestBackend_Children_NoChildrenIsEmptyNonNilList(t *testing.T) {
+	got, err := New(childrenRunner(true, `{"data":[],"schema_version":1}`)).Children(context.Background(), "tp-1")
+	if err != nil {
+		t.Fatalf("Children: %v", err)
+	}
+	if got.Children == nil || len(got.Children) != 0 {
+		t.Fatalf("Children = %#v, want a non-nil empty slice", got.Children)
+	}
+}
+
+// TestBackend_Children_UnknownParentIsNotFound: bd list --parent answers an
+// empty list for a missing parent, so Children must resolve the parent first
+// and answer not_found (which lets the umbrella try the next backend).
+func TestBackend_Children_UnknownParentIsNotFound(t *testing.T) {
+	fr := childrenRunner(false, `{"data":[],"schema_version":1}`)
+	_, err := New(fr).Children(context.Background(), "nope-1")
+	if !errors.Is(err, scriptout.ErrNotFound) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrNotFound)", err)
+	}
+	for _, c := range fr.calls {
+		if c[0] == "list" {
+			t.Fatalf("list must not run for an unknown parent, calls = %v", fr.calls)
+		}
+	}
+}
+
+// TestBackend_Children_FailsClosed: a bd failure or an undecodable payload
+// is an error, never an empty (apparently childless) result.
+func TestBackend_Children_FailsClosed(t *testing.T) {
+	t.Run("list fails", func(t *testing.T) {
+		fr := &fakeRunner{handle: func(args []string) (string, error) {
+			if args[0] == "show" {
+				return `{"data":[{"id":"tp-1","title":"p","status":"open"}],"schema_version":1}`, nil
+			}
+			return "", errors.New("bd list: exit status 1: connection refused")
+		}}
+		got, err := New(fr).Children(context.Background(), "tp-1")
+		if err == nil || got != nil {
+			t.Fatalf("got %+v, err %v; want a nil result and an error", got, err)
+		}
+	})
+	t.Run("list payload undecodable", func(t *testing.T) {
+		got, err := New(childrenRunner(true, `{"data":{"not":"an array"},"schema_version":1}`)).Children(context.Background(), "tp-1")
+		if err == nil || got != nil {
+			t.Fatalf("got %+v, err %v; want a nil result and an error", got, err)
+		}
+	})
+	t.Run("empty id", func(t *testing.T) {
+		fr := &fakeRunner{}
+		_, err := New(fr).Children(context.Background(), " ")
+		if !errors.Is(err, scriptout.ErrInvalidArgument) || len(fr.calls) != 0 {
+			t.Fatalf("err = %v, calls = %v; want invalid_argument and no bd call", err, fr.calls)
+		}
+	})
+}
+
+// TestBackend_Children_IDLooksLikeBDFlag: the id travels as the value of
+// --parent=, so a flag-shaped id cannot be read as a bd flag.
+func TestBackend_Children_IDLooksLikeBDFlag(t *testing.T) {
+	fr := childrenRunner(true, `{"data":[],"schema_version":1}`)
+	if _, err := New(fr).Children(context.Background(), "--all"); err != nil {
+		t.Fatalf("Children: %v", err)
+	}
+	list := fr.calls[len(fr.calls)-1]
+	if !containsArg(list, "--parent=--all") || containsArg(list, "--all") {
+		t.Fatalf("list argv = %v, want the id only inside --parent=--all", list)
+	}
+}

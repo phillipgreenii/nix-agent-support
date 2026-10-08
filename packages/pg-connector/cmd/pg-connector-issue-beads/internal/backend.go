@@ -46,6 +46,10 @@ func New(r Runner) *Backend {
 // Provider interface.
 var _ issue.Provider = (*Backend)(nil)
 
+// Compile-time check that Backend also implements the optional children
+// capability (bead pg2-nd60k).
+var _ issue.ChildrenLister = (*Backend)(nil)
+
 // Workspace reports the bd workspace directory this Backend's Runner is
 // (or would be) pinned to, without invoking bd — main.go's capabilities
 // handler uses this to advertise which tracker this backend instance
@@ -579,4 +583,47 @@ func (b *Backend) Deps(ctx context.Context, id string, full bool) (*schema.Issue
 		}
 	}
 	return &schema.IssueDepsResult{IDs: ids, Entities: entities}, nil
+}
+
+// Children implements issue.ChildrenLister via `bd list --parent=<id>
+// --json --limit 0 --readonly` (bead pg2-nd60k, daily-focus design item
+// (t)): the NON-CLOSED direct children of id (bd list excludes closed ones
+// unless --all is passed, which this op deliberately does not).
+//
+// The argv is built here, not taken from a configured query: a query
+// expression is a static argv (parseBDListExpr) and cannot carry a per-call
+// parent id. The id is joined to --parent with "=" so pflag cannot read an
+// id that looks like a flag as one (verified against bd v1.2.2: the "="
+// form takes the value literally), the same defence Show gets from its "--"
+// terminator.
+//
+// bd list --parent answers an EMPTY list for a parent that does not exist,
+// which would be indistinguishable from "no children" and would defeat
+// DispatchTargeted's try-each resolution policy (a non-bead key reaching
+// this backend first would "succeed" with no children). So the parent is
+// resolved with Show first, and an unknown id answers not_found. Both reads
+// are read-only, and any failure of either is returned as an error rather
+// than an empty list, so a caller can fail closed.
+func (b *Backend) Children(ctx context.Context, id string) (*schema.IssueChildrenResult, error) {
+	if strings.TrimSpace(id) == "" {
+		return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "issue: id required")
+	}
+	if _, err := b.Show(ctx, id); err != nil {
+		return nil, err
+	}
+	data, err := b.run(ctx, "list", "--parent="+id, "--readonly", "--json", "--limit", "0")
+	if err != nil {
+		return nil, err
+	}
+	issues, err := bdIssuesFromArray(data)
+	if err != nil {
+		return nil, err
+	}
+	tracker := b.tracker()
+	asOf := time.Now().UTC()
+	children := make([]schema.Issue, 0, len(issues))
+	for i := range issues {
+		children = append(children, *toSchemaIssue(&issues[i], tracker, asOf))
+	}
+	return &schema.IssueChildrenResult{Children: children}, nil
 }

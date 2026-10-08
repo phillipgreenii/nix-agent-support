@@ -277,7 +277,7 @@ distinction come from the behavior-docs method
 
   A capability's registry entry naming more than one backend resolves differently depending on
   whether the op is **id-keyed** (`show`, `files`, `commits`, `review submit`, `review pending`, `comment`, `transition`, `update`,
-  `close`, `deps`, `get_logs`, `rerun_failed`, `mail`'s `show`, `mark_read`, `mark_unread`, `archive`,
+  `close`, `deps`, `children` (an optional op: a backend answering `unknown_op` is skipped like a `not_found` one), `get_logs`, `rerun_failed`, `mail`'s `show`, `mark_read`, `mark_unread`, `archive`,
   `unarchive` and `fetch_attachment`, every `scm` targeted verb) or an **id-less write**
   (`issue create` today, the only member) — a split fixed
   by bead pg2-2j5ac.17.2's own operator ruling, deliberately narrow (see this rule's final

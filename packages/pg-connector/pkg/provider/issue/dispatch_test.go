@@ -557,3 +557,67 @@ func TestNewDispatchTable_AuthStatusPresentWithAuthChecker_Failure(t *testing.T)
 		t.Fatalf("result = %#v", result)
 	}
 }
+
+// fakeProviderWithChildren additionally implements the optional
+// ChildrenLister, to exercise NewDispatchTable's type-check-asserted
+// children entry (bead pg2-nd60k).
+type fakeProviderWithChildren struct {
+	fakeProvider
+	childrenFn func(ctx context.Context, id string) (*schema.IssueChildrenResult, error)
+}
+
+func (f *fakeProviderWithChildren) Children(ctx context.Context, id string) (*schema.IssueChildrenResult, error) {
+	return f.childrenFn(ctx, id)
+}
+
+func TestNewDispatchTable_ChildrenAbsentWithoutChildrenLister(t *testing.T) {
+	table := NewDispatchTable(&fakeProvider{})
+	if _, ok := table["children"]; ok {
+		t.Fatal("children entry present for a Provider not implementing ChildrenLister")
+	}
+}
+
+func TestNewDispatchTable_ChildrenPresentWithChildrenLister(t *testing.T) {
+	var gotID string
+	p := &fakeProviderWithChildren{childrenFn: func(ctx context.Context, id string) (*schema.IssueChildrenResult, error) {
+		gotID = id
+		return &schema.IssueChildrenResult{Children: []schema.Issue{{ID: "issue-1.1", State: "open"}}}, nil
+	}}
+	table := NewDispatchTable(p)
+	entry, ok := table["children"]
+	if !ok {
+		t.Fatal("children entry missing for a Provider implementing ChildrenLister")
+	}
+	if entry.SchemaVersion != schema.IssueSchemaVersion {
+		t.Fatalf("SchemaVersion = %d, want %d", entry.SchemaVersion, schema.IssueSchemaVersion)
+	}
+	result, err := entry.Handle(context.Background(), json.RawMessage(`{"id":"issue-1"}`))
+	if err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	got, ok := result.(*schema.IssueChildrenResult)
+	if gotID != "issue-1" || !ok || len(got.Children) != 1 || got.Children[0].ID != "issue-1.1" {
+		t.Fatalf("id = %q, result = %#v", gotID, result)
+	}
+}
+
+func TestNewDispatchTable_Children_ErrorsPassThroughUnwrapped(t *testing.T) {
+	p := &fakeProviderWithChildren{childrenFn: func(ctx context.Context, id string) (*schema.IssueChildrenResult, error) {
+		return nil, scriptout.WrapError(scriptout.ErrNotFound, "no such issue")
+	}}
+	_, err := NewDispatchTable(p)["children"].Handle(context.Background(), json.RawMessage(`{"id":"x"}`))
+	if !errors.Is(err, scriptout.ErrNotFound) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrNotFound)", err)
+	}
+}
+
+func TestNewDispatchTable_Children_DecodeFailureIsInvalidArgument(t *testing.T) {
+	p := &fakeProviderWithChildren{childrenFn: func(ctx context.Context, id string) (*schema.IssueChildrenResult, error) {
+		t.Fatal("Children must not be invoked when args fail to decode")
+		return nil, nil
+	}}
+	_, err := NewDispatchTable(p)["children"].Handle(context.Background(), json.RawMessage(`{not valid json`))
+	if !errors.Is(err, scriptout.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrInvalidArgument)", err)
+	}
+}

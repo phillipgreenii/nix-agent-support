@@ -74,7 +74,13 @@ import "encoding/json"
 // and finished work apart without listing status names) — same "any
 // field-shape change bumps the version" precedent as every earlier bump on
 // this constant.
-const IssueSchemaVersion = 8
+//
+// Bumped 8 -> 9 by bead pg2-nd60k, which added the read-only "children" op
+// and its IssueChildrenResult wire shape below (the focus decider's "no
+// open children" hold read) — same "a capability gaining a whole new op's
+// wire shape bumps its one schemaVersion integer" precedent as the 3 -> 4
+// bump for the list op.
+const IssueSchemaVersion = 9
 
 // Issue is the issue capability's shared JSON wire shape, returned by the
 // issue capability's "show" and "create" ops and carried by
@@ -304,4 +310,19 @@ type IssueListResult struct {
 type IssueDepsResult struct {
 	IDs      []string `json:"ids"`
 	Entities []Issue  `json:"entities,omitempty"`
+}
+
+// IssueChildrenResult is the "children" op's wire result payload for the
+// issue capability (bead pg2-nd60k, daily-focus design item (t)): the
+// NON-CLOSED direct children of one issue, each the same Issue shape "show"
+// returns (INV-VER-1 — no separate schema for this).
+//
+// Children is always present on the wire, never null: a success with an
+// empty list means "this issue has no non-closed children". Which states
+// count as non-closed is the backend's own: the beads backend returns open,
+// in_progress, blocked and deferred children (bd list --parent excludes
+// closed ones), and a caller that wants to ignore deferred ones filters on
+// the State it reads.
+type IssueChildrenResult struct {
+	Children []Issue `json:"children"`
 }

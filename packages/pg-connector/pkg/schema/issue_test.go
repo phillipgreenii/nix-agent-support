@@ -159,13 +159,13 @@ func TestIssueDepsResult_IDsPopulatedRegardlessOfFull_EntitiesOmittedWhenEmpty(t
 	}
 }
 
-// TestIssueSchemaVersion_PinnedAtEightAndRegistered pins the issue
-// capability's schema version at 8 (bead pg2-mj0jv bumped 7 -> 8 for the
-// StatusCategory field) and that CurrentSchemaVersions derives from the
+// TestIssueSchemaVersion_PinnedAtNineAndRegistered pins the issue
+// capability's schema version at 9 (bead pg2-nd60k bumped 8 -> 9 for the
+// children op; pg2-mj0jv's earlier 7 -> 8 added the StatusCategory field) and that CurrentSchemaVersions derives from the
 // constant rather than carrying its own copy.
-func TestIssueSchemaVersion_PinnedAtEightAndRegistered(t *testing.T) {
-	if IssueSchemaVersion != 8 {
-		t.Fatalf("IssueSchemaVersion = %d, want 8 (7 -> 8 by bead pg2-mj0jv)", IssueSchemaVersion)
+func TestIssueSchemaVersion_PinnedAtNineAndRegistered(t *testing.T) {
+	if IssueSchemaVersion != 9 {
+		t.Fatalf("IssueSchemaVersion = %d, want 9 (8 -> 9 by bead pg2-nd60k)", IssueSchemaVersion)
 	}
 	if got := CurrentSchemaVersions["issue"]; got != IssueSchemaVersion {
 		t.Fatalf(`CurrentSchemaVersions["issue"] = %d, want %d`, got, IssueSchemaVersion)
@@ -198,5 +198,29 @@ func TestIssue_StatusCategory_JSONRoundTrip(t *testing.T) {
 	}
 	if strings.Contains(string(raw), "status_category") {
 		t.Fatalf("empty StatusCategory must be omitted, got %s", raw)
+	}
+}
+
+// TestIssueChildrenResult_JSONShape: the wire key is children, each entry is
+// the shared Issue shape, and an empty result still carries an empty array
+// (never null), so a consumer can tell "no children" from a malformed reply.
+func TestIssueChildrenResult_JSONShape(t *testing.T) {
+	raw, err := json.Marshal(IssueChildrenResult{Children: []Issue{{ID: "c-1", State: "open"}}})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var back IssueChildrenResult
+	if err := json.Unmarshal(raw, &back); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(back.Children) != 1 || back.Children[0].ID != "c-1" || back.Children[0].State != "open" {
+		t.Fatalf("round trip = %+v (raw %s)", back, raw)
+	}
+	empty, err := json.Marshal(IssueChildrenResult{Children: []Issue{}})
+	if err != nil {
+		t.Fatalf("marshal empty: %v", err)
+	}
+	if string(empty) != `{"children":[]}` {
+		t.Fatalf("empty result = %s, want {\"children\":[]}", empty)
 	}
 }

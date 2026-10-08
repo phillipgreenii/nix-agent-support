@@ -64,6 +64,7 @@ func newIssueCmd() *cobra.Command {
 	issueCmd.AddCommand(newIssueUpdateCmd())
 	issueCmd.AddCommand(newIssueCloseCmd())
 	issueCmd.AddCommand(newIssueDepsCmd())
+	issueCmd.AddCommand(newIssueChildrenCmd())
 	issueCmd.AddCommand(newIssueChangesCmd())
 	return issueCmd
 }
@@ -295,6 +296,37 @@ func newIssueDepsCmd() *cobra.Command {
 		return reportIssueTargetedOutcome(cmd, resp, dispatchErr, humanizeIssueDeps)
 	}
 	cmd.Flags().BoolVar(&full, "full", false, "return full issue entities for each dependency, not just ids")
+	return cmd
+}
+
+// newIssueChildrenCmd is bead pg2-nd60k's read-only "issue children <id>":
+// the non-closed direct children of one issue (daily-focus design item
+// (t); the focus decider's "no open children" hold read). It is a LIVE
+// read: it dispatches straight to the backend and never reads or writes the
+// umbrella entity cache, so a stale cache can never make an issue look
+// childless. An error (any, including an unknown_op from a backend without
+// the op) means "unknown", never "no children": a caller MUST fail closed.
+//
+// The op is optional per backend (issue.ChildrenLister), so it dispatches
+// through DispatchTargetedOptional: a backend answering unknown_op is
+// skipped and the next registered backend is tried.
+func newIssueChildrenCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "children <id>",
+		Short: "List an issue's non-closed direct children (live read)",
+		Args:  cobra.ExactArgs(1),
+	}
+	backendFlag := addBackendFlag(cmd, "pin to exactly this backend, skipping the multi-instance try-each resolution policy")
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		reg, err := LoadRegistry()
+		if err != nil {
+			return reportIssueTargetedOutcome(cmd, nil, err, humanizeIssueChildren)
+		}
+		resp, dispatchErr := DispatchTargetedOptional(cmd.Context(), reg, "issue", "children", map[string]string{
+			"id": args[0],
+		}, *backendFlag)
+		return reportIssueTargetedOutcome(cmd, resp, dispatchErr, humanizeIssueChildren)
+	}
 	return cmd
 }
 
@@ -574,6 +606,25 @@ func humanizeIssueDeps(raw json.RawMessage) (string, error) {
 		fmt.Fprintf(&b, "deps (%d): %s\n", len(result.IDs), strings.Join(result.IDs, ", "))
 	}
 	for _, issue := range result.Entities {
+		fmt.Fprintf(&b, "  [%s] %q [%s]\n", issue.ID, issue.Title, issue.State)
+	}
+	return strings.TrimRight(b.String(), "\n"), nil
+}
+
+// humanizeIssueChildren formats an `issue children` result
+// (schema.IssueChildrenResult) for human display (bead pg2-nd60k): one
+// summary line per non-closed direct child.
+func humanizeIssueChildren(raw json.RawMessage) (string, error) {
+	var result schema.IssueChildrenResult
+	if err := scriptout.Decode(raw, &result); err != nil {
+		return "", err
+	}
+	if len(result.Children) == 0 {
+		return "children: (none)", nil
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "children (%d):\n", len(result.Children))
+	for _, issue := range result.Children {
 		fmt.Fprintf(&b, "  [%s] %q [%s]\n", issue.ID, issue.Title, issue.State)
 	}
 	return strings.TrimRight(b.String(), "\n"), nil
