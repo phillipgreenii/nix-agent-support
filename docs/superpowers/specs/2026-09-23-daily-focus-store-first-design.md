@@ -62,7 +62,7 @@ precedent already set twice earlier in the same session; it is superseded, kept 
 
 | #     | Decision                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| D-F1  | Daily-focus's PR candidate gathering reuses pg-desk's existing `pr-mine`/`pr-team` watch queries unchanged. Issue-type candidates (Jira issues, epics, bd tasks) are persisted by the same pull-through that serves PRs: pg-desk lists each name in `watch.issue.queries` with `pg-connector issue list --fingerprints`, hydrates added or changed entities through `issue show`, and persists them (`docs/behavior/pg-desk/changes.md`; the generic issue-entity pipeline of closed bead `pg2-2j5ac.46`, landed). This document therefore adds NO new gather code; it adds three named queries to `watch.issue.queries` (section 4.2). An earlier revision of this document treated issue-entity gather as an unlanded external prerequisite; that framing is retired.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| D-F1  | Daily-focus's PR candidate gathering reuses pg-desk's existing `pr-mine`/`pr-team` watch queries unchanged. Issue-type candidates (Jira issues, epics, bd tasks) are persisted by the same pull-through that serves PRs: pg-desk lists each name in `watch.issue.queries` with `pg-connector issue list --fingerprints`, hydrates added or changed entities through `issue show`, and persists them (`docs/behavior/pg-desk/changes.md`; the generic issue-entity pipeline of closed bead `pg2-2j5ac.46`, landed). This document therefore adds NO new gather code; it adds two named queries to `watch.issue.queries` (section 4.2). An earlier revision of this document treated issue-entity gather as an unlanded external prerequisite; that framing is retired.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | D-F2  | `pg-connector-pr-github`'s `mine` query stays scoped to the single repository the deployment configures (one repo), narrowing daily-focus's PR survey from v2's cross-repo author search. Recorded loss, same pattern as the design of record's D15. The repository itself is deployment configuration and is not named here.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | D-F3  | `df-deferred`'s description-marker-section mechanism retires entirely. "Deferred" is derived: candidates the store already holds that are not `focus_selection`-selected for the period. No description grammar, no lost-update hazard, no size cost.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | D-F4  | The per-day "focus bead" (one bead with wired blocking deps) retires. "Today's focus" becomes a `pg-desk` view/query (`focus_selection`/`focus_period`, §5), generalizing to week/sprint via a `period_type` column rather than a new bead type per level (not built this phase — schema-ready only). Beads stay reserved for actual agent-workable signals (D8), never for human plan-tracking.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
@@ -92,7 +92,7 @@ precedent already set twice earlier in the same session; it is superseded, kept 
 flowchart LR
     subgraph watch["pg-desk pull-through (watch queries)"]
         W1["pr: pr-mine / pr-team (existing)"]
-        W2["issue: assigned-to-me, Jira-assigned,\nopen-beads bulk (section 4.2)"]
+        W2["issue: assigned-to-me Jira,\nopen-beads bulk (section 4.2)"]
     end
     subgraph store["pg-desk store"]
         E["entity + interpretation + links"]
@@ -262,8 +262,9 @@ CREATE TABLE focus_selection (
                                        -- 'dropped' is a NON-terminal loss of candidacy only (never
                                        -- rank drift, never a finished source, D-F18, D-F22)
     source          TEXT NOT NULL,    -- 'ranked' | 'forced' | 'handadded' | 'pulled'
-    rank_position   INTEGER,          -- the row's place in the frozen plan: its position in the
-                                       -- draft that was locked (D-F22)
+    rank_position   INTEGER,          -- the row's place in the frozen plan: a dense per-period
+                                       -- lock sequence (section 7.2 step 5), the draft position
+                                       -- only for the first lock (D-F22)
     tier            TEXT,             -- 'overdue' | 'started' | 'not_started' as of that draft
     cap             INTEGER,          -- the cap in force for that run
     UNIQUE (focus_period_id, repo, entity_type, entity_id),
@@ -272,6 +273,7 @@ CREATE TABLE focus_selection (
     CHECK (tier IS NULL OR tier IN ('overdue', 'started', 'not_started')),
     CHECK ((status = 'struck') = (struck_at IS NOT NULL)),
     CHECK ((status = 'struck') = (struck_reason IS NOT NULL)),
+    CHECK (struck_reason IS NULL OR struck_reason IN ('operator', 'cap', 'dropped')),
     FOREIGN KEY (focus_period_id) REFERENCES focus_period (id),
     FOREIGN KEY (repo, entity_type, entity_id) REFERENCES entity (repo, entity_type, entity_id)
 );
@@ -303,7 +305,8 @@ CREATE TABLE focus_run (
     focus_period_id INTEGER,
     started_at  TEXT NOT NULL,
     actor       TEXT NOT NULL,
-    exit_code   INTEGER NOT NULL,
+    exit_code   INTEGER,                -- NULL until the run is finalised (section 7.2 step 5); a
+                                         -- NULL left by a crash counts as outcome `total`
     digest      TEXT,                   -- the digest of the draft this run locked (D-F22), or the
                                          -- one it computed in-process when given none
     counts_json TEXT NOT NULL,          -- ranked, selected, struck by reason, forced, handadded,
@@ -372,7 +375,9 @@ present `null` means unset; `doctor` carries a line that checks the contract (se
 is what a decider reads from the entity's view; the two writes happen in `focus select`/`focus pull`'s single flow, the
 table first, and a re-run is idempotent (a row that exists and an annotation that already holds the
 value are left alone: the verb reads the current value first, so a re-run appends no redundant
-change record), so a failure between them is repaired by re-running. The table writes of one verb
+change record), so a failure between them is repaired by `select --repair`, the only repair (a second
+`select --apply --draft F` exits `7`, because the first apply changed the plan the draft was based on;
+the no-draft form of a re-run is the one that is idempotent). The table writes of one verb
 run in a single store transaction, and the per-entity annotation read-then-write holds pg-desk's
 existing per-entity lock, so two concurrent `select`/`pull` runs (two operators, or an operator and an
 agent) serialize per entity and last writer wins; the later run's echo shows what it found. The value
@@ -425,8 +430,8 @@ ownership filter that hides an assigned item:
   under one key (`focus.operator_identities`; the decomposition names it): the bd assignee defaults to
   the actor's display name (git `user.name`), the Jira connector's assignee is the display name, else
   the email, and the bd owner is an email, so a single `self_issue_owner` string cannot match them
-  all. A match is the stored assignee TRIMMED of surrounding whitespace and compared exactly and
-  case-sensitively, as `classifyOwnership` compares today; a session actor id never matches, and an
+  all. A match is the stored assignee TRIMMED of surrounding whitespace (new: `classifyOwnership`
+  compares the raw string) and compared exactly and case-sensitively, as it does today; a session actor id never matches, and an
   empty list yields no Jira and no bead candidates (a `doctor` gate, §8.2). Ownership elsewhere, for
   contrast: a PR is the operator's by AUTHORSHIP (`interpretation.ownership` is `mine` when the PR
   author is the configured self, `co-owned` when a self-authored commit is on its branch, else `team`).
@@ -451,6 +456,9 @@ and consumes one slot, and the others are not separately listed. (Only `work` li
 The group's earliest due date and highest priority are inherited as the keys below say.
 
 **Slot rule** (D-F11): an epic and its children MUST NOT consume more than one slot between them.
+(This holds for bd epics. The Jira connector maps no `parent` today, so until item (u) of section 12 a
+Jira Epic and its assigned children each take a slot, and the `show` header says so; the `source_id`
+and `dedup_key` exclusions likewise apply to beads only.)
 A child item takes the slot; the epic is NOT listed separately while it has any open child. An epic
 that is incomplete and has NO open child work is a candidate in its own right, because the operator
 must move it along (create children, split it, and so on). The rule is applied BEFORE the cap line
@@ -473,8 +481,11 @@ operator's ruling of 2026-10-08, section 4.2), so a `blocked` child IS an open c
 not take a second slot. A `blocked` child assigned to the operator is also a candidate in its own
 right, because D-F11's candidate set is every non-done assigned item (an agent reading of the ruling,
 section 12); a `deferred` child is neither. Such an epic is shown instead in a
-trailing block below the cap line, "epics with children in play" (an epic is listed there whether or
-not it is itself assigned to the operator, because an assigned child is what puts it there, D-F23),
+trailing block below the cap line, "epics with children in play" (ONE membership rule, D-F23: an epic is listed when it has an open DIRECT child that is a
+candidate, or when it is itself a candidate suppressed by an open child, and transitively through
+nested epics; an epic whose open children are all unassigned and which is not itself assigned is in
+neither the ranked slots nor this block, because in this tracker that is nearly every epic and listing
+them would drown the plan),
 sorted by (kind, key) so the block and
 the digest are deterministic, not counted against
 `cap`, each with an indicator of how many of its open children are in the plan (a join over the same
@@ -575,6 +586,13 @@ pg-desk stores. A **draft** is a document the CALLER holds and pg-desk never sto
 with no plan) and `replan` print one, `--json` carries it (members: `contract`, `mode` of `draft` or
 `plan`, `period`, `made_at`, `digest`, `base`, `cap`, the ordered rows with tier and the deciding key, the
 rows proposed for the plan, the trailing epics block), and `select --draft <path>` applies a reply to it.
+Each ordered row carries its entity key, title, tier, the key that put it ahead of the row below, due
+date, priority, the `+` flag and the `finished` and `new` marks; the document also carries the
+coverage state it was computed under, the `rank_inputs` counts and `fresh_order`. A fresh rank is
+called at `show --draft` time and at lock ONLY to compute the drift notice and `drift_rows`, never to
+order anything (the order is always the draft's, so "the rank is computed once" counts the ordering
+call). The new `focus_run.counts_json` members are `draft_digest`, `draft_age_seconds`, `drift_rows`,
+`fresh_order`, the coverage state and the claimed or deferred rows kept in the plan.
 `base` is a digest of the period's persisted plan at the moment the draft was made: the period's
 `cap` and EVERY `focus_selection` row of the period, struck rows included, in `id` order, each as
 (key, `status`, `rank_position`, `tier`, `source`, `cap`); a period with no `focus_period` row or no rows
@@ -687,7 +705,10 @@ of each watch query (§4.2). Exit `0` coverage complete, including a small routi
 (printed as a NOTICE); `2` coverage incomplete, meaning any listing `degraded` or `failed`, or a
 backlog above `focus.coverage_backlog_max` (default 10% of the active count), shown and never silently
 omitted; `3` total failure, no candidates computable; `1` an unmigrated store. A legitimately empty
-candidate set is exit `0` and prints `no candidates`, distinct from `3`.
+candidate set is exit `0` and prints `no candidates`, distinct from `3`. An EMPTY operator identity
+list is not a legitimate empty set: `show` and `replan` print `NOTICE focus.operator_identities is
+empty: no Jira issue or bead can be a candidate` and exit `2`, so the first day of a misconfigured
+store cannot look like a quiet one.
 
 **Rows of the period that are no longer ranked are still shown.** Every `focus_selection` row of the
 period appears even when its entity is no longer a candidate: an item that finished (a merged or
@@ -803,18 +824,28 @@ show or replan and re-reply`, because someone locked or struck something after t
    candidate and re-mint its bead. The echo prints a line per merge (`merged PROJ-5 into
 OWNER/REPO#400 (link recorded; no bead for PROJ-5)`), `--dry-run` lists merges, `show` marks the
    absorbed key `absorbed into <key>`, and `+<absorbedKey>` reverses a merge. Each merge appends an
-   `absorbed` row to `focus_selection_event`.
-4. Compute the final set from the draft and the plan; rank is NEVER recomputed here (D-F22). `cap` is
-   the reply's `cap=N`, else the draft's own `cap` (resolved when the draft was made: its `--cap`, else
-   the period's persisted `cap`, else the default 6), so `ok` selects exactly the rows the operator saw
-   marked `+`, never more (`show --draft` takes no `--cap`: it is a
-   usage error there, the cap is the draft's, and `select` is where `cap=N` changes it).
+   `absorbed` row to `focus_selection_event` ATTACHED TO THE KEPT KEY'S `focus_selection` row (the
+   absorbed key never has one; `reason` carries the absorbed key); when the kept key has no row yet
+   the merge is recorded as the external link only, the echo says `no event (kept key not selected)`,
+   and no event row is written.
+4. Compute the final set from the draft and the plan; rank is NEVER recomputed here (D-F22). `cap` has two
+   roles. As the INITIAL-PLAN size it is the reply's `cap=N`, else the draft's own `cap` (its `--cap`,
+   else the period's persisted `cap`, else the default 6), so a first `ok` selects exactly the rows the
+   operator saw marked `+`, never more. As a STRIKE THRESHOLD over an existing plan, ONLY a reply
+   `cap=N` counts: a `--cap` given to `replan` or `select` moves the displayed cap line and nothing
+   else, so `replan --cap 3` followed by a bare `ok` never strikes. `select --cap` together with
+   `--draft` is a usage error (the cap is the draft's, and the reply's `cap=N` is where it changes);
+   without `--draft` it sets the in-process draft's cap. `show --draft` takes no `--cap` either. A plan
+   whose rows exceed its cap (a force-pull) prints `0 open slots` and never a negative count.
    - **No `selected` row yet** (the first lock; struck rows may exist): the final set is the draft's
      rows marked `+`, in draft order (`cap=N` re-takes the top N of the SAME draft order), plus
      force-pulled and hand-added items, each of which raises the effective cap by one ONLY when it would
      otherwise fall outside the top `cap` (matching the v2 doc's own rule). A finished draft row is
      skipped and does not count toward `cap`; a row the operator struck earlier is never proposed
-     again (it is reselected only by `+key`).
+     again (it is reselected only by `+key`), and neither is `pull --top` told to take it. A `-key` on a
+     proposal that was never selected writes NO row (a strike needs a selected row): the key is simply
+     left out of the final set, no other row is backfilled into its slot, and a later draft proposes it
+     again.
    - **A plan exists** (a lock after `replan`, or a re-run): the final set is EVERY currently `selected`
      row, in its recorded order, plus any `+key`, minus any `-key`. Nothing is added by rank, so a bare
      `ok` can never strike and can never add. `cap=N` below the number of selected, UNFINISHED rows
@@ -825,7 +856,9 @@ OWNER/REPO#400 (link recorded; no bead for PROJ-5)`), `--dry-run` lists merges, 
      names it before it applies; the closed list of those reasons is: a PR or Jira issue reassigned to
      someone else (a PR no longer `mine`, `co-owned` or review-requested of the operator, a Jira issue
      whose assignee now names another person), an entity hidden, and an entity inactive without a
-     terminal state. A BEAD never becomes `dropped`: a worker claiming it (the assignee becomes a
+     terminal state. `dropped` is a LOSS of candidacy, so it applies only to rows that ENTERED as
+     candidates (`source` `ranked` or `pulled`); a `handadded` row, and a `forced` row for a key that was
+     not a candidate, never were, persist until struck (D-F18), and are never `dropped`. A BEAD never becomes `dropped`: a worker claiming it (the assignee becomes a
      session actor id), a defer (`deferred`, including a held focus bead) and a release do not strike
      it, the row stays `selected` and shows `claimed by <actor>` or `deferred`, and only `-key` strikes
      it.
@@ -857,14 +890,19 @@ OWNER/REPO#400 (link recorded; no bead for PROJ-5)`), `--dry-run` lists merges, 
    deleted. Get-or-create the `focus_period` row
    first if absent (§5), and persist the period's `cap`. Then write the `focus_selected` annotation of
    §5 on every affected entity (the maximum `period_key` over its selected rows, else `none`; D-F12). A
-   `-key` on an item selected in an EARLIER period (annotation present, no row this period) strikes
-   that row of the earlier period when it exists, or writes `none` when no row remains `selected`, so a
-   strike always holds the bead. **Write order:** the table rows, the `focus_selection_event` rows, the
+   `-key` strikes EVERY `selected` row of that entity in EVERY period (today's, if it has one, and each
+   earlier period's, including an item carried over from yesterday that was never reselected today),
+   writes `none` once no row remains `selected`, and so ALWAYS holds the bead; a strike that left an
+   older period's row selected would leave the annotation at that period's key and silently defeat the
+   hold, while the echo said `struck by you`. A carried-over item is shown once, in the `carried over`
+   block, and is NOT proposed (`+`) in a new draft (it already has its bead); `+key` adds it to today's
+   period, which gives it a row there as well, and a later `-key` strikes both. **Write order:** the table rows, the `focus_selection_event` rows, the
    `focus_period` row and the `focus_run` row commit in ONE store transaction (the `base` re-check of
    §7 is inside it); then each entity's `focus_selected` annotation is written under pg-desk's
    per-entity lock, its value computed from the committed table; then the `focus_run` row's
    `counts_json` is updated with the per-entity `{outcome, seq}` (the `seq` exists only after the
-   annotation write). A crash between the steps leaves rows without annotations, which
+   annotation write) and the row's `exit_code` is set last, so a partial run (exit `2`) is recorded as
+   partial and `pg_desk_focus_runs{outcome="partial"}` is right. A crash between the steps leaves rows without annotations, which
    `--repair` mends and the `row_without_annotation` divergence names (§8.2); the stderr line of §8.2
    is printed from the final record.
 6. **Nothing is minted here.** `select` writes selection state only. The annotation is what a
@@ -902,7 +940,10 @@ entities; the echo names which. Re-running `select` is NOT a pure repair, becaus
 computes a new draft; the repair is `pg-desk focus select --repair`, which re-writes any missing
 or mismatched `focus_selected` annotation for the period's rows from the table, using the annotation
 function of §5, and reads no reply. `--repair` with `--dry-run` prints what it would write, and
-`--repair` takes no reply, no `--merge` and no `--draft`.
+`--repair` takes no reply, no `--merge` and no `--draft`, and is EXEMPT from the period-closed check
+(exit `6`): the annotation function of §5 is rewritten from the table, so a `row_without_annotation`
+left by a crash just before `close` is mended, and an `annotation_without_row` is mended the same way
+(the annotation is rewritten to the function's value, `none` when no `selected` row remains).
 
 **Dependency note**: this verb family depends on the entity change flow and its cutover release
 (§4.1), and its minting half depends on the focus decider (§8). The 2026-09-23 note that
@@ -1079,9 +1120,12 @@ decider rule (change-flow section 7, G5), registered in `pg-decider` and routed 
     `update` setting status `deferred`, setting no end date, and metadata `focus_hold=struck`. The
     decider cannot read "no open children" from its view, which carries neither children nor deferral
     dates (`view.Link` has state, labels, metadata and assignee only), so the check is a NAMED live read
-    in the apply step: `pg-connector issue list --parent <bead>`, whose failure FAILS CLOSED (the hold is
-    not written and the action is counted `failed`), and it is added to the dependency list of section 12
-    item (h). The same hold
+    in the apply step: a NEW read-only connector capability, `pg-connector issue children <bead>` (the
+    beads backend runs `bd list --parent <bead>`; today `issue list` has only `--query`, `--ids-only`
+    and `--fingerprints`, and a named query is a static argv, so a per-bead parent read cannot be one,
+    and `schema.Issue` carries `Parent` and one-level `Deps` but no children), whose failure FAILS CLOSED
+    (the hold is not written and the action is counted `failed`), and it is item (t) of section 12 and
+    in the dependency list of item (h). The same hold
     applies when the SOURCE is terminal (a merged or closed PR, a done issue): the work
     is dead, and without this the bead of a dead source stays claimable forever, because the PR
     anchor cascade closes only `work`-relation children and the focus bead's relation is `source`.
@@ -1287,7 +1331,7 @@ Following the telemetry declaration every pg-desk component carries (`docs/behav
     `selected_bead_held` and from `terminal_source_bead_open` while its bead is held (the last still
     counts a terminal source whose bead is NOT held, which is the missing-binding signal);
   - `pg_desk_focus_divergence{kind}` with `kind` in `row_without_annotation`,
-    `annotation_without_row`, `stale_period`, `selected_bead_held`, `struck_bead_open_unclaimed`,
+    `annotation_without_row`, `stale_period` (a period older than yesterday that was never closed), `selected_bead_held`, `struck_bead_open_unclaimed`,
     `struck_bead_claimed` and `terminal_source_bead_open`,
     each defined over the item's NEWEST `focus_selection` row only (so an item selected yesterday and
     reselected today is not forever "mismatched");
@@ -1325,7 +1369,8 @@ Following the telemetry declaration every pg-desk component carries (`docs/behav
   other symptom). `doctor` REPORTS: open beads exist and bead candidates are `0` (the empty set D-F23
   creates until a bead is assigned), and active Jira issues that lack a status category.
 - **`doctor` and `status`** gain a `focus:` block. Every line states whether it is a `gate` or a
-  `report`, the count and a one-line remedy. GATES: a selection older than `focus.pending_gate_age`
+  `report`, the count and a one-line remedy. GATES: an `unminted` selection (the metric's definition, which excludes an epic or bd task, a
+  hidden or suppressed source and a terminal source) older than `focus.pending_gate_age`
   (default 30m) with its annotation set and no bead (the missing-role and `plan`-mode case; `doctor`
   cannot read a role's `plan` versus `apply` from the router config, which carries only `name`,
   `enabled` and `binds`, so the age is the signal and an explicit "plan mode" bead-column value does
@@ -1573,7 +1618,7 @@ closed, human-labelled open}`: the single `update` (status `deferred`, marker `s
     `TestPlusOfCandidateNewSinceDraftIsForced`, `TestReplanOnClosedPeriodPrintsPlan`,
     `TestReplanWritesNoRunRow`, `TestOkOverReplanEchoesNoChange` (the echo says `no change; name items
     with +key or use pull`),
-    `TestShowPlanModeFreezesOrderAndShowsDrift` (a golden with the `not in plan` block and the replan
+    `TestShowPlanModeFreezesOrderAndShowsDrift` (a golden with the `candidates` block and the replan
     suggestion), `TestRunRecordCarriesDraftDigestAgeAndDrift`, and a round trip of the draft document
     through `--json` (the contract is stable and the digest is a pure function of the document).
   - Slot rule and closed listener (the 2026-10-08 rulings): `TestEpicSlotBlockedChildCountsAsOpen`
@@ -1619,6 +1664,23 @@ closed, human-labelled open}`: the single `update` (status `deferred`, marker `s
     terminal-ness changes), `TestFinishedFollowsJiraCategory`, `TestStartedWithAbsentCategory` and
     `TestRankInputsCountsAbsentCategory`, `TestAttentionDoneAgreesWithCategory` (or the documented
     divergence), and a burst re-hydration test bounded by `hydration.max_per_poll`.
+  - Added by the fourth review: `TestStrikeTodayWhileYesterdaySelectedHoldsBead` (the item has a
+    `selected` row in an earlier period: `-key` strikes both, the annotation becomes `none`, the bead is
+    held) and `TestCarriedOverItemIsNotProposedAndShownOnce`; `TestReplanCapThenBareOkNeverStrikes` and
+    `TestSelectCapFlagWithDraftIsUsageError`; `TestHandaddedRowIsNeverDropped` (a team PR hand-added,
+    then a lock: it persists); `TestMergeWithUnselectedKeptKeyWritesNoEvent` and
+    `TestAbsorbedEventAttachesToKeptRow`; `TestSecondApplyOfSameDraftExitsSeven` (the idempotent re-run
+    is the no-draft form, named so in `TestSelectTwiceWithOkIsByteIdentical`);
+    `TestRunRowExitCodeFinalisedLast` (a partial run records exit `2` and outcome `partial`, and a NULL
+    `exit_code` left by a crash counts as `total`); `TestJiraEpicTakesItsOwnSlotUntilParentMapped`;
+    `TestEpicsInPlayBlockMembership` (the one rule, nested epics, an unassigned epic with only
+    unassigned children is in neither place); `TestStrikeOfNeverSelectedProposalWritesNoRow` (no
+    backfill, proposed again next time) and `TestPullTopSkipsOperatorStruckRows`;
+    `TestRepairIgnoresClosedPeriod` and `TestRepairMendsAnnotationWithoutRow`;
+    `TestEmptyIdentityListShowExitsTwoWithNotice`; `TestDoctorPendingGateIsUnminted` (an epic, a hidden
+    source and a terminal source do not trip it); `TestChildrenReadFailsClosed` and a connector test for
+    `issue children`; `TestTrimmedAssigneeMatch`; and `TestShowPlanModeFreezesOrderAndShowsDrift` now
+    asserts the `candidates` block (labelled `current rank, not frozen`), not a `not in plan` block.
   - Alert rules of §8.2 each have an `internal/alertrules` rule test.
   - Verb contract: `TestFocusExitCodes` (a table of verb x documented code, asserting the code, that
     the stdout table is present where it should be, and the stderr remedy), a draft whose `base` no
@@ -1689,14 +1751,28 @@ the new watch queries and the new decider role live, not just a clean flake chec
   candidate set (everything assigned to the operator, with the epic slot rule) over `df-survey`'s, and
   the D-F23 narrowing of beads to those ASSIGNED to the operator (so the bead side differs from
   `df-survey` by design; assign at least one bead before comparing).
-- The three watch queries of §4.2 are each run live at least once (`pg-desk issue changes`, or the
+- The watch queries of §4.2 (the assigned-to-me Jira query, the open-beads bulk query and the narrow held-bead query) are each run live at least once (`pg-desk issue changes`, or the
   router's `run-query` equivalent) with a confirmed non-trivial outcome — real `entity` rows
   landing for an epic and a plain bd task, not just a clean `nix flake check`.
+- ORDER (the cutover runbook below is load-bearing): the live `apply` steps in this checklist run only
+  AFTER runbook step (1) has disabled `df-wire`, so the old and new mint paths are never both active
+  for one item.
 - The focus decider's role is exercised live in `plan` mode against a real selection and reports
   the bead it would create, then in `apply` mode creates exactly one, whose derived link appears in
   the source entity's `links[]` after `issue refresh`.
 - A full `select --apply` → `pull` → `show` (resolved status) → per-bead comments → `close` cycle
   runs end-to-end against the live tracker for one real day.
+- Observability and repair, each observed live (the repository rule: a wiring change is exercised
+  live): the `/metrics` scrape shows the focus families of §8.2 and each shipped alert rule evaluates
+  (an unbound role makes `pg-desk-focus-pending-beads-age` fire); `doctor`'s `focus:` block reports its
+  gates and reports, including the empty-identity gate; `select --dry-run` prints the CHANGES block of a
+  strike before `--apply` does it; `select --repair` mends a deliberately removed annotation; `explain`
+  answers for a struck item; the `carried over` block lists an item selected yesterday; and a
+  `-key` of an item selected yesterday and today holds its bead. Decider cost: measure the run time of
+  the focus decider per `issue.changed` event against the open-beads population (233 beads at the time
+  of writing, each re-routed at `sweep.reconcile_age`), and set the lag budget of
+  `pg-desk-focus-consumer-lag` from it; if one consumer cannot keep up, route only entities with a
+  non-`none` annotation or a linked focus bead.
 - The 2026-10-08 rulings, each observed live: a draft made with `show --json` and locked with `select
 --apply --draft` writes the draft's order even after a priority is changed in between; a `pull`
   between draft and lock gives exit `7`; `replan` shows the locked rows first and proposes nothing, and
@@ -1726,8 +1802,9 @@ the new watch queries and the new decider role live, not just a clean flake chec
   old and new mechanisms cannot both mint for the same item; (2) run `focus show` once and compare it
   with `df-survey` through the one-time differential check of section 8.2, accepting the recorded
   differences (D-F2, D-F11, D-F23, the Jira status category and the `blocked` widening) and noting that the `scope:` header names the single repository; (3) handle an in-flight v2
-  day: an existing per-day focus bead (the v2 bead labelled `daily-focus`) is excluded from the
-  candidates, or closed at this step, so it cannot take a slot as an operator-assigned bead or epic; it
+  day: an existing per-day focus bead (the v2 bead labelled `daily-focus`) is CLOSED at this step
+  (no exclusion rule exists for it: it has neither `source_id` nor `dedup_key`, and under D-F23 its
+  candidacy would turn on its assignee), so it cannot take a slot; it
   is never imported, and today's selection
   is made with `focus select` so `create.md`'s duplicate guard sees a row; (4) flip the decider role
   from `plan` to `apply`. Rollback is the reverse: flip the role back to `plan`, re-enable `df-wire`,
@@ -1774,14 +1851,15 @@ the new watch queries and the new decider role live, not just a clean flake chec
   requires in the SAME change: `docs/behavior/pg-desk/focus.md` (with `INV-FOCUS-n` ids and the
   telemetry declaration of §8.2) and its `README.md` row, `store-schema.md`, `serve.md` (the metrics
   families), `operator-commands.md` (the `doctor` focus block), `plan-and-apply.md` and the decider
-  README (today "only `pr` has a decider"); (j) the router role for the focus decider, binding `issue.changed`,
-  and `pr.changed` (§8 Routing; `reconcile` arrives as a kind inside them), with the deployment's `watch.issue.queries` and
+  README (today "only `pr` has a decider"); (j) the router role for the focus decider: a NEW role binding `issue.changed`
+  (§8 Routing; `reconcile` arrives as a kind inside it), while the PR side rides the PR decider role,
+  which already binds `pr.changed` and needs no new binding, with the deployment's `watch.issue.queries` and
   `watch.pr.queries` set, which they are not today; (k) the cross-document gap that per-source freshness has
   no recorder once `heartbeat` is removed (§4.2), to be closed in the change-flow design or declared
   deferred there; (l) the change-flow Phase 10 guard `TestNoDecisionLogicInPgDesk` (§8), which this
   change owns if Phase 10 has not landed it; (m) added by the second 2026-10-07 review: a
-  `focus.time_zone` key, a `focus.coverage_backlog_max` key, a `focus.pending_gate_age` key and a
-  `bead_id_pattern` key (§6, §7.1, §8.2, §8.1), documented in the pg-desk config behavior doc and, for
+  `focus.time_zone` key, a `focus.coverage_backlog_max` key, a `focus.pending_gate_age` key, a
+  `focus.operator_identities` list key (D-F23) and a `bead_id_pattern` key (§6, §7.1, §8.2, §8.1), documented in the pg-desk config behavior doc and, for
   the pattern, the decider's `config.md`; the persisted per-query listing status
   `change_flow.listing.<type>.<query>` in `changes.md`, `store-schema.md` and the change-flow design
   (§4.2); a `first_seen_at` column on `entity` and a `CreatedAt` field on `schema.Issue` (§5, §6); the
@@ -1815,7 +1893,7 @@ the new watch queries and the new decider role live, not just a clean flake chec
   grammar with examples, the exit codes and `--dry-run`; `focus --help` links `show`, `replan`, `explain` and
   `pull`; a `tldr` page `pg-desk-focus` shows the morning flow (`show --json` held as the draft,
   `select --draft`, `select --apply --draft`, `replan`, `pull --top 2`, `close`); shell completions cover the verbs, and keys complete from the
-  store's candidates. The folded text itself has had no review beyond the agent's own.
+  store's candidates. The 2026-10-07 folded text has had its own independent reviews (see the header).
 - **RULED by the operator on 2026-10-08** (the three questions the second review raised; recorded
   verbatim, with the agent's mechanics below each, which the operator answered fork by fork):
   1. **Rank drift on a re-run, resolved as the draft/lock model (D-F22).** The operator: "i think we
@@ -1877,7 +1955,7 @@ the new watch queries and the new decider role live, not just a clean flake chec
      `pg-decider` role for issues or PRs, and sets no `watch.issue.queries` or `watch.pr.queries`. The
      adapter emits `<type>.changed` with the kinds in metadata, so section 8 Routing binds that type
      and not per-kind names. The change-flow pipeline is not live; this design lands with its cutover.
-  2. **The three watch queries of §4.2 do not exist.** The nearest, `work-beads`, is title-filtered
+  2. **None of the watch queries of §4.2 exists.** The nearest, `work-beads`, is title-filtered
      and already lists `blocked`. The assigned-to-me Jira query exists under another name and is not
      watched.
   3. **Widening to `blocked` is a no-op on today's data.** The tracker stores status `blocked` on 0
@@ -1915,9 +1993,11 @@ the new watch queries and the new decider role live, not just a clean flake chec
   gain the field; (3) the classifier (`internal/classify/issue.go`) treats category `done` as terminal
   for Jira while keeping the state-name rule for beads, comparing TERMINAL-NESS before and after and
   not the state string (an issue already stored as "Complete" whose category arrives as `done` has the
-  same state string and would otherwise yield no `closed` record), and `classify.SourceTerminal`
-  (`classify/terminal.go`), which `deactivateIfTerminal` calls with the state only, gains the category
-  argument; (4) the focus rank's "started" and "finished" tests read the category; an absent category
+  same state string and would otherwise yield no `closed` record): concretely `issueView` (decoded by
+  `decodeIssueFacts`) carries `status_category`, `issueIsTerminal` becomes a test on the view, and
+  `issueStateKinds` compares the two views' terminal-ness; `classify.SourceTerminal(entityType, facts,
+now, window)` already decodes the facts blob itself, so it picks the category up through the same
+  view and its signature does not change; (4) the focus rank's "started" and "finished" tests read the category; an absent category
   (an older snapshot, a backend that has none) falls back to the previous name rules
   (`jira.in_progress_statuses` for started, the state-name set for terminal), is counted as
   `rank_inputs.status_category_absent`, and prints a `doctor` report line ("N active Jira issues lack a
@@ -1928,7 +2008,12 @@ the new watch queries and the new decider role live, not just a clean flake chec
   `interpret.md`, `attention.md`) are reworded. Adding the field changes every Jira list fingerprint at
   once, so the first poll after the connector change is a BURST re-hydration bounded by
   `hydration.max_per_poll`, not a slow age sweep. And the deployment's open-beads bulk query gains
-  `blocked`; and item (s), assignment as the bead candidacy rule (D-F23): a list key of operator
+  `blocked`; item (t), a read-only connector capability `pg-connector issue children <id>` (the beads
+  backend runs `bd list --parent <id>`; Jira returns the issues whose parent is the key once item (u)
+  exists), with its behavior-doc amendment, a fail-closed test and a live step, because the focus
+  decider's hold needs "no open children" (§8); item (u), a Jira `parent` mapping in the Jira backend
+  (the Epic link or parent field), so the slot rule covers Jira epics, which it does not today (§6);
+  and item (s), assignment as the bead candidacy rule (D-F23): a list key of operator
   identities (the display name and the email) for the assignee match of beads and Jira, and an
   exception in the bead-claim rules. Those rules treat an `open` bead with a
   non-empty assignee as stranded (the `beads-lifecycle` skill's B-5 and B-6: a claim in the operator's

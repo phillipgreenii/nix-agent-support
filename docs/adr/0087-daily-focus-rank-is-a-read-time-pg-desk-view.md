@@ -40,7 +40,7 @@ written rule disagree on the one example the rule names.
    judgment that chooses an outcome" is a decision when it causes a write; the same judgment
    expressed as a read-only view is a view. The closing sentence's example, daily-focus ranking, is
    therefore a view, and its minting is the decision.
-4. **Operator-invoked pg-desk verbs record operator input as mechanism.** `focus select` and `focus pull` write the selection row and the `focus_selected` annotation, and `--merge` writes an external link, exactly as `hide`, `wip` and `annotate` do. "Writes nothing" is true of the rank, not of those verbs; they record what the operator said, and the decider decides only what work exists, including holding (deferring) a focus bead when the operator strikes its item and releasing it on a reselect.
+4. **Operator-invoked pg-desk verbs record operator input as mechanism.** `focus select` and `focus pull` write the selection row and the `focus_selected` annotation, and `--merge` writes an external link, exactly as `hide`, `wip` and `annotate` do. "Writes nothing" is true of the rank, not of those verbs; they record what the operator said, and the decider decides only what work exists, including holding (deferring) a focus bead when the operator strikes its item and releasing it on a reselect. One hold is not operator-driven: when a selected item's SOURCE becomes terminal (a merged or closed PR, a closed or done issue) the decider holds its bead, because the work is dead; that is a deliberate exception to INV-DECIDER-25, and the design records it.
 
 ## Consequences
 
