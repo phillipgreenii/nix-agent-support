@@ -58,7 +58,7 @@ func runInvoke(ctx context.Context, binary string, req Request) ([]byte, error) 
 		return nil, fmt.Errorf("scriptout: marshal request: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, execTimeout)
+	ctx, cancel := context.WithTimeout(ctx, execTimeoutFor(req.Op))
 	defer cancel()
 
 	cmd := execCmdFactory(ctx, binary)
@@ -101,7 +101,7 @@ func callDetail(ctx context.Context, req Request, elapsed time.Duration) string 
 	switch {
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
 		detail += fmt.Sprintf(" (umbrella deadline %s exceeded; backend killed) args=%s",
-			execTimeout, SummarizeArgs(req.Args))
+			execTimeoutFor(req.Op), SummarizeArgs(req.Args))
 	case errors.Is(ctx.Err(), context.Canceled):
 		detail += " (canceled by caller) args=" + SummarizeArgs(req.Args)
 	}

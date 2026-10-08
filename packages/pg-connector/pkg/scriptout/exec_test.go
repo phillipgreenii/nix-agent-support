@@ -469,9 +469,9 @@ func TestInvoke_HungChild_KilledAtDeadlineNotHungForever(t *testing.T) {
 // the request's args, and keep "signal: killed" as the wrapped cause.
 func TestInvoke_HungChild_ErrorNamesOpArgsAndElapsed(t *testing.T) {
 	withFactory(t, "hang")
-	origTimeout := execTimeout
-	execTimeout = 150 * time.Millisecond
-	t.Cleanup(func() { execTimeout = origTimeout })
+	origTimeout := listExecTimeout
+	listExecTimeout = 150 * time.Millisecond
+	t.Cleanup(func() { listExecTimeout = origTimeout })
 
 	_, err := Invoke(context.Background(), "fake-binary", "list", map[string]any{"query": "is:open"}, nil)
 	if err == nil {
@@ -544,5 +544,42 @@ func TestInvoke_NonJSONStdoutFoldIsCapped(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "truncated") {
 		t.Fatalf("expected a truncation marker in the error, got a %d-byte message", len(err.Error()))
+	}
+}
+
+// TestInvoke_ListHasItsOwnExecBudget pins bead pg2-4ae4q on the umbrella side:
+// a hung "list" backend is killed at listExecTimeout, any other op at
+// execTimeout, and each error names the limit that actually applied.
+func TestInvoke_ListHasItsOwnExecBudget(t *testing.T) {
+	withFactory(t, "hang")
+	origExec, origList := execTimeout, listExecTimeout
+	execTimeout = 100 * time.Millisecond
+	listExecTimeout = 600 * time.Millisecond
+	t.Cleanup(func() { execTimeout, listExecTimeout = origExec, origList })
+
+	start := time.Now()
+	_, err := Invoke(context.Background(), "fake-binary", "list", nil, nil)
+	listElapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("expected a hung list backend to be killed")
+	}
+	if listElapsed < 500*time.Millisecond {
+		t.Errorf("list was killed after %v, before its %v budget", listElapsed, listExecTimeout)
+	}
+	if !strings.Contains(err.Error(), "umbrella deadline 600ms exceeded") {
+		t.Errorf("list error %q does not name the 600ms list limit", err)
+	}
+
+	start = time.Now()
+	_, err = Invoke(context.Background(), "fake-binary", "commit", nil, nil)
+	otherElapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("expected a hung non-list backend to be killed")
+	}
+	if otherElapsed >= 500*time.Millisecond {
+		t.Errorf("non-list op was killed after %v, it should use the %v budget", otherElapsed, execTimeout)
+	}
+	if !strings.Contains(err.Error(), "umbrella deadline 100ms exceeded") {
+		t.Errorf("non-list error %q does not name the 100ms limit", err)
 	}
 }

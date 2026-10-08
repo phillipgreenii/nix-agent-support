@@ -86,6 +86,35 @@ func TestBackendDeadlineFiresBeforeUmbrella(t *testing.T) {
 	if backendTimeout != DefaultBackendTimeout || execTimeout != DefaultExecTimeout {
 		t.Fatalf("production vars drifted: backendTimeout=%v execTimeout=%v", backendTimeout, execTimeout)
 	}
+	if listBackendTimeout != ListBackendTimeout || listExecTimeout != ListExecTimeout {
+		t.Fatalf("production list vars drifted: listBackendTimeout=%v listExecTimeout=%v", listBackendTimeout, listExecTimeout)
+	}
+}
+
+// TestPerOpDeadlinesKeepTheKillMargin pins bead pg2-4ae4q's constraint: giving
+// list its own, longer budget MUST NOT shrink the margin by which the backend
+// answers before the umbrella kills it, for ANY op. It also pins that list's
+// budget is a real extension, and that the global budget was not raised.
+func TestPerOpDeadlinesKeepTheKillMargin(t *testing.T) {
+	for _, op := range []string{OpList, "show", "comment", OpCapabilities, "review_submit"} {
+		backend, exec := backendTimeoutFor(op), execTimeoutFor(op)
+		if exec-backend != BackendDeadlineMargin {
+			t.Errorf("op %q: exec %v - backend %v = %v, want exactly BackendDeadlineMargin %v",
+				op, exec, backend, exec-backend, BackendDeadlineMargin)
+		}
+		if exec-backend < DefaultWaitDelay {
+			t.Errorf("op %q: margin %v is smaller than DefaultWaitDelay %v", op, exec-backend, DefaultWaitDelay)
+		}
+	}
+	if ListBackendTimeout <= DefaultBackendTimeout {
+		t.Errorf("ListBackendTimeout %v is not longer than DefaultBackendTimeout %v", ListBackendTimeout, DefaultBackendTimeout)
+	}
+	if got := backendTimeoutFor("show"); got != DefaultBackendTimeout {
+		t.Errorf("a non-list op's budget is %v, want the unchanged DefaultBackendTimeout %v", got, DefaultBackendTimeout)
+	}
+	if got := execTimeoutFor("show"); got != DefaultExecTimeout {
+		t.Errorf("a non-list op's exec deadline is %v, want the unchanged DefaultExecTimeout %v", got, DefaultExecTimeout)
+	}
 }
 
 // TestStaggerDoesNotShrinkTheBackendBudget pins bead pg2-27z7j: the stagger

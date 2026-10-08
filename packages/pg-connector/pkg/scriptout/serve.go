@@ -88,7 +88,11 @@ func serveLoop(env dispatchEnv, table DispatchTable) int {
 	// timed out [bead pg2-5dyz2]. The margin sits on the umbrella's side so
 	// this budget stays the full 30s [bead pg2-27z7j].
 	start := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), backendTimeout)
+	// limit is DefaultBackendTimeout, or ListBackendTimeout for the list op
+	// [bead pg2-4ae4q]; the umbrella adds BackendDeadlineMargin to whichever
+	// applies (exec.go's execTimeoutFor).
+	limit := backendTimeoutFor(req.Op)
+	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()
 	// Every op handler transitively receives the request's own opaque
 	// config block via ConfigFromContext, without widening OpHandler's own
@@ -101,7 +105,7 @@ func serveLoop(env dispatchEnv, table DispatchTable) int {
 	result, err := entry.Handle(ctx, req.Args)
 	if err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			err = deadlineError(req.Op, req.Args, time.Since(start), backendTimeout, err)
+			err = deadlineError(req.Op, req.Args, time.Since(start), limit, err)
 		}
 		return writeErrorResponse(env.out, entry.SchemaVersion, err)
 	}

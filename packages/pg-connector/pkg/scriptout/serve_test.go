@@ -322,9 +322,9 @@ func TestServeLoop_HandlerGetsDeadline_DoesNotHangForever(t *testing.T) {
 // answer with an error naming the op, the args, the elapsed time and the
 // limit, keep the original error text, and keep the unavailable wire code.
 func TestServeLoop_DeadlineError_NamesOpArgsAndElapsed(t *testing.T) {
-	origTimeout := backendTimeout
-	backendTimeout = 100 * time.Millisecond
-	t.Cleanup(func() { backendTimeout = origTimeout })
+	origTimeout := listBackendTimeout
+	listBackendTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { listBackendTimeout = origTimeout })
 
 	table := DispatchTable{
 		"list": {
@@ -467,5 +467,41 @@ func TestServeLoop_MalformedRequest(t *testing.T) {
 	}
 	if errObj["code"] != "unavailable" {
 		t.Fatalf("error.code = %v, want unavailable", errObj["code"])
+	}
+}
+
+// TestServeLoop_ListHasItsOwnBudget pins bead pg2-4ae4q: the "list" op runs
+// under listBackendTimeout, every other op under backendTimeout. The same
+// handler, slower than backendTimeout but faster than listBackendTimeout,
+// succeeds as a list and fails as any other op.
+func TestServeLoop_ListHasItsOwnBudget(t *testing.T) {
+	origBackend, origList := backendTimeout, listBackendTimeout
+	backendTimeout = 50 * time.Millisecond
+	listBackendTimeout = 5 * time.Second
+	t.Cleanup(func() { backendTimeout, listBackendTimeout = origBackend, origList })
+
+	slow := func(ctx context.Context, _ json.RawMessage) (any, error) {
+		select {
+		case <-time.After(300 * time.Millisecond):
+			return map[string]any{"ok": true}, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	table := DispatchTable{
+		"list":   {SchemaVersion: 1, Handle: slow},
+		"commit": {SchemaVersion: 1, Handle: slow},
+	}
+
+	if code, resp := runServeLoop(t, table, `{"op":"list","args":{}}`); code != 0 {
+		t.Fatalf("list under its own %v budget: exit %d (resp=%v), want success", listBackendTimeout, code, resp)
+	}
+	code, resp := runServeLoop(t, table, `{"op":"commit","args":{}}`)
+	if code == 0 {
+		t.Fatalf("non-list op ran past backendTimeout %v and still succeeded (resp=%v)", backendTimeout, resp)
+	}
+	errObj, _ := resp["error"].(map[string]any)
+	if msg, _ := errObj["message"].(string); !strings.Contains(msg, "limit 50ms") {
+		t.Errorf("non-list deadline error %q does not name its own limit 50ms", msg)
 	}
 }

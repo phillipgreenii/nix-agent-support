@@ -44,7 +44,8 @@ import (
 // is pg-connector-pr-github's team search list, which pages a ~10-page result
 // serially at about 2.7s a page (about 27s end to end): its failure rate went
 // from 1.5% to 33% when the apply carrying that change landed. review_submit's
-// comment caps (pg2-m79ch) are sized against this value too.
+// comment caps (pg2-m79ch) are sized against this value too. The "list" op has
+// its own, longer budget (ListBackendTimeout, pg2-4ae4q).
 const DefaultBackendTimeout = 30 * time.Second
 
 // BackendDeadlineMargin is how much LATER than a backend's own
@@ -77,6 +78,34 @@ const BackendDeadlineMargin = 5 * time.Second
 // own, earlier deadline.
 const DefaultExecTimeout = DefaultBackendTimeout + BackendDeadlineMargin
 
+// OpList is the wire name of the enumeration op every capability's backend
+// answers. It is named here, rather than in envelope.go, because this file is
+// the only place that needs it: list is the one op with its own call budget.
+const OpList = "list"
+
+// ListBackendTimeout is the per-call budget of a Tier-2 backend's "list" op
+// [bead pg2-4ae4q]: DefaultBackendTimeout plus headroom for the one list that
+// cannot fit in 30s. pg-connector-pr-github's team search list pages a
+// ~10-page result serially (about 2.7s a page), measured over 131 calls at
+// 22.7s to 29.8s with a median of 27.2s. Those are only the calls that
+// finished inside the old 30s cap, so the distribution is cut off there:
+// extrapolating its shape (spread about 2s) puts roughly 7% of team lists past
+// 30s, killed invisibly to the backend's own log when the umbrella's kill won
+// the race. 40s is about 1.5x the median and 10s clear of the slowest call
+// seen.
+//
+// Only list gets this: every other op stays on DefaultBackendTimeout, which is
+// the hung-gh bound handlers (and review_submit's comment caps, pg2-m79ch) are
+// sized against. The umbrella's deadline for a list is this plus
+// BackendDeadlineMargin (ListExecTimeout), so the backend still answers before
+// the umbrella kills it.
+const ListBackendTimeout = 40 * time.Second
+
+// ListExecTimeout is the umbrella's exec deadline for a "list": the backend's
+// ListBackendTimeout plus BackendDeadlineMargin, the same relationship
+// DefaultExecTimeout has to DefaultBackendTimeout.
+const ListExecTimeout = ListBackendTimeout + BackendDeadlineMargin
+
 // execTimeout is the deadline runInvoke (exec.go) applies to the umbrella's
 // exec of a backend. It starts at DefaultExecTimeout; tests swap it to a
 // short value (the same swappable-var pattern exec.go's own execCmdFactory
@@ -89,6 +118,32 @@ var execTimeout = DefaultExecTimeout
 // deliberately SHORTER than execTimeout (see BackendDeadlineMargin); tests
 // swap it the same way they swap execTimeout.
 var backendTimeout = DefaultBackendTimeout
+
+// listBackendTimeout and listExecTimeout are the "list" op's counterparts of
+// backendTimeout and execTimeout, swappable by tests the same way
+// [bead pg2-4ae4q].
+var (
+	listBackendTimeout = ListBackendTimeout
+	listExecTimeout    = ListExecTimeout
+)
+
+// backendTimeoutFor is the deadline serveLoop applies to a request for op.
+func backendTimeoutFor(op string) time.Duration {
+	if op == OpList {
+		return listBackendTimeout
+	}
+	return backendTimeout
+}
+
+// execTimeoutFor is the deadline runInvoke applies to the umbrella's exec of a
+// backend serving op. It is always later than backendTimeoutFor(op) by
+// BackendDeadlineMargin.
+func execTimeoutFor(op string) time.Duration {
+	if op == OpList {
+		return listExecTimeout
+	}
+	return execTimeout
+}
 
 // MaxSummarizedArgsBytes caps how much of a request's args JSON is folded
 // into a deadline error or an event-log row by SummarizeArgs: enough to
