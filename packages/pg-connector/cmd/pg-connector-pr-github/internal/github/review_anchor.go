@@ -186,7 +186,7 @@ func (p *Provider) GetComparedFiles(ctx context.Context, repo, base, head string
 // difference, its patch is unavailable, or the line is not in the diff.
 func ResolveAnchor(files []ComparedFile, path, side string, line int) (sendPath string, position int, ok bool) {
 	for _, f := range files {
-		if f.Path != path && !(strings.EqualFold(side, "LEFT") && f.PreviousPath == path) {
+		if f.Path != path && (!strings.EqualFold(side, "LEFT") || f.PreviousPath != path) {
 			continue
 		}
 		if f.Patch == "" {
