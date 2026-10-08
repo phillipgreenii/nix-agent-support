@@ -22,6 +22,12 @@ var epoch = time.Date(2026, 10, 7, 13, 30, 4, 120_000_000, time.UTC)
 // failureAt is the instant the stores of these tests report for "now".
 var failureAt = time.Date(2026, 10, 8, 12, 30, 45, 0, time.UTC)
 
+// fataler is what the helpers need of a *testing.T and of a *rapid.T.
+type fataler interface {
+	Helper()
+	Fatalf(format string, args ...any)
+}
+
 const testTask = event.TaskID("day:2026-10-07:post-plan")
 
 func newID(kind byte, n int) event.ID {
@@ -61,7 +67,7 @@ func batchOf(first, members int, b event.ID) []event.Event {
 }
 
 // line is the newline-terminated encoding of e.
-func line(t testing.TB, e event.Event) []byte {
+func line(t fataler, e event.Event) []byte {
 	t.Helper()
 	b, err := event.Encode(e)
 	if err != nil {
@@ -70,7 +76,7 @@ func line(t testing.TB, e event.Event) []byte {
 	return append(b, '\n')
 }
 
-func lines(t testing.TB, evs ...event.Event) []byte {
+func lines(t fataler, evs ...event.Event) []byte {
 	t.Helper()
 	var out []byte
 	for _, e := range evs {

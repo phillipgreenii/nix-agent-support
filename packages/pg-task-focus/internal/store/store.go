@@ -82,6 +82,7 @@ type Store struct {
 	// the failing Append all touch, without waiting for a slow disk.
 	state  sync.Mutex
 	closed bool
+	health Health
 }
 
 // Open takes the directory lock, opens the log for append, recovers the end of

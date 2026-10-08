@@ -105,6 +105,16 @@ func TestRecoverTornTail(t *testing.T) {
 				t.Errorf("Size = %d, want %d", s.Size(), len(committed))
 			}
 
+			// A following Append yields a clean log: the new line follows the
+			// committed bytes directly, with nothing of the torn tail between.
+			next := plainEvent(10)
+			if _, err := s.Append([]event.Event{next}); err != nil {
+				t.Fatalf("Append after recovery: %v", err)
+			}
+			if got, want := readLog(t, dir), append(bytes.Clone(committed), line(t, next)...); !bytes.Equal(got, want) {
+				t.Errorf("the log after the Append is not the committed bytes plus the new line")
+			}
+
 			// The recovery does not repeat: the next start finds a clean log.
 			if err := s.Close(); err != nil {
 				t.Fatal(err)
@@ -113,8 +123,8 @@ func TestRecoverTornTail(t *testing.T) {
 			if rec2 != (store.Recovery{}) {
 				t.Errorf("second Open recovered again: %+v", rec2)
 			}
-			if !slices.Equal(ids(again), ids(all)) {
-				t.Errorf("second Open events = %v, want %v", ids(again), ids(all))
+			if want := append(slices.Clone(all), next); !slices.Equal(ids(again), ids(want)) {
+				t.Errorf("second Open events = %v, want %v", ids(again), ids(want))
 			}
 		})
 	}
@@ -131,7 +141,7 @@ func TestRecoverUncommittedBatch(t *testing.T) {
 		dir := seedLog(t, append(bytes.Clone(committed), members...))
 		fs := storefault.New(nil)
 
-		_, evs, rec := openStore(t, dir, fs)
+		s, evs, rec := openStore(t, dir, fs)
 		if !slices.Equal(ids(evs), ids(all)) {
 			t.Errorf("events = %v, want only the committed %v", ids(evs), ids(all))
 		}
@@ -139,6 +149,16 @@ func TestRecoverUncommittedBatch(t *testing.T) {
 			t.Errorf("Recovery = %+v, want UncommittedBatches 1 and no torn tail", rec)
 		}
 		wantRecoveredLog(t, dir, fs, rec, committed, members)
+
+		// The batch id of the dropped members is free again, and the log
+		// after a following Append is clean.
+		again := batchOf(5, 2, batchID(2))
+		if _, err := s.Append(again); err != nil {
+			t.Fatalf("Append after recovery: %v", err)
+		}
+		if got, want := readLog(t, dir), append(bytes.Clone(committed), lines(t, again...)...); !bytes.Equal(got, want) {
+			t.Errorf("the log after the Append is not the committed bytes plus the new batch")
+		}
 	})
 
 	t.Run("an open batch followed by a torn line reports both", func(t *testing.T) {
