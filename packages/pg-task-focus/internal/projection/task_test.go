@@ -256,7 +256,7 @@ func TestLateCompletionOfMissedTask(t *testing.T) {
 		added := b.added(base)
 		materializedAt := b.members(bid(3))[2]
 
-		_, err := candidateReplay(base, added)
+		_, err := Candidate(base, added)
 		inv := asInvalid(t, err)
 		assertFinding(t, inv, codeResolutionBeforeMaterialization, string(newID),
 			[]event.ID{materializedAt}, at(sixteenHundredYesterday), at(875))
@@ -333,7 +333,7 @@ func TestTwoResolutionsAreTaskAlreadyResolved(t *testing.T) {
 		first := b.add(100, event.TaskCompleted{TaskID: id})
 		base := b.split()
 		second := b.add(110, skippedTask(id, false)(""))
-		_, err := candidateReplay(base, b.added(base))
+		_, err := Candidate(base, b.added(base))
 		inv := asInvalid(t, err)
 		assertFinding(t, inv, codeTaskAlreadyResolved, string(id), []event.ID{first}, at(100), at(110))
 		if !strings.Contains(inv.Message, "the new event") || strings.Contains(inv.Message, string(second)) {
@@ -364,7 +364,7 @@ func TestCompletionBeforeMaterialization(t *testing.T) {
 		completion := b.add(100, event.TaskCompleted{TaskID: id})
 		base := b.split()
 		b.add(120, event.EventCorrected{Target: completion, Fields: fieldsOf("effective_at", at(5).Format(instantLayout))})
-		_, err := candidateReplay(base, b.added(base))
+		_, err := Candidate(base, b.added(base))
 		inv := asInvalid(t, err)
 		assertFinding(t, inv, codeResolutionBeforeMaterialization, string(id),
 			[]event.ID{completion, b.members(bid(2))[0]}, at(5), at(10), at(120))
@@ -407,7 +407,7 @@ func TestMaterializedBeforeProfileIsTaskBeforeProfile(t *testing.T) {
 		b.batch(10, b.daily("post-plan", day1))
 		base := b.split()
 		b.add(20, event.EventRetracted{TargetBatch: profiles})
-		_, err := candidateReplay(base, b.added(base))
+		_, err := Candidate(base, b.added(base))
 		if inv := asInvalid(t, err); inv.Code != codeTaskBeforeProfile || !strings.Contains(inv.Message, "the new event") {
 			t.Errorf("Code = %q, message %q, want task_before_profile naming the new event", inv.Code, inv.Message)
 		}
@@ -439,7 +439,7 @@ func TestTaskWithoutPeriodChange(t *testing.T) {
 		b.batch(10, b.daily("post-plan", day1))
 		base := b.split()
 		retraction := b.add(20, event.EventRetracted{TargetBatch: periods})
-		_, err := candidateReplay(base, b.added(base))
+		_, err := Candidate(base, b.added(base))
 		inv := asInvalid(t, err)
 		assertFinding(t, inv, codeTaskWithoutPeriod, string(taskA), []event.ID{b.members(bid(3))[0]}, at(10), at(20))
 		if !strings.Contains(inv.Message, "the new event") || strings.Contains(inv.Message, string(retraction)) {
@@ -486,7 +486,7 @@ func TestSecondMaterializationIsTaskMaterializedTwice(t *testing.T) {
 	inv := asInvalid(t, err)
 	assertFinding(t, inv, codeTaskMaterializedTwice, string(id), []event.ID{first, second}, at(10), at(30))
 
-	_, err = candidateReplay(base, b.added(base))
+	_, err = Candidate(base, b.added(base))
 	inv = asInvalid(t, err)
 	assertFinding(t, inv, codeTaskMaterializedTwice, string(id), []event.ID{first}, at(10), at(30))
 	if strings.Contains(inv.Message, string(second)) || !strings.Contains(inv.Message, "the new event") {
@@ -501,7 +501,7 @@ func TestResolutionAfterWithdrawalIsTaskWithdrawn(t *testing.T) {
 	base := b.split()
 	b.add(120, event.TaskCompleted{TaskID: id})
 
-	_, err := candidateReplay(base, b.added(base))
+	_, err := Candidate(base, b.added(base))
 	inv := asInvalid(t, err)
 	assertFinding(t, inv, codeTaskWithdrawn, string(id), []event.ID{withdrawal}, at(100), at(120))
 	if !strings.Contains(inv.Message, "the new event") {

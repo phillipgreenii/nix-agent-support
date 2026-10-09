@@ -201,7 +201,7 @@ func (c invalidCase) run(t *testing.T) *Invalid {
 	if add == nil {
 		_, err = Replay(base)
 	} else {
-		_, err = candidateReplay(base, add)
+		_, err = Candidate(base, add)
 	}
 	return asInvalid(t, err) // entity, stored event ids and instants are in the message
 }

@@ -199,7 +199,7 @@ func TestStateTable(t *testing.T) {
 			setup[tt.state](b)
 			base := b.split()
 			ops[tt.op](b, when(tt.state))
-			m, err := candidateReplay(base, b.added(base))
+			m, err := Candidate(base, b.added(base))
 			if tt.code != "" {
 				inv := assertCode(t, err, tt.code)
 				if inv.Entity != string(cycleA) && tt.code != codeAnotherCycleRunning {
@@ -255,7 +255,7 @@ func TestInterruptPausesNamedCycleAtItsEffectiveAt(t *testing.T) {
 			}
 			base := b.split()
 			b.add(tt.at, interruptOf(cycleB, cycleA, 15))
-			_, err := candidateReplay(base, b.added(base))
+			_, err := Candidate(base, b.added(base))
 			inv := assertCode(t, err, codeEmptyRunningSegment)
 			if inv.Entity != string(cycleA) {
 				t.Errorf("Entity = %q, want the interrupted cycle %s", inv.Entity, cycleA)
@@ -333,7 +333,7 @@ func TestTwoRunningCyclesAreAnotherCycleRunning(t *testing.T) {
 
 		t.Run("through candidate replay the new cycle is not listed", func(t *testing.T) {
 			base := b.events[:len(b.events)-1]
-			_, err := candidateReplay(base, b.events[len(b.events)-1:])
+			_, err := Candidate(base, b.events[len(b.events)-1:])
 			inv := assertCode(t, err, codeAnotherCycleRunning)
 			if !slices.Equal(inv.Cycles, []event.CycleID{cycleA}) || inv.Entity != "" {
 				t.Errorf("Cycles %v, Entity %q: want only the stored cycle %s and no entity", inv.Cycles, inv.Entity, cycleA)
@@ -351,7 +351,7 @@ func TestTwoRunningCyclesAreAnotherCycleRunning(t *testing.T) {
 		stop := b.add(30, stopOf(cycleA))
 		base := b.split()
 		b.add(40, event.EventCorrected{Target: stop, Fields: fieldsOf("effective_at", event.At(at(15)))})
-		_, err := candidateReplay(base, b.added(base))
+		_, err := Candidate(base, b.added(base))
 		inv := assertCode(t, err, codeCycleStopped)
 		if !slices.Contains(inv.Events, resume) || !slices.Contains(inv.Events, stop) {
 			t.Errorf("Events = %v, want the resume %s and the moved stop %s", inv.Events, resume, stop)
@@ -382,7 +382,7 @@ func TestResumeOfStoppedCycleIsCycleStopped(t *testing.T) {
 	if !slices.Equal(inv.Events, []event.ID{resume, stop}) || inv.Entity != string(cycleA) {
 		t.Errorf("Events %v, Entity %q, want [%s %s] and %s", inv.Events, inv.Entity, resume, stop, cycleA)
 	}
-	_, err := candidateReplay(base, b.added(base))
+	_, err := Candidate(base, b.added(base))
 	inv = assertCode(t, err, codeCycleStopped)
 	if !slices.Equal(inv.Events, []event.ID{stop}) {
 		t.Errorf("Events = %v, want only the stored stop %s", inv.Events, stop)
@@ -403,7 +403,7 @@ func TestBackfilledBreakEndingAtStopInstantIsBreakEndsAtStop(t *testing.T) {
 	b, stop := stoppedAt60(t)
 	base := b.split()
 	b.backfill(70, 30, 60, cycleA)
-	_, err := candidateReplay(base, b.added(base))
+	_, err := Candidate(base, b.added(base))
 	inv := assertCode(t, err, codeBreakEndsAtStop)
 	if !strings.Contains(inv.Message, "end at") {
 		t.Errorf("message %q does not point at end at", inv.Message)
@@ -455,7 +455,7 @@ func TestStopNotAfterStart(t *testing.T) {
 	if !slices.Contains(inv.Events, start) || !slices.Contains(inv.Events, stop) {
 		t.Errorf("Events = %v, want the start and the stop", inv.Events)
 	}
-	_, err := candidateReplay(base, b.added(base))
+	_, err := Candidate(base, b.added(base))
 	assertCode(t, err, codeStopNotAfterStart)
 }
 
@@ -466,7 +466,7 @@ func TestStopAtTheInstantOfAResumeIsEmptyRunningSegment(t *testing.T) {
 	resume := b.add(20, resumeOf(cycleA))
 	base := b.split()
 	b.add(20, stopOf(cycleA))
-	_, err := candidateReplay(base, b.added(base))
+	_, err := Candidate(base, b.added(base))
 	inv := assertCode(t, err, codeEmptyRunningSegment)
 	if !slices.Equal(inv.Events, []event.ID{resume}) {
 		t.Errorf("Events = %v, want the resume %s that opened the segment", inv.Events, resume)
@@ -491,7 +491,7 @@ func TestEventBeforeCycleStartIsCycleEventBeforeStart(t *testing.T) {
 			c := b.fork(t)
 			base := c.split()
 			c.add(50, event.EventCorrected{Target: ids[name], Fields: fieldsOf("effective_at", event.At(at(5)))})
-			_, err := candidateReplay(base, c.added(base))
+			_, err := Candidate(base, c.added(base))
 			inv := assertCode(t, err, codeCycleEventBeforeStart)
 			if !slices.Contains(inv.Events, ids[name]) || inv.Entity != string(cycleA) {
 				t.Errorf("Events %v, Entity %q, want the moved event %s and %s", inv.Events, inv.Entity, ids[name], cycleA)
@@ -504,7 +504,7 @@ func TestEventBeforeCycleStartIsCycleEventBeforeStart(t *testing.T) {
 		pause := c.add(20, pauseOf(cycleA))
 		base := c.split()
 		c.add(30, event.EventRetracted{Target: start})
-		_, err := candidateReplay(base, c.added(base))
+		_, err := Candidate(base, c.added(base))
 		inv := assertCode(t, err, codeCycleEventBeforeStart)
 		if !slices.Equal(inv.Events, []event.ID{pause}) || !strings.Contains(inv.Message, "the new event") {
 			t.Errorf("Events %v, message %q: want the orphaned pause and the retraction as the new event", inv.Events, inv.Message)
@@ -559,7 +559,7 @@ func TestPauseOfAPausedCycleIsCycleSegmentsOverlap(t *testing.T) {
 		b.add(40, resumeOf(cycleA))
 		base := b.split()
 		b.backfill(50, 20, 30, cycleA)
-		_, err := candidateReplay(base, b.added(base))
+		_, err := Candidate(base, b.added(base))
 		assertCode(t, err, codeCycleSegmentsOverlap)
 	})
 	t.Run("a second start of one cycle", func(t *testing.T) {
@@ -651,7 +651,7 @@ func TestSwitchBackAtTheSameInstantIsEmptyRunningSegment(t *testing.T) {
 	b.switchTo(60, cycleA, cycleB)
 	base := b.split()
 	b.switchTo(60, cycleB, cycleA)
-	_, err := candidateReplay(base, b.added(base))
+	_, err := Candidate(base, b.added(base))
 	if inv := assertCode(t, err, codeEmptyRunningSegment); inv.Entity != string(cycleB) {
 		t.Errorf("Entity = %q, want %s, whose segment would have no length", inv.Entity, cycleB)
 	}

@@ -70,16 +70,6 @@ func (b *logb) split() (base []event.Event) { return slices.Clone(b.events) }
 
 func (b *logb) added(base []event.Event) []event.Event { return slices.Clone(b.events[len(base):]) }
 
-// candidateReplay stands for validation by candidate replay: the log of base
-// followed by add, where the added events are the ones a request would add.
-func candidateReplay(base, add []event.Event) (*Model, error) {
-	all := append(slices.Clone(base), add...)
-	for i := range add {
-		all[len(base)+i].Line = len(base) + i + 1
-	}
-	return replay(all, len(base))
-}
-
 func profileOf(name string) func(event.ID) event.Payload {
 	return func(bt event.ID) event.Payload { return event.ProfileChanged{Profile: name, Batch: bt} }
 }
@@ -290,7 +280,7 @@ func TestPeriodNotLaterIsPeriodUnchanged(t *testing.T) {
 				t.Errorf("message %q does not name the day period's zone", inv.Message)
 			}
 
-			_, err = candidateReplay(base, added)
+			_, err = Candidate(base, added)
 			inv = asInvalid(t, err)
 			assertFinding(t, inv, codePeriodUnchanged, "day", []event.ID{first}, at(0), at(60))
 			if !strings.Contains(inv.Message, "the new event") || strings.Contains(inv.Message, string(second)) {
@@ -393,7 +383,7 @@ func TestBackdatedPeriodChangeIsPeriodOutOfOrder(t *testing.T) {
 			}
 
 			// Candidate replay of the same events, the third being the new one.
-			_, err = candidateReplay(base, added)
+			_, err = Candidate(base, added)
 			cinv := asInvalid(t, err)
 			if cinv.Code != tt.want || cinv.Entity != "day" {
 				t.Fatalf("Candidate: code %q entity %q (%s), want %q for day", cinv.Code, cinv.Entity, cinv.Message, tt.want)
