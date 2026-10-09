@@ -1,8 +1,8 @@
 #!/usr/bin/env bats
 # bats file_tags=type:integration
 #
-# Tagged `type:integration` (phillipg-nix-repo-base's pg-test-runner label
-# registry -- its CLAUDE.md "Go tests" section / modules/pg-test-runner):
+# Tagged `type:integration` (the shared pg-test-runner label registry --
+# its CLAUDE.md "Go tests" section / modules/pg-test-runner):
 # this suite needs a real nix-built pg-desk package plus a wrapProgram-made
 # stub-wrapped copy of it, so it MUST NOT run under the commit-time
 # `run-unit-tests` hook (pg-test-runner --labels unit, no nix). It runs only
