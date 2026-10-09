@@ -275,6 +275,7 @@ func Compute(in Input, p Params) PhaseReport {
 	pr.samp.tickDur = durs
 	T := p.LivePeriod + p.SlotPeriod + time.Duration(MakeDist(durs).P90*float64(time.Second))
 	pr.Misses.Tolerance = T.String()
+	pr.Misses.LateWindow = p.LateWindow.String()
 
 	// Shadow items by id (pg-connector origin).
 	byID := map[string][]shadowItem{}
@@ -321,7 +322,13 @@ func Compute(in Input, p Params) PhaseReport {
 			pr.Live.WithoutEnqueuedAt++
 			continue
 		}
-		k := d.ID + "|" + d.EnqueuedAt.Format(time.RFC3339Nano)
+		// Two changes of one PR share an enqueue instant only with different
+		// per-change hashes: key on the raw id so they stay two events.
+		raw := d.Raw
+		if raw == "" {
+			raw = d.ID
+		}
+		k := raw + "|" + d.EnqueuedAt.Format(time.RFC3339Nano)
 		if seenEv[k] {
 			continue
 		}
@@ -339,6 +346,7 @@ func Compute(in Input, p Params) PhaseReport {
 	}
 	endOK := lastEnd.Add(-T)
 	matchedItems := map[string]bool{}
+	lateWhenUp := 0
 	pr.Misses.ByClass = map[string]int{}
 	for _, c := range MissClasses {
 		pr.Misses.ByClass[c] = 0
@@ -369,9 +377,28 @@ func Compute(in Input, p Params) PhaseReport {
 		class, ev := classifyMiss(e.id, e.at, T, firstStart, t0, p, in, ticks, gaps, routerDown, others, byID)
 		pr.Misses.Missed++
 		pr.Misses.ByClass[class]++
-		pr.Misses.Entries = append(pr.Misses.Entries, MissEntry{PR: lab.Label(e.id), At: schema.Format(e.at), Class: class, Evidence: ev})
+		entry := MissEntry{PR: lab.Label(e.id), At: schema.Format(e.at), Class: class, Evidence: ev}
+		// A miss is "not detected within T"; the shadow may still have flagged the
+		// PR once it was back (a gap, a skipped slot), which is what a replacement
+		// cares about. Report that delay without changing the miss class.
+		if it, ok := firstAfter(byID[e.id], e.at, p.LateWindow); ok {
+			late := it.at.Sub(e.at).Seconds()
+			entry.LateSeconds = &late
+			pr.Misses.LateDetected++
+			if class != ClassCollectorDown {
+				lateWhenUp++
+			}
+			pr.samp.dLate = append(pr.samp.dLate, late)
+		}
+		pr.Misses.Entries = append(pr.Misses.Entries, entry)
 	}
 	pr.Misses.Unexplained = pr.Misses.ByClass[ClassUnexplained]
+	if pr.Live.InWindow > 0 {
+		pr.Misses.Coverage = float64(pr.Misses.Matched+pr.Misses.LateDetected) / float64(pr.Live.InWindow)
+	}
+	if up := pr.Live.InWindow - pr.Misses.ByClass[ClassCollectorDown]; up > 0 {
+		pr.Misses.CoverageWhenUp = float64(pr.Misses.Matched+lateWhenUp) / float64(up)
+	}
 
 	// (b) SWEEP-CAUGHT.
 	pr.Sweep.OtherCauses = map[string]int{}
@@ -466,7 +493,7 @@ func Compute(in Input, p Params) PhaseReport {
 	}
 
 	// (d) delay.
-	pr.Delay = Delay{VsLiveEnqueue: MakeDist(pr.samp.dVsLive), ShadowFromUpdate: MakeDist(pr.samp.dShadowUpd), LiveFromUpdate: MakeDist(pr.samp.dLiveUpd)}
+	pr.Delay = Delay{VsLiveEnqueue: MakeDist(pr.samp.dVsLive), ShadowFromUpdate: MakeDist(pr.samp.dShadowUpd), LiveFromUpdate: MakeDist(pr.samp.dLiveUpd), MissedThenDetected: MakeDist(pr.samp.dLate)}
 
 	// (e) cost.
 	computeCost(&pr, executed, warmupEnd)
@@ -500,6 +527,20 @@ func absDur(d time.Duration) time.Duration {
 		return -d
 	}
 	return d
+}
+
+// firstAfter returns the earliest item strictly after at and within win of it.
+// items MUST be sorted by time (byID is).
+func firstAfter(items []shadowItem, at time.Time, win time.Duration) (shadowItem, bool) {
+	for _, it := range items {
+		if it.at.After(at) {
+			if it.at.Sub(at) <= win {
+				return it, true
+			}
+			break
+		}
+	}
+	return shadowItem{}, false
 }
 
 func nearestIn(items []shadowItem, at time.Time, win time.Duration, any bool) (shadowItem, bool) {
@@ -646,17 +687,24 @@ func classifyMiss(id string, e time.Time, T time.Duration, firstStart, t0 time.T
 		}
 	}
 	// live-only artefacts.
+	// Queue event ids carry the per-change `@<hash>` suffix since per-change event
+	// ids landed (older rows are bare): match on the PR, and count an enqueue
+	// twice only for the SAME change (two hashes are two changes, not coalescing).
 	evid := "pr.changed:" + id
+	enqByEvent := map[string]int{}
 	enq := 0
 	for _, q := range in.Queue {
-		if q.EventID != evid || q.At.Before(e.Add(-2*T)) || q.At.After(e.Add(T)) {
+		if BaseID(q.EventID) != evid || q.At.Before(e.Add(-2*T)) || q.At.After(e.Add(T)) {
 			continue
 		}
 		if q.Op == "evict" && q.Reason == "reemit" {
 			return ClassLiveOnly, "live queue re-emitted (coalesced) the event"
 		}
 		if q.Op == "enqueue" {
-			enq++
+			enqByEvent[q.EventID]++
+			if enqByEvent[q.EventID] > enq {
+				enq = enqByEvent[q.EventID]
+			}
 		}
 	}
 	if enq >= 2 {

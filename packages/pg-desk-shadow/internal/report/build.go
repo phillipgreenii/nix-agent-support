@@ -46,6 +46,7 @@ func Combine(phases []PhaseReport) *Combined {
 		c.LiveDetected += p.Live.InWindow
 		c.Matched += p.Misses.Matched
 		c.Missed += p.Misses.Missed
+		c.LateDetected += p.Misses.LateDetected
 		c.Unexplained += p.Misses.Unexplained
 		for k, v := range p.Misses.ByClass {
 			c.ByClass[k] += v
@@ -135,9 +136,13 @@ func Markdown(rep Report) string {
 		for _, c := range MissClasses {
 			w("| %s | %d |\n", c, p.Misses.ByClass[c])
 		}
-		w("\n")
+		w("\nCoverage (informational; matched plus missed-but-detected-later, over LIVE-DETECTED in window): %s; while the collector was up (events not classed collector-down): %s. %d of the %d missed events were flagged by the shadow later (the first later shadow item for the same PR within the late window of %s: an upper bound on the delay, not proof it is the same change); their delay is under (d).\n\n", pct(p.Misses.Coverage), pct(p.Misses.CoverageWhenUp), p.Misses.LateDetected, p.Misses.Missed, p.Misses.LateWindow)
 		for _, e := range p.Misses.Entries {
-			w("- `%s` at %s: %s %s\n", e.PR, e.At, e.Class, e.Evidence)
+			late := ""
+			if e.LateSeconds != nil {
+				late = fmt.Sprintf(" (shadow detected it later, after %.0fs)", *e.LateSeconds)
+			}
+			w("- `%s` at %s: %s %s%s\n", e.PR, e.At, e.Class, e.Evidence, late)
 		}
 		w("\n### (b) SWEEP-CAUGHT\n\nHeadline (pr-content-change, conflict-flip): %d; other causes %v. Shadow-detected %d; caught by a local/sweep-origin item %d (counted separately); shadow-missed %d (of which declared blind spot %d). The live sweep caught what the live feed missed on %d rows (rate %s). This feeds pg2-xg2k8 (sweep capacity).\n\n", p.Sweep.Headline, p.Sweep.OtherCauses, p.Sweep.ShadowDetected, p.Sweep.CaughtLocalSweep, p.Sweep.ShadowMissed, p.Sweep.MissedBlindSpot, p.Sweep.FeedMissed, pct(p.Sweep.FeedMissedRate))
 		for _, e := range p.Sweep.Entries {
@@ -145,7 +150,7 @@ func Markdown(rep Report) string {
 		}
 		so := p.ShadowOnly
 		w("\n### (c) Shadow-only detections\n\n%d shadow-only (origin pg-connector, no live pr.changed within tolerance), %.2f per hour; %d first-observation reconciles counted apart; %d with no projection field change. By kind %v; by field %v. Other-origin items %v (of which a real field change %v).\n\n", so.Total, so.NoiseRatePerHour, so.FirstObservation, so.NoFieldChange, so.ByKind, so.ByField, so.OtherOrigins, so.OtherReal)
-		w("### (d) Detection delay\n\nNegative means the shadow was first.\n\n- shadow minus live enqueue: %s\n- shadow minus the PR's own updated time: %s\n- live enqueue minus the PR's own updated time: %s\n\n", dist(p.Delay.VsLiveEnqueue, "s"), dist(p.Delay.ShadowFromUpdate, "s"), dist(p.Delay.LiveFromUpdate, "s"))
+		w("### (d) Detection delay\n\nNegative means the shadow was first.\n\n- shadow minus live enqueue: %s\n- shadow minus the PR's own updated time: %s\n- live enqueue minus the PR's own updated time: %s\n- missed events the shadow flagged later (shadow minus live enqueue, an upper bound): %s\n\n", dist(p.Delay.VsLiveEnqueue, "s"), dist(p.Delay.ShadowFromUpdate, "s"), dist(p.Delay.LiveFromUpdate, "s"), dist(p.Delay.MissedThenDetected, "s"))
 		w("### (e) Cost\n\n- Tick duration: %s; %d ticks over 60 s.\n- Hydrations per hour: %s.\n- GraphQL points per hour (shadow, lower bound): %s.\n- Hours with the shared token below the 1,000 reserve: %d. %s\n\n", dist(p.Cost.TickDurationS, "s"), p.Cost.TicksOver60s, dist(p.Cost.HydrationsPerHour, ""), dist(p.Cost.CostPerHour, ""), p.Cost.HoursBelowReserve, p.Cost.Statement)
 		w("| Hour (UTC) | Ticks | Hydrations | Points (lower bound) | Token remaining at hour end | Min remaining |\n| --- | --- | --- | --- | --- | --- |\n")
 		for _, h := range p.Cost.Hours {
@@ -161,7 +166,7 @@ func Markdown(rep Report) string {
 		}
 	}
 	if c := rep.Combined; c != nil {
-		w("## Combined (%s)\n\n- LIVE-DETECTED in window %d, matched %d, missed %d, unexplained %d; misses by class %v.\n- SWEEP-CAUGHT headline %d; shadow-only %d.\n- Tick duration: %s; hydrations per hour: %s; points per hour: %s; shadow minus live enqueue: %s.\n", strings.Join(c.Phases, " + "), c.LiveDetected, c.Matched, c.Missed, c.Unexplained, c.ByClass, c.SweepHeadline, c.ShadowOnly, dist(c.TickDurationS, "s"), dist(c.HydrationsPerHour, ""), dist(c.CostPerHour, ""), dist(c.VsLiveEnqueue, "s"))
+		w("## Combined (%s)\n\n- LIVE-DETECTED in window %d, matched %d, missed %d (of which flagged later %d), unexplained %d; misses by class %v.\n- SWEEP-CAUGHT headline %d; shadow-only %d.\n- Tick duration: %s; hydrations per hour: %s; points per hour: %s; shadow minus live enqueue: %s.\n", strings.Join(c.Phases, " + "), c.LiveDetected, c.Matched, c.Missed, c.LateDetected, c.Unexplained, c.ByClass, c.SweepHeadline, c.ShadowOnly, dist(c.TickDurationS, "s"), dist(c.HydrationsPerHour, ""), dist(c.CostPerHour, ""), dist(c.VsLiveEnqueue, "s"))
 	}
 	return b.String()
 }

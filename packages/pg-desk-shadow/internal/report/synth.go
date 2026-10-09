@@ -141,10 +141,13 @@ func Synthesize(dir string, o SynthOptions) (Synthetic, error) {
 	}
 
 	// Live router events (note the fourth row has no event_type: an old row).
+	// The live router names a per-change event `<pr id>@<hash>`; the older, bare
+	// shape stays in the scenario (the fourth row below) so both are exercised.
+	const changeHash = "@0123456789ab"
 	ev := func(id string, enq time.Time, kind string) string {
 		return js(map[string]any{
 			"time": schema.Format(enq.Add(20 * time.Minute)), "level": "info", "msg": "dispatch result", "kind": "dispatch", "role": "desk-pr",
-			"event_type": kind, "bead": id, "change": kind + ":" + id, "enqueued_at": schema.Format(enq), "started_at": schema.Format(enq.Add(18 * time.Minute)), "duration_ms": 15000,
+			"event_type": kind, "bead": id + changeHash, "change": kind + ":" + id + changeHash, "enqueued_at": schema.Format(enq), "started_at": schema.Format(enq.Add(18 * time.Minute)), "duration_ms": 15000,
 		})
 	}
 	var events []string
@@ -172,7 +175,7 @@ func Synthesize(dir string, o SynthOptions) (Synthetic, error) {
 	// Queue rows carry the local offset.
 	est := time.FixedZone("EST", -5*3600)
 	q := func(op, id string, t time.Time, reason string) string {
-		return js(map[string]any{"op": op, "eventId": "pr.changed:" + id, "at": t.In(est).Format(time.RFC3339Nano), "reason": reason, "payload": map[string]any{"id": id, "title": s.Titles[0]}})
+		return js(map[string]any{"op": op, "eventId": "pr.changed:" + id + changeHash, "at": t.In(est).Format(time.RFC3339Nano), "reason": reason, "payload": map[string]any{"id": id, "title": s.Titles[0]}})
 	}
 	queue := []string{
 		q("enqueue", synthID(104), at(10, 39, 0), ""),

@@ -49,7 +49,12 @@ flowchart LR
 
 - **LIVE-DETECTED.** A `(PR id, enqueued_at)` pair taken from a live router `pr.changed` dispatch row.
   The live detection time is the ENQUEUE time, never the dispatch time: waits behind the saturated
-  lane have been 11 to 45 minutes.
+  lane have been 11 to 45 minutes. The row's `bead` field is a per-change event id,
+  `<pr id>@<change hash>`, since per-change event ids landed (older rows and the run record carry the
+  bare PR id). Every join between the live side and the shadow side, the seeded set, the queue and the
+  run record MUST use the BARE PR id (everything before the first `@`); a join on the raw field never
+  matches anything. Two live events are the same event only when their RAW ids and enqueue times are
+  equal: two changes of one PR enqueued in the same second are two events.
 - **SHADOW-DETECTED.** Every shadow item whose `origin` is `pg-connector` (the list-diff path), of ANY
   kind. A PR first seen surfaces as a bare `reconcile` with origin `pg-connector`. The PR kinds are
   `opened`, `reopened`, `closed`, `merged`, `draft_changed`, `head_changed`, `base_changed`,
@@ -230,7 +235,8 @@ Run INSIDE the collector, because the live logs are not durable. Every tick it i
   append and a state write repeats the append byte for byte.
 - **Normalisation.** Every timestamp is normalised to UTC at read time (`queue.jsonl` carries the
   local offset, e.g. `-04:00`, which changes on 2026-11-01).
-- **Row shapes.** `events.jsonl` dispatch rows: `bead` (the PR id), `change` (`pr.changed:<id>`),
+- **Row shapes.** `events.jsonl` dispatch rows: `bead` (the per-change event id `<pr id>@<hash>`; the
+  bare PR id in rows before per-change ids), `change` (`pr.changed:<id>`, with the same suffix),
   `event_type`, `enqueued_at`, `started_at`, `time`, `duration_ms`, `role`, `kind`; `event_type` and
   `enqueued_at` exist only since about 2026-10-07T11:00Z, earlier rows are unusable, and `enqueued_at`
   is the source of the real enqueue time. `queue.jsonl` rows: `op` (`enqueue|accept|evict|archive|seen`),
@@ -256,8 +262,19 @@ Tolerance `T` is the live query's own period plus the slot period plus the measu
   cannot see: `merge_state_status`, CI detail, edited comment bodies, review threads beyond
   `totalCount`; owned by the 6h remote tier and the 30m local tier, spec 10.3 and ADR S35, or a
   local/sweep-origin item caught it), `live-only` (coalescing: a `reemit` evict of the event id,
-  an evict without a dispatch, a live router outage), `unexplained`. ONLY `unexplained` counts as
-  failure. Events before the end of warm-up are excluded, not classed.
+  an evict without a dispatch, the SAME per-change event enqueued twice, a live router outage; two
+  enqueues with different change hashes are two changes, not coalescing), `unexplained`. ONLY
+  `unexplained` counts as failure. Events before the end of warm-up are excluded, not classed.
+
+  A miss is "not detected within `T`". The report also states, for every missed event, whether the
+  shadow flagged the same PR LATER (the first later shadow item for that PR within a late window,
+  default 3 hours: it covers the longest observed sleep gap) and how long after the live enqueue. That
+  delay is an UPPER BOUND, not proof the later item is the same change, and it never changes the
+  class. From it the report gives two informational COVERAGE figures: matched plus later-detected over
+  all in-window events, and the same share over the events not classed `collector-down` (did the
+  shadow detect the change whenever it was running). Coverage is not a stop criterion; it is the
+  measure to use instead of tick uptime when overrun slots are expected (the runbook's correction 10).
+
 - **(b) Sweep-caught.** The share of SWEEP-CAUGHT rows also SHADOW-DETECTED (or caught by a
   local/sweep-origin item, counted separately), and the rate at which the live sweep catches what the
   live feed missed (a SWEEP-CAUGHT row with no live `pr.changed` within the sweep period plus `T`).
@@ -268,7 +285,8 @@ Tolerance `T` is the live query's own period plus the slot period plus the measu
   kind and the projection field that triggered each (the noise rate); first-observation reconciles
   are counted apart.
 - **(d) Detection delay.** Shadow-first-detect minus live `enqueued_at` per PR (relative; negative
-  means the shadow was first), and from the PR's own `updated_at` where the scratch facts carry it.
+  means the shadow was first), and from the PR's own `updated_at` where the scratch facts carry it;
+  plus the late-detection delay of the missed events the shadow flagged later (see (a)).
 - **(e) Cost.** Shadow tick duration p50, p90 and max against 60s; hydrations per hour; GraphQL points
   per hour p50 and max-hour (shadow spend, a lower bound); the shared-token remaining at each hour end
   against the 4,000 ceiling (5,000 limit minus the connector's 1,000 reserve).

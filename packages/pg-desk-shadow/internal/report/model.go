@@ -13,11 +13,14 @@ const SchemaID = "pg-desk-shadow.report/v1"
 
 // Params tunes the computation; every value is reported.
 type Params struct {
-	LivePeriod      time.Duration // longest live query period (pr-team)
-	SlotPeriod      time.Duration // shadow slot
-	SweepPeriod     time.Duration // live pr-sweep period
-	FirstHour       time.Duration // copy-staleness window after T0
-	RouterDownGap   time.Duration // a hole in the live dispatch log longer than this means the router was down
+	LivePeriod    time.Duration // longest live query period (pr-team)
+	SlotPeriod    time.Duration // shadow slot
+	SweepPeriod   time.Duration // live pr-sweep period
+	FirstHour     time.Duration // copy-staleness window after T0
+	RouterDownGap time.Duration // a hole in the live dispatch log longer than this means the router was down
+	// LateWindow bounds how long after a MISSED live event the first later shadow
+	// item for the same PR still counts as that event's late detection.
+	LateWindow      time.Duration
 	WeekdayMinTicks int
 	MinLive         int
 	MinSweepCaught  int
@@ -33,7 +36,7 @@ type Params struct {
 func DefaultParams() Params {
 	return Params{
 		LivePeriod: 120 * time.Second, SlotPeriod: 60 * time.Second, SweepPeriod: 30 * time.Minute,
-		FirstHour: time.Hour, RouterDownGap: 10 * time.Minute,
+		FirstHour: time.Hour, RouterDownGap: 10 * time.Minute, LateWindow: 3 * time.Hour,
 		WeekdayMinTicks: 480, MinLive: 100, MinSweepCaught: 10, MaxDays: 7, UptimeMin: 0.95,
 		HashUnusable: 0.20, Loc: time.Local,
 	}
@@ -159,16 +162,32 @@ type MissEntry struct {
 	At       string `json:"live_enqueued_at"`
 	Class    string `json:"class"`
 	Evidence string `json:"evidence,omitempty"`
+	// LateSeconds is the delay of the first later shadow item for the same PR
+	// (within the late window), when there is one. An upper bound on the delay,
+	// not proof that the item is the same change.
+	LateSeconds *float64 `json:"later_shadow_detection_s,omitempty"`
 }
 
 // Misses is metric (a).
 type Misses struct {
-	Matched     int            `json:"matched"`
-	Missed      int            `json:"missed"`
-	ByClass     map[string]int `json:"by_class"`
-	Unexplained int            `json:"unexplained"`
-	Entries     []MissEntry    `json:"entries"`
-	Tolerance   string         `json:"tolerance"`
+	Matched int `json:"matched"`
+	Missed  int `json:"missed"`
+	// LateDetected counts MISSED events the shadow flagged later (see MissEntry).
+	LateDetected int `json:"missed_but_detected_later"`
+	// Coverage is (Matched + LateDetected) over the in-window live events: the
+	// share of live changes the shadow detected at all. Informational: it does
+	// not replace a stop criterion.
+	Coverage float64 `json:"coverage"`
+	// CoverageWhenUp is the same share over the events NOT classed collector-down
+	// (matched plus later-detected misses of any other class, over in-window
+	// events minus the collector-down ones): did the shadow detect the change
+	// whenever it was running. Zero when every in-window event was collector-down.
+	CoverageWhenUp float64        `json:"coverage_when_collector_up"`
+	ByClass        map[string]int `json:"by_class"`
+	Unexplained    int            `json:"unexplained"`
+	Entries        []MissEntry    `json:"entries"`
+	Tolerance      string         `json:"tolerance"`
+	LateWindow     string         `json:"late_window"`
 }
 
 // SweepEntry is one SWEEP-CAUGHT row (label only).
@@ -210,6 +229,9 @@ type Delay struct {
 	VsLiveEnqueue    Dist `json:"shadow_minus_live_enqueue_s"`
 	ShadowFromUpdate Dist `json:"shadow_minus_pr_updated_s"`
 	LiveFromUpdate   Dist `json:"live_enqueue_minus_pr_updated_s"`
+	// MissedThenDetected is the late-detection delay of the missed events the
+	// shadow flagged later (an upper bound; see MissEntry).
+	MissedThenDetected Dist `json:"missed_then_detected_shadow_minus_live_enqueue_s"`
 }
 
 // Hour is one hour bucket of metric (e).
@@ -277,6 +299,7 @@ type PhaseReport struct {
 type samples struct {
 	tickDur, hydrationsHour, costHour []float64
 	dVsLive, dShadowUpd, dLiveUpd     []float64
+	dLate                             []float64
 }
 
 // Report is the JSON document.
@@ -293,6 +316,7 @@ type Combined struct {
 	LiveDetected      int            `json:"live_detected"`
 	Matched           int            `json:"matched"`
 	Missed            int            `json:"missed"`
+	LateDetected      int            `json:"missed_but_detected_later"`
 	ByClass           map[string]int `json:"misses_by_class"`
 	Unexplained       int            `json:"unexplained"`
 	SweepHeadline     int            `json:"sweep_headline"`

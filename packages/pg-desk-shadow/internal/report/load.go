@@ -23,8 +23,18 @@ type Dispatch struct {
 	EventType  string
 	EnqueuedAt time.Time // zero when absent (rows before event_type existed)
 	StartedAt  time.Time
-	ID         string // PR id (the row's bead field)
+	ID         string // bare PR id: the row's bead field without its `@<change hash>` suffix
+	Raw        string // the row's bead field as written (`<pr id>@<hash>` once per-change event ids landed)
 	Role       string
+}
+
+// BaseID strips the `@<change hash>` suffix the live router appends to a
+// per-change event id (`<pr id>@<hash>`, also inside `pr.changed:<pr id>@<hash>`).
+// A PR id is `<owner>/<repo>#<n>` and never contains `@`, so everything from the
+// first `@` is the suffix. An id without one is returned unchanged.
+func BaseID(s string) string {
+	base, _, _ := strings.Cut(s, "@")
+	return base
 }
 
 // QueueRow is one live queue.jsonl row, reduced. Its timestamps carry a local
@@ -168,12 +178,13 @@ func readEvents(path string) ([]Dispatch, int, error) {
 		if json.Unmarshal(b, &r) != nil || r.Time == "" {
 			return
 		}
-		d := Dispatch{Time: parseTS(r.Time), EventType: r.EventType, EnqueuedAt: parseTS(r.EnqueuedAt), StartedAt: parseTS(r.StartedAt), ID: r.Bead, Role: r.Role}
-		if d.ID == "" {
+		d := Dispatch{Time: parseTS(r.Time), EventType: r.EventType, EnqueuedAt: parseTS(r.EnqueuedAt), StartedAt: parseTS(r.StartedAt), Raw: r.Bead, Role: r.Role}
+		if d.Raw == "" {
 			if _, id, ok := strings.Cut(r.Change, ":"); ok {
-				d.ID = id
+				d.Raw = id
 			}
 		}
+		d.ID = BaseID(d.Raw)
 		out = append(out, d)
 	})
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Time.Before(out[j].Time) })
