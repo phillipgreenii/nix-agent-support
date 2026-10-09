@@ -54,15 +54,34 @@ func TestExecRunnerSpawnFailure(t *testing.T) {
 func TestTimeoutKillsForkedSleepingGrandchild(t *testing.T) {
 	pidFile := filepath.Join(t.TempDir(), "grandchild.pid")
 	script := `sleep 300 & echo $! > "` + pidFile + `"; wait`
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	// Expire the context only once the script has recorded the grandchild's
+	// pid. A fixed short deadline races the shell's startup: under host load
+	// it can fire before the pid file exists, killing the group with nothing
+	// to assert on (pg2-j4f8z). The 60s deadline is only a backstop.
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	start := time.Now()
+	canceledAt := make(chan time.Time, 1)
+	go func() {
+		for ctx.Err() == nil {
+			if raw, rerr := os.ReadFile(pidFile); rerr == nil && strings.HasSuffix(string(raw), "\n") {
+				canceledAt <- time.Now()
+				cancel()
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
 	_, err := ExecRunner{}.Run(ctx, Cmd{Path: "sh", Args: []string{"-c", script}, Env: []string{"PATH=" + os.Getenv("PATH")}})
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("err = %v, want deadline exceeded", err)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want canceled", err)
 	}
-	if elapsed := time.Since(start); elapsed > 10*time.Second {
-		t.Fatalf("Run blocked for %v after the deadline", elapsed)
+	select {
+	case at := <-canceledAt:
+		if elapsed := time.Since(at); elapsed > 10*time.Second {
+			t.Fatalf("Run blocked for %v after the cancel", elapsed)
+		}
+	default:
+		t.Fatal("context ended before the pid file was written")
 	}
 	raw, rerr := os.ReadFile(pidFile)
 	if rerr != nil {
