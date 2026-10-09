@@ -20,9 +20,13 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/projection"
 )
 
-var updateGolden = flag.Bool("update", false, "rewrite the golden logs under testdata/logs/rollover")
+var updateGolden = flag.Bool("update", false, "rewrite the golden logs under testdata/logs")
 
-const goldenDir = "../../testdata/logs/rollover"
+// The directories of the golden logs this package's tests write.
+const (
+	goldenDir      = "../../testdata/logs/rollover"
+	correctionsDir = "../../testdata/logs/corrections"
+)
 
 var (
 	// week1 is the Monday of day1's week; the example's sprint starts then too
@@ -138,9 +142,16 @@ func checkBatch(t *testing.T, p command.Plan, eff time.Time) {
 	}
 }
 
-// writeGolden compares the log with the golden file of that name, rewriting
-// it under -update, then decodes the file and replays it.
+// writeGolden compares the log with the golden file of that name under
+// testdata/logs/rollover, rewriting it under -update, then decodes the file
+// and replays it.
 func writeGolden(t *testing.T, name string, log []event.Event) *projection.Model {
+	t.Helper()
+	return writeGoldenIn(t, goldenDir, name, log)
+}
+
+// writeGoldenIn is writeGolden for the golden file name in dir.
+func writeGoldenIn(t *testing.T, dir, name string, log []event.Event) *projection.Model {
 	t.Helper()
 	var want []byte
 	for _, e := range log {
@@ -150,9 +161,9 @@ func writeGolden(t *testing.T, name string, log []event.Event) *projection.Model
 		}
 		want = append(want, append(line, '\n')...)
 	}
-	path := filepath.Join(goldenDir, name)
+	path := filepath.Join(dir, name)
 	if *updateGolden {
-		if err := os.MkdirAll(goldenDir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(path, want, 0o644); err != nil {

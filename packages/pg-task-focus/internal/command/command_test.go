@@ -1,6 +1,7 @@
 package command_test
 
 import (
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -10,15 +11,16 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/event"
 )
 
-// commandsOf builds one command of each kind of this layer with the given
-// client id and effective_at (ignored by annotate, which takes none).
+// commandCase builds one command of a kind with the given client id and
+// effective_at (ignored by the commands that take none).
 type commandCase struct {
 	name     string
 	build    func(id event.ID, eff *time.Time) command.Command
 	timeless bool // takes no effective_at
 }
 
-func taskAndCycleCommands() []commandCase {
+// commandsWithoutDryRun is one command of each kind that has no dry run.
+func commandsWithoutDryRun() []commandCase {
 	return []commandCase{
 		{name: "complete", build: func(id event.ID, eff *time.Time) command.Command {
 			return command.CompleteTask{ID: id, TaskID: postPlan, EffectiveAt: eff}
@@ -47,6 +49,15 @@ func taskAndCycleCommands() []commandCase {
 		{name: "annotate", timeless: true, build: func(id event.ID, _ *time.Time) command.Command {
 			return command.AnnotateCycle{ID: id, CycleID: cycleA, Note: "notes", KV: []event.KV{{Key: "ticket", Value: "T-1"}}}
 		}},
+		{name: "break", timeless: true, build: func(id event.ID, _ *time.Time) command.Command {
+			return command.BackfillBreak{ID: id, CycleID: cycleA, From: at(10), To: at(20)}
+		}},
+		{name: "correct", timeless: true, build: func(id event.ID, _ *time.Time) command.Command {
+			return command.Correct{ID: id, Target: idOf('L', 1), Fields: map[string]json.RawMessage{"note": json.RawMessage(`"fixed"`)}, Reason: "typo"}
+		}},
+		{name: "retract", timeless: true, build: func(id event.ID, _ *time.Time) command.Command {
+			return command.Retract{ID: id, Target: idOf('L', 1), Reason: "mistake"}
+		}},
 	}
 }
 
@@ -66,7 +77,7 @@ func TestReqHashExcludesIDAndDefaultedFieldsForEveryCommand(t *testing.T) {
 	eff := at(5)
 	other := at(6)
 	seen := map[string]string{}
-	for _, cc := range taskAndCycleCommands() {
+	for _, cc := range commandsWithoutDryRun() {
 		t.Run(cc.name, func(t *testing.T) {
 			bare := hashOf(t, cc.build("", nil))
 			if got := hashOf(t, cc.build(clientID, nil)); got != bare {
@@ -105,6 +116,14 @@ func TestReqHashExcludesIDAndDefaultedFieldsForEveryCommand(t *testing.T) {
 			{command.SwitchCycle{To: cycleA}, command.SwitchCycle{To: cycleB}},
 			{command.AnnotateCycle{CycleID: cycleA, Note: "a"}, command.AnnotateCycle{CycleID: cycleA, Note: "b"}},
 			{command.AnnotateCycle{CycleID: cycleA, KV: []event.KV{{Key: "pr", Value: "1"}}}, command.AnnotateCycle{CycleID: cycleA, KV: []event.KV{{Key: "pr", Value: "2"}}}},
+			{command.BackfillBreak{CycleID: cycleA, From: at(10), To: at(20)}, command.BackfillBreak{CycleID: cycleA, From: at(11), To: at(20)}},
+			{command.BackfillBreak{CycleID: cycleA, From: at(10), To: at(20)}, command.BackfillBreak{CycleID: cycleA, From: at(10), To: at(21)}},
+			{command.BackfillBreak{CycleID: cycleA, From: at(10), To: at(20)}, command.BackfillBreak{CycleID: cycleB, From: at(10), To: at(20)}},
+			{command.Correct{Target: idOf('L', 1), Fields: map[string]json.RawMessage{"note": json.RawMessage(`"a"`)}}, command.Correct{Target: idOf('L', 1), Fields: map[string]json.RawMessage{"note": json.RawMessage(`"b"`)}}},
+			{command.Correct{Target: idOf('L', 1), Fields: map[string]json.RawMessage{"note": json.RawMessage(`"a"`)}}, command.Correct{Target: idOf('L', 2), Fields: map[string]json.RawMessage{"note": json.RawMessage(`"a"`)}}},
+			{command.Correct{Target: idOf('L', 1), Fields: map[string]json.RawMessage{"note": json.RawMessage(`"a"`)}}, command.Correct{Target: idOf('L', 1), Fields: map[string]json.RawMessage{"note": json.RawMessage(`"a"`)}, Reason: "typo"}},
+			{command.Retract{Target: idOf('L', 1)}, command.Retract{TargetBatch: idOf('L', 1)}},
+			{command.Retract{Target: idOf('L', 1)}, command.Retract{Target: idOf('L', 1), Reason: "mistake"}},
 		}
 		for _, p := range pairs {
 			if hashOf(t, p[0]) == hashOf(t, p[1]) {
@@ -112,10 +131,26 @@ func TestReqHashExcludesIDAndDefaultedFieldsForEveryCommand(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("a break's instants enter the hash to the millisecond, as stored", func(t *testing.T) {
+		c := command.BackfillBreak{CycleID: cycleA, From: at(10), To: at(20)}
+		finer := command.BackfillBreak{CycleID: cycleA, From: at(10).Add(time.Microsecond), To: at(20)}
+		if hashOf(t, c) != hashOf(t, finer) {
+			t.Error("a sub-millisecond difference, which the stored instant drops, changes the hash")
+		}
+	})
+
+	t.Run("equivalent JSON in a correction's fields hashes the same", func(t *testing.T) {
+		a := command.Correct{Target: idOf('L', 1), Fields: map[string]json.RawMessage{"kv": json.RawMessage(`[{"key":"pr","value":"1"}]`)}}
+		b := command.Correct{Target: idOf('L', 1), Fields: map[string]json.RawMessage{"kv": json.RawMessage(`[ {"value": "1", "key": "pr"} ]`)}}
+		if hashOf(t, a) != hashOf(t, b) {
+			t.Error("whitespace or key order in a replacement value changes the hash")
+		}
+	})
 }
 
 func TestIsDryRunIsFalseForTheseCommands(t *testing.T) {
-	for _, cc := range taskAndCycleCommands() {
+	for _, cc := range commandsWithoutDryRun() {
 		if c := cc.build(clientID, nil); c.IsDryRun() {
 			t.Errorf("%s: IsDryRun() = true", cc.name)
 		}
@@ -124,7 +159,7 @@ func TestIsDryRunIsFalseForTheseCommands(t *testing.T) {
 
 func TestCommandNamesAreDistinct(t *testing.T) {
 	seen := map[string]bool{}
-	for _, cc := range taskAndCycleCommands() {
+	for _, cc := range commandsWithoutDryRun() {
 		name := cc.build("", nil).Name()
 		if name == "" || seen[name] {
 			t.Errorf("%s: Name() = %q, empty or repeated", cc.name, name)
@@ -136,7 +171,7 @@ func TestCommandNamesAreDistinct(t *testing.T) {
 func TestNoCommandHasCarryOverField(t *testing.T) {
 	// No carry-over: a task still open at rollover is missed or skipped,
 	// never carried into the next period, so no command can ask for it.
-	for _, cc := range taskAndCycleCommands() {
+	for _, cc := range commandsWithoutDryRun() {
 		typ := reflect.TypeOf(cc.build("", nil))
 		for i := range typ.NumField() {
 			name := strings.ToLower(typ.Field(i).Name)
@@ -149,6 +184,7 @@ func TestNoCommandHasCarryOverField(t *testing.T) {
 
 func TestUnknownTargetsAreCheckedBeforeStateCodes(t *testing.T) {
 	const ghost = event.CycleID("01J9ZZZZZZZZZZZZZZZZZZZZZG")
+	ghostEvent := idOf('G', 1)
 	idle := func(t *testing.T) *logb {
 		b := bootstrapped(t)
 		b.add(0, startOf(cycleA, deepWork))
@@ -177,6 +213,12 @@ func TestUnknownTargetsAreCheckedBeforeStateCodes(t *testing.T) {
 		{"an annotation of an unknown cycle", idle, at(30), command.AnnotateCycle{CycleID: ghost, Note: "x"}, command.ReasonUnknownCycle},
 		{"a completion of an unknown task with the clock behind the log", idle, at(-90), command.CompleteTask{TaskID: "day:2026-10-07:nothing"}, command.ReasonUnknownTask},
 		{"a start of an unknown type", paused, at(30), command.StartCycle{Type: "nothing"}, command.ReasonUnknownCycleType},
+		{"a break of an unknown cycle that would end after a stop", idle, at(30), command.BackfillBreak{CycleID: ghost, From: at(5), To: at(20)}, command.ReasonUnknownCycle},
+		{"a correction of an unknown event with an identity field", idle, at(30), command.Correct{Target: ghostEvent, Fields: map[string]json.RawMessage{"cycle_id": json.RawMessage(`"x"`)}}, command.ReasonUnknownEvent},
+		{"a correction of an unknown event with a client title", idle, at(30), command.Correct{Target: ghostEvent, Fields: map[string]json.RawMessage{"title": json.RawMessage(`"x"`)}}, command.ReasonUnknownEvent},
+		{"a correction of an unknown event with an unknown cycle type", idle, at(30), command.Correct{Target: ghostEvent, Fields: map[string]json.RawMessage{"type": json.RawMessage(`"nothing"`)}}, command.ReasonUnknownEvent},
+		{"a retraction of an unknown event", idle, at(30), command.Retract{Target: ghostEvent}, command.ReasonUnknownEvent},
+		{"a retraction of an unknown batch", paused, at(30), command.Retract{TargetBatch: ghostEvent}, command.ReasonUnknownEvent},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

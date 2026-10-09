@@ -1,6 +1,7 @@
 package command_test
 
 import (
+	"encoding/json"
 	"errors"
 	"slices"
 	"testing"
@@ -197,6 +198,31 @@ func TestPresentStateAndReplayAgreeOnCodes(t *testing.T) {
 			now: at(20), cmd: command.ResumeCycle{CycleID: cycleA},
 			event: resumeOf(cycleA), at: at(20),
 			want: command.ReasonAnotherCycleRunning,
+		},
+		{
+			// bootstrapped's events are L1 (the batch id) to L6; the skip is L7.
+			name: "a correction of an identity field",
+			build: func(t *testing.T) *logb {
+				b := bootstrapped(t)
+				b.add(10, event.TaskSkipped{TaskID: postPlan, Reason: "late"})
+				return b
+			},
+			now:   at(20),
+			cmd:   command.Correct{Target: idOf('L', 7), Fields: map[string]json.RawMessage{"task_id": json.RawMessage(`"x"`)}},
+			event: event.EventCorrected{Target: idOf('L', 7), Fields: map[string]json.RawMessage{"task_id": json.RawMessage(`"x"`)}}, at: at(20),
+			want: command.ReasonInvalidCorrection,
+		},
+		{
+			name: "a retraction of a batch member alone", build: bootstrapped, now: at(20),
+			cmd:   command.Retract{Target: idOf('L', 3)},
+			event: event.EventRetracted{Target: idOf('L', 3)}, at: at(20),
+			want: command.ReasonInvalidCorrection,
+		},
+		{
+			name: "a retraction of an unknown event", build: bootstrapped, now: at(20),
+			cmd:   command.Retract{Target: idOf('G', 1)},
+			event: event.EventRetracted{Target: idOf('G', 1)}, at: at(20),
+			want: command.ReasonUnknownEvent,
 		},
 	}
 	for _, tc := range cases {

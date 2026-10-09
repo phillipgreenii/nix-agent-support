@@ -81,8 +81,9 @@ type planner interface {
 // that reads earlier than the newest event of the entity acted on, when no
 // effective_at was given; (6) the candidate replay of the log with the new
 // events, whose finding becomes a Rejection with the same code. A period
-// change and a profile change are judged in the order their plans document,
-// which ends with the same candidate replay.
+// change, a profile change, a break, a correction and a retraction are judged
+// in the order their plans document, which ends with the same candidate
+// replay.
 func Build(env Env, c Command) (Plan, error) {
 	switch {
 	case c == nil:
@@ -200,6 +201,12 @@ func (b *builder) notFuture(eff time.Time, supplied *time.Time) error {
 	if supplied == nil {
 		return nil
 	}
+	return b.notFutureAs(eff, "The new event's effective_at")
+}
+
+// notFutureAs refuses an instant eff, which what names at the start of the
+// sentence, later than the clock plus the configured skew.
+func (b *builder) notFutureAs(eff time.Time, what string) error {
 	skew := b.env.Config.Defaults().MaxFutureSkewSeconds
 	limit := b.env.Now.Add(time.Duration(skew) * time.Second)
 	if !eff.After(limit) {
@@ -209,8 +216,8 @@ func (b *builder) notFuture(eff time.Time, supplied *time.Time) error {
 		Reason:   ReasonFutureEffectiveAt,
 		Instants: []time.Time{eff, b.at},
 		Message: fmt.Sprintf(
-			"The new event's effective_at %s is later than the clock, %s, plus the %d seconds of max_future_skew_seconds, and a change cannot take effect in the future.",
-			b.instant(eff), b.instant(b.at), skew,
+			"%s %s is later than the clock, %s, plus the %d seconds of max_future_skew_seconds, and a change cannot take effect in the future.",
+			what, b.instant(eff), b.instant(b.at), skew,
 		),
 	}
 }
@@ -297,6 +304,26 @@ func (b *builder) cycleRef(id event.CycleID) CycleRef {
 		}
 	}
 	return ref
+}
+
+// logged is the stored event with the given id, as appended, whatever its
+// type: a batch.committed too, which no view shows.
+func (b *builder) logged(id event.ID) (event.Event, bool) {
+	for _, e := range b.env.Model.Log() {
+		if e.ID == id {
+			return e, true
+		}
+	}
+	return event.Event{}, false
+}
+
+// describe names a stored event inside a sentence: its id, its type and the
+// entity it is about.
+func describe(e event.Event) string {
+	if entity := projection.EntityOf(e.Payload); entity != "" {
+		return fmt.Sprintf("event %s (%s of %s)", e.ID, e.Payload.EventType(), entity)
+	}
+	return fmt.Sprintf("event %s (%s)", e.ID, e.Payload.EventType())
 }
 
 // liveEvents lists the live events, as corrected, of the given types for
