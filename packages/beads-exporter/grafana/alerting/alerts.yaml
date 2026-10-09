@@ -1,6 +1,7 @@
 # beads-exporter unified-alerting rules.
 #
-#   beads-collect-failing   a database's bead metrics have not been collected for 15+ min
+#   beads-collect-failing      a database's bead metrics have not been collected for 15+ min
+#   beads-claims-no-live-owner a claimed bead has had no live session behind it for 6h+
 #
 # Registered via phillipgreenii.observability.alertRuleFiles from
 # darwin/modules/beads-exporter/default.nix. The folder "Claude Agents" converges by
@@ -9,12 +10,17 @@
 #
 # refId A is plain PromQL (any `unless` stays inside A) and refId C is a single
 # threshold stage, so the flake check test-beads-exporter-alert-rules can wrap A with
-# C's evaluator and run `promtool test rules` over it
-# (rule-tests/beads-collect-failing.test.yaml). Grafana-only behaviour (noDataState,
-# execErrState, annotations) is checked there with yq.
+# C's evaluator and run `promtool test rules` over it (rule-tests/<uid>.test.yaml).
+# Grafana-only behaviour (noDataState, execErrState, annotations) is checked there with yq.
 #
 # max_over_time(...[10m]) rides out a failed collection shorter than 10 minutes and
 # `for: 5m` then makes the rule fire about 15 minutes after the last good collection.
+#
+# beads-claims-no-live-owner reads beads_stranded_claims, which counts claims whose
+# claimant has shown no session activity within staleClaimHours (6h in the deployed
+# configuration; the summary text names that window). The claim only counts once the
+# stranded pass has seen it, and `for: 30m` rides out one transient reading. Nothing in
+# this rule or in the exporter releases a claim.
 #
 # Deliberately not covered here, because other rules already page for them: the
 # exporter process being down (the launchd health rules) and the database server being
@@ -72,3 +78,44 @@ groups:
                 - evaluator:
                     type: lt
                     params: [1]
+      - uid: beads-claims-no-live-owner
+        title: Bead claims with no live owner
+        condition: C
+        for: 30m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          __dashboardUid__: beads
+          __panelId__: "32"
+          summary: "{{ $values.A }} bead claim(s) in {{ $labels.db }} with no live session for 6h+"
+          description: 'Which beads: Beads → Claims and age → Which beads. An escalation consumer may already have filed a bead — check bd list --label escalated before acting. To release one: bd update <id> --status open --assignee "" --append-notes "dormant since <t>, may resume". Nothing auto-releases. Clears when the claim is released or its owner resumes.'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: sum by (db) (beads_stranded_claims)
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]

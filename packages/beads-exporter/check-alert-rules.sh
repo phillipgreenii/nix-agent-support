@@ -29,7 +29,7 @@ tests_dir="$3"
 
 # Every rule uid this check wraps and tests. A rule added to the alerts file extends this
 # list together with its cases under rule-tests/.
-rule_uids='["beads-collect-failing"]'
+rule_uids='["beads-claims-no-live-owner", "beads-collect-failing"]'
 
 fail() {
   echo "FAIL: $*" >&2
@@ -85,13 +85,47 @@ assert "$uid: refId C is a single lt 1 threshold stage" \
           | .type == "threshold" and .conditions == [{ evaluator: { type: "lt", params: [1] } }])'
 
 dash_uid="$(jq -r '.uid' "$dashboard")"
-panel_id="$(rule "$uid" '.annotations.__panelId__')"
-[ "$(rule "$uid" '.annotations.__dashboardUid__')" = "$dash_uid" ] ||
-  fail "$uid: __dashboardUid__ must be the dashboard uid ($dash_uid)"
-jq -e --arg pid "$panel_id" \
-  '[.. | objects | select(has("gridPos")) | select((.id | tostring) == $pid)] | length == 1' \
-  "$dashboard" >/dev/null ||
-  fail "$uid: __panelId__ $panel_id does not exist in the dashboard JSON exactly once"
+# check_dashboard_link <uid>: the annotations name the Beads dashboard and a panel id
+# that exists in it exactly once.
+check_dashboard_link() {
+  local rule_uid="$1" panel_id
+  panel_id="$(rule "$rule_uid" '.annotations.__panelId__')"
+  [ "$(rule "$rule_uid" '.annotations.__dashboardUid__')" = "$dash_uid" ] ||
+    fail "$rule_uid: __dashboardUid__ must be the dashboard uid ($dash_uid)"
+  jq -e --arg pid "$panel_id" \
+    '[.. | objects | select(has("gridPos")) | select((.id | tostring) == $pid)] | length == 1' \
+    "$dashboard" >/dev/null ||
+    fail "$rule_uid: __panelId__ $panel_id does not exist in the dashboard JSON exactly once"
+}
+check_dashboard_link "$uid"
+
+uid=beads-claims-no-live-owner
+assert "$uid: fixed uid, readable title, condition C" \
+  '.groups[].rules[] | select(.uid == "beads-claims-no-live-owner")
+   | .title == "Bead claims with no live owner" and .condition == "C"'
+assert "$uid: for 30m, noDataState OK, execErrState Error, severity warning" \
+  '.groups[].rules[] | select(.uid == "beads-claims-no-live-owner")
+   | .for == "30m" and .noDataState == "OK" and .execErrState == "Error"
+     and .labels == { severity: "warning" }'
+assert "$uid: summary and description text" \
+  '.groups[].rules[] | select(.uid == "beads-claims-no-live-owner") | .annotations
+   | .summary == "{{ $values.A }} bead claim(s) in {{ $labels.db }} with no live session for 6h+"
+     and .description == $desc' \
+  --arg desc 'Which beads: Beads → Claims and age → Which beads. An escalation consumer may already have filed a bead — check bd list --label escalated before acting. To release one: bd update <id> --status open --assignee "" --append-notes "dormant since <t>, may resume". Nothing auto-releases. Clears when the claim is released or its owner resumes.'
+assert "$uid: refId A is the plain PromQL expression" \
+  '.groups[].rules[] | select(.uid == "beads-claims-no-live-owner")
+   | (.data[] | select(.refId == "A") | .model.expr) == "sum by (db) (beads_stranded_claims)"'
+assert "$uid: refId C is a single gt 0 threshold stage" \
+  '.groups[].rules[] | select(.uid == "beads-claims-no-live-owner")
+   | (.data | map(.refId) == ["A", "B", "C"])
+     and ((.data[] | select(.refId == "C") | .model)
+          | .type == "threshold" and .conditions == [{ evaluator: { type: "gt", params: [0] } }])'
+check_dashboard_link "$uid"
+# The rule points at the tile that shows the same number it counts.
+jq -e --arg pid "$(rule "$uid" '.annotations.__panelId__')" \
+  '[.. | objects | select(has("gridPos")) | select((.id | tostring) == $pid)][0]
+   | .title == "Claims with no live owner"' "$dashboard" >/dev/null ||
+  fail "$uid: __panelId__ must name the Claims with no live owner tile"
 
 # --- part 2: PromQL behaviour ----------------------------------------------------------
 

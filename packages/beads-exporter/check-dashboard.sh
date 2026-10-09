@@ -21,6 +21,8 @@
 #   B8  every non-row panel has a description
 #   B9  queue tiles aggregate with sum by (db ...): never summed across databases
 #   B10 the data-age tile is titled "(worst db)" and says totals exclude a stale db
+#   B11 the stranded-claim additions: the red judgement tile, the By-db column, the
+#       oldest-claim tile and the Loki "Which beads" panel over event=stranded_claim
 set -euo pipefail
 
 if [ "$#" -ne 2 ]; then
@@ -72,8 +74,8 @@ lint() {
   rule B6 'a domain target does not filter db=~"$db"' \
     '[.. | objects | select(has("targets")) | .targets[] | .expr]
      | length > 0 and all(contains("db=~\"$db\""))' "$d"
-  rule B7 "aggregation under All: counts use sum, *_up uses min, ages use time() - min(), durations use max" \
-    '[.. | objects | select(has("targets")) | .targets[] | .expr]
+  rule B7 "aggregation under All: counts use sum, *_up uses min, ages use time() - min(), durations use max (Loki panels are log views, not aggregates)" \
+    '[.. | objects | select(has("targets") and ((.datasource.type? // "") != "loki")) | .targets[] | .expr]
      | all(
          if contains("beads_exporter_up") then test("^min( by \\([^)]*\\))? ?\\(")
          elif contains("_timestamp_seconds") then test("^time\\(\\) - min( by \\([^)]*\\))? ?\\(")
@@ -90,6 +92,16 @@ lint() {
   rule B10 "the data-age tile must be titled (worst db) and its description must say totals exclude a stale db" \
     '[.. | objects | select(has("gridPos") and (.title // "" | contains("(worst db)")))]
      | length == 1 and (.[0].description | test("excludes a stale database"))' "$d"
+  rule B11 "the stranded-claim additions are missing or wrong: red-from-1 background tile, By-db No live owner column, oldest-claim tile, Loki Which beads logs panel over event=stranded_claim filtered by db" \
+    '([.. | objects | select(has("gridPos") and .title == "Claims with no live owner")]
+      | length == 1 and (.[0] | .type == "stat" and .options.colorMode == "background"
+          and ([.fieldConfig.defaults.thresholds.steps[] | select(.color == "red")] | map(.value) == [1])))
+     and ([.. | objects | select(has("gridPos") and .title == "Oldest no-live-owner claim")] | length == 1)
+     and ([.. | objects | select(has("gridPos") and .title == "Which beads")]
+      | length == 1 and (.[0] | .type == "logs" and .datasource.type == "loki"
+          and (.targets[0].expr | contains("event=\"stranded_claim\"") and contains("db=~\"$db\""))))
+     and ([.. | objects | select(has("gridPos") and .title == "By db" and .type == "table")] | .[0].transformations
+      | any(.id == "organize" and .options.renameByName["Value #M"] == "No live owner"))' "$d"
   return "$status"
 }
 
@@ -169,4 +181,14 @@ mutate queue-tile-summed-across-dbs B9 "$(set_expr 8 'sum(beads_queue_candidates
 mutate data-age-title B10 '(.. | objects | select(has("gridPos") and .id == 1) | .title) = "Data age"'
 mutate data-age-description B10 '(.. | objects | select(has("gridPos") and .id == 1) | .description) = "How old the data is."'
 
-echo "OK: the Beads dashboard passes B1-B10 and $mutants mutants were each rejected by the intended rule."
+mutate stranded-tile-not-red B11 '(.. | objects | select(has("gridPos") and .title == "Claims with no live owner") | .fieldConfig.defaults.thresholds.steps[1].value) = 2'
+mutate stranded-tile-no-background B11 '(.. | objects | select(has("gridPos") and .title == "Claims with no live owner") | .options.colorMode) = "none"'
+mutate stranded-column-missing B11 'del(.. | objects | select(has("gridPos") and .title == "By db" and .type == "table") | .transformations[] | select(.id == "organize") | .options.renameByName["Value #M"])'
+mutate which-beads-not-logs B11 '(.. | objects | select(has("gridPos") and .title == "Which beads") | .type) = "table"'
+mutate which-beads-wrong-event B11 '(.. | objects | select(has("gridPos") and .title == "Which beads") | .targets[0].expr) |= gsub("stranded_claim"; "other_event")'
+mutate which-beads-no-db-filter B11 '(.. | objects | select(has("gridPos") and .title == "Which beads") | .targets[0].expr) |= gsub(" \\| db=~\"\\$db\""; "")'
+mutate oldest-tile-missing B11 '(.. | objects | select(has("gridPos") and .title == "Oldest no-live-owner claim") | .title) = "Oldest claim"'
+mutate stranded-count-not-sum B7 "$(set_expr 32 'max(beads_stranded_claims{db=~"$db"})')"
+mutate oldest-claim-not-min B7 "$(set_expr 33 'time() - max(beads_oldest_stranded_claim_timestamp_seconds{db=~"$db"})')"
+
+echo "OK: the Beads dashboard passes B1-B11 and $mutants mutants were each rejected by the intended rule."

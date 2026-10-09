@@ -867,7 +867,7 @@
       "id": 15,
       "type": "table",
       "title": "By db",
-      "description": "One row per database. Data age is the age of the last successful main collection. The state columns add up to Not closed; Merge-request holds merge-request beads and molecules, which bd ready never returns. The last four columns are what each command's queue offers.",
+      "description": "One row per database. Data age is the age of the last successful main collection. The state columns add up to Not closed; Merge-request holds merge-request beads and molecules, which bd ready never returns. No live owner counts claims whose claimant has shown no session activity within the stale-claim window. The last four columns are what each command's queue offers.",
       "gridPos": {
         "x": 0,
         "y": 25,
@@ -998,6 +998,16 @@
           "expr": "sum by (db) (beads_queue_candidates{db=~\"$db\",queue=\"unblock-human-focus\"})",
           "instant": true,
           "format": "table"
+        },
+        {
+          "refId": "M",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (db) (beads_stranded_claims{db=~\"$db\"})",
+          "instant": true,
+          "format": "table"
         }
       ],
       "transformations": [
@@ -1030,10 +1040,11 @@
               "Value #F": 6,
               "Value #G": 7,
               "Value #H": 8,
-              "Value #I": 9,
-              "Value #J": 10,
-              "Value #K": 11,
-              "Value #L": 12
+              "Value #I": 10,
+              "Value #J": 11,
+              "Value #K": 12,
+              "Value #L": 13,
+              "Value #M": 9
             },
             "renameByName": {
               "db": "Db",
@@ -1048,7 +1059,8 @@
               "Value #I": "Drain claim",
               "Value #J": "Drain termination",
               "Value #K": "Unblock-human",
-              "Value #L": "Unblock-focus"
+              "Value #L": "Unblock-focus",
+              "Value #M": "No live owner"
             }
           }
         },
@@ -1338,7 +1350,7 @@
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 50,
+        "y": 58,
         "w": 24,
         "h": 1
       },
@@ -1351,7 +1363,7 @@
       "description": "Not-closed beads by issue type, summed over the selected databases.",
       "gridPos": {
         "x": 0,
-        "y": 51,
+        "y": 59,
         "w": 8,
         "h": 8
       },
@@ -1407,7 +1419,7 @@
       "description": "Not-closed beads by priority, P0 (most urgent) to P4, summed over the selected databases.",
       "gridPos": {
         "x": 8,
-        "y": 51,
+        "y": 59,
         "w": 6,
         "h": 8
       },
@@ -1515,7 +1527,7 @@
       "description": "Not-closed beads carrying each workflow label, summed over the selected databases. A bead can carry several labels, so these do not add up to a total.",
       "gridPos": {
         "x": 14,
-        "y": 51,
+        "y": 59,
         "w": 10,
         "h": 8
       },
@@ -1610,7 +1622,7 @@
       "description": "The 20 most common labels among not-closed beads, summed over the selected databases. Labels overlap, so the bars do not add up to a total. The remainder bucket __other__ is left out here and shown in the all-labels table.",
       "gridPos": {
         "x": 0,
-        "y": 59,
+        "y": 67,
         "w": 24,
         "h": 10
       },
@@ -1697,7 +1709,7 @@
       "collapsed": true,
       "gridPos": {
         "x": 0,
-        "y": 69,
+        "y": 77,
         "w": 24,
         "h": 1
       },
@@ -1709,7 +1721,7 @@
           "description": "Every label that has its own series, with its not-closed bead count, summed over the selected databases. __other__ counts beads carrying any label outside the exporter's label cap, once per bead. Labels overlap, so the counts do not add up to a total.",
           "gridPos": {
             "x": 0,
-            "y": 70,
+            "y": 78,
             "w": 24,
             "h": 10
           },
@@ -1781,7 +1793,7 @@
       "collapsed": true,
       "gridPos": {
         "x": 0,
-        "y": 80,
+        "y": 88,
         "w": 24,
         "h": 1
       },
@@ -1793,7 +1805,7 @@
           "description": "Each dashboard state with its bead count and the status bd stores for it. Stored open = Ready + Blocked + Merge-request + Other + open beads snoozed under Deferred (gates are outside the not-closed view and so outside both columns).",
           "gridPos": {
             "x": 0,
-            "y": 81,
+            "y": 89,
             "w": 14,
             "h": 8
           },
@@ -1897,7 +1909,7 @@
           "description": "Beads by the status bd stores, summed over the selected databases. Closed comes from bd's status count, which includes closed gates, so it is not comparable with the not-closed columns. Stored open = Ready + Blocked + Merge-request + Other + open beads snoozed under Deferred (gates are outside the not-closed view and so outside both columns).",
           "gridPos": {
             "x": 14,
-            "y": 81,
+            "y": 89,
             "w": 10,
             "h": 8
           },
@@ -1967,7 +1979,7 @@
           "description": "Explains how the dashboard states relate to the statuses bd stores.",
           "gridPos": {
             "x": 0,
-            "y": 89,
+            "y": 97,
             "w": 24,
             "h": 3
           },
@@ -1985,7 +1997,7 @@
       "collapsed": true,
       "gridPos": {
         "x": 0,
-        "y": 92,
+        "y": 100,
         "w": 24,
         "h": 1
       },
@@ -1997,7 +2009,7 @@
           "description": "1 when the last main collection of the database succeeded, 0 when it failed.",
           "gridPos": {
             "x": 0,
-            "y": 93,
+            "y": 101,
             "w": 6,
             "h": 6
           },
@@ -2070,7 +2082,7 @@
           "description": "Age of the last successful run of each collection pass, per database. A pass that keeps failing keeps ageing.",
           "gridPos": {
             "x": 6,
-            "y": 93,
+            "y": 101,
             "w": 9,
             "h": 6
           },
@@ -2126,7 +2138,7 @@
           "description": "Collection failures per pass and closed reason, as the increase over the interval. stale_issues_jsonl means a stale issues.jsonl file blocks that database; the alert text says how to clear it.",
           "gridPos": {
             "x": 15,
-            "y": 93,
+            "y": 101,
             "w": 9,
             "h": 6
           },
@@ -2176,7 +2188,7 @@
           "description": "Wall-clock duration of the last run of each collection pass, per database.",
           "gridPos": {
             "x": 0,
-            "y": 99,
+            "y": 107,
             "w": 12,
             "h": 7
           },
@@ -2226,7 +2238,7 @@
           "description": "Link to the dashboard for the bead database server itself.",
           "gridPos": {
             "x": 12,
-            "y": 99,
+            "y": 107,
             "w": 12,
             "h": 7
           },
@@ -2236,6 +2248,151 @@
           }
         }
       ]
+    },
+    {
+      "id": 32,
+      "type": "stat",
+      "title": "Claims with no live owner",
+      "description": "Claimed beads (open, in progress or hooked with an assignee) whose claimant has shown no session activity within the stale-claim window. Red from 1. Which beads and how old: Claims and age below. Nothing releases these automatically.",
+      "gridPos": {
+        "x": 21,
+        "y": 1,
+        "w": 3,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(beads_stranded_claims{db=~\"$db\"})",
+          "instant": true
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"]
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 33,
+      "type": "stat",
+      "title": "Oldest no-live-owner claim",
+      "description": "Age of the oldest claim that has no live owner, counted from when it was claimed. Empty when there are none.",
+      "gridPos": {
+        "x": 12,
+        "y": 42,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "time() - min(beads_oldest_stranded_claim_timestamp_seconds{db=~\"$db\"})",
+          "instant": true
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"]
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dtdurations",
+          "noValue": "none",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 34,
+      "type": "logs",
+      "title": "Which beads",
+      "description": "One line per claim with no live owner, written by each stranded pass: database, bead, stored status, assignee and when it was claimed. Release one with the command in the alert description.",
+      "gridPos": {
+        "x": 0,
+        "y": 50,
+        "w": 24,
+        "h": 8
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{service_name=\"beads-exporter\"} | json | event=\"stranded_claim\" | db=~\"$db\" | line_format \"{{.db}} {{.bead}} {{.status}} {{.assignee}} claimed {{.claim_time}}\""
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "enableLogDetails": true,
+        "sortOrder": "Descending",
+        "dedupStrategy": "exact"
+      }
     }
   ]
 }

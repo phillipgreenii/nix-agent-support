@@ -11,7 +11,8 @@ beads_exporter_up{db="beta"} 0
 # HELP beads_exporter_pass_last_success_timestamp_seconds Time of the last successful run of each collection pass (main, throughput or stranded), in Unix seconds. Omitted until the pass has succeeded once.
 # TYPE beads_exporter_pass_last_success_timestamp_seconds gauge
 beads_exporter_pass_last_success_timestamp_seconds{db="alpha",pass="main"} 1780315200.6
-beads_exporter_pass_last_success_timestamp_seconds{db="alpha",pass="throughput"} 1780315261.6
+beads_exporter_pass_last_success_timestamp_seconds{db="alpha",pass="stranded"} 1780315201.1
+beads_exporter_pass_last_success_timestamp_seconds{db="alpha",pass="throughput"} 1780315261.8
 # HELP beads_exporter_collect_errors_total Collection failures by pass and closed-enum reason (stale_issues_jsonl, timeout, bd_error, schema_skew, parse_error or transcript_error).
 # TYPE beads_exporter_collect_errors_total counter
 beads_exporter_collect_errors_total{db="alpha",pass="main",reason="bd_error"} 0
@@ -19,6 +20,12 @@ beads_exporter_collect_errors_total{db="alpha",pass="main",reason="parse_error"}
 beads_exporter_collect_errors_total{db="alpha",pass="main",reason="schema_skew"} 0
 beads_exporter_collect_errors_total{db="alpha",pass="main",reason="stale_issues_jsonl"} 0
 beads_exporter_collect_errors_total{db="alpha",pass="main",reason="timeout"} 1
+beads_exporter_collect_errors_total{db="alpha",pass="stranded",reason="bd_error"} 0
+beads_exporter_collect_errors_total{db="alpha",pass="stranded",reason="parse_error"} 0
+beads_exporter_collect_errors_total{db="alpha",pass="stranded",reason="schema_skew"} 0
+beads_exporter_collect_errors_total{db="alpha",pass="stranded",reason="stale_issues_jsonl"} 0
+beads_exporter_collect_errors_total{db="alpha",pass="stranded",reason="timeout"} 0
+beads_exporter_collect_errors_total{db="alpha",pass="stranded",reason="transcript_error"} 1
 beads_exporter_collect_errors_total{db="alpha",pass="throughput",reason="bd_error"} 0
 beads_exporter_collect_errors_total{db="alpha",pass="throughput",reason="parse_error"} 0
 beads_exporter_collect_errors_total{db="alpha",pass="throughput",reason="schema_skew"} 0
@@ -29,6 +36,12 @@ beads_exporter_collect_errors_total{db="beta",pass="main",reason="parse_error"} 
 beads_exporter_collect_errors_total{db="beta",pass="main",reason="schema_skew"} 0
 beads_exporter_collect_errors_total{db="beta",pass="main",reason="stale_issues_jsonl"} 2
 beads_exporter_collect_errors_total{db="beta",pass="main",reason="timeout"} 0
+beads_exporter_collect_errors_total{db="beta",pass="stranded",reason="bd_error"} 0
+beads_exporter_collect_errors_total{db="beta",pass="stranded",reason="parse_error"} 0
+beads_exporter_collect_errors_total{db="beta",pass="stranded",reason="schema_skew"} 0
+beads_exporter_collect_errors_total{db="beta",pass="stranded",reason="stale_issues_jsonl"} 2
+beads_exporter_collect_errors_total{db="beta",pass="stranded",reason="timeout"} 0
+beads_exporter_collect_errors_total{db="beta",pass="stranded",reason="transcript_error"} 0
 beads_exporter_collect_errors_total{db="beta",pass="throughput",reason="bd_error"} 0
 beads_exporter_collect_errors_total{db="beta",pass="throughput",reason="parse_error"} 0
 beads_exporter_collect_errors_total{db="beta",pass="throughput",reason="schema_skew"} 2
@@ -37,6 +50,8 @@ beads_exporter_collect_errors_total{db="beta",pass="throughput",reason="timeout"
 # HELP beads_exporter_collect_duration_seconds Duration of the last run of each collection pass, in seconds.
 # TYPE beads_exporter_collect_duration_seconds gauge
 beads_exporter_collect_duration_seconds{db="alpha",pass="main"} 0.3
+beads_exporter_collect_duration_seconds{db="alpha",pass="stranded"} 0.1
 beads_exporter_collect_duration_seconds{db="alpha",pass="throughput"} 0.2
 beads_exporter_collect_duration_seconds{db="beta",pass="main"} 0.1
+beads_exporter_collect_duration_seconds{db="beta",pass="stranded"} 0.1
 beads_exporter_collect_duration_seconds{db="beta",pass="throughput"} 0.1

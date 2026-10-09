@@ -184,7 +184,7 @@ func TestRegistryValidation(t *testing.T) {
 }
 
 // TestDefaultFamiliesAllowlist is the label allowlist per family: the exact
-// label names of every family the main and throughput passes emit.
+// label names of every family the main, throughput and stranded passes emit.
 func TestDefaultFamiliesAllowlist(t *testing.T) {
 	want := map[string]string{
 		FamIssues:          "db,state",
@@ -197,6 +197,8 @@ func TestDefaultFamiliesAllowlist(t *testing.T) {
 		FamOldest:          "db,state",
 		FamCreated24h:      "db",
 		FamClosed24h:       "db",
+		FamStrandedClaims:  "db,status",
+		FamOldestStranded:  "db",
 		FamExporterUp:      "db",
 		FamPassLastSuccess: "db,pass",
 		FamCollectErrors:   "db,pass,reason",
@@ -227,11 +229,16 @@ func TestDefaultFamiliesAllowlist(t *testing.T) {
 	}
 }
 
-func TestStrandedFamiliesAreNotRegisteredHere(t *testing.T) {
+func TestStrandedFamiliesAreRegistered(t *testing.T) {
+	var got []string
 	for _, f := range Default().Families() {
 		if strings.Contains(f.Name, "stranded") {
-			t.Fatalf("stranded family %s must be added by the stranded pass, not here", f.Name)
+			got = append(got, f.Name+":"+string(f.Type))
 		}
+	}
+	want := []string{FamStrandedClaims + ":gauge", FamOldestStranded + ":gauge"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("stranded families = %v, want %v", got, want)
 	}
 }
 

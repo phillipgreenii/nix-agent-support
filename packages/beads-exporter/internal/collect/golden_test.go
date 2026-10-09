@@ -51,15 +51,20 @@ func goldenSuccess(t *testing.T) string {
 	started := at("2026-05-25T10:00:00Z")
 	inProgress := bead("alpha-2", "in_progress", "task", 2, "2026-05-20T08:00:00Z", "area-a")
 	inProgress.StartedAt = &started
+	inProgress.Assignee = strandedSession + "-drain"
 	deferred := bead("alpha-3", "open", "bug", 0, "2026-05-28T08:00:00Z")
 	until := at("2026-07-01T00:00:00Z")
 	deferred.DeferUntil = &until
 	ready1 := bead("alpha-1", "open", "task", 1, "2026-05-30T08:00:00Z", "area-a", "human")
+	ready1.Assignee = "drain-" + liveSession
+	claimedOpen := bead("alpha-4", "open", "task", 2, "2026-05-29T08:00:00Z")
+	claimedOpen.Assignee = "worker-gamma"
+	claimedOpen.UpdatedAt = ptr(at("2026-05-29T09:00:00Z"))
 	ready2 := bead("alpha-8", "open", "epic", 2, "2026-05-31T08:00:00Z", "human-focus-required")
 	ready3 := bead("alpha-9", "open", "task", 3, "2026-05-31T09:00:00Z", "odd\"label\\path", "multi\nline", "caf\u00e9", "bad\xffbyte", "__other__")
 	alphaList := []bd.Bead{
 		ready1, inProgress, deferred,
-		bead("alpha-4", "open", "task", 2, "2026-05-29T08:00:00Z"),
+		claimedOpen,
 		bead("alpha-5", "open", "merge-request", 2, "2026-05-10T08:00:00Z"),
 		bead("alpha-6", "pinned", "task", 3, "2026-04-01T08:00:00Z"),
 		bead("alpha-7", "review", "epic", 2, "2026-03-01T08:00:00Z"),
@@ -68,7 +73,7 @@ func goldenSuccess(t *testing.T) string {
 	alpha := &fakeAdapter{
 		list:       alphaList,
 		ready:      []bd.Bead{ready1, ready2, ready3},
-		blocked:    []bd.Bead{alphaList[3]},
+		blocked:    []bd.Bead{claimedOpen},
 		counts:     map[string]int{"closed": 7, "open": 99},
 		statuses:   []string{"open", "in_progress", "blocked", "deferred", "closed", "pinned", "hooked", "review", "archived"},
 		spawnReady: map[string][]bd.Bead{"--priority 1": {ready1}},
@@ -90,19 +95,23 @@ func goldenSuccess(t *testing.T) string {
 	}
 	dbs := []DB{{Name: "alpha", Adapter: alpha}, {Name: "beta", Adapter: beta}}
 	mp := NewMainPass(queues, 7)
-	c := New(clock, dbs, []Pass{mp, ThroughputPass{}}, quietLogger())
+	sp := NewStrandedPass(StrandedConfig{ClaudeDir: strandedClaudeDir(t, clock.Now()), Window: 6 * time.Hour}, quietLogger())
+	c := New(clock, dbs, []Pass{mp, ThroughputPass{}, sp}, quietLogger())
 	mp.Init(context.Background(), dbs)
 	c.RunPass(context.Background(), PassMain)
 	c.RunPass(context.Background(), PassThroughput)
+	c.RunPass(context.Background(), PassStranded)
 	return renderSnap(t, c.Snapshot())
 }
 
 func goldenFailure(t *testing.T) string {
 	t.Helper()
 	clock := newClock()
+	claimed := bead("alpha-1", "open", "task", 1, "2026-05-30T08:00:00Z")
+	claimed.Assignee = "worker-gamma"
 	alpha := &fakeAdapter{
-		list:     []bd.Bead{bead("alpha-1", "open", "task", 1, "2026-05-30T08:00:00Z")},
-		ready:    []bd.Bead{bead("alpha-1", "open", "task", 1, "2026-05-30T08:00:00Z")},
+		list:     []bd.Bead{claimed},
+		ready:    []bd.Bead{claimed},
 		counts:   map[string]int{"closed": 1},
 		statuses: []string{"open", "closed"},
 		created:  []bd.Bead{{ID: "a"}},
@@ -121,16 +130,24 @@ func goldenFailure(t *testing.T) string {
 
 	dbs := []DB{{Name: "alpha", Adapter: alpha}, {Name: "beta", Adapter: beta}}
 	mp := NewMainPass([]queue.Queue{mustQueue(t, "drain-claim", "--exclude-type", "epic")}, 3)
-	c := New(clock, dbs, []Pass{mp, ThroughputPass{}}, quietLogger())
+	claudeDir := strandedClaudeDir(t, clock.Now())
+	sp := NewStrandedPass(StrandedConfig{ClaudeDir: claudeDir, Window: 6 * time.Hour}, quietLogger())
+	c := New(clock, dbs, []Pass{mp, ThroughputPass{}, sp}, quietLogger())
 	mp.Init(context.Background(), dbs)
 
-	// Cycle 1: alpha succeeds on both passes.
+	// Cycle 1: alpha succeeds on all three passes.
 	c.RunPass(context.Background(), PassMain)
 	c.RunPass(context.Background(), PassThroughput)
+	c.RunPass(context.Background(), PassStranded)
 	// Cycle 2: alpha's main pass times out (its series are dropped and the
 	// last-success timestamp stays frozen at cycle 1); its throughput pass
-	// still succeeds. beta has failed both passes from the start.
+	// still succeeds. beta has failed every pass from the start. The stranded
+	// pass loses its transcript tree, so it fails with transcript_error and
+	// drops its series while its last-success timestamp stays frozen.
 	clock.Advance(time.Minute)
+	if err := os.RemoveAll(filepath.Join(claudeDir, "projects")); err != nil {
+		t.Fatal(err)
+	}
 	alpha.mu.Lock()
 	alpha.fail = map[string]error{"blocked": failure.New(failure.Timeout, "blocked", errf("deadline"))}
 	alpha.mu.Unlock()
@@ -139,6 +156,7 @@ func goldenFailure(t *testing.T) string {
 	alpha.fail = nil
 	alpha.mu.Unlock()
 	c.RunPass(context.Background(), PassThroughput)
+	c.RunPass(context.Background(), PassStranded)
 	return renderSnap(t, c.Snapshot())
 }
 

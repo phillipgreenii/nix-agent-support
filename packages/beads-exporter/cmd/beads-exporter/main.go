@@ -108,7 +108,12 @@ func serve(parent context.Context, cfg *config.Config, log *slog.Logger) error {
 	}
 
 	mainPass := collect.NewMainPass(cfg.ClassifiedQueues, cfg.LabelCap)
-	collector := collect.New(sched.RealClock{}, dbs, []collect.Pass{mainPass, collect.ThroughputPass{}}, log)
+	strandedPass := collect.NewStrandedPass(collect.StrandedConfig{
+		ClaudeDir:     cfg.ClaudeDir,
+		Window:        cfg.StaleClaimWindow(),
+		OperatorNames: cfg.OperatorNames,
+	}, log)
+	collector := collect.New(sched.RealClock{}, dbs, []collect.Pass{mainPass, collect.ThroughputPass{}, strandedPass}, log)
 	mainPass.Init(ctx, dbs)
 
 	reg := metrics.Default()
@@ -118,7 +123,7 @@ func serve(parent context.Context, cfg *config.Config, log *slog.Logger) error {
 	}
 	srv := &http.Server{Handler: server.Handler(collector, reg, log), ReadHeaderTimeout: 10 * time.Second}
 
-	done := make(chan struct{}, 2)
+	done := make(chan struct{}, 3)
 	go func() {
 		sched.Run(ctx, sched.RealClock{}, cfg.PollInterval(), func(c context.Context) { collector.RunPass(c, collect.PassMain) },
 			func() { log.Warn("main pass overran its interval; skipping a tick") })
@@ -127,6 +132,11 @@ func serve(parent context.Context, cfg *config.Config, log *slog.Logger) error {
 	go func() {
 		sched.Run(ctx, sched.RealClock{}, cfg.StrandedInterval(), func(c context.Context) { collector.RunPass(c, collect.PassThroughput) },
 			func() { log.Warn("throughput pass overran its interval; skipping a tick") })
+		done <- struct{}{}
+	}()
+	go func() {
+		sched.Run(ctx, sched.RealClock{}, cfg.StrandedInterval(), func(c context.Context) { collector.RunPass(c, collect.PassStranded) },
+			func() { log.Warn("stranded pass overran its interval; skipping a tick") })
 		done <- struct{}{}
 	}()
 
@@ -146,6 +156,7 @@ func serve(parent context.Context, cfg *config.Config, log *slog.Logger) error {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
 	_ = srv.Shutdown(shutdownCtx)
+	<-done
 	<-done
 	<-done
 	return serveErr

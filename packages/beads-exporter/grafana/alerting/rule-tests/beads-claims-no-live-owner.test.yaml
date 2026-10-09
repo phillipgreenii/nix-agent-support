@@ -1,0 +1,103 @@
+# promtool unit tests for the beads-claims-no-live-owner alert. Run by the flake check
+# test-beads-exporter-alert-rules, which generates rules.yml next to this file (see
+# beads-collect-failing.test.yaml for how the Grafana rule is wrapped).
+#
+# Time model: promtool's clock starts at 0 and every series has a 1m interval. A claim
+# with no live owner is reported from the first sample (t=0). The expression is true
+# from then on and `for: 30m` has to elapse before the alert fires: not at 29m
+# (t=1740s), yes at 31m (t=1860s).
+#
+# The series carry the label set the exporter publishes (db, status) plus the scrape
+# job and instance; the rule sums over status, so one alert instance exists per database.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: a stranded claim is pending at 29m and firing at 31m
+    interval: 1m
+    input_series:
+      - series: beads_stranded_claims{db="alpha",status="in_progress",job="beads-exporter",instance="127.0.0.1:9000"}
+        values: "1x80"
+      - series: beads_stranded_claims{db="alpha",status="open",job="beads-exporter",instance="127.0.0.1:9000"}
+        values: "0x80"
+      - series: beads_stranded_claims{db="alpha",status="hooked",job="beads-exporter",instance="127.0.0.1:9000"}
+        values: "0x80"
+    alert_rule_test:
+      - eval_time: 1740s
+        alertname: beads-claims-no-live-owner
+        exp_alerts: []
+      - eval_time: 1860s
+        alertname: beads-claims-no-live-owner
+        exp_alerts:
+          - exp_labels:
+              db: alpha
+              severity: warning
+
+  - name: claims in different statuses add up per database
+    interval: 1m
+    input_series:
+      - series: beads_stranded_claims{db="alpha",status="in_progress",job="beads-exporter",instance="127.0.0.1:9000"}
+        values: "1x80"
+      - series: beads_stranded_claims{db="alpha",status="open",job="beads-exporter",instance="127.0.0.1:9000"}
+        values: "2x80"
+    promql_expr_test:
+      - expr: wrapped:beads_claims_no_live_owner
+        eval_time: 1860s
+        exp_samples:
+          - labels: 'wrapped:beads_claims_no_live_owner{db="alpha"}'
+            value: 3
+    alert_rule_test:
+      - eval_time: 1860s
+        alertname: beads-claims-no-live-owner
+        exp_alerts:
+          - exp_labels:
+              db: alpha
+              severity: warning
+
+  - name: a database with no stranded claims never fires
+    interval: 1m
+    input_series:
+      - series: beads_stranded_claims{db="alpha",status="in_progress",job="beads-exporter",instance="127.0.0.1:9000"}
+        values: "0x80"
+      - series: beads_stranded_claims{db="alpha",status="open",job="beads-exporter",instance="127.0.0.1:9000"}
+        values: "0x80"
+    alert_rule_test:
+      - eval_time: 1860s
+        alertname: beads-claims-no-live-owner
+        exp_alerts: []
+      - eval_time: 4500s
+        alertname: beads-claims-no-live-owner
+        exp_alerts: []
+
+  - name: a claim released before 30m never fires
+    interval: 1m
+    input_series:
+      - series: beads_stranded_claims{db="alpha",status="in_progress",job="beads-exporter",instance="127.0.0.1:9000"}
+        values: "1x20 0x60"
+    alert_rule_test:
+      - eval_time: 1860s
+        alertname: beads-claims-no-live-owner
+        exp_alerts: []
+
+  - name: only the database holding the stranded claim fires
+    interval: 1m
+    input_series:
+      - series: beads_stranded_claims{db="alpha",status="in_progress",job="beads-exporter",instance="127.0.0.1:9000"}
+        values: "1x80"
+      - series: beads_stranded_claims{db="beta",status="in_progress",job="beads-exporter",instance="127.0.0.1:9000"}
+        values: "0x80"
+    promql_expr_test:
+      - expr: count(wrapped:beads_claims_no_live_owner)
+        eval_time: 1860s
+        exp_samples:
+          - labels: "{}"
+            value: 1
+    alert_rule_test:
+      - eval_time: 1860s
+        alertname: beads-claims-no-live-owner
+        exp_alerts:
+          - exp_labels:
+              db: alpha
+              severity: warning

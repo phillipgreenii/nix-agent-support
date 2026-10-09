@@ -63,3 +63,36 @@ Residual, accepted: a process that runs an unwrapped `bd` claim with no `--actor
 `BEADS_ACTOR` (not dispatched by pg-router, not one of the runners above) still resolves to git
 `user.name`. Closing that needs a generic guard shipped by this repo; file it separately if it
 shows up in practice.
+
+## Addendum 2026-10-08: stranded-claim liveness rules (bead `pg2-oob3u`)
+
+Decision 4 left stranded-claim detection as follow-up work. It is now the `stranded` pass of
+`packages/beads-exporter`. This addendum records the liveness rules; the exporter's README holds
+the mechanics.
+
+**What counts as a claim.** A not-closed bead with a non-empty assignee whose stored status is
+`open`, `in_progress` or `hooked`.
+
+**Live owner.** A claim is live when any of these holds, with "within the window" meaning within
+`staleClaimHours` of now (hours, configurable, never minutes: an idle session is not a dead one):
+
+1. a lower-case UUID inside the assignee names a session transcript
+   (`<claudeDir>/projects/<slug>/<uuid>.jsonl`) written within the window;
+2. a transcript written within the window (a session's own or a subagent's, never a statusline
+   sidecar) uses the assignee as a claim value: the argument of `--actor`, the value after
+   `BEADS_ACTOR=`, or an `"assignee":` JSON value, in raw or JSON-escaped form;
+3. the assignee is a configured operator name and the claim itself is younger than the window.
+   Rule 2 is skipped for operator names because the name appears in nearly every transcript.
+
+A bare mention of the assignee (for instance a `bd list` output in another session's transcript)
+is not a claim value and does not make a claim live. A value is recognised only when it is made of
+letters, digits and `._-:@/+`; an assignee outside that set can be live by rule 1 or 3 only.
+
+**Report only.** The pass exports counts and the oldest claim time as metrics, logs one line per
+claim with no live owner (the bead's own fields, never transcript text), and a Grafana alert fires
+after 30 minutes. Nothing releases or clears a claim, in line with the decision that detection is
+alert/report only.
+
+**Rejected.** A process or session-registry check (an actor id is not a session id), and a
+bare-string match of the assignee against transcript text (any mention, including the alert's own
+release command, would make a claim look live).

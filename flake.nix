@@ -351,12 +351,12 @@
           pg-router-disk-watchdog = final.callPackage ./packages/pg-router-disk-watchdog {
             inherit (goBuilders) mkGoApp;
           };
-          # beads-exporter: Pattern A (ADR 0008), a zero-dependency module that
-          # execs a pinned, read-only bd (by the absolute path its config file
-          # names) and serves hand-rolled Prometheus text. No local
-          # `replace`/modRoot. beads-exporter-contract is the bd contract suite
-          # compiled as a runnable (`--bd <path>`), because the machine-wiring
-          # verification runs it against the machine's own bd package.
+          # beads-exporter: Pattern B (ADR 0008), a module that execs a pinned,
+          # read-only bd (by the absolute path its config file names), discovers
+          # session transcripts through the local `replace ../claude-transcript`
+          # and serves hand-rolled Prometheus text. beads-exporter-contract is the
+          # bd contract suite compiled as a runnable (`--bd <path>`), because the
+          # machine-wiring verification runs it against the machine's own bd package.
           beads-exporter = final.callPackage ./packages/beads-exporter {
             inherit (goBuilders) mkGoApp;
           };
@@ -1243,7 +1243,6 @@
                 "pg-router-disk-watchdog"
                 "ccpool-probe"
                 "pg-rescue"
-                "beads-exporter"
                 "pg-task-focus"
               ];
 
@@ -1255,8 +1254,6 @@
                 "claude-extended-tool-approver"
                 # pg2-04jgw: internal/integration is `integration`-tagged.
                 "pg-rescue"
-                # internal/contract is `contract`-tagged (the bd contract suite).
-                "beads-exporter"
               ];
 
               # Pattern B (local `replace => ../sibling`): root the fileset at
@@ -1299,12 +1296,24 @@
                     ];
                   };
                 })
+                (goLint {
+                  module = "beads-exporter";
+                  modRoot = "beads-exporter";
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.unions [
+                      ./packages/beads-exporter
+                      ./packages/claude-transcript
+                    ];
+                  };
+                })
               ];
 
-              # `-tagged` companions for all three Pattern-B modules — every
-              # one of them carries build-tagged test files today (ccpool:
+              # `-tagged` companions for every Pattern-B module — every one of
+              # them carries build-tagged test files today (ccpool:
               # contract/integration; pa-monitor: hostile/integration;
-              # pg-router: integration/smoke). Same src/modRoot as patternBGoLints
+              # pg-router: integration/smoke; beads-exporter: contract). Same
+              # src/modRoot as patternBGoLints
               # above so the tagged check lints the identical module tree.
               patternBTaggedGoLints = [
                 (goLintTagged {
@@ -1337,6 +1346,17 @@
                     fileset = lib.fileset.unions [
                       (lib.fileset.difference ./packages/pg-router ./packages/pg-router/docs)
                       ./packages/ccpool
+                      ./packages/claude-transcript
+                    ];
+                  };
+                })
+                (goLintTagged {
+                  module = "beads-exporter";
+                  modRoot = "beads-exporter";
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.unions [
+                      ./packages/beads-exporter
                       ./packages/claude-transcript
                     ];
                   };
@@ -3641,10 +3661,12 @@
               };
 
               # beads-exporter - whole-module unit suite (adapter, categoriser, queues,
-              # label cap, stale guard, collector, renderer goldens, scheduler) with
-              # -race. The queue tests read the REAL claude-marketplace/pb/queues.json,
-              # so the source is the repo root narrowed to this package plus that one
-              # file (Pattern-B shaped: modRoot below the fileset root). No testDeps:
+              # label cap, stale guard, collector, stranded-claim classifier, renderer
+              # goldens, scheduler) with -race. The queue tests read the REAL
+              # claude-marketplace/pb/queues.json, so the source is the repo root
+              # narrowed to this package, its local `replace` sibling claude-transcript
+              # and that one file (Pattern-B shaped: modRoot below the fileset root).
+              # The stranded suite builds synthetic transcript trees in temp dirs. No testDeps:
               # the suite execs only `sh`/`env`/`sleep` from the build environment and
               # never a real bd; the build-tagged contract suite is NOT part of it.
               beads-exporter-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
@@ -3653,6 +3675,7 @@
                   root = ./.;
                   fileset = lib.fileset.unions [
                     ./packages/beads-exporter
+                    ./packages/claude-transcript
                     ./claude-marketplace/pb/queues.json
                   ];
                 };

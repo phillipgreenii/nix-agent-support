@@ -1,6 +1,6 @@
 package metrics
 
-// Family names. The main and throughput passes emit these; the exporter's own
+// Family names. The main, throughput and stranded passes emit these; the exporter's own
 // health families are emitted by the collector for every pass.
 const (
 	FamIssues          = "beads_issues"
@@ -13,6 +13,8 @@ const (
 	FamOldest          = "beads_oldest_timestamp_seconds"
 	FamCreated24h      = "beads_created_last_24h"
 	FamClosed24h       = "beads_closed_last_24h"
+	FamStrandedClaims  = "beads_stranded_claims"
+	FamOldestStranded  = "beads_oldest_stranded_claim_timestamp_seconds"
 	FamExporterUp      = "beads_exporter_up"
 	FamPassLastSuccess = "beads_exporter_pass_last_success_timestamp_seconds"
 	FamCollectErrors   = "beads_exporter_collect_errors_total"
@@ -23,7 +25,7 @@ const (
 	reasonHelpList     = "stale_issues_jsonl, timeout, bd_error, schema_skew, parse_error or transcript_error"
 )
 
-// Families returns the families of the main and throughput passes plus the
+// Families returns the families of the main, throughput and stranded passes plus the
 // exporter health families, in output order. A later pass registers its own
 // families on the registry returned by Default.
 func Families() []Family {
@@ -76,6 +78,16 @@ func Families() []Family {
 		{
 			FamClosed24h, Gauge,
 			"Beads closed in the last 24 hours, counted by the throughput pass.",
+			[]string{"db"},
+		},
+		{
+			FamStrandedClaims, Gauge,
+			"Claimed beads whose claim has no live owner, by stored status (open, in_progress or hooked): no transcript written within the stale-claim window by, or naming as a claim value, the claimant. Counted by the stranded pass; zero-filled over every status.",
+			[]string{"db", "status"},
+		},
+		{
+			FamOldestStranded, Gauge,
+			"Claim time (started_at, else updated_at) of the oldest claim with no live owner, in Unix seconds. Omitted when there are none.",
 			[]string{"db"},
 		},
 		{

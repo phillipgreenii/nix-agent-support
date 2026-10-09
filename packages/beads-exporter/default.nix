@@ -6,15 +6,21 @@
 mkGoApp {
   pname = "beads-exporter";
 
-  # Pattern A (phillipg-nix-repo-base ADR 0008): a single zero-dependency module
-  # rooted at this package dir, with go.mod and the committed gomod2nix.toml side
-  # by side. No local `replace`, so no modRoot and no parent-rooted fileset are
-  # needed. The binary execs bd as a subprocess (by the absolute path the
-  # configuration file names) and has no compile-time dependency on any other
-  # package in this repo; the committed queue mirror is read only by the tests,
-  # which run through the beads-exporter-go-tests check.
-  src = lib.cleanSource ./.;
-  modRoot = null;
+  # Pattern B (phillipg-nix-repo-base ADR 0008): the module has a local
+  # `replace ../claude-transcript` (the stranded-claim pass discovers session
+  # transcripts through it), so the build sandbox must contain BOTH package dirs
+  # at their relative positions. Root the source at packages/ and build the
+  # beads-exporter subdir. The binary execs bd as a subprocess (by the absolute
+  # path the configuration file names); the committed queue mirror is read only
+  # by the tests, which run through the beads-exporter-go-tests check.
+  src = lib.fileset.toSource {
+    root = ./..;
+    fileset = lib.fileset.unions [
+      ./.
+      ../claude-transcript
+    ];
+  };
+  modRoot = "beads-exporter";
 
   gomod2nixToml = ./gomod2nix.toml;
 

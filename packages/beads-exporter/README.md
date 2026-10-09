@@ -133,18 +133,18 @@ dropped, not served stale. There is no `*_build_info` series.
 | `beads_oldest_timestamp_seconds`                     | gauge   | `db`, `state`          | main       | Creation time of the oldest not-closed bead per state (start time for `in_progress`). Omitted when the state is empty.             |
 | `beads_created_last_24h`                             | gauge   | `db`                   | throughput | Beads created in the last 24 hours.                                                                                                |
 | `beads_closed_last_24h`                              | gauge   | `db`                   | throughput | Beads closed in the last 24 hours.                                                                                                 |
+| `beads_stranded_claims`                              | gauge   | `db`, `status`         | stranded   | Claims with no live owner by stored status (`open`, `in_progress`, `hooked`). Zero-filled every successful pass.                   |
+| `beads_oldest_stranded_claim_timestamp_seconds`      | gauge   | `db`                   | stranded   | Claim time (`started_at`, else `updated_at`) of the oldest claim with no live owner. Omitted when there are none.                  |
 | `beads_exporter_up`                                  | gauge   | `db`                   | main       | 1 if the last main cycle succeeded, 0 if it failed. Present once a main cycle has been attempted.                                  |
 | `beads_exporter_pass_last_success_timestamp_seconds` | gauge   | `db`, `pass`           | all        | Time of the last success of each pass. Omitted until the pass has succeeded once; frozen while it fails.                           |
 | `beads_exporter_collect_errors_total`                | counter | `db`, `pass`, `reason` | all        | Failures by pass and closed-enum reason. Never carries error text.                                                                 |
 | `beads_exporter_collect_duration_seconds`            | gauge   | `db`, `pass`           | all        | Duration of the last run of each pass.                                                                                             |
 
-The stranded-claim families are added by that pass and are not emitted here.
-
 ### Failure reasons
 
 `stale_issues_jsonl`, `timeout`, `bd_error`, `schema_skew`, `parse_error`, `transcript_error`
-(the last is only produced by the stranded-claim pass). The counter is zero-filled over the
-reasons a pass can produce.
+(the last is only produced by the stranded-claim pass: a transcript tree that cannot be listed or
+a transcript that cannot be read). The counter is zero-filled over the reasons a pass can produce.
 
 ### States
 
@@ -205,13 +205,48 @@ gives each pass its own last-success timestamp, error counters and series, and d
 pass's series for only that database on failure. A new pass registers its metric families on the
 registry and is added to the collector; nothing else changes.
 
-| Pass         | Period                    | bd spawns per database                                                              |
-| ------------ | ------------------------- | ----------------------------------------------------------------------------------- |
-| `main`       | `pollIntervalSeconds`     | 4: `list`, `ready`, `blocked`, `count --by-status` (plus one per spawn-only queue)  |
-| `throughput` | `strandedIntervalSeconds` | 2: `list --all --created-after <now-24h>` and `list --all --closed-after <now-24h>` |
+| Pass         | Period                    | bd spawns per database                                                                 |
+| ------------ | ------------------------- | -------------------------------------------------------------------------------------- |
+| `main`       | `pollIntervalSeconds`     | 4: `list`, `ready`, `blocked`, `count --by-status` (plus one per spawn-only queue)     |
+| `throughput` | `strandedIntervalSeconds` | 2: `list --all --created-after <now-24h>` and `list --all --closed-after <now-24h>`    |
+| `stranded`   | `strandedIntervalSeconds` | 1: its own `list -n 0` (so the stale-JSONL guard and the timeout apply to it directly) |
 
 The stored-status set is fetched with `bd statuses` once at start-up and again whenever a list
 result contains a status not in the cached set.
+
+## Stranded claims
+
+The `stranded` pass decides, for every not-closed bead that has an assignee and a stored status of
+`open`, `in_progress` or `hooked`, whether the claim still has a live owner. It reports; it never
+releases or changes a claim. A claim is **live** when any of these holds:
+
+1. **Transcript by id.** A lower-case UUID inside the assignee (`<uuid>-drain`, `drain-<uuid>`,
+   a plain `<uuid>`) names a transcript `<claudeDir>/projects/<slug>/<uuid>.jsonl` written within
+   `staleClaimHours`.
+2. **Claim context.** A transcript (a session's own, or a subagent's under
+   `<session>/subagents/`; never a `*.status.jsonl` statusline sidecar) written within
+   `staleClaimHours` uses the assignee as a claim value: the argument of `--actor`, the value after
+   `BEADS_ACTOR=`, or an `"assignee":` JSON value, in raw or JSON-escaped form. A bare mention (for
+   example a `bd list` output pasted into another session) does not count. A value is recognised
+   only when it is made of letters, digits and `._-:@/+`.
+3. **Operator names.** An assignee listed in `operatorNames` skips rule 2, because the name appears
+   in nearly every transcript. Such a claim is live only while its claim time (`started_at`, else
+   `updated_at`) is within `staleClaimHours`.
+
+Anything else has **no live owner**. Activity is file modification time, so an idle session whose
+transcript was written within the window is live. A process check by session id is not used: an
+actor id is not a session id.
+
+Transcript reading is incremental. Discovery is `claude-transcript`'s `DiscoverTranscripts`; files
+whose modification time is outside the window are never opened. One pass over each in-window file
+extracts every claim value at once, and an append-only cache keyed by (device, inode) reads only
+the bytes appended since the last pass plus a fixed overlap, so the cost of a pass tracks the new
+transcript output, not the size of the tree. A transcript that cannot be listed or read fails the
+pass with `transcript_error` rather than guessing.
+
+Each pass writes one JSON log line per claim with no live owner, with `event` set to
+`stranded_claim` and the bead id, database, assignee, stored status and claim time (the bead's own
+fields; never transcript text). The "Which beads" panel reads those lines from Loki.
 
 ## `metrics.txt`
 
@@ -300,9 +335,14 @@ the log source picks up; both log files are rotated by the launchd log manager.
 
 - `grafana/beads.json`: the "Beads / Queues & backlog" dashboard (uid `beads`, folder "Claude
   Agents"). Queue tiles are per database and never summed across databases.
-- `grafana/alerting/alerts.yaml`: the `beads-collect-failing` rule. It fires about 15 minutes after
-  a database's last successful collection and is suppressed while the database probe reports the
-  server, or that database, down.
+  The Now row carries the red-from-1 "Claims with no live owner" tile, the By-db table a "No live
+  owner" column, and the Claims and age row the "Oldest no-live-owner claim" tile and the Loki
+  "Which beads" panel.
+- `grafana/alerting/alerts.yaml`: the `beads-collect-failing` rule, which fires about 15 minutes
+  after a database's last successful collection and is suppressed while the database probe reports
+  the server, or that database, down; and the `beads-claims-no-live-owner` rule, which fires after
+  `beads_stranded_claims` has been above zero for 30 minutes (so about 30 minutes after the first
+  pass that sees the claim).
 - Checks: `test-beads-exporter-dashboard` (a `jq` lint against `metrics.txt` plus mutant
   self-tests, `check-dashboard.sh`), `test-beads-exporter-alert-rules` (Grafana-only fields plus
   `promtool test rules`, cases in `grafana/alerting/rule-tests/`, `check-alert-rules.sh`) and

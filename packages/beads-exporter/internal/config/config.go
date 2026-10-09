@@ -58,9 +58,15 @@ func (c *Config) PollInterval() time.Duration {
 	return time.Duration(c.PollIntervalSeconds) * time.Second
 }
 
-// StrandedInterval is the throughput (and later stranded) pass period.
+// StrandedInterval is the period of the throughput and stranded passes.
 func (c *Config) StrandedInterval() time.Duration {
 	return time.Duration(c.StrandedIntervalSeconds) * time.Second
+}
+
+// StaleClaimWindow is how recent a transcript write must be for a claim to have
+// a live owner.
+func (c *Config) StaleClaimWindow() time.Duration {
+	return time.Duration(c.StaleClaimHours) * time.Hour
 }
 
 // CommandTimeout bounds each bd call.
