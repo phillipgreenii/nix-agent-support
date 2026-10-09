@@ -175,44 +175,65 @@ func (r *overlayRun) checkCorrection(i int, p event.EventCorrected) (int, *Inval
 	if inv != nil {
 		return -1, inv
 	}
-	target := r.events[j]
+	pr := CheckCorrection(r.events[j], p.Fields)
+	if pr == nil {
+		return j, nil
+	}
+	head := r.subject(i) + " corrects " + r.describe(j)
+	var msg string
+	switch {
+	case pr.Identity && pr.Field == "":
+		msg = head + ", and a correction never targets event.corrected, event.retracted or batch.committed."
+	case pr.Identity && identityKeys[pr.Field]:
+		msg = fmt.Sprintf("%s with the identity field %s, and an identity field can never be corrected.", head, pr.Field)
+	case pr.Identity:
+		msg = fmt.Sprintf("%s with %s, a field of its envelope, and only effective_at and the data fields can be corrected.", head, pr.Field)
+	default:
+		// The command layer refuses a breaking replacement as invalid_request
+		// through CheckCorrection before candidate replay gets here; this
+		// finding is the stored-log re-check.
+		msg = fmt.Sprintf("%s with replacement values that make it invalid: %v.", head, pr.Err)
+	}
+	return j, r.invalidCorrection(i, j, msg)
+}
+
+// CorrectionProblem is why a correction cannot apply to its target. An
+// Identity problem is one the log rules forbid whatever the values: the target
+// is an event.corrected, event.retracted or batch.committed (Field is empty),
+// or Field is an identity field (target_batch among them) or a field of the
+// envelope, the envelope type included. Otherwise the replacement values make
+// the corrected event fail its schema, and Err says how.
+type CorrectionProblem struct {
+	Identity bool
+	Field    string
+	Err      error
+}
+
+// CheckCorrection applies the correction rules to replacing fields of target,
+// the event as appended: nil when the correction can apply. Identity problems
+// are found first, in key order, and a schema problem only when there is none.
+// Replay refuses either as invalid_correction; a command can refuse a schema
+// problem as a malformed request instead.
+func CheckCorrection(target event.Event, fields map[string]json.RawMessage) *CorrectionProblem {
 	typ := target.Payload.EventType()
 	switch typ {
 	case event.TypeEventCorrected, event.TypeEventRetracted, event.TypeBatchCommitted:
-		return j, r.invalidCorrection(i, j, fmt.Sprintf(
-			"%s corrects %s, and a correction never targets event.corrected, event.retracted or batch.committed.",
-			r.subject(i), r.describe(j),
-		))
+		return &CorrectionProblem{Identity: true}
 	}
-	keys := make([]string, 0, len(p.Fields))
-	for k := range p.Fields {
+	keys := make([]string, 0, len(fields))
+	for k := range fields {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		switch {
-		case identityKeys[k]:
-			return j, r.invalidCorrection(i, j, fmt.Sprintf(
-				"%s corrects %s with the identity field %s, and an identity field can never be corrected.",
-				r.subject(i), r.describe(j), k,
-			))
-		case envelopeKeys[k] || (k == "type" && typ != event.TypeCycleStarted):
-			return j, r.invalidCorrection(i, j, fmt.Sprintf(
-				"%s corrects %s with %s, a field of its envelope, and only effective_at and the data fields can be corrected.",
-				r.subject(i), r.describe(j), k,
-			))
+		if identityKeys[k] || envelopeKeys[k] || (k == "type" && typ != event.TypeCycleStarted) {
+			return &CorrectionProblem{Identity: true, Field: k}
 		}
 	}
-	if _, err := applyFields(target, p.Fields); err != nil {
-		// The command layer MUST pre-validate replacement values and refuse a
-		// breaking one as invalid_request before candidate replay gets here;
-		// this finding is the stored-log re-check.
-		return j, r.invalidCorrection(i, j, fmt.Sprintf(
-			"%s corrects %s with replacement values that make it invalid: %v.",
-			r.subject(i), r.describe(j), err,
-		))
+	if _, err := applyFields(target, fields); err != nil {
+		return &CorrectionProblem{Err: err}
 	}
-	return j, nil
+	return nil
 }
 
 // checkRetraction applies the log rules to the retraction at position i. A

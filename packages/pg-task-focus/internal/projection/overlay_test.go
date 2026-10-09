@@ -774,3 +774,52 @@ func asInvalid(t *testing.T, err error) *Invalid {
 	}
 	return inv
 }
+
+func TestCheckCorrection(t *testing.T) {
+	start := ev(1, 0, event.CycleStarted{CycleID: cycleA, Type: "focus", Title: "Focus", PlannedMinutes: 25})
+	correction := correct(2, 1, eid(1), "minutes", 20)
+	tests := []struct {
+		name     string
+		target   event.Event
+		fields   []any
+		identity bool   // the problem is about identity; ignored when ok
+		field    string // the field the problem names
+		ok       bool
+	}{
+		{"a data field", boost(1, 0, 10), []any{"minutes", 20}, false, "", true},
+		{"effective_at", boost(1, 0, 10), []any{"effective_at", event.At(at(5))}, false, "", true},
+		{"a cycle's own type", start, []any{"type", "deep-work"}, false, "", true},
+		{"an identity field", start, []any{"cycle_id", string(cycleB)}, true, "cycle_id", false},
+		{"target_batch", start, []any{"target_batch", string(bid(9))}, true, "target_batch", false},
+		{"the envelope type", completed(1, 0), []any{"type", "task.skipped"}, true, "type", false},
+		{"an envelope field", completed(1, 0), []any{"req_hash", strings.Repeat("ab", 32)}, true, "req_hash", false},
+		{"an identity field beside a schema break", start, []any{"planned_minutes", 0, "cycle_id", string(cycleB)}, true, "cycle_id", false},
+		{"an event.corrected", correction, []any{"reason", "x"}, true, "", false},
+		{"an event.retracted", retract(2, 1, eid(1)), []any{"reason", "x"}, true, "", false},
+		{"a batch.committed", committed(2, 0, bid(1)), []any{"batch", string(bid(2))}, true, "", false},
+		{"a key the event does not have", boost(1, 0, 10), []any{"note", "x"}, false, "", false},
+		{"a value of the wrong type", boost(1, 0, 10), []any{"minutes", "ten"}, false, "", false},
+		{"a value out of range", boost(1, 0, 10), []any{"minutes", 0}, false, "", false},
+		{"a malformed effective_at", boost(1, 0, 10), []any{"effective_at", "noon"}, false, "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := CheckCorrection(tt.target, fieldsOf(tt.fields...))
+			if tt.ok {
+				if p != nil {
+					t.Fatalf("CheckCorrection = %+v, want nil", *p)
+				}
+				return
+			}
+			if p == nil {
+				t.Fatal("CheckCorrection = nil, want a problem")
+			}
+			if p.Identity != tt.identity || p.Field != tt.field {
+				t.Errorf("problem = %+v, want Identity %v and Field %q", *p, tt.identity, tt.field)
+			}
+			if (p.Err != nil) == tt.identity {
+				t.Errorf("Err = %v: want an error exactly for a schema break", p.Err)
+			}
+		})
+	}
+}

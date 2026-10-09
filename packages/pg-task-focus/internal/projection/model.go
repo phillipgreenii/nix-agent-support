@@ -59,21 +59,24 @@ func newModelFrom(events []event.Event, firstAdded int) (*Model, error) {
 func (m *Model) Lines() int { return len(m.log) }
 
 // Events lists the views of the logged events matching q, in log order. Both
-// views include retracted events, flagged; neither lists batch.committed.
+// views include retracted events, flagged; neither lists batch.committed. The
+// caller owns the result and each CorrectedBy, but the events in a view share
+// their Data and the slices and maps of their payloads with the model, which
+// MUST NOT be modified.
 func (m *Model) Events(q EventQuery) []EventView {
 	out := make([]EventView, 0, len(m.order))
 	for _, id := range m.order {
 		if v := m.views[id]; q.matches(v) {
-			out = append(out, v)
+			out = append(out, v.clone())
 		}
 	}
 	return out
 }
 
-// Event returns the view of one logged event.
+// Event returns the view of one logged event, shared as Events says.
 func (m *Model) Event(id event.ID) (EventView, bool) {
 	v, ok := m.views[id]
-	return v, ok
+	return v.clone(), ok
 }
 
 // BatchEvents lists, in log order, the events that are members of batch b,

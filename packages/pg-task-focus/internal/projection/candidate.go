@@ -29,5 +29,7 @@ func Candidate(base, add []event.Event) (*Model, error) {
 }
 
 // Log is the raw log the model was built from, in order, with the log
-// position of each event. The caller owns the slice.
+// position of each event. The caller owns the slice, but each event's Data and
+// the slices and maps of its payload are shared with the model and MUST NOT be
+// modified.
 func (m *Model) Log() []event.Event { return slices.Clone(m.log) }

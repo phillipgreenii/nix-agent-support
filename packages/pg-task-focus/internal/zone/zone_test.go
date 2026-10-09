@@ -101,6 +101,20 @@ func TestLoadRequiresExactSpelling(t *testing.T) {
 	}
 }
 
+// TestZonesOfOneNameAreEqual pins that a zone is its name: two loads of one
+// name give equal zones that share their rules, so a struct holding zones
+// compares equal (with == or reflect.DeepEqual) whenever it names the same
+// zones, wherever each was loaded.
+func TestZonesOfOneNameAreEqual(t *testing.T) {
+	a, b := mustLoad(t, "America/New_York"), mustLoad(t, "America/New_York")
+	if a != b || a.Location() != b.Location() {
+		t.Errorf("two loads of America/New_York differ: %p and %p", a.Location(), b.Location())
+	}
+	if c := mustLoad(t, "Europe/Paris"); c == a {
+		t.Errorf("Europe/Paris equals America/New_York")
+	}
+}
+
 func assertInvalidZone(t *testing.T, name string, err error) {
 	t.Helper()
 	if err == nil {

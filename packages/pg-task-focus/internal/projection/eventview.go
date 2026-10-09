@@ -21,6 +21,12 @@ type EventView struct {
 	RetractedBy event.ID
 }
 
+// clone copies the view's CorrectedBy; the events are not copied.
+func (v EventView) clone() EventView {
+	v.CorrectedBy = slices.Clone(v.CorrectedBy)
+	return v
+}
+
 // The two views of an EventQuery.
 const (
 	viewCorrected = "corrected"

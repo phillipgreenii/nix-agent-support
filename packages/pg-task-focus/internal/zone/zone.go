@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 	_ "time/tzdata" // the embedded zone database, for hosts without usable zone files
 
@@ -32,15 +33,32 @@ func invalid(name, why string) *Error {
 }
 
 // Zone is a named IANA zone. The zero Zone names nothing and MUST NOT be used.
+// A zone is its name: every Load of one name returns the same rules, so two
+// zones are equal (==, and so reflect.DeepEqual) exactly when their names are.
 type Zone struct {
 	name string
 	loc  *time.Location
 }
 
+// loaded holds the first Zone each valid name was loaded as.
+var loaded sync.Map // name -> Zone
+
 // Load returns the zone called name. A name is valid when time.LoadLocation
 // resolves it in its exact letter case, except that the empty string and
 // "Local" are rejected: they are escapes to an implicit zone, not zone names.
 func Load(name string) (Zone, error) {
+	if z, ok := loaded.Load(name); ok {
+		return z.(Zone), nil
+	}
+	z, err := load(name)
+	if err != nil {
+		return Zone{}, err
+	}
+	actual, _ := loaded.LoadOrStore(name, z)
+	return actual.(Zone), nil
+}
+
+func load(name string) (Zone, error) {
 	switch name {
 	case "":
 		return Zone{}, invalid(name, "a zone MUST be named; there is no default zone")

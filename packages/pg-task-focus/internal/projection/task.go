@@ -54,18 +54,34 @@ type Task struct {
 	Reason      string
 }
 
-// Task returns the task with the given id.
+// clone copies the task so that no pointer is shared with it: not the
+// resolution instant, and not the due rule's weekday or day, which point into
+// the task.materialized payload.
+func (t Task) clone() Task {
+	t.ResolvedAt = clonePtr(t.ResolvedAt)
+	t.DueRule.Weekday = clonePtr(t.DueRule.Weekday)
+	t.DueRule.Day = clonePtr(t.DueRule.Day)
+	return t
+}
+
+// Task returns the task with the given id, as a copy.
 func (m *Model) Task(id event.TaskID) (Task, bool) {
 	i, ok := m.taskIndex[id]
 	if !ok {
 		return Task{}, false
 	}
-	return m.tasks[i], true
+	return m.tasks[i].clone(), true
 }
 
 // Tasks lists every task, in the order the log materialized them. The caller
-// owns the slice.
-func (m *Model) Tasks() []Task { return slices.Clone(m.tasks) }
+// owns the result.
+func (m *Model) Tasks() []Task {
+	out := make([]Task, len(m.tasks))
+	for i, t := range m.tasks {
+		out[i] = t.clone()
+	}
+	return out
+}
 
 // taskEvents are the live events of one task, each list in event order.
 type taskEvents struct {

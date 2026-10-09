@@ -562,12 +562,20 @@ func TestPauseOfAPausedCycleIsCycleSegmentsOverlap(t *testing.T) {
 		_, err := Candidate(base, b.added(base))
 		assertCode(t, err, codeCycleSegmentsOverlap)
 	})
-	t.Run("a second start of one cycle", func(t *testing.T) {
-		b := dayLog(t)
-		b.add(0, startOf(cycleA, 50))
-		b.add(10, startOf(cycleA, 50))
-		assertCode(t, mustFail(Replay(b.events)), codeCycleSegmentsOverlap)
-	})
+	for name, stopped := range map[string]bool{"a second start of one cycle": false, "a second start of a stopped cycle": true} {
+		t.Run(name, func(t *testing.T) {
+			b := dayLog(t)
+			b.add(0, startOf(cycleA, 50))
+			if stopped {
+				b.add(5, stopOf(cycleA))
+			}
+			b.add(10, startOf(cycleA, 50))
+			inv := assertCode(t, mustFail(Replay(b.events)), codeCycleSegmentsOverlap)
+			if !strings.Contains(inv.Message, "a cycle that has already started") || strings.Contains(inv.Message, "overlap") {
+				t.Errorf("message %q: want it to say the cycle has already started, not that segments overlap", inv.Message)
+			}
+		})
+	}
 }
 
 func TestStatusAtGivesTheStateAtAnyInstant(t *testing.T) {
@@ -879,4 +887,35 @@ func cycleGoldenLogs(t *testing.T) []golden {
 
 func TestGoldenCycleLogs(t *testing.T) {
 	checkGoldenLogs(t, filepath.Join("..", "..", "testdata", "logs", "cycles"), cycleGoldenLogs(t))
+}
+
+func TestCycleTitleNamesEveryCycleAFindingLists(t *testing.T) {
+	// The stored log starts A, corrects its title, retracts the start and
+	// starts B; the request retracts the retraction, so A runs again beside B.
+	b := dayLog(t)
+	startA := b.add(0, startOf(cycleA, 50))
+	b.add(1, event.EventCorrected{Target: startA, Fields: fieldsOf("title", "Renamed")})
+	retraction := b.add(2, event.EventRetracted{Target: startA})
+	b.add(5, event.CycleStarted{CycleID: cycleB, Type: "deep-work", Title: "Writing", PlannedMinutes: 25})
+	base := b.split()
+	b.add(10, event.EventRetracted{Target: retraction})
+
+	present := mustReplay(t, base)
+	_, err := Candidate(base, b.added(base))
+	inv := assertCode(t, err, codeAnotherCycleRunning)
+	if !sameCycles(inv.Cycles, cycleA, cycleB) {
+		t.Fatalf("Cycles = %v, want %s and %s", inv.Cycles, cycleA, cycleB)
+	}
+	if _, ok := present.Cycle(cycleA); ok {
+		t.Fatalf("the present model has cycle %s, whose start is retracted", cycleA)
+	}
+	want := map[event.CycleID]string{cycleA: "Renamed", cycleB: "Writing"}
+	for _, id := range inv.Cycles {
+		if got, ok := present.CycleTitle(id); !ok || got != want[id] {
+			t.Errorf("CycleTitle(%s) = %q, %v; want %q, true", id, got, ok, want[id])
+		}
+	}
+	if got, ok := present.CycleTitle(cycleC); ok {
+		t.Errorf("CycleTitle(%s) = %q, true; want false for a cycle the log never starts", cycleC, got)
+	}
 }

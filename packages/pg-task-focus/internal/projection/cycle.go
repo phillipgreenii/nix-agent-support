@@ -79,11 +79,11 @@ func (c Cycle) clone() Cycle {
 	return c
 }
 
-func clonePtr(t *time.Time) *time.Time {
-	if t == nil {
+func clonePtr[T any](p *T) *T {
+	if p == nil {
 		return nil
 	}
-	v := *t
+	v := *p
 	return &v
 }
 
@@ -113,6 +113,25 @@ func (m *Model) Cycles() []Cycle {
 		out[i] = c.clone()
 	}
 	return out
+}
+
+// CycleTitle returns the title of cycle id: the model's cycle's when it has
+// one, otherwise the corrected title of the latest logged cycle.started that
+// starts it, retracted or not. Every cycle an Invalid lists in Cycles is named
+// by a stored event, and candidate replay accepts an event of a cycle only
+// while the cycle has a live start, so in a log written through candidate
+// replay that cycle has a title here even when its start is retracted now;
+// false means no logged cycle.started starts it.
+func (m *Model) CycleTitle(id event.CycleID) (string, bool) {
+	if i, ok := m.cycleIndex[id]; ok {
+		return m.cycles[i].Title, true
+	}
+	for i := len(m.order) - 1; i >= 0; i-- {
+		if p, ok := m.views[m.order[i]].Corrected.Payload.(event.CycleStarted); ok && p.CycleID == id {
+			return p.Title, true
+		}
+	}
+	return "", false
 }
 
 // Running returns the cycle that is running at the end of the log: the focus.
@@ -420,7 +439,7 @@ func (m *machine) apply(s step) *Invalid {
 	case stepStart:
 		if m.start != nil {
 			return m.finding(codeCycleSegmentsOverlap, fmt.Sprintf(
-				"%s after %s started it, so its segments would overlap", m.does(s), m.r.ref(*m.start),
+				"%s after %s started it, and a cycle that has already started cannot start again", m.does(s), m.r.ref(*m.start),
 			), *e, *m.start)
 		}
 		p := e.Payload.(event.CycleStarted)
