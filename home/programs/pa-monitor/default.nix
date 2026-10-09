@@ -212,6 +212,14 @@ in
             serviceConfig = {
               StandardErrorPath = "${config.xdg.stateHome}/pa-monitor/launchd-stderr.log";
               StandardOutPath = "${config.xdg.stateHome}/pa-monitor/launchd-stdout.log";
+              # pg2-klusl (from pg2-r9ly8's host-load attribution): the daemon showed
+              # 20-69% CPU in every sample of a host at load 50-110 on 11 cores. It is a
+              # monitor, not interactive work, so tell launchd to run it at background
+              # priority (lower CPU and I/O scheduling class; same precedent as
+              # beads-exporter). This does NOT reduce what it computes: it only makes
+              # it yield to builds, tests and the user's own tools when the host is
+              # saturated, and costs nothing when the host is idle.
+              ProcessType = "Background";
               # OTel is sourced from ~/.config/pa-monitor/config.toml (single source
               # of truth, written above from the system observability stack) — not
               # injected as plist env.

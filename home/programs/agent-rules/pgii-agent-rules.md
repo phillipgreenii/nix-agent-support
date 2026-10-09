@@ -48,6 +48,7 @@ The section `## Rules for Interactive Sessions Only` applies only when working w
 - **L-1** A command expected to outlive the 2m default (`nix build`/`nix flake check`, `go test ./...`, monorepo `git fetch|clone|push`, any `--all-files` hook run) MUST set an explicit `timeout` or use `run_in_background` + Monitor.
 - **L-2** After a timeout, MUST NOT re-issue the SAME command unchanged; re-run in the background or with a larger timeout, narrowed if possible.
 - **L-3** A subagent brief instructing a build, check, or full test run MUST state the timeout or say to run in the background. A brief instructing a nix run (`nix build|flake check|eval|run|fmt`, `darwin-rebuild`) MUST also name `pg-nix-log-wrapped` as the command prefix.
+- **L-4** A direct agent `go test` (one that does not go through `pg-test-runner`, which already queues for a host-wide slot and runs niced) MUST run as `nice -n 10 go test -p 4 ...`, so a burst of agent test runs cannot saturate the host.
 
 #### Scratch / Payload File Writes
 

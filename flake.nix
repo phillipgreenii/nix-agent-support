@@ -113,12 +113,43 @@
           # NB: use `prev` (the input pkgs), never `final`, to derive the system and the
           # attr — deriving the overlay's OUTPUT SHAPE from `final` is a fixpoint cycle.
           basePkgs = phillipgreenii-nix-base.packages.${prev.stdenv.hostPlatform.system} or { };
+          # Every `*-go-tests` check in this flake builds through base's mkGoTest, so
+          # wrapping it HERE bounds all of them without touching a call site (bead
+          # pg2-klusl, from pg2-r9ly8's host-load attribution). pg-test-runner's
+          # slot cap only covers hook runs; a `nix build .#checks.*.<x>-go-tests`
+          # (pg-desk-go-tests ran >7 min under -race) and the daemon's parallel
+          # builds otherwise start `go test -race` with go's defaults (-p = every
+          # core, normal priority) on top of the same host. Two additive bounds,
+          # both set in preBuild so a check that REPLACES buildPhase (e.g.
+          # pg-decider-parity-gate) still gets them as long as it runs preBuild:
+          #   - GOFLAGS gains `-p=<goTestPackageParallelism>` (a go build flag, so
+          #     go test and go vet honour it): at most that many package test
+          #     binaries compile/run at once.
+          #   - `go` becomes a shell function running the real binary under
+          #     `nice -n <goTestNiceLevel>`, matching pg-test-runner's niceLevel so
+          #     interactive work and daemons keep the CPU. Fail-open: the function
+          #     is defined only when `nice` works in the sandbox.
+          # Neither changes what is tested or the pass/fail result.
+          goTestPackageParallelism = 4;
+          goTestNiceLevel = 10;
+          loadBoundedMkGoTest =
+            mkGoTest: args:
+            (mkGoTest args).overrideAttrs (old: {
+              preBuild = (old.preBuild or "") + ''
+                export GOFLAGS="''${GOFLAGS:-} -p=${toString goTestPackageParallelism}"
+                if nice -n ${toString goTestNiceLevel} true 2>/dev/null; then
+                  go() { nice -n ${toString goTestNiceLevel} "$(type -P go)" "$@"; }
+                fi
+              '';
+            });
         in
         {
           # packages added in later tasks
           _agentSupportBashBuilders = bashBuilders; # expose for modules
           _agentSupportPythonBuilders = pythonBuilders; # expose for modules
-          _agentSupportGoBuilders = goBuilders; # expose for checks (mirrors bash/python)
+          _agentSupportGoBuilders = goBuilders // {
+            mkGoTest = loadBoundedMkGoTest goBuilders.mkGoTest;
+          }; # expose for checks (mirrors bash/python)
           # codeburn: first npm package here — prebuilt-dist repackaging of a published CLI
           # (buildNpmPackage + importNpmLock). Needs no builder args; callPackage supplies
           # buildNpmPackage/fetchurl/importNpmLock/nodejs_22 from the overlaid pkgs.
@@ -9362,6 +9393,8 @@
                 assert e.enable;
                 # pg2-fdtvv: ADR 0011 -- no log file for a filelog logSources entry
                 assert e.logCollection.enable == false;
+                # pg2-klusl: the daemon yields CPU/IO to builds and tests under host load
+                assert e.serviceConfig.ProcessType == "Background";
                 assert
                   e.serviceConfig.StandardOutPath == "/Users/tester/.local/state/pa-monitor/launchd-stdout.log";
                 assert
@@ -9385,6 +9418,29 @@
                 assert builtins.length (failedAssertions darwinNoRegistry) == 1;
                 assert (settingsOf linux) == { };
                 pkgs.runCommand "pa-monitor-hm-launchd-ok" { } "touch $out";
+
+              # pg2-klusl: every `*-go-tests` check goes through the load-bounded mkGoTest
+              # wrapper in the overlay (`loadBoundedMkGoTest`). Pure eval guard that the
+              # wrapper's bounds are really on a built check and are additive to the
+              # builder's own preBuild/flags: package parallelism via GOFLAGS, the `go`
+              # function under `nice`, and the base builder's `-race` test flags intact.
+              test-go-tests-load-bound =
+                let
+                  drv = pkgs._agentSupportGoBuilders.mkGoTest {
+                    pname = "load-bound-probe";
+                    src = ./packages/claude-transcript;
+                    gomod2nixToml = ./packages/claude-transcript/gomod2nix.toml;
+                  };
+                  pre = drv.preBuild;
+                in
+                assert lib.hasInfix "-p=4" pre;
+                assert lib.hasInfix "nice -n 10" pre;
+                assert lib.hasInfix "go()" pre;
+                # base's own attributes survive the wrapper: still a no-subPackages, race-on test gate
+                assert !(drv ? subPackages);
+                assert drv.CGO_ENABLED == 1;
+                assert lib.hasInfix "-race" drv.buildPhase;
+                pkgs.runCommand "go-tests-load-bound-ok" { } "touch $out";
 
               # Wrapper check for the pa-monitor SwiftBar plugin (design: docs/superpowers/
               # specs/2026-10-07-pa-monitor-swiftbar-design.md). Builds the SAME

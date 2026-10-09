@@ -73,13 +73,22 @@ A-3: a brief that lists relative paths without a root causes exactly this defect
   `packages/pg-wi-flow/pg-wi-flow/tests/test-pg-wi-flow-integration.bats` (real `bd`, throwaway
   embedded Dolt database).
 
-## Timeouts (L-1..L-3)
+## Timeouts (L-1..L-3) and host load (L-4)
 
 Observed 2026-07-30 (8-day census): 127 Bash timeouts across 69 sessions, mostly `git`
 fetch/clone on the monorepo, `nix` builds/checks, and test loops re-issued unchanged after the
 first timeout. 73 of the 127 were subagent calls, which is why L-3 exists. The `pg-nix-log-wrapped`
 requirement in L-3 comes from the always-on workspace rule (epic pg2-kqrrs); a subagent does not
 reliably inherit that rule.
+
+L-4 (bead `pg2-klusl`, from `pg2-r9ly8`'s 2026-10-07 attribution): the host sat at 1m load 50-150
+on 11 cores because 3-5 `go test -race` trees ran at once, all with go's default `-p` (every core)
+at normal priority. `pg-test-runner` bounds only its own runs (2 host-wide slots, `nice -n 10`;
+repo-base commit 77da2451); direct agent `go test` bypasses it, and so did nix `*-go-tests` builds
+until this repo's overlay wrapped `mkGoTest` with the same two bounds (`-p=4`, `nice -n 10`). The
+values mirror those: 10 matches `niceLevel`; 4 is a bit over a third of the cores, so one run still
+parallelises. L-4 is deliberately NOT a claim budget or admission gate: the drain loop is endless by
+design (operator ruling), so the lever is making each run cheaper to the host, not running fewer.
 
 ## Scratch / Payload File Writes (V-1, V-2)
 
