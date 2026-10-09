@@ -66,11 +66,6 @@ already cached in `WORKDIR/probes/gate-check.json`.
    - The orchestrator removes claimed beads from your batch. If one appears anyway (`open`
      with a non-empty assignee, or `in_progress`), skip it and report
      `skipped — claimed by <assignee> (B-6)`.
-   - An `open` bead whose `assignee` matches an operator identity (B-8; the list is in
-     `WORKDIR/operator-identities.txt`, compared trimmed, exact, case-sensitive) is a deliberate
-     operator assignment, not a stranded claim. The orchestrator removes it from your batch; if
-     one appears anyway, leave it untouched and report `skipped — operator-assigned (B-8)`. NEVER
-     release, claim, or report it as stranded.
    - You MAY claim a bead only to run a verification that you will close or release in this
      same turn (B-1..B-5).
 2. **Handoff beads:** for type `handoff`, follow `beads-lifecycle:handoff-bead`. A `human`

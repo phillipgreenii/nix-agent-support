@@ -65,9 +65,6 @@ preconditions, and premise freshness (whose heaviest reference material lives in
 > **stranded**: `bd ready --claim` correctly skips it (it is claimed), `bd update <id> --claim`
 > rejects it ("issue already claimed by …"), and no stale-`in_progress` sweep can see it —
 > so it sits at the top of the queue, unclaimable and invisible.
->
-> One shape is NOT stranded: an `open` bead whose assignee is an operator identity, because the
-> operator assigned it on purpose (B-8).
 
 - **B-1** Whatever claims a bead MUST release it. Every exit path — success, hand-back, park,
   escalate, defer, give up, out of context — MUST end with the bead either `closed` or
@@ -89,13 +86,9 @@ preconditions, and premise freshness (whose heaviest reference material lives in
   `bd ready --claim`, `--status in_progress`, or a non-empty `--assignee`. The rule covers
   agents AND daemons. A machine `bd` wrapper MAY refuse a claim whose resolved actor is the
   operator's git `user.name` when the caller is non-interactive or `CLAUDECODE` is set; on such a
-  refusal, re-run with `--actor` rather than working around the wrapper. B-8 does NOT relax this
-  rule: an agent claim MUST still carry an explicit session actor, so an agent claim can never
-  match an operator identity.
+  refusal, re-run with `--actor` rather than working around the wrapper.
 - **B-6** On finding a bead that is `open` with a non-empty assignee, an agent MUST report it
-  rather than silently steal or clear it — it is this defect, and the operator decides. EXCEPT a
-  bead whose assignee matches an operator identity (B-8): that is a deliberate operator
-  assignment, NOT this defect, and MUST NOT be reported, stolen, or cleared.
+  rather than silently steal or clear it — it is this defect, and the operator decides.
 - **B-7** `bd ready --claim` (or any other MUTATING `bd`/git command) MUST NOT appear on
   either side of a shell `||`, in a retry loop keyed on parse success, or in any construct
   whose exit code depends on downstream parsing. A parse failure on the command's OWN output
@@ -103,32 +96,6 @@ preconditions, and premise freshness (whose heaviest reference material lives in
   the `||` branch even though the claim already succeeded and mutated state — re-running it
   claims a SECOND bead, stranding the first. Run the mutating command ONCE, alone, capturing
   raw output; parse it in a separate step.
-- **B-8** A bead that is `open` with a non-empty assignee that MATCHES AN OPERATOR IDENTITY is a
-  DELIBERATE OPERATOR ASSIGNMENT (daily-focus design decision D-F23, operator ruling 2026-10-08:
-  "for beads, the assigned is the one i was thinking about."): the operator, not an agent,
-  said the work is theirs. It is NOT stranded, so B-6's report-it rule does not apply to it,
-  and no agent, sweep, or command MAY report it as stranded or release it (no
-  `--assignee ""`, no `--status` change made to clear the claim), including `/pb:unstick-beads`
-  Stage 2 and any other dead-claim sweep. The exemption is narrow:
-  - It covers `open` beads only. An `in_progress` bead is a live or dead CLAIM and stays under
-    B-1..B-6, whatever its assignee.
-  - It never relaxes B-5: an agent MUST still pass an explicit session actor on every claim, and
-    MUST NOT take, set, or move an assignment to an operator identity on its own.
-  - **Operator identities** are a LIST, because the assignee defaults to the actor's display name
-    (git `user.name`) while the bd owner is an email, so both forms MUST match. The ONE source of
-    truth is the `focus.operator_identities` list in the pg-desk config (the same list the
-    daily-focus candidate rule reads; resolution order `$PG_DESK_CONFIG`, then
-    `$XDG_CONFIG_HOME/pg-desk/config.yaml`, then `~/.config/pg-desk/config.yaml`). It MUST NOT be
-    copied into this skill, a command, or a workspace `CLAUDE.md`, where a second list would
-    drift. Read it with `yq -r '.focus.operator_identities[]?' <config>`.
-  - **Fallback** (the list key has not landed, or is empty or unreadable): the identities are
-    `git config user.name` and `git config user.email` of the session's repo. The fallback is
-    conservative: it can only exempt MORE beads from release, never fewer.
-  - **Matching**: compare the bead's `assignee` after trimming surrounding whitespace, exactly
-    and case-sensitively, against each identity (the rule `pg-desk` applies to candidacy). A
-    session actor id (`<session-id>[-<role>]`) never matches. An empty assignee never matches.
-  - A sweep that cannot resolve the list at all MUST NOT release open assigned beads whose
-    assignee is not a session actor id; it MUST list them for the operator instead.
 
 ## Worktree-Review Label Lifecycle
 
