@@ -206,3 +206,110 @@ func TestDispatch_diskWatchdogStillRunsWhileLowDiskUsageIsActive(t *testing.T) {
 		t.Fatalf("dispatched to %v, want only the watchdog while LOW_DISK_USAGE is active", got)
 	}
 }
+
+// The motivating deployment of per-participant gate opt-out (bead pg2-hbin1):
+// a router gated on BEAD_SERVER_DOWN (an ordinary gate TYPE -- the core has no
+// special handling of it) must still run the participants that declared that
+// TYPE non-blocking, while every other participant is held. Through the real
+// role-listener dispatch path: only a listener that exempts THIS TYPE runs; one
+// that exempts a different TYPE, or none, is held with its event still queued
+// and receives it once the gate clears.
+func TestDispatch_beadServerDownGateRunsOnlyListenersThatExemptIt(t *testing.T) {
+	const gate = "BEAD_SERVER_DOWN"
+	const evtType = "work.ready"
+	cases := []struct {
+		name   string
+		exempt []string
+		// runsWhileGated: dispatched while the gate is up; otherwise held.
+		runsWhileGated bool
+	}{
+		{name: "exempts-the-active-type", exempt: []string{gate}, runsWhileGated: true},
+		{name: "exempts-among-several-types", exempt: []string{"LOW_DISK_USAGE", gate}, runsWhileGated: true},
+		{name: "no-opt-out", exempt: nil, runsWhileGated: false},
+		{name: "exempts-a-different-type", exempt: []string{"LOW_DISK_USAGE"}, runsWhileGated: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			o := newOrch(fastCfg(t), nil)
+			o.Reg = roles.RoleSet{
+				{Name: "subject", Enabled: true, Binds: []string{evtType}, NonBlockingGates: tc.exempt},
+			}
+			o.Bindings = core.NewBindings(o.Reg.DeclaredBindTypes()...)
+			handler := o.Handler.(*fakeHandler)
+			q := newTestQueue(t)
+			for _, r := range o.Reg {
+				q.Register(o.NewListener(context.Background(), r))
+			}
+
+			// Unexpired, so a held event queues rather than hitting its final attempt.
+			if _, err := q.Enqueue(eventqueue.Event{ID: "e1", Type: evtType, Payload: map[string]any{"id": "zr-w"}, ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := q.SetGate(eventqueue.GateRequest{Type: gate}); err != nil {
+				t.Fatal(err)
+			}
+
+			q.Dispatch()
+			want := []string(nil)
+			if tc.runsWhileGated {
+				want = []string{"subject"}
+			}
+			if got := dispatchedRoles(handler); !slices.Equal(got, want) {
+				t.Fatalf("while %s is active dispatched to %v, want %v", gate, got, want)
+			}
+
+			// Clearing delivers the event to a listener that was held (it was
+			// kept queued, not dropped) and does not redeliver to one that ran.
+			if _, _, err := q.ClearGate(gate, "op"); err != nil {
+				t.Fatal(err)
+			}
+			q.Dispatch()
+			if got := dispatchedRoles(handler); !slices.Equal(got, []string{"subject"}) {
+				t.Fatalf("after clearing %s dispatched to %v, want exactly one delivery to [subject]", gate, got)
+			}
+		})
+	}
+}
+
+// The emitter-side counterpart under the same gate: with BEAD_SERVER_DOWN
+// active, a query that exempts it is still polled, while one with no opt-out
+// and one that exempts only a different TYPE are not.
+func TestProduceTick_beadServerDownGateOnlyPollsEmittersThatExemptIt(t *testing.T) {
+	const gate = "BEAD_SERVER_DOWN"
+	src := func(name, emit string, exempt []string) query.Source {
+		return query.Source{
+			Name:             name,
+			Query:            &fakeQuery{Meta: query.Meta{EmitTypes: []string{emit}}},
+			NonBlockingGates: exempt,
+		}
+	}
+	sources := query.SourceSet{
+		src("exempt-source", "a.ready", []string{gate}),
+		src("plain-source", "b.ready", nil),
+		src("other-exempt-source", "c.ready", []string{"LOW_DISK_USAGE"}),
+	}
+	o := newOrch(fastCfg(t), sources)
+	o.Reg = roles.RoleSet{{Name: "r", Enabled: true, Binds: []string{"a.ready", "b.ready", "c.ready"}}}
+	o.Bindings = core.NewBindings(o.Reg.DeclaredBindTypes()...)
+	q := newTestQueue(t)
+	if _, err := q.SetGate(eventqueue.GateRequest{Type: gate}); err != nil {
+		t.Fatal(err)
+	}
+
+	rpt, err := o.ProduceTick(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, polled := rpt.LastTick["exempt-source"]; !polled {
+		t.Errorf("an emitter exempting %s must still be polled; LastTick=%v Blocked=%v", gate, rpt.LastTick, rpt.Blocked)
+	}
+	for _, name := range []string{"plain-source", "other-exempt-source"} {
+		if _, polled := rpt.LastTick[name]; polled {
+			t.Errorf("%s must not be polled while %s is active", name, gate)
+		}
+		if rpt.Blocked[name] != gate {
+			t.Errorf("Blocked[%s] = %q, want %s", name, rpt.Blocked[name], gate)
+		}
+	}
+}
