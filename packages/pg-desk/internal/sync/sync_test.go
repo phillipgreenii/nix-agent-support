@@ -191,11 +191,52 @@ func helperMain() {
 			os.Stderr.WriteString("boom: injected failure for " + id)
 			os.Exit(1)
 		}
+		// GO_HELPER_PARENT_ID + GO_HELPER_CHILD_IDS impersonate bd >= 1.3.1,
+		// which refuses to close a parent while any child is still open
+		// ("cannot close X: N open child issue(s); close children first").
+		// Closing the parent fails unless every listed child already has an
+		// earlier recorded `issue transition <child> closed` call.
+		if parent := os.Getenv("GO_HELPER_PARENT_ID"); parent != "" && parent == id && args[1] == "transition" {
+			if open := openChildrenAtThisCall(strings.Split(os.Getenv("GO_HELPER_CHILD_IDS"), ",")); open > 0 {
+				writeWireError("unavailable", fmt.Sprintf("cannot close %s: %d open child issue(s); close children first or use --force to override", id, open))
+			}
+		}
 		writeIssueResult(id)
 	default:
 		os.Stderr.WriteString("unexpected issue verb: " + args[1])
 		os.Exit(99)
 	}
+}
+
+// openChildrenAtThisCall counts how many of childIDs have NO earlier recorded
+// `issue transition <id> closed` call. The record file already holds this
+// invocation's own line (recordCall ran first), so only earlier lines count.
+func openChildrenAtThisCall(childIDs []string) int {
+	b, _ := os.ReadFile(os.Getenv("GO_HELPER_CALLS_RECORD_FILE"))
+	lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
+	if len(lines) > 0 {
+		lines = lines[:len(lines)-1]
+	}
+	open := 0
+	for _, id := range childIDs {
+		if id == "" {
+			continue
+		}
+		closed := false
+		for _, line := range lines {
+			var rec callRecord
+			if json.Unmarshal([]byte(line), &rec) != nil || len(rec.Args) < 3 {
+				continue
+			}
+			if rec.verb() == "issue transition" && rec.Args[2] == id && strings.Contains(strings.Join(rec.Args, " "), "closed") {
+				closed = true
+			}
+		}
+		if !closed {
+			open++
+		}
+	}
+	return open
 }
 
 // priorCallCount counts how many lines the calls-record file held BEFORE
@@ -728,6 +769,46 @@ func TestSync_ConfirmedClosure_ClosesEveryOpenChildOfAnchor(t *testing.T) {
 	}
 }
 
+// TestSync_ConfirmedClosure_ClosesChildrenBeforeAnchor guards pg2-mhz7b: bd
+// 1.3.1 (the 2026-10-08 upgrade) refuses to close a parent bead while any
+// child is still open, so the anchor MUST be closed AFTER every child (both
+// ledger-tracked cycles and the type-blind open children). Closing the anchor
+// first failed every confirmed closure, left the anchor's ledger last_synced_at
+// frozen (pg_desk_oldest_anchor_check_age_seconds grew to 37318s) and
+// re-stamped closed_at on the anchor bead on every retry.
+func TestSync_ConfirmedClosure_ClosesChildrenBeforeAnchor(t *testing.T) {
+	s := newTestSyncer(t, ModeApply)
+	recordFile := withFactory(t)
+	anchorID, cycleID, reviewID := seedExistingAnchorCycleAndReview(t, s)
+	t.Setenv("GO_HELPER_PARENT_ID", anchorID)
+	t.Setenv("GO_HELPER_CHILD_IDS", strings.Join([]string{cycleID, reviewID, "bd-human-1"}, ","))
+
+	facts := gather.Facts{
+		HeadSHA:      fixtureHeadSHA,
+		RemovedState: "merged",
+		WorkBeads: workBeadsFixture(
+			map[string]any{"id": "bd-human-1", "title": "Human: unblock stuck pending review on PR #42", "state": "open", "parent": anchorID},
+		),
+	}
+	if err := s.Sync(context.Background(), fixtureRepo, fixtureEntity, gather.ChangeRemoved, facts, interpFor("mine", nil)); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	var order []string
+	for _, r := range readCallRecords(t, recordFile) {
+		if r.verb() == "issue transition" && strings.Contains(strings.Join(r.Args, " "), "closed") {
+			order = append(order, r.Args[2])
+		}
+	}
+	if len(order) != 4 || order[len(order)-1] != anchorID {
+		t.Fatalf("close order = %v, want the anchor %s closed last, after cycle, review and open child", order, anchorID)
+	}
+	anchor, _, _ := s.store.GetLedger(fixtureRepo, "pr", fixtureEntity, KindAnchor)
+	if anchor.LastSyncedContentHash != closedSentinel {
+		t.Fatalf("anchor ledger row not marked closed: %+v", anchor)
+	}
+}
+
 // --- test: review-request ACL matches the fixture set -----------------------
 
 func TestSync_ReviewRequestACL(t *testing.T) {
@@ -865,8 +946,10 @@ func TestSync_EveryIssueWriteCarriesBeadsDirEnv(t *testing.T) {
 // pg2-kftf9.1: a connector error during handleClosure MUST surface as a Sync
 // error (the pipeline turns it into a non-zero `run` so pg-router retries),
 // and a RETRY after a partial failure MUST finish the cascade without
-// re-closing what already closed. Here the anchor closes, then the review
-// request's close fails; the retry must close only the review request.
+// re-closing what already closed. Children close before the anchor (pg2-mhz7b):
+// the cycle closes, then the review request's close fails, so the anchor is NOT
+// yet closed; the retry must close the review request and then the anchor, and
+// must not re-close the cycle.
 func TestSync_ConfirmedClosure_ConnectorErrorIsReturnedAndRetrySafe(t *testing.T) {
 	s := newTestSyncer(t, ModeApply)
 	recordFile := withFactory(t)
@@ -887,6 +970,9 @@ func TestSync_ConfirmedClosure_ConnectorErrorIsReturnedAndRetrySafe(t *testing.T
 	if review.LastSyncedContentHash == closedSentinel {
 		t.Fatal("review ledger row marked closed despite its close failing")
 	}
+	if anchor, _, _ := s.store.GetLedger(fixtureRepo, "pr", fixtureEntity, KindAnchor); anchor.LastSyncedContentHash == closedSentinel {
+		t.Fatal("anchor ledger row marked closed although a child's close failed first")
+	}
 
 	// Retry with the connector healthy again.
 	t.Setenv("GO_HELPER_FAIL_ID", "")
@@ -900,8 +986,8 @@ func TestSync_ConfirmedClosure_ConnectorErrorIsReturnedAndRetrySafe(t *testing.T
 			retryCloses = append(retryCloses, r.Args[2])
 		}
 	}
-	if len(retryCloses) != 1 || retryCloses[0] != reviewID {
-		t.Fatalf("retry closed %v, want only [%s] (anchor %s and cycle %s already closed)", retryCloses, reviewID, anchorID, cycleID)
+	if len(retryCloses) != 2 || retryCloses[0] != reviewID || retryCloses[1] != anchorID {
+		t.Fatalf("retry closed %v, want [%s %s] (cycle %s already closed)", retryCloses, reviewID, anchorID, cycleID)
 	}
 	review, _, _ = s.store.GetLedger(fixtureRepo, "pr", fixtureEntity, KindReviewRequest)
 	if review.LastSyncedContentHash != closedSentinel {

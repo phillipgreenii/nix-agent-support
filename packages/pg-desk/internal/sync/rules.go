@@ -163,7 +163,7 @@ func (rc *runContext) upsertReviewLedger(beadID, contentHash, lastReviewedHeadSH
 	})
 }
 
-// handleClosure closes the anchor and its open cycles — BOTH cycle types,
+// handleClosure closes the anchor's open children and then the anchor (children first, bead pg2-mhz7b) — BOTH cycle types,
 // the process-feedback cycle and the review-pr request alike — on a
 // CONFIRMED closure (design section 7.5's Anchor rule: "closed, with its
 // open cycles, only on a CONFIRMED closure"; the phase-10 packet's own
@@ -189,34 +189,19 @@ func (rc *runContext) handleClosure(ctx context.Context, reason string) error {
 	if rc.anchorID == "" {
 		return nil // no anchor ever existed for this PR — nothing to close
 	}
-	// A closure failure now fails the run so pg-router retries it
-	// (pg2-kftf9.1), so this MUST be safe to re-enter after a PARTIAL
-	// failure: the anchor being sentinel-closed no longer short-circuits the
-	// whole cascade (a child close that failed after the anchor closed would
-	// otherwise never be retried); it only skips the anchor's own
-	// transition, and each ledger-tracked child skips itself if already
-	// sentinel-closed (closeCascadedChild).
-	if rc.ledgerAnchor.LastSyncedContentHash != closedSentinel {
-		if rc.mode == ModeApply {
-			// Stamp the terminal state BEFORE the close so a closed anchor
-			// never keeps its stale open/draft metadata (pg2-kftf9.3).
-			state := reason
-			if state != "merged" {
-				state = "closed" // "closed" and "gone" (PR vanished) both read as closed
-			}
-			if err := rc.syncer.client.Update(ctx, rc.anchorID, updateInput{Metadata: map[string]string{
-				"state": state, "draft": "false", "closed_at": rc.now, "last_checked_at": rc.now,
-			}}); err != nil {
-				return fmt.Errorf("sync: stamp closed state on anchor %s: %w", rc.anchorID, err)
-			}
-			if err := rc.syncer.client.Transition(ctx, rc.anchorID, "closed"); err != nil {
-				return fmt.Errorf("sync: close anchor %s: %w", rc.anchorID, err)
-			}
-		}
-		if err := rc.upsertLedger(KindAnchor, rc.anchorID, closedSentinel, ""); err != nil {
-			return err
-		}
-	}
+	// Children first, the anchor LAST (bead pg2-mhz7b): bd >= 1.3.1 refuses
+	// to close a parent while any child is open ("cannot close X: N open
+	// child issue(s); close children first"), so closing the anchor first
+	// failed every confirmed closure after the 2026-10-08 bd upgrade, froze
+	// the anchor's ledger last_synced_at (the oldest-anchor-check-age gauge
+	// reached 37318s) and re-stamped closed_at on every retry.
+	//
+	// A closure failure fails the run so pg-router retries it (pg2-kftf9.1),
+	// so this MUST be safe to re-enter after a PARTIAL failure: each
+	// ledger-tracked child skips itself if already sentinel-closed
+	// (closeCascadedChild), an already-closed open child no longer appears in
+	// the work-beads read, and the anchor's own transition runs only while its
+	// ledger row is not yet sentinel-closed.
 	if err := rc.closeCascadedChild(ctx, KindFeedbackCycle, "feedback cycle", rc.cycleID, rc.ledgerCycle); err != nil {
 		return err
 	}
@@ -233,7 +218,28 @@ func (rc *runContext) handleClosure(ctx context.Context, reason string) error {
 			}
 		}
 	}
-	return nil
+	if rc.ledgerAnchor.LastSyncedContentHash == closedSentinel {
+		return nil
+	}
+	if rc.mode == ModeApply {
+		// Stamp the terminal state BEFORE the close so a closed anchor
+		// never keeps its stale open/draft metadata (pg2-kftf9.3). It is
+		// stamped only once the children are closed, so a child failure
+		// does not rewrite the anchor (and bump its updated_at) per retry.
+		state := reason
+		if state != "merged" {
+			state = "closed" // "closed" and "gone" (PR vanished) both read as closed
+		}
+		if err := rc.syncer.client.Update(ctx, rc.anchorID, updateInput{Metadata: map[string]string{
+			"state": state, "draft": "false", "closed_at": rc.now, "last_checked_at": rc.now,
+		}}); err != nil {
+			return fmt.Errorf("sync: stamp closed state on anchor %s: %w", rc.anchorID, err)
+		}
+		if err := rc.syncer.client.Transition(ctx, rc.anchorID, "closed"); err != nil {
+			return fmt.Errorf("sync: close anchor %s: %w", rc.anchorID, err)
+		}
+	}
+	return rc.upsertLedger(KindAnchor, rc.anchorID, closedSentinel, "")
 }
 
 // closeCascadedChild closes one open cycle-type child bead of the anchor
