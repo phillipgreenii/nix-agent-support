@@ -3605,11 +3605,25 @@
               # pg-task-focus (bead pg2-t7me1.1) - whole-module Go test gate. Pattern
               # A: flat src at the module dir, no local replace. No overlay package
               # and no default.nix until sub-project 2 adds a `package main`.
-              pg-task-focus-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {
-                pname = "pg-task-focus-go-tests";
-                src = lib.cleanSource ./packages/pg-task-focus;
-                gomod2nixToml = ./packages/pg-task-focus/gomod2nix.toml;
-              };
+              # The property tests run with rapid's seed pinned to 1 and no
+              # failure file, so this check is deterministic and writes nothing
+              # into the source tree; developers and the commit-time test hook
+              # keep random seeds, and a failure there prints the seed to
+              # replay. The settings go through rapid's environment variables
+              # (RAPID_SEED, RAPID_NOFAILFILE), not `-rapid.*` testFlags:
+              # `go test ./...` hands every flag to every test binary, and the
+              # packages whose tests do not import rapid reject `-rapid.seed`
+              # as an undefined flag.
+              pg-task-focus-go-tests =
+                (pkgs._agentSupportGoBuilders.mkGoTest {
+                  pname = "pg-task-focus-go-tests";
+                  src = lib.cleanSource ./packages/pg-task-focus;
+                  gomod2nixToml = ./packages/pg-task-focus/gomod2nix.toml;
+                }).overrideAttrs
+                  (_: {
+                    RAPID_SEED = "1";
+                    RAPID_NOFAILFILE = "true";
+                  });
 
               # pg-desk-shadow (bead pg2-nu7h0) - whole-module Go test gate. Pattern
               # A: flat src at the module dir, no local replace. sqlite3 on PATH

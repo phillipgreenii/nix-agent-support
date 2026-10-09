@@ -1,0 +1,185 @@
+{
+  "now": "2026-10-19T13:10:00Z",
+  "state": {
+    "Initialized": true,
+    "Profile": "normal",
+    "Periods": [
+      {
+        "Kind": "day",
+        "Start": "2026-10-19",
+        "End": "2026-10-19",
+        "Label": "",
+        "Zone": "America/New_York",
+        "Today": "2026-10-19",
+        "Ended": false,
+        "Banner": ""
+      },
+      {
+        "Kind": "week",
+        "Start": "2026-10-19",
+        "End": "2026-10-25",
+        "Label": "",
+        "Zone": "America/New_York",
+        "Today": "2026-10-19",
+        "Ended": false,
+        "Banner": ""
+      },
+      {
+        "Kind": "sprint",
+        "Start": "2026-10-19",
+        "End": "2026-11-01",
+        "Label": "",
+        "Zone": "America/New_York",
+        "Today": "2026-10-19",
+        "Ended": false,
+        "Banner": ""
+      }
+    ],
+    "Tasks": [
+      {
+        "Kind": "day",
+        "Task": {
+          "ID": "day:2026-10-19:plan-day",
+          "Definition": "plan-day",
+          "Cadence": "daily",
+          "PeriodStart": "2026-10-19",
+          "Title": "Plan the day",
+          "Group": "Start of day",
+          "Link": "",
+          "Due": "2026-10-19T13:00:00Z",
+          "DueRule": {
+            "at": "09:00",
+            "tz": "America/New_York"
+          },
+          "Status": "completed",
+          "ResolvedAt": "2026-10-19T12:55:00Z",
+          "Reason": ""
+        },
+        "GroupRank": 0,
+        "Overdue": false
+      },
+      {
+        "Kind": "day",
+        "Task": {
+          "ID": "day:2026-10-19:post-plan",
+          "Definition": "post-plan",
+          "Cadence": "daily",
+          "PeriodStart": "2026-10-19",
+          "Title": "Post the plan for the day",
+          "Group": "Start of day",
+          "Link": "",
+          "Due": "2026-10-19T13:30:00Z",
+          "DueRule": {
+            "at": "09:30",
+            "tz": "America/New_York"
+          },
+          "Status": "open",
+          "ResolvedAt": null,
+          "Reason": ""
+        },
+        "GroupRank": 0,
+        "Overdue": false
+      },
+      {
+        "Kind": "day",
+        "Task": {
+          "ID": "day:2026-10-19:end-of-day-summary",
+          "Definition": "end-of-day-summary",
+          "Cadence": "daily",
+          "PeriodStart": "2026-10-19",
+          "Title": "Post the end-of-day summary",
+          "Group": "End of day",
+          "Link": "",
+          "Due": "2026-10-19T21:30:00Z",
+          "DueRule": {
+            "at": "17:30",
+            "tz": "America/New_York"
+          },
+          "Status": "open",
+          "ResolvedAt": null,
+          "Reason": ""
+        },
+        "GroupRank": 2,
+        "Overdue": false
+      },
+      {
+        "Kind": "week",
+        "Task": {
+          "ID": "week:2026-10-19:weekly-update",
+          "Definition": "weekly-update",
+          "Cadence": "weekly",
+          "PeriodStart": "2026-10-19",
+          "Title": "Write the weekly status update",
+          "Group": "",
+          "Link": "",
+          "Due": "2026-10-22T13:00:00Z",
+          "DueRule": {
+            "at": "09:00",
+            "tz": "America/New_York",
+            "weekday": "thu"
+          },
+          "Status": "open",
+          "ResolvedAt": null,
+          "Reason": ""
+        },
+        "GroupRank": 3,
+        "Overdue": false
+      },
+      {
+        "Kind": "sprint",
+        "Task": {
+          "ID": "sprint:2026-10-19:capacity-check",
+          "Definition": "capacity-check",
+          "Cadence": "sprint",
+          "PeriodStart": "2026-10-19",
+          "Title": "Do the capacity check and post planning input",
+          "Group": "",
+          "Link": "",
+          "Due": "2026-10-19T13:00:00Z",
+          "DueRule": {
+            "at": "09:00",
+            "tz": "America/New_York",
+            "day": 1
+          },
+          "Status": "open",
+          "ResolvedAt": null,
+          "Reason": ""
+        },
+        "GroupRank": 3,
+        "Overdue": true
+      }
+    ],
+    "Next": {
+      "Kind": "sprint",
+      "Task": {
+        "ID": "sprint:2026-10-19:capacity-check",
+        "Definition": "capacity-check",
+        "Cadence": "sprint",
+        "PeriodStart": "2026-10-19",
+        "Title": "Do the capacity check and post planning input",
+        "Group": "",
+        "Link": "",
+        "Due": "2026-10-19T13:00:00Z",
+        "DueRule": {
+          "at": "09:00",
+          "tz": "America/New_York",
+          "day": 1
+        },
+        "Status": "open",
+        "ResolvedAt": null,
+        "Reason": ""
+      },
+      "GroupRank": 3,
+      "Overdue": true
+    },
+    "Focus": null,
+    "Dimmed": null,
+    "InterruptStack": null,
+    "ResumeOffer": null,
+    "Store": {
+      "ReadOnly": false,
+      "Reason": "",
+      "Since": "0001-01-01T00:00:00Z"
+    }
+  }
+}

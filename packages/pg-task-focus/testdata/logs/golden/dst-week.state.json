@@ -1,0 +1,218 @@
+{
+  "now": "2026-11-01T08:20:00Z",
+  "state": {
+    "Initialized": true,
+    "Profile": "normal",
+    "Periods": [
+      {
+        "Kind": "day",
+        "Start": "2026-11-01",
+        "End": "2026-11-01",
+        "Label": "",
+        "Zone": "America/New_York",
+        "Today": "2026-11-01",
+        "Ended": false,
+        "Banner": ""
+      },
+      {
+        "Kind": "week",
+        "Start": "2026-10-26",
+        "End": "2026-11-01",
+        "Label": "",
+        "Zone": "America/New_York",
+        "Today": "2026-11-01",
+        "Ended": false,
+        "Banner": ""
+      },
+      {
+        "Kind": "sprint",
+        "Start": "2026-10-19",
+        "End": "2026-11-01",
+        "Label": "",
+        "Zone": "America/New_York",
+        "Today": "2026-11-01",
+        "Ended": false,
+        "Banner": ""
+      }
+    ],
+    "Tasks": [
+      {
+        "Kind": "day",
+        "Task": {
+          "ID": "day:2026-11-01:plan-day",
+          "Definition": "plan-day",
+          "Cadence": "daily",
+          "PeriodStart": "2026-11-01",
+          "Title": "Plan the day",
+          "Group": "Start of day",
+          "Link": "",
+          "Due": "2026-11-01T14:00:00Z",
+          "DueRule": {
+            "at": "09:00",
+            "tz": "America/New_York"
+          },
+          "Status": "open",
+          "ResolvedAt": null,
+          "Reason": ""
+        },
+        "GroupRank": 0,
+        "Overdue": false
+      },
+      {
+        "Kind": "day",
+        "Task": {
+          "ID": "day:2026-11-01:post-plan",
+          "Definition": "post-plan",
+          "Cadence": "daily",
+          "PeriodStart": "2026-11-01",
+          "Title": "Post the plan for the day",
+          "Group": "Start of day",
+          "Link": "",
+          "Due": "2026-11-01T14:30:00Z",
+          "DueRule": {
+            "at": "09:30",
+            "tz": "America/New_York"
+          },
+          "Status": "open",
+          "ResolvedAt": null,
+          "Reason": ""
+        },
+        "GroupRank": 0,
+        "Overdue": false
+      },
+      {
+        "Kind": "day",
+        "Task": {
+          "ID": "day:2026-11-01:end-of-day-summary",
+          "Definition": "end-of-day-summary",
+          "Cadence": "daily",
+          "PeriodStart": "2026-11-01",
+          "Title": "Post the end-of-day summary",
+          "Group": "End of day",
+          "Link": "",
+          "Due": "2026-11-01T22:30:00Z",
+          "DueRule": {
+            "at": "17:30",
+            "tz": "America/New_York"
+          },
+          "Status": "open",
+          "ResolvedAt": null,
+          "Reason": ""
+        },
+        "GroupRank": 2,
+        "Overdue": false
+      },
+      {
+        "Kind": "week",
+        "Task": {
+          "ID": "week:2026-10-26:weekly-update",
+          "Definition": "weekly-update",
+          "Cadence": "weekly",
+          "PeriodStart": "2026-10-26",
+          "Title": "Write the weekly status update",
+          "Group": "",
+          "Link": "",
+          "Due": "2026-10-29T13:00:00Z",
+          "DueRule": {
+            "at": "09:00",
+            "tz": "America/New_York",
+            "weekday": "thu"
+          },
+          "Status": "completed",
+          "ResolvedAt": "2026-10-29T13:00:00Z",
+          "Reason": ""
+        },
+        "GroupRank": 3,
+        "Overdue": false
+      },
+      {
+        "Kind": "sprint",
+        "Task": {
+          "ID": "sprint:2026-10-19:capacity-check",
+          "Definition": "capacity-check",
+          "Cadence": "sprint",
+          "PeriodStart": "2026-10-19",
+          "Title": "Do the capacity check and post planning input",
+          "Group": "",
+          "Link": "",
+          "Due": "2026-10-19T13:00:00Z",
+          "DueRule": {
+            "at": "09:00",
+            "tz": "America/New_York",
+            "day": 1
+          },
+          "Status": "completed",
+          "ResolvedAt": "2026-10-26T13:00:00Z",
+          "Reason": ""
+        },
+        "GroupRank": 3,
+        "Overdue": false
+      }
+    ],
+    "Next": {
+      "Kind": "day",
+      "Task": {
+        "ID": "day:2026-11-01:plan-day",
+        "Definition": "plan-day",
+        "Cadence": "daily",
+        "PeriodStart": "2026-11-01",
+        "Title": "Plan the day",
+        "Group": "Start of day",
+        "Link": "",
+        "Due": "2026-11-01T14:00:00Z",
+        "DueRule": {
+          "at": "09:00",
+          "tz": "America/New_York"
+        },
+        "Status": "open",
+        "ResolvedAt": null,
+        "Reason": ""
+      },
+      "GroupRank": 0,
+      "Overdue": false
+    },
+    "Focus": {
+      "Cycle": {
+        "ID": "01M4A899G09R0000000000001G",
+        "Type": "deep-work",
+        "Title": "Deep work cycle",
+        "PlannedMinutes": 50,
+        "Boosts": [
+          {
+            "At": "2026-11-01T05:30:00Z",
+            "Minutes": 25
+          }
+        ],
+        "Status": "running",
+        "StoppedAt": null,
+        "Segments": [
+          {
+            "Start": "2026-11-01T04:20:00Z",
+            "End": null,
+            "OpenedBy": "01M4A899G08W00000000000017"
+          }
+        ],
+        "InterruptedBy": "",
+        "Note": "Worked through the repeated hour",
+        "KV": null
+      },
+      "Elapsed": 14400000000000,
+      "Remaining": -9900000000000,
+      "Overtime": true,
+      "NotInProfile": false,
+      "Alert": {
+        "Sound": "Hero",
+        "ReminderSound": "Tink",
+        "RepeatMinutes": 10
+      }
+    },
+    "Dimmed": null,
+    "InterruptStack": null,
+    "ResumeOffer": null,
+    "Store": {
+      "ReadOnly": false,
+      "Reason": "",
+      "Since": "0001-01-01T00:00:00Z"
+    }
+  }
+}
