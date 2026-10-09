@@ -64,6 +64,14 @@ A-3: a brief that lists relative paths without a root causes exactly this defect
   automatic test runners are the commit-time `run-unit-tests` hook (`pg-test-runner`, touched
   projects) plus FF-1b's `pg-hooks run pre-land` over the branch diff; if that lets problems
   through, that is the signal to bring CI back.
+- V-3 (operator ruling, Phillip, 2026-10-08, verbatim: "the checks and verifications for
+  deterministic code should be in a test"). Provenance: every pg-wi-flow test mocked `bd`, so two real
+  bugs (`bd` refusing a bare `--assignee` reassign of another actor's live claim, and a `.data // .`
+  jq idiom that errors on the bare array `bd` returns when `BD_JSON_ENVELOPE` is unset) shipped and
+  only surfaced in a live `/drain` run, and the fix was then re-verified by hand in a throwaway
+  database to close "verify after apply" beads. The landed guard is
+  `packages/pg-wi-flow/pg-wi-flow/tests/test-pg-wi-flow-integration.bats` (real `bd`, throwaway
+  embedded Dolt database).
 
 ## Timeouts (L-1..L-3)
 

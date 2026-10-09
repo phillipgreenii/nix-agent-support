@@ -171,3 +171,23 @@ status_of() {
   [ "$status" -eq 0 ]
   [ "$(assignee_of "$ITEM")" = "$DISPATCHER_IDENT-work" ]
 }
+
+# Literal scenario of the post-deploy verify bead tc-n84l6 (tc-1lmua), kept as
+# a test so that verification is not a one-off manual probe (tc-fyfbl):
+#   PG_WI_FLOW_IDENT=<8hex>-aaa-dispatcher pg-wi-flow next --id X, then
+#   PG_WI_FLOW_IDENT=<same8hex>-bbb-worker pg-wi-flow claim X exits 0 and the
+#   assignee becomes the worker actor; a different-session prefix still fails
+#   with the assignee unchanged.
+@test "tc-n84l6 scenario: <8hex>-aaa-dispatcher next, <same8hex>-bbb-worker claim transfers; other prefix refused" {
+  PG_WI_FLOW_IDENT="ab12cd34-aaa-dispatcher" run $SCRIPT next --id "$ITEM"
+  [ "$status" -eq 0 ]
+  [ "$(assignee_of "$ITEM")" = "ab12cd34-aaa-dispatcher-work" ]
+
+  PG_WI_FLOW_IDENT="ffff0000-bbb-worker" run $SCRIPT claim "$ITEM"
+  [ "$status" -ne 0 ]
+  [ "$(assignee_of "$ITEM")" = "ab12cd34-aaa-dispatcher-work" ]
+
+  PG_WI_FLOW_IDENT="ab12cd34-bbb-worker" run $SCRIPT claim "$ITEM"
+  [ "$status" -eq 0 ]
+  [ "$(assignee_of "$ITEM")" = "ab12cd34-bbb-worker-work" ]
+}
