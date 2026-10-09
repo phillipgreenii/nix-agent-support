@@ -8,6 +8,13 @@ It is the Phase-2 producer/consumer of the `pn:applied` contract (design spec:
 family of helpers for the `/drain-beads` work loop — starting with `drain isolate`,
 which sets up a bead's isolated worktree.
 
+`/drain-beads` is the interactive selection loop only: it claims a bead, then delegates the
+per-bead protocol (container probe, understand, isolate, delegate, validate, land, finish,
+STUCK routing) to the shared `pb:drain-one` skill
+(`claude-marketplace/pb/skills/drain-one/SKILL.md`). A pg-router drain worker applies the same
+skill to the bead the router chose, without calling `/drain-beads`. See ADR
+`docs/adr/0089-drain-roles-apply-the-shared-pb-drain-one-skill.md`.
+
 A gate is keyed to a change's **`git patch-id`** (not its commit SHA) so it survives the
 local rebases this workflow performs — the SHA changes on rebase, the diff (and thus the
 patch-id) does not.

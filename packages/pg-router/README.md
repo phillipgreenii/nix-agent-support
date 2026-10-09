@@ -188,7 +188,9 @@ Roles and queries are typed tagged unions discriminated by a `type` field:
   or TUI change required.
 
 A `ccpool` role's behavior is set by code-owned enums: `completion`
-(`close-only` | `close-or-handback`), `on_failure` (`unclaim` | `add-human`),
+(`close-only` | `close-or-handback` | `close-or-triage` | `close-or-split-triage` |
+`close-or-release`; see ADR `docs/adr/0089-drain-roles-apply-the-shared-pb-drain-one-skill.md`
+for the last), `on_failure` (`unclaim` | `add-human`),
 `on_dispatch_fail` (`unclaim` | `leave`). When `authorship_guard = true`, pg-router
 prepends a **non-editable** safety preamble (assert author is me, branch starts
 with `phillipg.`, never force-push) ahead of the role's task prompt, so
