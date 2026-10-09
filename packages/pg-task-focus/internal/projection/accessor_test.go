@@ -163,4 +163,16 @@ func TestNewestEventOfAnEntity(t *testing.T) {
 			t.Errorf("NewestEvent(unknown) = %s, want none", e.ID)
 		}
 	})
+
+	t.Run("the empty entity names nothing", func(t *testing.T) {
+		// A profile.changed has no entity, and a cycle.started that interrupts
+		// nothing has an empty interrupts: neither is an event of "".
+		m, err := Replay(b.events)
+		if err != nil {
+			t.Fatalf("Replay: %v", err)
+		}
+		if e, ok := m.NewestEvent(""); ok {
+			t.Errorf("NewestEvent(\"\") = %s (%s), want none", e.ID, e.Payload.EventType())
+		}
+	})
 }

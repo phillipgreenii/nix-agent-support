@@ -737,3 +737,41 @@ func TestPauseWithClockBehindLastEventIsClockBehindLog(t *testing.T) {
 		mustReject(t, envOf(t, b, at(30)), command.SwitchCycle{To: cycleB}, command.ReasonClockBehindLog)
 	})
 }
+
+func TestStartWithTheClockBehindOnlyAnEntitylessEventStarts(t *testing.T) {
+	// The bootstrap batch, an hour before t0, holds a profile.changed, which
+	// is about no task or cycle, so it is no entity a start acts on. (That a
+	// cycle.started interrupting nothing is no event of the empty entity is
+	// pinned by the projection's own test of NewestEvent.)
+	b := bootstrapped(t)
+	p := mustPlan(t, envOf(t, b, at(-70)), command.StartCycle{Type: review})
+	if got := only(t, p).Payload.(event.CycleStarted).Interrupts; got != "" {
+		t.Errorf("interrupts = %q, want none", got)
+	}
+
+	t.Run("a profile change stamped within the skew ahead", func(t *testing.T) {
+		b := newLog(t)
+		b.batch(1, func(bt event.ID) event.Payload { return event.ProfileChanged{Profile: "normal", Batch: bt} })
+		mustPlan(t, envOf(t, b, at(0)), command.StartCycle{Type: review})
+	})
+}
+
+func TestStartWithTheClockBehindTheFocusIsClockBehindLog(t *testing.T) {
+	// A starts at 10:20 New York and runs; the clock then reads 10:15.
+	b := bootstrapped(t)
+	b.add(140, startOf(cycleA, deepWork))
+	env := envOf(t, b, at(135))
+	r := mustReject(t, env, command.StartCycle{Type: review}, command.ReasonClockBehindLog)
+	if r.Entity != string(cycleA) {
+		t.Errorf("Entity = %q, want %s", r.Entity, cycleA)
+	}
+	for _, want := range []string{
+		"2026-10-07T14:15:00.000Z (10:15 America/New_York)", "2026-10-07T14:20:00.000Z (10:20 America/New_York)",
+		string(cycleA), "effective_at",
+	} {
+		if !strings.Contains(r.Message, want) {
+			t.Errorf("Message %q does not mention %q", r.Message, want)
+		}
+	}
+	mustReject(t, env, command.StartCycle{Type: review, EffectiveAt: ptr(at(135))}, command.ReasonAnotherCycleRunning)
+}

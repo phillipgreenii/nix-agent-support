@@ -230,7 +230,7 @@ func (c StartCycle) plan(b *builder) (Plan, error) {
 		p.Title = c.Type // the size check only; an unknown type is refused below
 	}
 	// The cycle running at the start's own instant is the one it interrupts.
-	if running, ok := b.m.RunningAt(eff); ok {
+	if running, ok := b.env.Model.RunningAt(eff); ok {
 		p.Interrupts = running.ID
 	}
 	if err := b.encodable(eff, p); err != nil {
@@ -245,7 +245,18 @@ func (c StartCycle) plan(b *builder) (Plan, error) {
 			Message: fmt.Sprintf("The cycle type %q is not defined in the configuration.", c.Type),
 		}
 	}
-	if err := b.clockBehind(c.EffectiveAt, eff, "cycle", string(p.Interrupts)); err != nil {
+	// With no effective_at the start acts on the cycle it interrupts and on
+	// the present focus: a clock behind either would stamp the start before
+	// events the operator has already recorded. A start that interrupts
+	// nothing and finds no focus acts on no stored cycle.
+	var acted []string
+	if p.Interrupts != "" {
+		acted = append(acted, string(p.Interrupts))
+	}
+	if focus, ok := b.env.Model.Running(); ok && focus.ID != p.Interrupts {
+		acted = append(acted, string(focus.ID))
+	}
+	if err := b.clockBehind(c.EffectiveAt, eff, "cycle", acted...); err != nil {
 		return Plan{}, err
 	}
 	p.CycleID = event.CycleID(b.env.NewID())
@@ -326,7 +337,7 @@ func (c AnnotateCycle) plan(b *builder) (Plan, error) {
 		}
 	}
 	return b.cycleVerb(c.CycleID, nil, verb{
-		name: "annotate",
+		name: "annotate", checked: true,
 		payload: func(id event.CycleID) event.Payload {
 			return event.CycleAnnotated{CycleID: id, Note: c.Note, KV: c.KV}
 		},
@@ -359,7 +370,7 @@ func (c SwitchCycle) plan(b *builder) (Plan, error) {
 	}
 	// The cycle paused is the one running at the switch's own instant, so a
 	// backdated switch after that cycle stopped is still a switch.
-	focus, ok := b.m.RunningAt(eff)
+	focus, ok := b.env.Model.RunningAt(eff)
 	if !ok {
 		return Plan{}, &Rejection{
 			Reason: ReasonNoRunningCycle, Entity: string(to.ID), Instants: []time.Time{eff},
@@ -393,26 +404,30 @@ func (b *builder) minutes(what string, n int) error {
 
 // verb is how one cycle verb plans: the state in which a repeat of it is a
 // no-op (none for boost and annotate), whether an omitted cycle id is first the
-// cycle running at the request's instant, and the event it adds.
+// cycle running at the request's instant, the event it adds, and whether the
+// command has already checked its text and the event's size itself.
 type verb struct {
 	name         string
 	repeat       projection.CycleStatus
 	runningFirst bool
+	checked      bool
 	payload      func(event.CycleID) event.Payload
 }
 
 // cycleVerb plans a verb that adds one event to one cycle.
 func (b *builder) cycleVerb(id event.CycleID, supplied *time.Time, v verb) (Plan, error) {
-	if err := b.validText(string(id)); err != nil {
-		return Plan{}, err
-	}
 	eff := b.effective(supplied)
-	provisional := id
-	if provisional == "" {
-		provisional = placeholderCycle
-	}
-	if err := b.encodable(eff, v.payload(provisional)); err != nil {
-		return Plan{}, err
+	if !v.checked {
+		if err := b.validText(string(id)); err != nil {
+			return Plan{}, err
+		}
+		provisional := id
+		if provisional == "" {
+			provisional = placeholderCycle
+		}
+		if err := b.encodable(eff, v.payload(provisional)); err != nil {
+			return Plan{}, err
+		}
 	}
 	if err := b.notFuture(eff, supplied); err != nil {
 		return Plan{}, err
@@ -434,7 +449,7 @@ func (b *builder) cycleVerb(id event.CycleID, supplied *time.Time, v verb) (Plan
 
 // named is the stored cycle a request names.
 func (b *builder) named(id event.CycleID, eff time.Time) (projection.Cycle, error) {
-	c, ok := b.m.Cycle(id)
+	c, ok := b.env.Model.Cycle(id)
 	if !ok {
 		return projection.Cycle{}, &Rejection{
 			Reason: ReasonUnknownCycle, Instants: []time.Time{eff},
@@ -453,12 +468,12 @@ func (b *builder) target(id event.CycleID, eff time.Time, v verb) (projection.Cy
 		return b.named(id, eff)
 	}
 	if v.runningFirst {
-		if c, ok := b.m.RunningAt(eff); ok {
+		if c, ok := b.env.Model.RunningAt(eff); ok {
 			return c, nil
 		}
 	}
 	var open []projection.Cycle
-	for _, c := range b.m.Cycles() {
+	for _, c := range b.env.Model.Cycles() {
 		if c.Status != projection.Stopped {
 			open = append(open, c)
 		}
@@ -494,7 +509,7 @@ func (b *builder) target(id event.CycleID, eff time.Time, v verb) (projection.Cy
 // noOp is the answer to a request that finds cycle c already in state at eff:
 // nothing to append, and one sentence naming the cycle and since when.
 func (b *builder) noOp(c projection.Cycle, eff time.Time, state projection.CycleStatus, tail string) (Plan, error) {
-	title, _ := b.m.CycleTitle(c.ID)
+	title, _ := b.env.Model.CycleTitle(c.ID)
 	if title == "" {
 		title = "Cycle " + string(c.ID)
 	}

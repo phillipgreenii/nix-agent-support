@@ -110,9 +110,13 @@ func (m *Model) Domain() Domain {
 // the latest effective_at, ties going to the later log position. The event is
 // as corrected. A cycle.started that names a cycle in interrupts is an event
 // of that cycle too, since it pauses it. False means no live event is about
-// the entity. The event shares its Data and payload with the model, as Log
-// says.
+// the entity, and the empty entity names nothing: no event without an entity
+// (a profile.changed) and no start that interrupts nothing is an event of "".
+// The event shares its Data and payload with the model, as Log says.
 func (m *Model) NewestEvent(entity string) (event.Event, bool) {
+	if entity == "" {
+		return event.Event{}, false
+	}
 	var newest *liveEvent
 	for i := range m.live {
 		e := &m.live[i]

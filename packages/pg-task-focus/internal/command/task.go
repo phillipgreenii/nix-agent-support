@@ -86,9 +86,9 @@ func (c SkipTask) plan(b *builder) (Plan, error) {
 
 // resolveTask plans the completion or skip p of task id. Completing or
 // skipping a missed task is allowed: a missed marker is not a resolution.
-func (b *builder) resolveTask(id event.TaskID, supplied *time.Time, verb string, p event.Payload) (Plan, error) {
+func (b *builder) resolveTask(id event.TaskID, supplied *time.Time, action string, p event.Payload) (Plan, error) {
 	if id == "" {
-		return Plan{}, b.invalid("A task_id is required to %s a task.", verb)
+		return Plan{}, b.invalid("A task_id is required to %s a task.", action)
 	}
 	if err := b.validText(string(id)); err != nil {
 		return Plan{}, err
@@ -100,14 +100,14 @@ func (b *builder) resolveTask(id event.TaskID, supplied *time.Time, verb string,
 	if err := b.notFuture(eff, supplied); err != nil {
 		return Plan{}, err
 	}
-	task, ok := b.m.Task(id)
+	task, ok := b.env.Model.Task(id)
 	if !ok {
 		return Plan{}, &Rejection{
 			Reason: ReasonUnknownTask, Instants: []time.Time{eff},
-			Message: fmt.Sprintf("No task %s exists in the log, so there is nothing to %s.", id, verb),
+			Message: fmt.Sprintf("No task %s exists in the log, so there is nothing to %s.", id, action),
 		}
 	}
-	if err := b.resolvable(task, eff, verb); err != nil {
+	if err := b.resolvable(task, eff, action); err != nil {
 		return Plan{}, err
 	}
 	if err := b.clockBehind(supplied, eff, "task", string(id)); err != nil {
@@ -138,7 +138,7 @@ func taskEvent(id event.TaskID) func(event.Payload) bool {
 // withdrawal that leaves it withdrawn. The facts are those the candidate
 // replay would give for the same events: the stored event, and the instants
 // in event order.
-func (b *builder) resolvable(task projection.Task, eff time.Time, verb string) error {
+func (b *builder) resolvable(task projection.Task, eff time.Time, action string) error {
 	switch task.Status {
 	case projection.Completed, projection.Skipped:
 		resolutions := b.liveEvents(taskEvent(task.ID), event.TypeTaskCompleted, event.TypeTaskSkipped)
@@ -152,7 +152,7 @@ func (b *builder) resolvable(task projection.Task, eff time.Time, verb string) e
 			Instants: instantsInOrder(z.EffectiveAt.Time(), eff),
 			Message: fmt.Sprintf(
 				"Task %s is already %s by event %s effective at %s, so the new event effective at %s cannot %s it; a task is completed or skipped only once.",
-				task.ID, task.Status, z.ID, b.instant(z.EffectiveAt.Time()), b.instant(eff), verb,
+				task.ID, task.Status, z.ID, b.instant(z.EffectiveAt.Time()), b.instant(eff), action,
 			),
 		}
 	case projection.Withdrawn:
@@ -177,7 +177,7 @@ func (b *builder) resolvable(task projection.Task, eff time.Time, verb string) e
 			Instants: instantsInOrder(by.EffectiveAt.Time(), eff),
 			Message: fmt.Sprintf(
 				"Task %s was withdrawn by event %s effective at %s, with no reinstatement since, so the new event effective at %s cannot %s it; reinstate the task first, or give an effective_at before the withdrawal.",
-				task.ID, by.ID, b.instant(by.EffectiveAt.Time()), b.instant(eff), verb,
+				task.ID, by.ID, b.instant(by.EffectiveAt.Time()), b.instant(eff), action,
 			),
 		}
 	}

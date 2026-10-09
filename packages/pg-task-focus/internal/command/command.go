@@ -96,7 +96,7 @@ func Build(env Env, c Command) (Plan, error) {
 	if !ok {
 		return Plan{}, fmt.Errorf("command: %T is not a command this package builds", c)
 	}
-	b := &builder{env: env, m: env.Model, cmd: c, at: event.At(env.Now).Time()}
+	b := &builder{env: env, cmd: c, at: event.At(env.Now).Time()}
 	if id := c.ClientID(); id != "" {
 		if _, err := event.ParseID(string(id)); err != nil {
 			return Plan{}, b.invalid("The request id %q is not a ULID (%v).", id, err)
@@ -117,14 +117,13 @@ const placeholderID = event.ID("00000000000000000000000000")
 // builder is the state of one Build.
 type builder struct {
 	env  Env
-	m    *projection.Model
 	cmd  Command
 	at   time.Time // the instant the events are recorded, to the millisecond
 	hash string    // the req_hash of every event, when the request carries an id
 }
 
 // instant writes t as every message does.
-func (b *builder) instant(t time.Time) string { return b.m.FormatInstant(t) }
+func (b *builder) instant(t time.Time) string { return b.env.Model.FormatInstant(t) }
 
 // invalid is an invalid_request with a sentence.
 func (b *builder) invalid(format string, args ...any) *Rejection {
@@ -227,7 +226,7 @@ func (b *builder) clockBehind(supplied *time.Time, eff time.Time, kind string, i
 		return nil
 	}
 	for _, id := range ids {
-		newest, ok := b.m.NewestEvent(id)
+		newest, ok := b.env.Model.NewestEvent(id)
 		if !ok || !eff.Before(newest.EffectiveAt.Time()) {
 			continue
 		}
@@ -260,7 +259,7 @@ func (b *builder) finish(events []event.Event, batch event.ID) (Plan, error) {
 			return Plan{}, fmt.Errorf("command: a planned %s does not read back: %w", e.Payload.EventType(), err)
 		}
 	}
-	m, err := projection.Candidate(b.m.Log(), out)
+	m, err := projection.Candidate(b.env.Model.Log(), out)
 	if err != nil {
 		var inv *projection.Invalid
 		if errors.As(err, &inv) {
@@ -292,8 +291,8 @@ func (b *builder) fromInvalid(inv *projection.Invalid) *Rejection {
 // retracted now.
 func (b *builder) cycleRef(id event.CycleID) CycleRef {
 	ref := CycleRef{ID: id}
-	ref.Title, _ = b.m.CycleTitle(id)
-	if c, ok := b.m.Cycle(id); ok {
+	ref.Title, _ = b.env.Model.CycleTitle(id)
+	if c, ok := b.env.Model.Cycle(id); ok {
 		ref.Status = c.Status
 		if len(c.Segments) > 0 {
 			ref.StartedAt = c.Segments[0].Start
@@ -307,7 +306,7 @@ func (b *builder) cycleRef(id event.CycleID) CycleRef {
 // position.
 func (b *builder) liveEvents(keep func(event.Payload) bool, types ...event.Type) []event.Event {
 	var out []event.Event
-	for _, v := range b.m.Events(projection.EventQuery{Types: types}) {
+	for _, v := range b.env.Model.Events(projection.EventQuery{Types: types}) {
 		if !v.Retracted && keep(v.Corrected.Payload) {
 			out = append(out, v.Corrected)
 		}
