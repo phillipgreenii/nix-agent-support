@@ -226,8 +226,15 @@ func TestTaskCarriesTheMaterializationSnapshot(t *testing.T) {
 // rollover appends the rollover batch that leaves day1 for day2 at 875
 // minutes (00:05 in New York on the 8th), marking the task missed, and
 // materializes the day2 task.
+// rollover rolls the day over to day2 at 875: id is missed and day2's
+// post-plan, due a day after day1's, is materialized.
 func rollover(b *logb, id event.TaskID) {
-	b.batch(875, missedTask(id), dayOf(day2), b.daily("post-plan", day2))
+	next := func(bt event.ID) event.Payload {
+		p := b.daily("post-plan", day2)(bt).(event.TaskMaterialized)
+		p.Due = event.At(p.Due.Time().Add(24 * time.Hour))
+		return p
+	}
+	b.batch(875, missedTask(id), dayOf(day2), next)
 }
 
 func TestLateCompletionOfMissedTask(t *testing.T) {
@@ -646,6 +653,10 @@ func goldenLogs(t *testing.T) []golden {
 		}
 		if old, fresh := mustTask(t, m, id).Status, mustTask(t, m, newID).Status; old != Completed || fresh != Open {
 			t.Errorf("old task %q, new task %q, want completed and open", old, fresh)
+		}
+		// The new day's task is due a day after the old day's.
+		if old, fresh := mustTask(t, m, id).Due, mustTask(t, m, newID).Due; !fresh.Equal(old.Add(24 * time.Hour)) {
+			t.Errorf("the new task is due %v, want a day after the old task's %v", fresh, old)
 		}
 		if p, _ := m.Period(Day); p.Start != day2 {
 			t.Errorf("current day = %s, want %s", p.Start, day2)

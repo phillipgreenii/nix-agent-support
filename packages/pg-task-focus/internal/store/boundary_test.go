@@ -226,3 +226,60 @@ func TestProbeReportsAFailedCloseOfTheLog(t *testing.T) {
 		t.Fatalf("Probe = %v, want the injected Close failure", err)
 	}
 }
+
+// takenFS is a store.FS over the operating system on which every recovery
+// sidecar name numbered below free already exists: creating one exclusively
+// fails with fs.ErrExist, without a file being made. A free of zero leaves no
+// name free.
+type takenFS struct {
+	*shortFS
+	free  int
+	tries int
+}
+
+func (f *takenFS) OpenFile(name string, flag int, perm os.FileMode) (store.File, error) {
+	base := filepath.Base(name)
+	if i := strings.LastIndex(base, "-"); strings.Contains(base, ".recovered-") && i >= 0 && flag&os.O_EXCL != 0 {
+		f.tries++
+		var n int
+		if _, err := fmt.Sscan(base[i+1:], &n); err == nil && (f.free == 0 || n < f.free) {
+			return nil, fmt.Errorf("creating %s: %w", name, fs.ErrExist)
+		}
+	}
+	return f.shortFS.OpenFile(name, flag, perm)
+}
+
+// INV-LOG-10: the sidecar takes the first free name up to the 10000th, and a
+// directory with all 10000 taken refuses the start and leaves the log.
+func TestRecoverySidecarNameBound(t *testing.T) {
+	t.Run("the 10000th name is the last one tried", func(t *testing.T) {
+		_, original := tornLog(t)
+		dir := seedLog(t, original)
+		fsys := &takenFS{shortFS: noShortness(), free: 10000}
+		_, _, rec := openStore(t, dir, fsys)
+		if want := filepath.Join(dir, "events.jsonl.recovered-20261008T123045Z-10000"); rec.Sidecar != want {
+			t.Errorf("Recovery.Sidecar = %q, want %q", rec.Sidecar, want)
+		}
+		if fsys.tries != 10000 {
+			t.Errorf("%d names tried, want 10000", fsys.tries)
+		}
+	})
+	t.Run("no name is free", func(t *testing.T) {
+		_, original := tornLog(t)
+		dir := seedLog(t, original)
+		fsys := &takenFS{shortFS: noShortness()}
+		_, _, _, err := store.Open(store.Options{Dir: dir, FS: fsys, Now: fixedNow})
+		if err == nil || !strings.Contains(err.Error(), "no free recovery sidecar name") || !strings.Contains(err.Error(), "10000 tries") {
+			t.Fatalf("Open = %v, want the refusal after 10000 tries", err)
+		}
+		if fsys.tries != 10000 {
+			t.Errorf("%d names tried, want 10000", fsys.tries)
+		}
+		if got := readLog(t, dir); !bytes.Equal(got, original) {
+			t.Error("a refused recovery changed the log")
+		}
+		if got := sidecars(t, dir); len(got) != 0 {
+			t.Errorf("sidecars were made: %v", got)
+		}
+	})
+}
