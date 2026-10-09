@@ -22,7 +22,8 @@ type Observer interface {
 	// did to the end of the log; the zero value means nothing was recovered.
 	Recovered(store.Recovery)
 	// Appended is called once per appended event, in log order, with the
-	// event's type. The stats of the append are split across its calls: each
+	// event's type, after the new state is adopted and before OnCommit, so a
+	// panic in it leaves the engine consistent (see Engine.Do). The stats of the append are split across its calls: each
 	// call carries Events 1 and the event's own Bytes, and the first call of
 	// an append carries the append's Duration (the later ones carry zero), so
 	// summing the calls of one append gives its totals.

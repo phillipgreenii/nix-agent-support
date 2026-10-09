@@ -159,6 +159,15 @@ func Open(opts Options) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Until the engine is built, the store is released on every way out, a
+	// panic in the observer included, so the directory is never left claimed
+	// by a store nobody can close. Store.Close is safe to call twice.
+	opened := false
+	defer func() {
+		if !opened {
+			_ = st.Close()
+		}
+	}()
 	obs.Recovered(rec)
 	began := time.Now()
 	m, err := projection.Replay(events)
@@ -166,6 +175,7 @@ func Open(opts Options) (*Engine, error) {
 		return nil, errors.Join(fmt.Errorf("replaying the event log: %w", err), st.Close())
 	}
 	obs.Replayed(len(events), time.Since(began))
+	opened = true
 	return &Engine{
 		st: st, clock: clk, newID: newID, obs: obs, adoptFault: opts.AdoptFault,
 		index: newIndex(events), noOps: newNoOpCache(noOpCacheSize),
@@ -184,7 +194,14 @@ func Open(opts Options) (*Engine, error) {
 // is planned and validated by command.Build; a no-op is answered, and
 // remembered under its id, without appending; otherwise the events are
 // appended and made durable, the request is recorded under its id, the
-// validated model is adopted, the version advances and OnCommit runs.
+// validated model is adopted, the version advances, the observer is told and
+// OnCommit runs.
+//
+// A panic in user code during a commit is re-raised. Raised after the model
+// is adopted (an Observer method, an OnCommit callback), it leaves the engine
+// consistent and writable; raised before (the AdoptFault seam), it first
+// makes the store read-only with ReasonAdopt, as an adoption failure does. In
+// both cases the request is recorded, so a retry with its id replays it.
 //
 // Every refusal is a *command.Rejection: one from Build, id_conflict, or
 // store_unavailable (the store was read-only; an append failed and was rolled
@@ -273,15 +290,22 @@ func (e *Engine) env() command.Env {
 
 // commit is the one place the store is written and the model adopted: it
 // appends the plan's events and makes them durable, records the request in
-// the record of request ids before anything else can fail, adopts the
-// plan's candidate model, advances the version and runs OnCommit. The caller
-// holds mu.
+// the record of request ids before any user code runs, adopts the plan's
+// candidate model, advances the version, and only then tells the observer
+// (Appended, Corrected) and runs OnCommit. The caller holds mu.
+//
+// Once the append is durable, a panic in any later step (the AdoptFault seam,
+// an Observer method, an OnCommit callback) is re-raised, never swallowed.
+// One raised before the candidate is adopted would leave a writable store
+// behind its model, so it first takes the adoption-failure path: the store
+// becomes read-only with ReasonAdopt. One raised after adoption leaves the
+// engine consistent (the request recorded, the model and the version matching
+// the file) and the store writable.
 func (e *Engine) commit(plan command.Plan) (Result, error) {
 	stats, err := e.st.Append(plan.Events)
 	if err != nil {
 		return Result{}, e.appendFailed(err)
 	}
-	e.observeAppend(plan.Events, stats)
 	result := Result{Changed: true, BatchID: plan.BatchID}
 	for _, ev := range plan.Events {
 		e.index.add(ev)
@@ -289,6 +313,18 @@ func (e *Engine) commit(plan command.Plan) (Result, error) {
 			result.EventIDs = append(result.EventIDs, ev.ID)
 		}
 	}
+
+	// settled is set once a panic can no longer leave a writable store behind
+	// its model: the candidate is adopted, or the store is already read-only.
+	settled := false
+	defer func() {
+		if p := recover(); p != nil {
+			if !settled {
+				e.adoptFailed()
+			}
+			panic(p)
+		}
+	}()
 
 	adoptErr := errors.New("the plan has no candidate model")
 	if plan.Candidate != nil {
@@ -298,11 +334,8 @@ func (e *Engine) commit(plan command.Plan) (Result, error) {
 		}
 	}
 	if adoptErr != nil {
-		// The change is durable and recorded; the model stays behind the
-		// log until the restart, so nothing more may be written.
-		e.st.MarkReadOnly(store.ReasonAdopt)
-		e.obs.AppendFailed(stageProject)
-		h := e.healthChanged()
+		settled = true // adoptFailed marks the store read-only before it runs user code
+		h := e.adoptFailed()
 		return Result{}, e.refuse(storeUnavailable(ReadOnlyMessage(h) + ". " + msgStoredNotAdopted))
 	}
 
@@ -311,10 +344,21 @@ func (e *Engine) commit(plan command.Plan) (Result, error) {
 	e.version.LogLines = plan.Candidate.Lines()
 	v := e.version
 	e.state.Unlock()
+	settled = true
 	result.Version = v
+	e.observeAppend(plan.Events, stats)
 	e.observeCorrections(plan.Events)
 	e.callbacks.commit(v)
 	return result, nil
+}
+
+// adoptFailed is the adoption-failure path: the change is durable and
+// recorded, but the model stays behind the log until the restart, so nothing
+// more may be written. It returns the store's health. The caller holds mu.
+func (e *Engine) adoptFailed() Health {
+	e.st.MarkReadOnly(store.ReasonAdopt)
+	e.obs.AppendFailed(stageProject)
+	return e.healthChanged()
 }
 
 // observeAppend reports each appended event, splitting the stats of the
