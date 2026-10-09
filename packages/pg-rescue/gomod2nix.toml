@@ -1,6 +1,9 @@
 schema = 3
 cachePackages = [
   'github.com/BurntSushi/toml',
+  'github.com/phillipgreenii/x/gitclient',
+  'github.com/phillipgreenii/x/gitfixture',
+  'github.com/phillipgreenii/x/gittest',
   'github.com/spf13/pflag'
 ]
 
@@ -8,6 +11,10 @@ cachePackages = [
   [mod.'github.com/BurntSushi/toml']
     version = 'v1.6.0'
     hash = 'sha256-ptdUJvuc21ixeLt+M5way/na3aCnCO4MYHWulWp8NEY='
+
+  [mod.'github.com/phillipgreenii/x']
+    version = 'v0.0.0-20261006150807-f5289669c748'
+    hash = 'sha256-Uk6PWVcIAn8fUKfJ+SpIB6yW6GP2KAmAopTXSKfRltE='
 
   [mod.'github.com/spf13/pflag']
     version = 'v1.0.5'

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -13,6 +12,8 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pg-rescue/internal/report"
+	"github.com/phillipgreenii/x/gitfixture"
+	"github.com/phillipgreenii/x/gittest"
 )
 
 const fixturesDir = "../../testdata/reports"
@@ -203,21 +204,15 @@ func TestCmdQuotesLikeEval(t *testing.T) {
 // .Repo against real git: the basename of the toplevel, from any depth, and
 // the basename of cwd when there is no repository.
 func TestRepoWithRealGit(t *testing.T) {
-	git, err := exec.LookPath("git")
-	if err != nil {
-		t.Fatalf("git is required (the pg-rescue-go-tests check puts it in testDeps): %v", err)
-	}
-	root := t.TempDir()
-	repo := filepath.Join(root, "my-repo")
+	fixture := gittest.New(t, gitfixture.RepoOptions{Name: "my-repo"})
+	repo := fixture.Dir
+	root := fixture.Root()
 	deep := filepath.Join(repo, "a", "b")
 	plain := filepath.Join(root, "not-a-repo")
 	for _, d := range []string{deep, plain} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			t.Fatal(err)
 		}
-	}
-	if out, err := exec.Command(git, "init", "-q", repo).CombinedOutput(); err != nil {
-		t.Fatalf("git init: %v\n%s", err, out)
 	}
 	// A leaked GIT_DIR must not redirect the answer.
 	t.Setenv("GIT_DIR", filepath.Join(plain, "nonexistent.git"))

@@ -7,13 +7,17 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/phillipgreenii/x/gitfixture"
+	"github.com/phillipgreenii/x/gittest"
 )
 
 // Tests for the pg-rescue-flake-lock-conflict handler (bead pg2-3ybxg), run
 // through the REAL pg-rescue wrapper (this test binary re-executed as main,
 // see TestMain) against scratch git repositories: a bare origin plus two
 // clones, where one clone pushes and the other pulls with
-// `git pull --rebase` under pg-rescue.
+// `git pull --rebase` under pg-rescue. The repositories come from
+// x/gittest, hermetic by construction (bead pg2-t8ej7).
 //
 // The handler is found on PATH (the nix check lists it in testDeps). For a
 // local `go test`, where it is not installed, it falls back to the script
@@ -63,20 +67,18 @@ type lockEnv struct {
 	bin     string
 	nixLog  string
 	cfg     string
-	origin  string
-	work    string // the clone that pulls under pg-rescue
-	other   string // the clone that pushes first
+	work    *gitfixture.Repo // the clone that pulls under pg-rescue
+	other   *gitfixture.Repo // the clone that pushes first
 	stateHm string
 }
 
-func gitIn(t *testing.T, dir string, args ...string) string {
+// gitIn runs git in repo through the fixture's hermetic client and returns its
+// stdout.
+func gitIn(t *testing.T, repo *gitfixture.Repo, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	out, err := cmd.CombinedOutput()
+	out, err := repo.Client.Run(t.Context(), args...)
 	if err != nil {
-		t.Fatalf("git %s (in %s): %v\n%s", strings.Join(args, " "), dir, err, out)
+		t.Fatalf("git %s (in %s): %v", strings.Join(args, " "), repo.Dir, err)
 	}
 	return string(out)
 }
@@ -94,8 +96,8 @@ func newLockEnv(t *testing.T) *lockEnv {
 	root := t.TempDir()
 	e := &lockEnv{
 		t: t, bin: filepath.Join(root, "bin"), nixLog: filepath.Join(root, "nix.log"),
-		cfg: filepath.Join(root, "config.toml"), origin: filepath.Join(root, "origin.git"),
-		work: filepath.Join(root, "work"), other: filepath.Join(root, "other"), stateHm: filepath.Join(root, "state"),
+		cfg:     filepath.Join(root, "config.toml"),
+		stateHm: filepath.Join(root, "state"),
 	}
 	if err := os.MkdirAll(e.bin, 0o700); err != nil {
 		t.Fatal(err)
@@ -117,35 +119,20 @@ func newLockEnv(t *testing.T) *lockEnv {
 
 	writeFile(t, e.cfg, "[handler.flock]\ncommand = [\""+handlerName+"\"]\n")
 
-	gitIn(t, root, "init", "--bare", "-b", "main", e.origin)
-	seed := filepath.Join(root, "seed")
-	gitIn(t, root, "clone", e.origin, seed)
-	e.identify(seed)
-	writeFile(t, filepath.Join(seed, "flake.lock"), lockBase)
-	writeFile(t, filepath.Join(seed, "README.md"), "readme\n")
-	gitIn(t, seed, "add", ".")
-	gitIn(t, seed, "commit", "-m", "seed")
+	origin := gittest.New(t, gitfixture.RepoOptions{Name: "origin", Bare: true, InitialBranch: "main"})
+	seed := gittest.Clone(t, origin, "seed")
+	e.commit(seed, "seed", map[string]string{"flake.lock": lockBase, "README.md": "readme\n"})
 	gitIn(t, seed, "push", "origin", "HEAD:main")
-	for _, c := range []string{e.work, e.other} {
-		gitIn(t, root, "clone", e.origin, c)
-		e.identify(c)
-	}
+	e.work = gittest.Clone(t, origin, "work")
+	e.other = gittest.Clone(t, origin, "other")
 	return e
 }
 
-func (e *lockEnv) identify(dir string) {
-	gitIn(e.t, dir, "config", "user.name", "Test")
-	gitIn(e.t, dir, "config", "user.email", "test@example.com")
-	gitIn(e.t, dir, "config", "commit.gpgsign", "false")
-}
-
-func (e *lockEnv) commit(dir, msg string, files map[string]string) {
+func (e *lockEnv) commit(repo *gitfixture.Repo, msg string, files map[string]string) {
 	e.t.Helper()
-	for name, content := range files {
-		writeFile(e.t, filepath.Join(dir, name), content)
+	if _, err := repo.Commit(e.t.Context(), msg, files); err != nil {
+		e.t.Fatal(err)
 	}
-	gitIn(e.t, dir, "add", ".")
-	gitIn(e.t, dir, "commit", "-m", msg)
 }
 
 // pull runs `git pull --rebase` in the work clone under the real pg-rescue.
@@ -155,14 +142,14 @@ func (e *lockEnv) pull() (code int, stdout, stderr string) {
 		"PATH=" + e.bin + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"FAKE_NIX_LOG=" + e.nixLog,
 		"XDG_STATE_HOME=" + e.stateHm,
-	}, "--config", e.cfg, "--handlers", "flock", "-C", e.work, "-v", "--", "git", "pull", "--rebase")
+	}, "--config", e.cfg, "--handlers", "flock", "-C", e.work.Dir, "-v", "--", "git", "pull", "--rebase")
 }
 
 func (e *lockEnv) midRebase() bool {
 	e.t.Helper()
 	p := strings.TrimSpace(gitIn(e.t, e.work, "rev-parse", "--git-path", "rebase-merge"))
 	if !filepath.IsAbs(p) {
-		p = filepath.Join(e.work, p)
+		p = filepath.Join(e.work.Dir, p)
 	}
 	_, err := os.Stat(p)
 	return err == nil
@@ -174,7 +161,7 @@ func (e *lockEnv) nixCalls() string {
 }
 
 func (e *lockEnv) read(name string) string {
-	b, err := os.ReadFile(filepath.Join(e.work, name))
+	b, err := os.ReadFile(filepath.Join(e.work.Dir, name))
 	if err != nil {
 		e.t.Fatal(err)
 	}

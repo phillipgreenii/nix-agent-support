@@ -15,6 +15,8 @@ import (
 	"github.com/phillipgreenii/pg-rescue/internal/report"
 	"github.com/phillipgreenii/pg-rescue/internal/testenv"
 	"github.com/phillipgreenii/pg-rescue/internal/tmpldata"
+	"github.com/phillipgreenii/x/gitfixture"
+	"github.com/phillipgreenii/x/gittest"
 )
 
 const fixtures = "../../testdata/reports"
@@ -504,10 +506,7 @@ func TestMissingTrackerDirExits1(t *testing.T) {
 
 func TestRealGitToplevelDerivation(t *testing.T) {
 	s := newScene(t, "first-attempt")
-	repo := t.TempDir()
-	if out, err := exec.Command("git", "init", "-q", repo).CombinedOutput(); err != nil {
-		t.Skipf("git init: %v %s", err, out)
-	}
+	repo := gittest.New(t, gitfixture.RepoOptions{Name: "real-repo"}).Dir
 	if err := os.MkdirAll(filepath.Join(repo, ".beads"), 0o700); err != nil {
 		t.Fatal(err)
 	}
