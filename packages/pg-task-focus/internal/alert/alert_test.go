@@ -273,6 +273,13 @@ func mustCycle(t *testing.T, b *logb, now time.Time, id event.CycleID) projectio
 	return c
 }
 
+// overAt is how far cycle id has run past its time at now, read from the
+// model: what a client shows beside an alert.
+func overAt(t *testing.T, b *logb, now time.Time, id event.CycleID) time.Duration {
+	t.Helper()
+	return -mustCycle(t, b, now, id).Remaining(now)
+}
+
 // notificationsLog is a 25-minute notifications cycle started at 09:00: time
 // is up at 09:25 and it reminds every 5 minutes.
 func notificationsLog(t *testing.T) *logb {
@@ -309,9 +316,13 @@ func TestExpiryOnceAtTimeUp(t *testing.T) {
 		t.Fatalf("at 09:25 TimeUp = %v and Overtime = %v, want true and false", c.TimeUp(hm(9, 25)), c.Overtime(hm(9, 25)))
 	}
 	a := poll(s, b, cfg, hm(9, 25))
-	want := alert.Alert{Kind: alert.Expiry, CycleID: cycleA, Title: "Snapshot notifications", Sound: "Glass", Overtime: 0}
+	want := alert.Alert{Kind: alert.Expiry, CycleID: cycleA, Sound: "Glass"}
 	if a == nil || *a != want {
 		t.Fatalf("Poll(09:25) = %+v, want %+v", a, want)
+	}
+	// What a client shows beside the sound, it reads from the model by id.
+	if c := mustCycle(t, b, hm(9, 25), a.CycleID); c.Title != "Snapshot notifications" || c.Remaining(hm(9, 25)) != 0 {
+		t.Errorf("the alerting cycle reads title %q and remaining %s, want the snapshot title and 0", c.Title, c.Remaining(hm(9, 25)))
 	}
 	if a := poll(s, b, cfg, hm(9, 25)); a != nil {
 		t.Errorf("a second Poll at 09:25 = %+v, want none: the expiry plays once", *a)
@@ -323,26 +334,32 @@ func TestExpiryOnceAtTimeUp(t *testing.T) {
 }
 
 func TestRemindersEveryRepeatMinutesOfRunningTime(t *testing.T) {
+	type want struct {
+		at    time.Time
+		kind  alert.Kind
+		sound string
+		over  time.Duration // read from the model at the alert's instant
+	}
 	tests := []struct {
 		name  string
 		log   func(*testing.T) *logb
 		until time.Time
-		want  []heard
+		want  []want
 	}{
 		{
 			name: "notifications, every 5 minutes", log: notificationsLog, until: hm(9, 39),
-			want: []heard{
-				{hm(9, 25), alert.Alert{Kind: alert.Expiry, Sound: "Glass", Overtime: 0}},
-				{hm(9, 30), alert.Alert{Kind: alert.Reminder, Sound: "Tink", Overtime: 5 * time.Minute}},
-				{hm(9, 35), alert.Alert{Kind: alert.Reminder, Sound: "Tink", Overtime: 10 * time.Minute}},
+			want: []want{
+				{hm(9, 25), alert.Expiry, "Glass", 0},
+				{hm(9, 30), alert.Reminder, "Tink", 5 * time.Minute},
+				{hm(9, 35), alert.Reminder, "Tink", 10 * time.Minute},
 			},
 		},
 		{
 			name: "deep work, every 10 minutes", log: deepWorkLog, until: hm(10, 19),
-			want: []heard{
-				{hm(9, 50), alert.Alert{Kind: alert.Expiry, Sound: "Hero", Overtime: 0}},
-				{hm(10, 0), alert.Alert{Kind: alert.Reminder, Sound: "Tink", Overtime: 10 * time.Minute}},
-				{hm(10, 10), alert.Alert{Kind: alert.Reminder, Sound: "Tink", Overtime: 20 * time.Minute}},
+			want: []want{
+				{hm(9, 50), alert.Expiry, "Hero", 0},
+				{hm(10, 0), alert.Reminder, "Tink", 10 * time.Minute},
+				{hm(10, 10), alert.Reminder, "Tink", 20 * time.Minute},
 			},
 		},
 	}
@@ -355,8 +372,9 @@ func TestRemindersEveryRepeatMinutesOfRunningTime(t *testing.T) {
 			}
 			for i, w := range tt.want {
 				g := got[i]
-				if !g.at.Equal(w.at) || g.Kind != w.Kind || g.Sound != w.Sound || g.Overtime != w.Overtime || g.CycleID != cycleA {
-					t.Errorf("alert %d = %s %+v, want %s %+v", i, g.at.Format("15:04"), g.Alert, w.at.Format("15:04"), w.Alert)
+				over := overAt(t, b, g.at, g.CycleID)
+				if !g.at.Equal(w.at) || g.Kind != w.kind || g.Sound != w.sound || over != w.over || g.CycleID != cycleA {
+					t.Errorf("alert %d = %s %+v over %s, want %s %+v", i, g.at.Format("15:04"), g.Alert, over, w.at.Format("15:04"), w)
 				}
 			}
 		})
@@ -376,7 +394,7 @@ func TestRemindersContinueIndefinitely(t *testing.T) {
 		if i == 0 {
 			wantKind = alert.Expiry
 		}
-		if !h.at.Equal(wantAt) || h.Kind != wantKind || h.Overtime != h.at.Sub(expiry) {
+		if !h.at.Equal(wantAt) || h.Kind != wantKind || overAt(t, b, h.at, h.CycleID) != h.at.Sub(expiry) {
 			t.Fatalf("alert %d = %s %+v, want %s at %s", i, h.at.Format("15:04"), h.Alert, wantKind, wantAt.Format("15:04"))
 		}
 	}
@@ -477,7 +495,7 @@ func TestCycleFirstSeenLaterInOvertimePlaysTheExpiry(t *testing.T) {
 		t.Fatalf("Poll(09:00) of an empty log = %+v", *a)
 	}
 	a := poll(s, b, cfg, hm(10, 0))
-	if a == nil || a.Kind != alert.Expiry || a.Sound != "Glass" || a.Overtime != 95*time.Minute {
+	if a == nil || a.Kind != alert.Expiry || a.Sound != "Glass" || overAt(t, b, hm(10, 0), a.CycleID) != 95*time.Minute {
 		t.Fatalf("Poll(10:00) = %+v, want the expiry, 95 minutes over", a)
 	}
 	assertHeard(t, pollEveryMinute(s, b, cfg, hm(10, 1), hm(10, 10)), "10:05 reminder A", "10:10 reminder A")
@@ -506,7 +524,7 @@ func TestBoostOutOfOvertimeThenExpiresAgain(t *testing.T) {
 		if !ok || !next.Equal(hm(9, 35)) {
 			t.Fatalf("NextAt(09:32) = %s, %v, want 09:35", next, ok)
 		}
-		if a := poll(s, b, cfg, next); a == nil || a.Kind != alert.Expiry || a.Sound != "Glass" || a.Overtime != 0 {
+		if a := poll(s, b, cfg, next); a == nil || a.Kind != alert.Expiry || a.Sound != "Glass" || overAt(t, b, next, a.CycleID) != 0 {
 			t.Errorf("Poll(09:35) = %+v, want the expiry again", a)
 		}
 	})
@@ -529,7 +547,7 @@ func TestBoostInsideOvertimeKeepsTheCadence(t *testing.T) {
 			if next, ok := nextAt(s, b, cfg, hm(10, 53)); !ok || !next.Equal(hm(11, 0)) {
 				t.Errorf("NextAt(10:53) after the boost = %s, %v, want 11:00, 7 minutes later", next, ok)
 			}
-			if a := poll(s, b, cfg, hm(11, 0)); a == nil || a.Kind != alert.Reminder || a.Overtime != time.Duration(70-minutes)*time.Minute {
+			if a := poll(s, b, cfg, hm(11, 0)); a == nil || a.Kind != alert.Reminder || overAt(t, b, hm(11, 0), a.CycleID) != time.Duration(70-minutes)*time.Minute {
 				t.Errorf("Poll(11:00) = %+v, want a reminder %d minutes over", a, 70-minutes)
 			}
 		})
@@ -574,7 +592,7 @@ func TestSleepYieldsOneCatchUp(t *testing.T) {
 			t.Errorf("NextAt(12:01) before the catch-up poll = %s, %v, want 12:01, never earlier than now", next, ok)
 		}
 		a := poll(s, b, cfg, hm(12, 1))
-		if a == nil || a.Kind != alert.Reminder || a.Overtime != 131*time.Minute {
+		if a == nil || a.Kind != alert.Reminder || overAt(t, b, hm(12, 1), a.CycleID) != 131*time.Minute {
 			t.Fatalf("Poll(12:01) after the sleep = %+v, want one reminder, 131 minutes over", a)
 		}
 		if a := poll(s, b, cfg, hm(12, 1)); a != nil {
@@ -590,7 +608,7 @@ func TestSleepYieldsOneCatchUp(t *testing.T) {
 		b, s := deepWorkLog(t), alert.NewScheduler()
 		assertHeard(t, pollEveryMinute(s, b, cfg, hm(9, 0), hm(9, 40)))
 		a := poll(s, b, cfg, hm(11, 40))
-		if a == nil || a.Kind != alert.Expiry || a.Sound != "Hero" || a.Overtime != 110*time.Minute {
+		if a == nil || a.Kind != alert.Expiry || a.Sound != "Hero" || overAt(t, b, hm(11, 40), a.CycleID) != 110*time.Minute {
 			t.Fatalf("Poll(11:40) after the sleep = %+v, want the expiry, 110 minutes over", a)
 		}
 		assertHeard(t, pollEveryMinute(s, b, cfg, hm(11, 40), hm(11, 50)), "11:50 reminder A")

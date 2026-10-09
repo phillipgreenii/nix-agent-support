@@ -30,15 +30,13 @@ const (
 )
 
 // Alert is one sound to play and one notification to send, for the cycle
-// CycleID. Title is the cycle's title from its snapshot in the log, Sound the
-// sound the configuration gives its type at the read instant, and Overtime how
-// long the cycle has run past its planned time and boosts.
+// CycleID. Sound is the sound the configuration gives the cycle's type at the
+// read instant. A client reads the cycle's title and timer from the model by
+// CycleID.
 type Alert struct {
-	Kind     Kind
-	CycleID  event.CycleID
-	Title    string
-	Sound    string
-	Overtime time.Duration
+	Kind    Kind
+	CycleID event.CycleID
+	Sound   string
 }
 
 // Scheduler decides which alert is due. Reminders count the cycle's running
@@ -97,8 +95,15 @@ func NewScheduler() *Scheduler {
 //     interval, so the restart keeps the cadence. A cycle first seen on a later
 //     poll has an unset anchor, so it plays the expiry.
 //
-// A boost that leaves the cycle's time up does not move its anchor. The
-// cycles are examined in log order; should two cycles run at once, the first
+// A boost that leaves the cycle's time up does not move its anchor.
+//
+// The scheduler learns that a cycle left time-up only by observing it, so
+// Poll MUST run at every commit and every reload, in particular at the commit
+// of a boost that takes a cycle out of overtime: that poll unsets the anchor.
+// If it is skipped, the anchor of the old overtime stretch survives, and the
+// next time-up plays a reminder or nothing instead of the expiry.
+//
+// The cycles are examined in log order; should two cycles run at once, the first
 // alerts and the other keeps its memory unchanged, to alert at the next poll.
 func (s *Scheduler) Poll(m *projection.Model, cfg *config.Config, now time.Time) *Alert {
 	s.mu.Lock()
@@ -138,19 +143,18 @@ func (a *anchor) observe(c projection.Cycle, settings config.Alert, now time.Tim
 	running := c.StatusAt(now) == projection.Running
 
 	if a.unknown {
-		if !running {
-			*a = anchor{at: grid, set: true}
+		if running && !mayPlay {
 			return nil
 		}
-		if !mayPlay {
+		*a = anchor{at: grid, set: true}
+		if !running {
 			return nil
 		}
 		kind := Reminder
 		if over < repeat {
 			kind = Expiry
 		}
-		*a = anchor{at: grid, set: true}
-		return alertOf(c, settings, kind, over)
+		return alertOf(c, settings, kind)
 	}
 
 	if a.set && elapsed < a.at {
@@ -169,7 +173,7 @@ func (a *anchor) observe(c projection.Cycle, settings config.Alert, now time.Tim
 		return nil
 	}
 	*a = anchor{at: elapsed, set: true}
-	return alertOf(c, settings, kind, over)
+	return alertOf(c, settings, kind)
 }
 
 // NextAt is the instant the cycle running at now next alerts if nothing
@@ -209,10 +213,10 @@ func repeatOf(settings config.Alert) time.Duration {
 	return time.Duration(settings.RepeatMinutes) * time.Minute
 }
 
-func alertOf(c projection.Cycle, settings config.Alert, kind Kind, over time.Duration) *Alert {
+func alertOf(c projection.Cycle, settings config.Alert, kind Kind) *Alert {
 	sound := settings.Sound
 	if kind == Reminder {
 		sound = settings.ReminderSound
 	}
-	return &Alert{Kind: kind, CycleID: c.ID, Title: c.Title, Sound: sound, Overtime: over}
+	return &Alert{Kind: kind, CycleID: c.ID, Sound: sound}
 }
