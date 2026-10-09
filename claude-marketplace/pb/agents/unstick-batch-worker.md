@@ -154,6 +154,14 @@ unpaused when you finish, and you MUST state its final state in your reply.
   `worker-ready`). Check for them, and delete them.
 - A "quiet machine" gate can never be met while a sweep is running. Re-model it as an
   operator-scheduled run instead of re-deferring it again.
+- A push or a relock is NEVER a valid blocker in a `pn` workspace (operator ruling, Phillip,
+  2026-10-09; `pn-workspace-rules` skill, "When to Push"): `pn workspace build/apply/flake-check`
+  use local-clone `--override-input`s, so unpushed or un-relocked state does not stop a bead from
+  being worked or verified. A bead parked, deferred, `human`-labelled, or edge-blocked on "after
+  the push" or "after the relock", or whose verification used a plain locked eval instead of
+  `pn workspace build`, has a void premise: remove the edge or label (or re-point the check at
+  `pn workspace build`), and treat a bead that exists only to push or relock as moot for its
+  dependents. Never ask the operator to push on a bead's behalf.
 
 ## Hard prohibitions
 

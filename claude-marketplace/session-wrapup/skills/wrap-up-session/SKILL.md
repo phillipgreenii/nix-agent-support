@@ -366,9 +366,10 @@ nothing carries over at all.
 STATE, and is NOT worth the operator's attention:
 
 - The end-of-run summary MUST NOT mention it — no block, no probe output, no counts, no remediation
-  path — and there is no probe to run for reporting's sake. The ONE exception is a CONSEQUENCE: if
-  being unpublished BLOCKS the work (e.g. a consumer flake pins these repos as `github:` inputs, so
-  the change cannot take effect on apply until they are pushed and relocked), say that in ONE line.
+  path — and there is no probe to run for reporting's sake. There is NO exception in a `pn`
+  workspace: build/apply/flake-check use local-clone `--override-input`s, so being unpublished (or a
+  consumer `flake.lock` pinning an older rev) never blocks the work, and push/relock are the
+  operator's own later step (`references/unpushed-landing-debt.md`, U-6).
 - **Never push to clear it.** Probes, if you need one at all, are READ-ONLY — never
   `pn workspace doctor --fix`, which ff-merges in the canonical clone and cannot publish an
   ahead-only divergence anyway.
@@ -622,8 +623,8 @@ handed_off_from_session=<this-session-id>` and the first body line `Handoff from
 - **Never `pn workspace push`/`rebase`** for a scoped wrapup — they hit every repo. Integrate
   per repo via `integrate-branch:integrate-branch`.
 - **Landed is not pushed, and that is not news.** A local ff-merge leaves commits on local `main`.
-  Wrapup never pushes them, never reports them (unless being unpublished BLOCKS the work — then one
-  line), and never records them in the P0 handoff bead, the handoff doc, or a standing push bead — a
+  Wrapup never pushes them, never reports them (in a `pn` workspace unpublished state never blocks
+  the work), and never records them in the P0 handoff bead, the handoff doc, or a standing push bead — a
   bead duplicating computable state is the defect this replaced (`references/unpushed-landing-debt.md`,
   U-1..U-4, U-6).
 - **Don't reconfigure beads to local.** Beads writes go to the shared remote automatically in
@@ -658,7 +659,7 @@ For a no-beads repo, replace the Beads / Next-session lines with the handoff doc
 `Handoff: HANDOFF.md updated — 2 outstanding items; resume brief for feat-x.`
 
 There is deliberately NO unpushed-debt block: commits landed locally and not pushed are expected,
-and are mentioned only when being unpublished BLOCKS the work — then as ONE line, not a section.
+and are never mentioned: in a `pn` workspace unpublished state does not block the work.
 
 The `Background:` line (phase 8) follows the same silent-unless-relevant pattern: include it only
 when something was actually stopped or is genuinely still needed. When phase 8 found nothing
@@ -681,7 +682,7 @@ If nothing was in scope, say so plainly rather than inventing work.
 | close finished work                                    | `bd close <id> [<id>...] --reason="..."`                                                                                                                          |
 | file discovered/unfinished                             | `bd create --title=... --description=... --type=... -p <0-4>`                                                                                                     |
 | dirty state                                            | `git status` ; ahead of main: `git log main..`                                                                                                                    |
-| unpushed blocks the work?                              | `pn workspace doctor` (read-only, never `--fix`) ; standalone: `git rev-list --count @{u}..HEAD`                                                                  |
+| unpushed state (never a blocker)                       | `pn workspace doctor` (read-only, never `--fix`) ; standalone: `git rev-list --count @{u}..HEAD`                                                                  |
 | run gates (nix-\* repos)                               | `pg-hooks run pre-commit <changed files>` (`prek run --files …` only when `pg-hooks` is absent), NOT `--all-files`; targeted `nix build .#checks.<system>.<name>` |
 | integrate a repo's work                                | invoke the `integrate-branch:integrate-branch` skill (detects method, lands, retires branch/worktree)                                                             |
 | set teardown / stash cleanup                           | see `references/cleanup.md`                                                                                                                                       |

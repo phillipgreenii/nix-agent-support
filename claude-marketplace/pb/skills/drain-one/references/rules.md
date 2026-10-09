@@ -107,8 +107,9 @@ Read in full BEFORE step 4 (DELEGATE) of `SKILL.md`. These are the per-bead rule
   one that resolves on an unrelated apply and proves nothing about the real deployment),
   and MUST NOT route to STUCK.
 - Landing locally leaves commits unpushed. That is expected and MUST NOT be reported —
-  no heading, no probe output, no counts, no remediation path — unless being unpublished
-  BLOCKS the work, which earns ONE line. Never push to clear it (read-only probes only,
+  no heading, no probe output, no counts, no remediation path. In a `pn` workspace it never
+  blocks a bead (build/apply use local-clone overrides) and MUST NOT park, defer, or
+  `human`-label one. Never push to clear it (read-only probes only,
   never `--fix`), and never file or update a standing push bead to track it: the debt is
   DERIVED STATE and a bead describes one instant while it regenerates on every land. Full
   contract: the `session-wrapup:wrap-up-session` skill's `references/unpushed-landing-debt.md`

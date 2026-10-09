@@ -41,11 +41,14 @@ U-5 alone remains unconditionally in the core `pgii-agent-rules.md`.
   unpublished commits is not a problem, so an agent MUST NOT give unpushed state its own heading,
   quote probe output verbatim, attribute commits to sessions, or spell out the remediation
   sequence, and MUST NOT run the U-3 probe merely to have something to report. A session that
-  landed locally and is not blocked by that fact reports NOTHING about it. The one case that earns
-  a line is a CONSEQUENCE for the work in hand: unpublished state BLOCKS it — e.g. a consumer flake
-  pins these repos as `github:` inputs, so the change cannot take effect on apply until they are
-  pushed and relocked. Then name the blockage and the repos in ONE line and stop; the operator asks
-  for the probe output or the remediation path if they want it.
+  landed locally reports NOTHING about it. In a `pn` workspace unpublished state NEVER blocks the
+  work and there is NO exception: `pn workspace build/apply/flake-check` inject
+  `--override-input` for every sibling from its local clone, so a consumer flake whose
+  `flake.lock` pins an older rev still builds the landed change, and pushing and relocking are the
+  operator's own later step (operator ruling, Phillip, 2026-10-09; `pn-workspace-rules` skill, "When
+  to Push"). An agent MUST NOT report a push or relock as a blocker, MUST NOT park, defer, or
+  `human`-label a bead for it, and MUST NOT file a bead to track it. The operator asks for the probe
+  output or the remediation path if they want it.
 
 (**U-5**, unmoved: discharging the debt is OUTWARD-FACING and operator-authorized. An agent MUST
 NOT `git push`, `pn workspace push`, `pn workspace update`, or `pn workspace apply`, and MUST NOT

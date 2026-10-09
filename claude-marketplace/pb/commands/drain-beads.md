@@ -101,8 +101,9 @@ the loop ends cleanly while they wait, and they resurface after the next
 Where the resolved strategy is `ff-merge-to-main` you LAND locally without
 pushing, so every closed bead adds unpublished commits to local `main`. That is
 EXPECTED — **REPORT NOTHING ABOUT IT** (no heading, no probe output, no counts,
-no remediation sequence) unless being unpublished BLOCKS the work itself, which
-earns ONE line. A `pull-request` repo leaves no such debt (the push IS the
+no remediation sequence), with NO exception in a `pn` workspace: build/apply use
+local-clone overrides, so unpublished or un-relocked state never blocks a bead
+and MUST NOT be a reason to park, defer, `human`-label, or block one (U-6). A `pull-request` repo leaves no such debt (the push IS the
 landing). Never push to clear it — read-only probes only, never `--fix` (U-4,
 U-5). Full contract: the `session-wrapup:wrap-up-session` skill's
 `references/unpushed-landing-debt.md` (**U-1..U-4, U-6**). **U-5** alone
