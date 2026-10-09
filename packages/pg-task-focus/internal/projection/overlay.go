@@ -265,7 +265,7 @@ func (r *overlayRun) checkRetraction(i int, p event.EventRetracted) (int, *Inval
 		))
 	case typ == event.TypeTaskMaterialized || typ == event.TypePeriodChanged:
 		return j, r.invalidCorrection(i, j, fmt.Sprintf(
-			"%s retracts %s, and a task.materialized or period.changed is retracted only through its batch.", r.subject(i), r.describe(j),
+			"%s retracts %s, and a task.materialized or period.changed is never retracted alone, which would leave a period and its tasks out of step; this one is in no batch, so it cannot be retracted.", r.subject(i), r.describe(j),
 		))
 	}
 	return j, nil
@@ -277,11 +277,7 @@ func (r *overlayRun) describe(j int) string {
 	if j >= r.firstAdded {
 		return "the new event"
 	}
-	e := r.events[j]
-	if entity := entityOf(e.Payload); entity != "" {
-		return fmt.Sprintf("event %s (%s of %s)", e.ID, e.Payload.EventType(), entity)
-	}
-	return fmt.Sprintf("event %s (%s)", e.ID, e.Payload.EventType())
+	return Describe(r.events[j])
 }
 
 // resolve finds the target of the correction or retraction at position i. A

@@ -601,6 +601,11 @@ func TestOverlayRejectsRetractionsTheLogRulesForbid(t *testing.T) {
 			if !strings.Contains(inv.Message, string(tt.id)) {
 				t.Errorf("message %q does not name the stored target %s", inv.Message, tt.id)
 			}
+			// A lone event is in no batch, so no message may send the
+			// operator through one.
+			if strings.HasPrefix(tt.name, "a lone") && strings.Contains(inv.Message, "through its batch") {
+				t.Errorf("message %q points at a batch the event is not in", inv.Message)
+			}
 		})
 	}
 }

@@ -1,6 +1,8 @@
 package projection
 
 import (
+	"fmt"
+
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/event"
 )
 
@@ -72,3 +74,13 @@ func (m *Model) CycleDependents(start event.ID) []event.ID {
 // A cycle.started that names a cycle in interrupts is about the cycle it
 // starts.
 func EntityOf(p event.Payload) string { return entityOf(p) }
+
+// Describe names a stored event inside a sentence, as every finding and
+// refusal does: "event <id> (<type> of <entity>)", or "event <id> (<type>)"
+// for an event about no entity.
+func Describe(e event.Event) string {
+	if entity := entityOf(e.Payload); entity != "" {
+		return fmt.Sprintf("event %s (%s of %s)", e.ID, e.Payload.EventType(), entity)
+	}
+	return fmt.Sprintf("event %s (%s)", e.ID, e.Payload.EventType())
+}

@@ -143,3 +143,24 @@ func TestEntityOfNamesTheTaskCycleOrPeriodKind(t *testing.T) {
 		}
 	}
 }
+
+func TestDescribeNamesTheIDTypeAndEntity(t *testing.T) {
+	tests := []struct {
+		e    event.Event
+		want string
+	}{
+		{
+			event.Event{Envelope: event.Envelope{ID: eid(1)}, Payload: event.TaskCompleted{TaskID: taskA}},
+			"event " + string(eid(1)) + " (task.completed of " + string(taskA) + ")",
+		},
+		{
+			event.Event{Envelope: event.Envelope{ID: eid(2)}, Payload: event.ProfileChanged{Profile: "work"}},
+			"event " + string(eid(2)) + " (profile.changed)",
+		},
+	}
+	for _, tt := range tests {
+		if got := Describe(tt.e); got != tt.want {
+			t.Errorf("Describe(%T) = %q, want %q", tt.e.Payload, got, tt.want)
+		}
+	}
+}
