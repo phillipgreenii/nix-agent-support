@@ -177,12 +177,12 @@ var verbs = map[stepKind]string{
 // stepInterrupted, the cycle.started of the cycle that interrupts it.
 type step struct {
 	kind stepKind
-	ev   liveEvent
+	ev   *liveEvent // into the live events, never copied
 }
 
 // stepOrder is the order of a cycle's sequence: by effective_at, then log
 // position, never by id.
-func stepOrder(a, b step) int { return cmp.Or(order(a.ev, b.ev), cmp.Compare(a.kind, b.kind)) }
+func stepOrder(a, b step) int { return cmp.Or(order(*a.ev, *b.ev), cmp.Compare(a.kind, b.kind)) }
 
 // cycleStep is the cycle a live event is about and the step it is.
 func cycleStep(p event.Payload) (event.CycleID, stepKind, bool) {
@@ -204,13 +204,13 @@ func cycleStep(p event.Payload) (event.CycleID, stepKind, bool) {
 }
 
 // startedCycle is the cycle a cycle.started begins.
-func startedCycle(e liveEvent) event.CycleID { return e.Payload.(event.CycleStarted).CycleID }
+func startedCycle(e *liveEvent) event.CycleID { return e.Payload.(event.CycleStarted).CycleID }
 
 // cycleRun is one projection of the live events onto cycles.
 type cycleRun struct {
 	*run
-	stored  map[event.CycleID]bool   // the cycles a stored event names
-	members map[event.ID][]liveEvent // the live cycle.paused and cycle.resumed of each batch
+	stored  map[event.CycleID]bool    // the cycles a stored event names
+	members map[event.ID][]*liveEvent // the live cycle.paused and cycle.resumed of each batch
 }
 
 // runSegment is a segment with the cycle it belongs to and the event that
@@ -219,7 +219,7 @@ type runSegment struct {
 	cycle  event.CycleID
 	start  time.Time
 	end    *time.Time
-	opener liveEvent
+	opener *liveEvent
 }
 
 // projectCycles groups the live cycle events by cycle, runs each cycle's state
@@ -233,7 +233,7 @@ type runSegment struct {
 // resumed one; a paused and a resumed of the same cycle sharing one batch are
 // a break. Batch membership is read only through BatchID.
 func (r *run) projectCycles(live []liveEvent) ([]Cycle, error) {
-	cr := &cycleRun{run: r, stored: map[event.CycleID]bool{}, members: map[event.ID][]liveEvent{}}
+	cr := &cycleRun{run: r, stored: map[event.CycleID]bool{}, members: map[event.ID][]*liveEvent{}}
 	for _, e := range r.log[:r.firstAdded] {
 		if id, _, ok := cycleStep(e.Payload); ok {
 			cr.stored[id] = true
@@ -251,7 +251,8 @@ func (r *run) projectCycles(live []liveEvent) ([]Cycle, error) {
 		}
 		seqs[id] = append(seqs[id], s)
 	}
-	for _, e := range live {
+	for i := range live {
+		e := &live[i]
 		id, kind, ok := cycleStep(e.Payload)
 		if !ok {
 			continue
@@ -323,7 +324,7 @@ func (r *cycleRun) cycleFinding(code Code, entity event.CycleID, cycles []event.
 
 // isBreak reports whether e, a paused or resumed of cycle id, is a member of a
 // break: its batch also pauses and resumes id.
-func (r *cycleRun) isBreak(e liveEvent, id event.CycleID) bool {
+func (r *cycleRun) isBreak(e *liveEvent, id event.CycleID) bool {
 	var paused, resumed bool
 	for _, o := range r.members[e.Payload.BatchID()] {
 		switch p := o.Payload.(type) {
@@ -338,7 +339,7 @@ func (r *cycleRun) isBreak(e liveEvent, id event.CycleID) bool {
 
 // switchedTo is the cycle a switch resumes when e, a pause of cycle id, is
 // a member of the switch: its batch resumes a different cycle.
-func (r *cycleRun) switchedTo(e liveEvent, id event.CycleID) (event.CycleID, bool) {
+func (r *cycleRun) switchedTo(e *liveEvent, id event.CycleID) (event.CycleID, bool) {
 	b := e.Payload.BatchID()
 	if b == "" {
 		return "", false
@@ -368,8 +369,8 @@ func (r *cycleRun) checkOneRunning(segs []runSegment) *Invalid {
 			}
 			return r.cycleFinding(codeAnotherCycleRunning, off.cycle, []event.CycleID{other.cycle, off.cycle}, fmt.Sprintf(
 				"The running segment of %s opened by %s overlaps the running segment of %s opened by %s, and only one cycle runs at a time",
-				r.cycle(off.cycle), r.ref(off.opener), r.cycle(other.cycle), r.ref(other.opener),
-			), off.opener, other.opener)
+				r.cycle(off.cycle), r.ref(*off.opener), r.cycle(other.cycle), r.ref(*other.opener),
+			), *off.opener, *other.opener)
 		}
 		if widest == nil || (widest.end != nil && (s.end == nil || s.end.After(*widest.end))) {
 			widest = s
@@ -383,18 +384,18 @@ type machine struct {
 	r       *cycleRun
 	c       Cycle
 	status  CycleStatus
-	first   *liveEvent  // the first start of the sequence, for a finding before it
-	start   *liveEvent  // the start the machine has applied
-	opener  liveEvent   // the start or resume that opened the latest segment
-	closer  step        // the step that ended the latest segment
-	stop    liveEvent   // the stop, once stopped
-	openers []liveEvent // the event that opened each segment
+	first   *liveEvent   // the first start of the sequence, for a finding before it
+	start   *liveEvent   // the start the machine has applied
+	opener  *liveEvent   // the start or resume that opened the latest segment
+	closer  step         // the step that ended the latest segment
+	stop    *liveEvent   // the stop, once stopped
+	openers []*liveEvent // the event that opened each segment
 }
 
 func (m *machine) run(seq []step) *Invalid {
 	for i := range seq {
 		if seq[i].kind == stepStart {
-			m.first = &seq[i].ev
+			m.first = seq[i].ev
 			break
 		}
 	}
@@ -420,11 +421,11 @@ func (m *machine) apply(s step) *Invalid {
 		if m.start != nil {
 			return m.finding(codeCycleSegmentsOverlap, fmt.Sprintf(
 				"%s after %s started it, so its segments would overlap", m.does(s), m.r.ref(*m.start),
-			), e, *m.start)
+			), *e, *m.start)
 		}
 		p := e.Payload.(event.CycleStarted)
 		m.c.Type, m.c.Title, m.c.PlannedMinutes = p.Type, p.Title, p.PlannedMinutes
-		m.start = &e
+		m.start = e
 		m.open(e)
 	case stepInterrupted:
 		if m.status != Running {
@@ -442,7 +443,7 @@ func (m *machine) apply(s step) *Invalid {
 		case Paused:
 			return m.finding(codeCycleSegmentsOverlap, fmt.Sprintf(
 				"%s while it is already paused since %s, so its segments would overlap", m.does(s), m.by(m.closer),
-			), e, m.closer.ev)
+			), *e, *m.closer.ev)
 		}
 		if inv := m.closeAt(s); inv != nil {
 			return inv
@@ -457,8 +458,8 @@ func (m *machine) apply(s step) *Invalid {
 			return m.stopped(s)
 		case Running:
 			return m.finding(codeCycleSegmentsOverlap, fmt.Sprintf(
-				"%s while it is already running since %s, so its segments would overlap", m.does(s), m.r.ref(m.opener),
-			), e, m.opener)
+				"%s while it is already running since %s, so its segments would overlap", m.does(s), m.r.ref(*m.opener),
+			), *e, *m.opener)
 		}
 		m.open(e)
 		m.c.InterruptedBy = ""
@@ -472,7 +473,7 @@ func (m *machine) apply(s step) *Invalid {
 			return m.stopped(s)
 		}
 		if t.Equal(m.start.EffectiveAt.Time()) {
-			return m.stopAtStart(s, *m.start)
+			return m.stopAtStart(s, m.start)
 		}
 		if m.status == Running {
 			if inv := m.closeAt(s); inv != nil {
@@ -489,7 +490,7 @@ func (m *machine) apply(s step) *Invalid {
 }
 
 // open starts a running segment at e.
-func (m *machine) open(e liveEvent) {
+func (m *machine) open(e *liveEvent) {
 	m.c.Segments = append(m.c.Segments, Segment{Start: e.EffectiveAt.Time(), OpenedBy: e.ID})
 	m.openers = append(m.openers, e)
 	m.opener, m.status = e, Running
@@ -502,8 +503,8 @@ func (m *machine) closeAt(s step) *Invalid {
 	if !t.After(m.opener.EffectiveAt.Time()) {
 		return m.finding(codeEmptyRunningSegment, fmt.Sprintf(
 			"%s, which is not strictly after %s that set it running, so its running segment would have no length",
-			m.does(s), m.r.ref(m.opener),
-		), m.opener, s.ev)
+			m.does(s), m.r.ref(*m.opener),
+		), *m.opener, *s.ev)
 	}
 	m.c.Segments[len(m.c.Segments)-1].End = &t
 	m.closer = s
@@ -521,21 +522,21 @@ func (m *machine) does(s step) string {
 	if s.kind == stepInterrupted {
 		return "is interrupted by " + m.by(s)
 	}
-	return fmt.Sprintf("is %s by %s", verbs[s.kind], m.r.ref(s.ev))
+	return fmt.Sprintf("is %s by %s", verbs[s.kind], m.r.ref(*s.ev))
 }
 
 // by names the event of a step.
 func (m *machine) by(s step) string {
 	if s.kind == stepInterrupted {
-		return fmt.Sprintf("the start of %s in %s", m.r.cycle(startedCycle(s.ev)), m.r.ref(s.ev))
+		return fmt.Sprintf("the start of %s in %s", m.r.cycle(startedCycle(s.ev)), m.r.ref(*s.ev))
 	}
-	return m.r.ref(s.ev)
+	return m.r.ref(*s.ev)
 }
 
-func (m *machine) stopAtStart(s step, start liveEvent) *Invalid {
+func (m *machine) stopAtStart(s step, start *liveEvent) *Invalid {
 	return m.finding(codeStopNotAfterStart, fmt.Sprintf(
-		"%s at the instant %s started it, and a stop must come after the start", m.does(s), m.r.ref(start),
-	), s.ev, start)
+		"%s at the instant %s started it, and a stop must come after the start", m.does(s), m.r.ref(*start),
+	), *s.ev, *start)
 }
 
 // beforeStart judges a step that sorts before the cycle's start, or of a cycle
@@ -545,30 +546,30 @@ func (m *machine) beforeStart(s step) *Invalid {
 		return m.notRunning(s)
 	}
 	if m.first == nil {
-		return m.finding(codeCycleEventBeforeStart, m.does(s)+", but no live cycle.started starts it", s.ev)
+		return m.finding(codeCycleEventBeforeStart, m.does(s)+", but no live cycle.started starts it", *s.ev)
 	}
 	if s.kind == stepStop && s.ev.EffectiveAt.Time().Equal(m.first.EffectiveAt.Time()) {
-		return m.stopAtStart(s, *m.first)
+		return m.stopAtStart(s, m.first)
 	}
 	return m.finding(codeCycleEventBeforeStart, fmt.Sprintf(
 		"%s, which sorts before %s that starts it, and no event of a cycle comes before its start",
 		m.does(s), m.r.ref(*m.first),
-	), s.ev, *m.first)
+	), *s.ev, *m.first)
 }
 
 // notRunning judges an interrupting start whose interrupted cycle, the
 // machine's, is not running at that instant. The offender is the cycle the
 // start begins.
 func (m *machine) notRunning(s step) *Invalid {
-	involved := []liveEvent{s.ev}
+	involved := []liveEvent{*s.ev}
 	var state string
 	switch {
 	case m.status == Paused:
 		state = "is paused since " + m.by(m.closer)
-		involved = append(involved, m.closer.ev)
+		involved = append(involved, *m.closer.ev)
 	case m.status == Stopped:
-		state = "was stopped by " + m.r.ref(m.stop)
-		involved = append(involved, m.stop)
+		state = "was stopped by " + m.r.ref(*m.stop)
+		involved = append(involved, *m.stop)
 	case startedCycle(s.ev) == m.c.ID:
 		state = "is the cycle it starts"
 	case m.first != nil:
@@ -580,7 +581,7 @@ func (m *machine) notRunning(s step) *Invalid {
 	y := startedCycle(s.ev)
 	return m.r.cycleFinding(codeInterruptedCycleNotRunning, y, nil, fmt.Sprintf(
 		"%s is started by %s interrupting %s, which %s at that instant, and only a running cycle can be interrupted",
-		capitalize(m.r.cycle(y)), m.r.ref(s.ev), m.r.cycle(m.c.ID), state,
+		capitalize(m.r.cycle(y)), m.r.ref(*s.ev), m.r.cycle(m.c.ID), state,
 	), involved...)
 }
 
@@ -589,21 +590,21 @@ func (m *machine) notRunning(s step) *Invalid {
 // stored one is cycle_stopped and names its batch.
 func (m *machine) stopped(s step) *Invalid {
 	e := s.ev
-	if (s.kind == stepPause || s.kind == stepResume) && m.r.isNew(e) && m.r.isBreak(e, m.c.ID) {
+	if (s.kind == stepPause || s.kind == stepResume) && m.r.isNew(*e) && m.r.isBreak(e, m.c.ID) {
 		edge := "begins"
 		if s.kind == stepResume {
 			edge = "ends"
 		}
 		return m.finding(codeBreakEndsAtStop, fmt.Sprintf(
 			"has a back-filled break that %s with %s, not before %s stopped it, and a break must end strictly before the stop; to stop the cycle when the break begins, use end at instead",
-			edge, m.r.ref(e), m.r.ref(m.stop),
-		), m.stop, e)
+			edge, m.r.ref(*e), m.r.ref(*m.stop),
+		), *m.stop, *e)
 	}
 	batch := ""
 	if b := e.Payload.BatchID(); b != "" {
 		batch = fmt.Sprintf(", a member of batch %s,", b)
 	}
 	return m.finding(codeCycleStopped, fmt.Sprintf(
-		"%s%s after %s stopped it, and a stopped cycle cannot change", m.does(s), batch, m.r.ref(m.stop),
-	), e, m.stop)
+		"%s%s after %s stopped it, and a stopped cycle cannot change", m.does(s), batch, m.r.ref(*m.stop),
+	), *e, *m.stop)
 }
