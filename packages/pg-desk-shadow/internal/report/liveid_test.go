@@ -300,9 +300,47 @@ func TestCeilingIsNotAvailableWithoutEvents(t *testing.T) {
 	if p.Live.InWindow != 0 || p.Misses.CoverageCeiling != 0 || p.Misses.CoverageCeilingWhenUp != 0 {
 		t.Fatalf("live %+v misses %+v", p.Live, p.Misses)
 	}
-	rep := Report{Schema: SchemaID, Phases: []PhaseReport{p}}
-	if md := Markdown(rep); !strings.Contains(md, "n/a (no events)") {
-		t.Error("a ceiling with no events must read n/a, not 0.0 percent")
+	md := Markdown(Report{Schema: SchemaID, Phases: []PhaseReport{p}})
+	for _, want := range []string{"CEILING (informational, an upper bound; matched plus missed-but-detected-later, over LIVE-DETECTED in window): n/a (no events); while the collector was up (events not classed collector-down): n/a (no events outside collector-down)."} {
+		if !strings.Contains(md, want) {
+			t.Errorf("a ceiling with no events must read n/a for BOTH figures, not 0.0 percent; got:\n%s", md)
+		}
+	}
+}
+
+func TestOnlyTheWhileUpCeilingIsNotAvailableWhenEveryEventWasCollectorDown(t *testing.T) {
+	f := fixture{
+		gapFrom: at(10, 0, 0), gapTo: at(10, 20, 0),
+		events: []Dispatch{live("acme/api#1", "aaaaaaaaaaaa", at(10, 5, 0))},
+	}
+	p := Compute(f.input(), params())
+	if p.Live.InWindow != 1 || p.Misses.ByClass[ClassCollectorDown] != 1 {
+		t.Fatalf("live %+v misses %+v", p.Live, p.Misses)
+	}
+	md := Markdown(Report{Schema: SchemaID, Phases: []PhaseReport{p}})
+	if !strings.Contains(md, "LIVE-DETECTED in window): 0.0 percent; while the collector was up (events not classed collector-down): n/a (no events outside collector-down).") {
+		t.Errorf("the plain ceiling is a number (0.0) and the while-up one is n/a; got:\n%s", md)
+	}
+}
+
+func TestLateClaimsFollowEnqueueOrderNotDispatchOrder(t *testing.T) {
+	// M1 enqueued 10:00 but dispatched after M2 (enqueued 10:20), so the input
+	// lists M2 first. Both are in a gap; one unmatched item at 10:25 and another
+	// at 11:10, late window 60m. In enqueue order M1 takes 10:25 and M2 takes
+	// 11:10 (within 60m of 10:20, not of 10:00): 2 late detections. In dispatch
+	// order M2 would take 10:25 and M1 would find nothing: 1.
+	m1 := live("acme/api#1", "aaaaaaaaaaaa", at(10, 0, 0))
+	m2 := live("acme/api#1", "bbbbbbbbbbbb", at(10, 20, 0))
+	items := shadowItem1("acme/api#1", at(10, 25, 0))
+	for k, v := range shadowItem1("acme/api#1", at(11, 10, 0)) {
+		items[k] = append(items[k], v...)
+	}
+	f := fixture{gapFrom: at(9, 55, 0), gapTo: at(10, 22, 0), items: items, events: []Dispatch{m2, m1}}
+	prm := params()
+	prm.LateWindow = 60 * time.Minute
+	p := Compute(f.input(), prm)
+	if p.Misses.Missed != 2 || p.Misses.LateDetected != 2 {
+		t.Fatalf("misses = %+v", p.Misses)
 	}
 }
 

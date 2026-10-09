@@ -359,15 +359,26 @@ func Compute(in Input, p Params) PhaseReport {
 		pr.Misses.ByClass[c] = 0
 	}
 	for _, e := range live {
+		// An item that matches an EXCLUDED live event (warm-up, outside the run or
+		// past the window end) still belongs to that event: it MUST NOT become the
+		// late detection of a different missed event.
+		excluded := func() {
+			if it, ok := nearest(e.id, e.at, T); ok {
+				matchedItems[itemKey(it)] = true
+			}
+		}
 		switch {
 		case e.at.Before(firstStart) || e.at.After(lastEnd):
 			pr.Live.ExcludedOutside++
+			excluded()
 			continue
 		case e.at.Before(warmupEnd):
 			pr.Live.ExcludedWarmup++
+			excluded()
 			continue
 		case e.at.After(endOK):
 			pr.Live.ExcludedOutside++
+			excluded()
 			continue
 		}
 		pr.Live.InWindow++
@@ -394,6 +405,9 @@ func Compute(in Input, p Params) PhaseReport {
 	// about. Report that delay without changing the miss class. Run after every
 	// live event is matched or missed, so an item that matched a live event is
 	// never also a late detection, and one item stands for at most ONE missed event.
+	// Claim in ENQUEUE order (live is ordered by dispatch time, which can differ),
+	// so the earliest miss gets the earliest item.
+	sort.SliceStable(missed, func(i, j int) bool { return missed[i].at.Before(missed[j].at) })
 	usedLate := map[string]bool{}
 	for _, m := range missed {
 		it, ok := firstAfter(byID[m.id], m.at, p.LateWindow, func(it shadowItem) bool {

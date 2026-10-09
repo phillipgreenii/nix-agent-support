@@ -263,7 +263,9 @@ Tolerance `T` is the live query's own period plus the slot period plus the measu
   `totalCount`; owned by the 6h remote tier and the 30m local tier, spec 10.3 and ADR S35, or a
   local/sweep-origin item caught it), `live-only` (coalescing: a `reemit` evict of the event id,
   an evict without a dispatch, the SAME per-change event enqueued twice, a live router outage; two
-  enqueues with different change hashes are two changes, not coalescing), `unexplained`. ONLY
+  enqueues with different change hashes are two changes, not coalescing, and a queue row naming a
+  DIFFERENT per-change event of the same PR says nothing about this miss; a bare id on either side
+  falls back to the PR), `unexplained`. ONLY
   `unexplained` counts as failure. Events before the end of warm-up are excluded, not classed.
 
   A miss is "not detected within `T`". The report also states, for every missed event, whether the
