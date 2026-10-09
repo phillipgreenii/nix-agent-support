@@ -151,6 +151,13 @@ func TestClassifyPanel_MineUnchangedByTeamRulings(t *testing.T) {
 		{"approved + BLOCKED merge state is still awaiting me (merge state is team-only)", prShow{State: "open", MergeStateStatus: "BLOCKED"}, ciRollupResult{State: "success"}, Approvals{HumanApproved: true}, PanelMineAwaitingMe},
 		{"unapproved + BLOCKED merge state is still awaiting team", prShow{State: "open", MergeStateStatus: "BLOCKED"}, ciRollupResult{State: "success"}, Approvals{}, PanelMineAwaitingTeam},
 		{"exempt-only failure stays reviewable (2026-10-02)", open, ciRollupResult{State: "failure", reviewState: "success", reviewerState: "success"}, Approvals{}, PanelMineAwaitingTeam},
+		// Own drafts are never awaiting team (2026-10-09). These pin that the
+		// draft rule composes with each other own-PR rule: a draft that is
+		// also exempt-failing, approved, threaded or conflicting is awaiting me.
+		{"own draft with exempt-only CI failure is awaiting me", prShow{State: "open", Draft: true}, ciRollupResult{State: "failure", reviewState: "success", reviewerState: "success"}, Approvals{}, PanelMineAwaitingMe},
+		{"own draft with a human approval is awaiting me", prShow{State: "open", Draft: true}, ciRollupResult{State: "success"}, Approvals{HumanApproved: true}, PanelMineAwaitingMe},
+		{"own draft with an unresolved thread is awaiting me", prShow{State: "open", Draft: true, Comments: []prComment{{ID: "c1", ThreadID: "t1", Resolved: false}}}, ciRollupResult{State: "success"}, Approvals{}, PanelMineAwaitingMe},
+		{"own draft with a merge conflict is awaiting me", prShow{State: "open", Draft: true, Mergeable: "CONFLICTING"}, ciRollupResult{State: "success"}, Approvals{}, PanelMineAwaitingMe},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
