@@ -163,6 +163,11 @@ func (rc *runContext) upsertReviewLedger(beadID, contentHash, lastReviewedHeadSH
 	})
 }
 
+// maxClosureDepth bounds how many levels below the anchor handleClosure walks
+// to close open descendants; real work-bead trees are two or
+// three levels deep, so reaching it means a malformed graph.
+const maxClosureDepth = 8
+
 // handleClosure closes the anchor's open children and then the anchor (children first, bead pg2-mhz7b) — BOTH cycle types,
 // the process-feedback cycle and the review-pr request alike — on a
 // CONFIRMED closure (design section 7.5's Anchor rule: "closed, with its
@@ -181,13 +186,25 @@ func (rc *runContext) upsertReviewLedger(beadID, contentHash, lastReviewedHeadSH
 // improvised children such as "Human: unblock ..." beads were left open
 // after merge). Unlike pg-pr this cannot enumerate children itself; it is
 // limited to what the work-beads query returned, and only reaches children
-// filed with --parent <anchor>. Feedback's own grandchildren are not
-// walked. History: pg2-ryexi added the review-pr request to the cascade
-// (it went stale at ~8x process-feedback's rate when only the feedback
-// cycle closed here).
+// filed with --parent <anchor>. Every closed bead's own open descendants
+// (children, grandchildren, ...) in the work-beads read close first,
+// depth-first (closeOpenDescendants). History: pg2-ryexi
+// added the review-pr request to the cascade (it went stale at ~8x
+// process-feedback's rate when only the feedback cycle closed here).
 func (rc *runContext) handleClosure(ctx context.Context, reason string) error {
 	if rc.anchorID == "" {
 		return nil // no anchor ever existed for this PR — nothing to close
+	}
+	// seen holds every bead this closure has already visited, so a malformed
+	// graph (a parent loop through the anchor, a bead listed twice) can neither
+	// loop nor close a bead twice. The anchor and the two ledger-tracked cycle
+	// beads are pre-seeded: each closes at its own step below, with its ledger
+	// row.
+	seen := map[string]bool{rc.anchorID: true}
+	for _, id := range []string{rc.cycleID, rc.reviewID} {
+		if id != "" {
+			seen[id] = true
+		}
 	}
 	// Children first, the anchor LAST (bead pg2-mhz7b): bd >= 1.3.1 refuses
 	// to close a parent while any child is open ("cannot close X: N open
@@ -202,21 +219,14 @@ func (rc *runContext) handleClosure(ctx context.Context, reason string) error {
 	// (closeCascadedChild), an already-closed open child no longer appears in
 	// the work-beads read, and the anchor's own transition runs only while its
 	// ledger row is not yet sentinel-closed.
-	if err := rc.closeCascadedChild(ctx, KindFeedbackCycle, "feedback cycle", rc.cycleID, rc.ledgerCycle); err != nil {
+	if err := rc.closeCascadedChild(ctx, KindFeedbackCycle, "feedback cycle", rc.cycleID, rc.ledgerCycle, seen); err != nil {
 		return err
 	}
-	if err := rc.closeCascadedChild(ctx, KindReviewRequest, "review request", rc.reviewID, rc.ledgerReview); err != nil {
+	if err := rc.closeCascadedChild(ctx, KindReviewRequest, "review request", rc.reviewID, rc.ledgerReview, seen); err != nil {
 		return err
 	}
-	for _, id := range openChildrenOf(rc.workBeads, rc.anchorID) {
-		if id == rc.cycleID || id == rc.reviewID {
-			continue // already closed above, with its ledger row
-		}
-		if rc.mode == ModeApply {
-			if err := rc.syncer.client.Transition(ctx, id, "closed"); err != nil {
-				return fmt.Errorf("sync: close anchor child %s: %w", id, err)
-			}
-		}
+	if err := rc.closeOpenDescendants(ctx, rc.anchorID, 1, seen); err != nil {
+		return err
 	}
 	if rc.ledgerAnchor.LastSyncedContentHash == closedSentinel {
 		return nil
@@ -245,10 +255,15 @@ func (rc *runContext) handleClosure(ctx context.Context, reason string) error {
 // closeCascadedChild closes one open cycle-type child bead of the anchor
 // (a process-feedback cycle or a review-pr request) as part of handleClosure's
 // cascade, and records the closure in that kind's own ledger row. An empty
-// beadID means that child never existed for this PR — nothing to close.
-func (rc *runContext) closeCascadedChild(ctx context.Context, kind, label, beadID string, ledger store.LedgerEntry) error {
+// beadID means that child never existed for this PR — nothing to close. Its
+// own open descendants close first (bd >= 1.3.1 refuses a parent with open
+// children).
+func (rc *runContext) closeCascadedChild(ctx context.Context, kind, label, beadID string, ledger store.LedgerEntry, seen map[string]bool) error {
 	if beadID == "" || ledger.LastSyncedContentHash == closedSentinel {
 		return nil // never existed, or already closed by an earlier (possibly partially failed) run
+	}
+	if err := rc.closeOpenDescendants(ctx, beadID, 1, seen); err != nil {
+		return err
 	}
 	if rc.mode == ModeApply {
 		if err := rc.syncer.client.Transition(ctx, beadID, "closed"); err != nil {
@@ -256,6 +271,34 @@ func (rc *runContext) closeCascadedChild(ctx context.Context, kind, label, beadI
 		}
 	}
 	return rc.upsertLedger(kind, beadID, closedSentinel, "")
+}
+
+// closeOpenDescendants closes every open descendant of parentID found in
+// Facts.WorkBeads, depth-first: each bead's own open children close before the
+// bead itself, because bd >= 1.3.1 refuses to close a parent with any open
+// child. depth is the level of parentID's children below the
+// anchor (the anchor's own children are level 1). seen is shared across the
+// whole closure so a malformed graph cannot loop or close a bead twice; a
+// nesting deeper than maxClosureDepth fails the run rather than walking on.
+func (rc *runContext) closeOpenDescendants(ctx context.Context, parentID string, depth int, seen map[string]bool) error {
+	for _, id := range openChildrenOf(rc.workBeads, parentID) {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		if depth > maxClosureDepth {
+			return fmt.Errorf("sync: bead %s is nested deeper than %d levels below anchor %s", id, maxClosureDepth, rc.anchorID)
+		}
+		if err := rc.closeOpenDescendants(ctx, id, depth+1, seen); err != nil {
+			return err
+		}
+		if rc.mode == ModeApply {
+			if err := rc.syncer.client.Transition(ctx, id, "closed"); err != nil {
+				return fmt.Errorf("sync: close descendant %s of anchor %s: %w", id, rc.anchorID, err)
+			}
+		}
+	}
+	return nil
 }
 
 // reconcile applies the Anchor/Feedback-cycle/Review-request rules for an

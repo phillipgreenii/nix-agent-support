@@ -191,13 +191,14 @@ func helperMain() {
 			os.Stderr.WriteString("boom: injected failure for " + id)
 			os.Exit(1)
 		}
-		// GO_HELPER_PARENT_ID + GO_HELPER_CHILD_IDS impersonate bd >= 1.3.1,
-		// which refuses to close a parent while any child is still open
-		// ("cannot close X: N open child issue(s); close children first").
-		// Closing the parent fails unless every listed child already has an
-		// earlier recorded `issue transition <child> closed` call.
-		if parent := os.Getenv("GO_HELPER_PARENT_ID"); parent != "" && parent == id && args[1] == "transition" {
-			if open := openChildrenAtThisCall(strings.Split(os.Getenv("GO_HELPER_CHILD_IDS"), ",")); open > 0 {
+		// GO_HELPER_PARENT_OF impersonates bd >= 1.3.1, which refuses to
+		// close a parent while any child is still open ("cannot close X: N
+		// open child issue(s); close children first"). It is a comma list of
+		// child:parent edges. Closing a bead fails unless EVERY descendant
+		// of it (children, grandchildren, ...) already has an earlier
+		// recorded `issue transition <id> closed` call.
+		if edges := os.Getenv("GO_HELPER_PARENT_OF"); edges != "" && args[1] == "transition" {
+			if open := openDescendantsAtThisCall(id, strings.Split(edges, ",")); open > 0 {
 				writeWireError("unavailable", fmt.Sprintf("cannot close %s: %d open child issue(s); close children first or use --force to override", id, open))
 			}
 		}
@@ -208,32 +209,48 @@ func helperMain() {
 	}
 }
 
-// openChildrenAtThisCall counts how many of childIDs have NO earlier recorded
-// `issue transition <id> closed` call. The record file already holds this
-// invocation's own line (recordCall ran first), so only earlier lines count.
-func openChildrenAtThisCall(childIDs []string) int {
+// openDescendantsAtThisCall counts how many descendants of id (reached through
+// the child:parent edges, transitively and cycle-safe) have NO earlier recorded
+// `issue transition <descendant> closed` call. The record file already holds
+// this invocation's own line (recordCall ran first), so only earlier lines
+// count.
+func openDescendantsAtThisCall(id string, edges []string) int {
 	b, _ := os.ReadFile(os.Getenv("GO_HELPER_CALLS_RECORD_FILE"))
 	lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
 	if len(lines) > 0 {
 		lines = lines[:len(lines)-1]
 	}
-	open := 0
-	for _, id := range childIDs {
-		if id == "" {
+	closed := map[string]bool{}
+	for _, line := range lines {
+		var rec callRecord
+		if json.Unmarshal([]byte(line), &rec) != nil || len(rec.Args) < 3 {
 			continue
 		}
-		closed := false
-		for _, line := range lines {
-			var rec callRecord
-			if json.Unmarshal([]byte(line), &rec) != nil || len(rec.Args) < 3 {
+		if rec.verb() == "issue transition" && strings.Contains(strings.Join(rec.Args, " "), "closed") {
+			closed[rec.Args[2]] = true
+		}
+	}
+	childrenOf := map[string][]string{}
+	for _, e := range edges {
+		if child, parent, ok := strings.Cut(e, ":"); ok {
+			childrenOf[parent] = append(childrenOf[parent], child)
+		}
+	}
+	open := 0
+	seen := map[string]bool{id: true}
+	queue := []string{id}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		for _, child := range childrenOf[cur] {
+			if seen[child] {
 				continue
 			}
-			if rec.verb() == "issue transition" && rec.Args[2] == id && strings.Contains(strings.Join(rec.Args, " "), "closed") {
-				closed = true
+			seen[child] = true
+			if !closed[child] {
+				open++
 			}
-		}
-		if !closed {
-			open++
+			queue = append(queue, child)
 		}
 	}
 	return open
@@ -780,8 +797,7 @@ func TestSync_ConfirmedClosure_ClosesChildrenBeforeAnchor(t *testing.T) {
 	s := newTestSyncer(t, ModeApply)
 	recordFile := withFactory(t)
 	anchorID, cycleID, reviewID := seedExistingAnchorCycleAndReview(t, s)
-	t.Setenv("GO_HELPER_PARENT_ID", anchorID)
-	t.Setenv("GO_HELPER_CHILD_IDS", strings.Join([]string{cycleID, reviewID, "bd-human-1"}, ","))
+	t.Setenv("GO_HELPER_PARENT_OF", strings.Join([]string{cycleID + ":" + anchorID, reviewID + ":" + anchorID, "bd-human-1:" + anchorID}, ","))
 
 	facts := gather.Facts{
 		HeadSHA:      fixtureHeadSHA,
@@ -807,6 +823,177 @@ func TestSync_ConfirmedClosure_ClosesChildrenBeforeAnchor(t *testing.T) {
 	if anchor.LastSyncedContentHash != closedSentinel {
 		t.Fatalf("anchor ledger row not marked closed: %+v", anchor)
 	}
+}
+
+// closedTransitions lists, in call order, the bead ids a recorded run asked
+// to close.
+func closedTransitions(t *testing.T, recordFile string) []string {
+	t.Helper()
+	var order []string
+	for _, r := range readCallRecords(t, recordFile) {
+		if r.verb() == "issue transition" && strings.Contains(strings.Join(r.Args, " "), "closed") {
+			order = append(order, r.Args[2])
+		}
+	}
+	return order
+}
+
+// TestSync_ConfirmedClosure_ClosesDescendantsDepthFirst guards that bd
+// 1.3.1 refuses to close a bead with ANY open child, so a cycle bead (or any
+// other child of the anchor) that has open children of its own can only close
+// after them. Every open descendant closes before its parent, depth first, and
+// the anchor closes last.
+func TestSync_ConfirmedClosure_ClosesDescendantsDepthFirst(t *testing.T) {
+	s := newTestSyncer(t, ModeApply)
+	recordFile := withFactory(t)
+	anchorID, cycleID, reviewID := seedExistingAnchorCycleAndReview(t, s)
+	t.Setenv("GO_HELPER_PARENT_OF", strings.Join([]string{
+		cycleID + ":" + anchorID, reviewID + ":" + anchorID, "bd-human-1:" + anchorID,
+		"bd-cycle-kid:" + cycleID, "bd-review-kid:" + reviewID,
+		"bd-human-kid:bd-human-1", "bd-human-grandkid:bd-human-kid",
+	}, ","))
+
+	facts := gather.Facts{
+		HeadSHA:      fixtureHeadSHA,
+		RemovedState: "merged",
+		WorkBeads: workBeadsFixture(
+			map[string]any{"id": cycleID, "title": "process-feedback: " + fixturePRKey, "state": "open", "parent": anchorID},
+			map[string]any{"id": "bd-cycle-kid", "title": "kid", "state": "open", "parent": cycleID},
+			map[string]any{"id": "bd-review-kid", "title": "kid", "state": "in_progress", "parent": reviewID},
+			map[string]any{"id": "bd-human-1", "title": "Human: unblock stuck pending review on PR #42", "state": "open", "parent": anchorID},
+			map[string]any{"id": "bd-human-kid", "title": "kid", "state": "open", "parent": "bd-human-1"},
+			map[string]any{"id": "bd-human-grandkid", "title": "grandkid", "state": "open", "parent": "bd-human-kid"},
+			map[string]any{"id": "bd-closed-kid", "title": "kid", "state": "closed", "parent": "bd-human-1"},
+		),
+	}
+	if err := s.Sync(context.Background(), fixtureRepo, fixtureEntity, gather.ChangeRemoved, facts, interpFor("mine", nil)); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	order := closedTransitions(t, recordFile)
+	if len(order) != 8 || order[len(order)-1] != anchorID {
+		t.Fatalf("close order = %v, want 8 closes with the anchor %s last", order, anchorID)
+	}
+	at := map[string]int{}
+	for i, id := range order {
+		if _, dup := at[id]; dup {
+			t.Fatalf("%s closed more than once: %v", id, order)
+		}
+		at[id] = i
+	}
+	for _, edge := range [][2]string{
+		{"bd-cycle-kid", cycleID},
+		{"bd-review-kid", reviewID},
+		{"bd-human-grandkid", "bd-human-kid"},
+		{"bd-human-kid", "bd-human-1"},
+	} {
+		if at[edge[0]] > at[edge[1]] {
+			t.Errorf("%s must close before its parent %s: %v", edge[0], edge[1], order)
+		}
+	}
+	if _, closed := at["bd-closed-kid"]; closed {
+		t.Errorf("an already-closed descendant must be left alone: %v", order)
+	}
+}
+
+// TestSync_ConfirmedClosure_DescendantFailureLeavesAnchorOpen guards that
+// a failing grandchild close fails the run and leaves the anchor untouched
+// (not stamped, not closed, ledger row open), so the retry finishes the job
+// without re-stamping the anchor per failed attempt.
+func TestSync_ConfirmedClosure_DescendantFailureLeavesAnchorOpen(t *testing.T) {
+	s := newTestSyncer(t, ModeApply)
+	recordFile := withFactory(t)
+	anchorID, cycleID, _ := seedExistingAnchorCycleAndReview(t, s)
+	facts := gather.Facts{
+		HeadSHA:      fixtureHeadSHA,
+		RemovedState: "merged",
+		WorkBeads: workBeadsFixture(
+			map[string]any{"id": cycleID, "title": "process-feedback: " + fixturePRKey, "state": "open", "parent": anchorID},
+			map[string]any{"id": "bd-cycle-kid", "title": "kid", "state": "open", "parent": cycleID},
+		),
+	}
+	interp := interpFor("mine", nil)
+
+	t.Setenv("GO_HELPER_FAIL_ID", "bd-cycle-kid")
+	err := s.Sync(context.Background(), fixtureRepo, fixtureEntity, gather.ChangeRemoved, facts, interp)
+	if err == nil || !strings.Contains(err.Error(), "bd-cycle-kid") {
+		t.Fatalf("Sync error = %v, want one naming bd-cycle-kid", err)
+	}
+	for _, r := range readCallRecords(t, recordFile) {
+		if len(r.Args) > 2 && r.Args[2] == anchorID {
+			t.Fatalf("anchor was written despite a failed descendant close: %v", r.Args)
+		}
+	}
+	if anchor, _, _ := s.store.GetLedger(fixtureRepo, "pr", fixtureEntity, KindAnchor); anchor.LastSyncedContentHash == closedSentinel {
+		t.Fatal("anchor ledger row marked closed although a descendant's close failed")
+	}
+
+	t.Setenv("GO_HELPER_FAIL_ID", "")
+	if err := s.Sync(context.Background(), fixtureRepo, fixtureEntity, gather.ChangeRemoved, facts, interp); err != nil {
+		t.Fatalf("retry Sync: %v", err)
+	}
+	if order := closedTransitions(t, recordFile); len(order) < 1 || order[len(order)-1] != anchorID {
+		t.Fatalf("retry close order = %v, want the anchor %s last", order, anchorID)
+	}
+}
+
+// TestSync_ConfirmedClosure_MalformedGraphTerminates guards that the
+// work-beads read is not trusted to be a tree. A parent loop through the
+// anchor and a bead listed twice are each closed at most once and the walk
+// ends; a chain nested past the depth bound fails the run with an error
+// naming the bound instead of walking on.
+func TestSync_ConfirmedClosure_MalformedGraphTerminates(t *testing.T) {
+	t.Run("loop-and-duplicate", func(t *testing.T) {
+		s := newTestSyncer(t, ModeApply)
+		recordFile := withFactory(t)
+		anchorID, cycleID, _ := seedExistingAnchorCycleAndReview(t, s)
+		facts := gather.Facts{
+			HeadSHA:      fixtureHeadSHA,
+			RemovedState: "merged",
+			WorkBeads: workBeadsFixture(
+				map[string]any{"id": cycleID, "title": "process-feedback: " + fixturePRKey, "state": "open", "parent": anchorID},
+				map[string]any{"id": "bd-loop-a", "title": "a", "state": "open", "parent": anchorID},
+				map[string]any{"id": "bd-loop-b", "title": "b", "state": "open", "parent": "bd-loop-a"},
+				map[string]any{"id": "bd-loop-b", "title": "b again", "state": "open", "parent": "bd-loop-a"},
+				map[string]any{"id": anchorID, "title": "anchor", "state": "open", "parent": "bd-loop-b"},
+			),
+		}
+		if err := s.Sync(context.Background(), fixtureRepo, fixtureEntity, gather.ChangeRemoved, facts, interpFor("mine", nil)); err != nil {
+			t.Fatalf("Sync: %v", err)
+		}
+		closed := map[string]int{}
+		for _, id := range closedTransitions(t, recordFile) {
+			closed[id]++
+		}
+		for _, id := range []string{anchorID, cycleID, "bd-loop-a", "bd-loop-b"} {
+			if closed[id] != 1 {
+				t.Errorf("%s closed %d times, want 1; all: %v", id, closed[id], closed)
+			}
+		}
+	})
+
+	t.Run("too-deep", func(t *testing.T) {
+		s := newTestSyncer(t, ModeApply)
+		recordFile := withFactory(t)
+		anchorID, _, _ := seedExistingAnchorCycleAndReview(t, s)
+		var chain []map[string]any
+		parent := anchorID
+		for i := 0; i < maxClosureDepth+2; i++ {
+			id := fmt.Sprintf("bd-deep-%d", i)
+			chain = append(chain, map[string]any{"id": id, "title": "deep", "state": "open", "parent": parent})
+			parent = id
+		}
+		facts := gather.Facts{HeadSHA: fixtureHeadSHA, RemovedState: "merged", WorkBeads: workBeadsFixture(chain...)}
+		err := s.Sync(context.Background(), fixtureRepo, fixtureEntity, gather.ChangeRemoved, facts, interpFor("mine", nil))
+		if err == nil || !strings.Contains(err.Error(), "deeper than") {
+			t.Fatalf("Sync error = %v, want a nesting-depth error", err)
+		}
+		for _, id := range closedTransitions(t, recordFile) {
+			if id == anchorID {
+				t.Fatal("anchor closed despite an unwalked, too deeply nested descendant")
+			}
+		}
+	})
 }
 
 // --- test: review-request ACL matches the fixture set -----------------------

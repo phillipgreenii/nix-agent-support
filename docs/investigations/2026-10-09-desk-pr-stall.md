@@ -120,8 +120,9 @@ after the children are closed. Tests: `TestSync_ConfirmedClosure_ClosesChildrenB
 before the change: `cannot close bd-anchor-existing: 3 open child issue(s)`) and the updated
 `TestSync_ConfirmedClosure_ConnectorErrorIsReturnedAndRetrySafe`.
 
-Limits, not fixed here: children of children (a feedback cycle's own children) are still not
-walked; the cascade only reaches what the work-beads read returned.
+Limit, since fixed: children of children were not walked, so an open grandchild of a cycle bead
+would have made closing the cycle fail the same way. The closure now closes every open descendant
+in the work-beads read depth-first, before its parent. The cascade still only reaches what that read returned.
 
 All eight affected anchors were closed by hand at 04:13Z to 04:48Z, but at 05:09Z the store still
 lists four of them with a `sync_error`. Whether re-driving an already-closed anchor is a no-op in

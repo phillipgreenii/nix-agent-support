@@ -97,7 +97,10 @@ prompts that read these shapes, in the same change:
   (`beadsbridge.CascadeCloseMergeRequest`): every open direct child of the anchor (a bead
   filed with `--parent <anchor>`) that the work-beads query returned is closed too, whatever its
   title or type (`pg2-kftf9.7`; e.g. an improvised "Human: unblock ..." bead). It reaches only
-  children present in the work-beads results, and does not walk grandchildren. An earlier
+  children present in the work-beads results, closing each bead's own open descendants
+  (grandchildren and deeper, to a bounded depth) before the bead itself, children first and the
+  anchor last, because `bd` 1.3.1 refuses to close a parent with an open child. A failed close
+  leaves the anchor open, and unstamped, for the next run. An earlier
   revision closed only the feedback cycle, leaving review-pr beads open at a far higher stale
   rate (`pg2-ryexi`).
 - **Feedback cycle** — for every PR with unaddressed feedback (a disposition that is still
