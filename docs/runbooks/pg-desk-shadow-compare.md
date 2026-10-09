@@ -32,7 +32,7 @@ network or `bd`/dolt writes: those are covered by the shims and the environment.
   (the machine `bd`, not the router wrapper's bundled copy) on `PATH`; `bgrun`/`bgcheck`; `caffeinate`.
   `pg-desk-shadow` itself is on `PATH` only where the consuming flake sets
   `phillipgreenii.programs.pg-desk.shadow.enable = true` (default off; correction 10).
-- The machine awake for the whole run (`caffeinate -i` below). Gaps from sleep, lid close, reboot and
+- The machine awake for the whole run (`caffeinate -is` below). Gaps from sleep, lid close, reboot and
   router applies WILL occur; they are recorded and excluded from misses.
 - A scratch directory on a volume with a few hundred MiB free, NOT under `~/.local/state`, for
   example `$HOME/pg-desk-shadow/phase-a-<date>`.
@@ -81,11 +81,12 @@ bgrun shadow-a -- caffeinate -is pg-desk-shadow run --scratch "$HOME/pg-desk-sha
 bgcheck shadow-a          # DONE exit=N plus the log tail; the only trustworthy exit status
 ```
 
-`caffeinate -i` alone does NOT stop the machine sleeping: the first 8-hour run (2026-10-09) lost
-about two hours to a sleep gap despite it. `-s` also prevents system sleep, but only while on AC
-power and not on a lid close, so keep the machine plugged in and the lid open (or on an external
-display). Sleep gaps are recorded and excluded from misses either way, but they still count against
-uptime.
+The first 8-hour run (2026-10-09) recorded sleep gaps (7,269 seconds in total, per its report) while
+launched under `caffeinate -i`; the cause was not established. `-i` only prevents idle sleep, so a
+lid close or running on battery would still sleep the machine. `-s` additionally prevents system
+sleep, but per `caffeinate(8)` only while on AC power; keep the machine plugged in and the lid open
+(or on an external display). Sleep gaps are recorded and excluded from misses either way, but they
+still count against uptime.
 
 The collector outlives agent sessions (a launchd agent is out of scope). It writes
 `<scratch>/collector/ticks.jsonl` and `collector.log` and exits when a stop or kill condition fires
@@ -208,13 +209,14 @@ Every claim was re-verified against current source and logs on 2026-10-07; these
     The report now joins on the bare id and keys de-duplication on the raw id. Regenerating a report
     over an earlier run's scratch directory recomputes it from the copied logs; nothing needs to be
     re-collected.
-14. The report adds two informational figures from the first run: the late detection of missed
-    events and coverage (see the behavior note's (a)). Read coverage while the collector was up,
-    not tick uptime, when overrun slots are expected (correction 10). In the 2026-10-09 data the
-    two bursts of live events enqueued in one second (one after a long tick overrun, one 46 seconds
-    after a wake from sleep) account for most `collector-down` misses and have no shadow
-    counterpart; whether they are live re-emits or real changes the shadow missed is not yet
-    determined.
+14. The report adds two informational figures after the first run: the late detection of missed
+    events and the coverage ceilings (see the behavior note's (a)). Read the ceiling for the events
+    while the collector was up alongside tick uptime, which overrun slots depress (see the
+    "multi-day run's uptime" row of the Unverified items table). In the 2026-10-09 data, two groups
+    of live events enqueued within one second (one around a tick overrun, one 46 seconds after a
+    wake from sleep) make up a large share of the `collector-down` misses and mostly have no
+    shadow item for the same PR; whether they are live re-emits or real changes the shadow missed
+    is not yet determined.
 
 ## Unverified items
 
@@ -225,7 +227,7 @@ Every claim was re-verified against current source and logs on 2026-10-07; these
 | `bd` read verbs create no file under the live `.beads`      | REFUTED (see correction 8): the machine `bd` attempts writes; the hermetic default avoids them                                                                                            |
 | First-diff shape compatibility of v1 facts versus new facts | OBSERVED, not judged: the first hydrations of seeded rows reported real changes (head, review, CI) plus a `new-entity` reconcile; the 4-tick smoke is too short to tell noise from change |
 | A multi-day run's uptime against the 95 percent criterion   | UNVERIFIED and at risk: ticks that hydrate take 90 to 150 seconds, so slots are skipped (overrun gaps count against uptime)                                                               |
-| `launchd`/sleep behavior of `caffeinate -i` with `bgrun`    | REFUTED for `-i` alone (2026-10-09: a two-hour sleep gap in an 8-hour run); `-is` on AC power is the launch command now, UNVERIFIED over a multi-day run                                  |
+| `launchd`/sleep behavior of `caffeinate -i` with `bgrun`    | OBSERVED: sleep gaps under `-i` (2026-10-09, 7,269 seconds in an 8-hour run, cause not established); `-is` is the launch command now, UNVERIFIED over a multi-day run                     |
 
 ## Smoke (agent-run, a few ticks, scratch only)
 

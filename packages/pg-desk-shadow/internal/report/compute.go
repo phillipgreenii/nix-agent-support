@@ -346,6 +346,13 @@ func Compute(in Input, p Params) PhaseReport {
 	}
 	endOK := lastEnd.Add(-T)
 	matchedItems := map[string]bool{}
+	type missRef struct {
+		entry int // index into pr.Misses.Entries
+		id    string
+		at    time.Time
+		class string
+	}
+	var missed []missRef
 	lateWhenUp := 0
 	pr.Misses.ByClass = map[string]int{}
 	for _, c := range MissClasses {
@@ -366,7 +373,7 @@ func Compute(in Input, p Params) PhaseReport {
 		pr.Live.InWindow++
 		if it, ok := nearest(e.id, e.at, T); ok {
 			pr.Misses.Matched++
-			matchedItems[it.id+"|"+it.at.Format(time.RFC3339Nano)] = true
+			matchedItems[itemKey(it)] = true
 			pr.samp.dVsLive = append(pr.samp.dVsLive, it.at.Sub(e.at).Seconds())
 			if !it.updAt.IsZero() {
 				pr.samp.dShadowUpd = append(pr.samp.dShadowUpd, it.at.Sub(it.updAt).Seconds())
@@ -374,30 +381,41 @@ func Compute(in Input, p Params) PhaseReport {
 			}
 			continue
 		}
-		class, ev := classifyMiss(e.id, e.at, T, firstStart, t0, p, in, ticks, gaps, routerDown, others, byID)
+		class, ev := classifyMiss(e.id, e.d.Raw, e.at, T, firstStart, t0, p, in, ticks, gaps, routerDown, others, byID)
 		pr.Misses.Missed++
 		pr.Misses.ByClass[class]++
-		entry := MissEntry{PR: lab.Label(e.id), At: schema.Format(e.at), Class: class, Evidence: ev}
-		// A miss is "not detected within T"; the shadow may still have flagged the
-		// PR once it was back (a gap, a skipped slot), which is what a replacement
-		// cares about. Report that delay without changing the miss class.
-		if it, ok := firstAfter(byID[e.id], e.at, p.LateWindow); ok {
-			late := it.at.Sub(e.at).Seconds()
-			entry.LateSeconds = &late
-			pr.Misses.LateDetected++
-			if class != ClassCollectorDown {
-				lateWhenUp++
-			}
-			pr.samp.dLate = append(pr.samp.dLate, late)
-		}
-		pr.Misses.Entries = append(pr.Misses.Entries, entry)
+		missed = append(missed, missRef{entry: len(pr.Misses.Entries), id: e.id, at: e.at, class: class})
+		pr.Misses.Entries = append(pr.Misses.Entries, MissEntry{PR: lab.Label(e.id), At: schema.Format(e.at), Class: class, Evidence: ev})
 	}
 	pr.Misses.Unexplained = pr.Misses.ByClass[ClassUnexplained]
+
+	// A miss is "not detected within T"; the shadow may still have flagged the PR
+	// once it was back (a gap, a skipped slot), which is what a replacement cares
+	// about. Report that delay without changing the miss class. Run after every
+	// live event is matched or missed, so an item that matched a live event is
+	// never also a late detection, and one item stands for at most ONE missed event.
+	usedLate := map[string]bool{}
+	for _, m := range missed {
+		it, ok := firstAfter(byID[m.id], m.at, p.LateWindow, func(it shadowItem) bool {
+			return matchedItems[itemKey(it)] || usedLate[itemKey(it)]
+		})
+		if !ok {
+			continue
+		}
+		usedLate[itemKey(it)] = true
+		late := it.at.Sub(m.at).Seconds()
+		pr.Misses.Entries[m.entry].LateSeconds = &late
+		pr.Misses.LateDetected++
+		if m.class != ClassCollectorDown {
+			lateWhenUp++
+		}
+		pr.samp.dLate = append(pr.samp.dLate, late)
+	}
 	if pr.Live.InWindow > 0 {
-		pr.Misses.Coverage = float64(pr.Misses.Matched+pr.Misses.LateDetected) / float64(pr.Live.InWindow)
+		pr.Misses.CoverageCeiling = float64(pr.Misses.Matched+pr.Misses.LateDetected) / float64(pr.Live.InWindow)
 	}
 	if up := pr.Live.InWindow - pr.Misses.ByClass[ClassCollectorDown]; up > 0 {
-		pr.Misses.CoverageWhenUp = float64(pr.Misses.Matched+lateWhenUp) / float64(up)
+		pr.Misses.CoverageCeilingWhenUp = float64(pr.Misses.Matched+lateWhenUp) / float64(up)
 	}
 
 	// (b) SWEEP-CAUGHT.
@@ -460,7 +478,7 @@ func Compute(in Input, p Params) PhaseReport {
 			}
 			continue
 		}
-		if matchedItems[it.id+"|"+it.at.Format(time.RFC3339Nano)] {
+		if matchedItems[itemKey(it)] {
 			continue
 		}
 		if len(it.kinds) == 1 && it.kinds[0] == "reconcile" {
@@ -529,15 +547,20 @@ func absDur(d time.Duration) time.Duration {
 	return d
 }
 
-// firstAfter returns the earliest item strictly after at and within win of it.
-// items MUST be sorted by time (byID is).
-func firstAfter(items []shadowItem, at time.Time, win time.Duration) (shadowItem, bool) {
+func itemKey(it shadowItem) string { return it.id + "|" + it.at.Format(time.RFC3339Nano) }
+
+// firstAfter returns the earliest item strictly after at and within win of it
+// that skip does not reject. items MUST be sorted by time (byID is).
+func firstAfter(items []shadowItem, at time.Time, win time.Duration, skip func(shadowItem) bool) (shadowItem, bool) {
 	for _, it := range items {
-		if it.at.After(at) {
-			if it.at.Sub(at) <= win {
-				return it, true
-			}
+		if !it.at.After(at) {
+			continue
+		}
+		if it.at.Sub(at) > win {
 			break
+		}
+		if !skip(it) {
+			return it, true
 		}
 	}
 	return shadowItem{}, false
@@ -604,7 +627,7 @@ func window(ts []time.Time) string {
 	return schema.Format(lo) + " to " + schema.Format(hi)
 }
 
-func classifyMiss(id string, e time.Time, T time.Duration, firstStart, t0 time.Time, p Params, in Input, ticks []schema.Row, gaps, routerDown []interval, others []shadowItem, byID map[string][]shadowItem) (string, string) {
+func classifyMiss(id, raw string, e time.Time, T time.Duration, firstStart, t0 time.Time, p Params, in Input, ticks []schema.Row, gaps, routerDown []interval, others []shadowItem, byID map[string][]shadowItem) (string, string) {
 	lo, hi := e.Add(-T), e.Add(T)
 	// collector-down: a gap overlaps, or no completed tick sits in [e, e+T].
 	for _, g := range gaps {
@@ -688,13 +711,24 @@ func classifyMiss(id string, e time.Time, T time.Duration, firstStart, t0 time.T
 	}
 	// live-only artefacts.
 	// Queue event ids carry the per-change `@<hash>` suffix since per-change event
-	// ids landed (older rows are bare): match on the PR, and count an enqueue
-	// twice only for the SAME change (two hashes are two changes, not coalescing).
+	// ids landed (older rows are bare). Match on the PR; when both the missed event
+	// and the queue row name a per-change event, they MUST name the SAME one (two
+	// hashes are two changes: the other change's re-emit or double enqueue says
+	// nothing about this one, which may be a genuine miss). A bare id on either
+	// side falls back to the PR. Verified on a real queue: every hash-bearing
+	// `reemit` evict is followed by an enqueue of the SAME full event id.
 	evid := "pr.changed:" + id
+	rawEv := ""
+	if strings.Contains(raw, "@") {
+		rawEv = "pr.changed:" + raw
+	}
 	enqByEvent := map[string]int{}
 	enq := 0
 	for _, q := range in.Queue {
 		if BaseID(q.EventID) != evid || q.At.Before(e.Add(-2*T)) || q.At.After(e.Add(T)) {
+			continue
+		}
+		if rawEv != "" && strings.Contains(q.EventID, "@") && q.EventID != rawEv {
 			continue
 		}
 		if q.Op == "evict" && q.Reason == "reemit" {

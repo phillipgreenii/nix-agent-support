@@ -83,6 +83,14 @@ func Write(rep Report, dir string) (jsonPath, mdPath string, err error) {
 
 func pct(f float64) string { return fmt.Sprintf("%.1f percent", f*100) }
 
+// pctOf is pct, or "n/a (no events)" when the share has no denominator.
+func pctOf(f float64, ok bool) string {
+	if !ok {
+		return "n/a (no events)"
+	}
+	return pct(f)
+}
+
 func dist(d Dist, unit string) string {
 	if d.N == 0 {
 		return "no samples"
@@ -136,7 +144,8 @@ func Markdown(rep Report) string {
 		for _, c := range MissClasses {
 			w("| %s | %d |\n", c, p.Misses.ByClass[c])
 		}
-		w("\nCoverage (informational; matched plus missed-but-detected-later, over LIVE-DETECTED in window): %s; while the collector was up (events not classed collector-down): %s. %d of the %d missed events were flagged by the shadow later (the first later shadow item for the same PR within the late window of %s: an upper bound on the delay, not proof it is the same change); their delay is under (d).\n\n", pct(p.Misses.Coverage), pct(p.Misses.CoverageWhenUp), p.Misses.LateDetected, p.Misses.Missed, p.Misses.LateWindow)
+		upEvents := p.Live.InWindow - p.Misses.ByClass[ClassCollectorDown]
+		w("\nCoverage CEILING (informational, an upper bound; matched plus missed-but-detected-later, over LIVE-DETECTED in window): %s; while the collector was up (events not classed collector-down): %s. %d of the %d missed events were flagged by the shadow later (the first later shadow item for the same PR within the late window of %s, one item per missed event and never an item that matched a live event: an upper bound on the delay, not proof it is the same change); their delay is under (d).\n\n", pctOf(p.Misses.CoverageCeiling, p.Live.InWindow > 0), pctOf(p.Misses.CoverageCeilingWhenUp, upEvents > 0), p.Misses.LateDetected, p.Misses.Missed, p.Misses.LateWindow)
 		for _, e := range p.Misses.Entries {
 			late := ""
 			if e.LateSeconds != nil {

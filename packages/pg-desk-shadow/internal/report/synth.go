@@ -141,8 +141,9 @@ func Synthesize(dir string, o SynthOptions) (Synthetic, error) {
 	}
 
 	// Live router events (note the fourth row has no event_type: an old row).
-	// The live router names a per-change event `<pr id>@<hash>`; the older, bare
-	// shape stays in the scenario (the fourth row below) so both are exercised.
+	// The live router names a per-change event `<pr id>@<hash>`; every row that
+	// reaches matching here uses that shape. The older bare shape is covered by the
+	// tests in liveid_test.go that build their input directly.
 	const changeHash = "@0123456789ab"
 	ev := func(id string, enq time.Time, kind string) string {
 		return js(map[string]any{

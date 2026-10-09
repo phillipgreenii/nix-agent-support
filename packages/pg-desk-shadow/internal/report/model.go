@@ -174,20 +174,23 @@ type Misses struct {
 	Missed  int `json:"missed"`
 	// LateDetected counts MISSED events the shadow flagged later (see MissEntry).
 	LateDetected int `json:"missed_but_detected_later"`
-	// Coverage is (Matched + LateDetected) over the in-window live events: the
-	// share of live changes the shadow detected at all. Informational: it does
-	// not replace a stop criterion.
-	Coverage float64 `json:"coverage"`
-	// CoverageWhenUp is the same share over the events NOT classed collector-down
-	// (matched plus later-detected misses of any other class, over in-window
-	// events minus the collector-down ones): did the shadow detect the change
-	// whenever it was running. Zero when every in-window event was collector-down.
-	CoverageWhenUp float64        `json:"coverage_when_collector_up"`
-	ByClass        map[string]int `json:"by_class"`
-	Unexplained    int            `json:"unexplained"`
-	Entries        []MissEntry    `json:"entries"`
-	Tolerance      string         `json:"tolerance"`
-	LateWindow     string         `json:"late_window"`
+	// CoverageCeiling is (Matched + LateDetected) over the in-window live events:
+	// an UPPER BOUND on the share of live changes the shadow detected (a late
+	// detection is the first later item for the same PR, not proof it is the same
+	// change; each item stands for at most one missed event and never for a
+	// matched one). Informational: it does not replace a stop criterion. Zero both
+	// when nothing was covered and when there were no in-window events.
+	CoverageCeiling float64 `json:"coverage_ceiling"`
+	// CoverageCeilingWhenUp is the same bound over the events NOT classed
+	// collector-down (matched plus later-detected misses of any other class, over
+	// in-window events minus the collector-down ones): did the shadow detect the
+	// change whenever it was running. Zero when there were no such events.
+	CoverageCeilingWhenUp float64        `json:"coverage_ceiling_when_collector_up"`
+	ByClass               map[string]int `json:"by_class"`
+	Unexplained           int            `json:"unexplained"`
+	Entries               []MissEntry    `json:"entries"`
+	Tolerance             string         `json:"tolerance"`
+	LateWindow            string         `json:"late_window"`
 }
 
 // SweepEntry is one SWEEP-CAUGHT row (label only).

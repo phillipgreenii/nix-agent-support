@@ -3,6 +3,7 @@ package report
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -116,8 +117,8 @@ func TestHashSuffixedLiveEventMatchesTheBareShadowItem(t *testing.T) {
 	if p.Delay.VsLiveEnqueue.N != 1 || p.Delay.VsLiveEnqueue.Max != 20 {
 		t.Errorf("delay = %+v", p.Delay.VsLiveEnqueue)
 	}
-	if p.Misses.Coverage != 1 {
-		t.Errorf("coverage = %v", p.Misses.Coverage)
+	if p.Misses.CoverageCeiling != 1 {
+		t.Errorf("coverage = %v", p.Misses.CoverageCeiling)
 	}
 }
 
@@ -208,8 +209,8 @@ func TestMissedEventLaterDetectedByTheShadowIsReported(t *testing.T) {
 	if p.Misses.LateDetected != 1 {
 		t.Errorf("late detected = %d, want 1", p.Misses.LateDetected)
 	}
-	if want := 0.5; p.Misses.Coverage != want {
-		t.Errorf("coverage = %v, want %v ((matched 0 + late 1) / in window 2)", p.Misses.Coverage, want)
+	if want := 0.5; p.Misses.CoverageCeiling != want {
+		t.Errorf("coverage = %v, want %v ((matched 0 + late 1) / in window 2)", p.Misses.CoverageCeiling, want)
 	}
 	if d := p.Delay.MissedThenDetected; d.N != 1 || d.Max != (16*time.Minute+30*time.Second).Seconds() {
 		t.Errorf("late delay = %+v", d)
@@ -243,11 +244,138 @@ func TestCoverageWhileTheCollectorWasUpExcludesCollectorDownEvents(t *testing.T)
 	if p.Misses.ByClass[ClassCollectorDown] != 1 || p.Misses.Matched != 1 || p.Misses.Unexplained != 1 {
 		t.Fatalf("misses = %+v", p.Misses)
 	}
-	if want := 1.0 / 3; p.Misses.Coverage < want-1e-9 || p.Misses.Coverage > want+1e-9 {
-		t.Errorf("coverage = %v, want %v", p.Misses.Coverage, want)
+	if want := 1.0 / 3; p.Misses.CoverageCeiling < want-1e-9 || p.Misses.CoverageCeiling > want+1e-9 {
+		t.Errorf("coverage = %v, want %v", p.Misses.CoverageCeiling, want)
 	}
-	if want := 0.5; p.Misses.CoverageWhenUp != want {
-		t.Errorf("coverage while up = %v, want %v (1 matched of the 2 events outside the gap)", p.Misses.CoverageWhenUp, want)
+	if want := 0.5; p.Misses.CoverageCeilingWhenUp != want {
+		t.Errorf("coverage while up = %v, want %v (1 matched of the 2 events outside the gap)", p.Misses.CoverageCeilingWhenUp, want)
+	}
+}
+
+func TestOneShadowItemIsNotTheLateDetectionOfSeveralEvents(t *testing.T) {
+	// One PR, one collector gap, ONE shadow item at 10:21:30 and three live
+	// changes: two inside the gap and one at 10:21:20 that the item matches.
+	// The item matches the third event, so it cannot also be a late detection;
+	// the ceiling must not claim all three were covered.
+	f := fixture{
+		gapFrom: at(10, 0, 0), gapTo: at(10, 20, 0),
+		items: shadowItem1("acme/api#1", at(10, 21, 30)),
+		events: []Dispatch{
+			live("acme/api#1", "aaaaaaaaaaaa", at(10, 5, 0)),
+			live("acme/api#1", "bbbbbbbbbbbb", at(10, 6, 0)),
+			live("acme/api#1", "cccccccccccc", at(10, 21, 20)),
+		},
+	}
+	p := Compute(f.input(), params())
+	if p.Misses.Matched != 1 || p.Misses.Missed != 2 || p.Misses.LateDetected != 0 {
+		t.Fatalf("misses = %+v", p.Misses)
+	}
+	if want := 1.0 / 3; p.Misses.CoverageCeiling < want-1e-9 || p.Misses.CoverageCeiling > want+1e-9 {
+		t.Errorf("ceiling = %v, want %v", p.Misses.CoverageCeiling, want)
+	}
+}
+
+func TestOneUnmatchedShadowItemStandsForOnlyOneMissedEvent(t *testing.T) {
+	// Two missed events in the gap, one later shadow item: it is the late
+	// detection of the EARLIER miss only.
+	f := fixture{
+		gapFrom: at(10, 0, 0), gapTo: at(10, 20, 0),
+		items: shadowItem1("acme/api#1", at(10, 25, 0)),
+		events: []Dispatch{
+			live("acme/api#1", "aaaaaaaaaaaa", at(10, 5, 0)),
+			live("acme/api#1", "bbbbbbbbbbbb", at(10, 6, 0)),
+		},
+	}
+	p := Compute(f.input(), params())
+	if p.Misses.Missed != 2 || p.Misses.LateDetected != 1 {
+		t.Fatalf("misses = %+v", p.Misses)
+	}
+	if got := *p.Misses.Entries[0].LateSeconds; got != (20*time.Minute).Seconds() || p.Misses.Entries[1].LateSeconds != nil {
+		t.Errorf("late seconds = %v, second = %v", got, p.Misses.Entries[1].LateSeconds)
+	}
+}
+
+func TestCeilingIsNotAvailableWithoutEvents(t *testing.T) {
+	p := Compute(fixture{}.input(), params())
+	if p.Live.InWindow != 0 || p.Misses.CoverageCeiling != 0 || p.Misses.CoverageCeilingWhenUp != 0 {
+		t.Fatalf("live %+v misses %+v", p.Live, p.Misses)
+	}
+	rep := Report{Schema: SchemaID, Phases: []PhaseReport{p}}
+	if md := Markdown(rep); !strings.Contains(md, "n/a (no events)") {
+		t.Error("a ceiling with no events must read n/a, not 0.0 percent")
+	}
+}
+
+// The bare id shape (rows written before per-change event ids, and every run
+// record row) must keep working end to end.
+
+func TestBareLiveEventStillMatchesTheShadowItem(t *testing.T) {
+	f := fixture{
+		items:  shadowItem1("acme/api#1", at(10, 5, 20)),
+		events: []Dispatch{live("acme/api#1", "", at(10, 5, 0))},
+	}
+	p := Compute(f.input(), params())
+	if p.Misses.Matched != 1 || p.Misses.Missed != 0 {
+		t.Fatalf("a bare live event must match: %+v", p.Misses)
+	}
+}
+
+func TestBareQueueRowsStillClassifyCoalescing(t *testing.T) {
+	reemit := fixture{
+		events: []Dispatch{live("acme/api#1", "", at(10, 5, 0))},
+		queue:  []QueueRow{{Op: "evict", EventID: "pr.changed:acme/api#1", At: at(10, 4, 50), Reason: "reemit"}},
+	}
+	if p := Compute(reemit.input(), params()); p.Misses.Entries[0].Class != ClassLiveOnly {
+		t.Errorf("a bare re-emit is live-only: %+v", p.Misses.Entries)
+	}
+	twice := fixture{
+		events: []Dispatch{live("acme/api#1", "", at(10, 5, 0))},
+		queue: []QueueRow{
+			{Op: "enqueue", EventID: "pr.changed:acme/api#1", At: at(10, 4, 0)},
+			{Op: "enqueue", EventID: "pr.changed:acme/api#1", At: at(10, 4, 30)},
+		},
+	}
+	if p := Compute(twice.input(), params()); p.Misses.Entries[0].Class != ClassLiveOnly {
+		t.Errorf("two bare enqueues are coalescing: %+v", p.Misses.Entries)
+	}
+}
+
+func TestAnotherChangesQueueRowsDoNotExplainThisMiss(t *testing.T) {
+	// Change A (hash a) was enqueued once and missed. Change B of the SAME PR
+	// (hash b) was enqueued twice and re-emitted. That says nothing about A: a
+	// genuine miss must stay unexplained, the one class that counts as failure.
+	f := fixture{
+		events: []Dispatch{live("acme/api#1", "aaaaaaaaaaaa", at(10, 5, 0))},
+		queue: []QueueRow{
+			{Op: "enqueue", EventID: "pr.changed:acme/api#1@aaaaaaaaaaaa", At: at(10, 4, 0)},
+			{Op: "enqueue", EventID: "pr.changed:acme/api#1@bbbbbbbbbbbb", At: at(10, 4, 10)},
+			{Op: "enqueue", EventID: "pr.changed:acme/api#1@bbbbbbbbbbbb", At: at(10, 4, 20)},
+			{Op: "evict", EventID: "pr.changed:acme/api#1@bbbbbbbbbbbb", At: at(10, 4, 30), Reason: "reemit"},
+		},
+	}
+	p := Compute(f.input(), params())
+	if p.Misses.Missed != 1 || p.Misses.Entries[0].Class != ClassUnexplained {
+		t.Errorf("misses = %+v", p.Misses)
+	}
+}
+
+func TestIdenticalRawIdAndEnqueueTimeIsOneEvent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "router-events.jsonl")
+	row := `{"time":"2026-01-05T10:25:00Z","kind":"dispatch","event_type":"pr.changed","bead":"acme/api#1@aaaaaaaaaaaa","enqueued_at":"2026-01-05T10:05:00Z"}`
+	// Differs only by the dispatch time, so the exact-line de-duplication of the
+	// reader does not collapse it; the report must.
+	row2 := `{"time":"2026-01-05T10:26:00Z","kind":"dispatch","event_type":"pr.changed","bead":"acme/api#1@aaaaaaaaaaaa","enqueued_at":"2026-01-05T10:05:00Z"}`
+	if err := os.WriteFile(path, []byte(row+"\n"+row2+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	events, _, err := readEvents(path)
+	if err != nil || len(events) != 2 {
+		t.Fatalf("events %v %v", events, err)
+	}
+	f := fixture{events: events}
+	if p := Compute(f.input(), params()); p.Live.Total != 1 {
+		t.Errorf("the same per-change event dispatched twice is one live event: %d", p.Live.Total)
 	}
 }
 

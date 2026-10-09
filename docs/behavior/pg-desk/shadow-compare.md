@@ -270,10 +270,14 @@ Tolerance `T` is the live query's own period plus the slot period plus the measu
   shadow flagged the same PR LATER (the first later shadow item for that PR within a late window,
   default 3 hours: it covers the longest observed sleep gap) and how long after the live enqueue. That
   delay is an UPPER BOUND, not proof the later item is the same change, and it never changes the
-  class. From it the report gives two informational COVERAGE figures: matched plus later-detected over
-  all in-window events, and the same share over the events not classed `collector-down` (did the
-  shadow detect the change whenever it was running). Coverage is not a stop criterion; it is the
-  measure to use instead of tick uptime when overrun slots are expected (the runbook's correction 10).
+  class. Each shadow item stands for at most ONE missed event, and never for an item that already
+  matched a live event. From it the report gives two informational COVERAGE CEILINGS: matched plus
+  later-detected over all in-window events, and the same share over the events not classed
+  `collector-down` (did the shadow detect the change whenever it was running). They are upper
+  bounds, because a later item for the same PR is not proof of the same change, and they read "n/a"
+  when there is no event to divide by. A ceiling is not a stop criterion; it is the measure to read
+  alongside tick uptime, which overrun slots are expected to depress (the runbook's Unverified
+  items row on a multi-day run's uptime).
 
 - **(b) Sweep-caught.** The share of SWEEP-CAUGHT rows also SHADOW-DETECTED (or caught by a
   local/sweep-origin item, counted separately), and the rate at which the live sweep catches what the
