@@ -842,6 +842,8 @@ func TestClassifyPanel(t *testing.T) {
 			{"resolved thread only, no approval -> awaiting team", prShow{State: "open", Comments: []prComment{{ID: "c1", ThreadID: "t1", Resolved: true}}}, ciRollupResult{State: "success"}, Approvals{}, PanelMineAwaitingTeam},
 			{"clean + approved -> awaiting me (ready to merge)", openPR, ciRollupResult{State: "success"}, Approvals{HumanApproved: true}, PanelMineAwaitingMe},
 			{"clean + not yet approved -> awaiting team", openPR, ciRollupResult{State: "success"}, Approvals{}, PanelMineAwaitingTeam},
+			{"own draft, clean, no thread, no human approval -> awaiting me (2026-10-09: nobody else flips a draft)", prShow{State: "open", Draft: true}, ciRollupResult{State: "success"}, Approvals{BotVerdict: BotVerdictApproved}, PanelMineAwaitingMe},
+			{"own draft, ci pending -> awaiting me (never awaiting team)", prShow{State: "open", Draft: true}, ciRollupResult{State: "pending"}, Approvals{}, PanelMineAwaitingMe},
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
@@ -853,6 +855,11 @@ func TestClassifyPanel(t *testing.T) {
 		t.Run("co-owned acts as mine", func(t *testing.T) {
 			if got := classifyPanel(OwnershipCoOwned, openPR, ciRollupResult{State: "success"}, Approvals{}, nil); got != PanelMineAwaitingTeam {
 				t.Errorf("classifyPanel = %q; want %q", got, PanelMineAwaitingTeam)
+			}
+		})
+		t.Run("co-owned draft is awaiting me", func(t *testing.T) {
+			if got := classifyPanel(OwnershipCoOwned, prShow{State: "open", Draft: true}, ciRollupResult{State: "success"}, Approvals{}, nil); got != PanelMineAwaitingMe {
+				t.Errorf("classifyPanel = %q; want %q", got, PanelMineAwaitingMe)
 			}
 		})
 	})

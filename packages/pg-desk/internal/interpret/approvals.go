@@ -419,7 +419,10 @@ func computeMatchReasons(pr prShow, teamMembers, watchLabels []string, self stri
 //     Once not blocked: any unresolved review-thread comment ->
 //     mine_awaiting_me (no author qualifier — any open thread is on me).
 //     Otherwise, already having a human approval -> mine_awaiting_me
-//     (nothing left to do but merge). Otherwise -> mine_awaiting_team.
+//     (nothing left to do but merge). Otherwise, an own draft ->
+//     mine_awaiting_me (operator ruling 2026-10-09: nobody else will flip
+//     it out of draft, so it is never waiting on the team). Otherwise ->
+//     mine_awaiting_team.
 //   - Team, in this order (operator rulings 2026-09-25, 2026-10-02 bead
 //     pg2-4ajtt, and 2026-10-05):
 //     1. HARD-blocked (CI failing, a real human CHANGES_REQUESTED, or a merge
@@ -470,6 +473,10 @@ func classifyPanel(own Ownership, pr prShow, ci ciRollupResult, appr Approvals, 
 		case hasUnresolvedThread(pr.allComments()):
 			return PanelMineAwaitingMe
 		case appr.HumanApproved:
+			return PanelMineAwaitingMe
+		case pr.Draft:
+			// Operator ruling 2026-10-09: nobody else will flip a draft out of
+			// draft, so an own draft is never "awaiting team".
 			return PanelMineAwaitingMe
 		default:
 			return PanelMineAwaitingTeam

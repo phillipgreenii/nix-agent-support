@@ -251,7 +251,7 @@ func TestInterpret_OwnPR_NotSoftenedByReviewerRules(t *testing.T) {
 		{"own PR, no CI data -> still awaiting me", map[string]any{"head_sha": "new", "author": "me"}, nil, PanelMineAwaitingMe, false},
 		{"own draft, cancelled-only run -> never ready to promote", map[string]any{"head_sha": "new", "author": "me", "draft": true}, cancelled, PanelMineAwaitingMe, false},
 		{"own draft, no CI data -> never ready to promote", map[string]any{"head_sha": "new", "author": "me", "draft": true}, nil, PanelMineAwaitingMe, false},
-		{"own draft, green -> ready to promote", map[string]any{"head_sha": "new", "author": "me", "draft": true}, []map[string]any{ciRun("A", "success", "new", "1", 1)}, PanelMineAwaitingTeam, true},
+		{"own draft, green -> ready to promote, awaiting me (2026-10-09: a draft is never awaiting team)", map[string]any{"head_sha": "new", "author": "me", "draft": true}, []map[string]any{ciRun("A", "success", "new", "1", 1)}, PanelMineAwaitingMe, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

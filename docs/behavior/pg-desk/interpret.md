@@ -129,8 +129,9 @@ and MUST NOT use an LLM for any step below.
     5. **Otherwise** → `team_awaiting_team`.
   - **Mine**, once not blocked: any unresolved review-thread comment → `mine_awaiting_me` (no
     author qualifier — an open thread is on the operator regardless of who left it). Otherwise, an
-    existing human approval → `mine_awaiting_me` (nothing left to do but merge). Otherwise →
-    `mine_awaiting_team`. Blocked → `mine_awaiting_me` (it's the operator's own PR to fix). The
+    existing human approval → `mine_awaiting_me` (nothing left to do but merge). Otherwise, an own
+    draft → `mine_awaiting_me` (operator ruling 2026-10-09: nobody else will flip a draft out of
+    draft, so it is never waiting on the team). Otherwise → `mine_awaiting_team`. Blocked → `mine_awaiting_me` (it's the operator's own PR to fix). The
     own-PR panels are unchanged by the 2026-10-05 team rulings: they use only the review-exempt
     softening, never the cancelled-run or no-CI-data softening, never the merge-state rule, and a
     bot disapproval still blocks.
