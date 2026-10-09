@@ -4005,7 +4005,7 @@
                 assert defaulted.pollIntervalSeconds == 120;
                 assert defaulted.strandedIntervalSeconds == 600;
                 assert defaulted.staleClaimHours == 6;
-                assert defaulted.commandTimeoutSeconds == 30;
+                assert defaulted.commandTimeoutSeconds == 90;
                 assert defaulted.labelCap == 500;
                 pkgs.runCommand "test-beads-exporter-darwin-module-ok"
                   {

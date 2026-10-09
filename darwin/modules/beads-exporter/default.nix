@@ -142,8 +142,12 @@ in
 
     commandTimeoutSeconds = lib.mkOption {
       type = lib.types.ints.positive;
-      default = 30;
-      description = "Bound on each bd call.";
+      default = 90;
+      description = ''
+        Bound on each bd call. A healthy call takes well under a second, so
+        the bound only has to tell a hang from a call slowed by host CPU
+        saturation, which has stretched a whole pass past 70 s.
+      '';
     };
 
     labelCap = lib.mkOption {

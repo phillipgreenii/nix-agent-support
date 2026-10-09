@@ -31,8 +31,10 @@ flowchart LR
   than overlap.
 - Databases are collected sequentially, and each database's result is published as soon as it
   finishes, so a slow database never withholds another database's series (beyond its own run).
-- Each bd call is bounded by `commandTimeoutSeconds`; on expiry the whole process group is
-  killed, so a forked grandchild cannot outlive the timeout.
+- Each bd call is bounded by `commandTimeoutSeconds` (90 in the module default: a healthy call
+  takes well under a second, so the bound only has to tell a hang from a call slowed by host CPU
+  saturation); on expiry the whole process group is killed, so a forked grandchild cannot outlive
+  the timeout.
 
 ## Running
 
@@ -325,7 +327,7 @@ stack is enabled and `dbs` is not empty; otherwise it defines nothing.
 | `claudeDir`                                                                                              | none: required                 |
 | `operatorNames`                                                                                          | `[]`                           |
 | `port`                                                                                                   | `9146`                         |
-| `pollIntervalSeconds`, `strandedIntervalSeconds`, `staleClaimHours`, `commandTimeoutSeconds`, `labelCap` | `120`, `600`, `6`, `30`, `500` |
+| `pollIntervalSeconds`, `strandedIntervalSeconds`, `staleClaimHours`, `commandTimeoutSeconds`, `labelCap` | `120`, `600`, `6`, `90`, `500` |
 | `internal.configFile` (read-only)                                                                        | the rendered config file       |
 
 The configuration file is rendered with the queue list read at evaluation time from
