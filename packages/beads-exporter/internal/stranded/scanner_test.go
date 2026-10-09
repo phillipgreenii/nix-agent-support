@@ -61,8 +61,8 @@ func TestIncrementalCacheReadsOnlyAppendedBytes(t *testing.T) {
 		t.Fatalf("an unchanged transcript was opened: %v", opened)
 	}
 
-	// Append one event: only the new bytes plus the overlap are read, and a new
-	// claim value in them is found.
+	// Append one event: only the new bytes are read, and a new claim value in
+	// them is found.
 	before := info.Size()
 	f.append(p, time.Minute, commandEvent("bd update y --actor worker-2"))
 	info, _ = os.Stat(p)
@@ -72,19 +72,18 @@ func TestIncrementalCacheReadsOnlyAppendedBytes(t *testing.T) {
 	if !equalStrings(keys(got), []string{"worker-1", "worker-2"}) {
 		t.Fatalf("scan after append = %v", keys(got))
 	}
-	if want := appended + int64(maxNeedleLen-1); f.opener.bytesRead(p) != want {
-		t.Fatalf("read %d bytes after appending %d, want appended + overlap = %d", f.opener.bytesRead(p), appended, want)
+	if f.opener.bytesRead(p) != appended {
+		t.Fatalf("read %d bytes after appending %d, want exactly the appended bytes", f.opener.bytesRead(p), appended)
 	}
 }
 
-func TestOverlapDecidesAClaimCutOffAtTheOldEnd(t *testing.T) {
+func TestAnUnfinishedLastLineIsCommittedOnlyOnceComplete(t *testing.T) {
 	f := newFixture(t)
 	path := f.write("-slug/a.jsonl", time.Hour, textEvent("x"))
 	s := NewScanner(f.opener.Open)
 	scan(t, s, path)
+	complete, _ := os.Stat(path)
 
-	// Append a claim that is written in two pieces: the first scan sees the
-	// value cut off and must not decide it; the next scan sees the rest.
 	appendRaw := func(text string) {
 		fh, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
 		if err != nil {
@@ -95,13 +94,68 @@ func TestOverlapDecidesAClaimCutOffAtTheOldEnd(t *testing.T) {
 		}
 		_ = fh.Close()
 	}
-	appendRaw(`bd update x --actor worker-1`)
+	// A line being written: no newline yet, so nothing in it counts, even a
+	// value that looks finished.
+	appendRaw(`{"type":"assistant","cmd":"bd update x --actor worker-1 --claim"}`)
 	if got := scan(t, s, path); len(got) != 0 {
-		t.Fatalf("an unterminated value was decided: %v", keys(got))
+		t.Fatalf("an unterminated line was committed: %v", keys(got))
 	}
-	appendRaw(`-extra --claim` + "\n")
-	if got := scan(t, s, path); !equalStrings(keys(got), []string{"worker-1-extra"}) {
-		t.Fatalf("scan = %v, want only the completed value", keys(got))
+	for _, e := range s.entries {
+		if e.offset != complete.Size() {
+			t.Fatalf("offset = %d, want the end of the last complete line (%d)", e.offset, complete.Size())
+		}
+	}
+	// Once the newline arrives the whole line is read again and counted.
+	appendRaw("\n")
+	f.opener.reset()
+	if got := scan(t, s, path); !equalStrings(keys(got), []string{"worker-1"}) {
+		t.Fatalf("scan = %v, want the completed line's value", keys(got))
+	}
+	info, _ := os.Stat(path)
+	if want := info.Size() - complete.Size(); f.opener.bytesRead(path) != want {
+		t.Fatalf("read %d bytes, want the %d bytes of the once-unfinished line", f.opener.bytesRead(path), want)
+	}
+}
+
+func TestToolResultLinesAreNotClaimsWhereverTheMarkerSits(t *testing.T) {
+	f := newFixture(t)
+	p := f.write(
+		"-slug/a.jsonl", time.Hour,
+		resultEvent(`[{"assignee":"listed-1"}]`),                     // marker after the value
+		rawEvent(map[string]any{"assignee": "listed-2"}),             // marker before the value
+		commandEvent("bd update x --actor kept-1"),                   // an ordinary line between them
+		resultEvent(`bd update x --actor listed-3`),                  // marker after
+		textEvent("run with BEADS_ACTOR=kept-2 set"),                 // a prompt
+		commandEvent("echo tool_result and toolUseResult are words"), // words, not markers
+		commandEvent("bd update x --actor kept-3"),
+	)
+	want := []string{"kept-1", "kept-2", "kept-3"}
+	for _, chunk := range []int{1, 3, 7, 19, 64, 100, readChunk} {
+		s := NewScanner(nil)
+		s.chunk = chunk
+		if got := keys(scan(t, s, p)); !equalStrings(got, want) {
+			t.Fatalf("chunk %d: claims = %v, want %v", chunk, got, want)
+		}
+	}
+}
+
+func TestAMarkerDoesNotLeakIntoTheNextLine(t *testing.T) {
+	f := newFixture(t)
+	p := f.write(
+		"-slug/a.jsonl", time.Hour,
+		resultEvent(`{"assignee":"listed"}`),
+		commandEvent("bd update x --actor kept"),
+	)
+	if got := keys(scan(t, NewScanner(nil), p)); !equalStrings(got, []string{"kept"}) {
+		t.Fatalf("claims = %v", got)
+	}
+	q := f.write(
+		"-slug/b.jsonl", time.Hour,
+		commandEvent("bd update x --actor kept"),
+		resultEvent(`{"assignee":"listed"}`),
+	)
+	if got := keys(scan(t, NewScanner(nil), q)); !equalStrings(got, []string{"kept"}) {
+		t.Fatalf("claims = %v", got)
 	}
 }
 

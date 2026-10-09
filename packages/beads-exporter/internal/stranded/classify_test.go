@@ -54,9 +54,10 @@ func TestLiveByClaimContext(t *testing.T) {
 		{"actor flag equals", commandEvent("bd update x1 --claim --actor=" + who)},
 		{"BEADS_ACTOR assignment", commandEvent("BEADS_ACTOR=" + who + " bd update x1 --claim")},
 		{"BEADS_ACTOR export quoted", commandEvent(`export BEADS_ACTOR="` + who + `"; bd ready`)},
-		{"assignee JSON value, escaped inside a tool result", resultEvent(`{"id":"x1","assignee":"` + who + `"}`)},
-		{"assignee JSON value, spaced, escaped", resultEvent(`{"id": "x1", "assignee": "` + who + `"}`)},
-		{"assignee JSON value, raw object", rawEvent(map[string]any{"id": "x1", "assignee": who})},
+		{"assignee JSON value, escaped inside a command", commandEvent(`echo '{"id":"x1","assignee":"` + who + `"}' | bd import`)},
+		{"assignee JSON value, spaced, escaped", commandEvent(`echo '{"id": "x1", "assignee": "` + who + `"}' | bd import`)},
+		{"assignee JSON value, raw in a tool input", toolInputEvent(map[string]any{"title": "t", "assignee": who})},
+		{"BEADS_ACTOR in the prompt the session was started with", textEvent("You are a worker. Run bd with BEADS_ACTOR=" + who + " set.")},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -86,6 +87,11 @@ func TestBareMentionIsNotLive(t *testing.T) {
 		commandEvent("echo worker-alpha"),
 		commandEvent("bd list --assignee worker-alpha"),
 		resultEvent(`{"assignee": null, "owner": "worker-alpha"}`),
+		// A tool's output is never a claim, however claim-shaped it looks.
+		resultEvent(`[{"id":"x1","assignee":"worker-alpha","status":"in_progress"}]`),
+		resultEvent(`bd update x1 --claim --actor worker-alpha`),
+		resultEvent(`BEADS_ACTOR=worker-alpha`),
+		rawEvent(map[string]any{"id": "x1", "assignee": "worker-alpha"}),
 		commandEvent("bd update x --actors worker-alpha"),
 	)
 	if got := f.classify(claimed("b1", "worker-alpha", "in_progress")); !equalStrings(got, []string{"b1"}) {

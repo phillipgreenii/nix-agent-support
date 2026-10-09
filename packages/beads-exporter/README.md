@@ -226,9 +226,12 @@ releases or changes a claim. A claim is **live** when any of these holds:
 2. **Claim context.** A transcript (a session's own, or a subagent's under
    `<session>/subagents/`; never a `*.status.jsonl` statusline sidecar) written within
    `staleClaimHours` uses the assignee as a claim value: the argument of `--actor`, the value after
-   `BEADS_ACTOR=`, or an `"assignee":` JSON value, in raw or JSON-escaped form. A bare mention (for
-   example a `bd list` output pasted into another session) does not count. A value is recognised
-   only when it is made of letters, digits and `._-:@/+`.
+   `BEADS_ACTOR=`, or an `"assignee":` JSON value, in raw or JSON-escaped form, on a line the
+   session itself wrote (a command, a tool input, a prompt). A bare mention does not count, and
+   neither does anything a tool printed: a transcript line that is a tool result (it carries
+   `"type":"tool_result"` or a `"toolUseResult":` key) is skipped whole, so a session that ran
+   `bd list --json` does not revive every claim in the output. A value is recognised only when it
+   is made of letters, digits and `._-:@/+`.
 3. **Operator names.** An assignee listed in `operatorNames` skips rule 2, because the name appears
    in nearly every transcript. Such a claim is live only while its claim time (`started_at`, else
    `updated_at`) is within `staleClaimHours`.
@@ -240,8 +243,10 @@ actor id is not a session id.
 Transcript reading is incremental. Discovery is `claude-transcript`'s `DiscoverTranscripts`; files
 whose modification time is outside the window are never opened. One pass over each in-window file
 extracts every claim value at once, and an append-only cache keyed by (device, inode) reads only
-the bytes appended since the last pass plus a fixed overlap, so the cost of a pass tracks the new
-transcript output, not the size of the tree. A transcript that cannot be listed or read fails the
+the bytes appended since the last pass, so the cost of a pass tracks the new transcript output, not
+the size of the tree. Only complete lines are consumed: a line still being written is read again,
+whole, on the next pass, and within a pass the last `maxNeedleLen-1` bytes are carried between
+chunks so a value cut by a chunk boundary is still seen. A transcript that cannot be listed or read fails the
 pass with `transcript_error` rather than guessing.
 
 Each pass writes one JSON log line per claim with no live owner, with `event` set to

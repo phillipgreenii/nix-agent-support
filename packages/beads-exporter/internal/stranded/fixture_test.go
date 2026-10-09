@@ -132,6 +132,20 @@ func resultEvent(output string) map[string]any {
 	}
 }
 
+// toolInputEvent is an assistant tool_use line whose structured input carries
+// the given fields, so JSON in it is not escaped.
+func toolInputEvent(input map[string]any) map[string]any {
+	return map[string]any{
+		"type": "assistant",
+		"message": map[string]any{
+			"role": "assistant",
+			"content": []any{map[string]any{
+				"type": "tool_use", "id": "tu", "name": "Create", "input": input,
+			}},
+		},
+	}
+}
+
 // rawEvent is a line carrying a structured tool result object, so JSON in it is
 // not escaped.
 func rawEvent(result any) map[string]any {

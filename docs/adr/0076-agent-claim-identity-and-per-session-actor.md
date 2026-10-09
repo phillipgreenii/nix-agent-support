@@ -79,13 +79,15 @@ the mechanics.
 1. a lower-case UUID inside the assignee names a session transcript
    (`<claudeDir>/projects/<slug>/<uuid>.jsonl`) written within the window;
 2. a transcript written within the window (a session's own or a subagent's, never a statusline
-   sidecar) uses the assignee as a claim value: the argument of `--actor`, the value after
-   `BEADS_ACTOR=`, or an `"assignee":` JSON value, in raw or JSON-escaped form;
+   sidecar) uses the assignee as a claim value on a line the session itself wrote: the argument
+   of `--actor`, the value after `BEADS_ACTOR=`, or an `"assignee":` JSON value, in raw or
+   JSON-escaped form;
 3. the assignee is a configured operator name and the claim itself is younger than the window.
    Rule 2 is skipped for operator names because the name appears in nearly every transcript.
 
-A bare mention of the assignee (for instance a `bd list` output in another session's transcript)
-is not a claim value and does not make a claim live. A value is recognised only when it is made of
+A bare mention of the assignee is not a claim value and does not make a claim live. That includes
+everything a tool printed: a transcript line that is a tool result is skipped whole, so a session
+that listed beads as JSON (or grepped another transcript) does not revive the claims in the output. A value is recognised only when it is made of
 letters, digits and `._-:@/+`; an assignee outside that set can be live by rule 1 or 3 only.
 
 **Report only.** The pass exports counts and the oldest claim time as metrics, logs one line per

@@ -132,7 +132,8 @@ func claimTime(b bd.Bead) time.Time {
 //  1. a lower-case UUID inside the assignee names a transcript
 //     <claudeDir>/projects/<slug>/<uuid>.jsonl written within the window;
 //  2. a transcript (a session's own or a subagent's, never a statusline
-//     sidecar) written within the window uses the assignee as a claim value;
+//     sidecar) written within the window uses the assignee as a claim value
+//     on a line the session wrote (output a tool printed does not count);
 //  3. the assignee is an operator name and the claim itself is younger than the
 //     window (rule 2 is skipped for these, since the name is everywhere).
 //
