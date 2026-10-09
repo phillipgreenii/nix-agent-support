@@ -149,6 +149,9 @@ func runToolAllow(t *testing.T, dir, name string, args ...string) (string, int) 
 	t.Helper()
 	cmd := exec.Command(name, args...)
 	cmd.Dir = dir
+	// Same scrubbed env as runTool: pb/pn/bd run git under it, and an inherited
+	// GIT_DIR/GIT_WORK_TREE would redirect them at the ambient repository.
+	cmd.Env = hermeticEnviron()
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		return string(out), 0
