@@ -4,112 +4,70 @@ import (
 	"context"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/phillipgreenii/x/gitfixture"
+	"github.com/phillipgreenii/x/gittest"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-scm-git/internal/gitenv"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
-// setupEnv returns a hermetic environment for the plain `git` invocations
-// this file's own fixture setup makes directly — bypassing this package's
-// Runner/gitenv seam entirely, since fixture setup is not the code under
-// test. HOME is pointed at a fresh temp dir and both the global and system
-// config files are pinned to /dev/null, so nothing this setup does can
-// read or write the real developer/CI environment's own git config
-// (mirrors packages/pg-pr/internal/gitfixture's already-established
-// pattern in this repo — a different Go module, so not importable here).
-//
-// It also applies that same sandbox to THIS PROCESS's own ambient
-// environment via t.Setenv (auto-restored at test/subtest cleanup) — not
-// just to the []string this function returns. The provider under test in
-// this file (New(NewExecRunner())) never receives that returned slice: its
-// Runner (gitexec.go's execRunner) builds every child git process through
-// gitenv.Command -> gitenv.Environ(), which reads this process's ambient
-// os.Environ(). Without the t.Setenv calls below, the provider under test
-// inherited the real developer/CI ~/.gitconfig even though every fixture
-// command setupGit runs was already sandboxed away from it [review finding
-// 35]. HOME is set fresh here rather than reusing a HOME from an earlier
-// call in the same test — harmless, since only "a value that is not the
-// real one" matters, never a specific path.
-func setupEnv(t *testing.T) []string {
-	t.Helper()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
-	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
-	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+// Every repository in this file comes from x/gittest: hermetic by
+// construction (fixture root under t.TempDir(), fixture HOME, an allowlisted
+// child environment that never inherits GIT_DIR/GIT_WORK_TREE, discovery
+// ceiling at the fixture root, hooks redirected to an empty directory).
 
-	ambient := map[string]string{}
-	for _, kv := range os.Environ() {
-		if k, v, ok := strings.Cut(kv, "="); ok {
-			ambient[k] = v
-		}
-	}
-	env := []string{
-		"HOME=" + home,
-		"GIT_CONFIG_NOSYSTEM=1",
-		"GIT_CONFIG_GLOBAL=/dev/null",
-		"GIT_CONFIG_SYSTEM=/dev/null",
-		"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@example.com",
-		"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@example.com",
-	}
-	for _, k := range []string{"PATH", "TMPDIR"} {
-		if v, ok := ambient[k]; ok {
-			env = append(env, k+"="+v)
-		}
-	}
-	return env
+// sandboxAmbientHome points THIS PROCESS's HOME (and XDG_CONFIG_HOME, which
+// git also reads global config from) at the fixture's own empty HOME, and
+// drops the system config, via t.Setenv (auto-restored at test cleanup). The
+// provider under test
+// in this file (New(NewExecRunner())) never receives the fixture's
+// environment: its Runner (gitexec.go's execRunner) builds every child git
+// process through gitenv.Command -> gitenv.Environ(), which reads this
+// process's ambient os.Environ(). Without this, the provider under test would
+// inherit the real developer/CI ~/.gitconfig (review finding 35).
+func sandboxAmbientHome(t *testing.T, repo *gitfixture.Repo) {
+	t.Helper()
+	home := filepath.Join(repo.Root(), "home")
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 }
 
-func setupGit(t *testing.T, dir string, args ...string) string {
+// mustGit runs `git <args...>` in repo through its hermetic client and fails
+// the test on error.
+func mustGit(t *testing.T, repo *gitfixture.Repo, args ...string) string {
 	t.Helper()
-	full := append([]string{"-C", dir}, args...)
-	cmd := exec.Command("git", full...)
-	cmd.Env = setupEnv(t)
-	out, err := cmd.CombinedOutput()
+	out, err := repo.Client.Run(context.Background(), args...)
 	if err != nil {
-		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		t.Fatalf("git %s: %v", strings.Join(args, " "), err)
 	}
 	return strings.TrimSpace(string(out))
 }
 
 // newRealGitFixture creates a throwaway repo with one commit on branch
-// "main", returning its absolute, symlink-resolved path (matching how
-// git itself reports paths on macOS, where a t.TempDir() lives under a
-// /var symlink to /private/var).
-func newRealGitFixture(t *testing.T) string {
+// "main", with this process's ambient HOME sandboxed for the provider under
+// test. repo.Dir is absolute and symlink-resolved (matching how git itself
+// reports paths on macOS, where a t.TempDir() lives under a /var symlink to
+// /private/var).
+func newRealGitFixture(t *testing.T) *gitfixture.Repo {
 	t.Helper()
-	dir := t.TempDir()
-	resolved, err := filepath.EvalSymlinks(dir)
-	if err != nil {
-		t.Fatalf("resolve symlinks: %v", err)
-	}
-	setupGit(t, resolved, "init", "-b", "main")
-	setupGit(t, resolved, "commit", "--allow-empty", "-m", "initial")
-	return resolved
+	repo := gittest.New(t, gitfixture.RepoOptions{InitialCommit: true})
+	sandboxAmbientHome(t, repo)
+	return repo
 }
 
-// TestProvider_RealGit_AmbientEnvironmentSharesFixtureSandbox is the
-// regression test for review finding 35: setupEnv previously sandboxed
-// HOME (and the global/system git config) only for the []string its own
-// callers (setupGit, i.e. this file's fixture setup) pass explicitly to
-// exec.Command. The provider under test throughout this file is built via
-// New(NewExecRunner()), whose Runner (gitexec.go's execRunner) builds
-// every child git process through gitenv.Command -> gitenv.Environ(),
-// which reads THIS PROCESS's own ambient os.Environ() — a value that
-// []string never touched, so the provider under test still inherited the
-// real developer/CI ~/.gitconfig.
-//
-// This test poisons the real HOME with a global git config value no
-// fixture ever sets, runs fixture setup (which must now re-sandbox the
-// ambient HOME/config away from the poisoned one), and then runs a git
-// command through the EXACT seam the provider's Runner uses
-// (gitenv.Command, never setupGit's own separate env slice) to assert the
+// TestProvider_RealGit_AmbientHomeIsSandboxed is the regression test for
+// review finding 35: the provider under test reads THIS PROCESS's ambient
+// environment, not the fixture's own, so fixture setup must re-sandbox the
+// ambient HOME. It poisons the real HOME with a global git config value no
+// fixture ever sets, builds a fixture, and then runs a git command through
+// the EXACT seam the provider's Runner uses (gitenv.Command) to assert the
 // poisoned value is unreachable.
-func TestProvider_RealGit_AmbientEnvironmentSharesFixtureSandbox(t *testing.T) {
+func TestProvider_RealGit_AmbientHomeIsSandboxed(t *testing.T) {
 	poisonedHome := t.TempDir()
 	if err := os.WriteFile(filepath.Join(poisonedHome, ".gitconfig"), []byte("[user]\n\temail = poisoned@example.com\n"), 0o644); err != nil {
 		t.Fatalf("write poisoned gitconfig: %v", err)
@@ -118,8 +76,8 @@ func TestProvider_RealGit_AmbientEnvironmentSharesFixtureSandbox(t *testing.T) {
 
 	repo := newRealGitFixture(t)
 
-	if out, err := gitenv.Command(context.Background(), repo, "config", "--global", "--get", "user.email").Output(); err == nil {
-		t.Fatalf("git config --global --get user.email = %q, want an error: global config must resolve to /dev/null (this file's sandbox), never the poisoned real HOME's ~/.gitconfig — the exact leak the provider under test was exposed to before this fix", strings.TrimSpace(string(out)))
+	if out, err := gitenv.Command(context.Background(), repo.Dir, "config", "--global", "--get", "user.email").Output(); err == nil {
+		t.Fatalf("git config --global --get user.email = %q, want an error: the ambient HOME must be the fixture's empty HOME, never the poisoned real HOME's ~/.gitconfig", strings.TrimSpace(string(out)))
 	}
 }
 
@@ -130,8 +88,9 @@ func TestProvider_RealGit_AmbientEnvironmentSharesFixtureSandbox(t *testing.T) {
 // checkout in tests, not just mocks, for at least one method)". It
 // exercises all four scm.Provider methods, not just one.
 func TestProvider_RealGit_WorktreeAddListRemoveAndBranchDetect(t *testing.T) {
-	repo := newRealGitFixture(t)
-	setupGit(t, repo, "branch", "feature")
+	fx := newRealGitFixture(t)
+	repo := fx.Dir
+	mustGit(t, fx, "branch", "feature")
 
 	// WorktreeAdd/WorktreeRemove/WorktreeList carry no repo/cwd wire
 	// argument of their own (interfaces.md's scm op catalog) — they resolve "the current
@@ -194,26 +153,19 @@ func TestProvider_RealGit_WorktreeAddListRemoveAndBranchDetect(t *testing.T) {
 }
 
 // newRealBareGitFixture creates a throwaway BARE repo with one commit on
-// branch "main", returning its absolute, symlink-resolved path. A bare
-// repo cannot receive a commit directly, so this goes via a throwaway
-// non-bare clone that pushes into it and is then discarded.
+// branch "main", returning its absolute, symlink-resolved path. A bare repo
+// cannot receive a commit directly, so this goes via a throwaway non-bare
+// seed repo that pushes into it; only the bare repo is handed to the test.
 func newRealBareGitFixture(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
-	resolved, err := filepath.EvalSymlinks(dir)
+	seed := gittest.New(t, gitfixture.RepoOptions{Suite: "bare-seed", InitialCommit: true})
+	bare, err := seed.AddBareRemote(context.Background(), "origin")
 	if err != nil {
-		t.Fatalf("resolve symlinks: %v", err)
+		t.Fatalf("AddBareRemote: %v", err)
 	}
-	bare := filepath.Join(resolved, "repo.git")
-	setupGit(t, resolved, "init", "--bare", "-b", "main", bare)
-	clone := filepath.Join(resolved, "seed-clone")
-	setupGit(t, resolved, "clone", bare, clone)
-	setupGit(t, clone, "commit", "--allow-empty", "-m", "initial")
-	setupGit(t, clone, "push", "origin", "main")
-	if err := os.RemoveAll(clone); err != nil {
-		t.Fatalf("remove seed clone: %v", err)
-	}
-	return bare
+	mustGit(t, seed, "push", "origin", "HEAD:refs/heads/main")
+	sandboxAmbientHome(t, bare)
+	return bare.Dir
 }
 
 // TestProvider_RealGit_BareRepo_WorktreeAddListBranchDetectRemove is the
@@ -269,25 +221,19 @@ func TestProvider_RealGit_BareRepo_WorktreeAddListBranchDetectRemove(t *testing.
 	}
 }
 
-// newRealSeparateGitDirFixture inits a repo at <root>/work whose git
-// directory is relocated to <root>/actual-git-dir via
-// `--separate-git-dir`, with one commit on branch "main". Returns the
-// working-tree root.
-func newRealSeparateGitDirFixture(t *testing.T) string {
+// newRealSeparateGitDirFixture builds a repo at <root>/work whose git
+// directory is relocated to <root>/actual-git-dir via `--separate-git-dir`
+// (gitfixture's RepoOptions.SeparateGitDir), with one commit on branch
+// "main". Returns the fixture repo; repo.Dir is the working-tree root.
+func newRealSeparateGitDirFixture(t *testing.T) *gitfixture.Repo {
 	t.Helper()
-	dir := t.TempDir()
-	resolved, err := filepath.EvalSymlinks(dir)
-	if err != nil {
-		t.Fatalf("resolve symlinks: %v", err)
-	}
-	work := filepath.Join(resolved, "work")
-	gitDir := filepath.Join(resolved, "actual-git-dir")
-	if err := os.MkdirAll(work, 0o755); err != nil {
-		t.Fatalf("mkdir work: %v", err)
-	}
-	setupGit(t, work, "init", "-b", "main", "--separate-git-dir="+gitDir)
-	setupGit(t, work, "commit", "--allow-empty", "-m", "initial")
-	return work
+	repo := gittest.New(t, gitfixture.RepoOptions{
+		Name:           "work",
+		SeparateGitDir: "actual-git-dir",
+		InitialCommit:  true,
+	})
+	sandboxAmbientHome(t, repo)
+	return repo
 }
 
 // TestProvider_RealGit_SeparateGitDir_MainWorktree_RootIsWorkingTree is
@@ -304,8 +250,12 @@ func newRealSeparateGitDirFixture(t *testing.T) string {
 // relocated git directory's own path as if it were the worktree path in
 // this exact configuration).
 func TestProvider_RealGit_SeparateGitDir_MainWorktree_RootIsWorkingTree(t *testing.T) {
-	work := newRealSeparateGitDirFixture(t)
-	setupGit(t, work, "branch", "feature")
+	fx := newRealSeparateGitDirFixture(t)
+	work := fx.Dir
+	if st, err := os.Stat(filepath.Join(work, ".git")); err != nil || !st.Mode().IsRegular() {
+		t.Fatalf("%s/.git must be a gitdir: file for the --separate-git-dir scenario: %v", work, err)
+	}
+	mustGit(t, fx, "branch", "feature")
 
 	t.Chdir(work)
 	p := New(NewExecRunner())
@@ -342,10 +292,11 @@ func TestProvider_RealGit_SeparateGitDir_MainWorktree_RootIsWorkingTree(t *testi
 // operates entirely on its own throwaway temp-dir repo/worktree; it never
 // touches this workspace's real `.worktrees/*`.
 func TestProvider_RealGit_WorktreeRemove_RefusesWorktreeNotCreatedByThisBackend(t *testing.T) {
-	repo := newRealGitFixture(t)
-	setupGit(t, repo, "branch", "other-tool-worktree")
+	fx := newRealGitFixture(t)
+	repo := fx.Dir
+	mustGit(t, fx, "branch", "other-tool-worktree")
 	otherPath := filepath.Join(repo, ".worktrees", "some-bead-id")
-	setupGit(t, repo, "worktree", "add", "--", otherPath, "other-tool-worktree")
+	mustGit(t, fx, "worktree", "add", "--", otherPath, "other-tool-worktree")
 
 	t.Chdir(repo)
 	p := New(NewExecRunner())
@@ -367,8 +318,9 @@ func TestProvider_RealGit_WorktreeRemove_RefusesWorktreeNotCreatedByThisBackend(
 // review), this test builds a genuinely unresolved symlinked alias of a
 // real worktree path and passes THAT to WorktreeRemove.
 func TestProvider_RealGit_WorktreeRemove_SymlinkedPathVariant_StillMatches(t *testing.T) {
-	repo := newRealGitFixture(t)
-	setupGit(t, repo, "branch", "feature")
+	fx := newRealGitFixture(t)
+	repo := fx.Dir
+	mustGit(t, fx, "branch", "feature")
 
 	t.Chdir(repo)
 	p := New(NewExecRunner())

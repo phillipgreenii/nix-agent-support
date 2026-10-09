@@ -56,6 +56,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/x/gitfixture"
+	"github.com/phillipgreenii/x/gittest"
+
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
@@ -294,30 +297,25 @@ func newDisposableBDWorkspace(t *testing.T) string {
 
 // newDisposableGitRepo creates a fresh, disposable one-commit git repo with
 // one extra unchecked-out branch ("feature/contract-probe") for the
-// scm-git cases to exercise `worktree add` against. Caller must already
-// have called requireTool(t, "git").
+// scm-git cases to exercise `worktree add` against. The repo comes from
+// x/gittest (hermetic by construction: fixture root under t.TempDir(),
+// fixture HOME, an allowlisted child environment that never inherits
+// GIT_DIR/GIT_WORK_TREE, fixture identity). Caller must already have called
+// requireTool(t, "git").
 func newDisposableGitRepo(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
-	run := func(args ...string) {
-		ctx, cancel := context.WithTimeout(context.Background(), runDeadline)
-		defer cancel()
-		cmd := exec.CommandContext(ctx, "git", args...)
-		cmd.Dir = dir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
+	repo := gittest.New(t, gitfixture.RepoOptions{Suite: "pg-connector-contract-suite"})
+	ctx, cancel := context.WithTimeout(context.Background(), runDeadline)
+	defer cancel()
+	if _, err := repo.Commit(ctx, "initial commit", map[string]string{
+		"README.md": "pg-connector contract suite fixture\n",
+	}); err != nil {
+		t.Fatalf("commit fixture: %v", err)
 	}
-	run("init", "-b", "main")
-	run("config", "user.email", "pg-connector-contract-suite@example.invalid")
-	run("config", "user.name", "pg-connector contract suite")
-	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("pg-connector contract suite fixture\n"), 0o644); err != nil {
-		t.Fatalf("write README: %v", err)
+	if _, err := repo.Client.Run(ctx, "branch", "feature/contract-probe"); err != nil {
+		t.Fatalf("git branch: %v", err)
 	}
-	run("add", "README.md")
-	run("commit", "-m", "initial commit")
-	run("branch", "feature/contract-probe")
-	return dir
+	return repo.Dir
 }
 
 // requireGHRepoAndPR is this suite's env-var gate for every real-GitHub

@@ -4,6 +4,7 @@ go 1.26.0
 
 require (
 	github.com/gofrs/flock v0.13.1
+	github.com/phillipgreenii/x v0.0.0-20261007115411-386c14bc447d
 	github.com/spf13/cobra v1.10.2
 	gopkg.in/yaml.v3 v3.0.1
 )

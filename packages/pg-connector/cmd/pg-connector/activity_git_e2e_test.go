@@ -7,8 +7,8 @@ package main
 // author dates span one month. Nothing here fakes the backend or the wire:
 // the umbrella execs the real binary over the real scriptout protocol.
 //
-// The fixture is generated with plain git commands under a hermetic
-// environment built from an allowlist (never inheriting GIT_DIR or
+// The fixture repositories come from x/gittest (hermetic by construction:
+// an allowlisted child environment that never inherits GIT_DIR or
 // GIT_INDEX_FILE, which the commit-time test hook exports).
 
 import (
@@ -24,6 +24,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/phillipgreenii/x/gitclient"
+	"github.com/phillipgreenii/x/gitfixture"
+	"github.com/phillipgreenii/x/gittest"
 )
 
 const (
@@ -34,43 +38,16 @@ const (
 	gitE2EBuildDeadline = 8 * time.Minute
 )
 
-// gitE2EEnv returns a hermetic environment for the fixture's own git
-// commands: PATH and TMPDIR from the ambient environment, a pinned HOME, no
-// global or system config, and a pinned identity and dates. GIT_DIR and
-// GIT_INDEX_FILE are never copied.
-func gitE2EEnv(home, name, email, date string) []string {
-	env := []string{
-		"HOME=" + home,
-		"GIT_CONFIG_NOSYSTEM=1",
-		"GIT_CONFIG_GLOBAL=/dev/null",
-		"GIT_CONFIG_SYSTEM=/dev/null",
-		"GIT_AUTHOR_NAME=" + name, "GIT_AUTHOR_EMAIL=" + email,
-		"GIT_COMMITTER_NAME=" + name, "GIT_COMMITTER_EMAIL=" + email,
-		"GIT_AUTHOR_DATE=" + date, "GIT_COMMITTER_DATE=" + date,
-	}
-	for _, k := range []string{"PATH", "TMPDIR"} {
-		if v, ok := os.LookupEnv(k); ok {
-			env = append(env, k+"="+v)
-		}
-	}
-	return env
-}
-
-func gitE2ERun(t *testing.T, env []string, dir string, args ...string) {
+// gitE2ECommit makes one commit (a one-line file change) authored and
+// committed by name/email at the given RFC3339 date. gitclient has no
+// per-call environment, so the pinned identity and dates ride on a one-off
+// client over the same repository; its base options mirror gitfixture's own
+// (fixture HOME, fixture-root ceiling, no system config) and the library's
+// allowlist still excludes every GIT_* variable of this process.
+func gitE2ECommit(t *testing.T, repo *gitfixture.Repo, name, email string, when time.Time, msg string) {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	cmd.Env = env
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
-	}
-}
-
-// gitE2ECommit makes one commit (a one-line file change) authored by email at
-// the given RFC3339 date.
-func gitE2ECommit(t *testing.T, home, repo, name, email string, when time.Time, msg string) {
-	t.Helper()
-	env := gitE2EEnv(home, name, email, when.Format(time.RFC3339))
-	f, err := os.OpenFile(filepath.Join(repo, "log.txt"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	date := when.Format(time.RFC3339)
+	f, err := os.OpenFile(filepath.Join(repo.Dir, "log.txt"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		t.Fatalf("open fixture file: %v", err)
 	}
@@ -80,16 +57,25 @@ func gitE2ECommit(t *testing.T, home, repo, name, email string, when time.Time, 
 	if err := f.Close(); err != nil {
 		t.Fatalf("close fixture file: %v", err)
 	}
-	gitE2ERun(t, env, repo, "add", "log.txt")
-	gitE2ERun(t, env, repo, "commit", "-q", "-m", msg)
-}
-
-func gitE2EInit(t *testing.T, home, repo string) {
-	t.Helper()
-	if err := os.MkdirAll(repo, 0o755); err != nil {
-		t.Fatalf("mkdir %s: %v", repo, err)
+	ctx := context.Background()
+	client, err := gitclient.New(
+		ctx, repo.Dir,
+		gitclient.WithHome(filepath.Join(repo.Root(), "home")),
+		gitclient.WithoutInherited("SSH_AUTH_SOCK"),
+		gitclient.WithCeiling(repo.Root()),
+		gitclient.WithEnv("GIT_CONFIG_NOSYSTEM", "1"),
+		gitclient.WithEnv("GIT_AUTHOR_NAME", name), gitclient.WithEnv("GIT_AUTHOR_EMAIL", email),
+		gitclient.WithEnv("GIT_COMMITTER_NAME", name), gitclient.WithEnv("GIT_COMMITTER_EMAIL", email),
+		gitclient.WithEnv("GIT_AUTHOR_DATE", date), gitclient.WithEnv("GIT_COMMITTER_DATE", date),
+	)
+	if err != nil {
+		t.Fatalf("git client for %s: %v", repo.Dir, err)
 	}
-	gitE2ERun(t, gitE2EEnv(home, "init", "init@example.test", "2026-08-31T00:00:00Z"), repo, "init", "-q", "-b", "main")
+	for _, args := range [][]string{{"add", "log.txt"}, {"commit", "-q", "-m", msg}} {
+		if _, err := client.Run(ctx, args...); err != nil {
+			t.Fatalf("git %s: %v", strings.Join(args, " "), err)
+		}
+	}
 }
 
 // buildActivityGitBinary go-builds the real backend into a fresh temp dir and
@@ -174,29 +160,23 @@ func TestActivityGitFanOutE2E(t *testing.T) {
 	binDir := buildActivityGitBinary(t)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	// Sandbox this process's ambient environment too: the umbrella execs the
-	// backend, which execs git under a PATH+HOME-only environment.
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
-	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
-	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	// Sandbox this process's ambient HOME too: the umbrella execs the backend,
+	// which execs git under a PATH+HOME-only environment.
+	t.Setenv("HOME", t.TempDir())
 
-	root, err := filepath.EvalSymlinks(t.TempDir())
-	if err != nil {
-		t.Fatalf("resolve temp dir: %v", err)
-	}
-	mainRepo := filepath.Join(root, "primary-clone")
-	searchRoot := filepath.Join(root, "workspace")
-	foundRepo := filepath.Join(searchRoot, "discovered-clone")
-	gitE2EInit(t, home, mainRepo)
-	gitE2EInit(t, home, foundRepo)
+	// Each fixture repository sits directly under its own fixture root; the
+	// discovered clone's root doubles as the search path (its home/hooks
+	// siblings are not repositories and are skipped like any plain directory).
+	primary := gittest.New(t, gitfixture.RepoOptions{Suite: "activity-primary", Name: "primary-clone"})
+	discovered := gittest.New(t, gitfixture.RepoOptions{Suite: "activity-discovered", Name: "discovered-clone"})
+	mainRepo := primary.Dir
+	searchRoot := discovered.Root()
 	// A non-repo directory under the search path and a missing configured
 	// path: both are skipped (logged to the backend's stderr), never fatal.
 	if err := os.MkdirAll(filepath.Join(searchRoot, "plain-directory"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	missing := filepath.Join(root, "no-such-clone")
+	missing := filepath.Join(primary.Root(), "no-such-clone")
 
 	// September 2026, noon UTC. The operator commits on most days (one or two
 	// a day); another author commits on every third day and must never appear.
@@ -209,17 +189,17 @@ func TestActivityGitFanOutE2E(t *testing.T) {
 		n := 1 + d%2
 		for i := 0; i < n; i++ {
 			when := day(d).Add(time.Duration(i) * time.Hour)
-			gitE2ECommit(t, home, mainRepo, "Operator", gitE2EAuthorEmail, when, fmt.Sprintf("operator change %d-%d", d, i))
+			gitE2ECommit(t, primary, "Operator", gitE2EAuthorEmail, when, fmt.Sprintf("operator change %d-%d", d, i))
 		}
 		expectedPerDay[day(d).Format("2006-01-02")] += n
 		if d%3 == 0 {
-			gitE2ECommit(t, home, mainRepo, "Someone Else", gitE2EOtherEmail, day(d).Add(5*time.Hour), fmt.Sprintf("other change %d", d))
+			gitE2ECommit(t, primary, "Someone Else", gitE2EOtherEmail, day(d).Add(5*time.Hour), fmt.Sprintf("other change %d", d))
 		}
 	}
 	// The discovered clone holds two operator commits and one foreign commit.
-	gitE2ECommit(t, home, foundRepo, "Operator", gitE2EAuthorEmail, day(10), "discovered operator one")
-	gitE2ECommit(t, home, foundRepo, "Operator", gitE2EAuthorEmail, day(20), "discovered operator two")
-	gitE2ECommit(t, home, foundRepo, "Someone Else", gitE2EOtherEmail, day(15), "discovered other")
+	gitE2ECommit(t, discovered, "Operator", gitE2EAuthorEmail, day(10), "discovered operator one")
+	gitE2ECommit(t, discovered, "Operator", gitE2EAuthorEmail, day(20), "discovered operator two")
+	gitE2ECommit(t, discovered, "Someone Else", gitE2EOtherEmail, day(15), "discovered other")
 	expectedPerDay[day(10).Format("2006-01-02")]++
 	expectedPerDay[day(20).Format("2006-01-02")]++
 	wantTotal := 0

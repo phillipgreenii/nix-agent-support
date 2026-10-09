@@ -5,13 +5,16 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/phillipgreenii/x/gitclient"
+	"github.com/phillipgreenii/x/gitfixture"
+	"github.com/phillipgreenii/x/gittest"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/activity"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
@@ -24,52 +27,80 @@ const (
 	otherEmail = "other@example.test"
 )
 
-// gitFixture is a hermetic scratch area for building real repositories.
+// gitFixture builds real repositories from x/gittest (hermetic by
+// construction: fixture root under t.TempDir(), fixture HOME, an allowlisted
+// child environment that never inherits GIT_DIR/GIT_INDEX_FILE, discovery
+// ceiling at the fixture root, hooks redirected to an empty directory). The
+// methods keep the path-keyed shape the tests were written against; every
+// path they accept is a repository this fixture created.
 type gitFixture struct {
-	t    *testing.T
-	home string
+	t     *testing.T
+	repos map[string]*gitfixture.Repo // by Dir
 }
 
-// newGitFixture pins HOME for this test process (the code under test builds
-// its git child environment from PATH and HOME only, so a pinned empty HOME
-// is what keeps it off the developer's real git config) and returns a
-// fixture whose setup git commands run under an allowlist-built environment.
-// The setup environment NEVER inherits GIT_DIR or GIT_INDEX_FILE (the
-// commit-time hook runs tests with GIT_DIR exported).
+// newGitFixture pins this process's HOME to an empty directory (the code
+// under test builds its git child environment from PATH and HOME only, so a
+// pinned empty HOME is what keeps it off the developer's real git config).
+// The fixture's own git commands never read this process's environment.
 func newGitFixture(t *testing.T) *gitFixture {
 	t.Helper()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	return &gitFixture{t: t, home: home}
+	t.Setenv("HOME", t.TempDir())
+	return &gitFixture{t: t, repos: map[string]*gitfixture.Repo{}}
 }
 
-func (f *gitFixture) env(extra ...string) []string {
-	env := []string{
-		"HOME=" + f.home,
-		"GIT_CONFIG_NOSYSTEM=1",
-		"GIT_CONFIG_GLOBAL=/dev/null",
-		"GIT_CONFIG_SYSTEM=/dev/null",
-		"GIT_AUTHOR_NAME=fixture", "GIT_AUTHOR_EMAIL=" + meEmail,
-		"GIT_COMMITTER_NAME=fixture", "GIT_COMMITTER_EMAIL=" + meEmail,
-		"GIT_AUTHOR_DATE=2026-01-01T00:00:00+00:00",
-		"GIT_COMMITTER_DATE=2026-01-01T00:00:00+00:00",
+// track registers repo, makes meEmail its configured author (the tests
+// filter on it; commit overrides it per commit), and returns its resolved
+// path.
+func (f *gitFixture) track(repo *gitfixture.Repo) string {
+	f.t.Helper()
+	if _, err := repo.Client.Run(context.Background(), "config", "user.email", meEmail); err != nil {
+		f.t.Fatalf("configure author of %s: %v", repo.Dir, err)
 	}
-	for _, k := range []string{"PATH", "TMPDIR"} {
-		if v, ok := os.LookupEnv(k); ok {
-			env = append(env, k+"="+v)
-		}
-	}
-	return append(env, extra...)
+	f.repos[repo.Dir] = repo
+	return repo.Dir
 }
 
-// git runs `git -C dir args...` under the hermetic environment.
+func (f *gitFixture) repo(dir string) *gitfixture.Repo {
+	f.t.Helper()
+	repo, ok := f.repos[dir]
+	if !ok {
+		f.t.Fatalf("%s is not a repository created by this fixture", dir)
+	}
+	return repo
+}
+
+// git runs `git args...` in the fixture repository at dir. extraEnv
+// (KEY=value pairs, e.g. pinned dates or an author) applies to this one
+// invocation, on top of the library's hermetic environment.
 func (f *gitFixture) git(dir string, extraEnv []string, args ...string) string {
 	f.t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	cmd.Env = f.env(extraEnv...)
-	out, err := cmd.CombinedOutput()
+	repo := f.repo(dir)
+	client := repo.Client
+	if len(extraEnv) > 0 {
+		// gitclient has no per-call environment, so a one-off client over
+		// the same repository carries it; the base options mirror
+		// gitfixture's own (fixture HOME, fixture-root ceiling, no system
+		// config), and the library's allowlist still excludes every GIT_*
+		// variable of this process.
+		opts := []gitclient.Option{
+			gitclient.WithHome(filepath.Join(repo.Root(), "home")),
+			gitclient.WithoutInherited("SSH_AUTH_SOCK"),
+			gitclient.WithCeiling(repo.Root()),
+			gitclient.WithEnv("GIT_CONFIG_NOSYSTEM", "1"),
+		}
+		for _, kv := range extraEnv {
+			k, v, _ := strings.Cut(kv, "=")
+			opts = append(opts, gitclient.WithEnv(k, v))
+		}
+		var err error
+		client, err = gitclient.New(context.Background(), repo.Dir, opts...)
+		if err != nil {
+			f.t.Fatalf("git client for %s: %v", dir, err)
+		}
+	}
+	out, err := client.Run(context.Background(), args...)
 	if err != nil {
-		f.t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		f.t.Fatalf("git %s: %v", strings.Join(args, " "), err)
 	}
 	return strings.TrimSpace(string(out))
 }
@@ -77,12 +108,14 @@ func (f *gitFixture) git(dir string, extraEnv []string, args ...string) string {
 // newRepo creates an empty repo on branch main and returns its resolved path.
 func (f *gitFixture) newRepo() string {
 	f.t.Helper()
-	dir, err := filepath.EvalSymlinks(f.t.TempDir())
-	if err != nil {
-		f.t.Fatal(err)
-	}
-	f.git(dir, nil, "init", "-b", "main")
-	return dir
+	return f.track(gittest.New(f.t, gitfixture.RepoOptions{}))
+}
+
+// clone clones the fixture repository at src into a new repository named
+// name beside it (under src's fixture root), with src as its origin.
+func (f *gitFixture) clone(src, name string) string {
+	f.t.Helper()
+	return f.track(gittest.Clone(f.t, f.repo(src), name))
 }
 
 // commit makes an empty commit with a pinned identity and pinned dates, and
@@ -262,10 +295,7 @@ func TestListActivity_RealRepo_ClonesDedupeAndTopicOnlyOnce(t *testing.T) {
 	f := newGitFixture(t)
 	repo := populatedRepo(f)
 
-	cloneA, cloneB := t.TempDir(), t.TempDir()
-	for _, c := range []string{cloneA, cloneB} {
-		f.git(filepath.Dir(c), nil, "clone", repo, c)
-	}
+	cloneA, cloneB := f.clone(repo, "clone-a"), f.clone(repo, "clone-b")
 	identA, identB := repoIdent(context.Background(), NewExecRunner(), cloneA), repoIdent(context.Background(), NewExecRunner(), cloneB)
 	if identA != identB || strings.HasPrefix(identA, filepath.Base(cloneA)) {
 		t.Fatalf("clones must share an origin-derived ident: %q vs %q", identA, identB)
@@ -429,22 +459,32 @@ func TestListActivity_RealRepo_SearchPathDiscovery(t *testing.T) {
 	origin := populatedRepo(f)
 	other := populatedRepo(f)
 
-	search, err := filepath.EvalSymlinks(t.TempDir())
+	// The search path is the fixture root of a bare remote that carries
+	// origin's branches: a bare repository has no .git entry, so discovery
+	// skips it, and the clones below land beside it.
+	bare, err := f.repo(origin).AddBareRemote(context.Background(), "origin")
 	if err != nil {
 		t.Fatal(err)
 	}
-	cloneA := filepath.Join(search, "a-clone")
-	cloneB := filepath.Join(search, "b-clone")
-	f.git(search, nil, "clone", origin, cloneA)
-	f.git(search, nil, "clone", origin, cloneB)
+	f.git(origin, nil, "push", "origin", "--all")
+	search := bare.Root()
+
+	cloneA := gittest.Clone(t, bare, "a-clone")
+	f.track(cloneA)
+	cloneB := gittest.Clone(t, bare, "b-clone")
+	f.track(cloneB)
 	siblingWT := filepath.Join(search, "c-sibling-worktree")
-	f.git(cloneA, nil, "worktree", "add", "-b", "wt-branch", siblingWT)
+	f.git(cloneA.Dir, nil, "worktree", "add", "-b", "wt-branch", siblingWT)
 	foreignWT := filepath.Join(search, "d-foreign-worktree")
 	f.git(other, nil, "worktree", "add", "-b", "wt-foreign", foreignWT)
 	mkdirAll(t, filepath.Join(search, "e-plain"))
-	nested := filepath.Join(search, "f-group", "nested")
-	mkdirAll(t, nested)
-	f.git(nested, nil, "init", "-b", "main")
+	// A repository two levels down: its fixture root is the group directory.
+	nestedRepo, err := gitfixture.NewRepo(context.Background(), filepath.Join(search, "f-group"),
+		gitfixture.RepoOptions{Suite: "nested", Name: "nested"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nested := f.track(nestedRepo)
 	f.commit(nested, meEmail, "2026-09-17T10:00:00+00:00", "2026-09-17T10:00:00+00:00", "nested-commit")
 
 	for _, wt := range []string{siblingWT, foreignWT} {
@@ -492,7 +532,7 @@ func TestListActivity_RealRepo_SearchPathDiscovery(t *testing.T) {
 	// cloneA is read first; cloneB and the sibling worktree share its
 	// repo_ident and shas, so everything they hold collides on id and loses.
 	// The foreign worktree has its own ident and contributes its own commits.
-	for path, want := range map[string]int{cloneA: 5, cloneB: 0, siblingWT: 0, foreignWT: 6} {
+	for path, want := range map[string]int{cloneA.Dir: 5, cloneB.Dir: 0, siblingWT: 0, foreignWT: 6} {
 		if byPath[path] != want {
 			t.Errorf("%s contributed %d items, want %d", path, byPath[path], want)
 		}
@@ -508,13 +548,8 @@ func TestListActivity_RealRepo_SearchPathDiscovery(t *testing.T) {
 // in repo_paths and found under a search path is read once.
 func TestListActivity_RealRepo_SearchPathSharedWithRepoPaths(t *testing.T) {
 	f := newGitFixture(t)
-	search, err := filepath.EvalSymlinks(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	repo := filepath.Join(search, "r")
-	mkdirAll(t, repo)
-	f.git(repo, nil, "init", "-b", "main")
+	repo := f.newRepo()
+	search := f.repo(repo).Root() // the repo sits directly under its fixture root
 	f.commit(repo, meEmail, "2026-09-05T10:00:00+00:00", "2026-09-05T10:00:00+00:00", "only-commit")
 
 	cfg := Config{AuthorEmails: []string{meEmail}, RepoPaths: []string{repo}, RepoSearchPaths: []string{search}}

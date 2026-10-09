@@ -1,6 +1,9 @@
 schema = 3
 cachePackages = [
   'github.com/gofrs/flock',
+  'github.com/phillipgreenii/x/gitclient',
+  'github.com/phillipgreenii/x/gitfixture',
+  'github.com/phillipgreenii/x/gittest',
   'github.com/spf13/cobra',
   'github.com/spf13/pflag',
   'golang.org/x/sys/unix',
@@ -15,6 +18,10 @@ cachePackages = [
   [mod.'github.com/inconshreveable/mousetrap']
     version = 'v1.1.0'
     hash = 'sha256-XWlYH0c8IcxAwQTnIi6WYqq44nOKUylSWxWO/vi+8pE='
+
+  [mod.'github.com/phillipgreenii/x']
+    version = 'v0.0.0-20261007115411-386c14bc447d'
+    hash = 'sha256-VOmqXfMbGimAQTkO0RdoMtjTnaxO5P3N5+R3xVHtG0w='
 
   [mod.'github.com/spf13/cobra']
     version = 'v1.10.2'
