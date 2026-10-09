@@ -7,45 +7,32 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/phillipgreenii/pb/internal/run"
+	"github.com/phillipgreenii/x/gitfixture"
+	"github.com/phillipgreenii/x/gittest"
 )
 
 // gitEnvVars are the variables git exports into a hook's environment (GIT_DIR,
 // GIT_INDEX_FILE, GIT_WORK_TREE, GIT_PREFIX, GIT_OBJECT_DIRECTORY,
-// GIT_COMMON_DIR). Inherited by a child process, they repoint tempdir git calls
-// at the REAL repo instead of the test's t.TempDir() — breaking hermeticity
-// whenever this package's tests run inside a `git commit` hook (this repo's own
-// run-unit-tests pre-commit hook runs `go test ./...`). Fixed the same way as
-// packages/pb/internal/patchid/patchid_test.go's hermeticEnviron helper.
+// GIT_COMMON_DIR). Isolate (the code under test) runs git with opts.Env left
+// nil, so it inherits THIS process's environment; TestMain therefore unsets
+// them before any test runs (see below). The tests' own fixture repositories
+// need no scrub: they come from x/gittest, whose git child environment is an
+// allowlist.
 var gitEnvVars = []string{
 	"GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE",
 	"GIT_PREFIX", "GIT_OBJECT_DIRECTORY", "GIT_COMMON_DIR",
 }
 
-// hermeticEnviron returns os.Environ() with the git hook-inherited variables
-// removed. Mirrors internal/patchid's hermeticEnviron.
-func hermeticEnviron() []string {
-	skip := make(map[string]bool, len(gitEnvVars))
-	for _, v := range gitEnvVars {
-		skip[v] = true
-	}
-	var env []string
-	for _, kv := range os.Environ() {
-		if k := strings.SplitN(kv, "=", 2)[0]; !skip[k] {
-			env = append(env, kv)
-		}
-	}
-	return env
-}
-
 // TestMain scrubs the git hook-inherited env vars from THIS PROCESS before any
-// test runs. gitTest below rebuilds its own child env from hermeticEnviron(),
-// but Isolate (production code) runs git via run.CLIRunner{} with opts.Env left
-// nil — which os/exec fills in from the process environment at inherit time —
-// so the process itself must be clean for the tests' Isolate calls to be
-// hermetic too. See the mandatory amendment in this task's brief.
+// test runs. Isolate (production code) runs git via run.CLIRunner{} with
+// opts.Env left nil — which os/exec fills in from the process environment at
+// inherit time — so the process itself must be clean for the tests' Isolate
+// calls to be hermetic. (The fixture repositories are hermetic by themselves;
+// this is about the code under test.)
 func TestMain(m *testing.M) {
 	for _, v := range gitEnvVars {
 		_ = os.Unsetenv(v)
@@ -112,42 +99,40 @@ func withCanonicalConfig(t *testing.T, repo string) string {
 	return src
 }
 
-// gitTest runs git with a hermetic config (no user/global gitconfig) and a
-// hermetic environment (no inherited hook git-state vars).
+// fixtureRepos maps each newRepo path to its x/gittest fixture so gitTest can
+// drive the same hermetic client (fixture HOME, identity and hooks directory;
+// no inherited GIT_* state).
+var fixtureRepos sync.Map // string (repo dir) -> *gitfixture.Repo
+
+// gitTest runs git in the fixture repository newRepo returned for dir, through
+// that fixture's hermetic client, and returns its stdout. It fails the test on
+// error or when dir was not produced by newRepo.
 func gitTest(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	r := run.CLIRunner{}
-	full := append([]string{
-		"-C", dir,
-		"-c", "user.email=test@example.com", "-c", "user.name=test",
-		"-c", "commit.gpgsign=false",
-	}, args...)
-	res, err := r.Run(context.Background(), "git", full, run.Options{
-		Env: append(hermeticEnviron(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null"),
-	})
-	if err != nil {
-		t.Fatalf("git %v: %v\n%s", args, err, res.Stderr)
+	v, ok := fixtureRepos.Load(dir)
+	if !ok {
+		t.Fatalf("gitTest: %s is not a newRepo fixture", dir)
 	}
-	return res.Stdout
+	out, err := v.(*gitfixture.Repo).Client.Run(t.Context(), args...)
+	if err != nil {
+		t.Fatalf("git %v: %v", args, err)
+	}
+	return string(out)
 }
 
-// newRepo creates a repo on branch main with one commit and returns its path.
-// The tempdir is symlink-resolved up front (macOS t.TempDir() lives under
-// /var/folders → /private/var/folders; git reports resolved paths, so the test
-// must compare in resolved space).
+// newRepo creates a hermetic x/gittest repository on branch main with one
+// commit and returns its path. gittest resolves symlinks in the path up front
+// (macOS t.TempDir() lives under /var/folders → /private/var/folders; git
+// reports resolved paths, so the test must compare in resolved space).
 func newRepo(t *testing.T) string {
 	t.Helper()
-	dir, err := filepath.EvalSymlinks(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
+	repo := gittest.New(t, gitfixture.RepoOptions{Suite: "pb-drain-isolate"})
+	if _, err := repo.Commit(t.Context(), "init", map[string]string{"f.txt": "x\n"}); err != nil {
+		t.Fatalf("seed commit: %v", err)
 	}
-	gitTest(t, dir, "init", "-b", "main")
-	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("x\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	gitTest(t, dir, "add", "f.txt")
-	gitTest(t, dir, "commit", "-m", "init")
-	return dir
+	fixtureRepos.Store(repo.Dir, repo)
+	t.Cleanup(func() { fixtureRepos.Delete(repo.Dir) })
+	return repo.Dir
 }
 
 func TestIsolate_freshWorktree(t *testing.T) {

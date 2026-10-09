@@ -25,6 +25,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/phillipgreenii/x/gitfixture"
+	"github.com/phillipgreenii/x/gittest"
 )
 
 // hermeticEnviron returns os.Environ() with the git-hook-injected vars
@@ -89,15 +92,17 @@ func isolateBeadsEnv(t *testing.T) {
 	t.Setenv("GIT_COMMITTER_EMAIL", "t@e.com")
 }
 
-func initGitRepoWithCommit(t *testing.T, dir string) {
+// initGitRepoWithCommit returns the directory of a hermetic x/gittest
+// repository holding one commit ("c1" adding a.txt on branch main). The
+// fixture owns its own HOME, identity and hooks directory and never inherits
+// GIT_* state, so no hand-rolled `git init` or env scrub is needed here.
+func initGitRepoWithCommit(t *testing.T) string {
 	t.Helper()
-	runTool(t, dir, "git", "init", "-b", "main")
-	runTool(t, dir, "git", "config", "commit.gpgsign", "false")
-	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("hello\n"), 0o644); err != nil {
-		t.Fatal(err)
+	repo := gittest.New(t, gitfixture.RepoOptions{Suite: "pb-gate-integration"})
+	if _, err := repo.Commit(t.Context(), "c1", map[string]string{"a.txt": "hello\n"}); err != nil {
+		t.Fatalf("seed commit: %v", err)
 	}
-	runTool(t, dir, "git", "add", "a.txt")
-	runTool(t, dir, "git", "commit", "-m", "c1")
+	return repo.Dir
 }
 
 // runTool runs name with cwd=dir, inheriting the (isolated) process env, and

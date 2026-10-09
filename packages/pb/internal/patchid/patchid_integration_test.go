@@ -91,7 +91,8 @@ func (p poisonedRunner) Run(ctx context.Context, name string, args []string, opt
 }
 
 func TestCompute_ignoresExternalDiffAndTextconvDrivers(t *testing.T) {
-	dir := initRepo(t)
+	repo := initRepo(t)
+	dir := repo.Dir
 
 	// Wire a diff.*.textconv driver via repo-local config + a .gitattributes
 	// `diff=` assignment -- the vector git-log(1) applies BY DEFAULT (unlike
@@ -99,11 +100,11 @@ func TestCompute_ignoresExternalDiffAndTextconvDrivers(t *testing.T) {
 	// see the package doc comment above).
 	textconvDriver := filepath.Join(dir, "garbage-textconv.sh")
 	writeGarbageDriver(t, textconvDriver, "TEXTCONV-GARBAGE")
-	runGit(t, dir, "config", "diff.corruptor.textconv", textconvDriver)
-	commit(t, dir, ".gitattributes", "*.txt diff=corruptor\n", "wire textconv driver")
+	runGit(t, repo, "config", "diff.corruptor.textconv", textconvDriver)
+	commit(t, repo, ".gitattributes", "*.txt diff=corruptor\n", "wire textconv driver")
 
-	commit(t, dir, "a.txt", "hello\n", "add a")
-	commit(t, dir, "a.txt", "hello there\n", "modify a")
+	commit(t, repo, "a.txt", "hello\n", "add a")
+	commit(t, repo, "a.txt", "hello there\n", "modify a")
 
 	// GIT_EXTERNAL_DIFF poisoning per the bug report's testable claim.
 	extDiffDriver := filepath.Join(dir, "garbage-ext-diff.sh")

@@ -10,6 +10,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/phillipgreenii/x/gitfixture"
+	"github.com/phillipgreenii/x/gittest"
 )
 
 // buildPB compiles the pb binary into a fresh t.TempDir() on every call.
@@ -61,34 +64,30 @@ func setupSmokeWorkspace(t *testing.T) string {
 	ws := t.TempDir()
 	t.Setenv("PN_WORKSPACE_ROOT", ws)
 
-	remotes := filepath.Join(ws, "remotes")
-	if err := os.MkdirAll(remotes, 0o755); err != nil {
+	// producer: one commit containing the change we will gate, pushed to a
+	// hermetic bare remote that the workspace clones from.
+	producer := gittest.New(t, gitfixture.RepoOptions{Suite: "pb-smoke-producer"})
+	producerBare := newBareOrigin(t, producer)
+	if _, err := producer.Commit(t.Context(), "the gated change", map[string]string{"change.txt": "the gated change\n"}); err != nil {
 		t.Fatal(err)
 	}
+	pushMain(t, producer)
 
-	// producer bare remote: one commit containing the change we will gate.
-	producerBare := filepath.Join(remotes, "producer.git")
-	runTool(t, ws, "git", "init", "--bare", "-b", "main", producerBare)
-	pw := t.TempDir()
-	runTool(t, pw, "git", "clone", "file://"+producerBare, ".")
-	writeFile(t, filepath.Join(pw, "change.txt"), "the gated change\n")
-	runTool(t, pw, "git", "add", "change.txt")
-	runTool(t, pw, "git", "commit", "-m", "the gated change")
-	runTool(t, pw, "git", "push", "-u", "origin", "main")
-
-	// terminal (consumer) bare remote: trivial flake + apply.sh.
-	consumerBare := filepath.Join(remotes, "consumer.git")
-	runTool(t, ws, "git", "init", "--bare", "-b", "main", consumerBare)
-	cw := t.TempDir()
-	runTool(t, cw, "git", "clone", "file://"+consumerBare, ".")
-	writeFile(t, filepath.Join(cw, "flake.nix"), "{ inputs = {}; outputs = { self, ... }: {}; }\n")
-	writeFile(t, filepath.Join(cw, "apply.sh"), "#!/bin/sh\nset -e\ntouch applied.txt\n")
-	if err := os.Chmod(filepath.Join(cw, "apply.sh"), 0o755); err != nil {
+	// terminal (consumer): trivial flake + apply.sh.
+	consumer := gittest.New(t, gitfixture.RepoOptions{Suite: "pb-smoke-consumer"})
+	consumerBare := newBareOrigin(t, consumer)
+	writeFile(t, filepath.Join(consumer.Dir, "flake.nix"), "{ inputs = {}; outputs = { self, ... }: {}; }\n")
+	writeFile(t, filepath.Join(consumer.Dir, "apply.sh"), "#!/bin/sh\nset -e\ntouch applied.txt\n")
+	if err := os.Chmod(filepath.Join(consumer.Dir, "apply.sh"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	runTool(t, cw, "git", "add", "flake.nix", "apply.sh")
-	runTool(t, cw, "git", "commit", "-m", "init terminal")
-	runTool(t, cw, "git", "push", "-u", "origin", "main")
+	if _, err := consumer.Client.Run(t.Context(), "add", "--", "flake.nix", "apply.sh"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := consumer.Client.Run(t.Context(), "commit", "-m", "init terminal"); err != nil {
+		t.Fatal(err)
+	}
+	pushMain(t, consumer)
 
 	// workspace config: wsid set, consumer is the terminal, trivial apply.
 	writeFile(t, filepath.Join(ws, "pn-workspace.toml"), ""+
@@ -116,6 +115,25 @@ func setupSmokeWorkspace(t *testing.T) string {
 	// isolated embedded-Dolt beads workspace at the root.
 	runTool(t, ws, "bd", "init", "--prefix", "pbsm")
 	return ws
+}
+
+// newBareOrigin registers a hermetic local bare repository as `origin` of repo
+// and returns its path (the clone URL the pn workspace uses).
+func newBareOrigin(t *testing.T, repo *gitfixture.Repo) string {
+	t.Helper()
+	bare, err := repo.AddBareRemote(t.Context(), "origin")
+	if err != nil {
+		t.Fatalf("add bare origin: %v", err)
+	}
+	return bare.Dir
+}
+
+// pushMain pushes repo's main branch to origin and sets upstream.
+func pushMain(t *testing.T, repo *gitfixture.Repo) {
+	t.Helper()
+	if _, err := repo.Client.Run(t.Context(), "push", "-u", "origin", "main"); err != nil {
+		t.Fatalf("push main: %v", err)
+	}
 }
 
 func writeFile(t *testing.T, path, content string) {

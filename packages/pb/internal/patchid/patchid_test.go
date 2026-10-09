@@ -5,29 +5,21 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/pb/internal/run"
+	"github.com/phillipgreenii/x/gitfixture"
+	"github.com/phillipgreenii/x/gittest"
 )
 
-// hermetic environment removes git env vars inherited from a parent `git commit`'s hook
-// environment (GIT_DIR, GIT_INDEX_FILE, GIT_WORK_TREE, GIT_PREFIX,
-// GIT_OBJECT_DIRECTORY, GIT_COMMON_DIR). These variables repoint tempdir git calls at the
-// real repo, breaking test hermeticity when tests are run from a git commit hook.
-//
-// It also pins GIT_CONFIG_NOSYSTEM=1 and GIT_CONFIG_GLOBAL/GIT_CONFIG_SYSTEM=/dev/null,
-// mirroring packages/pg-pr/internal/gitfixture.Env's already-established fix for the same
-// defect class (pg2-12795): this repo's system/global git config wires
-// core.hooksPath at a machine-wide pg-git-check-identity dispatcher (tc-2y74), which a
-// plain `-C <dir>` git invocation does NOT escape (that only changes the working
-// directory, not which config git resolves hooks from). Without this, these fixtures'
-// own throwaway commits (author/committer name "t") trip that hook's placeholder-identity
-// denylist -- and renaming to a "safer" name does not fix it either, since
-// PGCI_FAKE_NAME_RE also rejects the "gitfixture" pattern by design (it exists to catch
-// even a fixture identity that escapes its sandbox). Skipping global/system config
-// outright is the correct fix, not picking a name the denylist happens to allow today.
+// hermeticEnviron is the environment the CODE UNDER TEST (Client's own git calls,
+// via hermeticCLIRunner) runs with: the git hook-inherited variables (GIT_DIR,
+// GIT_INDEX_FILE, GIT_WORK_TREE, GIT_PREFIX, GIT_OBJECT_DIRECTORY,
+// GIT_COMMON_DIR) are removed so a hook's own repo state cannot redirect it, and
+// GIT_CONFIG_NOSYSTEM=1 / GIT_CONFIG_GLOBAL / GIT_CONFIG_SYSTEM=/dev/null skip
+// machine-wide config (e.g. a global core.hooksPath dispatcher). The test
+// fixtures themselves are built by x/gittest and need none of this.
 func hermeticEnviron() []string {
 	skipVars := map[string]bool{
 		"GIT_DIR": true, "GIT_INDEX_FILE": true, "GIT_WORK_TREE": true,
@@ -74,44 +66,38 @@ func hermeticEnviron() []string {
 // `if _, seen := byID[id]; !seen` with a constant leaves seen unused, which does
 // not compile — so a nonzero notViable count on this package is expected.
 
-func initRepo(t *testing.T) string {
+// initRepo returns a hermetic x/gittest repository (fixture HOME, identity and
+// hooks directory; no inherited GIT_* state) on branch main. Tests use
+// repo.Dir for the code under test and repo.Client / commit / mustGit for
+// fixture git steps.
+func initRepo(t *testing.T) *gitfixture.Repo {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH")
 	}
-	dir := t.TempDir()
-	t.Setenv("HOME", dir) // keep git config writes inside temp (nix sandbox is read-only HOME)
-	runGit(t, dir, "init", "-b", "main")
-	runGit(t, dir, "config", "commit.gpgsign", "false")
-	return dir
+	return gittest.New(t, gitfixture.RepoOptions{Suite: "pb-patchid"})
 }
 
-func runGit(t *testing.T, dir string, args ...string) {
+// runGit runs a fixture git step in repo, failing the test on error.
+func runGit(t *testing.T, repo *gitfixture.Repo, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	cmd.Env = append(
-		hermeticEnviron(),
-		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e.com",
-		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e.com",
-	)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+	if _, err := repo.Client.Run(t.Context(), args...); err != nil {
+		t.Fatalf("git %s: %v", strings.Join(args, " "), err)
 	}
 }
 
-func commit(t *testing.T, dir, file, content, msg string) {
+func commit(t *testing.T, repo *gitfixture.Repo, file, content, msg string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(dir, file), []byte(content), 0o644); err != nil {
-		t.Fatal(err)
+	if _, err := repo.Commit(t.Context(), msg, map[string]string{file: content}); err != nil {
+		t.Fatalf("commit %q: %v", msg, err)
 	}
-	runGit(t, dir, "add", file)
-	runGit(t, dir, "commit", "-m", msg)
 }
 
 func TestComputeAndScan_findsCommitPatchID(t *testing.T) {
-	dir := initRepo(t)
-	commit(t, dir, "a.txt", "hello\n", "add a")
-	commit(t, dir, "b.txt", "world\n", "add b")
+	repo := initRepo(t)
+	dir := repo.Dir
+	commit(t, repo, "a.txt", "hello\n", "add a")
+	commit(t, repo, "b.txt", "world\n", "add b")
 	c := Client{R: hermeticCLIRunner{}}
 	id, err := c.Compute(context.Background(), dir, "HEAD")
 	if err != nil || id == "" {
@@ -132,11 +118,12 @@ func TestComputeAndScan_findsCommitPatchID(t *testing.T) {
 // gate check already runs — no extra git call and no new gate metadata. Asserted
 // against real git, because it is git's output shape being relied upon.
 func TestScanPatchIDCommits_mapsPatchIDToItsCommit(t *testing.T) {
-	dir := initRepo(t)
-	commit(t, dir, "a.txt", "hello\n", "add a")
-	base := strings.TrimSpace(mustGit(t, dir, "rev-parse", "HEAD"))
-	commit(t, dir, "b.txt", "world\n", "add b")
-	head := strings.TrimSpace(mustGit(t, dir, "rev-parse", "HEAD"))
+	repo := initRepo(t)
+	dir := repo.Dir
+	commit(t, repo, "a.txt", "hello\n", "add a")
+	base := strings.TrimSpace(mustGit(t, repo, "rev-parse", "HEAD"))
+	commit(t, repo, "b.txt", "world\n", "add b")
+	head := strings.TrimSpace(mustGit(t, repo, "rev-parse", "HEAD"))
 
 	c := Client{R: hermeticCLIRunner{}}
 	id, err := c.Compute(context.Background(), dir, "HEAD")
@@ -165,8 +152,9 @@ func TestScanPatchIDCommits_mapsPatchIDToItsCommit(t *testing.T) {
 }
 
 func TestScan_emptyRangeYieldsEmptySet(t *testing.T) {
-	dir := initRepo(t)
-	commit(t, dir, "a.txt", "hello\n", "c1")
+	repo := initRepo(t)
+	dir := repo.Dir
+	commit(t, repo, "a.txt", "hello\n", "c1")
 	c := Client{R: hermeticCLIRunner{}}
 	// HEAD..HEAD is an empty range.
 	set, err := c.ScanPatchIDs(context.Background(), dir, "HEAD..HEAD")
@@ -179,16 +167,17 @@ func TestScan_emptyRangeYieldsEmptySet(t *testing.T) {
 }
 
 func TestComputeStableAcrossRebase(t *testing.T) {
-	dir := initRepo(t)
-	commit(t, dir, "base.txt", "base\n", "base")
-	commit(t, dir, "feat.txt", "feature\n", "feat")
+	repo := initRepo(t)
+	dir := repo.Dir
+	commit(t, repo, "base.txt", "base\n", "base")
+	commit(t, repo, "feat.txt", "feature\n", "feat")
 	c := Client{R: hermeticCLIRunner{}}
 	before, err := c.Compute(context.Background(), dir, "HEAD")
 	if err != nil {
 		t.Fatalf("Compute before: %v", err)
 	}
 	// Rewrite history: amend the base commit's message (changes SHAs of both).
-	runGit(t, dir, "rebase", "--exec", "true", "--root") // no-op exec forces re-application
+	runGit(t, repo, "rebase", "--exec", "true", "--root") // no-op exec forces re-application
 	after, err := c.Compute(context.Background(), dir, "HEAD")
 	if err != nil {
 		t.Fatalf("Compute after: %v", err)
@@ -199,11 +188,12 @@ func TestComputeStableAcrossRebase(t *testing.T) {
 }
 
 func TestIsAncestor(t *testing.T) {
-	dir := initRepo(t)
-	commit(t, dir, "a.txt", "1\n", "c1")
+	repo := initRepo(t)
+	dir := repo.Dir
+	commit(t, repo, "a.txt", "1\n", "c1")
 	c := Client{R: hermeticCLIRunner{}}
-	first := strings.TrimSpace(mustGit(t, dir, "rev-parse", "HEAD"))
-	commit(t, dir, "a.txt", "2\n", "c2")
+	first := strings.TrimSpace(mustGit(t, repo, "rev-parse", "HEAD"))
+	commit(t, repo, "a.txt", "2\n", "c2")
 	if !c.IsAncestor(context.Background(), dir, first, "HEAD") {
 		t.Error("first commit should be ancestor of HEAD")
 	}
@@ -212,11 +202,9 @@ func TestIsAncestor(t *testing.T) {
 	}
 }
 
-func mustGit(t *testing.T, dir string, args ...string) string {
+func mustGit(t *testing.T, repo *gitfixture.Repo, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	cmd.Env = hermeticEnviron()
-	out, err := cmd.Output()
+	out, err := repo.Client.Run(t.Context(), args...)
 	if err != nil {
 		t.Fatalf("git %v: %v", args, err)
 	}

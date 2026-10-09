@@ -49,8 +49,7 @@ func TestFleetRace_beadHeldUntilGateResolves(t *testing.T) {
 	requireBinaries(t, "bd", "git")
 	isolateBeadsEnv(t)
 
-	ws := t.TempDir()
-	initGitRepoWithCommit(t, ws)
+	ws := initGitRepoWithCommit(t)
 	runTool(t, ws, "bd", "init", "--prefix", "fr")
 
 	// Step 1: a deferred follow-up bead is hidden from `bd ready`.

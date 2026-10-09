@@ -29,6 +29,8 @@ import (
 	"github.com/phillipgreenii/pb/internal/patchid"
 	"github.com/phillipgreenii/pb/internal/pn"
 	"github.com/phillipgreenii/pb/internal/run"
+	"github.com/phillipgreenii/x/gitfixture"
+	"github.com/phillipgreenii/x/gittest"
 )
 
 // ---------------------------------------------------------------------------
@@ -360,14 +362,12 @@ func TestContract_GitPatchID(t *testing.T) {
 	c := patchid.Client{R: hermeticCLIRunner{}}
 	ctx := context.Background()
 
-	newRepo := func(name string) string {
-		dir := filepath.Join(t.TempDir(), name)
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		shellOut(t, dir, "git", "init", "-b", "main")
-		shellOut(t, dir, "git", "config", "commit.gpgsign", "false")
-		return dir
+	// newRepo builds a hermetic x/gittest repository (fixture HOME, no
+	// inherited GIT_* state) and returns it; callers use repo.Dir for the code
+	// under test and repo.Client for fixture git steps.
+	newRepo := func(t *testing.T, name string) *gitfixture.Repo {
+		t.Helper()
+		return gittest.New(t, gitfixture.RepoOptions{Suite: "pb-contract-patchid", Name: name})
 	}
 	lines := func(n int) []string {
 		out := make([]string, n)
@@ -376,38 +376,42 @@ func TestContract_GitPatchID(t *testing.T) {
 		}
 		return out
 	}
-	write := func(dir, name string, content []string) {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(strings.Join(content, "\n")+"\n"), 0o644); err != nil {
-			t.Fatal(err)
+	text := func(content []string) string { return strings.Join(content, "\n") + "\n" }
+	git := func(t *testing.T, repo *gitfixture.Repo, args ...string) {
+		t.Helper()
+		if _, err := repo.Client.Run(ctx, args...); err != nil {
+			t.Fatalf("git %s: %v", strings.Join(args, " "), err)
 		}
 	}
-	commitAll := func(dir, msg string) {
-		shellOut(t, dir, "git", "add", "-A")
-		shellOut(t, dir, "git", "commit", "-m", msg)
+	commit := func(t *testing.T, repo *gitfixture.Repo, msg string, files map[string]string) string {
+		t.Helper()
+		sha, err := repo.Commit(ctx, msg, files)
+		if err != nil {
+			t.Fatalf("commit %q: %v", msg, err)
+		}
+		return sha
 	}
 
 	t.Run("rebase-stable-and-found-by-scan", func(t *testing.T) {
-		dir := newRepo("stable")
+		repo := newRepo(t, "stable")
+		dir := repo.Dir
 		base := lines(30)
-		write(dir, "f.txt", base)
-		commitAll(dir, "base")
-		shellOut(t, dir, "git", "checkout", "-b", "feature")
+		commit(t, repo, "base", map[string]string{"f.txt": text(base)})
+		git(t, repo, "checkout", "-b", "feature")
 		feat := append([]string{}, base...)
 		feat[19] = "CHANGED20"
-		write(dir, "f.txt", feat)
-		commitAll(dir, "feat")
+		commit(t, repo, "feat", map[string]string{"f.txt": text(feat)})
 		orig, err := c.Compute(ctx, dir, "HEAD")
 		if err != nil {
 			t.Fatal(err)
 		}
 		// far edit on main (line2), then rebase feature onto it.
-		shellOut(t, dir, "git", "checkout", "main")
+		git(t, repo, "checkout", "main")
 		far := append([]string{}, base...)
 		far[1] = "MAIN2"
-		write(dir, "f.txt", far)
-		commitAll(dir, "main-far")
-		shellOut(t, dir, "git", "checkout", "feature")
-		shellOut(t, dir, "git", "rebase", "main")
+		commit(t, repo, "main-far", map[string]string{"f.txt": text(far)})
+		git(t, repo, "checkout", "feature")
+		git(t, repo, "rebase", "main")
 		after, err := c.Compute(ctx, dir, "HEAD")
 		if err != nil {
 			t.Fatal(err)
@@ -426,26 +430,24 @@ func TestContract_GitPatchID(t *testing.T) {
 	})
 
 	t.Run("near-context-rebase-misses", func(t *testing.T) {
-		dir := newRepo("near")
+		repo := newRepo(t, "near")
+		dir := repo.Dir
 		base := lines(30)
-		write(dir, "f.txt", base)
-		commitAll(dir, "base")
-		shellOut(t, dir, "git", "checkout", "-b", "feature")
+		commit(t, repo, "base", map[string]string{"f.txt": text(base)})
+		git(t, repo, "checkout", "-b", "feature")
 		feat := append([]string{}, base...)
 		feat[19] = "CHANGED20"
-		write(dir, "f.txt", feat)
-		commitAll(dir, "feat")
+		commit(t, repo, "feat", map[string]string{"f.txt": text(feat)})
 		orig, err := c.Compute(ctx, dir, "HEAD")
 		if err != nil {
 			t.Fatal(err)
 		}
-		shellOut(t, dir, "git", "checkout", "main")
+		git(t, repo, "checkout", "main")
 		near := append([]string{}, base...)
 		near[17] = "MAIN18" // within the 3-line diff context of line 20
-		write(dir, "f.txt", near)
-		commitAll(dir, "main-near")
-		shellOut(t, dir, "git", "checkout", "feature")
-		shellOut(t, dir, "git", "rebase", "main")
+		commit(t, repo, "main-near", map[string]string{"f.txt": text(near)})
+		git(t, repo, "checkout", "feature")
+		git(t, repo, "rebase", "main")
 		set, err := c.ScanPatchIDs(ctx, dir, "-n 10 HEAD")
 		if err != nil {
 			t.Fatal(err)
@@ -456,29 +458,26 @@ func TestContract_GitPatchID(t *testing.T) {
 	})
 
 	t.Run("squash-loses-component-patch-ids", func(t *testing.T) {
-		dir := newRepo("squash")
+		repo := newRepo(t, "squash")
+		dir := repo.Dir
 		base := lines(30)
-		write(dir, "f.txt", base)
-		commitAll(dir, "base")
-		baseSHA := strings.TrimSpace(shellOut(t, dir, "git", "rev-parse", "HEAD"))
+		baseSHA := commit(t, repo, "base", map[string]string{"f.txt": text(base)})
 		x := append([]string{}, base...)
 		x[4] = "X5"
-		write(dir, "f.txt", x)
-		commitAll(dir, "X")
+		commit(t, repo, "X", map[string]string{"f.txt": text(x)})
 		px, err := c.Compute(ctx, dir, "HEAD")
 		if err != nil {
 			t.Fatal(err)
 		}
 		y := append([]string{}, x...)
 		y[9] = "Y10"
-		write(dir, "f.txt", y)
-		commitAll(dir, "Y")
+		commit(t, repo, "Y", map[string]string{"f.txt": text(y)})
 		py, err := c.Compute(ctx, dir, "HEAD")
 		if err != nil {
 			t.Fatal(err)
 		}
-		shellOut(t, dir, "git", "reset", "--soft", baseSHA)
-		commitAll(dir, "Z (squash)")
+		git(t, repo, "reset", "--soft", baseSHA)
+		git(t, repo, "commit", "-m", "Z (squash)")
 		set, err := c.ScanPatchIDs(ctx, dir, baseSHA+"..HEAD")
 		if err != nil {
 			t.Fatal(err)
@@ -489,11 +488,9 @@ func TestContract_GitPatchID(t *testing.T) {
 	})
 
 	t.Run("binary-yields-patch-id", func(t *testing.T) {
-		dir := newRepo("binary")
-		if err := os.WriteFile(filepath.Join(dir, "b.bin"), []byte{0, 1, 2, 3, 0xff, 0xfe, 0xfd}, 0o644); err != nil {
-			t.Fatal(err)
-		}
-		commitAll(dir, "bin")
+		repo := newRepo(t, "binary")
+		dir := repo.Dir
+		commit(t, repo, "bin", map[string]string{"b.bin": string([]byte{0, 1, 2, 3, 0xff, 0xfe, 0xfd})})
 		id, err := c.Compute(ctx, dir, "HEAD")
 		if err != nil {
 			t.Fatal(err)
@@ -504,20 +501,23 @@ func TestContract_GitPatchID(t *testing.T) {
 	})
 
 	t.Run("stable-differs-from-verbatim", func(t *testing.T) {
-		dir := newRepo("stablever")
+		repo := newRepo(t, "stablever")
+		dir := repo.Dir
 		base := lines(30)
-		write(dir, "f.txt", base)
-		commitAll(dir, "base")
+		commit(t, repo, "base", map[string]string{"f.txt": text(base)})
 		two := append([]string{}, base...)
 		two[4] = "D5"
 		two[24] = "D25"
-		write(dir, "f.txt", two)
-		commitAll(dir, "two-hunks")
+		commit(t, repo, "two-hunks", map[string]string{"f.txt": text(two)})
 		stable, err := c.Compute(ctx, dir, "HEAD")
 		if err != nil {
 			t.Fatal(err)
 		}
-		show := shellOut(t, dir, "git", "show", "HEAD")
+		showOut, err := repo.Client.Run(ctx, "show", "HEAD")
+		if err != nil {
+			t.Fatalf("git show HEAD: %v", err)
+		}
+		show := string(showOut)
 		var sout, serr bytes.Buffer
 		vc := exec.Command("git", "-C", dir, "patch-id", "--verbatim")
 		vc.Env = hermeticEnviron()
