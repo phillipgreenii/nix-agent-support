@@ -18,7 +18,7 @@ import (
 //
 // Why: the host's link to GitHub drops intermittently, and `gh` answers a
 // dropped connection with "error connecting to api.github.com" (or a 502/503/
-// 504 from the edge, or a response cut off mid-body). One such blip failed the
+// 504 from the edge, an HTTP/2 stream CANCEL, or a response cut off mid-body). One such blip failed the
 // whole list/show op as "unavailable" even though an immediate second try
 // would have succeeded, and a sustained run of those blips tripped the
 // sustained-unavailable alert. A short, bounded retry absorbs the blip without
@@ -281,6 +281,12 @@ var transientMarkers = []string{
 	"gateway timeout",
 }
 
+// transientH2Cancel matches Go's HTTP/2 stream reset "stream error: stream ID
+// 7; CANCEL; received from peer": the edge cancelled one request mid-flight,
+// a passing fault like a dropped connection (bead pg2-8zqrs). Only CANCEL is
+// matched; other stream error codes are not claimed to be transient here.
+var transientH2Cancel = regexp.MustCompile(`stream error: stream id \d+; cancel\b`)
+
 // isTransientGHError reports whether err is a passing fault worth retrying:
 // not an auth failure, not a 4xx / rate-limit / not-found answer, not a
 // cancelled or expired context, and matching one of the transient markers.
@@ -302,6 +308,9 @@ func isTransientGHError(ctx context.Context, err error) bool {
 		if strings.Contains(msg, m) {
 			return false
 		}
+	}
+	if transientH2Cancel.MatchString(msg) {
+		return true
 	}
 	for _, m := range transientMarkers {
 		if strings.Contains(msg, m) {

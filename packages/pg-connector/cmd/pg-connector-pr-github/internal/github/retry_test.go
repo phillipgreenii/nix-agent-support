@@ -150,6 +150,21 @@ func TestRead_TransientThenSuccess(t *testing.T) {
 // A persistent transient failure exhausts the bounded attempts, then surfaces
 // as the SAME unclassified error it always did (wire code "unavailable") with
 // the diagnostic stderr tail still present.
+func TestRead_StreamCancelThenSuccess(t *testing.T) {
+	gh := &scriptedGH{script: []scripted{
+		transient("gh api graphql: exit status 1: stream error: stream ID 5; CANCEL; received from peer"),
+		okOut(okSearch),
+	}}
+	sl := &fakeSleeper{}
+	raw, err := retryProvider(gh, sl).runRead(context.Background(), readOpts{}, "api", "graphql")
+	if err != nil || string(raw) != okSearch {
+		t.Fatalf("runRead = %q, %v; want success after one retry", raw, err)
+	}
+	if len(gh.calls) != 2 || len(sl.delays) != 1 {
+		t.Fatalf("calls=%d delays=%v, want 2 calls and 1 backoff", len(gh.calls), sl.delays)
+	}
+}
+
 func TestRead_PersistentTransientExhaustsAttemptsKeepingTail(t *testing.T) {
 	gh := &scriptedGH{script: []scripted{transient(errConnect)}}
 	sl := &fakeSleeper{}
@@ -428,6 +443,7 @@ func TestIsTransientGHError(t *testing.T) {
 		"net/http: TLS handshake timeout", "dial tcp: lookup api.github.com: no such host",
 		"Get \"https://api.github.com/graphql\": unexpected EOF",
 		"unexpected end of JSON input", "gh: exit status 1: Unexpected End of JSON Input",
+		"Post \"https://api.github.com/graphql\": stream error: stream ID 7; CANCEL; received from peer",
 		"Post \"https://api.github.com/graphql\": context deadline exceeded (Client.Timeout exceeded while awaiting headers)",
 	}
 	for _, m := range yes {
@@ -438,6 +454,8 @@ func TestIsTransientGHError(t *testing.T) {
 	no := []string{
 		"gh: Not Found (HTTP 404)", "gh: Validation Failed (HTTP 422)", "gh: Too Many Requests (HTTP 429)",
 		"API rate limit exceeded", "exit status 1", "signal: killed", "",
+		"stream error: stream ID 7; PROTOCOL_ERROR; received from peer",
+		"stream error: stream ID 7; CANCELLED_BY_POLICY",
 	}
 	for _, m := range no {
 		if isTransientGHError(ctx, errors.New(m)) {

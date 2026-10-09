@@ -194,8 +194,8 @@ failing command) and its last bytes (the `gh` stderr, which names the cause), wi
 and a truncated response stay distinguishable in the log.
 
 `pg-connector-pr-github` retries transient `gh` failures on its read-only calls (show, files,
-commits, list and search reads): a connection error, an HTTP 502/503/504, or a response that is
-empty or cut off mid-JSON. It makes at most 3 attempts, backing off 500ms and then 1s, and never
+commits, list and search reads): a connection error, an HTTP 502/503/504, an HTTP/2 stream
+CANCEL, or a response that is empty or cut off mid-JSON. It makes at most 3 attempts, backing off 500ms and then 1s, and never
 starts a retry that would not leave at least 5s of the call's own deadline. Auth failures, 4xx
 answers, rate-limit errors and not-found answers are final on the first attempt, and writes are
 never retried. Before every retry the same GraphQL reserve check that guards `list` runs again, and
