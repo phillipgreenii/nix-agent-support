@@ -34,14 +34,20 @@ preconditions, and premise freshness (whose heaviest reference material lives in
 
 ## `bd --json` Output Shape
 
-> Two `bd` builds that both print `bd version 1.2.2 (dev)` coexist on this machine and
-> disagree on the `--json` envelope. The machine wrapper (`/etc/profiles/per-user/$USER/bin/bd`,
-> what the pg2 workspace runs) wraps every result as `{"schema_version": …, "data": [...]}`;
-> the `beads-1.2.2` store package that the ZR monorepo dev environment puts on `PATH` — and
-> that every pg-router-dispatched session therefore runs — returns the bare array. Observed
-> 2026-09-21: nine `jq` failures in one week of dispatched sessions, all
-> `Cannot index array with string ("data")`, from filters copied out of this skill and its
-> siblings.
+> Two `bd` 1.3.1 builds coexist on this machine. The ZR recipe build prints
+> `bd version 1.3.1 (nix:phillipg-nix-ziprecruiter)` and is what the machine wrapper
+> (`/etc/profiles/per-user/$USER/bin/bd`) resolves to; the llm-agents prebuilt prints
+> `bd version 1.3.1 (dev)`. Since 1.3.1 they no longer
+> disagree by build: both emit the same `--json` envelope, selected by the `BD_JSON_ENVELOPE`
+> environment variable. With `BD_JSON_ENVELOPE=1` (exported by home-manager in the pg2 workspace's
+> shells) every result is `{"schema_version": …, "data": [...]}`; with it unset or `0` the same
+> binaries return the bare array. So the shape depends on the caller's environment, not on which
+> binary runs: a session that does not inherit the variable (for example a pg-router-dispatched
+> session in the ZR monorepo dev environment) sees the bare array. Re-verified 2026-10-09 on both
+> 1.3.1 builds (`bd list -n 1 --json`, `bd show <id> --json`, `bd search`, `bd children`,
+> `bd dep list`). Observed earlier, 2026-09-21 on 1.2.2: nine `jq` failures in one week of
+> dispatched sessions, all `Cannot index array with string ("data")`, from filters copied out of
+> this skill and its siblings.
 
 - **J-1** A `jq` filter over `bd … --json` output MUST NOT assume either envelope. Unwrap
   first with the shape-agnostic prelude, then index:
