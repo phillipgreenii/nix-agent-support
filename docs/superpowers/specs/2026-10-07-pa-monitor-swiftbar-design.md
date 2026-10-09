@@ -303,7 +303,8 @@ Home-Manager (`home/programs/pa-monitor/default.nix`; no new import in `home/def
 
 ## 4. Error handling
 
-Every external call is bounded (`timeout 5`). Any `jq` failure degrades to state 5, never a raw
+Every external call is bounded (`timeout`, 5 s by default, overridable with
+`PA_SWIFTBAR_TIMEOUT_S`; the tests raise it so a starved host cannot fire it). Any `jq` failure degrades to state 5, never a raw
 error in the menu bar. Unknown ≠ zero. A failed toggle click leaves the displayed state unchanged on
 refresh (no silent success).
 

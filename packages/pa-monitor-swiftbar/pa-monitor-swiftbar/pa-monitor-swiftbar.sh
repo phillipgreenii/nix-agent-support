@@ -43,6 +43,10 @@ Environment:
   PA_MONITOR_BIN             pa-monitor executable (default: pa-monitor on PATH)
   PA_SWIFTBAR_STALE_AFTER_S  Seconds after which a reading is stale (default 600)
   PA_SWIFTBAR_NOW            Epoch seconds to treat as "now" (test seam)
+  PA_SWIFTBAR_TIMEOUT_S      Seconds each external call (`pa-monitor status --json`,
+                             `jq`) may take before it is abandoned (default 5; a
+                             non-numeric or zero value reads as 5). A timeout
+                             renders the unreachable / no-data state.
   PA_SWIFTBAR_SELF           Path the Title row re-invokes (the nix plugin wrapper
                              sets a whitespace-free store path; default: $0)
 HELP
@@ -305,7 +309,7 @@ resolve_pa_monitor() {
 }
 
 main() {
-  local bin now stale_after status_json rc rendered width wide glyph_prefix trow
+  local bin now stale_after call_timeout status_json rc rendered width wide glyph_prefix trow
 
   case "${1:-}" in
   -h | --help)
@@ -318,6 +322,11 @@ main() {
   [[ $now =~ ^[0-9]+$ ]] || now=$(date +%s)
   stale_after=${PA_SWIFTBAR_STALE_AFTER_S:-600}
   [[ $stale_after =~ ^[0-9]+$ ]] || stale_after=600
+  # Bound on each external call. A fixed 5 s is right for a menu bar refresh on
+  # an idle machine but fires spuriously on a starved one (bead pg2-zacis), so
+  # the tests raise it; a bad or zero value reads as the default.
+  call_timeout=${PA_SWIFTBAR_TIMEOUT_S:-5}
+  [[ $call_timeout =~ ^[0-9]+$ ]] && ((10#$call_timeout > 0)) || call_timeout=5
 
   # Title width: wide prefixes the message-state glyphs with `5h `.
   width=$(read_title_width)
@@ -336,7 +345,7 @@ main() {
   fi
 
   rc=0
-  status_json=$(timeout 5 "$bin" status --json 2>/dev/null) || rc=$?
+  status_json=$(timeout "$call_timeout" "$bin" status --json 2>/dev/null) || rc=$?
   if ((rc == 127)); then
     emit_message_state "${glyph_prefix}⚠" "pa-monitor not found" "$trow"
     return 0
@@ -346,7 +355,7 @@ main() {
     return 0
   fi
 
-  rendered=$(printf '%s' "$status_json" | timeout 5 jq -r \
+  rendered=$(printf '%s' "$status_json" | timeout "$call_timeout" jq -r \
     --argjson now "$now" --argjson stale_after "$stale_after" --arg bin "$bin" \
     --argjson wide "$wide" --arg title_row "$trow" \
     "$PA_SWIFTBAR_JQ_PROGRAM" 2>/dev/null) || rendered=""

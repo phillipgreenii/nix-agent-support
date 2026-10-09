@@ -15,6 +15,12 @@ setup() {
   # written against the narrow shape, so every test starts in narrow mode; the
   # title-width tests at the end set the mode they mean (or remove the file).
   export XDG_STATE_HOME="$TEST_DIR/xdg-state"
+  # The plugin abandons pa-monitor and jq after 5 s by default; a starved CI
+  # host (the nix sandbox under heavy load) can exceed that for a stub that
+  # returns instantly, which rendered the unreachable state and failed
+  # unrelated tests (bead pg2-zacis). Tests that mean to hit the limit set their
+  # own value.
+  export PA_SWIFTBAR_TIMEOUT_S=120
   TITLE_WIDTH_FILE="$XDG_STATE_HOME/pa-monitor-swiftbar/title-width"
   set_width narrow
 
@@ -38,6 +44,10 @@ setup() {
   cat >"$STUB" <<STUBEOF
 #!$(command -v bash)
 if [ "\${1:-}" = "status" ] && [ "\${2:-}" = "--json" ]; then
+  # STUB_HANG replaces the stub with a sleep, so the plugin's timeout kills the
+  # sleep itself (an orphaned child would hold the pipe open past the timeout).
+  [ -z "\${STUB_HANG:-}" ] || exec sleep "\$STUB_HANG"
+  sleep "\${STUB_SLEEP:-0}"
   cat "$TEST_DIR/status.json"
   exit "\${STUB_RC:-0}"
 fi
@@ -1002,4 +1012,41 @@ render_state() {
   [[ $output == *"title-width"* ]]
   [[ $output == *"wide"* && $output == *"narrow"* ]]
   [[ $output == *"PA_SWIFTBAR_SELF"* ]]
+}
+
+# --- call timeout (bead pg2-zacis) --------------------------------------------
+
+@test "PA_SWIFTBAR_TIMEOUT_S bounds pa-monitor: a slower stub renders the unreachable state" {
+  used_at 50
+  [ "$(glyph)" = "◑" ]
+  run env STUB_HANG=60 PA_SWIFTBAR_TIMEOUT_S=1 PA_SWIFTBAR_NOW="$NOW" PA_MONITOR_BIN="$STUB" "${PLUGIN[@]}"
+  [ "$status" -eq 0 ]
+  [ "$(title)" = "⚠ | color=#888888" ]
+  [[ $output == *"pa-monitor daemon unreachable"* ]]
+}
+
+@test "PA_SWIFTBAR_TIMEOUT_S above the stub latency still renders the reading" {
+  status ".rate_limits.five_hour = {used_pct: 50, resets_at: \"$(at 6720)\"}"
+  run env STUB_SLEEP=1 PA_SWIFTBAR_TIMEOUT_S=30 PA_SWIFTBAR_NOW="$NOW" PA_MONITOR_BIN="$STUB" "${PLUGIN[@]}"
+  [ "$status" -eq 0 ]
+  [ "$(title)" = "◑ | color=#3a9a4a" ]
+}
+
+@test "PA_SWIFTBAR_TIMEOUT_S that is not a positive integer falls back to the default" {
+  status ".rate_limits.five_hour = {used_pct: 50, resets_at: \"$(at 6720)\"}"
+  local bad
+  for bad in "" abc 0 -1 1.5; do
+    run env PA_SWIFTBAR_TIMEOUT_S="$bad" PA_SWIFTBAR_NOW="$NOW" PA_MONITOR_BIN="$STUB" "${PLUGIN[@]}"
+    [ "$status" -eq 0 ]
+    [ "$(title)" = "◑ | color=#3a9a4a" ] || {
+      echo "TIMEOUT_S='$bad': got '$(title)'" >&2
+      return 1
+    }
+  done
+}
+
+@test "--help documents PA_SWIFTBAR_TIMEOUT_S" {
+  run "${PLUGIN[@]}" --help
+  [ "$status" -eq 0 ]
+  [[ $output == *"PA_SWIFTBAR_TIMEOUT_S"* ]]
 }
