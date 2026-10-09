@@ -7,6 +7,13 @@
 
 let
   cfg = config.phillipgreenii.programs.pg-disk-reclaimer;
+
+  # The CLI's schema validator rejects a present-but-null displayTimeoutSeconds
+  # or sizeCommand (absent means "use the default"), so an unset optional
+  # (null) field must be DROPPED from the rendered entry, never written as
+  # `null`. Applies to the item level only: variants carry no optional fields.
+  dropNullFields = lib.filterAttrs (_name: value: value != null);
+  renderedRegistryEntries = map dropNullFields cfg.registryEntries;
 in
 {
   options.phillipgreenii.programs.pg-disk-reclaimer = {
@@ -49,6 +56,31 @@ in
             displayCommand = lib.mkOption {
               type = lib.types.str;
               description = "Shell command run to display this area's current size/state.";
+            };
+            displayTimeoutSeconds = lib.mkOption {
+              type = lib.types.nullOr lib.types.ints.positive;
+              default = null;
+              description = ''
+                Per-item ceiling, in wall-clock seconds, for running this item's
+                `displayCommand` (`list`) and for sizing it in `reclaim`. `null`
+                (the default) leaves the key out of the registry JSON, so the CLI
+                applies its global ceilings (`PGDR_DISPLAY_TIMEOUT_SECONDS` for
+                `list`, `PGDR_SIZE_TIMEOUT_SECONDS` for `reclaim`). Set it on an
+                item whose size genuinely takes longer, such as a very large cache.
+              '';
+            };
+            sizeCommand = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              description = ''
+                Shell command `reclaim` runs to size this item instead of
+                `du -sk <path>` -- for an item where `du` over `path` is not what
+                a reclaim frees, or is too slow. Its first output line MUST start
+                with the reclaimable size as an integer count of KiB (the first
+                whitespace-delimited field is read). `null` (the default) leaves
+                the key out of the registry JSON, so the CLI sizes the item with
+                `du -sk <path>`.
+              '';
             };
             variants = lib.mkOption {
               type = lib.types.listOf (
@@ -110,6 +142,6 @@ in
     # `enable` and appending to `registryEntries`.
     xdg.configFile."pg-disk-reclaimer/registry.json".source =
       (pkgs.formats.json { }).generate "pg-disk-reclaimer-registry.json"
-        cfg.registryEntries;
+        renderedRegistryEntries;
   };
 }

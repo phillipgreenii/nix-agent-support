@@ -187,25 +187,86 @@ let
     )
   '';
 
+  # mkCandidateScan (bead pg2-tfckf): the read-only half of the sweep above --
+  # classifies every direct child of the worktree dir as a candidate (clean, no
+  # lock file: the ones the dry run selects) or held (not a linked worktree,
+  # git operation in progress, or uncommitted changes), using the SAME checks in
+  # the SAME order as mkWorktreeSweepScript. Leaves `wtdir`, the `cands` array
+  # and the `held` count set for the caller to size.
+  mkCandidateScan = ''
+    wtdir=${lib.escapeShellArg cfg.launchConfig.worktreeDir}
+    cands=()
+    held=0
+    while IFS= read -r wt; do
+      gitdir=$(git -C "$wt" rev-parse --git-dir 2>/dev/null) || {
+        held=$((held + 1))
+        continue
+      }
+      case "$gitdir" in
+        /*) : ;;
+        *) gitdir="$wt/$gitdir" ;;
+      esac
+      if [ -f "$gitdir/index.lock" ] || [ -f "$gitdir/HEAD.lock" ]; then
+        held=$((held + 1))
+        continue
+      fi
+      if [ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ]; then
+        held=$((held + 1))
+        continue
+      fi
+      cands+=("$wt")
+    done < <(find "$wtdir" -mindepth 1 -maxdepth 1 -type d 2>/dev/null)
+  '';
+
   worktreeReclaimRegistryEntry = {
     id = "pg-router-ccpool-handler-worktrees";
     description = "pg-router-ccpool-handler's per-bead git worktrees -- belt-and-suspenders net for pg2-4roho's primary dispatch-completion cleanup (internal/executor/ccpool.go's cleanupWorktree)";
     path = cfg.launchConfig.worktreeDir;
+    # displayCommand and sizeCommand (bead pg2-tfckf) size ONLY the candidate
+    # worktrees -- the clean ones the dry run would select -- rather than `du`
+    # over the whole pool: worktrees held back by uncommitted changes or an
+    # in-flight git operation are not reclaimable, and they are usually the big
+    # ones, so a whole-tree `du` both overstated the reclaim and blew the
+    # default display ceiling. The held ones are reported as a count only
+    # (sizing them would bring back the slow `du`). Both run via a fresh
+    # `bash -c` (pgdr_display_output / pgdr_size_kb), so mkCandidateScan's
+    # variables need no subshell.
+    #
     # Leading `:` (pg2-2wu8d): see mkWorktreeSweepScript's own doc comment
-    # above -- pgdr_validate_commands_exist's leading-token check trips on
-    # this string's first real statement being a bare `n=$(find ...)`
-    # assignment rather than a command name (reads as a nonexistent
-    # command "n=$(find"). `:` is a real no-op builtin satisfying that
-    # check first; this runs via a fresh `bash -c` (pgdr_display_output),
-    # not `eval`, but the reasoning is the same -- a leading no-op
-    # statement doesn't change the string's own exit status, which is
-    # still the final `echo`'s.
+    # above -- pgdr_validate_commands_exist's leading-token check trips on a
+    # first real statement that is a bare assignment rather than a command
+    # name. `:` is a real no-op builtin satisfying that check first; it does
+    # not change the string's own exit status, which is still the final
+    # `echo`'s (displayCommand) or `awk`'s / `echo`'s (sizeCommand).
     displayCommand = ''
       :
-      n=$(find ${lib.escapeShellArg cfg.launchConfig.worktreeDir} -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
-      sz=$(du -sh ${lib.escapeShellArg cfg.launchConfig.worktreeDir} 2>/dev/null | cut -f1)
-      if [ -z "$sz" ]; then sz="0"; fi
-      echo "$n worktree(s), $sz"
+      ${mkCandidateScan}
+      total=$(find "$wtdir" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
+      kb=0
+      if [ "''${#cands[@]}" -gt 0 ]; then
+        kb=$(du -sk "''${cands[@]}" 2>/dev/null | awk '{s += $1} END {print s + 0}')
+      fi
+      human=$(awk -v k="$kb" 'BEGIN {
+        if (k >= 1048576) printf "%.1fG", k / 1048576
+        else if (k >= 1024) printf "%.1fM", k / 1024
+        else printf "%dK", k
+      }')
+      echo "$total worktree(s): ''${#cands[@]} reclaimable ($human), $held held (uncommitted changes or git operation in progress)"
+    '';
+    # `git status` per worktree plus `du` over the candidates: slow on a large
+    # monorepo, so both the `list` display and the `reclaim` sizing get a
+    # roomier per-item ceiling than the CLI defaults.
+    displayTimeoutSeconds = 180;
+    # Reclaimable size, in KiB, of the candidate worktrees (the CLI's
+    # sizeCommand contract: the first field of the first output line).
+    sizeCommand = ''
+      :
+      ${mkCandidateScan}
+      if [ "''${#cands[@]}" -gt 0 ]; then
+        du -sk "''${cands[@]}" 2>/dev/null | awk '{s += $1} END {print s + 0}'
+      else
+        echo 0
+      fi
     '';
     variants = [
       {

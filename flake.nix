@@ -5328,6 +5328,14 @@
                                       description = lib.mkOption { type = lib.types.str; };
                                       path = lib.mkOption { type = lib.types.str; };
                                       displayCommand = lib.mkOption { type = lib.types.str; };
+                                      displayTimeoutSeconds = lib.mkOption {
+                                        type = lib.types.nullOr lib.types.ints.positive;
+                                        default = null;
+                                      };
+                                      sizeCommand = lib.mkOption {
+                                        type = lib.types.nullOr lib.types.str;
+                                        default = null;
+                                      };
                                       variants = lib.mkOption {
                                         type = lib.types.listOf (
                                           lib.types.submodule {
@@ -6085,6 +6093,17 @@
                 assert worktreeReclaimEntry.id == "pg-router-ccpool-handler-worktrees";
                 assert worktreeReclaimEntry.path == "/tmp/pg2-qsred-repo/.worktrees";
                 assert lib.hasInfix "/tmp/pg2-qsred-repo/.worktrees" worktreeReclaimEntry.displayCommand;
+                # pg2-tfckf: the display sizes only the clean candidate
+                # worktrees (not `du` over the whole pool), under a per-item
+                # timeout, and `reclaim` sizes the same candidates through
+                # sizeCommand (KiB on the first line).
+                assert lib.hasInfix "status --porcelain" worktreeReclaimEntry.displayCommand;
+                assert !lib.hasInfix "du -sh" worktreeReclaimEntry.displayCommand;
+                assert lib.hasInfix "held" worktreeReclaimEntry.displayCommand;
+                assert worktreeReclaimEntry.displayTimeoutSeconds == 180;
+                assert worktreeReclaimEntry.sizeCommand != null;
+                assert lib.hasInfix "/tmp/pg2-qsred-repo/.worktrees" worktreeReclaimEntry.sizeCommand;
+                assert lib.hasInfix "du -sk" worktreeReclaimEntry.sizeCommand;
                 assert lib.length worktreeReclaimEntry.variants == 1;
                 assert worktreeReclaimVariant.aggressiveness == 1;
                 # decision item 5's own guard: neither script ever passes
@@ -6121,6 +6140,101 @@
                     darwinWithoutRoles.phillipgreenii.observability.logSources ? pg-router-ccpool-handler-pool-metrics
                   );
                 renderCheck;
+
+              # test-pg-disk-reclaimer-hm-registry (bead pg2-tfckf): the HM module's
+              # optional per-item `displayTimeoutSeconds` / `sizeCommand` render into
+              # registry.json when set, and are DROPPED (never written as `null`) when
+              # unset -- the CLI's schema validator rejects a present-but-null value for
+              # either. The generated file is also run through the real
+              # `pg-disk-reclaimer validate`, so a drift between this schema and the
+              # CLI's own is caught here.
+              test-pg-disk-reclaimer-hm-registry =
+                let
+                  evaluated =
+                    (lib.evalModules {
+                      specialArgs = { inherit pkgs; };
+                      modules = [
+                        ./home/programs/pg-disk-reclaimer/default.nix
+                        (
+                          { lib, ... }:
+                          {
+                            options = {
+                              home.packages = lib.mkOption {
+                                type = lib.types.listOf lib.types.package;
+                                default = [ ];
+                              };
+                              xdg.configFile = lib.mkOption {
+                                type = lib.types.attrsOf (
+                                  lib.types.submodule { options.source = lib.mkOption { type = lib.types.path; }; }
+                                );
+                                default = { };
+                              };
+                              programs.tldr = {
+                                enable = lib.mkOption {
+                                  type = lib.types.bool;
+                                  default = false;
+                                };
+                                customPages = lib.mkOption {
+                                  type = lib.types.attrsOf lib.types.anything;
+                                  default = { };
+                                };
+                              };
+                            };
+                          }
+                        )
+                        {
+                          phillipgreenii.programs.pg-disk-reclaimer = {
+                            enable = true;
+                            registryEntries = [
+                              {
+                                id = "with-optionals";
+                                description = "item that sets both optional fields";
+                                path = "/tmp/with-optionals";
+                                displayCommand = "echo shown";
+                                displayTimeoutSeconds = 120;
+                                sizeCommand = "echo 42";
+                                variants = [
+                                  {
+                                    aggressiveness = 1;
+                                    variantDescription = "light";
+                                    dryRunCommand = "echo dry";
+                                    removeCommand = "echo rm";
+                                  }
+                                ];
+                              }
+                              {
+                                id = "without-optionals";
+                                description = "item that leaves both optional fields at their defaults";
+                                path = "/tmp/without-optionals";
+                                displayCommand = "echo shown";
+                              }
+                            ];
+                          };
+                        }
+                      ];
+                    }).config;
+                  registryFile = evaluated.xdg.configFile."pg-disk-reclaimer/registry.json".source;
+                in
+                pkgs.runCommand "test-pg-disk-reclaimer-hm-registry"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.jq
+                      pkgs.pg-disk-reclaimer
+                    ];
+                    inherit registryFile;
+                  }
+                  ''
+                    set -euo pipefail
+                    export HOME="$TMPDIR"
+                    [ "$(jq -r '.[0].displayTimeoutSeconds' "$registryFile")" = 120 ]
+                    [ "$(jq -r '.[0].sizeCommand' "$registryFile")" = "echo 42" ]
+                    [ "$(jq -r '.[1] | has("displayTimeoutSeconds")' "$registryFile")" = false ]
+                    [ "$(jq -r '.[1] | has("sizeCommand")' "$registryFile")" = false ]
+                    # no null anywhere in the rendered registry
+                    [ "$(jq '[.. | nulls] | length' "$registryFile")" = 0 ]
+                    pg-disk-reclaimer validate "$registryFile"
+                    touch $out
+                  '';
 
               # test-home-default-imports-complete (bead pg2-xgmeo): home/default.nix's
               # `imports` list is an explicit ENUMERATION, not auto-discovery of

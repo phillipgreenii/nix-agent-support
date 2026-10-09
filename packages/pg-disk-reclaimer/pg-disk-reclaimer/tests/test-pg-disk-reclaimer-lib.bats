@@ -1068,6 +1068,52 @@ size_item() {
   [[ "$output" == *"total reclaimable: 0K (0 sized, 1 unknown)"* ]]
 }
 
+@test "cmd_reclaim sizing honours an item's displayTimeoutSeconds above the global size ceiling" {
+  mkdir -p "$TEST_DIR/patient" "$HOME/.config/pg-disk-reclaimer"
+  size_item patient "$TEST_DIR/patient" 'sleep 2; echo 512' 'echo dry-patient' |
+    jq '. + {displayTimeoutSeconds: 10}' | jq -s '.' >"$HOME/.config/pg-disk-reclaimer/registry.json"
+  PGDR_SIZE_TIMEOUT_SECONDS=1 run cmd_reclaim --aggressiveness 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"patient: size: 512K"* ]]
+  [[ "$output" == *"total reclaimable: 512K (1 sized, 0 unknown)"* ]]
+}
+
+@test "cmd_reclaim sizing still times out when the item's displayTimeoutSeconds is exceeded" {
+  mkdir -p "$TEST_DIR/stuck" "$HOME/.config/pg-disk-reclaimer"
+  size_item stuck "$TEST_DIR/stuck" 'sleep 5; echo 512' 'echo dry-stuck' |
+    jq '. + {displayTimeoutSeconds: 1}' | jq -s '.' >"$HOME/.config/pg-disk-reclaimer/registry.json"
+  PGDR_SIZE_TIMEOUT_SECONDS=1 run cmd_reclaim --aggressiveness 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"stuck: size: unknown (timed out after 1s)"* ]]
+}
+
+@test "pgdr_item_size_timeout is the larger of the global ceiling and the item's displayTimeoutSeconds" {
+  PGDR_SIZE_TIMEOUT_SECONDS=60 run pgdr_item_size_timeout '{"id":"a"}'
+  [ "$output" = "60" ]
+  PGDR_SIZE_TIMEOUT_SECONDS=60 run pgdr_item_size_timeout '{"id":"a","displayTimeoutSeconds":300}'
+  [ "$output" = "300" ]
+  PGDR_SIZE_TIMEOUT_SECONDS=60 run pgdr_item_size_timeout '{"id":"a","displayTimeoutSeconds":30}'
+  [ "$output" = "60" ]
+  PGDR_SIZE_TIMEOUT_SECONDS=60 run pgdr_item_size_timeout ''
+  [ "$output" = "60" ]
+}
+
+@test "pgdr_select_variants carries an item's displayTimeoutSeconds and sizeCommand into the selection, and omits them when absent" {
+  local reg="$TEST_DIR/sel-timeout.json"
+  {
+    size_item with "$TEST_DIR/with" 'echo 1' 'true' | jq '. + {displayTimeoutSeconds: 120}'
+    size_item without "$TEST_DIR/without" '' 'true'
+  } | jq -s '.' >"$reg"
+  run pgdr_select_variants "$reg" 1
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.[] | select(.id == "with") | .displayTimeoutSeconds' <<<"$output")" = "120" ]
+  [ "$(jq -r '.[] | select(.id == "with") | .sizeCommand' <<<"$output")" = "echo 1" ]
+  [ "$(jq -r '.[] | select(.id == "without") | has("displayTimeoutSeconds") or has("sizeCommand")' <<<"$output")" = "false" ]
+  run pgdr_select_variants "$reg" 1 with
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.[0].displayTimeoutSeconds' <<<"$output")" = "120" ]
+}
+
 @test "cmd_reclaim prints an explicit unknown marker when the size command yields no number" {
   mkdir -p "$TEST_DIR/junk"
   install_size_registry "$(size_item junk "$TEST_DIR/junk" 'echo not-a-number' 'echo dry-junk')"

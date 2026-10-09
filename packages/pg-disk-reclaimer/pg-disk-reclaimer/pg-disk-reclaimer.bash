@@ -241,6 +241,7 @@ pgdr_select_variants() {
         | ($qualifying | max_by(.aggressiveness)) as $chosen
         | ($item | {id, description, path})
           + (if $item.sizeCommand then {sizeCommand: $item.sizeCommand} else {} end)
+          + (if $item.displayTimeoutSeconds then {displayTimeoutSeconds: $item.displayTimeoutSeconds} else {} end)
           + ($chosen | {aggressiveness, variantDescription, dryRunCommand, removeCommand})
       ]
     ' "$path"
@@ -299,6 +300,7 @@ pgdr_select_variants() {
       | ($qualifying | max_by(.aggressiveness)) as $chosen
       | ($item | {id, description, path})
         + (if $item.sizeCommand then {sizeCommand: $item.sizeCommand} else {} end)
+        + (if $item.displayTimeoutSeconds then {displayTimeoutSeconds: $item.displayTimeoutSeconds} else {} end)
         + ($chosen | {aggressiveness, variantDescription, dryRunCommand, removeCommand})
     ]
   ' "$path"
@@ -715,7 +717,8 @@ pgdr_confirm() {
 # PGDR_DISPLAY_TIMEOUT_SECONDS because a reclaim is a deliberate action where
 # the operator wants the number for the biggest trees (a `du` over a
 # 65 GB cache), not a quick listing. Resolved per item by
-# pgdr_item_size_timeout so a per-item override can be added in one place.
+# pgdr_item_size_timeout, which raises it to the item's own
+# displayTimeoutSeconds when that is larger.
 : "${PGDR_SIZE_TIMEOUT_SECONDS:=60}"
 
 # PGDR_LONG_LINE_CHARS: a dry-run output line longer than this is collapsed to
@@ -724,12 +727,22 @@ pgdr_confirm() {
 : "${PGDR_LONG_LINE_CHARS:=200}"
 
 # pgdr_item_size_timeout: echoes the size-computation ceiling for one item.
-# Today this is just PGDR_SIZE_TIMEOUT_SECONDS for every item; it takes the
-# item's selection JSON ($1) so a per-item registry override (bead
-# pg2-m6bsb's displayTimeoutSeconds) can slot in here without touching
-# cmd_reclaim.
+# It is PGDR_SIZE_TIMEOUT_SECONDS, raised to the item's own
+# displayTimeoutSeconds (from the item's selection JSON, $1) when that is
+# larger: an item whose registry entry declares that it needs N seconds to
+# be measured gets at least N seconds when `reclaim` sizes it too, while the
+# env var can still raise every item's ceiling. A missing, null, or
+# non-numeric per-item value falls back to the global ceiling.
 pgdr_item_size_timeout() {
-  printf '%s\n' "$PGDR_SIZE_TIMEOUT_SECONDS"
+  local item="${1:-}" item_timeout=""
+  if [[ -n $item ]]; then
+    item_timeout=$(jq -r '.displayTimeoutSeconds // empty' <<<"$item" 2>/dev/null) || item_timeout=""
+  fi
+  if [[ $item_timeout =~ ^[0-9]+$ ]] && ((item_timeout > PGDR_SIZE_TIMEOUT_SECONDS)); then
+    printf '%s\n' "$item_timeout"
+  else
+    printf '%s\n' "$PGDR_SIZE_TIMEOUT_SECONDS"
+  fi
 }
 
 # pgdr_format_kb: renders a KiB count as a short human size (K/M/G/T, one
