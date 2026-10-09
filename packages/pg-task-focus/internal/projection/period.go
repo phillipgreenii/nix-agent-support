@@ -150,7 +150,7 @@ func periodStart(e liveEvent) civil.Date { return e.Payload.(event.PeriodChanged
 // current period of every kind that has one. The checks look at the events
 // alone, so a stored log and a candidate agree: the changes of a kind, in
 // event order, MUST have rising starts, and where a neighbouring pair does not,
-// the change recorded last is the offender. One that sorts after the change it
+// the change that stands later in the log is the offender. One that sorts after the change it
 // fails to follow does not start a later period (period_unchanged); one that
 // sorts before a change with a lower start is out of order although its own
 // start is later (period_out_of_order). An equal start is never later, so it is
@@ -222,7 +222,7 @@ func (r *run) checkPair(k Kind, a, b liveEvent) *Invalid {
 		return nil
 	}
 	offender, other := b, a
-	if a.At.Time().After(b.At.Time()) {
+	if a.pos > b.pos {
 		offender, other = a, b
 	}
 	if offender.pos == a.pos && as.Compare(bs) > 0 {

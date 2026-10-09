@@ -340,9 +340,9 @@ func TestBackdatedPeriodChangeIsPeriodOutOfOrder(t *testing.T) {
 			want: codePeriodUnchanged, offender: "p3", wantOthers: "p2",
 		},
 		{
-			name: "the change recorded last is the one that fails to follow",
+			name: "the change later in the log is the offender whatever it was recorded at",
 			p1:   change{d(1), 1, 1}, p2: change{d(8), 9, 8}, p3: change{d(9), 5, 3},
-			want: codePeriodUnchanged, offender: "p2", wantOthers: "p3",
+			want: codePeriodOutOfOrder, offender: "p3", wantOthers: "p2",
 		},
 		{
 			name: "an equal start that sorts first is not a later start",
