@@ -293,6 +293,20 @@ dep_fixture() {
   grep -q -- "^close tc-parent6" "$MOCK_BD_LOG"
 }
 
+@test "resolve --abandon --reason-code moot-premise: files a follow-up under EVERY parent" {
+  export MOCK_BD_CREATE_ID="tc-cleanup2"
+  show_fixture tc-q8 '{"id":"tc-q8","labels":["question","escalated","q:stall"],"metadata":{}}'
+  show_fixture tc-parentA '{"id":"tc-parentA","labels":[],"metadata":{}}'
+  show_fixture tc-parentB '{"id":"tc-parentB","labels":[],"metadata":{}}'
+  dep_fixture tc-q8 up '[{"id":"tc-parentA","status":"open"},{"id":"tc-parentB","status":"open"}]'
+  dep_fixture tc-parentA down '[]'
+  dep_fixture tc-parentB down '[]'
+  run pgwf_cmd_resolve tc-q8 --abandon --reason-code moot-premise
+  [ "$status" -eq 0 ]
+  grep '^create' "$MOCK_BD_LOG" | grep -q -- "--parent tc-parentA"
+  grep '^create' "$MOCK_BD_LOG" | grep -q -- "--parent tc-parentB"
+}
+
 # --- resolve: legacy human items ---
 
 @test "resolve --answer on a legacy human item: appends notes, removes human, releases (stays open)" {

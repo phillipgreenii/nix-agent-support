@@ -306,7 +306,20 @@ write_workflow_config() {
   [ "$output" = "tc-child2 implement homelab" ]
   child_advance="$(grep '^update tc-child2' "$MOCK_BD_LOG")"
   [[ "$child_advance" == *"--add-label stage:implement"* ]]
-  grep -q -- "dep add tc-child2 tc-blocker" "$MOCK_BD_LOG"
+  # edges are passed at create time, never wired after (no ready window)
+  create_line="$(grep '^create' "$MOCK_BD_LOG")"
+  [[ "$create_line" == *"--deps blocked-by:tc-blocker"* ]]
+  ! grep -q -- "dep add" "$MOCK_BD_LOG"
+}
+
+@test "create-child: multiple --blocked-by become one comma-joined --deps at create time" {
+  export MOCK_BD_CREATE_ID="tc-child4"
+  show_fixture tc-parent '{"id":"tc-parent","labels":[],"metadata":{}}'
+  run pgwf_cmd_create_child tc-parent --title "two deps" --blocked-by tc-a --blocked-by tc-b
+  [ "$status" -eq 0 ]
+  create_line="$(grep '^create' "$MOCK_BD_LOG")"
+  [[ "$create_line" == *"--deps blocked-by:tc-a,blocked-by:tc-b"* ]]
+  ! grep -q -- "dep add" "$MOCK_BD_LOG"
 }
 
 @test "create-child: a non-entry --stage does not add a stage label when it IS the entry stage" {

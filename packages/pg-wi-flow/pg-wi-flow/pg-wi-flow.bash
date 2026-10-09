@@ -894,6 +894,17 @@ pgwf_cmd_create_child() {
     create_args+=(--labels "${kind_prefix}${kind}")
   fi
 
+  # Dependency edges ride the create call itself (`bd create --deps
+  # blocked-by:ID,...`) so the child is never ready without them
+  # [design: "every dependency edge is added before a parent is released"].
+  if [[ ${#blocked_by[@]} -gt 0 ]]; then
+    local deps_csv="" b
+    for b in "${blocked_by[@]}"; do
+      deps_csv+="${deps_csv:+,}blocked-by:${b}"
+    done
+    create_args+=(--deps "$deps_csv")
+  fi
+
   local created child_id
   created="$(pgwf_tracker_create "$actor" "${create_args[@]}")" || return 1
   child_id="$(jq -r '.id // empty' <<<"$created")"
@@ -909,11 +920,6 @@ pgwf_cmd_create_child() {
   if ! pgwf_tracker_has_label "$parent" container; then
     pgwf_tracker_update "$parent" "$actor" --add-label container >/dev/null
   fi
-
-  local b
-  for b in "${blocked_by[@]}"; do
-    pgwf_tracker_add_dependency "$child_id" "$b" "$actor" >/dev/null || return 1
-  done
 
   printf '%s %s %s\n' "$child_id" "$target_stage" "$workflow"
 }
@@ -1501,12 +1507,13 @@ pgwf_cmd_resolve() {
   pgwf_tracker_close "$id" "resolve --abandon --reason-code $reason_code" "$actor" >/dev/null || return 1
 
   if [[ $reason_code == moot-premise ]]; then
-    local first_parent
-    first_parent="$(jq -r '.[0].id // empty' <<<"$parents")"
-    if [[ -n $first_parent ]]; then
-      pgwf_cmd_create_child "$first_parent" \
+    # One follow-up under EVERY parent the question blocked.
+    local mp_parent
+    while IFS= read -r mp_parent; do
+      [[ -z $mp_parent ]] && continue
+      pgwf_cmd_create_child "$mp_parent" \
         --title "Clean up remnants: $id abandoned as moot-premise" >/dev/null || return 1
-    fi
+    done < <(jq -r '.[].id' <<<"$parents")
   fi
 
   local parent_id other_open
