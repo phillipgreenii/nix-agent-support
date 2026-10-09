@@ -45,7 +45,8 @@ import (
 // serially at about 2.7s a page (about 27s end to end): its failure rate went
 // from 1.5% to 33% when the apply carrying that change landed. review_submit's
 // comment caps (pg2-m79ch) are sized against this value too. The "list" op has
-// its own, longer budget (ListBackendTimeout, pg2-4ae4q).
+// its own, longer budget (ListBackendTimeout, pg2-4ae4q), and so does
+// "list_activity" (ListActivityBackendTimeout, pg2-m4z5k).
 const DefaultBackendTimeout = 30 * time.Second
 
 // BackendDeadlineMargin is how much LATER than a backend's own
@@ -94,9 +95,10 @@ const OpList = "list"
 // the race. 40s is about 1.5x the median and 10s clear of the slowest call
 // seen.
 //
-// Only list gets this: every other op stays on DefaultBackendTimeout, which is
-// the hung-gh bound handlers (and review_submit's comment caps, pg2-m79ch) are
-// sized against. The umbrella's deadline for a list is this plus
+// Only list and list_activity get their own budget (ListActivityBackendTimeout):
+// every other op stays on DefaultBackendTimeout, which is the hung-gh bound
+// handlers (and review_submit's comment caps, pg2-m79ch) are sized against.
+// The umbrella's deadline for a list is this plus
 // BackendDeadlineMargin (ListExecTimeout), so the backend still answers before
 // the umbrella kills it.
 const ListBackendTimeout = 40 * time.Second
@@ -105,6 +107,40 @@ const ListBackendTimeout = 40 * time.Second
 // ListBackendTimeout plus BackendDeadlineMargin, the same relationship
 // DefaultExecTimeout has to DefaultBackendTimeout.
 const ListExecTimeout = ListBackendTimeout + BackendDeadlineMargin
+
+// OpListActivity is the wire name of the activity capability's one op. It is
+// named here for the same reason as OpList: this file is where the per-op call
+// budgets are chosen. pkg/provider/activity aliases it.
+const OpListActivity = "list_activity"
+
+// ListActivityBackendTimeout is the per-call budget of a Tier-2 backend's
+// "list_activity" op [bead pg2-m4z5k]. A range-shaped activity read fans out
+// one gh subprocess per candidate item (a reviews read and a comments read for
+// each PR in the window, at most 8 at a time), so its duration grows with the
+// window's item count and the host's load, not with any one call. An hourly
+// background pull over a 48-hour window went from about 15s to 15-28s as the
+// window filled to 49-59 items, and 5 of its last 19 runs were killed at the
+// 30s cap, each at a different in-flight call. Measured on the 14 that
+// finished: median about 20s, slowest 27.6s; the 5 killed ones ran past 30s.
+// Fitting a log-normal to that (median about 22s over all 19, P(over 30s) of
+// 5/19, about 26%, so sigma is about 0.49) puts P(over 40s) near 11%,
+// P(over 60s) near 2% and P(over 90s) near 0.1%, so list's 40s would still
+// fail about 1 pull in 9.
+//
+// 60s: nobody waits on this pull interactively (it is a scheduled background
+// fetch), so the budget is sized for the tail rather than for latency.
+//
+// Only list_activity gets this. DefaultBackendTimeout is not raised
+// (pg2-m79ch, pg2-4ae4q), ListBackendTimeout is not touched, and every other
+// op keeps the hung-gh bound handlers are sized against. The op key applies to
+// EVERY backend's list_activity, so a hung one can now take up to
+// ListActivityExecTimeout instead of DefaultExecTimeout in a serial fan-out.
+const ListActivityBackendTimeout = 60 * time.Second
+
+// ListActivityExecTimeout is the umbrella's exec deadline for a
+// "list_activity": ListActivityBackendTimeout plus BackendDeadlineMargin, the
+// same relationship DefaultExecTimeout has to DefaultBackendTimeout.
+const ListActivityExecTimeout = ListActivityBackendTimeout + BackendDeadlineMargin
 
 // execTimeout is the deadline runInvoke (exec.go) applies to the umbrella's
 // exec of a backend. It starts at DefaultExecTimeout; tests swap it to a
@@ -127,10 +163,21 @@ var (
 	listExecTimeout    = ListExecTimeout
 )
 
+// listActivityBackendTimeout and listActivityExecTimeout are the
+// "list_activity" op's counterparts, swappable by tests the same way
+// [bead pg2-m4z5k].
+var (
+	listActivityBackendTimeout = ListActivityBackendTimeout
+	listActivityExecTimeout    = ListActivityExecTimeout
+)
+
 // backendTimeoutFor is the deadline serveLoop applies to a request for op.
 func backendTimeoutFor(op string) time.Duration {
-	if op == OpList {
+	switch op {
+	case OpList:
 		return listBackendTimeout
+	case OpListActivity:
+		return listActivityBackendTimeout
 	}
 	return backendTimeout
 }
@@ -139,8 +186,11 @@ func backendTimeoutFor(op string) time.Duration {
 // backend serving op. It is always later than backendTimeoutFor(op) by
 // BackendDeadlineMargin.
 func execTimeoutFor(op string) time.Duration {
-	if op == OpList {
+	switch op {
+	case OpList:
 		return listExecTimeout
+	case OpListActivity:
+		return listActivityExecTimeout
 	}
 	return execTimeout
 }

@@ -35,7 +35,8 @@ import (
 // Budget. At most RetryPolicy.MaxAttempts attempts with a short backoff
 // between them, and never a retry that would not fit in the context's
 // remaining time (the op's whole-call deadline, scriptout.DefaultBackendTimeout,
-// or scriptout.ListBackendTimeout for a list):
+// scriptout.ListBackendTimeout for a list, or
+// scriptout.ListActivityBackendTimeout for a list_activity):
 // the loop never extends the caller's wall-clock bound.
 //
 // Rate-limit reserve. List/Search check the GraphQL rate-limit

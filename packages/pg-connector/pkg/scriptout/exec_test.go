@@ -583,3 +583,46 @@ func TestInvoke_ListHasItsOwnExecBudget(t *testing.T) {
 		t.Errorf("non-list error %q does not name the 100ms limit", err)
 	}
 }
+
+// TestInvoke_ListActivityHasItsOwnExecBudget pins bead pg2-m4z5k on the
+// umbrella side: a hung "list_activity" backend is killed at
+// listActivityExecTimeout, a hung "list" at listExecTimeout, any other op at
+// execTimeout, and each error names the limit that actually applied.
+func TestInvoke_ListActivityHasItsOwnExecBudget(t *testing.T) {
+	withFactory(t, "hang")
+	origExec, origList, origActivity := execTimeout, listExecTimeout, listActivityExecTimeout
+	execTimeout = 100 * time.Millisecond
+	listExecTimeout = 100 * time.Millisecond
+	listActivityExecTimeout = 600 * time.Millisecond
+	t.Cleanup(func() {
+		execTimeout, listExecTimeout, listActivityExecTimeout = origExec, origList, origActivity
+	})
+
+	start := time.Now()
+	_, err := Invoke(context.Background(), "fake-binary", "list_activity", nil, nil)
+	activityElapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("expected a hung list_activity backend to be killed")
+	}
+	if activityElapsed < 500*time.Millisecond {
+		t.Errorf("list_activity was killed after %v, before its %v budget", activityElapsed, listActivityExecTimeout)
+	}
+	if !strings.Contains(err.Error(), "umbrella deadline 600ms exceeded") {
+		t.Errorf("list_activity error %q does not name the 600ms list_activity limit", err)
+	}
+
+	for _, op := range []string{"list", "commit"} {
+		start = time.Now()
+		_, err = Invoke(context.Background(), "fake-binary", op, nil, nil)
+		elapsed := time.Since(start)
+		if err == nil {
+			t.Fatalf("expected a hung %q backend to be killed", op)
+		}
+		if elapsed >= 500*time.Millisecond {
+			t.Errorf("op %q was killed after %v, it should use its 100ms budget", op, elapsed)
+		}
+		if !strings.Contains(err.Error(), "umbrella deadline 100ms exceeded") {
+			t.Errorf("op %q error %q does not name the 100ms limit", op, err)
+		}
+	}
+}

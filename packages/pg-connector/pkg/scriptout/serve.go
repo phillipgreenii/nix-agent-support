@@ -88,8 +88,9 @@ func serveLoop(env dispatchEnv, table DispatchTable) int {
 	// timed out [bead pg2-5dyz2]. The margin sits on the umbrella's side so
 	// this budget stays the full 30s [bead pg2-27z7j].
 	start := time.Now()
-	// limit is DefaultBackendTimeout, or ListBackendTimeout for the list op
-	// [bead pg2-4ae4q]; the umbrella adds BackendDeadlineMargin to whichever
+	// limit is DefaultBackendTimeout, ListBackendTimeout for the list op
+	// [bead pg2-4ae4q], or ListActivityBackendTimeout for the list_activity op
+	// [bead pg2-m4z5k]; the umbrella adds BackendDeadlineMargin to whichever
 	// applies (exec.go's execTimeoutFor).
 	limit := backendTimeoutFor(req.Op)
 	ctx, cancel := context.WithTimeout(context.Background(), limit)

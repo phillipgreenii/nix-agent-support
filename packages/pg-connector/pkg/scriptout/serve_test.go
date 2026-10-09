@@ -505,3 +505,47 @@ func TestServeLoop_ListHasItsOwnBudget(t *testing.T) {
 		t.Errorf("non-list deadline error %q does not name its own limit 50ms", msg)
 	}
 }
+
+// TestServeLoop_ListActivityHasItsOwnBudget pins bead pg2-m4z5k: the
+// "list_activity" op runs under listActivityBackendTimeout, which is neither
+// the default budget nor list's. The same handler, slower than both
+// backendTimeout and listBackendTimeout but faster than
+// listActivityBackendTimeout, succeeds as list_activity and fails as a list or
+// any other op.
+func TestServeLoop_ListActivityHasItsOwnBudget(t *testing.T) {
+	origBackend, origList, origActivity := backendTimeout, listBackendTimeout, listActivityBackendTimeout
+	backendTimeout = 50 * time.Millisecond
+	listBackendTimeout = 50 * time.Millisecond
+	listActivityBackendTimeout = 5 * time.Second
+	t.Cleanup(func() {
+		backendTimeout, listBackendTimeout, listActivityBackendTimeout = origBackend, origList, origActivity
+	})
+
+	slow := func(ctx context.Context, _ json.RawMessage) (any, error) {
+		select {
+		case <-time.After(300 * time.Millisecond):
+			return map[string]any{"ok": true}, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	table := DispatchTable{
+		"list_activity": {SchemaVersion: 1, Handle: slow},
+		"list":          {SchemaVersion: 1, Handle: slow},
+		"commit":        {SchemaVersion: 1, Handle: slow},
+	}
+
+	if code, resp := runServeLoop(t, table, `{"op":"list_activity","args":{}}`); code != 0 {
+		t.Fatalf("list_activity under its own %v budget: exit %d (resp=%v), want success", listActivityBackendTimeout, code, resp)
+	}
+	for _, op := range []string{"list", "commit"} {
+		code, resp := runServeLoop(t, table, `{"op":"`+op+`","args":{}}`)
+		if code == 0 {
+			t.Fatalf("op %q ran past its 50ms budget and still succeeded (resp=%v)", op, resp)
+		}
+		errObj, _ := resp["error"].(map[string]any)
+		if msg, _ := errObj["message"].(string); !strings.Contains(msg, "limit 50ms") {
+			t.Errorf("op %q deadline error %q does not name its own limit 50ms", op, msg)
+		}
+	}
+}

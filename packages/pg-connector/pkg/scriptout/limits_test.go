@@ -89,6 +89,10 @@ func TestBackendDeadlineFiresBeforeUmbrella(t *testing.T) {
 	if listBackendTimeout != ListBackendTimeout || listExecTimeout != ListExecTimeout {
 		t.Fatalf("production list vars drifted: listBackendTimeout=%v listExecTimeout=%v", listBackendTimeout, listExecTimeout)
 	}
+	if listActivityBackendTimeout != ListActivityBackendTimeout || listActivityExecTimeout != ListActivityExecTimeout {
+		t.Fatalf("production list_activity vars drifted: listActivityBackendTimeout=%v listActivityExecTimeout=%v",
+			listActivityBackendTimeout, listActivityExecTimeout)
+	}
 }
 
 // TestPerOpDeadlinesKeepTheKillMargin pins bead pg2-4ae4q's constraint: giving
@@ -96,7 +100,7 @@ func TestBackendDeadlineFiresBeforeUmbrella(t *testing.T) {
 // answers before the umbrella kills it, for ANY op. It also pins that list's
 // budget is a real extension, and that the global budget was not raised.
 func TestPerOpDeadlinesKeepTheKillMargin(t *testing.T) {
-	for _, op := range []string{OpList, "show", "comment", OpCapabilities, "review_submit"} {
+	for _, op := range []string{OpList, OpListActivity, "show", "comment", OpCapabilities, "review_submit"} {
 		backend, exec := backendTimeoutFor(op), execTimeoutFor(op)
 		if exec-backend != BackendDeadlineMargin {
 			t.Errorf("op %q: exec %v - backend %v = %v, want exactly BackendDeadlineMargin %v",
@@ -114,6 +118,38 @@ func TestPerOpDeadlinesKeepTheKillMargin(t *testing.T) {
 	}
 	if got := execTimeoutFor("show"); got != DefaultExecTimeout {
 		t.Errorf("a non-list op's exec deadline is %v, want the unchanged DefaultExecTimeout %v", got, DefaultExecTimeout)
+	}
+}
+
+// TestPerOpDeadlinesArePinned pins bead pg2-m4z5k: list_activity has its own
+// 60s backend / 65s umbrella budget, list keeps its 40s / 45s, and every other
+// op keeps 30s / 35s. The literals are deliberate: a budget is a behaviour
+// change, so changing one MUST change this table.
+func TestPerOpDeadlinesArePinned(t *testing.T) {
+	cases := []struct {
+		op      string
+		backend time.Duration
+		exec    time.Duration
+	}{
+		{OpListActivity, 60 * time.Second, 65 * time.Second},
+		{OpList, 40 * time.Second, 45 * time.Second},
+		{"show", 30 * time.Second, 35 * time.Second},
+		{"review_submit", 30 * time.Second, 35 * time.Second},
+		{OpCapabilities, 30 * time.Second, 35 * time.Second},
+	}
+	for _, c := range cases {
+		if got := backendTimeoutFor(c.op); got != c.backend {
+			t.Errorf("op %q: backend budget %v, want %v", c.op, got, c.backend)
+		}
+		if got := execTimeoutFor(c.op); got != c.exec {
+			t.Errorf("op %q: umbrella deadline %v, want %v", c.op, got, c.exec)
+		}
+	}
+	if DefaultBackendTimeout != 30*time.Second || ListBackendTimeout != 40*time.Second {
+		t.Errorf("DefaultBackendTimeout=%v ListBackendTimeout=%v, want 30s and 40s (unchanged)", DefaultBackendTimeout, ListBackendTimeout)
+	}
+	if OpListActivity != "list_activity" {
+		t.Errorf("OpListActivity = %q, want the wire name list_activity", OpListActivity)
 	}
 }
 

@@ -16,8 +16,9 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
-// OpListActivity is the activity capability's one wire op.
-const OpListActivity = "list_activity"
+// OpListActivity is the activity capability's one wire op. It aliases
+// scriptout.OpListActivity, where the op's own call budget is keyed.
+const OpListActivity = scriptout.OpListActivity
 
 // NewDispatchTable builds the activity capability's op-dispatch table for p:
 // list_activity always; auth_status only when p also implements
