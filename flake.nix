@@ -2852,8 +2852,8 @@
                     echo "FAIL: the core agent rules lost the never-probe-with-test-f rule for hook presence" >&2
                     exit 1
                   fi
-                  if ! grep -qF -- 'pb drain isolate' "$surface/claude-marketplace/pb/commands/drain-beads.md" || ! grep -qF -- 'writes nothing into the' "$surface/claude-marketplace/pb/commands/drain-beads.md"; then
-                    echo "FAIL: drain-beads.md lost the writes-nothing wording for pb drain isolate's hook-bundle report" >&2
+                  if ! grep -qF -- 'pb drain isolate' "$surface/claude-marketplace/pb/skills/drain-one/SKILL.md" || ! grep -qF -- 'writes nothing into the' "$surface/claude-marketplace/pb/skills/drain-one/SKILL.md"; then
+                    echo "FAIL: the pb:drain-one skill lost the writes-nothing wording for pb drain isolate's hook-bundle report" >&2
                     exit 1
                   fi
                   if ! grep -qF 'is NOT a per-change or land-time gate' "$surface/home/programs/agent-rules/pgii-agent-rules.md"; then

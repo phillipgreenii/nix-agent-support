@@ -1,14 +1,19 @@
 ---
 name: drain-stuck
-description: Disposition a claimed drain-beads bead that cannot complete — run the freshness probes, then park it for a human, close it as moot, or convert its blockers into bd dependencies. Invoked by /drain-beads with the bead id, session actor id, worktree/branch location, and what was tried. Do NOT use outside a drain session.
+description: Disposition a claimed drain-beads bead that cannot complete — run the freshness probes, then park it for a human, close it as moot, or convert its blockers into bd dependencies. Invoked by /drain-beads or a drain worker (through pb:drain-one) with the bead id, session actor id, worktree/branch location, and what was tried. Do NOT use outside a drain session.
 ---
 
 # drain-stuck
 
-You were invoked from a /drain-beads session holding a claimed bead it cannot
-complete. Required context from the caller: the bead id (<id>), the session
+You were invoked from a drain session (/drain-beads, or a drain worker applying
+pb:drain-one) holding a claimed bead it cannot complete. Required context from the caller: the bead id (<id>), the session
 actor id (ID), the worktree/branch location, and what was tried. Every `bd`
 write below passes `--actor "ID"`.
+
+`<work-branch>` is the branch the caller passes (default `drain/<id>`). If the skill text
+you hold ends with `skill content truncated for compaction`, or you cannot quote the step
+you need, Read this file's path in full before acting. A container hit under release
+policy `park` skips STUCK steps 1, 3 and 4 and takes CONTAINER PARK at the end of this file.
 
 `human` means A PERSON IS THE BLOCKER — the LAST RESORT. Work through STUCK in
 order; it exits by exactly one of: PARK (labeled `human`, claim released),
@@ -41,7 +46,7 @@ live blocker is a LIVE EXTERNAL EVENT that no person or bead can force leaves vi
 
 1. PARK the change (do NOT discard it). KEEP the isolated worktree/branch — do NOT
    clean it up; the park IS leaving it in place. If the WIP commits cleanly, commit
-   it on branch `drain/<id>` with a `WIP (parked): <id> <why>` message; if
+   it on branch `<work-branch>` with a `WIP (parked): <id> <why>` message; if
    pre-commit hooks block the commit, leave the changes uncommitted in the retained
    worktree (do NOT use `--no-verify`).
 2. FRESHNESS CHECK — re-verify the bead's PREMISE against CURRENT reality BEFORE you
@@ -149,7 +154,7 @@ live blocker is a LIVE EXTERNAL EVENT that no person or bead can force leaves vi
    **6a — ordinary park**, carrying the step-4 block when there is a precondition:
 
    ```bash
-   bd comment <id> "stuck: <what you tried / why>. Parked on branch drain/<id> in <repo> at <worktree-path>.
+   bd comment <id> "stuck: <what you tried / why>. Parked on branch <work-branch> in <repo>.
    FRESHNESS: <ISO date> — <probe>=<decisive output> ⇒ premise LIVE
    PRECONDITION: <observable outcome that must hold before this is workable>
    PRECONDITION-KEY: <stable-outcome-slug>
@@ -161,7 +166,7 @@ live blocker is a LIVE EXTERNAL EVENT that no person or bead can force leaves vi
    restate the old precondition as though it were fresh:
 
    ```bash
-   bd comment <id> "stuck (SUSPECTED STALE PRECONDITION): SECOND park on PRECONDITION-KEY <slug>, so the precondition may be unsatisfiable rather than merely unmet. Re-derive it from its provenance (<repo>@<sha> — <path>) against CURRENT source before acting on it. Observed now: <what you ran and saw>. FRESHNESS: <ISO date> — <probe>=<decisive output> ⇒ premise LIVE. Do NOT re-park on this key. Parked on branch drain/<id> in <repo> at <worktree-path>." --actor "ID"
+   bd comment <id> "stuck (SUSPECTED STALE PRECONDITION): SECOND park on PRECONDITION-KEY <slug>, so the precondition may be unsatisfiable rather than merely unmet. Re-derive it from its provenance (<repo>@<sha> — <path>) against CURRENT source before acting on it. Observed now: <what you ran and saw>. FRESHNESS: <ISO date> — <probe>=<decisive output> ⇒ premise LIVE. Do NOT re-park on this key. Parked on branch <work-branch> in <repo>." --actor "ID"
    ```
 
 7. ESCALATE by labeling for a human (hides the bead from BOTH the claim and the
@@ -188,8 +193,7 @@ live blocker is a LIVE EXTERNAL EVENT that no person or bead can force leaves vi
    bd update <id> --assignee "" --status open --actor "ID"
    ```
 
-9. Do NOT clean up the parked worktree/branch. Done — return to the drain loop's
-   CLAIM step.
+9. Do NOT clean up the parked worktree/branch. Done — return to the caller.
 
 ## CLOSE-AS-MOOT (STUCK step 2 disproved the premise)
 
@@ -200,7 +204,7 @@ worthless: stale work often contains a PREDICTION about the code, and a blind cl
 throws that away (F-7). EXTRACT first, close second.
 
 1. READ the stale work before discarding it — the bead's description/design, its
-   comments, and any WIP commit on `drain/<id>`. You are looking for a claim it makes
+   comments, and any WIP commit on `<work-branch>`. You are looking for a claim it makes
    that CURRENT source VIOLATES: a defect it predicted, or a decision it called
    load-bearing that the shipped version skipped. Blind-closing is forbidden.
 
@@ -221,10 +225,10 @@ throws that away (F-7). EXTRACT first, close second.
    bd close <id> --reason "moot on re-verification: <probe>=<decisive output>; superseded by <what>; extracted <extracted>" --actor "ID"
    ```
 
-4. The isolation — do NOT delete unlanded work. Check whether anything would be lost:
+4. The isolation — do NOT delete unlanded work. Check whether anything would be lost (`<primary>` is the repo's primary branch: `git config pgii-integrate-branch.primaryBranch`, else `git symbolic-ref refs/remotes/origin/HEAD`, else `main`):
 
    ```bash
-   git -C <worktree-path> status --porcelain; git -C <repo> cherry -v main drain/<id>
+   git -C <worktree-path> status --porcelain; git -C <repo> cherry -v <primary> <work-branch>
    ```
 
    BOTH empty → nothing to lose → CLEANUP as in the `done` path. EITHER non-empty →
@@ -238,7 +242,7 @@ throws that away (F-7). EXTRACT first, close second.
    ```bash
    bd create "worktree-review: reconcile leftover isolation for <id> (closed as moot)" \
      --labels human,worktree-review --defer +7d --deps "discovered-from:<id>" \
-     --notes "[worktree-review $(date +%F)] Leftover isolation from <id>: worktree <worktree-path>, branch drain/<id> in <repo>. Unlanded: <git cherry output>. Dirty: <git status --porcelain output>. A person must rule on keep vs discard. No promotion (priority left at P2)." \
+     --notes "[worktree-review $(date +%F)] Leftover isolation from <id>: branch <work-branch> in <repo>. Unlanded: <git cherry output>. Dirty: <git status --porcelain output>. A person must rule on keep vs discard. No promotion (priority left at P2)." \
      --actor "ID"
    ```
 
@@ -259,7 +263,7 @@ throws that away (F-7). EXTRACT first, close second.
    The only isolation drain ever retires is the one IT created for the bead it currently holds,
    after that bead's own work LANDED (FINISH step 7) — never an adjudication of someone else's.
 
-5. Done — return to the drain loop's CLAIM step.
+5. Done — return to the caller.
 
 ## CONVERT-TO-DEPENDENCY (STUCK step 3 found the blocker is another bead)
 
@@ -290,7 +294,7 @@ label a dependency edge clears ITSELF. Full contract: the `beads-lifecycle` skil
    **P-1** describes:
 
    ```bash
-   bd comment <id> "not stuck on a person: blocked on <blocker-id>[, <blocker-id>…], now wired as bd dependencies instead of a human park. No human input is needed to move this — it returns to the drain queue by itself when the last blocker closes. Work parked on branch drain/<id> in <repo> at <worktree-path>.
+   bd comment <id> "not stuck on a person: blocked on <blocker-id>[, <blocker-id>…], now wired as bd dependencies instead of a human park. No human input is needed to move this — it returns to the drain queue by itself when the last blocker closes. Work parked on branch <work-branch> in <repo>.
    FRESHNESS: <ISO date> — sibling-open?=<status per blocker> ⇒ premise LIVE
    BLOCKED-BY-BEADS: <blocker-id>[, <blocker-id>…]" --actor "ID"
    ```
@@ -310,7 +314,7 @@ label a dependency edge clears ITSELF. Full contract: the `beads-lifecycle` skil
    after the dependency resolved.
 
 4. Do NOT clean up the parked worktree/branch — the work resumes there once the blockers
-   clear. Done — return to the drain loop's CLAIM step.
+   clear. Done — return to the caller.
 
 **MIXED blocker (a bead AND a person) — both apply; do not let either fall through**
 (**D-7**). Do step 1 above for the bead half, then go BACK to STUCK step 4 and finish the
@@ -361,7 +365,7 @@ required".
    `FRESHNESS:` line and the step-1 PRECONDITION block:
 
    ```bash
-   bd comment <id> "stuck (event-gated, not human-gated): <what you tried / observed>. The blocker is a live external event/observation, not a person or another bead — see beads-lifecycle D-10. Parked on branch drain/<id> in <repo> at <worktree-path>.
+   bd comment <id> "stuck (event-gated, not human-gated): <what you tried / observed>. The blocker is a live external event/observation, not a person or another bead — see beads-lifecycle D-10. Parked on branch <work-branch> in <repo>.
    FRESHNESS: <ISO date> — <probe>=<decisive output> ⇒ premise LIVE
    PRECONDITION: <observable outcome that must occur before this is workable>
    PRECONDITION-KEY: <stable-outcome-slug>
@@ -382,4 +386,28 @@ required".
    `--label human` queue at all.
 
 5. Do NOT clean up the parked worktree/branch — the work resumes there once the event has
-   occurred. Done — return to the drain loop's CLAIM step.
+   occurred. Done — return to the caller.
+
+## CONTAINER PARK (a container hit under release policy `park`)
+
+Reached ONLY when `pb:drain-one`'s container probe fired and the caller's release policy
+is `park`: the caller passes the probe evidence (which check fired, the note verbatim or the
+child ids, statuses and priorities, and the container's own priority). A container-parent has
+no work of its own, so the other exits do not fit. CONVERT-TO-DEPENDENCY would read the open
+children as "every live blocker is a bead" and wire the D-9 deadlock (a parent blocked by its
+own child). DEFER-ON-EVENT and any other defer hide the whole subtree (**D-9**). CLOSE-AS-MOOT's
+isolation steps do not apply. So:
+
+1. Run step 2 FRESHNESS with the children-state probe only
+   (`bd list --parent <id> --status all -n 0 --json`, plus the `sibling-open?` reading per
+   child). SKIP steps 1, 3 and 4, and the CONVERT-TO-DEPENDENCY, DEFER-ON-EVENT and
+   CLOSE-AS-MOOT exits. Run step 5's repeat detection against
+   `PRECONDITION-KEY: container-not-retyped`.
+2. Write the 6a comment with the probe evidence and the `FRESHNESS:` line. Do NOT include the
+   branch or worktree sentence, and do NOT name a pg-router branch or a worktree path. End it
+   with what removes the bead from the drain-ready query (`bd update <id> -t epic`, close it, or
+   drop `has-acceptance-criteria`) and carry `PRECONDITION-KEY: container-not-retyped`, so a
+   SECOND park escalates through step 5's repeat-key path (6b/7b) instead of ping-ponging with
+   `/unblock-human-beads`, whose RELEASE strips `human`.
+3. Then 7a (`--add-label human`) and 8 (UNCLAIM). Apply NO defer and NO `bd dep` edge (**D-9**).
+   Done — return to the caller.
