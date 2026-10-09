@@ -103,22 +103,60 @@ func TestClientTimeoutWithRealRunnerClassifiesAsTimeout(t *testing.T) {
 	}
 }
 
-func TestCancelOnAnAlreadyGoneProcessGroupIsNotAnError(t *testing.T) {
+// The kill primitive is injected rather than provoked for real. A real
+// "already gone" group cannot be made deterministic: once the child is reaped
+// its pid/pgid is free for the kernel to recycle, and under host load the
+// window between reap and Cancel widens enough for a recycled pgid to turn the
+// expected ESRCH into success or EPERM (pg2-j4f8z).
+func stubKill(t *testing.T, fn func(pid int, sig syscall.Signal) error) {
+	t.Helper()
+	orig := killProcess
+	killProcess = fn
+	t.Cleanup(func() { killProcess = orig })
+}
+
+func startedCmd(t *testing.T) *exec.Cmd {
+	t.Helper()
 	cmd := exec.CommandContext(context.Background(), "true")
 	configureProcessGroup(cmd)
 	if err := cmd.Run(); err != nil {
 		t.Fatal(err)
 	}
-	// The group no longer exists: kill reports ESRCH, which Cancel must swallow.
+	return cmd
+}
+
+func TestCancelOnAnAlreadyGoneProcessGroupIsNotAnError(t *testing.T) {
+	cmd := startedCmd(t)
+	var gotPid int
+	var gotSig syscall.Signal
+	stubKill(t, func(pid int, sig syscall.Signal) error {
+		gotPid, gotSig = pid, sig
+		return syscall.ESRCH
+	})
 	if err := cmd.Cancel(); err != nil {
-		t.Fatalf("Cancel on a finished process = %v, want nil", err)
+		t.Fatalf("Cancel on a gone group = %v, want nil", err)
 	}
-	// A command that never started has no process to signal.
-	if err := func() error {
-		c := exec.CommandContext(context.Background(), "true")
-		configureProcessGroup(c)
-		return c.Cancel()
-	}(); err != nil {
+	if gotPid != -cmd.Process.Pid || gotSig != syscall.SIGKILL {
+		t.Fatalf("kill(%d, %v), want kill(%d, SIGKILL): the whole group", gotPid, gotSig, -cmd.Process.Pid)
+	}
+}
+
+func TestCancelReportsKillErrorsOtherThanAlreadyGone(t *testing.T) {
+	cmd := startedCmd(t)
+	stubKill(t, func(int, syscall.Signal) error { return syscall.EPERM })
+	if err := cmd.Cancel(); !errors.Is(err, syscall.EPERM) {
+		t.Fatalf("Cancel = %v, want EPERM propagated", err)
+	}
+}
+
+func TestCancelBeforeStartSignalsNothing(t *testing.T) {
+	stubKill(t, func(pid int, _ syscall.Signal) error {
+		t.Errorf("kill(%d) called for a command that never started", pid)
+		return nil
+	})
+	c := exec.CommandContext(context.Background(), "true")
+	configureProcessGroup(c)
+	if err := c.Cancel(); err != nil {
 		t.Fatalf("Cancel before start = %v", err)
 	}
 }
