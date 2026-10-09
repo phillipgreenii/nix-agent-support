@@ -1217,7 +1217,8 @@ pgwf_resolve_actor_role() {
 #    of appearance): ID is the BLOCKED work item. Per pair, computes the
 #    fingerprint, reuses an OPEN question already carrying it (adds a
 #    blocking edge from ID to that question, creates nothing) or creates a
-#    new question child (bd type task, --no-inherit-labels, labeled
+#    new question child (bd type task, --parent ID so context/workflow
+#    resolution follow .parent, --no-inherit-labels, labeled
 #    question+escalated+the trigger, `fingerprint` metadata set), then adds
 #    the blocking edge from ID to it. The check-then-create race is
 #    ACCEPTED, not prevented [rev7] -- no locking is added here.
@@ -1310,6 +1311,7 @@ pgwf_cmd_escalate() {
 
     local -a create_args=(
       --title "$question"
+      --parent "$id"
       --labels "${question_label},${escalated_label},${trigger}"
       --no-inherit-labels
       --metadata "$(jq -cn --arg fp "$fp" '{fingerprint: $fp}')"
