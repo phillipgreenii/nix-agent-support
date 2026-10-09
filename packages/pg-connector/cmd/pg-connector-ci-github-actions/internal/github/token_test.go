@@ -2,8 +2,15 @@ package github
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
 // TestEnvWithoutGHToken exercises the general strip-token behavior; the
@@ -311,5 +318,76 @@ func TestDefaultTokenSource_HonorsEnvBeforeGH(t *testing.T) {
 	}
 	if tok != "envtok" {
 		t.Errorf("Token = %q, want envtok", tok)
+	}
+}
+
+// ghStubScript puts an executable named `gh` with the given /bin/sh body on
+// PATH, shadowing any real gh.
+func ghStubScript(t *testing.T, body string) {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte("#!/bin/sh\n"+body+"\n"), 0o700); err != nil {
+		t.Fatalf("write gh stub: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// TestCLIRun_TokenLookupKilledAtDeadline_IsNotAuthInvalid mirrors the sibling
+// backend's regression test for bead pg2-ev2uf: a `gh auth token` killed at
+// the per-call budget never judged the credential, so it must not surface as
+// ErrGHAuthInvalid (unauthenticated) or tell the operator to re-login.
+func TestCLIRun_TokenLookupKilledAtDeadline_IsNotAuthInvalid(t *testing.T) {
+	ghStubScript(t, "exec sleep 30")
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+
+	out, err := NewCLIWithTokenSource(ghCLITokenSource{}).Run(ctx, "run", "list")
+
+	if len(out) != 0 {
+		t.Errorf("Run returned stdout %q, want empty", out)
+	}
+	if err == nil {
+		t.Fatal("Run returned nil error although the token lookup was killed")
+	}
+	if errors.Is(err, ErrGHAuthInvalid) {
+		t.Errorf("a killed `gh auth token` was classified as auth-invalid: %v", err)
+	}
+	if strings.Contains(err.Error(), "gh auth login") {
+		t.Errorf("error tells the operator to re-login for a lookup that never finished: %v", err)
+	}
+	if got := scriptout.CodeForError(err); got != "unavailable" {
+		t.Errorf("wire code = %q, want unavailable (err=%v)", got, err)
+	}
+}
+
+// TestCLIRun_TokenLookupSignalled_IsNotAuthInvalid covers a `gh auth token`
+// killed by a signal with the context still live.
+func TestCLIRun_TokenLookupSignalled_IsNotAuthInvalid(t *testing.T) {
+	ghStubScript(t, "kill -KILL $$")
+
+	_, err := NewCLIWithTokenSource(ghCLITokenSource{}).Run(context.Background(), "run", "list")
+
+	if err == nil {
+		t.Fatal("Run returned nil error although the token lookup was killed")
+	}
+	if errors.Is(err, ErrGHAuthInvalid) {
+		t.Errorf("a signalled `gh auth token` was classified as auth-invalid: %v", err)
+	}
+}
+
+// TestCLIRun_TokenLookupGenuineNonZeroExit_IsAuthInvalid pins the other side:
+// a `gh auth token` that ran to completion and exited non-zero stays in the
+// unauthenticated class.
+func TestCLIRun_TokenLookupGenuineNonZeroExit_IsAuthInvalid(t *testing.T) {
+	for _, exit := range []int{1, 4} {
+		t.Run(fmt.Sprintf("exit %d", exit), func(t *testing.T) {
+			ghStubExitingWithStderr(t, exit, "no oauth token found for github.com")
+
+			_, err := NewCLIWithTokenSource(ghCLITokenSource{}).Run(context.Background(), "run", "list")
+
+			if !errors.Is(err, ErrGHAuthInvalid) {
+				t.Errorf("errors.Is(err, ErrGHAuthInvalid) = false, want true (err=%v)", err)
+			}
+		})
 	}
 }

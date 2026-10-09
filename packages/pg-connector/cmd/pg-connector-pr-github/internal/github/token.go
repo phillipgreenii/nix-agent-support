@@ -62,9 +62,18 @@ func ghAuthTokenCommand(ctx context.Context) *exec.Cmd {
 // bare "exit status N" .Output() would otherwise leave callers with — every
 // credential failure used to collapse to a generic "run gh auth login"
 // message regardless of the real cause (bead pg2-y23d4 #32).
+//
+// A lookup that never finished (killed at the context deadline or by a
+// signal, or stuck past WaitDelay) says nothing about the credential, so it
+// wraps errTokenLookupInterrupted and cliGHRunner.command keeps it out of the
+// auth-invalid class [bead pg2-ev2uf]. Only a lookup that ran to completion
+// and exited non-zero is left for the caller to treat as a credential problem.
 func (ghCLITokenSource) Token(ctx context.Context) (string, error) {
 	out, err := ghAuthTokenCommand(ctx).Output()
 	if err != nil {
+		if tokenLookupInterrupted(ctx, err) {
+			return "", fmt.Errorf("gh auth token: %w: %w", errTokenLookupInterrupted, err)
+		}
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			if st := strings.TrimSpace(string(exitErr.Stderr)); st != "" {
@@ -75,6 +84,23 @@ func (ghCLITokenSource) Token(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("gh auth token: %w", err)
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// errTokenLookupInterrupted marks a `gh auth token` that did not run to
+// completion: the per-call budget (context deadline) or a signal killed it, or
+// it outlived cmd.WaitDelay. The credential was never judged, so this is an
+// availability problem, not an authentication one [bead pg2-ev2uf].
+var errTokenLookupInterrupted = errors.New("gh credential lookup did not complete")
+
+// tokenLookupInterrupted reports whether err from running `gh auth token`
+// means the process never finished, as opposed to finishing with a non-zero
+// exit. A process ended by a signal has ExitCode() == -1.
+func tokenLookupInterrupted(ctx context.Context, err error) bool {
+	if ctx.Err() != nil || errors.Is(err, exec.ErrWaitDelay) {
+		return true
+	}
+	var exitErr *exec.ExitError
+	return errors.As(err, &exitErr) && exitErr.ExitCode() == -1
 }
 
 // chainTokenSource returns the first source that yields a non-empty token.

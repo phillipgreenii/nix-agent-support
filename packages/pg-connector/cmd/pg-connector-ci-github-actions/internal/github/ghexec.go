@@ -92,6 +92,14 @@ func (r *cliGHRunner) token(ctx context.Context) (string, error) {
 func (r *cliGHRunner) command(ctx context.Context, args ...string) (*exec.Cmd, error) {
 	tok, err := r.token(ctx)
 	if err != nil {
+		// A lookup that never finished (killed at the per-call budget or by a
+		// signal) did not judge the credential: report it WITHOUT
+		// ErrGHAuthInvalid so it surfaces as unavailable, not as "run `gh auth
+		// login`" [bead pg2-ev2uf]. gh is still not executed.
+		if errors.Is(err, errTokenLookupInterrupted) {
+			return nil, fmt.Errorf("gh %s: GitHub credential lookup did not complete: %w",
+				strings.Join(args, " "), err)
+		}
 		return nil, fmt.Errorf("gh %s: no usable GitHub credential; run `gh auth login`: %w",
 			strings.Join(args, " "), errors.Join(ErrGHAuthInvalid, err))
 	}
