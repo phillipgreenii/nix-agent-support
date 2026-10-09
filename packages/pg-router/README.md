@@ -127,6 +127,18 @@ blocks on every gate TYPE by default and declares `non_blocking_gates = [...]` (
 blocked when an event's final attempt falls due loses that event, so long gates drop events (counted
 in `pg_router_gate_drops`). External systems use the `gate-set`/`gate-clear` socket verbs.
 
+**Operator convention: `BEAD_SERVER_DOWN`.** Gate TYPEs are arbitrary, and `BEAD_SERVER_DOWN` is
+the one an operator sets before taking the shared beads/Dolt server down (for example a `bd`
+schema migration): `pg-router gate set BEAD_SERVER_DOWN --owner beads-migration --description
+"bd schema migration: shared Dolt server down"`, with NO `--ttl` (a lapsed lease counts as
+cleared). It needs a running core, so set it BEFORE the router is stopped, and clear it last with
+`pg-router gate clear BEAD_SERVER_DOWN`. Participants that never touch beads declare
+`non_blocking_gates = ["BEAD_SERVER_DOWN"]` and keep running; an emitter/listener pair that must
+stay live together MUST opt out on BOTH sides (a heartbeat emitter whose listener still blocks
+just queues events). A long gate drops events whose TTL lapses (`pg_router_gate_drops`). The
+full migration procedure is `docs/beads-1-3-1-schema-migration.md` in the
+`phillipg-nix-ziprecruiter` repo.
+
 Unlike the file-backed gates they replaced, these commands are **socket clients**: they need a
 running core and fail with `no running core` (exit `1`) otherwise — they never start one
 ([ADR 0036](../../docs/adr/0036-pg-router-cli-never-auto-starts-a-core.md)). See `MIGRATION.md`'s

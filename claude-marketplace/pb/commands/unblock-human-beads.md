@@ -171,7 +171,8 @@ does NOT apply to this branch: a correctly DEFERred bead cannot reappear
 this run, so a reappearance means the loop is stuck — this is a defensive guard, not the
 "queue is empty" condition the flag changes. If the
 command ERRORS (a bd/dolt blip), that is NOT "empty" → back off briefly and retry; never
-exit on an error.
+exit on an error — EXCEPT a persistent condition that is not a blip (see "Persistent bd
+failure is not a blip" near the end of this file), which MUST stop the loop.
 
 ### --monitor-if-empty
 
@@ -1358,6 +1359,12 @@ Freshness` rules (F-3) —
   remove safety filters or broaden scope.
 - Never use `--no-verify`. Transient infra failures (bd/dolt blip, `index.lock`
   contention) are NOT terminal — back off and retry.
+- **Persistent bd failure is not a blip.** A `bd` write that refuses with "refusing to
+  auto-apply N pending schema migrations", or an active `BEAD_SERVER_DOWN` pg-router gate
+  (`pg-router gate list`), is a migration state that retrying cannot clear, and a loop
+  that retries it spins forever. STOP the loop (do not start or restart dolt), report that
+  the operator must run the schema migration, and leave claims released per B-1/B-2.
+  Runbook: `docs/beads-1-3-1-schema-migration.md` in the `phillipg-nix-ziprecruiter` repo.
 
 ## Loop overview
 

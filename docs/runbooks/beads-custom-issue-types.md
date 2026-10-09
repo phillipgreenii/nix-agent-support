@@ -17,7 +17,8 @@ database (or stands up a new tracker) MUST repeat it.
 
 ## Why a naive `bd config set types.custom <list>` is unsafe
 
-Verified against bd 1.2.2.
+Verified against bd 1.2.2 (originally; both machine builds are now 1.3.1, and this behavior has
+not been re-probed on 1.3.1).
 
 - `bd config set types.custom <list>` REPLACES the whole list. Passing only the
   new type silently unregisters every other custom type (including
@@ -106,8 +107,8 @@ database that has not been migrated yet degrades instead of breaking.
 
 ## Which bd build
 
-Every build of bd 1.2.2 on this machine (the machine wrapper and the
-unwrapped upstream build used by some dispatched sessions) reads the same
-database state, so one registration covers both. After registering, confirm the
+Both builds of bd on this machine (the machine wrapper and the unwrapped
+upstream build used by some dispatched sessions; both are 1.3.1 since the
+2026-10-08 upgrade, earlier both were 1.2.2) read the same database state, so one registration covers both. After registering, confirm the
 unwrapped build agrees:
 `<store-path-of-that-build>/bin/bd -C "$T" types` lists the new type.

@@ -7,8 +7,9 @@ environment, and whether it can therefore auto-start a competing dolt server.
 | -------------------------- | ---------------------- | --------------- | ------------------------------------------------- | ---------------------------------------------- |
 | User CLI shell             | interactive login      | yes             | overlay `bd` wrapper                              | yes                                            |
 | GUI app (VS Code)          | launchd `gui/UID`      | no              | overlay `bd` wrapper                              | yes (extension — being removed)                |
-| Per-user launchd agent     | plist, `gui/UID`       | no              | overlay `bd` wrapper                              | yes (`pg-pr-sync`)                             |
+| Per-user launchd agent     | plist, `gui/UID`       | no              | overlay `bd` wrapper                              | yes (`pg-desk-serve`, `pg-router-daemon`)      |
 | Root/system launchd daemon | plist, `system` domain | no              | overlay `bd` wrapper                              | none today (only Caddy proxy); forward-looking |
+| SQL-only launchd client    | plist, `gui/UID`       | no              | n/a (never runs `bd`; connects to 25252 directly) | yes (`mysql-probe-exporter`; SQL client only)  |
 
 **Takeaway:** the overlay `bd` **wrapper** is the only mechanism common to every
 row. `home.packages` and `home.sessionVariables` reach the shell row but **miss

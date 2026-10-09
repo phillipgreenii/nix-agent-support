@@ -11,8 +11,10 @@
 #   4  the bead was created but the read-back disagrees with what was asked
 
 # J-1 envelope prelude (beads-lifecycle skill): `bd ... --json` returns
-# {"data":[..]} on some builds and a bare array on others (dispatched sessions
-# run the latter). Both reduce to ONE issue object here.
+# {"data":[..]} only when BD_JSON_ENVELOPE=1 and a bare array otherwise; the
+# build does not matter, and dispatched sessions (launchd, pg-router, nix
+# sandbox) do not source the variable, so they get the bare array. Both reduce
+# to ONE issue object here.
 HC_ENVELOPE_PRELUDE='(if type=="object" and has("data") then .data else . end) | (if type=="array" then .[0] else . end)'
 
 # The exact `bd create` error text for a database that does not register the

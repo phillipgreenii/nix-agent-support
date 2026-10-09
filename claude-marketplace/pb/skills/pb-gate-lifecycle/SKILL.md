@@ -50,7 +50,10 @@ concurrent agent draining `bd ready` can grab it in the gap.
    NEITHER field is a usable check: on `bd 1.2.2 (dev)`, `bd create --defer` returns
    `status: deferred` with the defer in `defer_until` (observed 2026-08-21; an earlier
    2026-08-13 observation of `status: open` has since drifted), while `deferred_until`
-   reads `null` in the `bd show --json` projection — so which field carries the truth
+   reads `null` in the `bd show --json` projection (re-observed unchanged 2026-10-09 on
+   `bd 1.3.1`: `status: deferred`, `defer_until` populated, `deferred_until` null; the
+   `deferred_until` key is simply not the populated one, so read `defer_until` if you must
+   look at a field at all) — so which field carries the truth
    has already changed once underneath this instruction, and a field read reports a
    FALSE failure. Assert the OUTCOME the ordering exists to produce (**P-1**):
 

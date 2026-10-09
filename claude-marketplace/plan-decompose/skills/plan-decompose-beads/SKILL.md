@@ -12,7 +12,9 @@ description: >-
 
 Maps every abstract operation of the `plan-decompose` core skill onto `bd`, one heading per
 core-table row, same grouping and order. Empirical facts were probed 2026-08-27 against
-bd 1.0.x on this workspace (commands shown); re-verify on a bd major bump.
+bd 1.0.x on this workspace (commands shown); the workspace now runs bd 1.3.1 and these
+probes have NOT been re-run on it (only the epic/task `blocks` edge check was, 2026-10-09; see
+`epic-decompose`'s Wire step); re-verify on a bd major bump.
 
 ## `find-docket`
 

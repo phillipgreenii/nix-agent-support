@@ -18,3 +18,11 @@ server against the shared data or on port 25252.
 signature, the config use-case matrix, and the step-by-step debugging playbook
 (find the rogue process, the port holder, the caller) plus how to confirm data
 safety before killing anything.
+
+**Not a rogue server:** a `bd` WRITE that refuses with "refusing to auto-apply N pending
+schema migrations" (reads still work) means the shared database awaits an operator-run
+`bd migrate schema`. Do not start or restart dolt and do not run the rogue-hunting
+playbook; stop and tell the operator. During a migration window a second dolt server on
+port 25253 is the operator's migrator, not a rogue (check `pg-router gate list` for
+`BEAD_SERVER_DOWN` first). Runbook: `docs/beads-1-3-1-schema-migration.md` in the
+`phillipg-nix-ziprecruiter` repo.

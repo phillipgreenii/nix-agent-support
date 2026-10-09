@@ -3,6 +3,18 @@
 Read-only diagnosis first; destructive steps only after data safety is
 confirmed. None of these steps start a server.
 
+**Do not run this playbook during a migration window.** A planned `bd` schema migration
+legitimately runs a second `dolt sql-server` on an alternate port (25253) while the shared
+agent is booted out; steps 1, 2, 6 and 7 would classify it as rogue and tell you to
+`pkill` or `bootout` it. First run `pg-router gate list`: if a `BEAD_SERVER_DOWN` gate is
+set, stop, change nothing, and tell the operator. Runbook: `docs/beads-1-3-1-schema-migration.md`
+in the `phillipg-nix-ziprecruiter` repo (named by repo and path; this repo is standalone).
+
+If instead `bd` WRITES fail with "refusing to auto-apply N pending schema migrations" while
+reads work, see "bd writes refuse: pending schema migrations" in `SKILL.md`: the server is
+healthy, `bd doctor`'s "run any bd command / restart dolt" hint does NOT fix a shared-server
+database, and the fix is the operator-run `bd migrate schema`. Do not start or restart dolt.
+
 ## 0. Probe caution: `bd dolt status` false-negatives
 
 `bd dolt status` can falsely report "Dolt server: not running / Expected port
@@ -29,7 +41,9 @@ ps -axo pid,ppid,lstart,command | grep '[d]olt sql-server'
 ```
 
 Look for **two** servers: one with a `--config <path>` (the shared server) and
-one **config-less** rooted at a workspace-local `./.beads/dolt`. Note the
+one **config-less** rooted at a workspace-local `./.beads/dolt`. (A server on port
+25253 with its own `--config` is a migration window's migrator, not a rogue; see the
+caution at the top.) Note the
 **start times** (`lstart`) — the newer one is usually the rogue — and each
 process's **PPID** (the parent that spawned it).
 
@@ -63,7 +77,8 @@ lines separate the crash-looping real server from the squatting rogue.
 The rogue was started by _something_. Find it:
 
 - **Enumerate launchd jobs** and any `pg-launchd`-wrapped daemons; look for jobs
-  that shell out to `bd` on a timer (e.g. a PR-sync / maintenance daemon).
+  that shell out to `bd` on a timer (e.g. `pg-desk-serve`, `pg-router-daemon`, or a
+  maintenance daemon).
 - **Check Claude hooks** and editor/IDE **beads extensions** (e.g.
   `planet57.vscode-beads`) that poll `bd dolt status` and run `bd dolt start` on
   connect / on error.
@@ -113,8 +128,8 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/org.nixos.beads-dolt-ser
 ```
 
 The agent loads to state=running instantly once the port is free. Corollary:
-do NOT stop the shared server while agents or bd-polling daemons (e.g. a
-PR-sync timer) are active — a stray `bd` call during the gap can spawn a
+do NOT stop the shared server while agents or bd-polling daemons (e.g.
+`pg-desk-serve`, `pg-router-daemon`) are active — a stray `bd` call during the gap can spawn a
 config-less rogue on 25252 that serves an EMPTY DB and re-creates this whole
 incident; prefer online operations that keep the server bound.
 

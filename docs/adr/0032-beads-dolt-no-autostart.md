@@ -131,6 +131,9 @@ the overlay wrapper, which every context resolves.
 - Design: `docs/superpowers/specs/2026-07-24-beads-dolt-no-autostart-design.md`
 - Runbook: `docs/runbooks/beads-dolt-no-autostart.md`
 - Skill: `claude-marketplace/beads-dolt-doctor/`
+- bd 1.3.1 schema migration runbook (migration window and pending-migration write refusals,
+  neither of which is a rogue server): `docs/beads-1-3-1-schema-migration.md` in the
+  `phillipg-nix-ziprecruiter` repo
 - Delivery of always-on rules: ADR
   `docs/adr/0017-static-nix-built-local-plugin-marketplace.md` (agent-rules is
   the user `~/.claude/CLAUDE.md`, not a plugin).

@@ -19,8 +19,9 @@ This skill is the ONLY place the handoff-bead rules live. Consumers (`/drain-bea
 MUST NOT copy the rules.
 
 All `jq` in this skill uses the **J-1** envelope prelude from the `beads-lifecycle` skill
-(`(if type=="object" and has("data") then .data else . end)`), because dispatched sessions run a
-`bd` that returns a bare array. This skill works in any beads database (pg2, ZR, others); it MUST
+(`(if type=="object" and has("data") then .data else . end)`), because the `--json` envelope is
+present only when `BD_JSON_ENVELOPE=1` and dispatched sessions (launchd, pg-router, nix sandbox)
+do not source it, so they get a bare array. This skill works in any beads database (pg2, ZR, others); it MUST
 NOT assume a particular tracker or the drain loop.
 
 ## Definition (minimal)

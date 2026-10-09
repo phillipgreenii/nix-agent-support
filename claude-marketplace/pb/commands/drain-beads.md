@@ -89,7 +89,9 @@ If that command SUCCEEDS (exit 0) and has no non-template entry, STOP (see "Unpu
 you STOP") — UNLESS this session was invoked with `--monitor-if-empty` (see
 "--monitor-if-empty" below), in which case an empty result ARMS a recurring
 check instead of stopping. If it ERRORS (a bd/dolt blip), that is NOT "empty" →
-back off briefly and retry; never exit on an error. `bd ready` already excludes
+back off briefly and retry; never exit on an error — EXCEPT a persistent condition that
+is not a blip (see "Persistent bd failure is not a blip" under "Transient infra failures"
+in `pb:drain-one`'s `references/rules.md`), which MUST stop the loop. `bd ready` already excludes
 `in_progress`/`blocked`/`deferred`, so in-flight work is excluded automatically;
 `human`-labeled parked beads are excluded here too. Beads awaiting post-deploy
 verification are GATED (blocked), so they are absent from `bd ready` as well —

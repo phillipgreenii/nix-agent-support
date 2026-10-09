@@ -113,8 +113,10 @@ directory and never starts a dolt server.
     completeness; expect denials, which stop the run.
 - **pg-connector config.** A copy of the live `pg-pr` config (a read-only nix-store symlink in the
   live tree; the per-author search split is already live, `pg2-kn9n1`) minus the Jira backend.
-- **PATH and shims.** The machine `bd` (the router wrapper's bundled `bd` 1.3.1 failed against the
-  shared database in `pg2-x3h8c.12`: "table not found: leases"), `gh` and `bd` logging shims in
+- **PATH and shims.** The machine `bd` (history: before the 2026-10-08 shared-database schema
+  migration, the router wrapper's bundled `bd` 1.3.1 failed against the then-unmigrated shared
+  database in `pg2-x3h8c.12` with "table not found: leases"; the migration has since been applied),
+  `gh` and `bd` logging shims in
   front. The installed `pg-connector-pr-github` and `pg-connector-ci-github-actions` are wrapper
   scripts that PREPEND the nix-store `gh` to `PATH`, which would bypass a `gh` shim; the scratch bin
   dir therefore links their UNWRAPPED binaries (`.<name>-wrapped`) and the same is done for

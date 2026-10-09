@@ -72,9 +72,9 @@ whatever invoked the outermost skill [design: §3 Decision 9, §5.3].
    the trigger bead's own id (both already resolved at step 1), the phase bead's design text,
    the ids of the UPSTREAM phases this phase depends on, and the absolute repo root(s).
    - **Resolving the upstream-phase ids**: query `bd dep list <trigger-bead-id>` — NEVER
-     `bd dep list <phase-bead-id>` (the phase bead itself carries no gating edge at all; `bd`
-     rejects any epic/task-mixed edge, so nothing is ever wired to or from it for this
-     purpose — see `epic-decompose`'s Wire step). The trigger bead's `--blocked-by` list is
+     `bd dep list <phase-bead-id>` (the phase bead itself carries no gating edge at all; by
+     design nothing is wired to or from it for this purpose (bd 1.2.2 also rejected any
+     epic/task-mixed edge; 1.3.1 no longer does) — see `epic-decompose`'s Wire step). The trigger bead's `--blocked-by` list is
      TASK-LEVEL, not phase-level: each entry is either an upstream work-packet bead (the
      common case) or, transiently, another phase's trigger bead (the PLACEHOLDER case, before
      that upstream phase has been decomposed — see `epic-decompose`'s Wire step). For each
@@ -200,7 +200,7 @@ dep list <this phase's own trigger-bead id> --direction=up` — `bd`'s reverse-d
      names — this is a deliberate loosening of the earlier phase-level gate (operator
      ruling, bead `pg2-8fjus`, 2026-09-11): the old phase-bead-level gate (which epics'
      no-auto-close-until-every-child-closed behavior would have given, had the mixed-type
-     edge been wirable at all) required the WHOLE upstream phase done; this requires only the
+     edge been wired; bd 1.2.2 could not wire it at all) required the WHOLE upstream phase done; this requires only the
      specific packets named, which may leave the upstream phase's own unrelated packets still
      open.
 

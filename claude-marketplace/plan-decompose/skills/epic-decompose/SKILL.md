@@ -175,13 +175,17 @@ ambiguous "same source, different intended round" case.
      P2 phase beads under a P1 program epic got P3 triggers, which sat ready and unclaimed
      behind unrelated ready P2 tasks.
 
-   - **Wire — never a mixed epic/task edge.** `bd` 1.2.2 rejects `blocks` edges that mix an
+   - **Wire — never a mixed epic/task edge.** `bd` 1.2.2 rejected `blocks` edges that mix an
      epic and a task in either direction ("epics can only block other epics, not tasks" /
-     "tasks can only block other tasks, not epics" — verified 2026-09-10, memory
-     `bd-epic-task-blocks-edges-rejected`). The phase bead is `-t epic`; the trigger is
-     `-t task`; so neither `bd dep add <phase-bead> --blocked-by <its own trigger>` nor
-     `bd dep add <trigger> --blocked-by <phase-bead>` can ever be wired — do not attempt
-     either. This replaces both the phase-bead-to-trigger edge and the old
+     "tasks can only block other tasks, not epics" — verified 2026-09-10). `bd` 1.3.1 no
+     longer enforces that check: re-verified 2026-10-09 in a disposable embedded database,
+     where `bd dep add` accepted an epic/task `blocks` edge and rejected only an edge between
+     an issue and its own ancestor or descendant. The phase bead is `-t epic`; the trigger is
+     `-t task`. This procedure still does NOT wire either
+     `bd dep add <phase-bead> --blocked-by <its own trigger>` or
+     `bd dep add <trigger> --blocked-by <phase-bead>`: the design keeps the phase bead free of
+     any gating edge and gates at the trigger, and that design is unchanged by the bd upgrade
+     (whether to revisit it is a separate decision) — do not attempt either. This replaces both the phase-bead-to-trigger edge and the old
      trigger-to-phase-bead cross-phase edge this step previously specified; neither was ever
      actually wired in practice (the phase-bead-to-trigger edge was silently dropped, and the
      cross-phase edge fell back ad hoc to an epic-to-epic edge on the phase beads themselves

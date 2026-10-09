@@ -28,7 +28,7 @@ flowchart TD
     LFLAG --> LRULE["always-on agent rule\n(beads-dolt-launchd-rule.md)"]
     WRAP --> SHELL["shells"]
     WRAP --> GUI["GUI apps (VS Code)"]
-    WRAP --> AGENT["per-user launchd agents (pg-pr-sync)"]
+    WRAP --> AGENT["per-user launchd agents (pg-desk-serve, pg-router-daemon)"]
     WRAP --> ROOT["root daemons (forward-looking)"]
     DAEMON["org.nixos.beads-dolt-server\nkeepAlive, owns 25252"] -. mitigation .-> WRAP
 ```
@@ -41,7 +41,7 @@ How each context gets its `bd` and whether it can auto-start a server.
 | -------------------------- | ---------------------- | --------------- | ----------------------- | ---------------------------------------------- |
 | User CLI shell             | interactive login      | yes             | overlay `bd` wrapper    | yes                                            |
 | GUI app (VS Code)          | launchd `gui/UID`      | no              | overlay `bd` wrapper    | yes (extension — being removed)                |
-| Per-user launchd agent     | plist, `gui/UID`       | no              | overlay `bd` wrapper    | yes (`pg-pr-sync`)                             |
+| Per-user launchd agent     | plist, `gui/UID`       | no              | overlay `bd` wrapper    | yes (`pg-desk-serve`, `pg-router-daemon`)      |
 | Root/system launchd daemon | plist, `system` domain | no              | overlay `bd` wrapper    | none today (only Caddy proxy); forward-looking |
 
 **Takeaway:** the overlay `bd` **wrapper** is the only mechanism common to every
@@ -106,6 +106,16 @@ row; `home.packages` / `home.sessionVariables` miss the launchd/daemon rows.
 
 All steps are read-only until data safety is confirmed. None start a server.
 
+**Do not run this playbook during a migration window.** A planned `bd` schema migration
+legitimately runs a second `dolt sql-server` on an alternate port (25253) while
+`org.nixos.beads-dolt-server` is booted out; the steps below would classify it as rogue.
+First run `pg-router gate list`: if a `BEAD_SERVER_DOWN` gate is set, stop, change nothing,
+and tell the operator. If `bd` writes fail with "refusing to auto-apply N pending schema
+migrations" the server is healthy and this is not a rogue-server incident; the fix is the
+operator-run `bd migrate schema` (see the `beads-dolt-doctor` skill's "bd writes refuse"
+section). Runbook: `docs/beads-1-3-1-schema-migration.md` in the `phillipg-nix-ziprecruiter`
+repo (named by repo and path, because this repo is standalone).
+
 1. **Enumerate dolt processes** — config vs config-less, start times, PPIDs:
    ```bash
    ps -axo pid,ppid,lstart,command | grep '[d]olt sql-server'
@@ -141,3 +151,6 @@ All steps are read-only until data safety is confirmed. None start a server.
   `home/programs/agent-rules/beads-dolt-launchd-rule.md` (Mac-local launchd
   specifics, gated by `localDoltLaunchdServer`)
 - Skill: `claude-marketplace/beads-dolt-doctor/`
+- bd 1.3.1 schema migration runbook (migration window, alt-port server, pending-migration
+  write refusals): `docs/beads-1-3-1-schema-migration.md` in the `phillipg-nix-ziprecruiter`
+  repo

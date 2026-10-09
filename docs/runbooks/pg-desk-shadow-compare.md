@@ -29,7 +29,9 @@ network or `bd`/dolt writes: those are covered by the shims and the environment.
 
 - macOS with `/usr/bin/sandbox-exec`, `sqlite3` (3.35 or newer), `pg-desk`, `pg-connector`,
   `pg-router-source-pg-desk`, `gh` (logged in; the token is read from the login keychain) and `bd`
-  (the machine `bd`, not the router wrapper's bundled copy) on `PATH`; `bgrun`/`bgcheck`; `caffeinate`.
+  (the machine `bd`, not the router wrapper's bundled copy; history: the bundled copy once failed with
+  "table not found: leases" against the then-unmigrated shared database, before the 2026-10-08 schema
+  migration) on `PATH`; `bgrun`/`bgcheck`; `caffeinate`.
   `pg-desk-shadow` itself is on `PATH` only where the consuming flake sets
   `phillipgreenii.programs.pg-desk.shadow.enable = true` (default off; correction 10).
 - The machine awake for the whole run (`caffeinate -is` below). Gaps from sleep, lid close, reboot and

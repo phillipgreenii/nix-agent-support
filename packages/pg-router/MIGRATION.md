@@ -268,6 +268,16 @@ External systems use the same socket verbs (`gate-set`, `gate-clear`; schemas `c
 simply stops gating when its owner dies. `pg-router status`/`--json` and the TUI Gates modal (`g`)
 list the active gates (TYPE, description, owner, set-at, TTL remaining).
 
+**Operator convention: `BEAD_SERVER_DOWN`.** An operator sets this gate before taking the shared
+beads/Dolt server down (for example a `bd` schema migration):
+`pg-router gate set BEAD_SERVER_DOWN --owner beads-migration --description "..."`, with NO `--ttl`
+(a lapsed lease counts as cleared). It needs a running core, so set it BEFORE the router is stopped
+(`gate set` fails with `no running core` otherwise), and clear it last, once the server is verified
+healthy. Participants that never touch beads declare `non_blocking_gates = ["BEAD_SERVER_DOWN"]`; an
+emitter and its listener that must stay live together MUST opt out on BOTH sides. A long gate drops
+events whose TTL lapses (`pg_router_gate_drops`). The full procedure is
+`docs/beads-1-3-1-schema-migration.md` in the `phillipg-nix-ziprecruiter` repo.
+
 **The disk-space watchdog (`LOW_DISK_USAGE`).** The replacement for `disk_space_low` is an ordinary
 external listener, `pg-router-disk-watchdog` (bead `pg2-zwdwf`, `packages/pg-router-disk-watchdog`),
 not pg-router code. Wire it as a timer-driven role that is registered **non-blocking on
