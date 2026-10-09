@@ -905,3 +905,229 @@ JSON
   [[ "$output" =~ "does not exist -- nothing to do, skipping" ]]
   [[ ! "$output" =~ "SHOULD-NOT-RUN" ]]
 }
+
+# cmd_reclaim reclaimable-size reporting (bead pg2-es6fn).
+#
+# Every item that cmd_reclaim actually runs (dry run or --apply) gets a
+# `<id>: size: <size>` line -- or an explicit `size: unknown (<reason>)`
+# marker, never silence -- and the run ends with a total that sums ONLY the
+# known sizes and says how many items were unknown. Skipped items (missing
+# path, declined confirm gate) get no size line and are not counted.
+#
+# Registries are built inline with jq -n under this test's own TEST_DIR
+# (per-test isolation), not committed as fixtures: several cases need the
+# per-item paths and sizeCommand strings to vary.
+
+# install_size_registry <item-json>...: writes a registry from the given
+# item objects to the default XDG registry path. Build each item with
+# size_item below.
+install_size_registry() {
+  mkdir -p "$HOME/.config/pg-disk-reclaimer"
+  jq -s '.' >"$HOME/.config/pg-disk-reclaimer/registry.json" < <(printf '%s\n' "$@")
+}
+
+# size_item <id> <path> <sizeCommand-or-empty> <dryRunCommand> [aggressiveness]:
+# prints one registry item as JSON. An empty sizeCommand omits the field
+# (so the du-over-path default applies).
+size_item() {
+  jq -n --arg id "$1" --arg path "$2" --arg sc "$3" --arg dry "$4" \
+    --argjson aggr "${5:-1}" '
+    {
+      id: $id,
+      description: ("size test item " + $id),
+      path: $path,
+      displayCommand: "true",
+      variants: [{
+        aggressiveness: $aggr,
+        variantDescription: "size test",
+        dryRunCommand: $dry,
+        removeCommand: ("echo remove-" + $id)
+      }]
+    } + (if $sc == "" then {} else {sizeCommand: $sc} end)'
+}
+
+@test "pgdr_format_kb renders KiB as a short human size" {
+  run pgdr_format_kb 0
+  [ "$output" = "0K" ]
+  run pgdr_format_kb 1023
+  [ "$output" = "1023K" ]
+  run pgdr_format_kb 1536
+  [ "$output" = "1.5M" ]
+  run pgdr_format_kb 68500000
+  [ "$output" = "65.3G" ]
+  run pgdr_format_kb 2147483648
+  [ "$output" = "2.0T" ]
+}
+
+@test "cmd_reclaim dry run prints a known size per item and a total" {
+  mkdir -p "$TEST_DIR/known"
+  install_size_registry "$(size_item known "$TEST_DIR/known" 'echo 2048' 'echo dry-known')"
+  run cmd_reclaim --aggressiveness 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"known: size: 2.0M"* ]]
+  [[ "$output" == *"dry-known"* ]]
+  [[ "$output" == *"total reclaimable: 2.0M (1 sized, 0 unknown)"* ]]
+}
+
+@test "cmd_reclaim sizes an item with du over its path when it has no sizeCommand" {
+  mkdir -p "$TEST_DIR/duitem"
+  dd if=/dev/zero of="$TEST_DIR/duitem/blob" bs=1024 count=1024 2>/dev/null
+  install_size_registry "$(size_item duitem "$TEST_DIR/duitem" '' 'echo dry-du')"
+  run cmd_reclaim --aggressiveness 1
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ duitem:\ size:\ [0-9.]+[KMGT] ]]
+  [[ "$output" == *"(1 sized, 0 unknown)"* ]]
+}
+
+@test "cmd_reclaim prints an explicit unknown marker when the size times out, still runs the dry run, and counts it unknown" {
+  mkdir -p "$TEST_DIR/slow"
+  install_size_registry "$(size_item slow "$TEST_DIR/slow" 'sleep 5' 'echo dry-slow')"
+  PGDR_SIZE_TIMEOUT_SECONDS=1 run cmd_reclaim --aggressiveness 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"slow: size: unknown (timed out after 1s)"* ]]
+  [[ "$output" == *"dry-slow"* ]]
+  [[ "$output" == *"total reclaimable: 0K (0 sized, 1 unknown)"* ]]
+}
+
+@test "cmd_reclaim prints an explicit unknown marker when the size command yields no number" {
+  mkdir -p "$TEST_DIR/junk"
+  install_size_registry "$(size_item junk "$TEST_DIR/junk" 'echo not-a-number' 'echo dry-junk')"
+  run cmd_reclaim --aggressiveness 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"junk: size: unknown (size command gave no number)"* ]]
+  [[ "$output" == *"(0 sized, 1 unknown)"* ]]
+}
+
+@test "cmd_reclaim total sums only the known sizes and counts the unknown ones" {
+  mkdir -p "$TEST_DIR/a" "$TEST_DIR/b" "$TEST_DIR/c"
+  install_size_registry \
+    "$(size_item a "$TEST_DIR/a" 'echo 1024' 'echo dry-a')" \
+    "$(size_item b "$TEST_DIR/b" 'echo 3072' 'echo dry-b')" \
+    "$(size_item c "$TEST_DIR/c" 'echo nope' 'echo dry-c')"
+  run cmd_reclaim --aggressiveness 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"total reclaimable: 4.0M (2 sized, 1 unknown)"* ]]
+}
+
+@test "cmd_reclaim does not size, run, or count a skipped (missing-path) item, and prints no total when nothing ran" {
+  marker="$TEST_DIR/size-ran"
+  install_size_registry "$(size_item gone "$TEST_DIR/does-not-exist" "touch $marker; echo 5" 'echo SHOULD-NOT-RUN')"
+  run cmd_reclaim --aggressiveness 1
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ ! -e "$marker" ]
+}
+
+@test "cmd_reclaim mixed run: the skipped item adds no size line and does not change the total" {
+  mkdir -p "$TEST_DIR/real"
+  install_size_registry \
+    "$(size_item gone "$TEST_DIR/does-not-exist" 'echo 9999' 'echo SHOULD-NOT-RUN')" \
+    "$(size_item real "$TEST_DIR/real" 'echo 1024' 'echo dry-real')"
+  run cmd_reclaim --aggressiveness 1
+  [ "$status" -eq 0 ]
+  [[ ! "$output" == *"gone"* ]]
+  [[ "$output" == *"real: size: 1.0M"* ]]
+  [[ "$output" == *"total reclaimable: 1.0M (1 sized, 0 unknown)"* ]]
+}
+
+# Long single-line dry-run output (bead pg2-es6fn amendment 2026-10-09): the
+# go-build-cache item's `go clean -n -cache` prints ONE `rm -rf <256 hash
+# dirs>` line. The default output collapses it to a short summary; the raw
+# line stays available under -v.
+install_long_line_registry() {
+  mkdir -p "$TEST_DIR/gocache"
+  local cmd='printf "rm -rf"; for i in $(seq 1 256); do printf " %s/gocache/%02x" "$TEST_DIR" "$i"; done; printf "\n"'
+  install_size_registry "$(size_item go-build-cache "$TEST_DIR/gocache" 'echo 68500000' "$cmd")"
+}
+
+@test "cmd_reclaim collapses a very long single-line dry run to one summary with the size, not the raw rm line" {
+  install_long_line_registry
+  run cmd_reclaim --aggressiveness 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"go-build-cache: size: 65.3G"* ]]
+  [[ "$output" == *"would remove 256 paths under $TEST_DIR/gocache"* ]]
+  [[ ! "$output" == *"rm -rf"* ]]
+  [[ ! "$output" == *"gocache/ff"* ]]
+  # exactly one line names the item
+  [ "$(grep -c '^go-build-cache' <<<"$output")" -eq 1 ]
+}
+
+@test "cmd_reclaim -v keeps the raw long dry-run line in addition to the summary" {
+  install_long_line_registry
+  run cmd_reclaim --aggressiveness 1 -v
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"would remove 256 paths under"* ]]
+  [[ "$output" == *"rm -rf"* ]]
+  [[ "$output" == *"gocache/ff"* ]]
+}
+
+@test "cmd_reclaim truncates a very long non-rm dry-run line instead of echoing it" {
+  mkdir -p "$TEST_DIR/wide"
+  install_size_registry "$(size_item wide "$TEST_DIR/wide" 'echo 1' 'printf "X%.0s" $(seq 1 400); echo')"
+  run cmd_reclaim --aggressiveness 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"[400 chars; use -v for the raw line]"* ]]
+  [[ ! "$output" == *"$(printf 'X%.0s' $(seq 1 300))"* ]]
+}
+
+@test "cmd_reclaim --apply shows the size before removal and totals what was reclaimed, excluding a declined item" {
+  mkdir -p "$TEST_DIR/lo" "$TEST_DIR/hi"
+  install_size_registry \
+    "$(size_item lo "$TEST_DIR/lo" 'echo 1024' 'echo dry-lo' 1)" \
+    "$(size_item hi "$TEST_DIR/hi" 'echo 4096' 'echo dry-hi' 5)"
+  pgdr_confirm() { return 1; }
+  run cmd_reclaim --aggressiveness 5 --apply
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"lo: size: 1.0M"* ]]
+  [[ "$output" == *"remove-lo"* ]]
+  [[ "$output" == *"skipping 'hi' (not confirmed)"* ]]
+  [[ "$output" == *"total reclaimed: 1.0M (1 sized, 0 unknown)"* ]]
+}
+
+@test "cmd_reclaim excludes an item whose command failed from the total" {
+  mkdir -p "$TEST_DIR/bad" "$TEST_DIR/good"
+  install_size_registry \
+    "$(size_item bad "$TEST_DIR/bad" 'echo 8192' 'echo dry-bad; exit 3')" \
+    "$(size_item good "$TEST_DIR/good" 'echo 1024' 'echo dry-good')"
+  run cmd_reclaim --aggressiveness 1
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"total reclaimable: 1.0M (1 sized, 0 unknown)"* ]]
+}
+
+@test "cmd_reclaim size reporting never triggers errexit in a caller running under 'set -euo pipefail' (unknown size, timeout)" {
+  mkdir -p "$TEST_DIR/slow"
+  install_size_registry "$(size_item slow "$TEST_DIR/slow" 'sleep 5' 'echo dry-slow')"
+  PGDR_SIZE_TIMEOUT_SECONDS=1 run bash -c '
+    set -euo pipefail
+    source "$1/pg-disk-reclaimer.bash"
+    cmd_reclaim --aggressiveness 1
+    echo "AFTER"
+  ' -- "$SCRIPTS_DIR"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"size: unknown (timed out after 1s)"* ]]
+  [[ "$output" == *"AFTER"* ]]
+}
+
+@test "pgdr_validate_registry rejects a non-string or empty sizeCommand, naming the item index" {
+  local reg="$TEST_DIR/bad-size.json"
+  size_item x /tmp/x 'echo 1' 'echo d' | jq -s '.[0].sizeCommand = 5' >"$reg"
+  run pgdr_validate_registry "$reg"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"index 0"* ]]
+  [[ "$output" == *"sizeCommand"* ]]
+  size_item x /tmp/x 'echo 1' 'echo d' | jq -s '.[0].sizeCommand = ""' >"$reg"
+  run pgdr_validate_registry "$reg"
+  [ "$status" -ne 0 ]
+}
+
+@test "pgdr_validate_registry accepts a registry with a valid sizeCommand and cmd_validate checks its leading command exists" {
+  local reg="$TEST_DIR/size-ok.json"
+  size_item x /tmp/x 'echo 1' 'true' | jq -s '.' >"$reg"
+  run cmd_validate "$reg"
+  [ "$status" -eq 0 ]
+  size_item x /tmp/x 'pg-disk-reclaimer-test-nonexistent-cmd-xyz 1' 'true' | jq -s '.' >"$reg"
+  run cmd_validate "$reg"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"sizeCommand"* ]]
+  [[ "$output" == *"pg-disk-reclaimer-test-nonexistent-cmd-xyz"* ]]
+}

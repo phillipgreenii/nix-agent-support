@@ -89,6 +89,20 @@ pgdr_validate_registry() {
     return 1
   fi
 
+  # (b) sizeCommand is optional (bead pg2-es6fn); when present it MUST be a
+  # non-empty string (a shell command that prints the reclaimable size in
+  # KiB as its first field -- see pgdr_size_kb).
+  local bad_size_command
+  bad_size_command=$(jq -r '
+    to_entries
+    | map(select(.value | has("sizeCommand") and (((.sizeCommand | type) != "string") or .sizeCommand == "")))
+    | .[0].key // ""
+  ' "$path")
+  if [[ -n $bad_size_command ]]; then
+    echo "pg-disk-reclaimer: registry '$path' item at index $bad_size_command has an invalid sizeCommand (must be a non-empty string when present)" >&2
+    return 1
+  fi
+
   # (c) every variant has a non-empty variantDescription/dryRunCommand/
   # removeCommand and a non-negative aggressiveness. An empty variants[]
   # array is valid (informational-only item) and matches nothing here.
@@ -204,6 +218,7 @@ pgdr_select_variants() {
         | select(($qualifying | length) > 0)
         | ($qualifying | max_by(.aggressiveness)) as $chosen
         | ($item | {id, description, path})
+          + (if $item.sizeCommand then {sizeCommand: $item.sizeCommand} else {} end)
           + ($chosen | {aggressiveness, variantDescription, dryRunCommand, removeCommand})
       ]
     ' "$path"
@@ -261,6 +276,7 @@ pgdr_select_variants() {
       | select(($qualifying | length) > 0)
       | ($qualifying | max_by(.aggressiveness)) as $chosen
       | ($item | {id, description, path})
+        + (if $item.sizeCommand then {sizeCommand: $item.sizeCommand} else {} end)
         + ($chosen | {aggressiveness, variantDescription, dryRunCommand, removeCommand})
     ]
   ' "$path"
@@ -549,6 +565,7 @@ pgdr_validate_commands_exist() {
     | ($item.id) as $id
     | (
         [{id: $id, field: "displayCommand", cmd: $item.displayCommand}]
+        + (if $item.sizeCommand then [{id: $id, field: "sizeCommand", cmd: $item.sizeCommand}] else [] end)
         + (($item.variants // []) | to_entries | map({
             id: $id,
             field: ("variants[" + (.key | tostring) + "].dryRunCommand"),
@@ -639,7 +656,149 @@ pgdr_confirm() {
   esac
 }
 
+# PGDR_SIZE_TIMEOUT_SECONDS: ceiling (wall-clock seconds) on how long
+# cmd_reclaim waits to size ONE item (bead pg2-es6fn). Separate from
+# PGDR_DISPLAY_TIMEOUT_SECONDS because a reclaim is a deliberate action where
+# the operator wants the number for the biggest trees (a `du` over a
+# 65 GB cache), not a quick listing. Resolved per item by
+# pgdr_item_size_timeout so a per-item override can be added in one place.
+: "${PGDR_SIZE_TIMEOUT_SECONDS:=60}"
+
+# PGDR_LONG_LINE_CHARS: a dry-run output line longer than this is collapsed to
+# a short summary unless -v is given (bead pg2-es6fn). `go clean -n -cache`
+# prints ONE `rm -rf` line naming all 256 hash dirs.
+: "${PGDR_LONG_LINE_CHARS:=200}"
+
+# pgdr_item_size_timeout: echoes the size-computation ceiling for one item.
+# Today this is just PGDR_SIZE_TIMEOUT_SECONDS for every item; it takes the
+# item's selection JSON ($1) so a per-item registry override (bead
+# pg2-m6bsb's displayTimeoutSeconds) can slot in here without touching
+# cmd_reclaim.
+pgdr_item_size_timeout() {
+  printf '%s\n' "$PGDR_SIZE_TIMEOUT_SECONDS"
+}
+
+# pgdr_format_kb: renders a KiB count as a short human size (K/M/G/T, one
+# decimal above 1 MiB). Pure integer arithmetic -- no awk/locale dependence.
+pgdr_format_kb() {
+  local kb="$1"
+  local -a units=(K M G T)
+  local i=0
+  local tenths
+
+  if ((kb < 1024)); then
+    printf '%dK\n' "$kb"
+    return 0
+  fi
+
+  tenths=$((kb * 10))
+  while ((tenths >= 10240 && i < 3)); do
+    tenths=$((tenths / 1024))
+    i=$((i + 1))
+  done
+  printf '%d.%d%s\n' $((tenths / 10)) $((tenths % 10)) "${units[$i]}"
+}
+
+# pgdr_size_kb: computes the reclaimable size of one item, in KiB.
+#
+# Usage: pgdr_size_kb <path> <size-command-or-empty> <timeout-seconds>
+#
+# With a non-empty size command (the item's optional `sizeCommand`, for items
+# where `du` over the path is not meaningful -- e.g. nix-store-gc, whose path
+# is the whole store) that command is the size source; otherwise it is
+# `du -sk <path>`. Both are trusted operator-authored registry strings, run
+# via `bash -c` under `timeout` (same trust model and reasoning as
+# pgdr_display_output). The first whitespace-delimited field of the first
+# output line is the KiB count; a nonzero exit is tolerated when that field
+# is numeric (du prints a real total alongside its permission warnings).
+#
+# On success prints the integer KiB to stdout and returns 0. On failure
+# prints a short human reason to stdout (e.g. "timed out after 60s") and
+# returns 1 -- never silent, so the caller can print an explicit unknown
+# marker. Always safe under `set -e` (statuses are captured in `if`).
+pgdr_size_kb() {
+  local path="$1" size_command="$2" timeout_seconds="$3"
+  local cmd out status first
+
+  if [[ -n $size_command ]]; then
+    cmd="$size_command"
+  else
+    cmd="du -sk $path"
+  fi
+
+  if out=$(timeout "$timeout_seconds" bash -c "$cmd" 2>/dev/null); then
+    status=0
+  else
+    status=$?
+  fi
+
+  if [[ $status -eq 124 ]]; then
+    printf 'timed out after %ss\n' "$timeout_seconds"
+    return 1
+  fi
+
+  first=""
+  read -r first _ <<<"$out" || true
+  if [[ $first =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "$first"
+    return 0
+  fi
+
+  if [[ -n $size_command ]]; then
+    printf 'size command gave no number\n'
+  else
+    printf 'du gave no number\n'
+  fi
+  return 1
+}
+
+# pgdr_print_dry_run_output: prints a dry-run command's captured output
+# (OUT, $3), collapsing any line longer than PGDR_LONG_LINE_CHARS unless
+# VERBOSE ($2) is 1. A long `rm ...` line becomes
+# "would remove N paths under <item path>" (N = non-flag words after `rm`);
+# any other long line is truncated with its char count. Under VERBOSE the
+# raw line is printed as well (instead of only the truncation for non-rm
+# lines).
+pgdr_print_dry_run_output() {
+  local item_path="$1" verbose="$2" out="$3"
+  local line n w
+  local -a words
+
+  [[ -z $out ]] && return 0
+
+  while IFS= read -r line; do
+    if ((${#line} <= PGDR_LONG_LINE_CHARS)); then
+      printf '%s\n' "$line"
+    elif [[ $line == "rm "* ]]; then
+      read -ra words <<<"$line"
+      n=0
+      for w in "${words[@]:1}"; do
+        [[ $w == -* ]] || n=$((n + 1))
+      done
+      printf 'would remove %s paths under %s\n' "$n" "$item_path"
+      [[ $verbose -eq 1 ]] && printf '%s\n' "$line"
+    elif [[ $verbose -eq 1 ]]; then
+      printf '%s\n' "$line"
+    else
+      printf '%s... [%s chars; use -v for the raw line]\n' "${line:0:100}" "${#line}"
+    fi
+  done <<<"$out"
+
+  return 0
+}
+
 # cmd_reclaim: implements the `reclaim` subcommand.
+#
+# Reclaimable-size reporting (bead pg2-es6fn): every item cmd_reclaim runs
+# (dry run or --apply) gets a "<id>: size: <size>" line -- or an explicit
+# "size: unknown (<reason>)" marker, never silence -- computed by
+# pgdr_size_kb (the item's optional `sizeCommand`, else `du -sk` over its
+# path) under pgdr_item_size_timeout, and the run ends with a
+# "total reclaimable|reclaimed: <size> (N sized, M unknown)" line that sums
+# ONLY the known sizes. Skipped items (missing path, declined confirm gate)
+# and items whose command failed get no total contribution. A dry run's
+# captured output goes through pgdr_print_dry_run_output (long-line
+# collapse, raw under -v).
 #
 # Grammar: reclaim --aggressiveness N [id...] [--apply] [-v|--verbose]
 #   --aggressiveness N (REQUIRED): the selection ceiling. Passed straight
@@ -763,29 +922,17 @@ cmd_reclaim() {
     overall_status=1
   fi
 
+  local total_kb=0 sized_count=0 unknown_count=0
   local item
   while IFS= read -r item; do
-    local id aggressiveness dry_run_command remove_command path
+    local id aggressiveness dry_run_command remove_command path size_command
+    local size_kb size_result size_label dry_out
     id=$(jq -r '.id' <<<"$item")
     aggressiveness=$(jq -r '.aggressiveness' <<<"$item")
     dry_run_command=$(jq -r '.dryRunCommand' <<<"$item")
     remove_command=$(jq -r '.removeCommand' <<<"$item")
     path=$(jq -r '.path' <<<"$item")
-
-    if [[ $apply -eq 0 ]]; then
-      if ! pgdr_path_exists "$path"; then
-        if [[ $verbose -eq 1 ]]; then
-          echo "pg-disk-reclaimer: '$id' path '$path' does not exist -- nothing to do, skipping" >&2
-        fi
-        continue
-      fi
-
-      if ! eval "$dry_run_command"; then
-        echo "pg-disk-reclaimer: dry-run command for '$id' exited non-zero" >&2
-        overall_status=1
-      fi
-      continue
-    fi
+    size_command=$(jq -r '.sizeCommand // ""' <<<"$item")
 
     if ! pgdr_path_exists "$path"; then
       if [[ $verbose -eq 1 ]]; then
@@ -794,6 +941,42 @@ cmd_reclaim() {
       continue
     fi
 
+    # Size the item before anything runs, so the operator sees it ahead of
+    # an --apply confirm prompt. NOT a bare $(...) assignment: a failing
+    # size computation must be an explicit "unknown" marker, never fatal
+    # under the nix wrapper's `set -euo pipefail`.
+    size_kb=""
+    if size_result=$(pgdr_size_kb "$path" "$size_command" "$(pgdr_item_size_timeout "$item")"); then
+      size_kb="$size_result"
+      size_label=$(pgdr_format_kb "$size_kb")
+    else
+      size_label="unknown ($size_result)"
+    fi
+
+    if [[ $apply -eq 0 ]]; then
+      printf '%s: size: %s\n' "$id" "$size_label"
+
+      # stdout+stderr captured together so a long single-line dry run (go
+      # clean -n prints its `rm -rf` line on a stream we should not guess)
+      # can be collapsed; see pgdr_print_dry_run_output.
+      if dry_out=$(eval "$dry_run_command" 2>&1); then
+        pgdr_print_dry_run_output "$path" "$verbose" "$dry_out"
+        if [[ -n $size_kb ]]; then
+          total_kb=$((total_kb + size_kb))
+          sized_count=$((sized_count + 1))
+        else
+          unknown_count=$((unknown_count + 1))
+        fi
+      else
+        pgdr_print_dry_run_output "$path" "$verbose" "$dry_out"
+        echo "pg-disk-reclaimer: dry-run command for '$id' exited non-zero" >&2
+        overall_status=1
+      fi
+      continue
+    fi
+
+    printf '%s: size: %s\n' "$id" "$size_label"
+
     if [[ $aggressiveness -ge 4 ]]; then
       if ! pgdr_confirm "pg-disk-reclaimer: reclaim '$id' at aggressiveness $aggressiveness -- run its removeCommand? [y/N] "; then
         echo "pg-disk-reclaimer: skipping '$id' (not confirmed)" >&2
@@ -801,11 +984,27 @@ cmd_reclaim() {
       fi
     fi
 
-    if ! eval "$remove_command"; then
+    if eval "$remove_command"; then
+      if [[ -n $size_kb ]]; then
+        total_kb=$((total_kb + size_kb))
+        sized_count=$((sized_count + 1))
+      else
+        unknown_count=$((unknown_count + 1))
+      fi
+    else
       echo "pg-disk-reclaimer: remove command for '$id' exited non-zero" >&2
       overall_status=1
     fi
   done < <(jq -c '.[]' <<<"$selected")
+
+  # No total when nothing ran (a run where every item was skipped stays
+  # silent, matching the quiet-by-default missing-path contract).
+  if ((sized_count + unknown_count > 0)); then
+    local total_word="reclaimable"
+    [[ $apply -eq 1 ]] && total_word="reclaimed"
+    printf 'total %s: %s (%s sized, %s unknown)\n' \
+      "$total_word" "$(pgdr_format_kb "$total_kb")" "$sized_count" "$unknown_count"
+  fi
 
   return "$overall_status"
 }

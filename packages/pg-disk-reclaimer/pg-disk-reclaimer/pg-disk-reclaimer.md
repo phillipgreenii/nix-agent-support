@@ -23,6 +23,10 @@
 
 `pg-disk-reclaimer reclaim --aggressiveness {{2}}`
 
+- Dry-run output shows each item's reclaimable size (or `size: unknown (timed out after 60s)`) and a trailing total of the known sizes. Raise the per-item size ceiling for huge caches:
+
+`PGDR_SIZE_TIMEOUT_SECONDS={{300}} pg-disk-reclaimer reclaim --aggressiveness {{3}}`
+
 - Actually remove (rather than dry-run):
 
 `pg-disk-reclaimer reclaim --aggressiveness {{2}} --apply`

@@ -40,10 +40,20 @@ Options:
 'reclaim' options:
   -v, --verbose  Also show a note when a selected item's path does not
                  exist on this machine (skipped silently, without
-                 running its dryRunCommand/removeCommand, by default).
+                 running its dryRunCommand/removeCommand, by default),
+                 and keep very long single-line dry-run output (e.g.
+                 `go clean -n -cache`'s one `rm -rf` line naming every
+                 hash dir) instead of collapsing it to a summary.
                  This is a reclaim-only flag, unrelated to the top-level
                  -v/--version above, which is parsed before subcommand
                  dispatch.
+
+  Every item reclaim runs prints a "<id>: size: <size>" line (from the
+  registry item's optional sizeCommand, else `du -sk` over its path), or
+  "size: unknown (<reason>, e.g. timed out after 60s)" when the size could
+  not be computed in time, and the run ends with a total that sums only
+  the known sizes and counts the unknown ones. The per-item size ceiling
+  is PGDR_SIZE_TIMEOUT_SECONDS (default 60).
 
 Notes:
   'validate' checks the registry's JSON schema, then does a best-effort
