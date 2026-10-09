@@ -70,6 +70,10 @@ func newMetricsHandler(st *store.Store, cfg *config.Config, pollInterval PollInt
 		if err != nil {
 			return metrics.Snapshot{}, err
 		}
+		reconcileRun, reconcileAge, haveReconcile, err := sync.ReadReconcileLastRun(st, nowUTC())
+		if err != nil {
+			return metrics.Snapshot{}, err
+		}
 		return metrics.Snapshot{
 			AgeSeconds:                payload.AgeSeconds,
 			Stale:                     payload.Stale,
@@ -81,6 +85,7 @@ func newMetricsHandler(st *store.Store, cfg *config.Config, pollInterval PollInt
 
 			OldestAnchorCheckAgeSeconds: anchorCheckAge,
 			SourceAges:                  sourceAges(payload.Sources),
+			Reconcile:                   reconcileSnapshot(reconcileRun, reconcileAge, haveReconcile),
 		}, nil
 	}
 
@@ -112,6 +117,19 @@ func newMetricsHandler(st *store.Store, cfg *config.Config, pollInterval PollInt
 	}
 
 	return scrapeHandler(registry, scrapeTimeout), nil
+}
+
+// reconcileSnapshot projects the persisted last reconcile run to the gauges'
+// input; nil (no series) when no run has recorded a summary (bead pg2-q89ng).
+func reconcileSnapshot(r sync.ReconcileLastRun, ageSeconds int, found bool) *metrics.ReconcileSnapshot {
+	if !found {
+		return nil
+	}
+	out := &metrics.ReconcileSnapshot{Candidates: r.Candidates, Deferred: r.Deferred, AgeSeconds: ageSeconds}
+	if r.OpenIDs != nil && r.SkippedOpen != nil {
+		out.HaveOpenSet, out.OpenIDs, out.SkippedOpen = true, *r.OpenIDs, *r.SkippedOpen
+	}
+	return out
 }
 
 // sourceAges projects the payload's sources[] to the gauge's input: a

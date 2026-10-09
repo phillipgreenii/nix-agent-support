@@ -96,6 +96,31 @@ const (
 	// recorded success exports NO series: it is never exported as 0, which
 	// would read as freshly fetched.
 	MetricSourceAge = "pg_desk_source_age_seconds"
+
+	// The pg_desk_reconcile_* gauges (bead pg2-q89ng) report the most recent
+	// `pg-desk reconcile` run, persisted by that separate process into the
+	// shared store and read here at scrape time. They exist because a
+	// successful run's stderr (the reconcile_open_set and reconcile_deferred
+	// log lines) is discarded by pg-router. With no recorded run they export no
+	// series, never 0.
+
+	// MetricReconcileOpenSetIDs is the last run's open-set size (the
+	// reconcile_open_set line's open_ids). No series when that run did not read
+	// the open set.
+	MetricReconcileOpenSetIDs = "pg_desk_reconcile_open_set_ids"
+	// MetricReconcileSkippedOpen is the last run's count of open anchors not
+	// re-read because a watched query still listed their PR (skipped_open).
+	// No series when that run did not read the open set.
+	MetricReconcileSkippedOpen = "pg_desk_reconcile_skipped_open"
+	// MetricReconcileCandidates is the last run's number of re-drive candidates.
+	MetricReconcileCandidates = "pg_desk_reconcile_candidates"
+	// MetricReconcileDeferred is the number of candidates the last run deferred
+	// on a transient read failure (its reconcile_deferred lines).
+	MetricReconcileDeferred = "pg_desk_reconcile_deferred"
+	// MetricReconcileLastRunAge is the seconds since the last run finished, so a
+	// stopped reconcile schedule is visible and the gauges above can be read as
+	// current or stale.
+	MetricReconcileLastRunAge = "pg_desk_reconcile_last_run_age_seconds"
 )
 
 // Snapshot is the subset of the /api/v1/dashboard payload the metrics
@@ -120,6 +145,18 @@ type Snapshot struct {
 	// SourceAges backs MetricSourceAge: one entry per source with a known
 	// age; sources with an unknown age are omitted.
 	SourceAges []SourceAge
+	// Reconcile backs the pg_desk_reconcile_* gauges; nil when no reconcile
+	// run has recorded a summary, which exports no series.
+	Reconcile *ReconcileSnapshot
+}
+
+// ReconcileSnapshot is the last `pg-desk reconcile` run's summary. OpenIDs and
+// SkippedOpen are meaningful only when HaveOpenSet (the run read the open set).
+type ReconcileSnapshot struct {
+	OpenIDs, SkippedOpen int
+	HaveOpenSet          bool
+	Candidates, Deferred int
+	AgeSeconds           int
 }
 
 // SourceAge is one source's age for MetricSourceAge.
@@ -221,6 +258,27 @@ func New(mp metric.MeterProvider, snapshotFn SnapshotFunc) (*Emitter, error) {
 		return nil, err
 	}
 	instruments = append(instruments, sourceAge)
+	reconcileGauges := []struct {
+		name, desc string
+		val        func(ReconcileSnapshot) int64
+		needsOpen  bool
+		inst       metric.Int64ObservableGauge
+	}{
+		{name: MetricReconcileOpenSetIDs, desc: "open-set size (PR ids the watched queries list) read by the last pg-desk reconcile run; no series when it did not read the open set", val: func(r ReconcileSnapshot) int64 { return int64(r.OpenIDs) }, needsOpen: true},
+		{name: MetricReconcileSkippedOpen, desc: "open anchors the last pg-desk reconcile run did not re-read because a watched query still listed their PR; no series when it did not read the open set", val: func(r ReconcileSnapshot) int64 { return int64(r.SkippedOpen) }, needsOpen: true},
+		{name: MetricReconcileCandidates, desc: "re-drive candidates of the last pg-desk reconcile run", val: func(r ReconcileSnapshot) int64 { return int64(r.Candidates) }},
+		{name: MetricReconcileDeferred, desc: "candidates the last pg-desk reconcile run deferred on a transient read failure", val: func(r ReconcileSnapshot) int64 { return int64(r.Deferred) }},
+		{name: MetricReconcileLastRunAge, desc: "age in seconds of the last pg-desk reconcile run; no series when none has recorded a summary", val: func(r ReconcileSnapshot) int64 { return int64(r.AgeSeconds) }},
+	}
+	for i := range reconcileGauges {
+		g := &reconcileGauges[i]
+		inst, err := m.Int64ObservableGauge(g.name, metric.WithDescription(g.desc))
+		if err != nil {
+			return nil, err
+		}
+		g.inst = inst
+		instruments = append(instruments, inst)
+	}
 	if _, err := m.RegisterCallback(func(_ context.Context, o metric.Observer) error {
 		snap, err := snapshotFn()
 		if err != nil {
@@ -231,6 +289,14 @@ func New(mp metric.MeterProvider, snapshotFn SnapshotFunc) (*Emitter, error) {
 		}
 		for _, s := range snap.SourceAges {
 			o.ObserveInt64(sourceAge, int64(s.Seconds), metric.WithAttributes(attribute.String("source", s.Source)))
+		}
+		if r := snap.Reconcile; r != nil {
+			for _, g := range reconcileGauges {
+				if g.needsOpen && !r.HaveOpenSet {
+					continue
+				}
+				o.ObserveInt64(g.inst, g.val(*r))
+			}
 		}
 		return nil
 	}, instruments...); err != nil {

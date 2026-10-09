@@ -107,6 +107,13 @@ re-read as before; it never skips a closure. It logs
 `{"event":"reconcile_open_set","open_ids":N,"skipped_open":S,"candidates":C}` once per run when
 the open set was read.
 
+Because `reconcile` runs as a short-lived scheduled process whose stderr the scheduler keeps only
+for a failed run, the same counts are also recorded in the store at the end of every run
+(`meta.reconcile.last_run`: the open-set size and `skipped_open` when the open set was read, the
+candidate count, how many candidates the run deferred, and when it finished) and exported by
+`serve` as the `pg_desk_reconcile_*` gauges (see [`serve.md`](serve.md)), so a healthy run's counts
+stay readable after it exits.
+
 `reconcile` MUST be idempotent: once an anchor is closed and `sync_error` is empty, the entity is
 no longer re-driven. Every candidate is attempted even after one fails; failures are joined into
 one error, with one exception: a candidate whose READ of the PR (the re-read that confirms its

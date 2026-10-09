@@ -11,6 +11,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/changes"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/pipeline"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
+	pgsync "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/sync"
 )
 
 func scrape(t *testing.T, s *store.Store) string {
@@ -130,6 +131,40 @@ func TestMetricsExposeOldestAnchorCheckAge(t *testing.T) {
 	})
 	if body := scrape(t, n); !strings.Contains(body, "pg_desk_oldest_anchor_check_age_seconds 0") {
 		t.Errorf("new-schema scrape missing the zero anchor-check gauge:\n%s", body)
+	}
+}
+
+// TestMetricsExposeLastReconcileRun covers bead pg2-q89ng end to end: the
+// summary a separate `pg-desk reconcile` process left in the store is exported
+// by the scrape, and a store with no recorded run has no reconcile series.
+func TestMetricsExposeLastReconcileRun(t *testing.T) {
+	setClock(t, time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC))
+	s := store.OpenForTest(t)
+	mustUpsertInterpretation(t, s, store.Interpretation{
+		Repo: "acme/widgets", EntityType: "pull_request", EntityID: "1",
+		Panel: PanelMineAwaitingMe, AsOf: "2026-10-09T11:59:00Z",
+	})
+	if body := scrape(t, s); strings.Contains(body, "pg_desk_reconcile_") {
+		t.Errorf("scrape of a store with no reconcile run exposes reconcile series:\n%s", body)
+	}
+
+	open, skipped := 40, 38
+	if err := pgsync.WriteReconcileLastRun(s, pgsync.ReconcileLastRun{
+		At: "2026-10-09T11:30:00Z", OpenIDs: &open, SkippedOpen: &skipped, Candidates: 2, Deferred: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	body := scrape(t, s)
+	for _, line := range []string{
+		"pg_desk_reconcile_open_set_ids 40",
+		"pg_desk_reconcile_skipped_open 38",
+		"pg_desk_reconcile_candidates 2",
+		"pg_desk_reconcile_deferred 1",
+		"pg_desk_reconcile_last_run_age_seconds 1800",
+	} {
+		if !strings.Contains(body, line) {
+			t.Errorf("scrape missing %q:\n%s", line, body)
+		}
 	}
 }
 

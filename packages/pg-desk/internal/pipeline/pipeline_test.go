@@ -1148,6 +1148,49 @@ func TestPipelineReconcile_RereadsOnlyAnchorsAbsentFromTheOpenSet(t *testing.T) 
 	}
 }
 
+// TestPipelineReconcile_RecordsLastRunSummary (bead pg2-q89ng): the counts the
+// reconcile_open_set line logs are also persisted for the pg_desk_reconcile_*
+// gauges, since a successful run's stderr is discarded.
+func TestPipelineReconcile_RecordsLastRunSummary(t *testing.T) {
+	var out bytes.Buffer
+	g := &openSetGatherer{ids: map[string][]string{"mine": {"1"}, "review-requested": {"2"}}}
+	p := newOpenSetPipeline(t, &out, []string{"mine", "review-requested"}, g, nil)
+	for _, id := range []string{"1", "2", "3"} {
+		seedReconcileEntity(t, p, id, "abc")
+	}
+	if err := p.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	s, _, found, err := sync.ReadReconcileLastRun(p.store, p.clock.Now())
+	if err != nil || !found {
+		t.Fatalf("last run not recorded: found=%v err=%v", found, err)
+	}
+	if s.OpenIDs == nil || *s.OpenIDs != 2 || s.SkippedOpen == nil || *s.SkippedOpen != 2 || s.Candidates != 1 || s.Deferred != 0 {
+		t.Fatalf("summary = %+v, want open_ids=2 skipped_open=2 candidates=1 deferred=0", s)
+	}
+}
+
+// TestPipelineReconcile_LastRunSummaryWithoutOpenSetCountsDeferrals: a run
+// that never read the open set leaves those fields unset, and a deferred
+// candidate is counted even though the pass returns nil.
+func TestPipelineReconcile_LastRunSummaryWithoutOpenSetCountsDeferrals(t *testing.T) {
+	var out bytes.Buffer
+	p := newTestPipeline(t, gatherFunc(func(ctx context.Context, entityType, entityID string, change gather.ChangeKind) (gather.Facts, error) {
+		return gather.Facts{}, errors.New(killedErrText)
+	}), &out)
+	seedReconcileEntity(t, p, "9", "abc")
+	if err := p.Reconcile(context.Background()); err != nil {
+		t.Fatalf("a transient failure must be deferred: %v", err)
+	}
+	s, _, found, err := sync.ReadReconcileLastRun(p.store, p.clock.Now())
+	if err != nil || !found {
+		t.Fatalf("last run not recorded: found=%v err=%v", found, err)
+	}
+	if s.OpenIDs != nil || s.SkippedOpen != nil || s.Candidates != 1 || s.Deferred != 1 {
+		t.Fatalf("summary = %+v, want no open set, candidates=1 deferred=1", s)
+	}
+}
+
 // TestPipelineReconcile_OpenSetUnreadableRereadsEverything: a failed listing
 // must never cost a closure; with no usable open set every open anchor is
 // re-read, and a query that still lists contributes its ids.

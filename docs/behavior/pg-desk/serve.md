@@ -88,6 +88,25 @@ log lines additionally export over OTLP as `{service_name="pg-desk-serve"}`
 `~/Library/Logs/pg-desk-serve.log`. This resolves the observability review's (`pg2-7kizi`) `serve`
 half.
 
+### Reconcile metrics
+
+`pg-desk reconcile` runs as a separate process, and its `reconcile_open_set` / `reconcile_deferred`
+log lines are discarded by the scheduler on a successful run (bead `pg2-q89ng`). It therefore
+records a summary of each run in the store (`meta.reconcile.last_run`, see
+[`operator-commands.md`](operator-commands.md)), and `/metrics` exposes the LAST run's summary at
+scrape time as gauges:
+
+- `pg_desk_reconcile_open_set_ids` and `pg_desk_reconcile_skipped_open` — the open-set size and the
+  number of open anchors not re-read because a watched query still listed their PR. A run that did
+  not read the open set has NO series for these two (never `0`).
+- `pg_desk_reconcile_candidates` — re-drive candidates the run considered.
+- `pg_desk_reconcile_deferred` — candidates the run deferred on a transient read failure.
+- `pg_desk_reconcile_last_run_age_seconds` — seconds since the run finished, so a stopped schedule
+  is visible and the gauges above can be read as current or stale.
+
+Until a run has recorded a summary (and on a store whose value is unreadable) none of these has a
+series.
+
 ### Change-flow metrics
 
 `/metrics` also exposes the change-flow families, per entity `type` (and, where noted, `kind`,

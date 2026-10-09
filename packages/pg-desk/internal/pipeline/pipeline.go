@@ -780,6 +780,10 @@ func (p *Pipeline) Reconcile(ctx context.Context) error {
 
 	start := p.clock.Now()
 	var errs []error
+	deferred := 0
+	// The run's summary is persisted however the loop ends (completion, budget
+	// stop, or failures), so serve can export it (bead pg2-q89ng).
+	defer func() { p.recordReconcileLastRun(openSet, skippedOpen, len(order), &deferred) }()
 	for idx, id := range order {
 		if p.reconcileBudget > 0 && idx > 0 && p.clock.Now().Sub(start) >= p.reconcileBudget {
 			line, _ := json.Marshal(map[string]any{
@@ -797,6 +801,7 @@ func (p *Pipeline) Reconcile(ctx context.Context) error {
 			}
 		case deferrable(ctx, err, deferrals[id]):
 			deferrals[id]++
+			deferred++
 			_ = p.store.SetMeta(reconcileDeferredKeyPrefix+id, strconv.Itoa(deferrals[id]))
 			line, _ := json.Marshal(map[string]any{
 				"event": "reconcile_deferred", "entity_id": id, "error_class": transientClass(err),
@@ -811,6 +816,19 @@ func (p *Pipeline) Reconcile(ctx context.Context) error {
 		return fmt.Errorf("pipeline: reconcile: %w", errors.Join(errs...))
 	}
 	return nil
+}
+
+// recordReconcileLastRun persists the run summary (sync.ReconcileLastRun) for
+// the pg_desk_reconcile_* gauges. Best-effort, like the other reconcile meta
+// stamps: an unwritable summary must not fail the pass. A nil openSet (it was
+// not read) leaves the open-set fields unset.
+func (p *Pipeline) recordReconcileLastRun(openSet map[string]bool, skippedOpen, candidates int, deferred *int) {
+	s := sync.ReconcileLastRun{At: p.clock.Now().UTC().Format(time.RFC3339), Candidates: candidates, Deferred: *deferred}
+	if openSet != nil {
+		open := len(openSet)
+		s.OpenIDs, s.SkippedOpen = &open, &skippedOpen
+	}
+	_ = sync.WriteReconcileLastRun(p.store, s)
 }
 
 // reconcileCandidate runs one candidate's re-drive, settled-review re-run and

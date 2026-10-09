@@ -3,6 +3,7 @@ package metrics
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -219,6 +220,71 @@ func TestSourceAgeIsPerSourceAndOmitsUnknown(t *testing.T) {
 				t.Fatalf("MetricSourceAge exported %d series with no known source", len(g.DataPoints))
 			}
 		}
+	}
+}
+
+// TestReconcileGauges pins the pg_desk_reconcile_* catalog (bead pg2-q89ng):
+// every gauge carries the last run's value, the two open-set gauges drop out
+// (no series, not 0) when the run did not read the open set, and with no
+// recorded run nothing is exported.
+func TestReconcileGauges(t *testing.T) {
+	want := map[string]string{
+		MetricReconcileOpenSetIDs:  "pg_desk_reconcile_open_set_ids",
+		MetricReconcileSkippedOpen: "pg_desk_reconcile_skipped_open",
+		MetricReconcileCandidates:  "pg_desk_reconcile_candidates",
+		MetricReconcileDeferred:    "pg_desk_reconcile_deferred",
+		MetricReconcileLastRunAge:  "pg_desk_reconcile_last_run_age_seconds",
+	}
+	for got, name := range want {
+		if got != name {
+			t.Fatalf("metric name = %q, want %q", got, name)
+		}
+	}
+	series := func(h *harness) map[string]int64 {
+		out := map[string]int64{}
+		for _, sm := range h.collect(t).ScopeMetrics {
+			for _, m := range sm.Metrics {
+				if g, ok := m.Data.(metricdata.Gauge[int64]); ok && strings.HasPrefix(m.Name, "pg_desk_reconcile_") {
+					for _, dp := range g.DataPoints {
+						out[m.Name] = dp.Value
+					}
+				}
+			}
+		}
+		return out
+	}
+
+	h := newHarness(t)
+	h.snap = Snapshot{Reconcile: &ReconcileSnapshot{HaveOpenSet: true, OpenIDs: 40, SkippedOpen: 38, Candidates: 2, Deferred: 1, AgeSeconds: 900}}
+	got := series(h)
+	exp := map[string]int64{
+		MetricReconcileOpenSetIDs: 40, MetricReconcileSkippedOpen: 38, MetricReconcileCandidates: 2,
+		MetricReconcileDeferred: 1, MetricReconcileLastRunAge: 900,
+	}
+	if len(got) != len(exp) {
+		t.Fatalf("series = %v, want %v", got, exp)
+	}
+	for k, v := range exp {
+		if got[k] != v {
+			t.Fatalf("%s = %d, want %d (all: %v)", k, got[k], v, got)
+		}
+	}
+
+	h.snap = Snapshot{Reconcile: &ReconcileSnapshot{Candidates: 3, AgeSeconds: 5}}
+	got = series(h)
+	if _, ok := got[MetricReconcileOpenSetIDs]; ok {
+		t.Fatalf("open-set gauge exported without an open set: %v", got)
+	}
+	if _, ok := got[MetricReconcileSkippedOpen]; ok {
+		t.Fatalf("skipped_open gauge exported without an open set: %v", got)
+	}
+	if got[MetricReconcileCandidates] != 3 || got[MetricReconcileDeferred] != 0 || got[MetricReconcileLastRunAge] != 5 {
+		t.Fatalf("no-open-set run series = %v", got)
+	}
+
+	h.snap = Snapshot{}
+	if got = series(h); len(got) != 0 {
+		t.Fatalf("no recorded run must export no reconcile series, got %v", got)
 	}
 }
 
