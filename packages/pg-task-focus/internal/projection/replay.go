@@ -47,7 +47,7 @@ func (m *Model) projectCalendar(r *run) error {
 	if err != nil {
 		return err
 	}
-	m.periods, m.tasks = periods, tasks
+	m.periods, m.tasks, m.zone = periods, tasks, r.zone
 	if len(profiles) > 0 {
 		m.profile = profiles[len(profiles)-1].Payload.(event.ProfileChanged).Profile
 	}

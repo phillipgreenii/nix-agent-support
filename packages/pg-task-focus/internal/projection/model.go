@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/event"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/zone"
 )
 
 // Model is a replayed log. It starts with the overlay's views of the events;
@@ -22,6 +23,7 @@ type Model struct {
 	taskIndex  map[event.TaskID]int
 	cycles     []Cycle
 	cycleIndex map[event.CycleID]int
+	zone       *zone.Zone // the active day period's zone; nil while no day period exists
 }
 
 // newModel runs the overlay over the log and indexes the result. The model
@@ -101,4 +103,29 @@ type Domain struct {
 // Domain returns the state the model describes, as a copy.
 func (m *Model) Domain() Domain {
 	return Domain{Profile: m.profile, Periods: maps.Clone(m.periods), Tasks: m.Tasks(), Cycles: m.Cycles()}
+}
+
+// NewestEvent returns the live event about entity, a task or cycle id or a
+// period kind as an Invalid names it, that sorts last in the entity's order:
+// the latest effective_at, ties going to the later log position. The event is
+// as corrected. A cycle.started that names a cycle in interrupts is an event
+// of that cycle too, since it pauses it. False means no live event is about
+// the entity. The event shares its Data and payload with the model, as Log
+// says.
+func (m *Model) NewestEvent(entity string) (event.Event, bool) {
+	var newest *liveEvent
+	for i := range m.live {
+		e := &m.live[i]
+		about := entityOf(e.Payload) == entity
+		if p, ok := e.Payload.(event.CycleStarted); ok && string(p.Interrupts) == entity {
+			about = true
+		}
+		if about && (newest == nil || order(*e, *newest) > 0) {
+			newest = e
+		}
+	}
+	if newest == nil {
+		return event.Event{}, false
+	}
+	return newest.Event, true
 }

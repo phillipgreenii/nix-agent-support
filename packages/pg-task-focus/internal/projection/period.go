@@ -87,21 +87,30 @@ func sorted(evs []liveEvent) []liveEvent {
 
 func (r *run) isNew(e liveEvent) bool { return e.pos >= r.firstAdded }
 
-// instant is t in UTC and, once a day period exists, the same instant in that
-// period's zone with its identifier, so no zone is implicit. The local date is
-// given only when it differs from the UTC date.
-func (r *run) instant(t time.Time) string {
+// instant is t as the findings of this run write it; see formatInstant.
+func (r *run) instant(t time.Time) string { return formatInstant(r.zone, t) }
+
+// FormatInstant writes t the way every finding of the model's log writes an
+// instant, so a message built outside the projection reads like one built
+// inside it: t in UTC and, once a day period exists, the same instant in the
+// active day period's zone with its identifier.
+func (m *Model) FormatInstant(t time.Time) string { return formatInstant(m.zone, t) }
+
+// formatInstant is t in UTC and, when z is not nil, the same instant in z with
+// its identifier, so no zone is implicit. The local date is given only when it
+// differs from the UTC date.
+func formatInstant(z *zone.Zone, t time.Time) string {
 	utc := t.UTC()
 	s := utc.Format(instantLayout)
-	if r.zone == nil {
+	if z == nil {
 		return s
 	}
-	local := t.In(r.zone.Location())
+	local := t.In(z.Location())
 	layout := "15:04"
 	if y, mo, d := local.Date(); y != utc.Year() || mo != utc.Month() || d != utc.Day() {
 		layout = "2006-01-02 15:04"
 	}
-	return fmt.Sprintf("%s (%s %s)", s, local.Format(layout), r.zone.Name())
+	return fmt.Sprintf("%s (%s %s)", s, local.Format(layout), z.Name())
 }
 
 // ref names an event inside a sentence, with the instant it takes effect: a
