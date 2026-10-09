@@ -173,7 +173,7 @@ func TestCandidateAssignsLogPositions(t *testing.T) {
 
 	t.Run("the reverse order at one instant is a different timeline", func(t *testing.T) {
 		_, err := Candidate(base, []event.Event{add[1], add[0]})
-		assertCode(t, err, codeCycleSegmentsOverlap) // the resume now lands on a running cycle
+		_ = assertCode(t, err, codeCycleSegmentsOverlap) // the resume now lands on a running cycle
 	})
 }
 
@@ -338,7 +338,7 @@ func TestCandidateAndReplayAgreeOnCodes(t *testing.T) {
 				want = tt.code
 			}
 			_, err = Replay(slices.Concat(base, add))
-			assertCode(t, err, want)
+			_ = assertCode(t, err, want)
 		})
 	}
 }

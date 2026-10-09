@@ -226,8 +226,8 @@ func TestCycleTypeIsCorrectable(t *testing.T) {
 	if got.Type != "review" || got.Title != "Review" || got.CycleID != cycleA {
 		t.Errorf("corrected cycle start = %+v, want type review, title Review and the same cycle", got)
 	}
-	if live[0].Envelope.Type != event.TypeCycleStarted {
-		t.Errorf("envelope type = %q, want it unchanged", live[0].Envelope.Type)
+	if live[0].Type != event.TypeCycleStarted {
+		t.Errorf("envelope type = %q, want it unchanged", live[0].Type)
 	}
 }
 

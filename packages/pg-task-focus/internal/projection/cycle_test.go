@@ -456,7 +456,7 @@ func TestStopNotAfterStart(t *testing.T) {
 		t.Errorf("Events = %v, want the start and the stop", inv.Events)
 	}
 	_, err := Candidate(base, b.added(base))
-	assertCode(t, err, codeStopNotAfterStart)
+	_ = assertCode(t, err, codeStopNotAfterStart)
 }
 
 func TestStopAtTheInstantOfAResumeIsEmptyRunningSegment(t *testing.T) {
@@ -550,7 +550,7 @@ func TestPauseOfAPausedCycleIsCycleSegmentsOverlap(t *testing.T) {
 		b := dayLog(t)
 		b.add(0, startOf(cycleA, 50))
 		b.add(10, resumeOf(cycleA))
-		assertCode(t, mustFail(Replay(b.events)), codeCycleSegmentsOverlap)
+		_ = assertCode(t, mustFail(Replay(b.events)), codeCycleSegmentsOverlap)
 	})
 	t.Run("a break inside an existing pause", func(t *testing.T) {
 		b := dayLog(t)
@@ -560,7 +560,7 @@ func TestPauseOfAPausedCycleIsCycleSegmentsOverlap(t *testing.T) {
 		base := b.split()
 		b.backfill(50, 20, 30, cycleA)
 		_, err := Candidate(base, b.added(base))
-		assertCode(t, err, codeCycleSegmentsOverlap)
+		_ = assertCode(t, err, codeCycleSegmentsOverlap)
 	})
 	for name, stopped := range map[string]bool{"a second start of one cycle": false, "a second start of a stopped cycle": true} {
 		t.Run(name, func(t *testing.T) {
@@ -873,14 +873,14 @@ func cycleGoldenLogs(t *testing.T) []golden {
 	b, _ = stoppedAt60(t)
 	b.backfill(70, 30, 60, cycleA)
 	out = append(out, golden{name: "break-ending-at-stop.jsonl", events: b.events, check: func(t *testing.T, _ *Model, err error) {
-		assertCode(t, err, codeCycleStopped)
+		_ = assertCode(t, err, codeCycleStopped)
 	}})
 
 	b = dayLog(t)
 	b.add(0, startOf(cycleA, 50))
 	b.addAt(at(20), at(10), startOf(cycleB, 25))
 	out = append(out, golden{name: "two-running.jsonl", events: b.events, check: func(t *testing.T, _ *Model, err error) {
-		assertCode(t, err, codeAnotherCycleRunning)
+		_ = assertCode(t, err, codeAnotherCycleRunning)
 	}})
 	return out
 }

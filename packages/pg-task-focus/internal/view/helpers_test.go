@@ -45,10 +45,9 @@ func at(n int) time.Time { return t0.Add(time.Duration(n) * time.Minute) }
 // logb builds a log one event at a time, every event recorded and effective at
 // the instant it is added at.
 type logb struct {
-	t       *testing.T
-	events  []event.Event
-	ids     uint32
-	batches int
+	t      *testing.T
+	events []event.Event
+	ids    uint32
 }
 
 func newLog(t *testing.T) *logb {
