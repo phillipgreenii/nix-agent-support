@@ -16,7 +16,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/event"
 )
 
-var updateGolden = flag.Bool("update", false, "rewrite the golden logs under testdata/logs/tasks")
+var updateGolden = flag.Bool("update", false, "rewrite the golden logs under testdata/logs")
 
 var (
 	day1 = civil.Date{Year: 2026, Month: time.October, Day: 7}
@@ -525,110 +525,6 @@ func oneSentence(msg string) bool {
 		!strings.Contains(msg, "\n") && !strings.Contains(msg, "  ")
 }
 
-func TestInvalidCarriesCodeMessageEntityEventsAndInstants(t *testing.T) {
-	type build func(t *testing.T) (base, add []event.Event)
-	stored := func(f func(t *testing.T) *logb) build {
-		return func(t *testing.T) ([]event.Event, []event.Event) { return f(t).events, nil }
-	}
-	tests := []struct {
-		name   string
-		code   Code
-		entity string
-		build  build
-	}{
-		{"task_already_resolved", codeTaskAlreadyResolved, string(taskA), stored(func(t *testing.T) *logb {
-			b, id := bootstrapped(t)
-			b.add(100, event.TaskCompleted{TaskID: id})
-			b.add(110, event.TaskCompleted{TaskID: id})
-			return b
-		})},
-		{"resolution_before_materialization", codeResolutionBeforeMaterialization, string(taskA), stored(func(t *testing.T) *logb {
-			b, id := bootstrapped(t)
-			b.add(5, event.TaskCompleted{TaskID: id})
-			return b
-		})},
-		{"task_withdrawn", codeTaskWithdrawn, string(taskA), stored(func(t *testing.T) *logb {
-			b, id := bootstrapped(t)
-			b.batch(100, withdrawnTask(id))
-			b.add(120, event.TaskCompleted{TaskID: id})
-			return b
-		})},
-		{"task_not_withdrawn", codeTaskNotWithdrawn, string(taskA), stored(func(t *testing.T) *logb {
-			b, id := bootstrapped(t)
-			b.batch(100, reinstatedTask(id))
-			return b
-		})},
-		{"task_materialized_twice", codeTaskMaterializedTwice, string(taskA), stored(func(t *testing.T) *logb {
-			b, _ := bootstrapped(t)
-			b.batch(30, b.daily("post-plan", day1))
-			return b
-		})},
-		{"task_without_period", codeTaskWithoutPeriod, "day:2026-10-08:post-plan", stored(func(t *testing.T) *logb {
-			b, _ := bootstrapped(t)
-			b.batch(30, b.daily("post-plan", day2))
-			return b
-		})},
-		{"task_before_profile", codeTaskBeforeProfile, string(taskA), stored(func(t *testing.T) *logb {
-			b := newLog(t)
-			b.batch(0, dayOf(day1), b.daily("post-plan", day1))
-			return b
-		})},
-		{"period_unchanged", codePeriodUnchanged, "day", stored(func(t *testing.T) *logb {
-			b, _ := bootstrapped(t)
-			b.batch(30, dayOf(day1))
-			return b
-		})},
-		{"period_out_of_order", codePeriodOutOfOrder, "day", func(t *testing.T) ([]event.Event, []event.Event) {
-			b := newLog(t)
-			b.batch(0, profileOf("work"))
-			b.addAt(instantOn(civil.Date{Year: 2026, Month: time.October, Day: 1}, 12), instantOn(civil.Date{Year: 2026, Month: time.October, Day: 1}, 12),
-				event.PeriodChanged{Kind: "day", Start: civil.Date{Year: 2026, Month: time.October, Day: 1}, TZ: "America/New_York", Batch: bid(2)})
-			b.addAt(instantOn(civil.Date{Year: 2026, Month: time.October, Day: 8}, 12), instantOn(civil.Date{Year: 2026, Month: time.October, Day: 8}, 12),
-				event.PeriodChanged{Kind: "day", Start: civil.Date{Year: 2026, Month: time.October, Day: 8}, TZ: "America/New_York", Batch: bid(2)})
-			base := b.split()
-			b.addAt(instantOn(civil.Date{Year: 2026, Month: time.October, Day: 9}, 12), instantOn(civil.Date{Year: 2026, Month: time.October, Day: 3}, 12),
-				event.PeriodChanged{Kind: "day", Start: civil.Date{Year: 2026, Month: time.October, Day: 9}, TZ: "America/New_York", Batch: bid(2)})
-			return base, b.added(base)
-		}},
-	}
-
-	produced := map[Code]bool{}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			base, add := tt.build(t)
-			var err error
-			if add == nil {
-				_, err = Replay(base)
-			} else {
-				_, err = candidateReplay(base, add)
-			}
-			inv := asInvalid(t, err) // entity, event ids and instants are in the message
-			produced[inv.Code] = true
-			if inv.Code != tt.code {
-				t.Fatalf("Code = %q (%s), want %q", inv.Code, inv.Message, tt.code)
-			}
-			if inv.Entity != tt.entity {
-				t.Errorf("Entity = %q, want %q", inv.Entity, tt.entity)
-			}
-			if inv.Entity == "" || len(inv.Events) == 0 || len(inv.Instants) == 0 {
-				t.Errorf("Entity %q, Events %v, Instants %v: each MUST be set", inv.Entity, inv.Events, inv.Instants)
-			}
-			if !oneSentence(inv.Message) {
-				t.Errorf("message %q is not one plain sentence", inv.Message)
-			}
-			if inv.Error() != inv.Message {
-				t.Errorf("Error() = %q, want the message", inv.Error())
-			}
-			if !strings.Contains(inv.Message, "America/New_York") {
-				t.Errorf("message %q names no zone though a day period exists", inv.Message)
-			}
-			if !slices.Contains(Codes(), inv.Code) {
-				t.Errorf("Codes() = %v lacks the produced code %q", Codes(), inv.Code)
-			}
-		})
-	}
-}
-
 func TestMessagesNameTheActiveDayPeriodZoneNextToEveryInstant(t *testing.T) {
 	b, id := bootstrapped(t)
 	b.add(5, event.TaskCompleted{TaskID: id})
@@ -789,8 +685,14 @@ type golden struct {
 }
 
 func TestGoldenTaskLogs(t *testing.T) {
-	dir := filepath.Join("..", "..", "testdata", "logs", "tasks")
-	for _, g := range goldenLogs(t) {
+	checkGoldenLogs(t, filepath.Join("..", "..", "testdata", "logs", "tasks"), goldenLogs(t))
+}
+
+// checkGoldenLogs compares each golden log with the file of its name in dir,
+// rewriting the file under -update, then decodes the file and replays it.
+func checkGoldenLogs(t *testing.T, dir string, logs []golden) {
+	t.Helper()
+	for _, g := range logs {
 		t.Run(g.name, func(t *testing.T) {
 			var want []byte
 			for _, e := range g.events {

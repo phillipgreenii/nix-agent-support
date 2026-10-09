@@ -26,6 +26,8 @@ func Codes() []Code {
 		codeTaskAlreadyResolved, codeTaskWithdrawn, codeTaskNotWithdrawn, codeTaskMaterializedTwice,
 		codeTaskWithoutPeriod, codeTaskBeforeProfile, codeResolutionBeforeMaterialization,
 		codePeriodUnchanged, codePeriodOutOfOrder,
+		codeCycleStopped, codeAnotherCycleRunning, codeInterruptedCycleNotRunning, codeCycleSegmentsOverlap,
+		codeBreakEndsAtStop, codeStopNotAfterStart, codeEmptyRunningSegment, codeCycleEventBeforeStart,
 	}
 }
 
