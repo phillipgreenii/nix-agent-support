@@ -92,9 +92,29 @@ func TestCLIRunner_timeoutKillsWholeProcessGroup(t *testing.T) {
 		t.Fatal(rerr)
 	}
 	pid, _ := strconv.Atoi(strings.TrimSpace(string(b)))
-	if syscall.Kill(pid, 0) == nil {
+	// SIGKILL is delivered to the group before Run returns, but a killed
+	// process stays visible to kill(pid, 0) as a zombie until its (re)parent
+	// reaps it. Under host load that reap can lag, so a single liveness check
+	// right after Run is racy. Poll with a bounded deadline: a grandchild that
+	// is truly alive (group not killed) never goes away and still fails.
+	if !waitProcessGone(pid, 10*time.Second) {
 		_ = syscall.Kill(pid, syscall.SIGKILL)
 		t.Errorf("grandchild %d survived the timeout", pid)
+	}
+}
+
+// waitProcessGone polls until kill(pid, 0) reports the process no longer
+// exists, or the deadline passes. It returns true when the process is gone.
+func waitProcessGone(pid int, deadline time.Duration) bool {
+	end := time.Now().Add(deadline)
+	for {
+		if syscall.Kill(pid, 0) != nil {
+			return true
+		}
+		if time.Now().After(end) {
+			return false
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 
