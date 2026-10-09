@@ -139,6 +139,13 @@ type Engine struct {
 // rebuilds the record of request ids from the log's req_hash fields. A log
 // the store refuses (corrupt, an unknown version, locked by another process)
 // or whose timeline is impossible is an error, and the directory is released.
+//
+// Open does not check the log's active profile against Options.Config: a log
+// whose profile the configuration no longer defines opens, and a period
+// change that names no profile is then refused with unknown_profile until a
+// request names a defined one. Whether a service refuses to start on such a
+// log is the caller's decision (SetConfig, by contrast, refuses a reload that
+// drops the active profile).
 func Open(opts Options) (*Engine, error) {
 	if opts.Config == nil {
 		return nil, errors.New("engine: Options needs a Config")
@@ -472,6 +479,16 @@ func (e *Engine) State(now time.Time) view.State {
 // Health reports whether the store is read-only, why and since when; the
 // zero value means healthy. Only reopening clears it.
 func (e *Engine) Health() Health { return e.st.Health() }
+
+// Probe checks that the data directory can still take a write, as
+// store.Store.Probe does: nil when it can, the failure otherwise. It writes no
+// byte of the log, does not consult or change the read-only state, and never
+// waits for a write in progress. It backs the store_writable gauge.
+func (e *Engine) Probe() error { return e.st.Probe() }
+
+// StoreSize is the length in bytes of the committed log. It never waits for a
+// write in progress. It backs the store_size_bytes gauge.
+func (e *Engine) StoreSize() int64 { return e.st.Size() }
 
 // Version is the present state version.
 func (e *Engine) Version() Version {

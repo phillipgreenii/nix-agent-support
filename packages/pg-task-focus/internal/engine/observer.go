@@ -23,10 +23,13 @@ type Observer interface {
 	Recovered(store.Recovery)
 	// Appended is called once per appended event, in log order, with the
 	// event's type, after the new state is adopted and before OnCommit, so a
-	// panic in it leaves the engine consistent (see Engine.Do). The stats of the append are split across its calls: each
-	// call carries Events 1 and the event's own Bytes, and the first call of
-	// an append carries the append's Duration (the later ones carry zero), so
-	// summing the calls of one append gives its totals.
+	// panic in it leaves the engine consistent (see Engine.Do). The stats of
+	// the append are split across its calls: each call carries Events 1 and
+	// the event's own Bytes, and only the first call of an append (the first
+	// event of a batch) carries the append's Duration; the later ones carry
+	// zero, so summing the calls of one append gives its totals. A daemon that
+	// records the append latency MUST observe Duration only when it is
+	// non-zero, or every later event of a batch counts as a zero-length append.
 	Appended(t event.Type, s store.AppendStats)
 	// AppendFailed is called when a request reached the store and failed
 	// there: "write" (the write failed), "fsync" (its sync failed) or
