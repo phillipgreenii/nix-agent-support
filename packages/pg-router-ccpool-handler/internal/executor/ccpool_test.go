@@ -179,7 +179,7 @@ func TestWaitDone_paneDiesStillInProgress_failure(t *testing.T) {
 	if err := e.waitDone(context.Background(), nil, d, "pg-router-worker-zr-w"); err == nil {
 		t.Fatal("dead session + in_progress = failure")
 	}
-	if !dtest.HasUpdate(bd, "update zr-w --add-label human") {
+	if !dtest.HasUpdate(bd, "update zr-w --add-label human --status=open --assignee=") {
 		t.Errorf("must add human; updates=%v", bd.Updates)
 	}
 }
@@ -319,7 +319,7 @@ func TestWaitDone_workerDoneStopsFast_failure(t *testing.T) {
 	if err := e.waitDone(context.Background(), nil, d, "pg-router-worker-zr-w"); err == nil {
 		t.Fatal("done + not-closed should fail")
 	}
-	if !dtest.HasUpdate(bd, "update zr-w --add-label human") {
+	if !dtest.HasUpdate(bd, "update zr-w --add-label human --status=open --assignee=") {
 		t.Errorf("worker done-without-close must add human; updates=%v", bd.Updates)
 	}
 	// sessionState (edge check) + active() each call List once, then closeReason
@@ -547,7 +547,7 @@ func TestWaitDone_deathByCloseReason(t *testing.T) {
 			if got := dtest.HasUpdate(bd, "update zr-w --status=open --assignee="); got != tc.wantUnclaim {
 				t.Errorf("unclaimed = %v, want %v; updates=%v", got, tc.wantUnclaim, bd.Updates)
 			}
-			if got := dtest.HasUpdate(bd, "update zr-w --add-label human"); got != tc.wantHuman {
+			if got := dtest.HasUpdate(bd, "update zr-w --add-label human --status=open --assignee="); got != tc.wantHuman {
 				t.Errorf("human = %v, want %v; updates=%v", got, tc.wantHuman, bd.Updates)
 			}
 			if got := len(bd.Comments) > 0; got != tc.wantComment {
@@ -629,7 +629,7 @@ func TestWaitDone_genuineDeathStillFailsAfterBoundedRetry(t *testing.T) {
 	if err := e.waitDone(context.Background(), nil, d, "pg-router-review-zr-rv"); err == nil {
 		t.Fatal("a genuine unexplained death (no reopen ever arrives) must still fail")
 	}
-	if !dtest.HasUpdate(bd, "update zr-rv --add-label human") {
+	if !dtest.HasUpdate(bd, "update zr-rv --add-label human --status=open --assignee=") {
 		t.Errorf("review role's on_failure=add-human must still apply; updates=%v", bd.Updates)
 	}
 }
@@ -652,7 +652,7 @@ func TestWaitDone_neverClaimedDeath_stillFails(t *testing.T) {
 	if err := e.waitDone(context.Background(), nil, d, "pg-router-review-zr-rv"); err == nil {
 		t.Fatal("dying before ever claiming (never-seen in_progress) must still fail, per DoneSignal's own startup-race guard")
 	}
-	if !dtest.HasUpdate(bd, "update zr-rv --add-label human") {
+	if !dtest.HasUpdate(bd, "update zr-rv --add-label human --status=open --assignee=") {
 		t.Errorf("review role's on_failure=add-human must still apply; updates=%v", bd.Updates)
 	}
 }
@@ -2286,7 +2286,7 @@ func TestWaitDone_triager_exitWithoutChangeStillFails(t *testing.T) {
 	if err := triagerRun(t, bd, false); err == nil {
 		t.Fatal("a session that exits without changing its bead must still fail")
 	}
-	if !dtest.HasUpdate(bd, "update pg2-x --add-label human") {
+	if !dtest.HasUpdate(bd, "update pg2-x --add-label human --status=open --assignee=") {
 		t.Errorf("on_failure=add-human must apply; updates=%v", bd.Updates)
 	}
 }

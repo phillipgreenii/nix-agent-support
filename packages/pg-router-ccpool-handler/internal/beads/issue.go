@@ -185,6 +185,20 @@ func AddHuman(ctx context.Context, r Runner, id string) error {
 	return nil
 }
 
+// AddHumanAndUnclaim flags a bead for a human AND releases its claim in ONE
+// write: `bd update <id> --add-label human --status=open --assignee=`. For a
+// session that is gone: the human label keeps the bead out of every retry
+// queue, and the cleared assignee keeps it from staying in_progress under a
+// session that no longer exists (pg2-0fsuu). One call, so a bd hiccup cannot
+// land the label without the release or the reverse.
+func AddHumanAndUnclaim(ctx context.Context, r Runner, id string) error {
+	_, err := r.Run(ctx, "update", id, "--add-label", "human", "--status=open", "--assignee=")
+	if err != nil {
+		return fmt.Errorf("add-human-and-unclaim %s: %w", id, err)
+	}
+	return nil
+}
+
 // AddLabel adds an arbitrary label: `bd update <id> --add-label <label>`.
 func AddLabel(ctx context.Context, r Runner, id, label string) error {
 	_, err := r.Run(ctx, "update", id, "--add-label", label)

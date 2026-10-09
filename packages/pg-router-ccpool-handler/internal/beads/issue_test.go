@@ -138,6 +138,20 @@ func TestAddHuman_argv(t *testing.T) {
 	}
 }
 
+func TestAddHumanAndUnclaim_singleUpdateArgv(t *testing.T) {
+	fr := &fakeRunner{}
+	if err := AddHumanAndUnclaim(context.Background(), fr, "zr-1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(fr.args) != 1 {
+		t.Fatalf("must be ONE bd call, got %d: %v", len(fr.args), fr.args)
+	}
+	want := []string{"update", "zr-1", "--add-label", "human", "--status=open", "--assignee="}
+	if joinArgs(fr.args[0]) != joinArgs(want) {
+		t.Errorf("argv = %v, want %v", fr.args[0], want)
+	}
+}
+
 func TestShowObj_parsesLabels(t *testing.T) {
 	fr := &fakeRunner{out: `{"id":"zr-1","status":"open","labels":["worker-ready","pool-launch-fail"]}`}
 	iss, err := ShowObj(context.Background(), fr, "zr-1")

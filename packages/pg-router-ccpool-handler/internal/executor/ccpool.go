@@ -417,6 +417,16 @@ func (r *ccpoolRun) waitFailureResult(cc *roles.CCPoolConfig, beadID string, err
 		}
 		return failureAction(report.Unclaimed, beadID)
 	}
+	if errors.Is(err, ErrSessionDied) {
+		// complete.OnDeath released the claim under either on_failure, so the
+		// unclaim verb is always reported; add-human adds its escalation too
+		// (pg2-0fsuu).
+		res := failureAction(report.Unclaimed, beadID)
+		if cc.OnFailure == roles.AddHuman {
+			res.Actions = append([]report.Action{{Verb: report.Escalated, Refs: res.Actions[0].Refs}}, res.Actions...)
+		}
+		return res
+	}
 	switch cc.OnFailure {
 	case roles.Unclaim:
 		return failureAction(report.Unclaimed, beadID)
@@ -1346,7 +1356,7 @@ func (r *ccpoolRun) waitDone(ctx context.Context, claimTerminal func() bool, d D
 					_ = r.deps.CC.Close(ctx, name, false)
 				}
 				r.logUsageLimitOnDeath(ctx, name, d.Item.ID)
-				return r.fail(ctx, d, "session exited before completing")
+				return r.failDead(ctx, d, "session exited before completing")
 			}
 			return lose()
 		}
@@ -1385,6 +1395,33 @@ func (r *ccpoolRun) fail(ctx context.Context, d DispatchContext, reason string) 
 	_ = complete.OnFailure(ctx, r.deps.BD, d.Role.CCPool.OnFailure, d.Item.ID)
 	return fmt.Errorf("%s: %s", d.Item.ID, reason)
 }
+
+// failDead is fail for a session that is GONE (it exited before completing and
+// its row is closed): the role's on_failure label policy is unchanged, but the
+// claim is released in the same single update (complete.OnDeath), so the bead
+// is never left in_progress under a session that no longer exists (pg2-0fsuu).
+// The error text is the same as fail's.
+func (r *ccpoolRun) failDead(ctx context.Context, d DispatchContext, reason string) error {
+	_ = complete.OnDeath(ctx, r.deps.BD, d.Role.CCPool.OnFailure, d.Item.ID)
+	return &sessionDied{beadID: d.Item.ID, reason: reason}
+}
+
+// ErrSessionDied wraps the unexplained death of a session (waitDone's death
+// branch, failDead); waitFailureResult reports it with the unclaim verb since
+// the claim was released.
+var ErrSessionDied = errors.New("session exited before completing")
+
+// sessionDied is the concrete error behind ErrSessionDied. Its message is
+// exactly what fail produced ("<bead>: <reason>"), so every consumer of the
+// failure text is unchanged.
+type sessionDied struct {
+	beadID string
+	reason string
+}
+
+func (e *sessionDied) Error() string { return fmt.Sprintf("%s: %s", e.beadID, e.reason) }
+
+func (e *sessionDied) Is(target error) bool { return target == ErrSessionDied }
 
 // externalCloseReasons: SOMETHING ELSE ended the session while the worker was
 // fine — the reaper (idle_ttl, cap_eviction) or an operator. "handler" is this

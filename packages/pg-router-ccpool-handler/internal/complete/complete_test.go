@@ -58,6 +58,28 @@ func TestOnFailure_unclaimNeverAddsHuman(t *testing.T) {
 	}
 }
 
+// OnDeath is OnFailure for a session that is gone: the label policy is the same,
+// but the claim is always released, in the SAME single update (pg2-0fsuu).
+func TestOnDeath_addHumanReleasesClaimInOneUpdate(t *testing.T) {
+	fr := &recRunner{}
+	if err := OnDeath(context.Background(), fr, roles.AddHuman, "zr-w1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(fr.calls) != 1 || fr.calls[0] != "update zr-w1 --add-label human --status=open --assignee=" {
+		t.Errorf("add-human death must add human AND release the claim in one update; calls=%v", fr.calls)
+	}
+}
+
+func TestOnDeath_unclaimNeverAddsHuman(t *testing.T) {
+	fr := &recRunner{}
+	if err := OnDeath(context.Background(), fr, roles.Unclaim, "zr-c1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(fr.calls) != 1 || fr.calls[0] != "update zr-c1 --status=open --assignee=" {
+		t.Errorf("unclaim death must only unclaim; calls=%v", fr.calls)
+	}
+}
+
 type recRunner struct{ calls []string }
 
 func (r *recRunner) Run(_ context.Context, args ...string) (string, error) {

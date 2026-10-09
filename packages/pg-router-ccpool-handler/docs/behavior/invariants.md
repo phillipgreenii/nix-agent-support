@@ -44,7 +44,12 @@ module as an **implementer** of `INTF-HANDLER`/`INTF-SOURCE`.
   MUST release the bead (status open, assignee cleared) with a comment naming the reason,
   regardless of the role's `on_failure`, and MUST escalate to `human` on the second
   consecutive external close of the same bead. Only an unexplained death, or a close the
-  handler itself requested (`handler`), applies `on_failure`.
+  handler itself requested (`handler`), applies `on_failure`. That death also MUST release the
+  claim (status open, assignee cleared) whichever `on_failure` the role has, in the SAME single
+  update that applies it (so `add-human` adds `human` and releases in one write), and the dispatch
+  MUST report the unclaim verb (alongside the escalation verb for `add-human`): a bead is never
+  left `in_progress` under a session that no longer exists. The `human` label policy is unchanged.
+  Bead `pg2-0fsuu`.
 - **`INV-CCH-8`** — when preparing per-bead isolation (`git worktree add`) fails because the
   filesystem has run out of room, the handler MUST NOT treat it as a per-bead launch failure
   (no `pool-launch-fail`/`human` escalation) — a full disk is a transient, system-wide
