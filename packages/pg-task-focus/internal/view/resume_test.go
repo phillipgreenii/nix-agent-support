@@ -108,41 +108,44 @@ func TestResumeOfferChain(t *testing.T) {
 
 func TestResumeOfferPersistsWhileAnotherCycleRuns(t *testing.T) {
 	cfg := loadConfig(t, nil)
-	b := bootstrapped(t)
-	b.add(at(0), startOf(cycleA, "deep-work", 50))
-	b.add(at(10), interruptOf(cycleB, cycleA, "notifications", 15))
-	b.add(at(20), stopOf(cycleB))
-	assertOffer(t, view.Build(b.model(), cfg, at(21)), cycleA, view.OfferResume)
+	// A is interrupted by B, B stops (A is offered), then C starts and runs.
+	fixture := func(t *testing.T) *logb {
+		b := bootstrapped(t)
+		b.add(at(0), startOf(cycleA, "deep-work", 50))
+		b.add(at(10), interruptOf(cycleB, cycleA, "notifications", 15))
+		b.add(at(20), stopOf(cycleB))
+		b.add(at(25), startOf(cycleC, "review", 25))
+		return b
+	}
 
-	b.add(at(25), startOf(cycleC, "review", 25))
-	st := view.Build(b.model(), cfg, at(26))
-	assertOffer(t, st, cycleA, view.OfferSwitch)
-	if got := dimmedIDs(st); !slices.Equal(got, []event.CycleID{cycleA}) {
-		t.Errorf("Dimmed = %v, want the offered cycle also listed", got)
-	}
-	for _, d := range st.Dimmed {
-		if !d.CanSwitch {
-			t.Errorf("cycle %s CanSwitch = false while another cycle runs", d.Cycle.ID)
+	t.Run("the offer stays and its action is a switch", func(t *testing.T) {
+		st := view.Build(fixture(t).model(), cfg, at(26))
+		assertOffer(t, st, cycleA, view.OfferSwitch)
+		if got := dimmedIDs(st); !slices.Equal(got, []event.CycleID{cycleA}) {
+			t.Errorf("Dimmed = %v, want the offered cycle also listed", got)
 		}
-	}
-	if st.Focus == nil || st.Focus.Cycle.ID != cycleC {
-		t.Errorf("Focus = %+v, want C", st.Focus)
-	}
+		for _, d := range st.Dimmed {
+			if !d.CanSwitch {
+				t.Errorf("cycle %s CanSwitch = false while another cycle runs", d.Cycle.ID)
+			}
+		}
+		if focusOf(st).Cycle.ID != cycleC {
+			t.Errorf("Focus = %s, want C", focusOf(st).Cycle.ID)
+		}
+	})
 
 	t.Run("switching to the offered cycle ends the offer", func(t *testing.T) {
-		b := *b
-		b.events = slices.Clone(b.events)
+		b := fixture(t)
 		b.switchTo(at(30), cycleC, cycleA)
 		st := view.Build(b.model(), cfg, at(31))
 		assertOffer(t, st, "", "")
-		if st.Focus == nil || st.Focus.Cycle.ID != cycleA {
-			t.Errorf("Focus = %+v, want A", st.Focus)
+		if focusOf(st).Cycle.ID != cycleA {
+			t.Errorf("Focus = %s, want A", focusOf(st).Cycle.ID)
 		}
 	})
 
 	t.Run("stopping the offered cycle ends the offer", func(t *testing.T) {
-		b := *b
-		b.events = slices.Clone(b.events)
+		b := fixture(t)
 		b.add(at(30), stopOf(cycleA))
 		st := view.Build(b.model(), cfg, at(31))
 		assertOffer(t, st, "", "")
@@ -152,11 +155,67 @@ func TestResumeOfferPersistsWhileAnotherCycleRuns(t *testing.T) {
 	})
 
 	t.Run("a pause of the running cycle turns the offer back into a resume", func(t *testing.T) {
-		b := *b
-		b.events = slices.Clone(b.events)
+		b := fixture(t)
 		b.add(at(30), pauseOf(cycleC))
 		assertOffer(t, view.Build(b.model(), cfg, at(31)), cycleA, view.OfferResume)
 	})
+}
+
+func TestResumeOfferPicksTheLatestInterruption(t *testing.T) {
+	// Two paused cycles are candidates, each interrupted by a cycle that is
+	// now stopped; the one interrupted later is offered, whatever the cycle ids
+	// and the order the interrupters stopped in. Two cycles cannot be paused at
+	// the same instant: a cycle is paused when its last running segment ends,
+	// one cycle runs at a time, and a segment has a length, so a tie cannot be
+	// built from valid events.
+	cfg := loadConfig(t, nil)
+	tests := []struct {
+		name  string
+		build func(b *logb)
+		want  event.CycleID
+		other event.CycleID
+	}{
+		{"A is interrupted first and C later", func(b *logb) {
+			b.add(at(0), startOf(cycleA, "deep-work", 50))
+			b.add(at(10), interruptOf(cycleB, cycleA, "notifications", 15))
+			b.add(at(20), stopOf(cycleB))
+			b.add(at(30), startOf(cycleC, "deep-work", 50))
+			b.add(at(40), interruptOf(cycleD, cycleC, "notifications", 15))
+			b.add(at(50), stopOf(cycleD))
+		}, cycleC, cycleA},
+		{"the instants swapped: C is interrupted first and A later", func(b *logb) {
+			b.add(at(0), startOf(cycleC, "deep-work", 50))
+			b.add(at(10), interruptOf(cycleD, cycleC, "notifications", 15))
+			b.add(at(20), stopOf(cycleD))
+			b.add(at(30), startOf(cycleA, "deep-work", 50))
+			b.add(at(40), interruptOf(cycleB, cycleA, "notifications", 15))
+			b.add(at(50), stopOf(cycleB))
+		}, cycleA, cycleC},
+		{"the interrupter that stopped last belongs to the earlier interruption", func(b *logb) {
+			b.add(at(0), startOf(cycleA, "deep-work", 50))
+			b.add(at(10), interruptOf(cycleB, cycleA, "notifications", 15))
+			b.add(at(15), pauseOf(cycleB))
+			b.add(at(16), startOf(cycleC, "deep-work", 50))
+			b.add(at(20), interruptOf(cycleD, cycleC, "notifications", 15))
+			b.add(at(25), stopOf(cycleD))
+			b.add(at(30), stopOf(cycleB)) // a dimmed cycle can be stopped where it is
+		}, cycleC, cycleA},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := bootstrapped(t)
+			tt.build(b)
+			st := view.Build(b.model(), cfg, at(100))
+			assertOffer(t, st, tt.want, view.OfferResume)
+			got := dimmedIDs(st)
+			if !slices.Contains(got, tt.want) || !slices.Contains(got, tt.other) {
+				t.Errorf("Dimmed = %v, want both candidates listed: the one not offered stays visible", got)
+			}
+			if stack := cycleIDs(st.InterruptStack); len(stack) != 2 || stack[0] != tt.want {
+				t.Errorf("InterruptStack = %v, want both, %s first", stack, tt.want)
+			}
+		})
+	}
 }
 
 func TestResumeOfferAfterSwitchSequences(t *testing.T) {

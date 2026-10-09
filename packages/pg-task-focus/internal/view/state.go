@@ -47,7 +47,8 @@ type PeriodState struct {
 // CycleView is a cycle with its timer read at the read instant. Elapsed,
 // Remaining and Overtime come from the segments and boosts; nothing ticks into
 // the log. NotInProfile flags a cycle whose type the active profile does not
-// list, which is allowed. Alert is the alert the configuration gives the type
+// list, which is allowed; it is true for every type when the configuration no
+// longer defines the active profile. Alert is the alert the configuration gives the type
 // now, or defaults.alert when the type is no longer defined; the cycle's own
 // type id and title always come from the snapshot in the log.
 type CycleView struct {
