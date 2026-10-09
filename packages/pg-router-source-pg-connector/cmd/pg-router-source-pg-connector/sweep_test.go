@@ -43,6 +43,38 @@ func TestSweep_UnionsPresentIdsAcrossQueries_ReadingPresentIdsNeverEntities(t *t
 	}
 }
 
+func TestSweep_SinceFlag_IsPassedThroughToEveryListCall(t *testing.T) {
+	// --since narrows the swept set to entities updated in the window: the
+	// double returns only "recent" for --since 40m, and the output shape
+	// (title = id, metadata exactly {"change":"sweep"}) is unchanged.
+	withFactory(t, "sweep_since_echo")
+
+	stdout, stderr, code := runCLI(t, "sweep", "pr", "--since", "40m", "mine", "team")
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr=%q)", code, stderr)
+	}
+	items := mustUnmarshalItems(t, stdout)
+	if len(items) != 1 || items[0].ID != "recent" {
+		t.Fatalf("items = %+v, want exactly the one id \"recent\" (the --since 40m result, deduped across both queries)", items)
+	}
+	if items[0].Title != "recent" || len(items[0].Metadata) != 1 || items[0].Metadata["change"] != "sweep" {
+		t.Fatalf("item %+v: title/metadata shape changed", items[0])
+	}
+}
+
+func TestSweep_NoSinceFlag_ListsTheWholeSetAsBefore(t *testing.T) {
+	withFactory(t, "sweep_since_echo")
+
+	stdout, stderr, code := runCLI(t, "sweep", "pr", "mine")
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr=%q)", code, stderr)
+	}
+	items := mustUnmarshalItems(t, stdout)
+	if len(items) != 2 || items[0].ID != "recent" || items[1].ID != "old" {
+		t.Fatalf("items = %+v, want [recent old] (no --since means the unfiltered set)", items)
+	}
+}
+
 func TestSweep_ZeroQueryNames_IsUsageErrorWithNoSubprocessConsulted(t *testing.T) {
 	// No withFactory: if this RunE ever tried to exec pg-connector for
 	// this case, the (unset) execCmdFactory default would try to run a

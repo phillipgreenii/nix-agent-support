@@ -72,9 +72,15 @@ flowchart LR
     such rows for one PR coalesce inside the window whatever their heads. Rows classified by the
     same call's own refresh carry the full entity and are unaffected.
 
-- **`sweep <type> <query>... [--beads-dir <path>]`** — runs
-  `pg-connector <type> list --query <query> --ids-only --output json` once per named query
-  (one or more), unions the matched ids by reading each response's top-level `present_ids` array
+- **`sweep <type> <query>... [--since <bound>] [--beads-dir <path>]`** — runs
+  `pg-connector <type> list --query <query> --ids-only [--since <bound>] --output json` once per
+  named query (one or more); `--since`, when given, is forwarded unchanged to every call (a bound
+  is an RFC3339 timestamp, a Go duration such as `40m`, or whole days; pg-connector parses and
+  applies it, narrowing each list to entities updated in that window, and the adapter adds no
+  parsing of its own), and when omitted the whole matched set is listed. A narrowed sweep only
+  re-surfaces entities whose own last-updated time moved, so it does not re-surface a change that
+  leaves that time alone (for a PR, a mergeability or CI change); a deployment that narrows its
+  periodic sweep SHOULD keep a second, unnarrowed sweep on a longer period. The sweep unions the matched ids by reading each response's top-level `present_ids` array
   (never `entities`, which is always empty for `--ids-only`), and prints one rawItem per unioned
   id with `title` equal to the id and `metadata` exactly `{"change": "sweep"}`. It never runs a
   second, full fetch to backfill title/other fields — its purpose is a cheap reconciliation

@@ -202,6 +202,20 @@ func helperMain() {
 		}
 		_, _ = fmt.Fprintf(os.Stdout, `{"entities":[],"present_ids":%s,"sources":[]}`, presentIDs)
 		os.Exit(0)
+	case "sweep_since_echo":
+		// A ranged --ids-only response: with --since 40m only the recently
+		// updated id comes back; with no --since the whole open set does.
+		// Any other --since value is a test bug and fails loudly.
+		switch since := flagValue(childArgs, "--since"); since {
+		case "":
+			_, _ = fmt.Fprint(os.Stdout, `{"entities":[],"present_ids":["recent","old"],"sources":[]}`)
+		case "40m":
+			_, _ = fmt.Fprint(os.Stdout, `{"entities":[],"present_ids":["recent"],"sources":[]}`)
+		default:
+			_, _ = fmt.Fprintln(os.Stderr, "unexpected --since value: "+since)
+			os.Exit(98)
+		}
+		os.Exit(0)
 	case "list_full_ok":
 		_, _ = fmt.Fprint(os.Stdout, `{"entities":[`+
 			`{"id":"i1","title":"Alpha task one","issue_type":"task","metadata":{"k":"v1"}},`+

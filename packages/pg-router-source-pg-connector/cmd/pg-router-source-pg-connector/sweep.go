@@ -1,7 +1,8 @@
 // sweep.go: the "sweep" verb — runs
 // `pg-connector <type> list --query <query> --ids-only --output json`
 // once per named query, unions the matched ids across all of them, and
-// prints one pg-router rawItem per unioned id [design: section 6.1].
+// prints one pg-router rawItem per unioned id [design: section 6.1]. An
+// optional --since is forwarded to each list call unchanged.
 package main
 
 import (
@@ -21,7 +22,7 @@ type idsOnlyWire struct {
 }
 
 func newSweepCmd() *cobra.Command {
-	var beadsDir string
+	var beadsDir, since string
 	cmd := &cobra.Command{
 		Use:   "sweep <type> <query>...",
 		Short: "Union matched ids across one or more named queries, as pg-router rawItems",
@@ -33,6 +34,7 @@ func newSweepCmd() *cobra.Command {
 		Args: cobra.MinimumNArgs(1),
 	}
 	cmd.Flags().StringVar(&beadsDir, "beads-dir", "", "sets PG_CONNECTOR_ISSUE_BEADS_DIR in the pg-connector child's environment")
+	cmd.Flags().StringVar(&since, "since", "", "only sweep entities updated within this bound; passed through unchanged as pg-connector's own --since (an RFC3339 timestamp, a Go duration such as 40m, or whole days such as 7d); omitted means the whole matched set")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		entityType := args[0]
 		queries := args[1:]
@@ -45,9 +47,12 @@ func newSweepCmd() *cobra.Command {
 		seen := make(map[string]bool)
 		ordered := make([]string, 0)
 		for _, query := range queries {
-			out, err := invokeOrFail(cmd.Context(), cmd.ErrOrStderr(),
-				[]string{entityType, "list", "--query", query, "--ids-only", "--output", "json"},
-				env)
+			listArgs := []string{entityType, "list", "--query", query, "--ids-only"}
+			if since != "" {
+				listArgs = append(listArgs, "--since", since)
+			}
+			listArgs = append(listArgs, "--output", "json")
+			out, err := invokeOrFail(cmd.Context(), cmd.ErrOrStderr(), listArgs, env)
 			if err != nil {
 				return err
 			}
