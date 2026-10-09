@@ -1030,3 +1030,77 @@ groups:
                 - evaluator:
                     type: gt
                     params: [0]
+
+      # A Gate Registry gate held for a long time (bead pg2-l6ody). A gate halts
+      # every listener and polled source except its owner for as long as it is in
+      # force. On 2026-10-08 a LOW_DISK_USAGE gate (the disk watchdog's, renewed
+      # every 5 minutes while free space stayed below its floor) held desk-pr,
+      # desk-issue, the probes and every polled source for 4h18m with nothing
+      # alerting: pg_router_failures_total does not move, because a gate pause is
+      # not a failure (docs/decisions/observability.md), and no rule watched the
+      # gates themselves (docs/investigations/2026-10-09-desk-pr-stall.md).
+      #
+      # Signal: pg_router_gates_active{type}, a 1-per-TYPE gauge that exists only
+      # while a gate is in force (no zero sample, no since-timestamp, and the owner
+      # is deliberately not a label). So the hold duration cannot be read from the
+      # metric; it is expressed by `for: 30m`. A gate's lease is renewed by its
+      # owner (the disk watchdog every 5 minutes), so a healthy transient gate
+      # (a short pause, a watchdog blip) clears in minutes; 30m matches
+      # pg-router-queue-stalled, is far below the 4.3h incident, and keeps a
+      # routine `pg-router pause` / `resume` from alerting. Every TYPE counts,
+      # SYSTEM_PAUSE included: a pause forgotten for 30 minutes stalls routing
+      # exactly as a watchdog gate does.
+      #
+      # last_over_time over 10m bridges the gap a daemon restart leaves (the lease
+      # of the incident gate lapsed for about 6 minutes while the daemon was down,
+      # which would otherwise reset the pending timer); a gap longer than 10m does
+      # restart the wait.
+      #
+      # Severity: warning, deliberately. Desktop notifications are critical-only
+      # (ADR 0040 amendment, operator ruling 2026-10-08), so this surfaces in
+      # Grafana and the pg-router-probe bead flow, not as a banner. A gate is
+      # usually protective (disk pressure, an operator pause) and its owner is
+      # already acting on it; promoting to critical would banner every long pause,
+      # and is an operator call. noDataState: OK because the series is absent
+      # whenever nothing is gated, which is the healthy state. Annotations are
+      # STATIC (see the escalation convention above); the gate TYPE is the
+      # `type` label of the alert.
+      - uid: pg-router-gate-held
+        title: pg-router gate has been held for a long time (by type)
+        condition: C
+        for: 30m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "a pg-router gate has been in force for over 30 minutes, halting every role except its owner"
+          description: "pg_router_gates_active has stayed above 0 for over 30 minutes for the gate TYPE in this alert's `type` label. A gate halts every listener and polled source except its owner, so dispatch (desk-pr, desk-issue, reviews, drains) is stalled while it is held. Inspect it with `pg-router gate list` (owner, set-at, TTL remaining, description). LOW_DISK_USAGE is the disk watchdog's: free space on the volume is below its floor, so free disk space, and the watchdog clears the gate once it recovers. SYSTEM_PAUSE is an operator pause: `pg-router resume` when done. If the owner is gone and the gate is only being renewed or will not lapse, clear it with `pg-router gate clear <TYPE>`."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: max by (type)(last_over_time(pg_router_gates_active[10m])) > 0
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
