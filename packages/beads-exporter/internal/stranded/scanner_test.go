@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -408,5 +409,49 @@ func TestCancelledContextFailsEvenWhenNothingNeedsReading(t *testing.T) {
 	cancel()
 	if _, err := s.Claims(ctx, []Source{src}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+}
+
+func TestOneLineCanCarryManyClaims(t *testing.T) {
+	f := newFixture(t)
+	p := f.write("-slug/a.jsonl", time.Hour,
+		commandEvent("bd update a --actor first-1 && bd update b --actor second-2 && BEADS_ACTOR=third-3 bd ready"))
+	want := []string{"first-1", "second-2", "third-3"}
+	for _, chunk := range []int{5, 17, readChunk} {
+		s := NewScanner(nil)
+		s.chunk = chunk
+		if got := keys(scan(t, s, p)); !equalStrings(got, want) {
+			t.Fatalf("chunk %d: claims = %v, want %v", chunk, got, want)
+		}
+	}
+}
+
+// TestLineBoundariesAcrossChunkSizes feeds raw (not JSON) lines, including
+// blank ones and a last line with no newline, at many chunk sizes: a value that
+// ends exactly at a newline is decided by it, blank lines end nothing wrongly,
+// and the offset stays at the end of the last complete line.
+func TestLineBoundariesAcrossChunkSizes(t *testing.T) {
+	f := newFixture(t)
+	complete := "\nrun --actor bare-1\n\n\nBEADS_ACTOR=bare-2\n" + strings.Repeat("filler ", 30) + "\nrun --actor bare-3\n"
+	content := complete + "partial --actor nope-9"
+	p := filepath.Join(f.dir, "projects", "-slug", "raw.jsonl")
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"bare-1", "bare-2", "bare-3"}
+	for _, chunk := range []int{1, 2, 3, 5, 8, 13, 21, 64, 200, readChunk} {
+		s := NewScanner(nil)
+		s.chunk = chunk
+		if got := keys(scan(t, s, p)); !equalStrings(got, want) {
+			t.Fatalf("chunk %d: claims = %v, want %v", chunk, got, want)
+		}
+		for _, e := range s.entries {
+			if e.offset != int64(len(complete)) {
+				t.Fatalf("chunk %d: offset = %d, want %d (the end of the last complete line)", chunk, e.offset, len(complete))
+			}
+		}
 	}
 }

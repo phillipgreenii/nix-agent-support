@@ -134,12 +134,11 @@ func (l *lineScan) feed(piece []byte) {
 	})
 }
 
-// end finishes the line: its values count unless it was a tool result.
+// end finishes the line: its values count unless it was a tool result (which
+// leaves nothing pending).
 func (l *lineScan) end(commit func(string)) {
-	if !l.result {
-		for v := range l.pending {
-			commit(v)
-		}
+	for v := range l.pending {
+		commit(v)
 	}
 	l.result, l.pending = false, nil
 }
