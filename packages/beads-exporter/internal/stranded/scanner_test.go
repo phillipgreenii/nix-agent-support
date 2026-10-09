@@ -455,3 +455,19 @@ func TestLineBoundariesAcrossChunkSizes(t *testing.T) {
 		}
 	}
 }
+
+// A claim far after the marker in the same line (more than a carry's length
+// away, in a later chunk) is still part of a tool result and must not count.
+func TestResultMarkerOutlivesTheCarryWithinOneLine(t *testing.T) {
+	f := newFixture(t)
+	p := f.write("-slug/a.jsonl", time.Hour,
+		rawEvent(map[string]any{"pad": strings.Repeat("x", 3*maxNeedleLen), "cmd": "bd update x --actor leaked-1"}),
+		commandEvent("bd update x --actor kept-1"))
+	for _, chunk := range []int{16, 64, readChunk} {
+		s := NewScanner(nil)
+		s.chunk = chunk
+		if got := keys(scan(t, s, p)); !equalStrings(got, []string{"kept-1"}) {
+			t.Fatalf("chunk %d: claims = %v, want only the ordinary line's", chunk, got)
+		}
+	}
+}
