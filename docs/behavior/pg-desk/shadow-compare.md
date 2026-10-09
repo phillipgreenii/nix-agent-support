@@ -240,7 +240,8 @@ Run INSIDE the collector, because the live logs are not durable. Every tick it i
   `event_type`, `enqueued_at`, `started_at`, `time`, `duration_ms`, `role`, `kind`; `event_type` and
   `enqueued_at` exist only since about 2026-10-07T11:00Z, earlier rows are unusable, and `enqueued_at`
   is the source of the real enqueue time. `queue.jsonl` rows: `op` (`enqueue|accept|evict|archive|seen`),
-  `eventId` (`pr.changed:<id>`, no sequence), `type`, `at`, `expiresAt`, `enqueuedAt`,
+  `eventId` (`pr.changed:<id>@<hash>` since per-change ids landed, bare `pr.changed:<id>` before;
+  join on the bare id, never on the raw field), `type`, `at`, `expiresAt`, `enqueuedAt`,
   `payload{id,title,type,metadata{change}}`; `evict` rows carry `reason` (for example `reemit`);
   `archive` rows only `{op,eventId,type,at,accepts}`; `pr.reconcile` enqueues have `expiresAt ==
 enqueuedAt`, so `queue.jsonl` is useful only as evict/coalescing evidence. Run-record rows: `ts`
@@ -272,12 +273,17 @@ Tolerance `T` is the live query's own period plus the slot period plus the measu
   shadow flagged the same PR LATER (the first later shadow item for that PR within a late window,
   default 3 hours: it covers the longest observed sleep gap) and how long after the live enqueue. That
   delay is an UPPER BOUND, not proof the later item is the same change, and it never changes the
-  class. Each shadow item stands for at most ONE missed event, and never for an item that already
-  matched a live event. From it the report gives two informational COVERAGE CEILINGS: matched plus
+  class. Each shadow item stands for at most ONE missed event, and never for an item that matched a
+  live event, including a live event excluded from the window (warm-up, outside the run, past the
+  window end). Missed events claim items in ENQUEUE order, so the earliest miss gets the earliest
+  item. A late-detection item is more than `T` after its missed event and no live event is near it,
+  so it is ALSO counted under (c) as shadow-only: read the (c) count with that overlap in mind. From
+  it the report gives two informational COVERAGE CEILINGS: matched plus
   later-detected over all in-window events, and the same share over the events not classed
   `collector-down` (did the shadow detect the change whenever it was running). They are upper
   bounds, because a later item for the same PR is not proof of the same change, and they read "n/a"
-  when there is no event to divide by. A ceiling is not a stop criterion; it is the measure to read
+  in the markdown when there is no event to divide by (the JSON fields hold 0 there, which also
+  means "nothing covered": read the markdown or the event counts to tell them apart). A ceiling is not a stop criterion; it is the measure to read
   alongside tick uptime, which overrun slots are expected to depress (the runbook's Unverified
   items row on a multi-day run's uptime).
 

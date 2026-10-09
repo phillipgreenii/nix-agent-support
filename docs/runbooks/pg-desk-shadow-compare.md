@@ -83,9 +83,9 @@ bgcheck shadow-a          # DONE exit=N plus the log tail; the only trustworthy 
 
 The first 8-hour run (2026-10-09) recorded sleep gaps (7,269 seconds in total, per its report) while
 launched under `caffeinate -i`; the cause was not established. `-i` only prevents idle sleep, so a
-lid close or running on battery would still sleep the machine. `-s` additionally prevents system
-sleep, but per `caffeinate(8)` only while on AC power; keep the machine plugged in and the lid open
-(or on an external display). Sleep gaps are recorded and excluded from misses either way, but they
+lid close would still sleep the machine. `-s` additionally prevents system sleep, but per
+`caffeinate(8)` only while on AC power; keep the machine plugged in and the lid open (or on an
+external display). Sleep gaps are recorded and excluded from misses either way, but they
 still count against uptime.
 
 The collector outlives agent sessions (a launchd agent is out of scope). It writes
@@ -205,7 +205,9 @@ Every claim was re-verified against current source and logs on 2026-10-07; these
 13. Correction 5 no longer holds for rows written after per-change event ids landed (observed
     2026-10-09): the dispatch row's `bead` field and the queue `eventId` are `<pr id>@<change hash>`,
     not the bare PR id. A report built before the fix joined on the raw field, so it matched nothing
-    (0 of 28 live events) and classed matching events `copy-staleness` ("not in the seeded set").
+    (0 of 28 live events in the first report, made 8 hours into the run) and classed matching events
+    `copy-staleness` ("not in the seeded set"). Later reports of the same run cover more events (48
+    in window when it was stopped, 11 of them matched after the fix).
     The report now joins on the bare id and keys de-duplication on the raw id. Regenerating a report
     over an earlier run's scratch directory recomputes it from the copied logs; nothing needs to be
     re-collected.
