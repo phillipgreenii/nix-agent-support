@@ -725,6 +725,21 @@ func TestNewEventIsNeverCitedByIDOrListed(t *testing.T) {
 	}
 }
 
+func TestCorrectionOfANewTargetCallsItTheNewEvent(t *testing.T) {
+	log := []event.Event{boost(1, 0, 10), correct(2, 1, eid(1), "cycle_id", string(cycleB))}
+	_, _, err := overlayFrom(log, 0)
+	inv := asInvalid(t, err)
+	if inv.Code != codeInvalidCorrection || len(inv.Events) != 0 || inv.Entity != "" {
+		t.Errorf("finding = %q with events %v and entity %q, want invalid_correction listing no event and no entity", inv.Code, inv.Events, inv.Entity)
+	}
+	if strings.Contains(inv.Message, string(eid(1))) || strings.Contains(inv.Message, string(eid(2))) {
+		t.Errorf("message %q cites the id of a new event", inv.Message)
+	}
+	if !strings.HasPrefix(inv.Message, "The new event") || strings.Count(inv.Message, "the new event") != 1 {
+		t.Errorf("message %q does not call both the offender and its target the new event", inv.Message)
+	}
+}
+
 func TestOverlayDoesNotMutateItsInput(t *testing.T) {
 	log := []event.Event{boost(1, 0, 10), correct(2, 1, eid(1), "minutes", 20)}
 	mustOverlay(t, log)
@@ -738,6 +753,24 @@ func asInvalid(t *testing.T, err error) *Invalid {
 	var inv *Invalid
 	if !errors.As(err, &inv) {
 		t.Fatalf("error = %v (%T), want *Invalid", err, err)
+	}
+	// Every finding names, in its one plain sentence, the entity, the stored
+	// events and the instants it lists.
+	if inv.Entity != "" && !strings.Contains(inv.Message, inv.Entity) {
+		t.Errorf("message %q does not name the entity %q", inv.Message, inv.Entity)
+	}
+	for _, id := range inv.Events {
+		if !strings.Contains(inv.Message, string(id)) {
+			t.Errorf("message %q does not name the stored event %s", inv.Message, id)
+		}
+	}
+	if len(inv.Instants) == 0 {
+		t.Error("Instants is empty, want at least the offending event's effective_at")
+	}
+	for _, at := range inv.Instants {
+		if want := at.UTC().Format(instantLayout); !strings.Contains(inv.Message, want) {
+			t.Errorf("message %q does not name the instant %s", inv.Message, want)
+		}
 	}
 	return inv
 }

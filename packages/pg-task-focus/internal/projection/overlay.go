@@ -178,8 +178,8 @@ func (r *overlayRun) checkCorrection(i int, p event.EventCorrected) (int, *Inval
 	switch typ {
 	case event.TypeEventCorrected, event.TypeEventRetracted, event.TypeBatchCommitted:
 		return j, r.invalidCorrection(i, j, fmt.Sprintf(
-			"%s corrects event %s, which is %s %s: a correction never targets event.corrected, event.retracted or batch.committed.",
-			r.subject(i), target.ID, article(string(typ)), typ,
+			"%s corrects %s, and a correction never targets event.corrected, event.retracted or batch.committed.",
+			r.subject(i), r.describe(j),
 		))
 	}
 	keys := make([]string, 0, len(p.Fields))
@@ -191,20 +191,23 @@ func (r *overlayRun) checkCorrection(i int, p event.EventCorrected) (int, *Inval
 		switch {
 		case identityKeys[k]:
 			return j, r.invalidCorrection(i, j, fmt.Sprintf(
-				"%s corrects event %s (%s) with the identity field %s, and an identity field can never be corrected.",
-				r.subject(i), target.ID, typ, k,
+				"%s corrects %s with the identity field %s, and an identity field can never be corrected.",
+				r.subject(i), r.describe(j), k,
 			))
 		case envelopeKeys[k] || (k == "type" && typ != event.TypeCycleStarted):
 			return j, r.invalidCorrection(i, j, fmt.Sprintf(
-				"%s corrects event %s (%s) with %s, a field of its envelope, and only effective_at and the data fields can be corrected.",
-				r.subject(i), target.ID, typ, k,
+				"%s corrects %s with %s, a field of its envelope, and only effective_at and the data fields can be corrected.",
+				r.subject(i), r.describe(j), k,
 			))
 		}
 	}
 	if _, err := applyFields(target, p.Fields); err != nil {
+		// The command layer MUST pre-validate replacement values and refuse a
+		// breaking one as invalid_request before candidate replay gets here;
+		// this finding is the stored-log re-check.
 		return j, r.invalidCorrection(i, j, fmt.Sprintf(
-			"%s corrects event %s (%s) with replacement values that make it invalid: %v.",
-			r.subject(i), target.ID, typ, err,
+			"%s corrects %s with replacement values that make it invalid: %v.",
+			r.subject(i), r.describe(j), err,
 		))
 	}
 	return j, nil
@@ -230,19 +233,32 @@ func (r *overlayRun) checkRetraction(i int, p event.EventRetracted) (int, *Inval
 	switch {
 	case typ == event.TypeBatchCommitted:
 		return j, r.invalidCorrection(i, j, fmt.Sprintf(
-			"%s retracts event %s, a batch.committed marker, and a retraction never targets one.", r.subject(i), target.ID,
+			"%s retracts %s, and a retraction never targets a batch marker.", r.subject(i), r.describe(j),
 		))
 	case target.Payload.BatchID() != "":
 		return j, r.invalidCorrection(i, j, fmt.Sprintf(
-			"%s retracts event %s (%s), which is a member of batch %s and can be retracted only through its batch.",
-			r.subject(i), target.ID, typ, target.Payload.BatchID(),
+			"%s retracts %s, which is a member of batch %s and can be retracted only through its batch.",
+			r.subject(i), r.describe(j), target.Payload.BatchID(),
 		))
 	case typ == event.TypeTaskMaterialized || typ == event.TypePeriodChanged:
 		return j, r.invalidCorrection(i, j, fmt.Sprintf(
-			"%s retracts event %s, a lone %s, and one is retracted only through its batch.", r.subject(i), target.ID, typ,
+			"%s retracts %s, and a task.materialized or period.changed is retracted only through its batch.", r.subject(i), r.describe(j),
 		))
 	}
 	return j, nil
+}
+
+// describe names the event at position j: a stored event by id, type and
+// entity, the new event never by id.
+func (r *overlayRun) describe(j int) string {
+	if j >= r.firstAdded {
+		return "the new event"
+	}
+	e := r.events[j]
+	if entity := entityOf(e.Payload); entity != "" {
+		return fmt.Sprintf("event %s (%s of %s)", e.ID, e.Payload.EventType(), entity)
+	}
+	return fmt.Sprintf("event %s (%s)", e.ID, e.Payload.EventType())
 }
 
 // resolve finds the target of the correction or retraction at position i. A
@@ -333,14 +349,6 @@ func entityOf(p event.Payload) string {
 		return string(p.CycleID)
 	}
 	return ""
-}
-
-// article is "a" or "an" for a noun that starts with a vowel letter.
-func article(noun string) string {
-	if strings.ContainsRune("aeiou", rune(noun[0])) {
-		return "an"
-	}
-	return "a"
 }
 
 // applyFields returns orig with the replacement fields applied: effective_at
