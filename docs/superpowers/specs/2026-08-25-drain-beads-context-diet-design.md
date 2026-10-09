@@ -209,9 +209,16 @@ Two new auto-discovered skills under `claude-marketplace/pb/skills/`:
 
 `drain-beads.md` keeps a ~10-line trigger stub per path that names the skill to invoke
 and what context to pass. Skill bodies load only when the path fires (this session:
-never), and — bonus — a Skill body is read at invoke time from the installed marketplace,
-so rare-path content is fresher than the session-start-loaded command body; the existing
-per-CLAIM SELF-CHECK stays scoped to `drain-beads.md` alone.
+never), and the existing per-CLAIM SELF-CHECK stays scoped to `drain-beads.md` alone.
+
+> **Correction (2026-10-09, pg2-svnck):** this section originally claimed, as a "bonus",
+> that a Skill body is read at invoke time from the installed marketplace, so rare-path
+> content is fresher than the session-start-loaded command body. That does not hold: the
+> skill and the command are served from the same installed marketplace, and a loaded
+> skill body stays in context like any other. The
+> SELF-CHECK covers `drain-beads.md` only, so a stale skill or reference file, once
+> loaded, goes undetected. This is the same "Self-check is detection, not prevention"
+> limitation recorded in `drain-beads.md` "Known limitations".
 
 Incident-history narratives in the remaining command body compress to one-line
 provenance citations (`(provenance: pg2-xxxxx)`) — the bead records hold the full

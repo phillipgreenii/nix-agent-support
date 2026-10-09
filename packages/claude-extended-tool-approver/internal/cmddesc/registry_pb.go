@@ -3,8 +3,8 @@ package cmddesc
 import "strings"
 
 // pg2-cjfpy.1: the `pb` CLI the claude-marketplace/pb plugin (its /drain-beads,
-// /unblock-human-beads and /unstick-beads commands and its drain-stuck and
-// pb-gate-lifecycle skills) instructs an agent to run -- `pb drain isolate`,
+// /unblock-human-beads and /unstick-beads commands and its drain-one,
+// drain-stuck and pb-gate-lifecycle skills) instructs an agent to run -- `pb drain isolate`,
 // `pb gate create`, `pb gate check` and `pb gate attach-verified-child`.
 //
 // Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy, verbatim): "for

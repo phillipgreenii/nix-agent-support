@@ -20,8 +20,8 @@ bead below, so a wake can't fire mid-sequence and re-enter the Main loop after
 you've already been asked to stop.
 
 Stop claiming new beads in this session. Finish the bead this session
-already has claimed, following `/drain-beads`' own steps through to a
-normal close (or a normal park, if it genuinely can't finish) — don't force
+already has claimed, following `/drain-beads`' own steps (and the `pb:drain-one` skill it applies to each bead)
+through to a normal close (or a normal park, if it genuinely can't finish) — don't force
 a park just because you were asked to stop. If this session hasn't claimed
 anything, there's nothing to finish here.
 

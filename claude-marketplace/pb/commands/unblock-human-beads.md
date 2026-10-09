@@ -281,13 +281,13 @@ and it STOPs unconditionally regardless of this flag.
    unchanged.
 
 2. **CONTAINER GUARD** (defense in depth against a D-9 `beads-lifecycle` container-parent
-   dominating the claim — ported from `/drain-beads`' own Container guard, provenance
-   `tc-ipgw`, ported by `tc-qwdys`). Run TWO checks, in this order, before treating the
+   dominating the claim — ported from the container probe that `/drain-beads` applies through
+   `pb:drain-one`, provenance `tc-ipgw`, ported by `tc-qwdys`). Run TWO checks, in this order, before treating the
    claimed bead as workable:
    1. **Container-note check.** Does the claimed bead's `notes` contain a container-marker
       pattern (contains "Do NOT claim this container bead for direct work", or is prefixed
-      `[container note`)? This marker is a convention SHARED with `/drain-beads` — either
-      command may write or read it.
+      `[container note`)? This marker is a convention SHARED with `/drain-beads` and `pb:drain-one` —
+      either command may write or read it.
    2. **Children-existence probe** — run ONLY when check 1 did NOT match:
       `bd list --parent <id> --status all -n 0 --json`. A NON-EMPTY `.data` is necessary but
       NOT sufficient — a bead can have children and still need its own independent human
@@ -346,8 +346,12 @@ and it STOPs unconditionally regardless of this flag.
    invents.
 
 3. **UNDERSTAND** (brief): `bd show <id>`. Read the `stuck:` comment/description to learn
-   the blocker, and — if `/drain-beads` parked one — note the worktree/branch/set location
-   (drain records it as `branch drain/<id>` in the repo at its worktree path).
+   the blocker, and — if `/drain-beads` or a drain worker parked one — note the branch/set
+   location. The park comment names the branch and the repo; call that branch `<work-branch>`
+   (`drain/<id>` by default, but a worker's may differ, e.g. `phillipg.NO-JIRA.<bead id>` in
+   zr) and use it wherever this command says `<work-branch>`. The worktree is conventionally
+   `.worktrees/<id>`; if the comment gives no branch, or a probe on it resolves nothing,
+   treat that as no parked isolation (the safe direction), never guess a name.
 
 4. **FRESHNESS CHECK** (MANDATORY, and BEFORE triage) — the bead was parked at some earlier
    time and its body reads as though it were current. Re-verify its PREMISE against CURRENT
@@ -389,7 +393,7 @@ Invoke the `beads-lifecycle` skill and follow its `Premise Freshness` rules (F-1
 one per external referent the bead OR its `stuck:` comment names — keeping each decisive
 output verbatim:
 
-- `landed?` / `pushed?` / `patch-identical?` for commits and the parked `drain/<id>` branch;
+- `landed?` / `pushed?` / `patch-identical?` for commits and the parked `<work-branch>` branch;
   `path-exists?` / `symbol-shape?` for every file, module, or symbol the bead's design or
   steps EDIT; `ticket-open?` for external tickets; `sibling-open?` for referenced beads;
   `next-free-id?` for any "next free" number the bead recorded.
@@ -507,9 +511,9 @@ in EVERY member repo:
 git -C <worktree-path> status --porcelain
 
 # (a)/(b) every commit on the branch is LANDED, or PATCH-IDENTICAL to one that is
-git -C <repo> cherry -v main drain/<id>                       # F-3 patch-identical?
+git -C <repo> cherry -v main <work-branch>                       # F-3 patch-identical?
 git -C <repo> merge-base --is-ancestor <sha> main; echo $?     # F-3 landed?, per commit
-git -C <repo> range-diff main...drain/<id>                     # corroborates the patch-id half
+git -C <repo> range-diff main...<work-branch>                     # corroborates the patch-id half
 ```
 
 Read the OUTPUT, not the exit status. The proof HOLDS only when ALL of:
@@ -540,7 +544,7 @@ Then, IN ORDER:
    is a SECOND guard on leg (c), and a refusal CONTRADICTS your proof: treat that as the proof having
    failed, LEAVE the isolation in place, and go to 1b. Which branch/set command follows depends on
    WHICH leg carried the proof:
-   - **Leg (a) — every commit is an ancestor of main.** `git -C <repo> branch -d drain/<id>` for a
+   - **Leg (a) — every commit is an ancestor of main.** `git -C <repo> branch -d <work-branch>` for a
      single repo, `pn-workspace-rules:cleanup-workforest` for a SET. Both re-check the ancestry
      themselves (`-d` refuses an unmerged branch; the skill KEEPS any member whose branch is not an
      ancestor of its primary), so they are second guards here too, and a refusal or a KEEP
@@ -548,7 +552,7 @@ Then, IN ORDER:
    - **Leg (b) — patch-identical under a DIFFERENT sha.** `-d` WILL refuse, by design, because the
      branch genuinely is not merged; that refusal is EXPECTED and is NOT a contradiction. This is
      the `pg2-kl0o4` shape the standing ruling was made about, so
-     `git -C <repo> branch -D drain/<id>` IS permitted — for a SINGLE repo, and only with the
+     `git -C <repo> branch -D <work-branch>` IS permitted — for a SINGLE repo, and only with the
      leg-(b) proof recorded per step 2.
      `-d`'s ancestry check and your patch-id proof answer the same question; the proof is the
      STRICTER of the two, and it is what licenses `-D`. Do NOT reach for `-D` on the strength of
@@ -760,10 +764,10 @@ and only on its full three-leg proof.
 **And the asymmetry with `/drain-beads` is DELIBERATE, not an oversight.** Class 1a belongs to
 THIS command because a person is in the session: an unattended drain cannot notice a peer
 committing into that worktree between the probe and the teardown, and it has no operator to fall
-back to when a leg reads ambiguously. `/drain-beads` therefore keeps the STRICTER posture — no
+back to when a leg reads ambiguously. `/drain-beads` (and `pb:drain-one`, which it applies) therefore keeps the STRICTER posture — no
 provably-lossless carve-out at all, and the only isolation it ever retires is the one IT created
 for the bead it currently holds, after that bead's own work LANDED. Do not mirror 1a into
-`drain-beads.md`.
+`drain-beads.md` or the `pb:drain-one` skill.
 
 ## Class 4 — planning session already required (re-check the evidence, never re-ask)
 
@@ -1011,7 +1015,7 @@ step — and never reaches TRIAGE at all.
   ```bash
   bd create "worktree-review: reconcile leftover isolation for <id>" \
     --labels human,worktree-review --defer +7d --deps "discovered-from:<id>" \
-    --notes "[worktree-review $(date +%F)] Leftover isolation from <id> at <worktree-path> (branch drain/<id>). A person must rule on keep vs discard. No promotion (priority left at P2)." \
+    --notes "[worktree-review $(date +%F)] Leftover isolation from <id> at <worktree-path> (branch <work-branch>). A person must rule on keep vs discard. No promotion (priority left at P2)." \
     --actor "ID"
   ```
 
@@ -1065,8 +1069,8 @@ step — and never reaches TRIAGE at all.
 
     ```bash
     bd update <id> --remove-label worktree-review --priority <prior> \
-      --append-notes "[worktree-review-resolved $(date +%F)] tear-down: PROVABLY LOSSLESS, no operator prompt. Removed <worktree-path> and branch drain/<id> in <repo>. Nothing remains. Restored P0->P<prior>." --actor "ID"
-    bd comment <id> "LOSSLESS: clean?=<git status --porcelain output, or: empty>; patch-identical?=<git cherry -v output verbatim, or: empty>; landed?=<sha>:<0|1> per commit; range-diff=<row verbatim> ⇒ the teardown could lose nothing. Legs run in <repo>[, <repo>…] this session, not inherited. TORN DOWN: <worktree-path>, branch drain/<id>. Remaining substrate work: none. Authority: operator's standing ruling on pg2-kl0o4 — provably landed ⇒ do not ask, just clean up. FRESHNESS: <ISO date> — <probe>=<decisive output> ⇒ premise <LIVE|MOOT>" --actor "ID"
+      --append-notes "[worktree-review-resolved $(date +%F)] tear-down: PROVABLY LOSSLESS, no operator prompt. Removed <worktree-path> and branch <work-branch> in <repo>. Nothing remains. Restored P0->P<prior>." --actor "ID"
+    bd comment <id> "LOSSLESS: clean?=<git status --porcelain output, or: empty>; patch-identical?=<git cherry -v output verbatim, or: empty>; landed?=<sha>:<0|1> per commit; range-diff=<row verbatim> ⇒ the teardown could lose nothing. Legs run in <repo>[, <repo>…] this session, not inherited. TORN DOWN: <worktree-path>, branch <work-branch>. Remaining substrate work: none. Authority: operator's standing ruling on pg2-kl0o4 — provably landed ⇒ do not ask, just clean up. FRESHNESS: <ISO date> — <probe>=<decisive output> ⇒ premise <LIVE|MOOT>" --actor "ID"
     bd close <id> --reason "isolation torn down: provably lossless (clean tree + every commit landed or patch-identical); proof recorded on the bead; no operator prompt per the standing ruling" --actor "ID"
     ```
 
@@ -1113,7 +1117,8 @@ step — and never reaches TRIAGE at all.
   it on re-claim).
 - **Create (no isolation exists) — single-repo only.** If committed code is genuinely
   required and no parked isolation exists, create it at drain's exact convention:
-  `git worktree add .worktrees/<id> -b drain/<id>` (branch off local main), so drain's
+  `git worktree add .worktrees/<id> -b <work-branch>` (`<work-branch>` = `drain/<id>` here;
+  branch off local main), so drain's
   ISOLATE reuses it.
 - **Never create a fresh multi-repo set mid-session.** `fork-workforest` MUST run from the
   canonical workspace root and MUST NOT be nested inside a set. If a NEW multi-repo
