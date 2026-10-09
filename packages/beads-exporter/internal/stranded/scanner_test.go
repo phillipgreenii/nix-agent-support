@@ -2,6 +2,8 @@ package stranded
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"os"
 	"sort"
 	"strings"
@@ -221,5 +223,136 @@ func TestCancelledContextStopsAScan(t *testing.T) {
 	cancel()
 	if _, err := NewScanner(nil).Claims(ctx, []Source{{Path: p, Info: info}}); err == nil {
 		t.Fatal("want the context error")
+	}
+}
+
+// failingFile wraps an os.File and fails or distorts selected calls.
+type failingFile struct {
+	*os.File
+	statErr  error
+	readErr  error
+	extra    int64 // added to the size Stat reports
+	onRead   func()
+	readCall int
+}
+
+func (f *failingFile) Stat() (fs.FileInfo, error) {
+	if f.statErr != nil {
+		return nil, f.statErr
+	}
+	info, err := f.File.Stat()
+	if err != nil {
+		return nil, err
+	}
+	return inflated{info, f.extra}, nil
+}
+
+func (f *failingFile) ReadAt(p []byte, off int64) (int, error) {
+	f.readCall++
+	if f.readCall > 1000 {
+		return 0, errors.New("runaway read loop")
+	}
+	if f.onRead != nil {
+		f.onRead()
+	}
+	if f.readErr != nil {
+		return 0, f.readErr
+	}
+	return f.File.ReadAt(p, off)
+}
+
+type inflated struct {
+	fs.FileInfo
+	extra int64
+}
+
+func (i inflated) Size() int64 { return i.FileInfo.Size() + i.extra }
+
+func opener(wrap func(*os.File) *failingFile) Opener {
+	return func(path string) (File, error) {
+		f, err := os.Open(path)
+		if err != nil {
+			return nil, err
+		}
+		return wrap(f), nil
+	}
+}
+
+func sourceOf(t *testing.T, p string) Source {
+	t.Helper()
+	info, err := os.Stat(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return Source{Path: p, Info: info}
+}
+
+func TestStatErrorOfAnOpenFileFailsTheScan(t *testing.T) {
+	f := newFixture(t)
+	p := f.write("-slug/a.jsonl", time.Hour, textEvent("x"))
+	boom := errors.New("stat boom")
+	s := NewScanner(opener(func(fh *os.File) *failingFile { return &failingFile{File: fh, statErr: boom} }))
+	if _, err := s.Claims(context.Background(), []Source{sourceOf(t, p)}); !errors.Is(err, boom) {
+		t.Fatalf("err = %v, want the stat error", err)
+	}
+}
+
+func TestReadErrorFailsTheScan(t *testing.T) {
+	f := newFixture(t)
+	p := f.write("-slug/a.jsonl", time.Hour, textEvent("x"))
+	boom := errors.New("read boom")
+	s := NewScanner(opener(func(fh *os.File) *failingFile { return &failingFile{File: fh, readErr: boom} }))
+	if _, err := s.Claims(context.Background(), []Source{sourceOf(t, p)}); !errors.Is(err, boom) {
+		t.Fatalf("err = %v, want the read error", err)
+	}
+}
+
+func TestAFileShorterThanItsStatEndsTheReadAndResumesFromWhereItStopped(t *testing.T) {
+	f := newFixture(t)
+	p := f.write("-slug/a.jsonl", time.Hour, commandEvent("bd update x --actor worker-1"))
+	real, _ := os.Stat(p)
+	s := NewScanner(opener(func(fh *os.File) *failingFile { return &failingFile{File: fh, extra: 500} }))
+	src := sourceOf(t, p)
+	got, err := s.Claims(context.Background(), []Source{src})
+	if err != nil {
+		t.Fatalf("Claims: %v", err)
+	}
+	if !equalStrings(keys(got), []string{"worker-1"}) {
+		t.Fatalf("claims = %v", keys(got))
+	}
+	for _, e := range s.entries {
+		if e.offset != real.Size() {
+			t.Fatalf("offset = %d, want the %d bytes actually read", e.offset, real.Size())
+		}
+	}
+}
+
+func TestCancellationBetweenReadsStopsAMultiChunkRead(t *testing.T) {
+	f := newFixture(t)
+	p := f.write("-slug/a.jsonl", time.Hour, commandEvent("bd update x --actor worker-1"), textEvent(strings.Repeat("pad ", 200)))
+	ctx, cancel := context.WithCancel(context.Background())
+	s := NewScanner(opener(func(fh *os.File) *failingFile { return &failingFile{File: fh, onRead: cancel} }))
+	s.chunk = 64
+	_, err := s.Claims(ctx, []Source{sourceOf(t, p)})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	if len(s.entries) != 0 {
+		t.Fatalf("a failed scan left %d cache entries", len(s.entries))
+	}
+}
+
+func TestCancelledContextFailsEvenWhenNothingNeedsReading(t *testing.T) {
+	f := newFixture(t)
+	p := f.write("-slug/a.jsonl", time.Hour, textEvent("x"))
+	s := NewScanner(nil)
+	src := sourceOf(t, p)
+	if _, err := s.Claims(context.Background(), []Source{src}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := s.Claims(ctx, []Source{src}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
 	}
 }

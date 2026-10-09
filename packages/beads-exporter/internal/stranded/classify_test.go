@@ -186,7 +186,11 @@ func TestStatusAndAssigneeScope(t *testing.T) {
 		claimed("b-blocked", "w4", "blocked"),
 		claimed("b-deferred", "w5", "deferred"),
 		claimed("b-closed", "w6", "closed"),
+		claimed("b-pinned", "w7", "pinned"),
+		claimed("b-review", "w8", "review"),
+		claimed("b-archived", "w9", "archived"),
 		claimed("b-unassigned", "", "in_progress"),
+		claimed("b-unassigned-open", "", "open"),
 	)
 	if want := []string{"b-hooked", "b-open", "b-prog"}; !equalStrings(got, want) {
 		t.Fatalf("stranded = %v, want %v", got, want)
@@ -276,8 +280,9 @@ func TestCancelledContextStopsTheScan(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err := f.cl.Classify(ctx, []bd.Bead{claimed("b1", "w", "open")}, testNow)
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("err = %v, want context.Canceled", err)
+	var fe *failure.Error
+	if !errors.Is(err, context.Canceled) || errors.As(err, &fe) {
+		t.Fatalf("err = %#v, want the cancellation itself, not a transcript failure wrapping it", err)
 	}
 }
 

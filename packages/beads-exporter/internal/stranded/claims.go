@@ -49,8 +49,8 @@ const maxNeedleLen = lookbehindLen + maxAnchorLen + maxGapLen + maxValueLen + te
 
 var isValueByte = func() [256]bool {
 	var t [256]bool
-	for i := 0; i < len(valueBytes); i++ {
-		t[valueBytes[i]] = true
+	for _, c := range []byte(valueBytes) {
+		t[c] = true
 	}
 	return t
 }()
@@ -63,7 +63,7 @@ func inSet(b byte, set string) bool { return strings.IndexByte(set, b) >= 0 }
 func scanClaims(buf []byte, emit func(string)) {
 	for _, a := range [...]string{anchorActorFlag, anchorActorEnv, anchorAssignee} {
 		anchor := []byte(a)
-		for from := 0; from < len(buf); {
+		for from := 0; ; {
 			i := bytes.Index(buf[from:], anchor)
 			if i < 0 {
 				break
@@ -80,17 +80,21 @@ func scanClaims(buf []byte, emit func(string)) {
 // parseClaim parses the value of the anchor that starts at buf[at].
 func parseClaim(buf []byte, anchor string, at int) (string, bool) {
 	pos := at + len(anchor)
-	gapStart := pos
-	skip := func(set string) {
+	gap := 0 // bytes skipped between the anchor and the value
+	skip := func(set string) int {
+		n := 0
 		for pos < len(buf) && inSet(buf[pos], set) {
 			pos++
+			n++
 		}
+		gap += n
+		return n
 	}
 	switch anchor {
 	case anchorActorFlag:
 		// "--actors" and "--actor-x" are different flags: the flag must be
 		// followed by a space, a tab or "=".
-		if pos >= len(buf) || !(inSet(buf[pos], gapSpaceBytes) || buf[pos] == '=') {
+		if pos == len(buf) || (!inSet(buf[pos], gapSpaceBytes) && buf[pos] != '=') {
 			return "", false
 		}
 		skip(gapSpaceBytes + "=")
@@ -106,36 +110,29 @@ func parseClaim(buf []byte, anchor string, at int) (string, bool) {
 		}
 		skip(gapQuoteBytes)
 		skip(gapSpaceBytes)
-		if pos >= len(buf) || buf[pos] != ':' {
+		if pos == len(buf) || buf[pos] != ':' {
 			return "", false
 		}
 		pos++
+		gap++
 		skip(gapSpaceBytes)
-		valueGap := pos
-		skip(gapQuoteBytes)
-		if pos == valueGap {
+		if skip(gapQuoteBytes) < 1 {
 			return "", false
 		}
 	}
-	if pos-gapStart > maxGapLen {
+	if gap > maxGapLen {
 		return "", false
 	}
 	start := pos
-	for pos < len(buf) && isValueByte[buf[pos]] && pos-start <= maxValueLen {
+	for pos < len(buf) && isValueByte[buf[pos]] {
 		pos++
 	}
-	if pos >= len(buf) {
+	if pos-start > maxValueLen {
+		return "", false
+	}
+	if pos == len(buf) {
 		return "", false // undecided: the value may continue in bytes not yet read
 	}
-	if pos-start == 0 || pos-start > maxValueLen {
-		return "", false
-	}
-	v := buf[start:pos]
-	for len(v) > 0 && inSet(v[len(v)-1], valueTrimmedTail) {
-		v = v[:len(v)-1]
-	}
-	if len(v) == 0 {
-		return "", false
-	}
-	return string(v), true
+	v := bytes.TrimRight(buf[start:pos], valueTrimmedTail)
+	return string(v), len(v) > 0
 }

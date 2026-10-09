@@ -37,6 +37,7 @@ func TestScanClaimsRecognisedShapes(t *testing.T) {
 		{"trailing dot and colon trimmed", `--actor worker-1. `, []string{"worker-1"}},
 		{"trailing colon trimmed", `--actor worker-1: `, []string{"worker-1"}},
 		{"several in one buffer", `--actor a1 BEADS_ACTOR=b2 {"assignee":"c3"}`, []string{"a1", "b2", "c3"}},
+		{"assignee key at the very start of the buffer with its quote", `"assignee":"w" `, []string{"w"}},
 		{"uuid with suffix", `--actor aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa-drain `, []string{"aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa-drain"}},
 	}
 	for _, tc := range cases {
@@ -72,6 +73,14 @@ func TestScanClaimsRejectedShapes(t *testing.T) {
 		{"gap runs to the end of the buffer", `--actor "`},
 		{"flag at the end of the buffer", `--actor`},
 		{"bare mention", `bd show worker-1: Assignee: worker-1`},
+		{"assignee preceded by a space", `, assignee": "worker-1" `},
+		{"assignee preceded by a letter", `x assignee":"worker-1" `},
+		{"assignee key ends the buffer", `{"assignee"`},
+		{"assignee key then a stray byte instead of a colon", `{"assignee"X"worker-1" `},
+		{"assignee key then the byte just below the colon", `{"assignee"9"worker-1" `},
+		{"assignee key then the byte just above the colon", `{"assignee";"worker-1" `},
+		{"assignee colon then end of buffer", `{"assignee":`},
+		{"assignee colon then end after a quote", `{"assignee":"`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -97,6 +106,18 @@ func TestScanClaimsGapLengthBoundary(t *testing.T) {
 	}
 	if got := scanAll("--actor " + strings.Repeat(`"`, maxGapLen) + "worker-1 "); len(got) != 0 {
 		t.Fatalf("a gap of maxGapLen+1 bytes was accepted: %v", got)
+	}
+}
+
+func TestScanClaimsAssigneeGapLengthBoundary(t *testing.T) {
+	// The key's closing quote and the colon count toward the gap, then every
+	// quote before the value.
+	key := `{"assignee"` + ":"
+	if got := scanAll(key + strings.Repeat(`"`, maxGapLen-2) + "worker-1 "); len(got) != 1 {
+		t.Fatalf("an assignee gap of exactly maxGapLen bytes was not recognised: %v", got)
+	}
+	if got := scanAll(key + strings.Repeat(`"`, maxGapLen-1) + "worker-1 "); len(got) != 0 {
+		t.Fatalf("an assignee gap of maxGapLen+1 bytes was accepted: %v", got)
 	}
 }
 

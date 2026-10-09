@@ -101,16 +101,13 @@ func (s *Scanner) read(ctx context.Context, src Source, e *entry) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	info, err := f.Stat()
 	if err != nil {
 		return err
 	}
 	size := info.Size()
-	pos := e.offset
-	if pos > 0 {
-		pos = max(0, pos-int64(maxNeedleLen-1))
-	}
+	pos := max(0, e.offset-int64(maxNeedleLen-1))
 	add := func(v string) { e.values[v] = struct{}{} }
 	var carry []byte
 	buf := make([]byte, s.chunk)
@@ -118,11 +115,7 @@ func (s *Scanner) read(ctx context.Context, src Source, e *entry) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		want := int64(len(buf))
-		if rest := size - pos; rest < want {
-			want = rest
-		}
-		n, err := f.ReadAt(buf[:want], pos)
+		n, err := f.ReadAt(buf, pos)
 		if err != nil && !errors.Is(err, io.EOF) {
 			return err
 		}

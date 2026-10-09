@@ -70,7 +70,7 @@ func freePort(t *testing.T) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 	return ln.Addr().(*net.TCPAddr).Port
 }
 
@@ -112,7 +112,7 @@ func TestServeRunsTheStrandedPassOnItsInterval(t *testing.T) {
 	for time.Now().Before(deadline) {
 		if resp, err := http.Get(url); err == nil {
 			raw, _ := io.ReadAll(resp.Body)
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			body = string(raw)
 			if strings.Contains(body, want) {
 				break
