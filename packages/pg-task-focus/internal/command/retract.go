@@ -53,19 +53,22 @@ func (c Retract) ReqHash() (string, error) {
 // retracted, which is a no-op; (5) the dependents of a cycle.started or a
 // batch (cycle_has_dependents, batch_has_dependents), then the candidate replay
 // of the log with the retraction, whose finding keeps its own code.
+//
+// The new event takes effect when it is recorded, so every refusal, a
+// malformed request's included, names that instant.
 func (c Retract) plan(b *builder) (Plan, error) {
 	switch {
 	case c.Target == "" && c.TargetBatch == "":
-		return Plan{}, b.invalid("A retraction names exactly one of target, an event id, and target_batch, a batch id, and it names neither.")
+		return Plan{}, stamped(b.invalid("A retraction names exactly one of target, an event id, and target_batch, a batch id, and it names neither."), b.at)
 	case c.Target != "" && c.TargetBatch != "":
-		return Plan{}, b.invalid("A retraction names exactly one of target, an event id, and target_batch, a batch id, and it names both.")
+		return Plan{}, stamped(b.invalid("A retraction names exactly one of target, an event id, and target_batch, a batch id, and it names both."), b.at)
 	}
 	if err := b.validText(string(c.Target), string(c.TargetBatch), c.Reason); err != nil {
-		return Plan{}, err
+		return Plan{}, stamped(err, b.at)
 	}
 	p := event.EventRetracted{Target: c.Target, TargetBatch: c.TargetBatch, Reason: c.Reason}
 	if err := b.encodable(b.at, p); err != nil {
-		return Plan{}, err
+		return Plan{}, stamped(err, b.at)
 	}
 	if c.TargetBatch != "" {
 		return b.retractBatch(c.TargetBatch, p)
@@ -109,7 +112,7 @@ func (b *builder) retractEvent(id event.ID, p event.EventRetracted) (Plan, error
 		return &Rejection{
 			Reason: ReasonInvalidCorrection, Entity: projection.EntityOf(target.Payload),
 			Events: []event.ID{id}, Instants: []time.Time{b.at},
-			Message: fmt.Sprintf("The new event retracts %s, %s", describe(target), why),
+			Message: fmt.Sprintf("The new event retracts %s, %s", projection.Describe(target), why),
 		}
 	}
 	typ, batch := target.Payload.EventType(), target.Payload.BatchID()
@@ -117,11 +120,8 @@ func (b *builder) retractEvent(id event.ID, p event.EventRetracted) (Plan, error
 	case typ == event.TypeBatchCommitted:
 		return Plan{}, refuse(fmt.Sprintf("the marker that commits batch %s, and a retraction never targets a batch marker; to take the batch back, name %s as target_batch.", batch, batch))
 	case typ == event.TypeTaskMaterialized || typ == event.TypePeriodChanged:
-		how := "it is retracted only through its batch"
-		if batch != "" {
-			how = fmt.Sprintf("it is retracted only through its batch, by naming %s as target_batch", batch)
-		}
-		return Plan{}, refuse(fmt.Sprintf("and a %s is never retracted alone, which would leave a period and its tasks out of step; %s.", typ, how))
+		// The schema requires a batch of both, so a stored one always has one.
+		return Plan{}, refuse(fmt.Sprintf("and a %s is never retracted alone, which would leave a period and its tasks out of step; it is retracted only through its batch, by naming %s as target_batch.", typ, batch))
 	case batch != "":
 		return Plan{}, refuse(fmt.Sprintf("which is a member of batch %s and can be retracted only through its batch, by naming %s as target_batch.", batch, batch))
 	}
@@ -130,9 +130,14 @@ func (b *builder) retractEvent(id event.ID, p event.EventRetracted) (Plan, error
 	}
 	if start, ok := target.Payload.(event.CycleStarted); ok {
 		if deps := b.env.Model.CycleDependents(id); len(deps) > 0 {
+			// The start takes effect at its live instant, as corrected.
+			startedAt := target.EffectiveAt.Time()
+			if v, ok := b.env.Model.Event(id); ok {
+				startedAt = v.Corrected.EffectiveAt.Time()
+			}
 			return Plan{}, &Rejection{
 				Reason: ReasonCycleHasDependents, Entity: string(start.CycleID), Events: deps,
-				Instants: instantsInOrder(target.EffectiveAt.Time(), b.at),
+				Instants: instantsInOrder(startedAt, b.at),
 				Message: fmt.Sprintf(
 					"Event %s, the start of cycle %s, cannot be retracted while later live events need the cycle: %s; retract those first, then the start.",
 					id, start.CycleID, b.described(deps),
@@ -163,7 +168,7 @@ func (b *builder) described(ids []event.ID) string {
 	for i, id := range ids {
 		names[i] = "event " + string(id)
 		if v, ok := b.env.Model.Event(id); ok {
-			names[i] = describe(v.Original)
+			names[i] = projection.Describe(v.Original)
 		}
 	}
 	return list(names)

@@ -128,30 +128,53 @@ func normalized(t *testing.T, p command.Plan) []string {
 func TestDryRunEqualsRealPlan(t *testing.T) {
 	base, _ := begun(t, withLight(t))
 	base.Now = at(24 * 60)
-	lines := base.Model.Lines()
-	for name, pair := range map[string][2]command.Command{
+	empty := emptyEnv(t, withLight(t), at(-60))
+	all := []command.PeriodChange{dayTo(day1), weekFrom(week1), sprintFrom(sprint1)}
+	for name, tc := range map[string]struct {
+		env       command.Env
+		dry, real command.Command
+	}{
 		"a period change with a profile and an override": {
+			base,
 			command.ChangePeriods{DryRun: true, Changes: []command.PeriodChange{dayTo(day2)}, Profile: "light", Overrides: []command.Override{{TaskID: postPlan, Reason: "moved"}}},
 			command.ChangePeriods{Changes: []command.PeriodChange{dayTo(day2)}, Profile: "light", Overrides: []command.Override{{TaskID: postPlan, Reason: "moved"}}},
 		},
 		"a period change with a request id": {
+			base,
 			command.ChangePeriods{ID: clientID, DryRun: true, Changes: []command.PeriodChange{weekFrom(week1.AddDays(7))}},
 			command.ChangePeriods{ID: clientID, Changes: []command.PeriodChange{weekFrom(week1.AddDays(7))}},
 		},
+		"a period change with skip_all_reason": {
+			base,
+			command.ChangePeriods{DryRun: true, Changes: []command.PeriodChange{dayTo(day2)}, SkipAllReason: strPtr("out sick")},
+			command.ChangePeriods{Changes: []command.PeriodChange{dayTo(day2)}, SkipAllReason: strPtr("out sick")},
+		},
+		"a bootstrap": {
+			empty,
+			command.ChangePeriods{DryRun: true, Changes: all},
+			command.ChangePeriods{Changes: all},
+		},
+		"a bootstrap naming another profile": {
+			empty,
+			command.ChangePeriods{DryRun: true, Changes: all, Profile: "light"},
+			command.ChangePeriods{Changes: all, Profile: "light"},
+		},
 		"a profile change": {
+			base,
 			command.ChangeProfile{DryRun: true, Profile: "light"},
 			command.ChangeProfile{Profile: "light"},
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
+			lines := tc.env.Model.Lines()
 			// The real request draws its ids from another source, so the
 			// comparison is of the events with their ids normalized.
 			var n uint32
-			dryEnv, realEnv := base, base
+			dryEnv, realEnv := tc.env, tc.env
 			dryEnv.NewID = newIDs()
 			realEnv.NewID = func() event.ID { n++; return idOf('M', n) }
-			dry := mustPlan(t, dryEnv, pair[0])
-			actual := mustPlan(t, realEnv, pair[1])
+			dry := mustPlan(t, dryEnv, tc.dry)
+			actual := mustPlan(t, realEnv, tc.real)
 			if got, want := normalized(t, dry), normalized(t, actual); !slices.Equal(got, want) {
 				t.Errorf("dry run events\n%v\nwant the real request's\n%v", strings.Join(got, "\n"), strings.Join(want, "\n"))
 			}
@@ -161,8 +184,8 @@ func TestDryRunEqualsRealPlan(t *testing.T) {
 			if dry.Candidate == nil || dry.NoOp {
 				t.Error("the dry run has no candidate model")
 			}
-			if base.Model.Lines() != lines {
-				t.Errorf("the model has %d lines, want %d: Build appended", base.Model.Lines(), lines)
+			if tc.env.Model.Lines() != lines {
+				t.Errorf("the model has %d lines, want %d: Build appended", tc.env.Model.Lines(), lines)
 			}
 		})
 	}

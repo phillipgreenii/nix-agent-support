@@ -1,10 +1,12 @@
 package command_test
 
 import (
+	"encoding/json"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/command"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/config"
@@ -409,4 +411,71 @@ func TestRetractSwitchBatchRestoresFocus(t *testing.T) {
 		b.add(25, interruptOf(cycleC, cycleA, review)) // interrupts A, which only the switch set running
 		mustReject(t, envOf(t, b, at(30)), command.Retract{TargetBatch: batch}, command.ReasonInterruptedCycleNotRunning)
 	})
+}
+
+// TestTaskMaterializedAndPeriodChangedAreAlwaysInABatch pins why a
+// retraction of either names its batch: the codec refuses one with no batch,
+// so no stored task.materialized or period.changed is outside a batch, and
+// the refusal of retracting one alone always points at target_batch.
+func TestTaskMaterializedAndPeriodChangedAreAlwaysInABatch(t *testing.T) {
+	for name, p := range map[string]event.Payload{
+		"a task.materialized": taskOf("lonely")(""),
+		"a period.changed":    event.PeriodChanged{Kind: "week", Start: week1, End: datePtr(week1.AddDays(6)), TZ: newYork},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := event.Encode(event.Event{
+				Envelope: event.Envelope{V: event.SchemaVersion, ID: idOf('L', 99), At: event.At(t0), EffectiveAt: event.At(t0), Type: p.EventType()},
+				Payload:  p,
+			})
+			if err == nil {
+				t.Fatalf("a %s with no batch encodes; the retraction rule needs a message for it", p.EventType())
+			}
+		})
+	}
+	b := bootstrapped(t)
+	env := envOf(t, b, at(20))
+	batch := bootstrapBatch(b)
+	for _, typ := range []event.Type{event.TypeTaskMaterialized, event.TypePeriodChanged} {
+		target := memberOf(t, env.Model, batch, typ)
+		r := mustReject(t, env, command.Retract{Target: target}, command.ReasonInvalidCorrection)
+		if !strings.Contains(r.Message, "target_batch") || !strings.Contains(r.Message, string(batch)) {
+			t.Errorf("%s: message %q does not point at target_batch %s", typ, r.Message, batch)
+		}
+	}
+}
+
+// TestCycleHasDependentsNamesTheStartAsCorrected retracts a cycle start whose
+// effective_at a correction moved: the refusal gives the live instant.
+func TestCycleHasDependentsNamesTheStartAsCorrected(t *testing.T) {
+	b := bootstrapped(t)
+	start := b.add(0, startOf(cycleA, deepWork))
+	b.add(1, event.EventCorrected{Target: start, Fields: map[string]json.RawMessage{"effective_at": rawOf(t, event.At(at(-5)))}})
+	b.add(5, event.CycleBoosted{CycleID: cycleA, Minutes: 5})
+	env := envOf(t, b, at(30))
+	r := mustReject(t, env, command.Retract{Target: start}, command.ReasonCycleHasDependents)
+	if !slices.ContainsFunc(r.Instants, at(-5).Equal) || slices.ContainsFunc(r.Instants, at(0).Equal) {
+		t.Errorf("Instants %v, want the corrected start %v and not the appended %v", r.Instants, at(-5), at(0))
+	}
+	if !slices.ContainsFunc(r.Instants, at(30).Equal) {
+		t.Errorf("Instants %v lack the new event's effective_at", r.Instants)
+	}
+}
+
+// TestRetractStepOneRefusalsCarryTheNewEventInstant checks that a malformed
+// retraction gives the new event's effective_at, the recording instant.
+func TestRetractStepOneRefusalsCarryTheNewEventInstant(t *testing.T) {
+	b, batch := switchedBack(t)
+	env := envOf(t, b, at(30))
+	for name, c := range map[string]command.Retract{
+		"neither":            {},
+		"both":               {Target: b.events[0].ID, TargetBatch: batch},
+		"a reason not UTF-8": {Target: b.events[0].ID, Reason: "a\xff"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := mustReject(t, env, c, command.ReasonInvalidRequest)
+			if !slices.Equal(r.Instants, []time.Time{at(30)}) {
+				t.Errorf("Instants %v, want the new event's effective_at %v", r.Instants, at(30))
+			}
+		})
+	}
 }

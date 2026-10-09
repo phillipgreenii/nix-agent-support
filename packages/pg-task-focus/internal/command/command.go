@@ -129,6 +129,18 @@ func (b *builder) invalid(format string, args ...any) *Rejection {
 	return &Rejection{Reason: ReasonInvalidRequest, Message: fmt.Sprintf(format, args...)}
 }
 
+// stamped gives an invalid_request that names no instant the instants ts of
+// the new events the request would add, once they are known, as every later
+// refusal of the same request names them. Any other error is returned as it
+// is.
+func stamped(err error, ts ...time.Time) error {
+	var r *Rejection
+	if errors.As(err, &r) && r.Reason == ReasonInvalidRequest && len(r.Instants) == 0 && len(ts) > 0 {
+		r.Instants = instantsInOrder(ts...)
+	}
+	return err
+}
+
 // badText refuses text, or an event, that cannot be stored: not valid UTF-8,
 // over the size limit, or otherwise refused by the codec.
 func (b *builder) badText(err error) *Rejection {
@@ -317,13 +329,14 @@ func (b *builder) logged(id event.ID) (event.Event, bool) {
 	return event.Event{}, false
 }
 
-// describe names a stored event inside a sentence: its id, its type and the
-// entity it is about.
-func describe(e event.Event) string {
-	if entity := projection.EntityOf(e.Payload); entity != "" {
-		return fmt.Sprintf("event %s (%s of %s)", e.ID, e.Payload.EventType(), entity)
+// unknownEvent is the refusal of a correction or retraction whose target is
+// not in the log. A batch id named as an event gets a pointer at target_batch.
+func (b *builder) unknownEvent(id event.ID, verb string) *Rejection {
+	msg := fmt.Sprintf("No event %s exists in the log, so there is nothing to %s.", id, verb)
+	if len(b.env.Model.BatchEvents(id)) > 0 {
+		msg = fmt.Sprintf("No event %s exists in the log: it is a batch, which is retracted whole by naming it as target_batch.", id)
 	}
-	return fmt.Sprintf("event %s (%s)", e.ID, e.Payload.EventType())
+	return &Rejection{Reason: ReasonUnknownEvent, Instants: []time.Time{b.at}, Message: msg}
 }
 
 // liveEvents lists the live events, as corrected, of the given types for

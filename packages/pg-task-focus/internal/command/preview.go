@@ -1,6 +1,8 @@
 package command
 
 import (
+	"time"
+
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/event"
 )
 
@@ -32,4 +34,14 @@ type Preview struct {
 	NotMaterialized  []struct{ Definition, Reason string }
 	BlockingCycles   []CycleRef
 	Version          Version
+}
+
+// notMaterialized is an entry of Preview.NotMaterialized: a definition the
+// new periods could not materialize, with the reason.
+type notMaterialized = struct{ Definition, Reason string }
+
+// taskRef names a task in a preview, flagged overdue when its due instant has
+// passed by the clock the request is recorded at.
+func (b *builder) taskRef(id event.TaskID, title string, dueAt time.Time) TaskRef {
+	return TaskRef{ID: id, Title: title, Overdue: dueAt.Before(b.at)}
 }

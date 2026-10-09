@@ -383,15 +383,10 @@ func (c SwitchCycle) plan(b *builder) (Plan, error) {
 	if err := b.clockBehind(c.EffectiveAt, eff, "cycle", string(focus.ID), string(to.ID)); err != nil {
 		return Plan{}, err
 	}
-	batch := c.ID
-	if batch == "" {
-		batch = b.env.NewID()
-	}
-	return b.finish([]event.Event{
-		b.newEvent(b.env.NewID(), eff, pause(focus.ID, batch)),
-		b.newEvent(b.env.NewID(), eff, resume(to.ID, batch)),
-		b.newEvent(b.env.NewID(), eff, event.BatchCommitted{Batch: batch}),
-	}, batch)
+	bt := b.batch(eff)
+	bt.add(pause(focus.ID, bt.id))
+	bt.add(resume(to.ID, bt.id))
+	return bt.finish(false, nil)
 }
 
 // minutes refuses a minutes value outside 1 to 525600.

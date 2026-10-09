@@ -657,6 +657,9 @@ func TestChangePeriodsMapsZoneErrorToInvalidZone(t *testing.T) {
 			if r.Reason.Status() != 400 || !strings.Contains(r.Message, `"`+tz+`"`) {
 				t.Errorf("status %d, message %q does not name the zone", r.Reason.Status(), r.Message)
 			}
+			if r.Entity != string(projection.Day) {
+				t.Errorf("Entity %q, want the kind of the change, %s", r.Entity, projection.Day)
+			}
 		})
 	}
 }
@@ -761,5 +764,73 @@ func TestNoCarryOver(t *testing.T) {
 				t.Errorf("%s has the field %s", typ.Name(), typ.Field(i).Name)
 			}
 		}
+	}
+}
+
+// TestSkipAllReasonIsSizedWithTheTasksItSkips checks the step-1 size check of
+// a shared skip reason against the ids of the tasks it would skip, so a
+// reason that fits beside a short placeholder id but not beside the real one
+// is refused there, before the zone is judged.
+func TestSkipAllReasonIsSizedWithTheTasksItSkips(t *testing.T) {
+	long := strings.Repeat("a-long-definition-name-", 4) + "x"
+	cfg := loadConfig(t, func(c map[string]any) {
+		c["tasks"].(map[string]any)[long] = map[string]any{
+			"title": "A task with a long name", "cadence": "daily",
+			"due": map[string]any{"at": "16:00", "tz": newYork},
+		}
+		for _, name := range []string{"normal", "on-call"} {
+			p := c["profiles"].(map[string]any)[name].(map[string]any)
+			p["daily"] = append(p["daily"].([]any), long)
+		}
+	})
+	env, _ := begun(t, cfg)
+	env.Now = at(24 * 60)
+	realID := event.NewTaskID(due.Daily, day1, long)
+	if _, ok := env.Model.Task(realID); !ok {
+		t.Fatalf("task %s is not open", realID)
+	}
+
+	// The size of the skip of the real task with a one-byte reason, as Build
+	// encodes it: fresh ids, the recording instant, no req_hash.
+	base, err := event.Encode(event.Event{
+		Envelope: event.Envelope{V: event.SchemaVersion, ID: idOf('N', 1), At: event.At(env.Now), EffectiveAt: event.At(env.Now), Type: event.TypeTaskSkipped},
+		Payload:  event.TaskSkipped{TaskID: realID, Reason: "r", Batch: idOf('N', 2)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Twenty bytes too long beside the real id, and short enough beside any
+	// id more than twenty bytes shorter.
+	reason := strings.Repeat("r", event.MaxEventBytes-len(base)+1+20)
+	// The real skip is too long: with a valid zone the request is refused too.
+	mustReject(t, env, command.ChangePeriods{Changes: []command.PeriodChange{dayTo(day2)}, SkipAllReason: &reason}, command.ReasonInvalidRequest)
+	badZone := dayTo(day2)
+	badZone.TZ = "ET"
+	r := mustReject(t, env, command.ChangePeriods{Changes: []command.PeriodChange{badZone}, SkipAllReason: &reason}, command.ReasonInvalidRequest)
+	if !strings.Contains(r.Message, "longer than") {
+		t.Errorf("message %q, want the size refusal", r.Message)
+	}
+}
+
+func TestBootstrapNamingAnotherProfileWritesTwoProfileChanges(t *testing.T) {
+	env := emptyEnv(t, withLight(t), at(-60))
+	p := mustPlan(t, env, command.ChangePeriods{Changes: []command.PeriodChange{dayTo(day1), weekFrom(week1), sprintFrom(sprint1)}, Profile: "light"})
+	checkBatch(t, p, at(-60))
+	var profiles []string
+	for _, pc := range payloadsOf[event.ProfileChanged](p) {
+		profiles = append(profiles, pc.Profile)
+	}
+	if want := []string{env.Config.Defaults().Profile, "light"}; !slices.Equal(profiles, want) {
+		t.Fatalf("profile.changed events %v, want defaults.profile then the requested one %v", profiles, want)
+	}
+	if got := typesOf(p); got[0] != event.TypeProfileChanged || got[1] != event.TypeProfileChanged {
+		t.Errorf("types %v, want the batch to begin with the two profile changes", got)
+	}
+	// The new periods take their tasks from the requested profile.
+	if got := taskIDsOf[event.TaskMaterialized](p); !sameIDs(got, planDay, weeklyReview, sprintRetro) {
+		t.Errorf("materialized %v, want the light profile's tasks", got)
+	}
+	if p.Candidate.Profile() != "light" {
+		t.Errorf("profile %q, want light", p.Candidate.Profile())
 	}
 }

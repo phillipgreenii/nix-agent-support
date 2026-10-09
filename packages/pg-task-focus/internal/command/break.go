@@ -44,24 +44,24 @@ func (c BackfillBreak) ReqHash() (string, error) {
 // (invalid_request), then future_effective_at for its end, which is after its
 // start; (2) the cycle (unknown_cycle); (3) the candidate replay of the batch.
 // The batch.committed takes effect when it is recorded.
+//
+// A malformed request names the instants of the break it gives, the
+// effective instants of its pause and resume.
 func (c BackfillBreak) plan(b *builder) (Plan, error) {
-	if c.CycleID == "" {
-		return Plan{}, b.invalid("A break needs the cycle_id of the cycle it pauses.")
-	}
-	if err := b.validText(string(c.CycleID)); err != nil {
-		return Plan{}, err
-	}
-	if c.From.IsZero() || c.To.IsZero() {
-		return Plan{}, b.invalid("A break needs from and to, the instants it begins and ends.")
+	if err := c.validate(b); err != nil {
+		var given []time.Time
+		for _, t := range []time.Time{c.From, c.To} {
+			if !t.IsZero() {
+				given = append(given, event.At(t).Time())
+			}
+		}
+		return Plan{}, stamped(err, given...)
 	}
 	from, to := event.At(c.From).Time(), event.At(c.To).Time()
-	if !from.Before(to) {
-		return Plan{}, b.invalid("The break's from, %s, is not before its to, %s, to the millisecond, so the break has no length.", b.instant(from), b.instant(to))
-	}
 	pause := func(batch event.ID) event.Payload { return event.CyclePaused{CycleID: c.CycleID, Batch: batch} }
 	resume := func(batch event.ID) event.Payload { return event.CycleResumed{CycleID: c.CycleID, Batch: batch} }
 	if err := b.encodable(to, pause(placeholderID), resume(placeholderID), event.BatchCommitted{Batch: placeholderID}); err != nil {
-		return Plan{}, err
+		return Plan{}, stamped(err, from, to)
 	}
 	if err := b.notFuture(to, &to); err != nil {
 		return Plan{}, err
@@ -78,4 +78,22 @@ func (c BackfillBreak) plan(b *builder) (Plan, error) {
 		b.newEvent(b.env.NewID(), to, resume(batch)),
 		b.newEvent(b.env.NewID(), b.at, event.BatchCommitted{Batch: batch}),
 	}, batch)
+}
+
+// validate is the shape of a break: a cycle, from and to, from before to.
+func (c BackfillBreak) validate(b *builder) error {
+	if c.CycleID == "" {
+		return b.invalid("A break needs the cycle_id of the cycle it pauses.")
+	}
+	if err := b.validText(string(c.CycleID)); err != nil {
+		return err
+	}
+	if c.From.IsZero() || c.To.IsZero() {
+		return b.invalid("A break needs from and to, the instants it begins and ends.")
+	}
+	from, to := event.At(c.From).Time(), event.At(c.To).Time()
+	if !from.Before(to) {
+		return b.invalid("The break's from, %s, is not before its to, %s, to the millisecond, so the break has no length.", b.instant(from), b.instant(to))
+	}
+	return nil
 }

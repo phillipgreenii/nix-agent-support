@@ -131,7 +131,7 @@ func TestCorrectionRejectsIdentityFields(t *testing.T) {
 	t.Run("the envelope type", func(t *testing.T) {
 		check(t, e.skip, string(postPlan), fieldsOf(t, "type", "task.completed"), "type")
 	})
-	for _, k := range []string{"id", "at", "req_hash", "v"} {
+	for _, k := range []string{"id", "at", "req_hash", "v", "data"} {
 		t.Run("the envelope "+k, func(t *testing.T) {
 			check(t, e.skip, string(postPlan), fieldsOf(t, k, "x"), k)
 		})
@@ -388,4 +388,38 @@ func TestCorrectionAppliedTwiceChangesNothing(t *testing.T) {
 			rt.Fatalf("the correction applied twice changed the state:\n%+v\nwant\n%+v", got, want)
 		}
 	})
+}
+
+func TestCorrectionUnknownCycleTypeNamesTheCycle(t *testing.T) {
+	e := editableLog(t)
+	r := mustReject(t, envOf(t, e.b, at(30)), command.Correct{Target: e.start, Fields: fieldsOf(t, "type", "nothing")}, command.ReasonUnknownCycleType)
+	if r.Entity != string(cycleA) || !sameIDs(r.Events, e.start) {
+		t.Errorf("Entity %q, Events %v; want cycle %s and the stored start %s", r.Entity, r.Events, cycleA, e.start)
+	}
+	if !slices.ContainsFunc(r.Instants, at(30).Equal) {
+		t.Errorf("Instants %v lack the new event's effective_at", r.Instants)
+	}
+}
+
+// TestCorrectionStepOneRefusalsCarryTheNewEventInstant checks that a
+// malformed correction gives the new event's effective_at, the recording
+// instant, like every later refusal of a correction.
+func TestCorrectionStepOneRefusalsCarryTheNewEventInstant(t *testing.T) {
+	e := editableLog(t)
+	for name, c := range map[string]command.Correct{
+		"no target":                 {Fields: fieldsOf(t, "note", "x")},
+		"no fields":                 {Target: e.note},
+		"a value that is not JSON":  {Target: e.note, Fields: map[string]json.RawMessage{"note": json.RawMessage("nope")}},
+		"a minutes of zero":         {Target: e.boost, Fields: fieldsOf(t, "minutes", 0)},
+		"a reason not UTF-8":        {Target: e.note, Fields: fieldsOf(t, "note", "x"), Reason: "a\xff"},
+		"a client title":            {Target: e.start, Fields: fieldsOf(t, "title", "Mine")},
+		"a type that is not a text": {Target: e.start, Fields: fieldsOf(t, "type", 5)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := mustReject(t, envOf(t, e.b, at(30)), c, command.ReasonInvalidRequest)
+			if !slices.Equal(r.Instants, []time.Time{at(30)}) {
+				t.Errorf("Instants %v, want the new event's effective_at %v", r.Instants, at(30))
+			}
+		})
+	}
 }

@@ -262,3 +262,36 @@ func TestBreakInTheFutureIsFutureEffectiveAt(t *testing.T) {
 		mustPlan(t, envOf(t, b, now), command.BackfillBreak{CycleID: cycleA, From: at(20), To: now.Add(time.Minute)})
 	})
 }
+
+func TestBreakBeforeTheCycleStartIsCycleEventBeforeStart(t *testing.T) {
+	b := runningFrom0(t)
+	start := b.events[len(b.events)-1].ID
+	r := mustReject(t, envOf(t, b, at(60)), command.BackfillBreak{CycleID: cycleA, From: at(-10), To: at(20)}, command.ReasonCycleEventBeforeStart)
+	if r.Entity != string(cycleA) || !slices.Contains(r.Events, start) {
+		t.Errorf("Entity %q, Events %v; want cycle %s and the stored start %s", r.Entity, r.Events, cycleA, start)
+	}
+	if !strings.Contains(r.Message, "the new event") {
+		t.Errorf("message %q does not name the pause as the new event", r.Message)
+	}
+}
+
+// TestBreakStepOneRefusalsCarryTheBreakInstants checks that a malformed break
+// gives the instants of the new events it knows.
+func TestBreakStepOneRefusalsCarryTheBreakInstants(t *testing.T) {
+	b := runningFrom0(t)
+	for name, tc := range map[string]struct {
+		cmd  command.BackfillBreak
+		want []time.Time
+	}{
+		"from after to": {command.BackfillBreak{CycleID: cycleA, From: at(40), To: at(30)}, []time.Time{at(30), at(40)}},
+		"no cycle":      {command.BackfillBreak{From: at(20), To: at(30)}, []time.Time{at(20), at(30)}},
+		"no from":       {command.BackfillBreak{CycleID: cycleA, To: at(30)}, []time.Time{at(30)}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := mustReject(t, envOf(t, b, at(60)), tc.cmd, command.ReasonInvalidRequest)
+			if !slices.Equal(r.Instants, tc.want) {
+				t.Errorf("Instants %v, want %v", r.Instants, tc.want)
+			}
+		})
+	}
+}

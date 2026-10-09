@@ -79,17 +79,17 @@ func fieldPath(k string) string {
 // (unknown_cycle_type); (3) the correction rules (invalid_correction), and the
 // target's schema with the replacement values (invalid_request); (4) the
 // candidate replay of the log with the correction.
+//
+// The new event takes effect when it is recorded, so every refusal, a
+// malformed request's included, names that instant.
 func (c Correct) plan(b *builder) (Plan, error) {
-	fields, err := c.validate(b)
+	fields, replacedAt, err := c.validate(b)
 	if err != nil {
-		return Plan{}, err
+		return Plan{}, stamped(err, b.at)
 	}
-	if raw, ok := fields[fieldEffectiveAt]; ok {
-		var at event.Instant
-		if err := json.Unmarshal(raw, &at); err == nil {
-			if err := b.notFutureAs(at.Time(), "The replacement effective_at"); err != nil {
-				return Plan{}, err
-			}
+	if replacedAt != nil {
+		if err := b.notFutureAs(*replacedAt, "The replacement effective_at"); err != nil {
+			return Plan{}, err
 		}
 	}
 	target, ok := b.logged(c.Target)
@@ -97,8 +97,8 @@ func (c Correct) plan(b *builder) (Plan, error) {
 		return Plan{}, b.unknownEvent(c.Target, "correct")
 	}
 	if _, ok := target.Payload.(event.CycleStarted); ok {
-		if err := b.cycleType(fields); err != nil {
-			return Plan{}, err
+		if err := b.cycleType(target, fields); err != nil {
+			return Plan{}, stamped(err, b.at)
 		}
 	}
 	if pr := projection.CheckCorrection(target, fields); pr != nil {
@@ -108,25 +108,30 @@ func (c Correct) plan(b *builder) (Plan, error) {
 }
 
 // validate is step 1 of a correction: it returns the fields as they will be
-// stored, a replacement reason trimmed.
-func (c Correct) validate(b *builder) (map[string]json.RawMessage, error) {
+// stored, a replacement reason trimmed, and the replacement effective_at when
+// there is one.
+func (c Correct) validate(b *builder) (map[string]json.RawMessage, *time.Time, error) {
 	if c.Target == "" {
-		return nil, b.invalid("A correction needs target, the id of the event it corrects.")
+		return nil, nil, b.invalid("A correction needs target, the id of the event it corrects.")
 	}
 	if len(c.Fields) == 0 {
-		return nil, b.invalid("A correction needs fields, the replacement values, and it has none.")
+		return nil, nil, b.invalid("A correction needs fields, the replacement values, and it has none.")
 	}
 	keys := slices.Sorted(maps.Keys(c.Fields))
 	if err := b.validText(append([]string{string(c.Target), c.Reason}, keys...)...); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	fields := maps.Clone(c.Fields)
+	var replacedAt *time.Time
 	for _, k := range keys {
-		raw, err := b.fieldValue(k, c.Fields[k])
+		raw, at, err := b.fieldValue(k, c.Fields[k])
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		fields[k] = raw
+		if at != nil {
+			replacedAt = at
+		}
 	}
 	// Together the values must fit in one event too. Whether the new event
 	// encodes is judged once the correction rules have passed, because an
@@ -137,56 +142,60 @@ func (c Correct) validate(b *builder) (map[string]json.RawMessage, error) {
 		all = append(all, string(raw))
 	}
 	if err := b.validText(all...); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return fields, nil
+	return fields, replacedAt, nil
 }
 
 // fieldValue checks one replacement value the way a command checks the same
-// value, before the target is known, and returns it as it will be stored.
-func (b *builder) fieldValue(k string, raw json.RawMessage) (json.RawMessage, error) {
+// value, before the target is known, and returns it as it will be stored and,
+// for effective_at, the instant it names.
+func (b *builder) fieldValue(k string, raw json.RawMessage) (json.RawMessage, *time.Time, error) {
 	path := fieldPath(k)
 	switch err := event.ValidText(string(raw)); {
 	case errors.Is(err, event.ErrInvalidUTF8):
-		return nil, b.invalid("The replacement value of %s is not valid UTF-8, which is refused rather than rewritten.", path)
+		return nil, nil, b.invalid("The replacement value of %s is not valid UTF-8, which is refused rather than rewritten.", path)
 	case errors.Is(err, event.ErrTooLarge):
-		return nil, b.invalid("The replacement value of %s is longer than the %d bytes an event may take; shorten it.", path, event.MaxEventBytes)
+		return nil, nil, b.invalid("The replacement value of %s is longer than the %d bytes an event may take; shorten it.", path, event.MaxEventBytes)
 	}
 	if !json.Valid(raw) {
-		return nil, b.invalid("The replacement value of %s is not a JSON value.", path)
+		return nil, nil, b.invalid("The replacement value of %s is not a JSON value.", path)
 	}
 	switch k {
 	case fieldEffectiveAt:
 		var at event.Instant
 		if err := json.Unmarshal(raw, &at); err != nil {
-			return nil, b.invalid("The replacement value of %s is not an instant: %v.", path, err)
+			return nil, nil, b.invalid("The replacement value of %s is not an instant: %v.", path, err)
 		}
+		t := at.Time()
+		return raw, &t, nil
 	case fieldReason:
 		var s string
 		if err := json.Unmarshal(raw, &s); err != nil {
-			return nil, b.invalid("The replacement value of %s is not a string.", path)
+			return nil, nil, b.invalid("The replacement value of %s is not a string.", path)
 		}
 		reason, err := event.ValidReason(s)
 		if err != nil {
-			return nil, b.invalid("The replacement value of %s is blank: a reason that is empty or only white space is refused.", path)
+			return nil, nil, b.invalid("The replacement value of %s is blank: a reason that is empty or only white space is refused.", path)
 		}
-		return jsonText(reason)
+		text, err := jsonText(reason)
+		return text, nil, err
 	case fieldMinutes, fieldPlannedMinutes:
 		var n int64
 		if err := json.Unmarshal(raw, &n); err != nil {
-			return nil, b.invalid("The replacement value of %s, %s, is not a whole number of minutes.", path, raw)
+			return nil, nil, b.invalid("The replacement value of %s, %s, is not a whole number of minutes.", path, raw)
 		}
 		if n < 1 || n > maxMinutes {
-			return nil, b.invalid("The replacement value of %s, %d, is outside 1 to %d.", path, n, maxMinutes)
+			return nil, nil, b.invalid("The replacement value of %s, %d, is outside 1 to %d.", path, n, maxMinutes)
 		}
 	}
-	return raw, nil
+	return raw, nil, nil
 }
 
-// cycleType applies the type rule of a cycle.started's correction to fields:
-// the client never supplies the title, and a new type MUST be configured, its
-// title then filled from the configuration as it is now.
-func (b *builder) cycleType(fields map[string]json.RawMessage) error {
+// cycleType applies the type rule of the correction of the cycle.started
+// target to fields: the client never supplies the title, and a new type MUST
+// be configured, its title then filled from the configuration as it is now.
+func (b *builder) cycleType(target event.Event, fields map[string]json.RawMessage) error {
 	if _, ok := fields[fieldTitle]; ok {
 		return b.invalid("A correction of a cycle.started cannot supply %s: the title follows the cycle's type, so correct %s and the configured title is filled in.", fieldPath(fieldTitle), fieldPath(fieldType))
 	}
@@ -201,8 +210,9 @@ func (b *builder) cycleType(fields map[string]json.RawMessage) error {
 	def, known := b.env.Config.CycleType(typ)
 	if !known {
 		return &Rejection{
-			Reason: ReasonUnknownCycleType, Instants: []time.Time{b.at},
-			Message: fmt.Sprintf("The cycle type %q is not defined in the configuration.", typ),
+			Reason: ReasonUnknownCycleType, Entity: projection.EntityOf(target.Payload),
+			Events: []event.ID{target.ID}, Instants: []time.Time{b.at},
+			Message: fmt.Sprintf("The new event corrects %s with the cycle type %q, which is not defined in the configuration.", projection.Describe(target), typ),
 		}
 	}
 	title, err := jsonText(def.Title)
@@ -221,7 +231,7 @@ func (b *builder) correctionProblem(target event.Event, fields map[string]json.R
 		Reason: ReasonInvalidCorrection, Entity: projection.EntityOf(target.Payload),
 		Events: []event.ID{target.ID}, Instants: []time.Time{b.at},
 	}
-	head := "The new event corrects " + describe(target)
+	head := "The new event corrects " + projection.Describe(target)
 	switch {
 	case pr.Identity && pr.Field == "":
 		r.Message = head + ", and a correction never targets an event.corrected, an event.retracted or a batch.committed."
@@ -241,16 +251,6 @@ func (b *builder) correctionProblem(target event.Event, fields map[string]json.R
 		r.Message = fmt.Sprintf("%s with a replacement value of %s that the event cannot hold: %v.", head, path, pr.Err)
 	}
 	return r
-}
-
-// unknownEvent is the refusal of a correction or retraction whose target is
-// not in the log. A batch id named as an event gets a pointer at target_batch.
-func (b *builder) unknownEvent(id event.ID, verb string) *Rejection {
-	msg := fmt.Sprintf("No event %s exists in the log, so there is nothing to %s.", id, verb)
-	if len(b.env.Model.BatchEvents(id)) > 0 {
-		msg = fmt.Sprintf("No event %s exists in the log: it is a batch, which is retracted whole by naming it as target_batch.", id)
-	}
-	return &Rejection{Reason: ReasonUnknownEvent, Instants: []time.Time{b.at}, Message: msg}
 }
 
 // jsonText is s as a JSON string, written as the log writes text: without

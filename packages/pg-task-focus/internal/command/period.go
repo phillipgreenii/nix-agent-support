@@ -126,7 +126,7 @@ func (c ChangePeriods) plan(b *builder) (Plan, error) {
 		return Plan{}, err
 	}
 	eff := b.effective(c.EffectiveAt)
-	if err := b.encodable(eff, c.sizedPayloads(overrides, skipAll)...); err != nil {
+	if err := b.encodable(eff, c.sizedPayloads(b, overrides, skipAll)...); err != nil {
 		return Plan{}, err
 	}
 	if err := b.notFuture(eff, c.EffectiveAt); err != nil {
@@ -284,8 +284,12 @@ func (c ChangePeriods) validate(b *builder) (map[event.TaskID]string, string, er
 
 // sizedPayloads are the events of the request whose size depends on what the
 // client wrote, for the size check: each period change (with a placeholder
-// zone, judged later), the profile change and a skip with each reason.
-func (c ChangePeriods) sizedPayloads(overrides map[event.TaskID]string, skipAll string) []event.Payload {
+// zone, judged later), the profile change, a skip with each override reason,
+// and a skip with the shared reason of each open task it may skip (the open
+// tasks of the cadences that change), each with its real id, so the check
+// cannot pass a skip the real id would make too long. With no such task the
+// shared reason is sized beside a placeholder task id.
+func (c ChangePeriods) sizedPayloads(b *builder, overrides map[event.TaskID]string, skipAll string) []event.Payload {
 	var out []event.Payload
 	for _, ch := range c.Changes {
 		out = append(out, event.PeriodChanged{Kind: string(ch.Kind), Start: ch.Start, End: ch.End, TZ: placeholderZone, Label: ch.Label, Batch: placeholderID})
@@ -296,7 +300,21 @@ func (c ChangePeriods) sizedPayloads(overrides map[event.TaskID]string, skipAll 
 	for id, reason := range overrides {
 		out = append(out, event.TaskSkipped{TaskID: id, Reason: reason, Batch: placeholderID})
 	}
-	if c.SkipAllReason != nil {
+	if c.SkipAllReason == nil {
+		return out
+	}
+	cadences := map[due.Cadence]bool{}
+	for _, ch := range c.Changes {
+		cadences[cadenceOf(ch.Kind)] = true
+	}
+	sized := false
+	for _, task := range b.env.Model.Tasks() {
+		if task.Status == projection.Open && cadences[task.Cadence] {
+			out = append(out, event.TaskSkipped{TaskID: task.ID, Reason: skipAll, Batch: placeholderID})
+			sized = true
+		}
+	}
+	if !sized {
 		out = append(out, event.TaskSkipped{TaskID: event.NewTaskID(due.Sprint, civil.Date{Year: 2000, Month: time.January, Day: 1}, "placeholder"), Reason: skipAll, Batch: placeholderID})
 	}
 	return out
@@ -349,7 +367,7 @@ func invalidZone(ch PeriodChange, err error, eff time.Time) *Rejection {
 		why = zerr.Message
 	}
 	return &Rejection{
-		Reason: ReasonInvalidZone, Instants: []time.Time{eff},
+		Reason: ReasonInvalidZone, Entity: string(ch.Kind), Instants: []time.Time{eff},
 		Message: fmt.Sprintf("The %s change names a zone that cannot be used: %s.", ch.Kind, why),
 	}
 }
