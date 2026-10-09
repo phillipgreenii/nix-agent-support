@@ -28,6 +28,21 @@
     ]
   },
   {
+    "id": "long-item",
+    "description": "displayCommand outlives the global timeout but fits its own displayTimeoutSeconds",
+    "path": "/tmp/long-item",
+    "displayCommand": "sleep 2 && echo LONG-SIZE",
+    "displayTimeoutSeconds": 10,
+    "variants": [
+      {
+        "aggressiveness": 1,
+        "variantDescription": "n/a",
+        "dryRunCommand": "echo dry-long",
+        "removeCommand": "echo remove-long"
+      }
+    ]
+  },
+  {
     "id": "ok-item",
     "description": "displayCommand succeeds normally",
     "path": "/tmp/ok-item",

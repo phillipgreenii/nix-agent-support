@@ -75,7 +75,7 @@ bats_require_minimum_version 1.5.0
 setup_file() {
   SHARED_TMPDIR="$(mktemp -d)"
   export SHARED_TMPDIR
-  mkdir -p "$SHARED_TMPDIR"/{cache-a,cache-b,info-only,failing-item,slow-item,ok-item,low-item,high-item,real-item}
+  mkdir -p "$SHARED_TMPDIR"/{cache-a,cache-b,info-only,failing-item,slow-item,long-item,ok-item,low-item,high-item,real-item}
 }
 
 teardown_file() {
@@ -160,7 +160,8 @@ install_list_registry() {
 
 # install_list_resilience_registry: installs
 # tests/fixtures/list-resilience.json (failing-item, then slow-item, then
-# ok-item -- in that registry order; path fields retargeted to
+# long-item (has its own displayTimeoutSeconds), then ok-item -- in that
+# registry order; path fields retargeted to
 # SHARED_TMPDIR) to the default XDG registry path, for exercising
 # pgdr_display_output's failure/timeout handling from cmd_list.
 install_list_resilience_registry() {
@@ -169,6 +170,7 @@ install_list_resilience_registry() {
     "$HOME/.config/pg-disk-reclaimer/registry.json" \
     "/tmp/failing-item=$SHARED_TMPDIR/failing-item" \
     "/tmp/slow-item=$SHARED_TMPDIR/slow-item" \
+    "/tmp/long-item=$SHARED_TMPDIR/long-item" \
     "/tmp/ok-item=$SHARED_TMPDIR/ok-item"
 }
 
@@ -573,6 +575,83 @@ JSON
   [[ ! "$output" =~ "should-not-appear" ]]
   [[ "$output" =~ "ID: ok-item" ]]
   [[ "$output" =~ "OK-SIZE" ]]
+}
+
+# Per-item displayTimeoutSeconds override + concurrent display (bead
+# pg2-m6bsb), against the same list-resilience fixture: long-item sleeps 2s
+# and declares displayTimeoutSeconds 10, slow-item sleeps 5s with no
+# override, so under a 1s global ceiling only slow-item times out.
+
+@test "cmd_list lets an item's displayTimeoutSeconds exceed the global ceiling, while items without it keep the global ceiling" {
+  install_list_resilience_registry
+  PGDR_DISPLAY_TIMEOUT_SECONDS=1 run cmd_list --aggressiveness 1
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "LONG-SIZE" ]]
+  [[ "$output" == *"(display command timed out after 1s)"* ]]
+  [[ ! "$output" =~ "should-not-appear" ]]
+}
+
+@test "cmd_list reports a per-item timeout's own value when that item times out" {
+  install_list_resilience_registry
+  jq 'map(if .id == "long-item" then .displayTimeoutSeconds = 1 else . end)' \
+    "$HOME/.config/pg-disk-reclaimer/registry.json" >"$TEST_DIR/r.json"
+  mv "$TEST_DIR/r.json" "$HOME/.config/pg-disk-reclaimer/registry.json"
+  PGDR_DISPLAY_TIMEOUT_SECONDS=30 run cmd_list --aggressiveness 1
+  [ "$status" -eq 0 ]
+  [[ ! "$output" =~ "LONG-SIZE" ]]
+  [[ "$output" == *"(display command timed out after 1s)"* ]]
+}
+
+@test "cmd_list prints items in registry order even though displayCommands run concurrently" {
+  install_list_resilience_registry
+  PGDR_DISPLAY_TIMEOUT_SECONDS=1 run cmd_list --aggressiveness 1
+  [ "$status" -eq 0 ]
+  local failing slow long ok
+  failing=${output%%ID: failing-item*}
+  slow=${output%%ID: slow-item*}
+  long=${output%%ID: long-item*}
+  ok=${output%%ID: ok-item*}
+  [ "${#failing}" -lt "${#slow}" ]
+  [ "${#slow}" -lt "${#long}" ]
+  [ "${#long}" -lt "${#ok}" ]
+}
+
+@test "cmd_list runs displayCommands concurrently: each item waits for all its siblings to have started (load-independent, no wall-clock threshold)" {
+  mkdir -p "$HOME/.config/pg-disk-reclaimer" "$SHARED_TMPDIR/conc" "$TEST_DIR/barrier"
+  # Each item drops a marker, then polls until all 4 markers exist. Run
+  # serially the first item can never see the others and prints nothing
+  # (and would time out); run concurrently every item sees all 4.
+  jq -n --arg p "$SHARED_TMPDIR/conc" --arg b "$TEST_DIR/barrier" '
+    [range(0; 4) | {
+      id: "conc-\(.)", description: "waits for siblings", path: $p,
+      displayCommand: ("touch \($b)/m\(.); for i in $(seq 200); do [ $(ls \($b) | wc -l) -ge 4 ] && echo CONC-DONE && exit 0; sleep 0.1; done; echo CONC-SERIAL"),
+      variants: [{aggressiveness: 1, variantDescription: "n/a",
+                  dryRunCommand: "echo d", removeCommand: "echo r"}]
+    }]' >"$HOME/.config/pg-disk-reclaimer/registry.json"
+  PGDR_DISPLAY_TIMEOUT_SECONDS=60 run cmd_list --aggressiveness 1
+  [ "$status" -eq 0 ]
+  [ "$(grep -c CONC-DONE <<<"$output")" -eq 4 ]
+  [[ ! "$output" =~ "CONC-SERIAL" ]]
+}
+
+# validate: displayTimeoutSeconds, when present, must be a positive integer.
+
+@test "pgdr_validate_registry accepts a positive-integer displayTimeoutSeconds" {
+  install_list_resilience_registry
+  run --separate-stderr pgdr_validate_registry "$HOME/.config/pg-disk-reclaimer/registry.json"
+  [ "$status" -eq 0 ]
+}
+
+@test "pgdr_validate_registry rejects a non-positive, non-integer, or non-numeric displayTimeoutSeconds" {
+  install_list_resilience_registry
+  local reg="$HOME/.config/pg-disk-reclaimer/registry.json" bad
+  for bad in 0 -5 1.5 '"10"' null true; do
+    jq --argjson v "$bad" 'map(if .id == "long-item" then .displayTimeoutSeconds = $v else . end)' \
+      "$reg" >"$TEST_DIR/bad.json"
+    run --separate-stderr pgdr_validate_registry "$TEST_DIR/bad.json"
+    [ "$status" -ne 0 ]
+    [[ "$stderr" == *"item at index 2 has an invalid displayTimeoutSeconds"* ]]
+  done
 }
 
 # cmd_list path-existence guard (this bug fix, operator dogfooding

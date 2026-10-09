@@ -33,7 +33,10 @@ pgdr_default_registry_path() {
 #   - Checks, IN ORDER, FAILING FAST on the first category that fails:
 #       a. the file is valid JSON at all
 #       b. every item has a non-empty id/description/path/displayCommand,
-#          and id is unique across the whole registry
+#          id is unique across the whole registry, and the OPTIONAL
+#          displayTimeoutSeconds (per-item override of the list display
+#          ceiling, see PGDR_DISPLAY_TIMEOUT_SECONDS) is, when present, a
+#          positive integer
 #       c. every item's variants[] (which MAY legitimately be empty -- that
 #          means "informational-only, never reclaimable") has unique,
 #          non-negative aggressiveness values within that item, and each
@@ -100,6 +103,25 @@ pgdr_validate_registry() {
   ' "$path")
   if [[ -n $bad_size_command ]]; then
     echo "pg-disk-reclaimer: registry '$path' item at index $bad_size_command has an invalid sizeCommand (must be a non-empty string when present)" >&2
+    return 1
+  fi
+
+  # (b) displayTimeoutSeconds is optional; when the key is present it MUST
+  # be a positive integer (a JSON number, not a string/bool/null, > 0, with
+  # no fractional part).
+  local bad_timeout
+  bad_timeout=$(jq -r '
+    to_entries
+    | map(select(
+        .value | has("displayTimeoutSeconds") and (
+          .displayTimeoutSeconds
+          | (type != "number") or (. <= 0) or (. != floor)
+        )
+      ))
+    | .[0].key // ""
+  ' "$path")
+  if [[ -n $bad_timeout ]]; then
+    echo "pg-disk-reclaimer: registry '$path' item at index $bad_timeout has an invalid displayTimeoutSeconds (must be a positive integer)" >&2
     return 1
   fi
 
@@ -303,11 +325,15 @@ pgdr_path_exists() {
 # doesn't make the suite slow). A single displayCommand -- e.g. `du` over a
 # large/networked/permission-restricted volume -- has been observed to take
 # 1-2 minutes on its own; this bounds that cost per item instead of letting
-# one pathological item dominate the whole listing.
+# one pathological item dominate the whole listing. An item MAY override this
+# ceiling with its own registry field displayTimeoutSeconds (a positive
+# integer, enforced by pgdr_validate_registry) -- for a known-slow item that
+# is worth waiting on; items without the field keep this global ceiling.
 : "${PGDR_DISPLAY_TIMEOUT_SECONDS:=10}"
 
-# pgdr_display_output: runs displayCommand under the PGDR_DISPLAY_TIMEOUT_SECONDS
-# ceiling and ALWAYS prints something usable to stdout, returning 0
+# pgdr_display_output: runs displayCommand under a timeout ceiling -- the
+# optional second argument (the item's displayTimeoutSeconds), else
+# PGDR_DISPLAY_TIMEOUT_SECONDS -- and ALWAYS prints something usable to stdout, returning 0
 # regardless of what displayCommand did -- a display command is purely
 # informational (see cmd_list below), so its failure or slowness must never
 # stop or abort the listing of other items.
@@ -329,6 +355,7 @@ pgdr_path_exists() {
 # thrown away -- seeing a plausible number beats seeing nothing.
 pgdr_display_output() {
   local display_command="$1"
+  local timeout_seconds="${2:-$PGDR_DISPLAY_TIMEOUT_SECONDS}"
   local out status
 
   # NOT `out=$(...); status=$?` -- that bare assignment is a plain simple
@@ -342,14 +369,14 @@ pgdr_display_output() {
   # registry under `set -euo pipefail` -- like the nix-wrapped binary runs
   # it -- since bats' own `run` helper neutralizes `errexit` and so cannot
   # exercise this failure mode at all.)
-  if out=$(timeout "$PGDR_DISPLAY_TIMEOUT_SECONDS" bash -c "$display_command" 2>&1); then
+  if out=$(timeout "$timeout_seconds" bash -c "$display_command" 2>&1); then
     status=0
   else
     status=$?
   fi
 
   if [[ $status -eq 124 ]]; then
-    printf '(display command timed out after %ss)\n' "$PGDR_DISPLAY_TIMEOUT_SECONDS"
+    printf '(display command timed out after %ss)\n' "$timeout_seconds"
   elif [[ $status -ne 0 ]]; then
     printf '(display command exited %s)\n' "$status"
     [[ -n $out ]] && printf '%s\n' "$out"
@@ -382,9 +409,12 @@ pgdr_display_output() {
 # a variant for, not just the single highest-qualifying variant
 # pgdr_select_variants would choose; a zero-variant item shows "-"), then
 # the verbatim output of running its displayCommand (via
-# pgdr_display_output, bounded by PGDR_DISPLAY_TIMEOUT_SECONDS and never
-# fatal to the run), then a "---" separator line and a blank line before
+# pgdr_display_output, bounded by the item's displayTimeoutSeconds or else
+# PGDR_DISPLAY_TIMEOUT_SECONDS, and never fatal to the run), then a "---" separator line and a blank line before
 # the next item. A fixed-width table was tried here before, but
+# Every included item's displayCommand runs CONCURRENTLY (each into its own
+# temp file, then printed in registry order), so the listing's wall time is
+# roughly the slowest item rather than the sum of all of them.
 # displayCommand strings have no contract to produce single-line output --
 # one registry entry's `find ... -exec du -sh {} +` legitimately prints one
 # line PER matched file -- so a table row is the wrong shape; this
@@ -474,18 +504,40 @@ cmd_list() {
           description,
           path,
           displayCommand,
+          displayTimeoutSeconds: (
+            if .displayTimeoutSeconds == null then "" else (.displayTimeoutSeconds | floor | tostring) end
+          ),
           aggressiveness: ((.variants // []) | map(.aggressiveness))
         }
     ]
   ' "$registry_path")
 
-  local row
+  # Pass 1: start every existing-path item's displayCommand in the
+  # background, each writing to its own file under out_dir (named by row
+  # index). pgdr_display_output always returns 0, so a failing/slow item
+  # never disturbs its siblings.
+  local out_dir
+  out_dir=$(mktemp -d)
+  local idx=0 row path display_command item_timeout
   while IFS= read -r row; do
-    local id description path display_command aggressiveness_display
+    path=$(jq -r '.path' <<<"$row")
+    if pgdr_path_exists "$path"; then
+      display_command=$(jq -r '.displayCommand' <<<"$row")
+      item_timeout=$(jq -r '.displayTimeoutSeconds' <<<"$row")
+      pgdr_display_output "$display_command" "${item_timeout:-$PGDR_DISPLAY_TIMEOUT_SECONDS}" \
+        >"$out_dir/$idx" </dev/null &
+    fi
+    idx=$((idx + 1))
+  done < <(jq -c '.[]' <<<"$rows")
+  wait || true
+
+  # Pass 2: print in registry order.
+  local id description aggressiveness_display
+  idx=0
+  while IFS= read -r row; do
     id=$(jq -r '.id' <<<"$row")
     description=$(jq -r '.description' <<<"$row")
     path=$(jq -r '.path' <<<"$row")
-    display_command=$(jq -r '.displayCommand' <<<"$row")
     aggressiveness_display=$(jq -r '
       .aggressiveness
       | if length == 0 then "-" else (map(tostring) | join(",")) end
@@ -495,7 +547,7 @@ cmd_list() {
       printf 'ID: %s\n' "$id"
       printf 'DESCRIPTION: %s\n' "$description"
       printf 'AGGRESSIVENESS: %s\n' "$aggressiveness_display"
-      pgdr_display_output "$display_command"
+      cat "$out_dir/$idx"
       printf -- '---\n\n'
     elif [[ $verbose -eq 1 ]]; then
       printf 'ID: %s\n' "$id"
@@ -504,8 +556,10 @@ cmd_list() {
       printf "(path '%s' does not exist -- nothing to do)\n" "$path"
       printf -- '---\n\n'
     fi
+    idx=$((idx + 1))
   done < <(jq -c '.[]' <<<"$rows")
 
+  rm -rf "$out_dir"
   return 0
 }
 
