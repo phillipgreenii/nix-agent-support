@@ -74,14 +74,25 @@ func (c SkipTask) ReqHash() (string, error) {
 }
 
 func (c SkipTask) plan(b *builder) (Plan, error) {
-	reason, err := event.ValidReason(c.Reason)
-	switch {
-	case errors.Is(err, event.ErrInvalidUTF8), errors.Is(err, event.ErrTooLarge):
-		return Plan{}, b.badText(err)
-	case err != nil:
-		return Plan{}, b.invalid("A skip needs a reason that is not blank: empty or only white space is refused.")
+	reason, err := b.reason("A skip", c.Reason)
+	if err != nil {
+		return Plan{}, err
 	}
 	return b.resolveTask(c.TaskID, c.EffectiveAt, "skip", event.TaskSkipped{TaskID: c.TaskID, Reason: reason})
+}
+
+// reason checks the reason of a skip, an override or a shared skip, what
+// names which, and returns it trimmed. A blank reason, text that is not valid
+// UTF-8 and text over the size limit are invalid_request.
+func (b *builder) reason(what, s string) (string, error) {
+	reason, err := event.ValidReason(s)
+	switch {
+	case errors.Is(err, event.ErrInvalidUTF8), errors.Is(err, event.ErrTooLarge):
+		return "", b.badText(err)
+	case err != nil:
+		return "", b.invalid("%s needs a reason that is not blank: empty or only white space is refused.", what)
+	}
+	return reason, nil
 }
 
 // resolveTask plans the completion or skip p of task id. Completing or

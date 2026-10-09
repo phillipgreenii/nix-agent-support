@@ -46,10 +46,6 @@ type Plan struct {
 	Candidate *projection.Model
 }
 
-// Preview is what a dry run reports. The task and cycle commands have no dry
-// run; the period and profile changes give it its fields.
-type Preview struct{}
-
 // Version is the state version: the number of lines in the log and the
 // configuration generation.
 type Version struct {
@@ -84,7 +80,9 @@ type planner interface {
 // the requested state at the request's instant, which is a no-op; (5) a clock
 // that reads earlier than the newest event of the entity acted on, when no
 // effective_at was given; (6) the candidate replay of the log with the new
-// events, whose finding becomes a Rejection with the same code.
+// events, whose finding becomes a Rejection with the same code. A period
+// change and a profile change are judged in the order their plans document,
+// which ends with the same candidate replay.
 func Build(env Env, c Command) (Plan, error) {
 	switch {
 	case c == nil:
