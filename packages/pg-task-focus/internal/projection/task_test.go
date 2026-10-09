@@ -638,7 +638,7 @@ func goldenLogs(t *testing.T) []golden {
 
 	b, id = bootstrapped(t)
 	rollover(b, id)
-	b.add(390, event.TaskCompleted{TaskID: id})
+	b.addAt(at(900), at(390), event.TaskCompleted{TaskID: id}) // recorded after the rollover, effective the day before
 	out = append(out, golden{name: "rollover-late-completion.jsonl", events: b.events, check: func(t *testing.T, m *Model, err error) {
 		newID := event.NewTaskID(due.Daily, day2, "post-plan")
 		if err != nil {
@@ -661,15 +661,20 @@ func goldenLogs(t *testing.T) []golden {
 		}
 	}})
 
+	// Each change is its own batch, recorded at noon UTC of the day given, in
+	// log order and after the profile. The change to the 1st is backdated to
+	// the 1st and the change to the 9th to the 3rd, so the 9th sorts before
+	// the 8th although it was recorded after it.
 	b = newLog(t)
 	b.batch(0, profileOf("work"))
-	for _, p := range []struct{ start, recorded, effective int }{{1, 1, 1}, {8, 8, 8}, {9, 9, 3}} {
-		d := civil.Date{Year: 2026, Month: time.October, Day: p.start}
-		b.addAt(instantOn(civil.Date{Year: 2026, Month: time.October, Day: p.recorded}, 12),
-			instantOn(civil.Date{Year: 2026, Month: time.October, Day: p.effective}, 12),
-			event.PeriodChanged{Kind: "day", Start: d, TZ: "America/New_York", Batch: bid(2)})
+	for _, p := range []struct{ start, recorded, effective int }{{1, 8, 1}, {8, 8, 8}, {9, 9, 3}} {
+		recorded := instantOn(civil.Date{Year: 2026, Month: time.October, Day: p.recorded}, 12)
+		b.batches++
+		bt := bid(b.batches)
+		b.addAt(recorded, instantOn(civil.Date{Year: 2026, Month: time.October, Day: p.effective}, 12),
+			event.PeriodChanged{Kind: "day", Start: civil.Date{Year: 2026, Month: time.October, Day: p.start}, TZ: "America/New_York", Batch: bt})
+		b.addAt(recorded, recorded, event.BatchCommitted{Batch: bt})
 	}
-	b.add(0, event.BatchCommitted{Batch: bid(2)})
 	out = append(out, golden{name: "backdated-period.jsonl", events: b.events, check: func(t *testing.T, _ *Model, err error) {
 		if inv := asInvalid(t, err); inv.Code != codePeriodOutOfOrder {
 			t.Errorf("Code = %q, want %q", inv.Code, codePeriodOutOfOrder)
