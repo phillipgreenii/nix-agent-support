@@ -12,12 +12,14 @@ import (
 )
 
 // liveEvent is an event that counts: not retracted, with the live corrections
-// applied. Corrected is set when a correction changed it. Only the events that
-// describe the domain are live; corrections, retractions and batch markers are
-// consumed by the overlay.
+// applied. Corrected is set when a correction changed it, and pos is its
+// position in the log (not Line, which an unappended event does not have).
+// Only the events that describe the domain are live; corrections, retractions
+// and batch markers are consumed by the overlay.
 type liveEvent struct {
 	event.Event
 	Corrected bool
+	pos       int
 }
 
 // identityKeys are the data fields a correction can never change, because they
@@ -135,7 +137,7 @@ func overlayFrom(events []event.Event, firstAdded int) ([]liveEvent, map[event.I
 		}
 		views[e.ID] = v
 		if !v.Retracted && typ != event.TypeEventCorrected && typ != event.TypeEventRetracted {
-			live = append(live, liveEvent{Event: v.Corrected, Corrected: len(v.CorrectedBy) > 0})
+			live = append(live, liveEvent{Event: v.Corrected, Corrected: len(v.CorrectedBy) > 0, pos: i})
 		}
 	}
 	return live, views, nil

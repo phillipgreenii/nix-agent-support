@@ -14,6 +14,11 @@ type Model struct {
 	views   map[event.ID]EventView
 	order   []event.ID // the ids that have a view, in log order
 	batches map[event.ID][]event.ID
+
+	periods   map[Kind]Period
+	profile   string
+	tasks     []Task
+	taskIndex map[event.TaskID]int
 }
 
 // newModel runs the overlay over the log and indexes the result. The model
@@ -46,6 +51,65 @@ func newModelFrom(events []event.Event, firstAdded int) (*Model, error) {
 	}
 	return m, nil
 }
+
+// Cycle and Segment are placeholders: the cycle half of the projection is
+// built on them later, and until then Replay ignores the cycle events.
+type (
+	Cycle   struct{}
+	Segment struct{}
+)
+
+// Replay projects a whole log: the overlay of its corrections and retractions,
+// then the periods, profile and tasks the live events describe. The error is an
+// *Invalid when the timeline is impossible.
+func Replay(events []event.Event) (*Model, error) {
+	return replay(events, len(events))
+}
+
+// replay is Replay for a log whose events from firstAdded on are the ones a
+// request would add.
+func replay(events []event.Event, firstAdded int) (*Model, error) {
+	m, err := newModelFrom(events, firstAdded)
+	if err != nil {
+		return nil, err
+	}
+	if err := m.projectCalendar(firstAdded); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+// projectCalendar sets the periods, the profile and the tasks from the live
+// events.
+func (m *Model) projectCalendar(firstAdded int) error {
+	r := newRun(m.log, firstAdded)
+	periods, profiles, err := r.projectPeriods(m.live)
+	if err != nil {
+		return err
+	}
+	var changes []liveEvent
+	for _, e := range m.live {
+		if _, ok := e.Payload.(event.PeriodChanged); ok {
+			changes = append(changes, e)
+		}
+	}
+	tasks, err := r.projectTasks(m.live, changes, profiles)
+	if err != nil {
+		return err
+	}
+	m.periods, m.tasks = periods, tasks
+	if len(profiles) > 0 {
+		m.profile = profiles[len(profiles)-1].Payload.(event.ProfileChanged).Profile
+	}
+	m.taskIndex = make(map[event.TaskID]int, len(tasks))
+	for i, t := range tasks {
+		m.taskIndex[t.ID] = i
+	}
+	return nil
+}
+
+// Lines is the number of events in the log the model was built from.
+func (m *Model) Lines() int { return len(m.log) }
 
 // Events lists the views of the logged events matching q, in log order. Both
 // views include retracted events, flagged; neither lists batch.committed.

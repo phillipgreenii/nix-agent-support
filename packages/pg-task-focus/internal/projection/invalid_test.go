@@ -25,7 +25,12 @@ func TestInvalidImplementsErrorAndCodesListsTheCodesDeclaredSoFar(t *testing.T) 
 		t.Errorf("errors.As did not recover the *Invalid: %+v", inv)
 	}
 
-	want := []Code{"unknown_event", "invalid_correction"}
+	want := []Code{
+		"unknown_event", "invalid_correction",
+		"task_already_resolved", "task_withdrawn", "task_not_withdrawn", "task_materialized_twice",
+		"task_without_period", "task_before_profile", "resolution_before_materialization",
+		"period_unchanged", "period_out_of_order",
+	}
 	if got := Codes(); !reflect.DeepEqual(got, want) {
 		t.Errorf("Codes() = %v, want %v", got, want)
 	}

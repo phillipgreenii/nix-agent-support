@@ -21,7 +21,12 @@ const (
 
 // Codes lists every code declared so far. The caller owns the slice.
 func Codes() []Code {
-	return []Code{codeUnknownEvent, codeInvalidCorrection}
+	return []Code{
+		codeUnknownEvent, codeInvalidCorrection,
+		codeTaskAlreadyResolved, codeTaskWithdrawn, codeTaskNotWithdrawn, codeTaskMaterializedTwice,
+		codeTaskWithoutPeriod, codeTaskBeforeProfile, codeResolutionBeforeMaterialization,
+		codePeriodUnchanged, codePeriodOutOfOrder,
+	}
 }
 
 // Invalid is the finding of a replay: the log, or the log plus the events a
