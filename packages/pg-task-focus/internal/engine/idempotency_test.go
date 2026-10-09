@@ -3,6 +3,7 @@ package engine_test
 import (
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/command"
@@ -403,5 +404,22 @@ func TestRetryOfADurableRequestReturnsTheOriginalWhileReadOnly(t *testing.T) {
 	}
 	if !reflect.DeepEqual(h.e.Health(), engine.Health{ReadOnly: true, Reason: store.ReasonAppendSync, Since: local(9, 20)}) {
 		t.Errorf("Health %+v", h.e.Health())
+	}
+}
+
+func TestIdConflictOfABatchMemberNamesItsBatch(t *testing.T) {
+	h := newHarness(t, nil)
+	boot := h.bootstrap()
+	member := boot.EventIDs[0]
+	r := h.reject(command.CompleteTask{ID: member, TaskID: taskOf(7, "plan-day")}, command.ReasonIDConflict)
+	if !strings.Contains(r.Message, string(boot.BatchID)) {
+		t.Errorf("message %q does not name the batch %s the event is a member of", r.Message, boot.BatchID)
+	}
+	if strings.Contains(r.Message, "no request with an id produced") {
+		t.Errorf("message %q says no request with an id produced the event, but the bootstrap carried one", r.Message)
+	}
+	h.reopen()
+	if r2 := h.reject(command.CompleteTask{ID: member, TaskID: taskOf(7, "plan-day")}, command.ReasonIDConflict); r2.Message != r.Message {
+		t.Errorf("after a restart the message is %q, want %q", r2.Message, r.Message)
 	}
 }

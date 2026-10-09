@@ -219,6 +219,11 @@ func (e *Engine) Do(ctx context.Context, c command.Command) (Result, error) {
 	if c == nil {
 		return Result{}, errors.New("engine: no command")
 	}
+	// A request whose context is done is not handled: checked before waiting
+	// for the write path, and again once it is taken.
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -241,11 +246,11 @@ func (e *Engine) Do(ctx context.Context, c command.Command) (Result, error) {
 		}
 	}
 	if h := e.st.Health(); h.ReadOnly {
-		return Result{}, e.refuse(storeUnavailable(ReadOnlyMessage(h)))
+		return Result{}, e.reportRejection(storeUnavailable(ReadOnlyMessage(h)))
 	}
 	plan, err := command.Build(e.env(), c)
 	if err != nil {
-		return Result{}, e.refused(err)
+		return Result{}, e.reportBuildErr(err)
 	}
 	if plan.NoOp {
 		r := Result{Note: plan.Note, Version: e.version}
@@ -261,7 +266,7 @@ func (e *Engine) Do(ctx context.Context, c command.Command) (Result, error) {
 func (e *Engine) lookup(id event.ID, hash string) (Result, bool, error) {
 	r, found, conflict := e.index.lookup(id, hash)
 	if conflict != nil {
-		return Result{}, true, e.refuse(conflict)
+		return Result{}, true, e.reportRejection(conflict)
 	}
 	if found {
 		return Result{
@@ -271,7 +276,7 @@ func (e *Engine) lookup(id event.ID, hash string) (Result, bool, error) {
 	}
 	n, found, conflict := e.noOps.lookup(id, hash)
 	if conflict != nil {
-		return Result{}, true, e.refuse(conflict)
+		return Result{}, true, e.reportRejection(conflict)
 	}
 	if found {
 		out := n.result
@@ -285,7 +290,7 @@ func (e *Engine) lookup(id event.ID, hash string) (Result, bool, error) {
 func (e *Engine) dryRun(c command.Command) (Result, error) {
 	plan, err := command.Build(e.env(), c)
 	if err != nil {
-		return Result{}, e.refused(err)
+		return Result{}, e.reportBuildErr(err)
 	}
 	return Result{Note: plan.Note, Version: e.version, Preview: plan.Preview}, nil
 }
@@ -343,7 +348,7 @@ func (e *Engine) commit(plan command.Plan) (Result, error) {
 	if adoptErr != nil {
 		settled = true // adoptFailed marks the store read-only before it runs user code
 		h := e.adoptFailed()
-		return Result{}, e.refuse(storeUnavailable(ReadOnlyMessage(h) + ". " + msgStoredNotAdopted))
+		return Result{}, e.reportRejection(storeUnavailable(ReadOnlyMessage(h) + ". " + msgStoredNotAdopted))
 	}
 
 	e.state.Lock()
@@ -373,6 +378,9 @@ func (e *Engine) adoptFailed() Health {
 func (e *Engine) observeAppend(events []event.Event, stats store.AppendStats) {
 	for i, ev := range events {
 		share := store.AppendStats{Events: 1}
+		// Build and Append have each encoded this event already, and
+		// encoding is deterministic, so this cannot fail; were it to, the
+		// event is reported with Bytes zero rather than not at all.
 		if line, err := event.Encode(ev); err == nil {
 			share.Bytes = int64(len(line)) + 1
 		}
@@ -410,7 +418,7 @@ func (e *Engine) appendFailed(err error) error {
 	case errors.Is(err, store.ErrStoreUnavailable):
 		// Nothing was attempted: the store was already read-only or closed.
 		if h := e.st.Health(); h.ReadOnly {
-			return e.refuse(storeUnavailable(ReadOnlyMessage(h)))
+			return e.reportRejection(storeUnavailable(ReadOnlyMessage(h)))
 		}
 		return errClosed
 	default:
@@ -419,9 +427,9 @@ func (e *Engine) appendFailed(err error) error {
 		return fmt.Errorf("engine: appending: %w", err)
 	}
 	if h := e.healthChanged(); h.ReadOnly {
-		return e.refuse(storeUnavailable(ReadOnlyMessage(h) + ". " + msgUnknownOutcome))
+		return e.reportRejection(storeUnavailable(ReadOnlyMessage(h) + ". " + msgUnknownOutcome))
 	}
-	return e.refuse(storeUnavailable(msgRolledBack))
+	return e.reportRejection(storeUnavailable(msgRolledBack))
 }
 
 // healthChanged reads the store's health and, when it differs from the last
@@ -443,15 +451,16 @@ func storeUnavailable(msg string) *command.Rejection {
 	return &command.Rejection{Reason: command.ReasonStoreUnavailable, Message: msg}
 }
 
-// refuse reports a refusal to the observer and returns it.
-func (e *Engine) refuse(r *command.Rejection) error {
+// reportRejection tells the observer of a refusal and returns it.
+func (e *Engine) reportRejection(r *command.Rejection) error {
 	e.obs.Rejected(r.Reason)
 	return r
 }
 
-// refused is refuse for an error from Build, which is a refusal when it is a
-// *command.Rejection and a defect otherwise.
-func (e *Engine) refused(err error) error {
+// reportBuildErr is reportRejection for an error from Build, which is a
+// refusal when it is a *command.Rejection and a defect otherwise; it returns
+// err as it is.
+func (e *Engine) reportBuildErr(err error) error {
 	var r *command.Rejection
 	if errors.As(err, &r) {
 		e.obs.Rejected(r.Reason)
@@ -468,6 +477,11 @@ func (e *Engine) Snapshot() Snapshot {
 }
 
 // State is what a client shows at now, with the store's health in State.Store.
+// It is two reads, the snapshot and then the health, not one atomic reading:
+// a failed write between them may pair a read-only health with the model from
+// just before it. That is harmless, because health only ever moves from
+// healthy to read-only (only reopening clears it), so State never shows a
+// read-only store as healthy.
 func (e *Engine) State(now time.Time) view.State {
 	snap := e.Snapshot()
 	st := view.Build(snap.Model, snap.Config, now)

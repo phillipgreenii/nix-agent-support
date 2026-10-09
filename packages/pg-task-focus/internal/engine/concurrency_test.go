@@ -1,11 +1,14 @@
 package engine_test
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/command"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/engine"
@@ -153,5 +156,104 @@ func TestConcurrentCompleteSameTaskDifferentIDs(t *testing.T) {
 	}
 	if ok != 1 || refused != 1 || h.lines() != before+1 {
 		t.Errorf("%d successes, %d refusals, %d new lines; want one of each and one line", ok, refused, h.lines()-before)
+	}
+}
+
+func TestDoChecksTheContextBeforeWaitingForTheWritePath(t *testing.T) {
+	h := newHarness(t, nil)
+	h.bootstrap()
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	h.e.OnCommit(func(engine.Version) {
+		once.Do(func() { close(entered) })
+		<-release
+	})
+	writer := make(chan error, 1)
+	h.clock.Set(local(9, 5))
+	go func() { _, err := h.try(command.CompleteTask{TaskID: taskOf(7, "plan-day")}); writer <- err }()
+	<-entered // the write path is held by the commit's callback
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	done := make(chan error, 1)
+	go func() { _, err := h.e.Do(ctx, command.StartCycle{Type: deepWork}); done <- err }()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("Do with a cancelled context = %v, want context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Error("Do with a cancelled context waited for the write path")
+		close(release)
+		<-done
+		<-writer
+		return
+	}
+	close(release)
+	if err := <-writer; err != nil {
+		t.Fatalf("the held commit: %v", err)
+	}
+}
+
+// TestReadersSeeConsistentSnapshotsWhileWriting runs Snapshot, State and
+// Version against Do and SetConfig; under -race it also checks the locking.
+// Every snapshot's version MUST describe its model and its configuration.
+func TestReadersSeeConsistentSnapshotsWhileWriting(t *testing.T) {
+	h := newHarness(t, nil)
+	h.bootstrap()
+	a := h.start(local(9, 0), deepWork)
+	h.clock.Set(local(9, 10))
+
+	var gens sync.Map // *config.Config -> its generation
+	gens.Store(h.cfg, h.gen)
+	stop := make(chan struct{})
+	var readers sync.WaitGroup
+	for range 4 {
+		readers.Go(func() {
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				snap := h.e.Snapshot()
+				if snap.Version.LogLines != snap.Model.Lines() {
+					t.Errorf("Snapshot version %+v with a model of %d lines", snap.Version, snap.Model.Lines())
+					return
+				}
+				if g, ok := gens.Load(snap.Config); !ok || g.(int64) != snap.Version.ConfigGeneration {
+					t.Errorf("Snapshot config of generation %v (known %v), version %+v", g, ok, snap.Version)
+					return
+				}
+				_ = h.e.State(local(9, 10))
+				_ = h.e.Version()
+			}
+		})
+	}
+	var writers sync.WaitGroup
+	writers.Go(func() {
+		for range 40 {
+			if _, err := h.try(command.BoostCycle{CycleID: a, Minutes: 5}); err != nil {
+				t.Errorf("boost: %v", err)
+				return
+			}
+		}
+	})
+	writers.Go(func() {
+		for i := range 20 {
+			next := loadConfig(t, nil)
+			gen := h.gen + int64(i) + 1
+			gens.Store(next, gen)
+			if err := h.e.SetConfig(next, gen); err != nil {
+				t.Errorf("SetConfig: %v", err)
+				return
+			}
+		}
+	})
+	writers.Wait()
+	close(stop)
+	readers.Wait()
+	if v := h.e.Version(); v.LogLines != h.lines() {
+		t.Errorf("Version %+v, file %d lines", v, h.lines())
 	}
 }

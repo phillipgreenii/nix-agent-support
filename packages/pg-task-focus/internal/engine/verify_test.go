@@ -112,3 +112,23 @@ func TestVerifyOffline(t *testing.T) {
 		}
 	})
 }
+
+func TestVerifyReportOKAgreesWithReplayed(t *testing.T) {
+	// A replay error that is not a finding leaves this report: no problem,
+	// no finding and nothing replayed. It is not OK.
+	if (engine.VerifyReport{}).OK() {
+		t.Error("a report whose log was not replayed is OK")
+	}
+	if !(engine.VerifyReport{Replayed: true}).OK() {
+		t.Error("a report whose log replayed is not OK")
+	}
+	h := newHarness(t, nil)
+	h.bootstrap()
+	rep, err := engine.Verify(h.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rep.Replayed || !rep.OK() {
+		t.Errorf("a clean log: Replayed %v, OK %v", rep.Replayed, rep.OK())
+	}
+}

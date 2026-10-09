@@ -27,9 +27,11 @@ type VerifyReport struct {
 }
 
 // OK reports whether a service would start on the log and replay it: no
-// corruption, no unknown version and a possible timeline. A recovery the next
+// corruption, no unknown version, and the committed events replayed into a
+// possible timeline. It agrees with Replayed: a replay that failed for a reason
+// other than a finding (Verify's error) is not OK either. A recovery the next
 // start would perform does not make a log fail.
-func (r VerifyReport) OK() bool { return r.Check.Problem == nil && r.Invalid == nil }
+func (r VerifyReport) OK() bool { return r.Check.Problem == nil && r.Invalid == nil && r.Replayed }
 
 // Verify checks the log at path, the data directory or the log file itself,
 // without taking the directory lock and without modifying anything, so it

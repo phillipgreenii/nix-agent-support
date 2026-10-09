@@ -761,12 +761,26 @@ func TestOnlyTheEngineWritesTheStoreAndTheModel(t *testing.T) {
 		if !reflect.DeepEqual(after.Model.Domain(), before.Model.Domain()) || h.e.Version() != before.Version {
 			t.Error("a failed append moved the model or the version")
 		}
-		for _, c := range []command.Command{
-			command.CompleteTask{TaskID: taskOf(7, "plan-day")},
-			command.StartCycle{Type: deepWork},
-			command.SwitchCycle{To: "unknown"},
+		// The rolled-back append left the store writable: the same request
+		// commits, and a refusal moves nothing.
+		for _, tc := range []struct {
+			c    command.Command
+			want command.Reason // empty: the request commits
+		}{
+			{command.CompleteTask{TaskID: taskOf(7, "plan-day")}, ""},
+			{command.StartCycle{Type: deepWork}, ""},
+			{command.SwitchCycle{To: "unknown"}, command.ReasonUnknownCycle},
 		} {
-			_, _ = h.try(c)
+			c := tc.c
+			r, err := h.try(c)
+			switch {
+			case tc.want != "":
+				rejectionOf(t, err, tc.want)
+			case err != nil:
+				t.Errorf("%T: %v, want it to commit", c, err)
+			case !r.Changed || r.Version != h.e.Version():
+				t.Errorf("%T: Result %+v, want a commit at the present version %+v", c, r, h.e.Version())
+			}
 			if h.lines() != h.e.Version().LogLines {
 				t.Errorf("after %T the file has %d lines and Version().LogLines is %d", c, h.lines(), h.e.Version().LogLines)
 			}
@@ -1078,5 +1092,25 @@ func TestScriptedDayThroughEngine(t *testing.T) {
 		if _, err := projection.Replay(events[:n]); err != nil {
 			t.Errorf("the prefix of %d lines does not replay: %v", n, err)
 		}
+	}
+}
+
+func TestWriteRollbackFailureMessageIsExact(t *testing.T) {
+	for _, f := range readOnlyFaults() {
+		if f.stage != "write" {
+			continue
+		}
+		t.Run(string(f.reason), func(t *testing.T) {
+			h := newHarness(t, nil)
+			h.bootstrap()
+			h.clock.Set(local(9, 5))
+			f.inject(h)
+			_, err := h.try(command.CompleteTask{ID: clientID(), TaskID: taskOf(7, "plan-day")})
+			r := rejectionOf(t, err, command.ReasonStoreUnavailable)
+			h.requireNoPending()
+			if want := readOnlySentence(f.reason) + ". " + unknownReadOnly; r.Message != want {
+				t.Errorf("message %q, want %q", r.Message, want)
+			}
+		})
 	}
 }

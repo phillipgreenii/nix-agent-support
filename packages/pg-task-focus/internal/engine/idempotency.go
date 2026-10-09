@@ -21,10 +21,11 @@ type request struct {
 	batch  event.ID
 }
 
-// storedID is an id the log already uses: an event's id, or a batch's id with
-// the events of the batch.
+// storedID is an id the log already uses: an event's id, with the batch it
+// is a member of (member), or a batch's id with the events of the batch.
 type storedID struct {
 	batch  bool
+	member event.ID
 	events []event.ID
 }
 
@@ -51,8 +52,8 @@ func newIndex(log []event.Event) *index {
 // its own id.
 func (x *index) add(e event.Event) {
 	committed := e.Payload.EventType() == event.TypeBatchCommitted
-	x.stored[e.ID] = &storedID{events: []event.ID{e.ID}}
 	batch := e.Payload.BatchID()
+	x.stored[e.ID] = &storedID{member: batch, events: []event.ID{e.ID}}
 	if batch != "" {
 		s := x.stored[batch]
 		if s == nil {
@@ -101,16 +102,18 @@ func (x *index) lookup(id event.ID, hash string) (r *request, found bool, confli
 		}
 	}
 	if s := x.stored[id]; s != nil {
-		what := "event " + string(id)
-		if s.batch {
-			what = fmt.Sprintf("batch %s (%s)", id, eventList(s.events))
+		// A request's id is its lone event's id or its batch's id, so an id
+		// recorded under neither is a member of a batch, or an event or a
+		// batch stored with no req_hash.
+		msg := fmt.Sprintf("The request id %s is the id of the stored event %s, which no request with an id produced; a new request needs a new id.", id, id)
+		switch {
+		case s.batch:
+			msg = fmt.Sprintf("The request id %s is the id of the stored batch %s (%s), which no request with an id produced; a new request needs a new id.", id, id, eventList(s.events))
+		case s.member != "":
+			msg = fmt.Sprintf("The request id %s is the id of the stored event %s, a member of batch %s, and a request with a batch is known by its batch id, never by a member's; a new request needs a new id.", id, id, s.member)
 		}
 		return nil, false, &command.Rejection{
-			Reason: command.ReasonIDConflict, Events: append([]event.ID(nil), s.events...),
-			Message: fmt.Sprintf(
-				"The request id %s is the id of the stored %s, which no request with an id produced; a new request needs a new id.",
-				id, what,
-			),
+			Reason: command.ReasonIDConflict, Events: append([]event.ID(nil), s.events...), Message: msg,
 		}
 	}
 	return nil, false, nil
