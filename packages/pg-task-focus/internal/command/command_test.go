@@ -10,6 +10,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/command"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/event"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/testutil"
 )
 
 // commandCase builds one command of a kind with the given client id and
@@ -260,7 +261,7 @@ func TestFutureEffectiveAtRejected(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			env := envOf(t, running(t), now)
 			if tc.skew != 0 {
-				env.Config = loadConfig(t, func(c map[string]any) {
+				env.Config = testutil.LoadConfig(t, func(c map[string]any) {
 					c["defaults"].(map[string]any)["max_future_skew_seconds"] = tc.skew
 				})
 			}

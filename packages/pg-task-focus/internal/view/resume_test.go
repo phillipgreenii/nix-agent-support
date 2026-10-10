@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/event"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/testutil"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/view"
 )
 
@@ -26,7 +27,7 @@ func assertOffer(t *testing.T, st view.State, wantID event.CycleID, wantAction v
 }
 
 func TestResumeOfferAfterInterruptingCycleStopped(t *testing.T) {
-	cfg := loadConfig(t, nil)
+	cfg := testutil.LoadConfig(t, nil)
 	b := bootstrapped(t)
 	b.add(at(0), startOf(cycleA, "deep-work", 50))
 	b.add(at(10), interruptOf(cycleB, cycleA, "notifications", 15))
@@ -57,7 +58,7 @@ func TestResumeOfferAfterInterruptingCycleStopped(t *testing.T) {
 }
 
 func TestNoResumeOfferWhileInterrupterPausedOrRunning(t *testing.T) {
-	cfg := loadConfig(t, nil)
+	cfg := testutil.LoadConfig(t, nil)
 	b := bootstrapped(t)
 	b.add(at(0), startOf(cycleA, "deep-work", 50))
 	b.add(at(10), interruptOf(cycleB, cycleA, "notifications", 15))
@@ -80,7 +81,7 @@ func TestNoResumeOfferWhileInterrupterPausedOrRunning(t *testing.T) {
 }
 
 func TestResumeOfferChain(t *testing.T) {
-	cfg := loadConfig(t, nil)
+	cfg := testutil.LoadConfig(t, nil)
 	b := bootstrapped(t)
 	b.add(at(0), startOf(cycleA, "deep-work", 50))
 	b.add(at(10), interruptOf(cycleB, cycleA, "review", 25))
@@ -107,7 +108,7 @@ func TestResumeOfferChain(t *testing.T) {
 }
 
 func TestResumeOfferPersistsWhileAnotherCycleRuns(t *testing.T) {
-	cfg := loadConfig(t, nil)
+	cfg := testutil.LoadConfig(t, nil)
 	// A is interrupted by B, B stops (A is offered), then C starts and runs.
 	fixture := func(t *testing.T) *logb {
 		b := bootstrapped(t)
@@ -168,7 +169,7 @@ func TestResumeOfferPicksTheLatestInterruption(t *testing.T) {
 	// the same instant: a cycle is paused when its last running segment ends,
 	// one cycle runs at a time, and a segment has a length, so a tie cannot be
 	// built from valid events.
-	cfg := loadConfig(t, nil)
+	cfg := testutil.LoadConfig(t, nil)
 	tests := []struct {
 		name  string
 		build func(b *logb)
@@ -219,7 +220,7 @@ func TestResumeOfferPicksTheLatestInterruption(t *testing.T) {
 }
 
 func TestResumeOfferAfterSwitchSequences(t *testing.T) {
-	cfg := loadConfig(t, nil)
+	cfg := testutil.LoadConfig(t, nil)
 
 	t.Run("an interrupted cycle switched back to and then paused by hand has no link and no offer", func(t *testing.T) {
 		b := bootstrapped(t)
@@ -285,7 +286,7 @@ func TestResumeOfferAfterSwitchSequences(t *testing.T) {
 }
 
 func TestInterruptStackOrder(t *testing.T) {
-	cfg := loadConfig(t, nil)
+	cfg := testutil.LoadConfig(t, nil)
 	b := bootstrapped(t)
 	b.add(at(0), startOf(cycleD, "review", 25))
 	b.add(at(5), pauseOf(cycleD)) // paused by hand: dimmed but not in the stack

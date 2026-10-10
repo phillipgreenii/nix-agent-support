@@ -1,21 +1,16 @@
 package command_test
 
 import (
-	"bytes"
-	"encoding/binary"
-	"encoding/json"
-	"errors"
-	"os"
 	"slices"
 	"testing"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/civil"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/command"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/due"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/event"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/projection"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/testutil"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/zone"
 )
 
@@ -24,8 +19,7 @@ import (
 // drift from the codec. The configuration is the example fixture.
 
 const (
-	configFixture = "../../testdata/config/valid.json"
-	newYork       = "America/New_York"
+	newYork = "America/New_York"
 
 	cycleA = event.CycleID("01J9ZZZZZZZZZZZZZZZZZZZZZA")
 	cycleB = event.CycleID("01J9ZZZZZZZZZZZZZZZZZZZZZB")
@@ -53,18 +47,7 @@ var (
 // at is the instant n minutes after t0.
 func at(n int) time.Time { return t0.Add(time.Duration(n) * time.Minute) }
 
-func ptr(t time.Time) *time.Time { return &t }
-
 func intPtr(n int) *int { return &n }
-
-// idOf is the nth id of a family: the stored log ('L'), the ids the command
-// layer draws ('N'). Ids of different families never collide.
-func idOf(family byte, n uint32) event.ID {
-	var entropy [10]byte
-	entropy[0] = family
-	binary.BigEndian.PutUint32(entropy[6:], n)
-	return event.NewID(t0, bytes.NewReader(entropy[:]))
-}
 
 // logb builds a stored log one event at a time.
 type logb struct {
@@ -184,31 +167,6 @@ func pauseOf(id event.CycleID) event.Payload  { return event.CyclePaused{CycleID
 func resumeOf(id event.CycleID) event.Payload { return event.CycleResumed{CycleID: id} }
 func stopOf(id event.CycleID) event.Payload   { return event.CycleStopped{CycleID: id} }
 
-// loadConfig is the example configuration after edit has changed its generic
-// tree; a nil edit leaves it as it is.
-func loadConfig(t *testing.T, edit func(c map[string]any)) *config.Config {
-	t.Helper()
-	raw, err := os.ReadFile(configFixture)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if edit != nil {
-		var c map[string]any
-		if err := json.Unmarshal(raw, &c); err != nil {
-			t.Fatal(err)
-		}
-		edit(c)
-		if raw, err = json.Marshal(c); err != nil {
-			t.Fatal(err)
-		}
-	}
-	cfg, err := config.Parse(raw)
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-	return cfg
-}
-
 // newIDs draws fresh ids of the 'N' family, the way the engine's generator
 // would.
 func newIDs() func() event.ID {
@@ -223,7 +181,7 @@ func newIDs() func() event.ID {
 // with the example configuration.
 func envOf(t *testing.T, b *logb, now time.Time) command.Env {
 	t.Helper()
-	return command.Env{Model: b.model(), Config: loadConfig(t, nil), Now: now, NewID: newIDs()}
+	return command.Env{Model: b.model(), Config: testutil.LoadConfig(t, nil), Now: now, NewID: newIDs()}
 }
 
 // then is env after the plan's events are adopted, read at now.
@@ -246,20 +204,6 @@ func mustPlan(t *testing.T, env command.Env, c command.Command) command.Plan {
 	return p
 }
 
-// rejectionOf is the rejection err MUST be, with the reason want. It returns
-// the rejection by value, so the caller may ignore it.
-func rejectionOf(t *testing.T, err error, want command.Reason) command.Rejection {
-	t.Helper()
-	var r *command.Rejection
-	if !errors.As(err, &r) {
-		t.Fatalf("error %v (%T) is not a *command.Rejection", err, err)
-	}
-	if r.Reason != want {
-		t.Fatalf("Reason = %q (%s), want %q", r.Reason, r.Message, want)
-	}
-	return *r
-}
-
 // mustReject builds a command that MUST be rejected with reason want, and
 // checks that nothing was planned.
 func mustReject(t *testing.T, env command.Env, c command.Command, want command.Reason) command.Rejection {
@@ -268,7 +212,7 @@ func mustReject(t *testing.T, env command.Env, c command.Command, want command.R
 	if len(p.Events) != 0 || p.Candidate != nil || p.NoOp {
 		t.Errorf("a rejected %T planned %d events (NoOp %v)", c, len(p.Events), p.NoOp)
 	}
-	return rejectionOf(t, err, want)
+	return testutil.RejectionOf(t, err, want)
 }
 
 // mustNoOp builds a command that MUST be a no-op and returns its note.
@@ -313,3 +257,7 @@ func status(t *testing.T, m *projection.Model, id event.CycleID, when time.Time)
 	}
 	return c.StatusAt(when)
 }
+
+// idOf is the nth id of a family: the stored log ('L'), the ids the command
+// layer draws ('N'). Ids of different families never collide.
+func idOf(family byte, n uint32) event.ID { return testutil.IDOf(t0, family, n) }

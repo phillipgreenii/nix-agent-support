@@ -10,6 +10,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/due"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/event"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/projection"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/testutil"
 )
 
 var (
@@ -25,7 +26,7 @@ var (
 // definitions.
 func withLight(t *testing.T) *config.Config {
 	t.Helper()
-	return loadConfig(t, func(c map[string]any) {
+	return testutil.LoadConfig(t, func(c map[string]any) {
 		c["profiles"].(map[string]any)["light"] = map[string]any{
 			"daily": []any{"plan-day"}, "weekly": []any{"weekly-review"}, "sprint": []any{"sprint-retro"}, "cycles": []any{"review"},
 		}
@@ -140,10 +141,10 @@ func TestChangeProfileAddsWithdrawsReinstates(t *testing.T) {
 }
 
 func TestProfileChangeWithdrawsTasksWhoseDefinitionVanished(t *testing.T) {
-	env, _ := begun(t, loadConfig(t, nil))
+	env, _ := begun(t, testutil.LoadConfig(t, nil))
 	env = extend(t, env, at(10), event.TaskCompleted{TaskID: planDay})
 	// A reload drops post-plan and plan-day from the configuration.
-	env.Config = loadConfig(t, func(c map[string]any) {
+	env.Config = testutil.LoadConfig(t, func(c map[string]any) {
 		for _, name := range []string{"normal", "on-call"} {
 			c["profiles"].(map[string]any)[name].(map[string]any)["daily"] = []any{"end-of-day-summary"}
 		}

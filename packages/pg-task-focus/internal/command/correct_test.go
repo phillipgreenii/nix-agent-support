@@ -14,6 +14,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/event"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/projection"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/testgen"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/testutil"
 )
 
 // fataler is what the JSON helpers need of a test, a property's included.
@@ -257,7 +258,7 @@ func TestCorrectionOfCycleTypeFillsTitleFromConfig(t *testing.T) {
 		mustReject(t, env, command.Correct{Target: e.start, Fields: fieldsOf(t, "type", 5)}, command.ReasonInvalidRequest)
 	})
 	t.Run("the golden log built by Build replays without the configuration", func(t *testing.T) {
-		env, _ := begun(t, loadConfig(t, nil))
+		env, _ := begun(t, testutil.LoadConfig(t, nil))
 		env, sp := apply(t, env, command.StartCycle{Type: review}, at(0))
 		start := only(t, sp)
 		_, p := apply(t, env, command.Correct{ID: clientID, Target: start.ID, Fields: fieldsOf(t, "type", deepWork), Reason: "started the wrong type"}, at(10))
@@ -291,7 +292,7 @@ func TestCorrectionWithAFutureEffectiveAtIsFutureEffectiveAt(t *testing.T) {
 }
 
 func TestCorrectionMovingARolloverAnywhereIsJudgedByTimelineRulesOnly(t *testing.T) {
-	env, _ := begun(t, loadConfig(t, nil))
+	env, _ := begun(t, testutil.LoadConfig(t, nil))
 	env, roll := apply(t, env, command.ChangePeriods{Changes: []command.PeriodChange{dayTo(day2)}}, at(24*60))
 	changed := eventOfType(t, roll, event.TypePeriodChanged)
 	env.Now = at(24*60 + 10)
@@ -341,7 +342,7 @@ func TestUndoIsAlwaysAvailableForACorrection(t *testing.T) {
 }
 
 func TestCorrectionAppliedTwiceChangesNothing(t *testing.T) {
-	cfg := loadConfig(t, nil)
+	cfg := testutil.LoadConfig(t, nil)
 	rapid.Check(t, func(rt *rapid.T) {
 		log := testgen.Log(12).Draw(rt, "log")
 		m, err := projection.Replay(log)

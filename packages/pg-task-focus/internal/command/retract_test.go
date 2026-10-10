@@ -13,6 +13,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/due"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/event"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/projection"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/testutil"
 )
 
 // rolledOver is the environment, read a day after t0 plus ten minutes, after
@@ -187,7 +188,7 @@ func TestRetractTaskWhosePeriodWouldLoseItsChangeRejected(t *testing.T) {
 	// The on-call profile lists one more daily task; changing to it on day2
 	// materializes that task in its own batch, so retracting the rollover
 	// would leave it with no live period.changed of day2.
-	cfg := loadConfig(t, func(c map[string]any) {
+	cfg := testutil.LoadConfig(t, func(c map[string]any) {
 		c["tasks"].(map[string]any)["page-review"] = map[string]any{
 			"title": "Review the pages", "cadence": "daily", "due": map[string]any{"at": "10:00", "tz": newYork},
 		}
@@ -245,8 +246,8 @@ func TestRetractUnknownBatchIs404(t *testing.T) {
 }
 
 func TestBatchRetractionRemovesRolloverAndNewPeriods(t *testing.T) {
-	env, roll := rolledOver(t, loadConfig(t, nil))
-	before, _ := begun(t, loadConfig(t, nil))
+	env, roll := rolledOver(t, testutil.LoadConfig(t, nil))
+	before, _ := begun(t, testutil.LoadConfig(t, nil))
 	prior, _ := before.Model.Period(projection.Day)
 	_, p := apply(t, env, command.Retract{ID: clientID, TargetBatch: roll.BatchID, Reason: "rolled the day by mistake"}, env.Now)
 	m := writeGoldenIn(t, correctionsDir, "rollover-retracted.jsonl", p.Candidate.Log())
@@ -270,7 +271,7 @@ func TestBatchRetractionRemovesRolloverAndNewPeriods(t *testing.T) {
 }
 
 func TestBatchHasDependents(t *testing.T) {
-	env, roll := rolledOver(t, loadConfig(t, nil))
+	env, roll := rolledOver(t, testutil.LoadConfig(t, nil))
 	env, done := apply(t, env, command.CompleteTask{TaskID: newPostPlan}, at(24*60+20))
 	env, skip := apply(t, env, command.SkipTask{TaskID: newPlanDay, Reason: "not today"}, at(24*60+25))
 	env.Now = at(24*60 + 30)
@@ -290,11 +291,11 @@ func TestBatchHasDependents(t *testing.T) {
 }
 
 func TestLateCompletionOfMissedTaskIsNotADependent(t *testing.T) {
-	env, roll := rolledOver(t, loadConfig(t, nil))
+	env, roll := rolledOver(t, testutil.LoadConfig(t, nil))
 	if task, _ := env.Model.Task(postPlan); task.Status != projection.Missed {
 		t.Fatalf("task %s is %s, want missed", postPlan, task.Status)
 	}
-	env, late := apply(t, env, command.CompleteTask{TaskID: postPlan, EffectiveAt: ptr(at(5 * 60))}, at(24*60+20))
+	env, late := apply(t, env, command.CompleteTask{TaskID: postPlan, EffectiveAt: testutil.Ptr(at(5 * 60))}, at(24*60+20))
 	_, p := apply(t, env, command.Retract{TargetBatch: roll.BatchID}, at(24*60+30))
 	task, _ := p.Candidate.Task(postPlan)
 	if task.Status != projection.Completed || !task.ResolvedAt.Equal(at(5*60)) {
@@ -346,7 +347,7 @@ func TestRetractionOfAnAlreadyRetractedTargetIsANoOp(t *testing.T) {
 		}
 	})
 	t.Run("a batch", func(t *testing.T) {
-		env, roll := rolledOver(t, loadConfig(t, nil))
+		env, roll := rolledOver(t, testutil.LoadConfig(t, nil))
 		env, first := apply(t, env, command.Retract{TargetBatch: roll.BatchID}, env.Now)
 		undo := only(t, first).ID
 		note := mustNoOp(t, env, command.Retract{TargetBatch: roll.BatchID})
@@ -362,7 +363,7 @@ func TestRetractionOfAnAlreadyRetractedTargetIsANoOp(t *testing.T) {
 }
 
 func TestBatchRetractionIsOneEventWithTargetBatchAndNoBatch(t *testing.T) {
-	env, roll := rolledOver(t, loadConfig(t, nil))
+	env, roll := rolledOver(t, testutil.LoadConfig(t, nil))
 	c := command.Retract{ID: clientID, TargetBatch: roll.BatchID}
 	p := mustPlan(t, env, c)
 	e := only(t, p)
@@ -380,7 +381,7 @@ func TestBatchRetractionIsOneEventWithTargetBatchAndNoBatch(t *testing.T) {
 }
 
 func TestRetractionOfABatchRetractionRestoresTheBatch(t *testing.T) {
-	env, roll := rolledOver(t, loadConfig(t, nil))
+	env, roll := rolledOver(t, testutil.LoadConfig(t, nil))
 	env, first := apply(t, env, command.Retract{TargetBatch: roll.BatchID}, env.Now)
 	rolled := roll.Candidate.Domain()
 	_, p := apply(t, env, command.Retract{Target: only(t, first).ID, Reason: "the rollover was right"}, at(24*60+11))

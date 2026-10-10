@@ -18,6 +18,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/due"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/event"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/projection"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/testutil"
 )
 
 var updateGolden = flag.Bool("update", false, "rewrite the golden logs under testdata/logs")
@@ -194,7 +195,7 @@ func writeGoldenIn(t *testing.T, dir, name string, log []event.Event) *projectio
 }
 
 func TestBootstrapBatchOrder(t *testing.T) {
-	cfg := loadConfig(t, func(c map[string]any) {
+	cfg := testutil.LoadConfig(t, func(c map[string]any) {
 		c["tasks"].(map[string]any)["plan-day"].(map[string]any)["link"] = "https://example.test/plan"
 	})
 	env := emptyEnv(t, cfg, at(-60))
@@ -281,7 +282,7 @@ func TestBootstrapBatchOrder(t *testing.T) {
 }
 
 func TestRolloverGoldenLog(t *testing.T) {
-	env, _ := begun(t, loadConfig(t, nil))
+	env, _ := begun(t, testutil.LoadConfig(t, nil))
 	env = extend(t, env, at(30), event.TaskCompleted{TaskID: planDay})
 	env.Now = at(24 * 60)
 	p := mustPlan(t, env, command.ChangePeriods{
@@ -435,7 +436,7 @@ func TestPeriodUnchangedRejected(t *testing.T) {
 	}{
 		{"the same start", day1, nil},
 		{"an earlier start", day1.AddDays(-1), nil},
-		{"an earlier start backdated before the stored change", day1.AddDays(-1), ptr(at(-120))},
+		{"an earlier start backdated before the stored change", day1.AddDays(-1), testutil.Ptr(at(-120))},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := mustReject(t, envOf(t, b, now), command.ChangePeriods{Changes: []command.PeriodChange{dayTo(tc.start)}, EffectiveAt: tc.eff}, command.ReasonPeriodUnchanged)
@@ -517,7 +518,7 @@ func TestEachKindChangesIndependently(t *testing.T) {
 	sprint := event.NewTaskID(due.Sprint, sprint1, "capacity-check")
 
 	t.Run("changing the day leaves the week and the sprint", func(t *testing.T) {
-		env, _ := begun(t, loadConfig(t, nil))
+		env, _ := begun(t, testutil.LoadConfig(t, nil))
 		env.Now = at(24 * 60)
 		p := mustPlan(t, env, command.ChangePeriods{Changes: []command.PeriodChange{dayTo(day2)}})
 		for _, e := range p.Events {
@@ -538,7 +539,7 @@ func TestEachKindChangesIndependently(t *testing.T) {
 		}
 	})
 	t.Run("changing the week leaves the day", func(t *testing.T) {
-		env, _ := begun(t, loadConfig(t, nil))
+		env, _ := begun(t, testutil.LoadConfig(t, nil))
 		env.Now = at(5 * 24 * 60)
 		p := mustPlan(t, env, command.ChangePeriods{Changes: []command.PeriodChange{weekFrom(week1.AddDays(7))}})
 		if got := taskIDsOf[event.TaskMissed](p); !sameIDs(got, weekly) {
@@ -596,7 +597,7 @@ func TestEndRequiredForWeekAndSprintAbsentForDay(t *testing.T) {
 func TestBackdatingIsUnrestricted(t *testing.T) {
 	// The day was set ten days before t0, so the log allows a rollover
 	// backdated by up to ten days.
-	cfg := loadConfig(t, nil)
+	cfg := testutil.LoadConfig(t, nil)
 	env := emptyEnv(t, cfg, at(-10*24*60))
 	boot := mustPlan(t, env, command.ChangePeriods{Changes: []command.PeriodChange{dayTo(day1)}})
 	now := at(9 * 24 * 60)
@@ -613,7 +614,7 @@ func TestBackdatingIsUnrestricted(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			p := mustPlan(t, env, command.ChangePeriods{
 				Changes:     []command.PeriodChange{dayTo(day2)},
-				EffectiveAt: ptr(tc.eff),
+				EffectiveAt: testutil.Ptr(tc.eff),
 				Overrides:   []command.Override{{TaskID: postPlan, Reason: "forgot to roll"}},
 			})
 			checkBatch(t, p, tc.eff)
@@ -630,10 +631,10 @@ func TestBackdatingIsUnrestricted(t *testing.T) {
 		})
 	}
 	t.Run("future_effective_at still applies", func(t *testing.T) {
-		mustReject(t, env, command.ChangePeriods{Changes: []command.PeriodChange{dayTo(day2)}, EffectiveAt: ptr(now.Add(61 * time.Second))}, command.ReasonFutureEffectiveAt)
+		mustReject(t, env, command.ChangePeriods{Changes: []command.PeriodChange{dayTo(day2)}, EffectiveAt: testutil.Ptr(now.Add(61 * time.Second))}, command.ReasonFutureEffectiveAt)
 	})
 	t.Run("a time the timeline cannot hold gets the code of its condition", func(t *testing.T) {
-		mustReject(t, env, command.ChangePeriods{Changes: []command.PeriodChange{dayTo(day2)}, EffectiveAt: ptr(at(-11 * 24 * 60))}, command.ReasonPeriodOutOfOrder)
+		mustReject(t, env, command.ChangePeriods{Changes: []command.PeriodChange{dayTo(day2)}, EffectiveAt: testutil.Ptr(at(-11 * 24 * 60))}, command.ReasonPeriodOutOfOrder)
 	})
 	t.Run("no setting bounds it", func(t *testing.T) {
 		typ := reflect.TypeOf(config.Defaults{})
@@ -732,8 +733,8 @@ func TestChangePeriodsCheckOrder(t *testing.T) {
 		},
 		{
 			"cycle_active before the candidate replay", command.ReasonCycleActive, command.ReasonPeriodOutOfOrder,
-			command.ChangePeriods{Changes: day2Only, EffectiveAt: ptr(at(-120))},
-			command.ChangePeriods{Changes: day2Only, EffectiveAt: ptr(at(-120))},
+			command.ChangePeriods{Changes: day2Only, EffectiveAt: testutil.Ptr(at(-120))},
+			command.ChangePeriods{Changes: day2Only, EffectiveAt: testutil.Ptr(at(-120))},
 			true,
 		},
 	}
@@ -749,7 +750,7 @@ func TestChangePeriodsCheckOrder(t *testing.T) {
 }
 
 func TestNoCarryOver(t *testing.T) {
-	env, _ := begun(t, loadConfig(t, nil))
+	env, _ := begun(t, testutil.LoadConfig(t, nil))
 	env.Now = at(24 * 60)
 	p := mustPlan(t, env, command.ChangePeriods{Changes: []command.PeriodChange{dayTo(day2)}})
 	for _, m := range payloadsOf[event.TaskMaterialized](p) {
@@ -778,7 +779,7 @@ func TestNoCarryOver(t *testing.T) {
 func longNamedTaskEnv(t *testing.T) (command.Env, event.TaskID, string) {
 	t.Helper()
 	long := strings.Repeat("a-long-definition-name-", 4) + "x"
-	cfg := loadConfig(t, func(c map[string]any) {
+	cfg := testutil.LoadConfig(t, func(c map[string]any) {
 		c["tasks"].(map[string]any)[long] = map[string]any{
 			"title": "A task with a long name", "cadence": "daily",
 			"due": map[string]any{"at": "16:00", "tz": newYork},

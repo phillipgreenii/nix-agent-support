@@ -22,6 +22,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/projection"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/store/storefault"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/testutil"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/view"
 )
 
@@ -82,7 +83,7 @@ func TestDoAppendsFsyncsThenAdopts(t *testing.T) {
 	h.fs.Inject(storefault.Rule{Op: storefault.OpWrite, Name: logName, Partial: 7})
 	h.clock.Set(local(9, 5))
 	_, err := h.try(complete)
-	rejectionOf(t, err, command.ReasonStoreUnavailable)
+	testutil.RejectionOf(t, err, command.ReasonStoreUnavailable)
 	h.requireNoPending()
 	failed := h.e.Snapshot()
 	if !reflect.DeepEqual(failed.Model.Domain(), before.Model.Domain()) || failed.Version != before.Version {
@@ -317,29 +318,29 @@ func reasonCases(t *testing.T) []reasonCase {
 			return command.Retract{Target: h.profileEventOf()} // a batch member, alone
 		}},
 		{want: command.ReasonFutureEffectiveAt, run: func(h *harness) command.Command {
-			return command.CompleteTask{TaskID: planDay, EffectiveAt: ptr(h.clock.Now().Add(2 * time.Hour))}
+			return command.CompleteTask{TaskID: planDay, EffectiveAt: testutil.Ptr(h.clock.Now().Add(2 * time.Hour))}
 		}},
 		{want: command.ReasonStopNotAfterStart, run: func(h *harness) command.Command {
 			c := h.start(local(9, 0), deepWork)
 			h.clock.Set(local(9, 10))
-			return command.StopCycle{CycleID: c, EffectiveAt: ptr(local(9, 0))}
+			return command.StopCycle{CycleID: c, EffectiveAt: testutil.Ptr(local(9, 0))}
 		}},
 		{want: command.ReasonEmptyRunningSegment, run: func(h *harness) command.Command {
 			h.start(local(9, 0), deepWork)
 			h.clock.Set(local(9, 10))
-			return command.StartCycle{Type: review, EffectiveAt: ptr(local(9, 0))}
+			return command.StartCycle{Type: review, EffectiveAt: testutil.Ptr(local(9, 0))}
 		}},
 		{want: command.ReasonCycleEventBeforeStart, run: func(h *harness) command.Command {
 			c := h.start(local(9, 0), deepWork)
 			h.clock.Set(local(9, 10))
-			return command.PauseCycle{CycleID: c, EffectiveAt: ptr(local(8, 55))}
+			return command.PauseCycle{CycleID: c, EffectiveAt: testutil.Ptr(local(8, 55))}
 		}},
 		{want: command.ReasonResolutionBeforeMaterialization, run: func(*harness) command.Command {
-			return command.CompleteTask{TaskID: planDay, EffectiveAt: ptr(local(8, 40))}
+			return command.CompleteTask{TaskID: planDay, EffectiveAt: testutil.Ptr(local(8, 40))}
 		}},
 		{want: command.ReasonPeriodOutOfOrder, run: func(*harness) command.Command {
 			roll := rolloverCmd("", 8)
-			roll.EffectiveAt = ptr(local(8, 40)) // before the bootstrap
+			roll.EffectiveAt = testutil.Ptr(local(8, 40)) // before the bootstrap
 			return roll
 		}},
 		{want: command.ReasonStoreUnavailable, run: func(h *harness) command.Command {
@@ -356,7 +357,7 @@ func TestRejectionAppendsNothingAndCountsReason(t *testing.T) {
 		t.Run(string(tc.want), func(t *testing.T) {
 			var cfg *config.Config
 			if tc.edit != nil {
-				cfg = loadConfig(t, tc.edit)
+				cfg = testutil.LoadConfig(t, tc.edit)
 			}
 			h := newHarness(t, cfg)
 			h.bootstrap()
@@ -392,7 +393,7 @@ func TestReadOnlyModeRejectsEveryMutationAndKeepsReads(t *testing.T) {
 	h.clock.Set(failedAt)
 	h.injectOnLog(storefault.OpSync)
 	_, err := h.try(command.PauseCycle{CycleID: c})
-	rejectionOf(t, err, command.ReasonStoreUnavailable)
+	testutil.RejectionOf(t, err, command.ReasonStoreUnavailable)
 	h.requireNoPending()
 
 	h.clock.Set(local(9, 20))
@@ -469,7 +470,7 @@ func TestHealthReportsReadOnlyReasonAndSince(t *testing.T) {
 			h.clock.Set(failedAt)
 			f.inject(h)
 			_, err := h.try(command.CompleteTask{ID: clientID(), TaskID: taskOf(7, "plan-day")})
-			rejectionOf(t, err, command.ReasonStoreUnavailable)
+			testutil.RejectionOf(t, err, command.ReasonStoreUnavailable)
 			h.requireNoPending()
 
 			want := engine.Health{ReadOnly: true, Reason: f.reason, Since: failedAt}
@@ -506,7 +507,7 @@ func TestStateVersionAdvancesOnCommitAndOnReload(t *testing.T) {
 	if committed.LogLines != h.lines() || committed.ConfigGeneration != h.gen || r.Version != committed {
 		t.Errorf("after a commit: Version %+v, Result.Version %+v, file %d lines", committed, r.Version, h.lines())
 	}
-	if err := h.e.SetConfig(loadConfig(t, nil), h.gen+1); err != nil {
+	if err := h.e.SetConfig(testutil.LoadConfig(t, nil), h.gen+1); err != nil {
 		t.Fatalf("SetConfig: %v", err)
 	}
 	reloaded := h.e.Version()
@@ -531,7 +532,7 @@ func TestSetConfigRejectsRemovedActiveProfile(t *testing.T) {
 	h.e.OnCommit(func(engine.Version) { calls++ })
 	version := h.e.Version()
 
-	withoutNormal := loadConfig(t, func(c map[string]any) {
+	withoutNormal := testutil.LoadConfig(t, func(c map[string]any) {
 		delete(c["profiles"].(map[string]any), "normal")
 		c["defaults"].(map[string]any)["profile"] = "on-call"
 	})
@@ -544,7 +545,7 @@ func TestSetConfigRejectsRemovedActiveProfile(t *testing.T) {
 		t.Errorf("a refused reload swapped the config (%v), moved the version (%+v) or ran OnCommit (%d)", snap.Config != h.cfg, snap.Version, calls)
 	}
 
-	withoutOnCall := loadConfig(t, func(c map[string]any) { delete(c["profiles"].(map[string]any), "on-call") })
+	withoutOnCall := testutil.LoadConfig(t, func(c map[string]any) { delete(c["profiles"].(map[string]any), "on-call") })
 	if err := h.e.SetConfig(withoutOnCall, h.gen+2); err != nil {
 		t.Fatalf("removing a profile that is not active: %v", err)
 	}
@@ -756,7 +757,7 @@ func TestOnlyTheEngineWritesTheStoreAndTheModel(t *testing.T) {
 		h.injectOnLog(storefault.OpWrite)
 		h.clock.Set(local(9, 5))
 		_, err := h.try(command.CompleteTask{TaskID: taskOf(7, "plan-day")})
-		rejectionOf(t, err, command.ReasonStoreUnavailable)
+		testutil.RejectionOf(t, err, command.ReasonStoreUnavailable)
 		after := h.e.Snapshot()
 		if !reflect.DeepEqual(after.Model.Domain(), before.Model.Domain()) || h.e.Version() != before.Version {
 			t.Error("a failed append moved the model or the version")
@@ -775,7 +776,7 @@ func TestOnlyTheEngineWritesTheStoreAndTheModel(t *testing.T) {
 			r, err := h.try(c)
 			switch {
 			case tc.want != "":
-				rejectionOf(t, err, tc.want)
+				testutil.RejectionOf(t, err, tc.want)
 			case err != nil:
 				t.Errorf("%T: %v, want it to commit", c, err)
 			case !r.Changed || r.Version != h.e.Version():
@@ -796,7 +797,7 @@ func TestReadOnlyRefusesANewIdLessNoOp(t *testing.T) {
 	h.injectOnLog(storefault.OpSync)
 	h.clock.Set(local(9, 20))
 	_, err := h.try(command.AnnotateCycle{CycleID: c, Note: "done"})
-	rejectionOf(t, err, command.ReasonStoreUnavailable)
+	testutil.RejectionOf(t, err, command.ReasonStoreUnavailable)
 
 	// A stop of the stopped cycle would be a no-op, but the gate comes first.
 	r := h.reject(command.StopCycle{CycleID: c}, command.ReasonStoreUnavailable)
@@ -816,7 +817,7 @@ func TestAppendFsyncFailedRequestGetsRetryGuidance(t *testing.T) {
 			c.ID = clientID()
 		}
 		_, err := h.try(c)
-		r := rejectionOf(t, err, command.ReasonStoreUnavailable)
+		r := testutil.RejectionOf(t, err, command.ReasonStoreUnavailable)
 		want := readOnlySentence(store.ReasonAppendSync) + ". " + unknownReadOnly
 		if r.Message != want {
 			t.Errorf("with an id %v: message %q, want %q", withID, r.Message, want)
@@ -886,7 +887,7 @@ func TestEnteringReadOnlyFiresHealthChange(t *testing.T) {
 			h.clock.Set(local(9, 5))
 			f.inject(h)
 			_, err := h.try(command.SkipTask{TaskID: taskOf(7, "post-plan"), Reason: "not today"})
-			rejectionOf(t, err, command.ReasonStoreUnavailable)
+			testutil.RejectionOf(t, err, command.ReasonStoreUnavailable)
 			want := engine.Health{ReadOnly: true, Reason: f.reason, Since: local(9, 5)}
 			if !slices.Equal(seen, []engine.Health{want}) {
 				t.Errorf("OnHealthChange saw %+v, want once %+v", seen, want)
@@ -935,7 +936,7 @@ func TestDoErrorContract(t *testing.T) {
 		h.bootstrap()
 		h.injectOnLog(storefault.OpSync)
 		_, err := h.try(command.CompleteTask{TaskID: planDay})
-		rejectionOf(t, err, command.ReasonStoreUnavailable)
+		testutil.RejectionOf(t, err, command.ReasonStoreUnavailable)
 		r := h.reject(command.StartCycle{Type: deepWork}, command.ReasonStoreUnavailable)
 		if r.Message != readOnlySentence(store.ReasonAppendSync) {
 			t.Errorf("message %q", r.Message)
@@ -949,7 +950,7 @@ func TestDoErrorContract(t *testing.T) {
 		c := command.CompleteTask{ID: id, TaskID: planDay}
 		h.clock.Set(local(9, 5))
 		_, err := h.try(c)
-		r := rejectionOf(t, err, command.ReasonStoreUnavailable)
+		r := testutil.RejectionOf(t, err, command.ReasonStoreUnavailable)
 		if want := readOnlySentence(store.ReasonAdopt) + ". " + storedReadOnly; r.Message != want {
 			t.Errorf("message %q, want %q", r.Message, want)
 		}
@@ -1052,7 +1053,7 @@ func TestScriptedDayThroughEngine(t *testing.T) {
 	if got := h.task(summary).Status; got != projection.Missed {
 		t.Fatalf("after the rollover end-of-day-summary is %s, want missed", got)
 	}
-	commit(localOn(8, 9, 5), command.CompleteTask{ID: clientID(), TaskID: summary, EffectiveAt: ptr(local(16, 0))})
+	commit(localOn(8, 9, 5), command.CompleteTask{ID: clientID(), TaskID: summary, EffectiveAt: testutil.Ptr(local(16, 0))})
 
 	now := localOn(8, 9, 10)
 	if got := h.cycle(deep).Elapsed(now); got != 187*time.Minute {
@@ -1106,7 +1107,7 @@ func TestWriteRollbackFailureMessageIsExact(t *testing.T) {
 			h.clock.Set(local(9, 5))
 			f.inject(h)
 			_, err := h.try(command.CompleteTask{ID: clientID(), TaskID: taskOf(7, "plan-day")})
-			r := rejectionOf(t, err, command.ReasonStoreUnavailable)
+			r := testutil.RejectionOf(t, err, command.ReasonStoreUnavailable)
 			h.requireNoPending()
 			if want := readOnlySentence(f.reason) + ". " + unknownReadOnly; r.Message != want {
 				t.Errorf("message %q, want %q", r.Message, want)

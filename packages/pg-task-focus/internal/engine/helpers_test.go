@@ -4,9 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/binary"
-	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,6 +22,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/projection"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/store/storefault"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/testutil"
 )
 
 // The engine tests run a real store in a temporary directory, through the
@@ -32,9 +30,8 @@ import (
 // goes through Engine.Do, so the tests see what a daemon would.
 
 const (
-	configFixture = "../../testdata/config/valid.json"
-	newYork       = "America/New_York"
-	logName       = "events.jsonl"
+	newYork = "America/New_York"
+	logName = "events.jsonl"
 
 	deepWork      = "deep-work"
 	notifications = "notifications"
@@ -61,49 +58,17 @@ func localOn(d, h, m int) time.Time {
 // local is the instant of a wall-clock time in New York on 2026-10-07.
 func local(h, m int) time.Time { return localOn(7, h, m) }
 
-func ptr[T any](v T) *T { return &v }
-
 // taskOf is the id of the daily task def of day d.
 func taskOf(d int, def string) event.TaskID { return event.NewTaskID(due.Daily, dayOf(d), def) }
 
 // idOf is the nth id of a family: the ids clients send ('C') and the ids the
 // engine draws ('N'). Ids of different families never collide.
-func idOf(family byte, n uint32) event.ID {
-	var entropy [10]byte
-	entropy[0] = family
-	binary.BigEndian.PutUint32(entropy[6:], n)
-	return event.NewID(local(0, 0), bytes.NewReader(entropy[:]))
-}
+func idOf(family byte, n uint32) event.ID { return testutil.IDOf(local(0, 0), family, n) }
 
 // clientIDs hands out fresh client ids.
 var clientIDs atomic.Uint32
 
 func clientID() event.ID { return idOf('C', clientIDs.Add(1)) }
-
-// loadConfig is the example configuration after edit has changed its generic
-// tree; a nil edit leaves it as it is.
-func loadConfig(t *testing.T, edit func(c map[string]any)) *config.Config {
-	t.Helper()
-	raw, err := os.ReadFile(configFixture)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if edit != nil {
-		var c map[string]any
-		if err := json.Unmarshal(raw, &c); err != nil {
-			t.Fatal(err)
-		}
-		edit(c)
-		if raw, err = json.Marshal(c); err != nil {
-			t.Fatal(err)
-		}
-	}
-	cfg, err := config.Parse(raw)
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-	return cfg
-}
 
 // fakeObserver records every call.
 type fakeObserver struct {
@@ -190,7 +155,7 @@ type harness struct {
 func newHarness(t *testing.T, cfg *config.Config) *harness {
 	t.Helper()
 	if cfg == nil {
-		cfg = loadConfig(t, nil)
+		cfg = testutil.LoadConfig(t, nil)
 	}
 	h := &harness{t: t, dir: t.TempDir(), clock: clock.NewFake(local(8, 50)), cfg: cfg, gen: 1000}
 	h.open()
@@ -311,25 +276,11 @@ func (h *harness) reject(c command.Command, want command.Reason) command.Rejecti
 	h.t.Helper()
 	before := h.logBytes()
 	_, err := h.try(c)
-	r := rejectionOf(h.t, err, want)
+	r := testutil.RejectionOf(h.t, err, want)
 	if !bytes.Equal(before, h.logBytes()) {
 		h.t.Errorf("a refused %T changed the log", c)
 	}
 	return r
-}
-
-// rejectionOf is the rejection err MUST be, with the reason want. It returns
-// the rejection by value, so the caller may ignore it.
-func rejectionOf(t *testing.T, err error, want command.Reason) command.Rejection {
-	t.Helper()
-	var r *command.Rejection
-	if !errors.As(err, &r) {
-		t.Fatalf("error %v (%T) is not a *command.Rejection", err, err)
-	}
-	if r.Reason != want {
-		t.Fatalf("Reason = %q (%s), want %q", r.Reason, r.Message, want)
-	}
-	return *r
 }
 
 // bootstrapCmd sets up the day 2026-10-07, the week 2026-10-05 to 2026-10-11
@@ -337,8 +288,8 @@ func rejectionOf(t *testing.T, err error, want command.Reason) command.Rejection
 func bootstrapCmd(id event.ID) command.ChangePeriods {
 	return command.ChangePeriods{ID: id, Changes: []command.PeriodChange{
 		{Kind: projection.Day, Start: dayOf(7), TZ: newYork},
-		{Kind: projection.Week, Start: dayOf(5), End: ptr(dayOf(11)), TZ: newYork},
-		{Kind: projection.Sprint, Start: dayOf(5), End: ptr(dayOf(18)), TZ: newYork},
+		{Kind: projection.Week, Start: dayOf(5), End: testutil.Ptr(dayOf(11)), TZ: newYork},
+		{Kind: projection.Sprint, Start: dayOf(5), End: testutil.Ptr(dayOf(18)), TZ: newYork},
 	}}
 }
 

@@ -8,6 +8,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/command"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/event"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/projection"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/testutil"
 )
 
 // taskStatus is the status of a task in a model.
@@ -132,7 +133,7 @@ func TestCompleteMissedTaskAllowed(t *testing.T) {
 		},
 		func(bt event.ID) event.Payload { return event.TaskMissed{TaskID: postPlan, Batch: bt} },
 	)
-	for name, eff := range map[string]*time.Time{"now": nil, "late on the day it was due": ptr(at(600))} {
+	for name, eff := range map[string]*time.Time{"now": nil, "late on the day it was due": testutil.Ptr(at(600))} {
 		t.Run(name, func(t *testing.T) {
 			env := envOf(t, b, at(1500))
 			if got := taskStatus(t, env.Model, postPlan); got != projection.Missed {
@@ -180,7 +181,7 @@ func TestCompleteWithdrawnTask(t *testing.T) {
 	t.Run("a completion effective before the withdrawal is accepted", func(t *testing.T) {
 		b := bootstrapped(t)
 		withdraw(b, 10)
-		p := mustPlan(t, envOf(t, b, at(20)), command.CompleteTask{TaskID: postPlan, EffectiveAt: ptr(at(5))})
+		p := mustPlan(t, envOf(t, b, at(20)), command.CompleteTask{TaskID: postPlan, EffectiveAt: testutil.Ptr(at(5))})
 		if got := taskStatus(t, p.Candidate, postPlan); got != projection.Completed {
 			t.Errorf("status = %s, want completed", got)
 		}
@@ -198,7 +199,7 @@ func TestCompleteWithdrawnTask(t *testing.T) {
 		first := withdraw(b, 10)
 		reinstate(b, 15)
 		withdraw(b, 25)
-		r := mustReject(t, envOf(t, b, at(30)), command.CompleteTask{TaskID: postPlan, EffectiveAt: ptr(at(12))}, command.ReasonTaskWithdrawn)
+		r := mustReject(t, envOf(t, b, at(30)), command.CompleteTask{TaskID: postPlan, EffectiveAt: testutil.Ptr(at(12))}, command.ReasonTaskWithdrawn)
 		if !sameIDs(r.Events, first) {
 			t.Errorf("Events = %v, want the first withdrawal %s", r.Events, first)
 		}
@@ -206,7 +207,7 @@ func TestCompleteWithdrawnTask(t *testing.T) {
 }
 
 func TestCompleteBeforeMaterialization(t *testing.T) {
-	r := mustReject(t, envOf(t, bootstrapped(t), at(10)), command.CompleteTask{TaskID: postPlan, EffectiveAt: ptr(at(-90))}, command.ReasonResolutionBeforeMaterialization)
+	r := mustReject(t, envOf(t, bootstrapped(t), at(10)), command.CompleteTask{TaskID: postPlan, EffectiveAt: testutil.Ptr(at(-90))}, command.ReasonResolutionBeforeMaterialization)
 	if r.Reason.Status() != 422 {
 		t.Errorf("status %d, want 422", r.Reason.Status())
 	}
@@ -231,5 +232,5 @@ func TestTaskCommandWithClockBehindTheTaskIsClockBehindLog(t *testing.T) {
 			t.Errorf("Message %q does not mention %q", r.Message, want)
 		}
 	}
-	mustReject(t, envOf(t, b, at(-70)), command.CompleteTask{TaskID: postPlan, EffectiveAt: ptr(at(-70))}, command.ReasonResolutionBeforeMaterialization)
+	mustReject(t, envOf(t, b, at(-70)), command.CompleteTask{TaskID: postPlan, EffectiveAt: testutil.Ptr(at(-70))}, command.ReasonResolutionBeforeMaterialization)
 }

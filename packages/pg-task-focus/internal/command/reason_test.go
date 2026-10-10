@@ -10,6 +10,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/command"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/event"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/projection"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/testutil"
 )
 
 func TestRejectionStatusTable(t *testing.T) {
@@ -146,13 +147,13 @@ func TestPresentStateAndReplayAgreeOnCodes(t *testing.T) {
 		},
 		{
 			name: "a backdated double completion lists the instants in event order", build: completedAt10, now: at(20),
-			cmd:   command.CompleteTask{TaskID: postPlan, EffectiveAt: ptr(at(5))},
+			cmd:   command.CompleteTask{TaskID: postPlan, EffectiveAt: testutil.Ptr(at(5))},
 			event: event.TaskCompleted{TaskID: postPlan}, at: at(5),
 			want: command.ReasonTaskAlreadyResolved,
 		},
 		{
 			name: "a double resolution at the same instant", build: completedAt10, now: at(20),
-			cmd:   command.CompleteTask{TaskID: postPlan, EffectiveAt: ptr(at(10))},
+			cmd:   command.CompleteTask{TaskID: postPlan, EffectiveAt: testutil.Ptr(at(10))},
 			event: event.TaskCompleted{TaskID: postPlan}, at: at(10),
 			want: command.ReasonTaskAlreadyResolved,
 		},
@@ -170,7 +171,7 @@ func TestPresentStateAndReplayAgreeOnCodes(t *testing.T) {
 		},
 		{
 			name: "a completion at the instant of the withdrawal", build: withdrawnAt10, now: at(20),
-			cmd:   command.CompleteTask{TaskID: postPlan, EffectiveAt: ptr(at(10))},
+			cmd:   command.CompleteTask{TaskID: postPlan, EffectiveAt: testutil.Ptr(at(10))},
 			event: event.TaskCompleted{TaskID: postPlan}, at: at(10),
 			want: command.ReasonTaskWithdrawn,
 		},

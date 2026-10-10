@@ -12,6 +12,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/due"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/event"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/projection"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/testutil"
 )
 
 func TestReqHashExcludesIDDryRunAndExpectedVersionAndDefaultedFields(t *testing.T) {
@@ -45,7 +46,7 @@ func TestReqHashExcludesIDDryRunAndExpectedVersionAndDefaultedFields(t *testing.
 				if hashOf(t, build("", false, nil, &eff)) == bare {
 					t.Error("a supplied effective_at does not enter the hash")
 				}
-				if hashOf(t, build("", false, nil, &eff)) == hashOf(t, build("", false, nil, ptr(at(6)))) {
+				if hashOf(t, build("", false, nil, &eff)) == hashOf(t, build("", false, nil, testutil.Ptr(at(6)))) {
 					t.Error("two effective_at values hash the same")
 				}
 			}
@@ -216,7 +217,7 @@ func TestExpectedVersionStale(t *testing.T) {
 }
 
 func TestMatchesNoCivilDateReported(t *testing.T) {
-	cfg := loadConfig(t, func(c map[string]any) {
+	cfg := testutil.LoadConfig(t, func(c map[string]any) {
 		c["tasks"].(map[string]any)["capacity-check"].(map[string]any)["due"].(map[string]any)["day"] = 15
 	})
 	env := emptyEnv(t, cfg, at(-60))
@@ -377,7 +378,7 @@ func TestRolloverRejectedWhileACycleIsActive(t *testing.T) {
 		env := envOf(t, b, now)
 		roll := command.ChangePeriods{Changes: []command.PeriodChange{dayTo(day2)}, EffectiveAt: &backdated}
 		mustReject(t, env, roll, command.ReasonCycleActive)
-		stop := mustPlan(t, env, command.StopCycle{CycleID: cycleA, EffectiveAt: ptr(at(9 * 60))})
+		stop := mustPlan(t, env, command.StopCycle{CycleID: cycleA, EffectiveAt: testutil.Ptr(at(9 * 60))})
 		env = then(t, env, stop, now)
 		p := mustPlan(t, env, roll)
 		for _, e := range p.Events {
@@ -387,7 +388,7 @@ func TestRolloverRejectedWhileACycleIsActive(t *testing.T) {
 		}
 	})
 	t.Run("bootstrap is blocked the same way", func(t *testing.T) {
-		env := emptyEnv(t, loadConfig(t, nil), at(10))
+		env := emptyEnv(t, testutil.LoadConfig(t, nil), at(10))
 		env = extend(t, env, at(0), startOf(cycleA, deepWork))
 		r := mustReject(t, env, command.ChangePeriods{Changes: []command.PeriodChange{dayTo(day1)}}, command.ReasonCycleActive)
 		if !sameIDs(cycleIDsOf(r), cycleA) {

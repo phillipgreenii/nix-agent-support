@@ -9,6 +9,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/command"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/event"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/projection"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/testutil"
 )
 
 func TestStartCycleSnapshotsTitleAndMinutes(t *testing.T) {
@@ -83,7 +84,7 @@ func TestStartWhileRunningSetsInterruptsFromRunningAtEffectiveAt(t *testing.T) {
 		b := bootstrapped(t)
 		b.add(0, startOf(cycleA, deepWork))
 		b.add(30, stopOf(cycleA))
-		p := mustPlan(t, envOf(t, b, at(40)), command.StartCycle{Type: review, EffectiveAt: ptr(at(10))})
+		p := mustPlan(t, envOf(t, b, at(40)), command.StartCycle{Type: review, EffectiveAt: testutil.Ptr(at(10))})
 		if got := only(t, p).Payload.(event.CycleStarted).Interrupts; got != cycleA {
 			t.Errorf("interrupts = %q, want %s, the cycle running at the start's instant", got, cycleA)
 		}
@@ -221,22 +222,22 @@ func TestRepeatedStateCommandsAreJudgedAtTheEffectiveInstant(t *testing.T) {
 		return b
 	}
 	t.Run("a pause when it was already paused is a no-op although it runs now", func(t *testing.T) {
-		mustNoOp(t, envOf(t, base(t), at(100)), command.PauseCycle{CycleID: cycleA, EffectiveAt: ptr(at(15))})
+		mustNoOp(t, envOf(t, base(t), at(100)), command.PauseCycle{CycleID: cycleA, EffectiveAt: testutil.Ptr(at(15))})
 	})
 	t.Run("a pause when it was running, with a later pause recorded, overlaps", func(t *testing.T) {
 		b := base(t)
 		b.add(30, pauseOf(cycleA))
-		mustReject(t, envOf(t, b, at(100)), command.PauseCycle{CycleID: cycleA, EffectiveAt: ptr(at(25))}, command.ReasonCycleSegmentsOverlap)
+		mustReject(t, envOf(t, b, at(100)), command.PauseCycle{CycleID: cycleA, EffectiveAt: testutil.Ptr(at(25))}, command.ReasonCycleSegmentsOverlap)
 	})
 	t.Run("a stop later than the cycle's stop is a no-op", func(t *testing.T) {
 		b := base(t)
 		b.add(60, stopOf(cycleA))
-		mustNoOp(t, envOf(t, b, at(100)), command.StopCycle{CycleID: cycleA, EffectiveAt: ptr(at(70))})
+		mustNoOp(t, envOf(t, b, at(100)), command.StopCycle{CycleID: cycleA, EffectiveAt: testutil.Ptr(at(70))})
 	})
 	t.Run("a stop earlier than the cycle's stop is cycle_stopped, pointing at that stop", func(t *testing.T) {
 		b := base(t)
 		stopped := b.add(60, stopOf(cycleA))
-		r := mustReject(t, envOf(t, b, at(100)), command.StopCycle{CycleID: cycleA, EffectiveAt: ptr(at(50))}, command.ReasonCycleStopped)
+		r := mustReject(t, envOf(t, b, at(100)), command.StopCycle{CycleID: cycleA, EffectiveAt: testutil.Ptr(at(50))}, command.ReasonCycleStopped)
 		if !strings.Contains(r.Message, "correct") || !strings.Contains(r.Message, string(stopped)) {
 			t.Errorf("Message %q does not say to correct the time of stop %s", r.Message, stopped)
 		}
@@ -245,10 +246,10 @@ func TestRepeatedStateCommandsAreJudgedAtTheEffectiveInstant(t *testing.T) {
 		}
 	})
 	t.Run("a stop at the instant of the last resume is an empty segment", func(t *testing.T) {
-		mustReject(t, envOf(t, base(t), at(100)), command.StopCycle{CycleID: cycleA, EffectiveAt: ptr(at(20))}, command.ReasonEmptyRunningSegment)
+		mustReject(t, envOf(t, base(t), at(100)), command.StopCycle{CycleID: cycleA, EffectiveAt: testutil.Ptr(at(20))}, command.ReasonEmptyRunningSegment)
 	})
 	t.Run("a stop at the instant of the first start", func(t *testing.T) {
-		mustReject(t, envOf(t, base(t), at(100)), command.StopCycle{CycleID: cycleA, EffectiveAt: ptr(at(0))}, command.ReasonStopNotAfterStart)
+		mustReject(t, envOf(t, base(t), at(100)), command.StopCycle{CycleID: cycleA, EffectiveAt: testutil.Ptr(at(0))}, command.ReasonStopNotAfterStart)
 	})
 	t.Run("a no-op stores nothing even with an id", func(t *testing.T) {
 		p := mustPlan(t, envOf(t, base(t), at(100)), command.ResumeCycle{ID: clientID, CycleID: cycleA})
@@ -266,7 +267,7 @@ func TestStatusAtBoundariesDecideNoOps(t *testing.T) {
 	b.add(30, resumeOf(cycleA))
 	b.add(40, stopOf(cycleA))
 	env := envOf(t, b, at(100))
-	eff := func(n int) *time.Time { return ptr(at(n)) }
+	eff := func(n int) *time.Time { return testutil.Ptr(at(n)) }
 
 	t.Run("before the start nothing is a no-op", func(t *testing.T) {
 		mustReject(t, env, command.PauseCycle{CycleID: cycleA, EffectiveAt: eff(5)}, command.ReasonCycleEventBeforeStart)
@@ -349,7 +350,7 @@ func TestOmittedCycleIDForPauseBoostAndStop(t *testing.T) {
 				t.Errorf("%s targets %s, want the running %s", c.Name(), got, cycleB)
 			}
 		}
-		if got := targetOf(t, mustPlan(t, env, command.BoostCycle{Minutes: 5, EffectiveAt: ptr(at(5))})); got != cycleA {
+		if got := targetOf(t, mustPlan(t, env, command.BoostCycle{Minutes: 5, EffectiveAt: testutil.Ptr(at(5))})); got != cycleA {
 			t.Errorf("a backdated boost targets %s, want %s, the cycle running then", got, cycleA)
 		}
 	})
@@ -359,7 +360,7 @@ func TestOmittedCycleIDForPauseBoostAndStop(t *testing.T) {
 		b.add(0, startOf(cycleA, deepWork))
 		b.add(20, stopOf(cycleA))
 		b.add(30, startOf(cycleB, review))
-		if got := targetOf(t, mustPlan(t, envOf(t, b, at(40)), command.PauseCycle{EffectiveAt: ptr(at(10))})); got != cycleA {
+		if got := targetOf(t, mustPlan(t, envOf(t, b, at(40)), command.PauseCycle{EffectiveAt: testutil.Ptr(at(10))})); got != cycleA {
 			t.Errorf("targets %s, want %s", got, cycleA)
 		}
 	})
@@ -609,13 +610,13 @@ func TestSwitchRejections(t *testing.T) {
 		mustReject(t, envOf(t, b, at(30)), command.SwitchCycle{To: cycleB}, command.ReasonCycleStopped)
 	})
 	t.Run("an instant not after the focus's last start", func(t *testing.T) {
-		mustReject(t, envOf(t, interrupted(t), at(30)), command.SwitchCycle{To: cycleB, EffectiveAt: ptr(at(10))}, command.ReasonEmptyRunningSegment)
+		mustReject(t, envOf(t, interrupted(t), at(30)), command.SwitchCycle{To: cycleB, EffectiveAt: testutil.Ptr(at(10))}, command.ReasonEmptyRunningSegment)
 	})
 	t.Run("an instant inside a pause the target already ends later", func(t *testing.T) {
 		b := interrupted(t)
 		b.switchTo(20, cycleA, cycleB)
 		b.switchTo(25, cycleB, cycleA)
-		mustReject(t, envOf(t, b, at(30)), command.SwitchCycle{To: cycleB, EffectiveAt: ptr(at(15))}, command.ReasonCycleSegmentsOverlap)
+		mustReject(t, envOf(t, b, at(30)), command.SwitchCycle{To: cycleB, EffectiveAt: testutil.Ptr(at(15))}, command.ReasonCycleSegmentsOverlap)
 	})
 }
 
@@ -655,7 +656,7 @@ func TestSwitchBackdatedAfterTheFocusWasStopped(t *testing.T) {
 	b.add(60, startOf(cycleB, review))
 	b.add(120, interruptOf(cycleA, cycleB, deepWork))
 	b.add(150, stopOf(cycleA))
-	p := mustPlan(t, envOf(t, b, at(160)), command.SwitchCycle{To: cycleB, EffectiveAt: ptr(at(135))})
+	p := mustPlan(t, envOf(t, b, at(160)), command.SwitchCycle{To: cycleB, EffectiveAt: testutil.Ptr(at(135))})
 	if got := typesOf(p); len(got) != 3 {
 		t.Fatalf("events %v", got)
 	}
@@ -670,7 +671,7 @@ func TestSwitchBackdatedAfterTheFocusWasStopped(t *testing.T) {
 func TestSwitchToACycleWithALaterAnnotationIsValid(t *testing.T) {
 	b := interrupted(t)
 	b.add(20, event.CycleAnnotated{CycleID: cycleB, Note: "later note"})
-	p := mustPlan(t, envOf(t, b, at(30)), command.SwitchCycle{To: cycleB, EffectiveAt: ptr(at(15))})
+	p := mustPlan(t, envOf(t, b, at(30)), command.SwitchCycle{To: cycleB, EffectiveAt: testutil.Ptr(at(15))})
 	if got := status(t, p.Candidate, cycleB, at(30)); got != projection.Running {
 		t.Errorf("B = %s, want running", got)
 	}
@@ -712,7 +713,7 @@ func TestPauseWithClockBehindLastEventIsClockBehindLog(t *testing.T) {
 	}
 
 	t.Run("a supplied effective_at is judged by replay alone", func(t *testing.T) {
-		mustPlan(t, env, command.PauseCycle{CycleID: cycleA, EffectiveAt: ptr(at(20))})
+		mustPlan(t, env, command.PauseCycle{CycleID: cycleA, EffectiveAt: testutil.Ptr(at(20))})
 	})
 	t.Run("a no-op is decided before the clock", func(t *testing.T) {
 		b := bootstrapped(t)
@@ -773,5 +774,5 @@ func TestStartWithTheClockBehindTheFocusIsClockBehindLog(t *testing.T) {
 			t.Errorf("Message %q does not mention %q", r.Message, want)
 		}
 	}
-	mustReject(t, env, command.StartCycle{Type: review, EffectiveAt: ptr(at(135))}, command.ReasonAnotherCycleRunning)
+	mustReject(t, env, command.StartCycle{Type: review, EffectiveAt: testutil.Ptr(at(135))}, command.ReasonAnotherCycleRunning)
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/projection"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/store/storefault"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/testutil"
 )
 
 // sameResult checks that a retry got the original result, marked as a
@@ -107,7 +108,7 @@ func TestIdConflictOnDifferentPayload(t *testing.T) {
 		id := clientID()
 		h.at(local(9, 5), command.CompleteTask{ID: id, TaskID: planDay})
 		h.reject(command.CompleteTask{ID: id, TaskID: postPlan}, command.ReasonIDConflict)
-		h.reject(command.CompleteTask{ID: id, TaskID: planDay, EffectiveAt: ptr(local(9, 0))}, command.ReasonIDConflict)
+		h.reject(command.CompleteTask{ID: id, TaskID: planDay, EffectiveAt: testutil.Ptr(local(9, 0))}, command.ReasonIDConflict)
 		h.reopen()
 		h.reject(command.CompleteTask{ID: id, TaskID: postPlan}, command.ReasonIDConflict)
 	})
@@ -198,7 +199,7 @@ func TestStoreUnavailableThenRetrySucceedsOnce(t *testing.T) {
 		h.injectOnLog(storefault.OpSync, storefault.OpTruncate) // the fsync fails and the line cannot be taken out
 		h.clock.Set(local(9, 5))
 		_, err := h.try(c)
-		r := rejectionOf(t, err, command.ReasonStoreUnavailable)
+		r := testutil.RejectionOf(t, err, command.ReasonStoreUnavailable)
 		if !hasPrefixAndGuidance(r.Message, store.ReasonAppendSync, unknownReadOnly) {
 			t.Errorf("message %q, want the READ-ONLY sentence and the retry guidance", r.Message)
 		}
@@ -207,7 +208,7 @@ func TestStoreUnavailableThenRetrySucceedsOnce(t *testing.T) {
 		}
 		// In this process the store is read-only and the request was never recorded.
 		_, err = h.try(c)
-		rejectionOf(t, err, command.ReasonStoreUnavailable)
+		testutil.RejectionOf(t, err, command.ReasonStoreUnavailable)
 
 		h.reopen()
 		retry := h.do(c)
@@ -296,7 +297,7 @@ func TestNoOpIdConflictOnDifferentPayload(t *testing.T) {
 	a := h.start(local(9, 0), deepWork)
 	id := clientID()
 	h.at(local(9, 10), command.ResumeCycle{ID: id, CycleID: a})
-	h.reject(command.ResumeCycle{ID: id, CycleID: a, EffectiveAt: ptr(local(9, 5))}, command.ReasonIDConflict)
+	h.reject(command.ResumeCycle{ID: id, CycleID: a, EffectiveAt: testutil.Ptr(local(9, 5))}, command.ReasonIDConflict)
 	h.reject(command.StopCycle{ID: id, CycleID: a}, command.ReasonIDConflict)
 }
 
@@ -312,7 +313,7 @@ func TestNoOpCacheIsBoundedAndLeastRecentlyUsed(t *testing.T) {
 	pause := func(i int) command.PauseCycle { return command.PauseCycle{ID: ids[i], CycleID: a} }
 	other := func(i int) command.PauseCycle {
 		c := pause(i)
-		c.EffectiveAt = ptr(local(9, 15))
+		c.EffectiveAt = testutil.Ptr(local(9, 15))
 		return c
 	}
 	for i := range size {
@@ -386,7 +387,7 @@ func TestRetryOfADurableRequestReturnsTheOriginalWhileReadOnly(t *testing.T) {
 	h.injectOnLog(storefault.OpSync)
 	h.clock.Set(local(9, 20))
 	_, err := h.try(command.SkipTask{TaskID: taskOf(7, "post-plan"), Reason: "not today"})
-	rejectionOf(t, err, command.ReasonStoreUnavailable)
+	testutil.RejectionOf(t, err, command.ReasonStoreUnavailable)
 	if !h.e.Health().ReadOnly {
 		t.Fatal("the store is not read-only")
 	}

@@ -21,6 +21,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/event"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/projection"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/store"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/testutil"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/view"
 )
 
@@ -62,7 +63,7 @@ func scripted(script func(g *goldenRun)) func(t *testing.T) []byte {
 func scriptedWith(edit func(c map[string]any), script func(g *goldenRun)) func(t *testing.T) []byte {
 	return func(t *testing.T) []byte {
 		t.Helper()
-		g := newGoldenRun(t, loadConfig(t, edit))
+		g := newGoldenRun(t, testutil.LoadConfig(t, edit))
 		script(g)
 		return g.logBytes()
 	}
@@ -162,11 +163,11 @@ func dayChange(d civil.Date) command.PeriodChange {
 }
 
 func weekChange(start civil.Date) command.PeriodChange {
-	return command.PeriodChange{Kind: projection.Week, Start: start, End: ptr(start.AddDays(6)), TZ: newYork}
+	return command.PeriodChange{Kind: projection.Week, Start: start, End: testutil.Ptr(start.AddDays(6)), TZ: newYork}
 }
 
 func sprintChange(start civil.Date) command.PeriodChange {
-	return command.PeriodChange{Kind: projection.Sprint, Start: start, End: ptr(start.AddDays(13)), TZ: newYork}
+	return command.PeriodChange{Kind: projection.Sprint, Start: start, End: testutil.Ptr(start.AddDays(13)), TZ: newYork}
 }
 
 func daily(d civil.Date, def string) event.TaskID { return event.NewTaskID(due.Daily, d, def) }
@@ -458,7 +459,7 @@ func stateOf(t *testing.T, log []byte, now time.Time) []byte {
 	if err := os.WriteFile(filepath.Join(dir, logName), log, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	e, err := engine.Open(engine.Options{Dir: dir, Config: loadConfig(t, nil), ConfigGeneration: 1, Clock: clock.NewFake(now)})
+	e, err := engine.Open(engine.Options{Dir: dir, Config: testutil.LoadConfig(t, nil), ConfigGeneration: 1, Clock: clock.NewFake(now)})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

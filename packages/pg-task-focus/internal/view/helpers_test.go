@@ -3,13 +3,10 @@ package view_test
 import (
 	"bytes"
 	"encoding/binary"
-	"encoding/json"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/civil"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/due"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/event"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/projection"
@@ -20,8 +17,6 @@ import (
 // The tests build their logs from payload structs, pass every event through
 // the real encoder and decoder, and replay them, so a fixture cannot drift
 // from the codec. Configurations are the example fixture, edited in place.
-
-const configFixture = "../../testdata/config/valid.json"
 
 const (
 	newYork = "America/New_York"
@@ -169,31 +164,6 @@ func bootstrapped(t *testing.T) *logb {
 	b := newLog(t)
 	b.batch(t0, profileOf("normal"), dayIn(day1, newYork))
 	return b
-}
-
-// loadConfig is the example configuration after edit has changed its generic
-// tree; a nil edit leaves it as it is.
-func loadConfig(t *testing.T, edit func(c map[string]any)) *config.Config {
-	t.Helper()
-	raw, err := os.ReadFile(configFixture)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if edit != nil {
-		var c map[string]any
-		if err := json.Unmarshal(raw, &c); err != nil {
-			t.Fatal(err)
-		}
-		edit(c)
-		if raw, err = json.Marshal(c); err != nil {
-			t.Fatal(err)
-		}
-	}
-	cfg, err := config.Parse(raw)
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-	return cfg
 }
 
 // focusOf is the focus of the state, or the zero view when there is none, so a

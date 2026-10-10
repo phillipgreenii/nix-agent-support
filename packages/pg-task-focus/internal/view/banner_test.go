@@ -6,6 +6,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/civil"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/projection"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/testutil"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/view"
 )
 
@@ -34,7 +35,7 @@ func TestEndedPeriodBannerStrings(t *testing.T) {
 		b.batch(t0, profileOf("normal"), dayIn(day1, newYork),
 			periodOf("week", civil.Date{Year: 2026, Month: time.October, Day: 5}, &weekEnd, newYork),
 			periodOf("sprint", civil.Date{Year: 2026, Month: time.October, Day: 5}, &sprintEnd, newYork))
-		m, cfg := b.model(), loadConfig(t, nil)
+		m, cfg := b.model(), testutil.LoadConfig(t, nil)
 
 		// 2026-10-12 is the day after the week ended and inside the sprint.
 		st := view.Build(m, cfg, time.Date(2026, time.October, 12, 15, 0, 0, 0, time.UTC))

@@ -9,6 +9,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/due"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/event"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/projection"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/testutil"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/view"
 )
 
@@ -54,7 +55,7 @@ func TestTaskOrdering(t *testing.T) {
 	}
 
 	t.Run("by kind, then group rank, then due time, unlisted groups last", func(t *testing.T) {
-		st := view.Build(build(t).model(), loadConfig(t, nil), at(20))
+		st := view.Build(build(t).model(), testutil.LoadConfig(t, nil), at(20))
 		want := []string{
 			"early-start", "later-start", "midday", "closing", "no-group", "stray", // day: listed groups by rank, then the unlisted and the empty group by due time
 			"weekly-early", "weekly-late", // week
@@ -81,7 +82,7 @@ func TestTaskOrdering(t *testing.T) {
 	})
 
 	t.Run("the order follows the group_order of the configuration now", func(t *testing.T) {
-		cfg := loadConfig(t, func(c map[string]any) {
+		cfg := testutil.LoadConfig(t, func(c map[string]any) {
 			c["group_order"] = []any{"End of day", "Start of day"}
 		})
 		st := view.Build(build(t).model(), cfg, at(20))
@@ -97,7 +98,7 @@ func TestTaskOrdering(t *testing.T) {
 			taskOf("second-listed-first", due.Daily, day1, "Start of day", at(60)),
 			taskOf("first-listed-second", due.Daily, day1, "Start of day", at(60)),
 		)
-		st := view.Build(b.model(), loadConfig(t, nil), at(20))
+		st := view.Build(b.model(), testutil.LoadConfig(t, nil), at(20))
 		if got, want := taskTitles(st), []string{"second-listed-first", "first-listed-second"}; !slices.Equal(got, want) {
 			t.Errorf("task order = %v, want %v", got, want)
 		}
@@ -113,14 +114,14 @@ func TestTasksListOnlyTheCurrentPeriodOfEachKind(t *testing.T) {
 		dayIn(day2, newYork),
 		taskOf("plan", due.Daily, day2, "Start of day", at(1500)),
 	)
-	st := view.Build(b.model(), loadConfig(t, nil), at(1450))
+	st := view.Build(b.model(), testutil.LoadConfig(t, nil), at(1450))
 	if len(st.Tasks) != 1 || st.Tasks[0].Task.PeriodStart != day2 {
 		t.Errorf("Tasks = %v, want only the task of the current day: nothing is carried over", taskTitles(st))
 	}
 }
 
 func TestNextTiesBrokenByGroup(t *testing.T) {
-	cfg := loadConfig(t, nil)
+	cfg := testutil.LoadConfig(t, nil)
 
 	t.Run("the lower group rank wins a tie on the due time", func(t *testing.T) {
 		b := withWeek(
@@ -186,7 +187,7 @@ func TestNextIgnoresResolvedAndWithdrawn(t *testing.T) {
 		func(bt event.ID) event.Payload { return event.TaskMissed{TaskID: dailyID("missed"), Batch: bt} },
 		func(bt event.ID) event.Payload { return event.TaskWithdrawn{TaskID: dailyID("withdrawn"), Batch: bt} },
 	)
-	m, cfg := b.model(), loadConfig(t, nil)
+	m, cfg := b.model(), testutil.LoadConfig(t, nil)
 
 	st := view.Build(m, cfg, at(20))
 	if st.Next == nil || st.Next.Task.Definition != "open" {
@@ -216,7 +217,7 @@ func TestOverdueFlag(t *testing.T) {
 		taskOf("finished", due.Daily, day1, "Start of day", at(90)),
 	)
 	b.add(at(10), event.TaskCompleted{TaskID: dailyID("finished")})
-	m, cfg := b.model(), loadConfig(t, nil)
+	m, cfg := b.model(), testutil.LoadConfig(t, nil)
 
 	tests := []struct {
 		name        string

@@ -3,9 +3,7 @@ package alert_test
 import (
 	"bytes"
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
-	"os"
 	"reflect"
 	"slices"
 	"strings"
@@ -16,6 +14,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/event"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/projection"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/testutil"
 )
 
 // The tests build their logs from payload structs, pass every event through
@@ -27,8 +26,6 @@ import (
 // every 10 with the sound "Hero" and the default reminder sound "Tink";
 // notifications cycles are 25 minutes and take defaults.alert whole: "Glass",
 // then "Tink" every 5 minutes.
-
-const configFixture = "../../testdata/config/valid.json"
 
 const (
 	cycleA = event.CycleID("01J9ZZZZZZZZZZZZZZZZZZZZZA")
@@ -138,31 +135,6 @@ func (b *logb) commits() []time.Time {
 		}
 	}
 	return out
-}
-
-// loadConfig is the example configuration after edit has changed its generic
-// tree; a nil edit leaves it as it is.
-func loadConfig(t *testing.T, edit func(c map[string]any)) *config.Config {
-	t.Helper()
-	raw, err := os.ReadFile(configFixture)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if edit != nil {
-		var c map[string]any
-		if err := json.Unmarshal(raw, &c); err != nil {
-			t.Fatal(err)
-		}
-		edit(c)
-		if raw, err = json.Marshal(c); err != nil {
-			t.Fatal(err)
-		}
-	}
-	cfg, err := config.Parse(raw)
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-	return cfg
 }
 
 // withoutDeepWork removes the deep-work cycle type from the configuration.
@@ -297,7 +269,7 @@ func deepWorkLog(t *testing.T) *logb {
 }
 
 func TestNoAlertBeforeTimeUp(t *testing.T) {
-	b, cfg, s := notificationsLog(t), loadConfig(t, nil), alert.NewScheduler()
+	b, cfg, s := notificationsLog(t), testutil.LoadConfig(t, nil), alert.NewScheduler()
 	assertHeard(t, pollEveryMinute(s, b, cfg, hm(9, 0), hm(9, 24)))
 	if a := poll(s, b, cfg, hm(9, 25).Add(-time.Millisecond)); a != nil {
 		t.Errorf("Poll a millisecond before time-up = %+v, want none", *a)
@@ -308,7 +280,7 @@ func TestNoAlertBeforeTimeUp(t *testing.T) {
 }
 
 func TestExpiryOnceAtTimeUp(t *testing.T) {
-	b, cfg, s := notificationsLog(t), loadConfig(t, nil), alert.NewScheduler()
+	b, cfg, s := notificationsLog(t), testutil.LoadConfig(t, nil), alert.NewScheduler()
 	assertHeard(t, pollEveryMinute(s, b, cfg, hm(9, 0), hm(9, 24)))
 
 	c := mustCycle(t, b, hm(9, 25), cycleA)
@@ -366,7 +338,7 @@ func TestRemindersEveryRepeatMinutesOfRunningTime(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b := tt.log(t)
-			got := pollEveryMinute(alert.NewScheduler(), b, loadConfig(t, nil), hm(9, 0), tt.until)
+			got := pollEveryMinute(alert.NewScheduler(), b, testutil.LoadConfig(t, nil), hm(9, 0), tt.until)
 			if len(got) != len(tt.want) {
 				t.Fatalf("alerts %q, want %d", lines(got), len(tt.want))
 			}
@@ -382,7 +354,7 @@ func TestRemindersEveryRepeatMinutesOfRunningTime(t *testing.T) {
 }
 
 func TestRemindersContinueIndefinitely(t *testing.T) {
-	b, cfg, s := notificationsLog(t), loadConfig(t, nil), alert.NewScheduler()
+	b, cfg, s := notificationsLog(t), testutil.LoadConfig(t, nil), alert.NewScheduler()
 	expiry, end := hm(9, 25), hm(9, 25).Add(6*time.Hour)
 	got := drive(t, s, b, cfg, hm(9, 0), end)
 	// One expiry, then one reminder per 5 minutes over 6 hours: 6*60/5 = 72.
@@ -414,7 +386,7 @@ func pausedDeepWorkLog(t *testing.T) *logb {
 }
 
 func TestPauseSilencesAndResumeContinuesTheCount(t *testing.T) {
-	b, cfg := pausedDeepWorkLog(t), loadConfig(t, nil)
+	b, cfg := pausedDeepWorkLog(t), testutil.LoadConfig(t, nil)
 	// Five running minutes were left of the interval at the pause, so the next
 	// reminder is five minutes after the resume, at 10:35, never 10:40.
 	assertBothWays(t, b, cfg, hm(9, 0), hm(11, 0),
@@ -457,7 +429,7 @@ func TestPauseBeforeTimeUpMovesExpiryByThePausedSpan(t *testing.T) {
 	b := deepWorkLog(t)
 	b.pause(hm(9, 20), cycleA)
 	b.resume(hm(9, 30), cycleA)
-	assertBothWays(t, b, loadConfig(t, nil), hm(9, 0), hm(10, 5), "10:00 expiry A")
+	assertBothWays(t, b, testutil.LoadConfig(t, nil), hm(9, 0), hm(10, 5), "10:00 expiry A")
 }
 
 func TestBackfilledBreakInOvertimeDoesNotSilenceReminders(t *testing.T) {
@@ -466,7 +438,7 @@ func TestBackfilledBreakInOvertimeDoesNotSilenceReminders(t *testing.T) {
 	// At 13:12 a break from 12:00 to 13:00 is back-filled: the cycle has then
 	// run 72 minutes, 22 of them in overtime, against 130 when it last played.
 	b.backfill(hm(13, 12), hm(12, 0), hm(13, 0), cycleA)
-	cfg := loadConfig(t, nil)
+	cfg := testutil.LoadConfig(t, nil)
 
 	assertBothWays(t, b, cfg, hm(11, 0), hm(13, 30),
 		"11:50 expiry A", "12:00 reminder A", "12:10 reminder A", "12:20 reminder A", "12:30 reminder A",
@@ -488,7 +460,7 @@ func TestCycleFirstSeenLaterInOvertimePlaysTheExpiry(t *testing.T) {
 	// At 10:00 a start is back-dated to 08:00: the 25-minute cycle is already
 	// 95 minutes into overtime the first time the scheduler sees it.
 	b.addAt(hm(10, 0), hm(8, 0), event.CycleStarted{CycleID: cycleA, Type: "notifications", Title: "Late entry", PlannedMinutes: 25})
-	cfg := loadConfig(t, nil)
+	cfg := testutil.LoadConfig(t, nil)
 
 	s := alert.NewScheduler()
 	if a := poll(s, b, cfg, hm(9, 0)); a != nil {
@@ -506,7 +478,7 @@ func TestBoostOutOfOvertimeThenExpiresAgain(t *testing.T) {
 	// 09:32 leaves 3 minutes, so time is up again at 09:35.
 	b := notificationsLog(t)
 	b.boost(hm(9, 32), cycleA, 10)
-	cfg := loadConfig(t, nil)
+	cfg := testutil.LoadConfig(t, nil)
 
 	assertBothWays(t, b, cfg, hm(9, 0), hm(9, 45),
 		"09:25 expiry A", "09:30 reminder A", "09:35 expiry A", "09:40 reminder A", "09:45 reminder A")
@@ -537,7 +509,7 @@ func TestBoostInsideOvertimeKeepsTheCadence(t *testing.T) {
 		t.Run(fmt.Sprintf("boost of %d minutes", minutes), func(t *testing.T) {
 			b := deepWorkLog(t)
 			b.boost(hm(10, 53), cycleA, minutes)
-			cfg := loadConfig(t, nil)
+			cfg := testutil.LoadConfig(t, nil)
 			assertBothWays(t, b, cfg, hm(9, 0), hm(11, 10),
 				"09:50 expiry A", "10:00 reminder A", "10:10 reminder A", "10:20 reminder A", "10:30 reminder A",
 				"10:40 reminder A", "10:50 reminder A", "11:00 reminder A", "11:10 reminder A")
@@ -567,7 +539,7 @@ func TestNextAtAfterABoostWithoutPoll(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			b, cfg, s := notificationsLog(t), loadConfig(t, nil), alert.NewScheduler()
+			b, cfg, s := notificationsLog(t), testutil.LoadConfig(t, nil), alert.NewScheduler()
 			pollEveryMinute(s, b, cfg, hm(9, 0), hm(9, 31))
 			if before, ok := nextAt(s, b, cfg, hm(9, 32)); !ok || !before.Equal(hm(9, 35)) {
 				t.Fatalf("NextAt(09:32) before the boost = %s, %v, want 09:35", before, ok)
@@ -581,7 +553,7 @@ func TestNextAtAfterABoostWithoutPoll(t *testing.T) {
 }
 
 func TestSleepYieldsOneCatchUp(t *testing.T) {
-	cfg := loadConfig(t, nil)
+	cfg := testutil.LoadConfig(t, nil)
 
 	t.Run("over a reminder", func(t *testing.T) {
 		b, s := deepWorkLog(t), alert.NewScheduler()
@@ -616,7 +588,7 @@ func TestSleepYieldsOneCatchUp(t *testing.T) {
 }
 
 func TestFreshSchedulerFirstPoll(t *testing.T) {
-	cfg := loadConfig(t, nil)
+	cfg := testutil.LoadConfig(t, nil)
 
 	// The deep-work cycle started at 09:00 is time-up at 09:50 and its grid of
 	// reminders is 10:00, 10:10 and so on.
@@ -627,10 +599,10 @@ func TestFreshSchedulerFirstPoll(t *testing.T) {
 		next  time.Time
 	}{
 		{"not time-up plays nothing", hm(9, 30), nil, hm(9, 50)},
-		{"exactly at time-up plays the expiry", hm(9, 50), ptr(alert.Expiry), hm(10, 0)},
-		{"inside the first interval plays the expiry", hm(9, 55), ptr(alert.Expiry), hm(10, 0)},
-		{"at the end of the first interval plays a reminder", hm(10, 0), ptr(alert.Reminder), hm(10, 10)},
-		{"later in overtime plays one reminder on the grid", hm(10, 13), ptr(alert.Reminder), hm(10, 20)},
+		{"exactly at time-up plays the expiry", hm(9, 50), testutil.Ptr(alert.Expiry), hm(10, 0)},
+		{"inside the first interval plays the expiry", hm(9, 55), testutil.Ptr(alert.Expiry), hm(10, 0)},
+		{"at the end of the first interval plays a reminder", hm(10, 0), testutil.Ptr(alert.Reminder), hm(10, 10)},
+		{"later in overtime plays one reminder on the grid", hm(10, 13), testutil.Ptr(alert.Reminder), hm(10, 20)},
 	}
 	for _, tt := range running {
 		t.Run("running: "+tt.name, func(t *testing.T) {
@@ -667,8 +639,6 @@ func TestFreshSchedulerFirstPoll(t *testing.T) {
 	})
 }
 
-func ptr[T any](v T) *T { return &v }
-
 func TestSwitchedAwayCycleIsSilentAndSwitchingBackContinuesItsCount(t *testing.T) {
 	b := newLog(t)
 	// B, a notifications cycle, ran 10 of its 25 minutes before 09:00.
@@ -685,7 +655,7 @@ func TestSwitchedAwayCycleIsSilentAndSwitchingBackContinuesItsCount(t *testing.T
 	// Back to B at 10:50, 3 running minutes short of its next reminder at 40.
 	b.switchTo(hm(10, 50), cycleA, cycleB)
 
-	assertBothWays(t, b, loadConfig(t, nil), hm(8, 30), hm(11, 0),
+	assertBothWays(t, b, testutil.LoadConfig(t, nil), hm(8, 30), hm(11, 0),
 		"09:50 expiry A", "10:00 reminder A",
 		"10:20 expiry B", "10:25 reminder B", "10:30 reminder B",
 		"10:37 reminder A", "10:47 reminder A",
@@ -720,7 +690,7 @@ func TestPerTypeAlertOverridesAndFallbackToDefaults(t *testing.T) {
 			b := newLog(t)
 			b.start(hm(9, 0), cycleA, tt.typ, tt.planned)
 			deadline := hm(9, 0).Add(time.Duration(tt.planned) * time.Minute)
-			got := drive(t, alert.NewScheduler(), b, loadConfig(t, tt.edit), hm(9, 0), deadline.Add(2*tt.repeat))
+			got := drive(t, alert.NewScheduler(), b, testutil.LoadConfig(t, tt.edit), hm(9, 0), deadline.Add(2*tt.repeat))
 			want := []heard{
 				{deadline, alert.Alert{Kind: alert.Expiry, Sound: tt.expiry}},
 				{deadline.Add(tt.repeat), alert.Alert{Kind: alert.Reminder, Sound: tt.remind}},
@@ -745,7 +715,7 @@ func assertSounds(t *testing.T, got, want []heard) {
 }
 
 func TestRemovedCycleTypeFallsBackToDefaults(t *testing.T) {
-	removed := loadConfig(t, withoutDeepWork)
+	removed := testutil.LoadConfig(t, withoutDeepWork)
 	if _, ok := removed.CycleType("deep-work"); ok {
 		t.Fatal("the edited configuration still defines deep-work")
 	}
@@ -761,7 +731,7 @@ func TestRemovedCycleTypeFallsBackToDefaults(t *testing.T) {
 
 	t.Run("after a reload mid-overtime", func(t *testing.T) {
 		b, s := deepWorkLog(t), alert.NewScheduler()
-		assertHeard(t, pollEveryMinute(s, b, loadConfig(t, nil), hm(9, 0), hm(10, 1)), "09:50 expiry A", "10:00 reminder A")
+		assertHeard(t, pollEveryMinute(s, b, testutil.LoadConfig(t, nil), hm(9, 0), hm(10, 1)), "09:50 expiry A", "10:00 reminder A")
 		// The reload at 10:02 keeps the anchor at 60 running minutes; the
 		// repeat is now the default 5.
 		got := pollEveryMinute(s, b, removed, hm(10, 2), hm(10, 10))
@@ -773,7 +743,7 @@ func TestRemovedCycleTypeFallsBackToDefaults(t *testing.T) {
 }
 
 func TestNextAtMatchesPoll(t *testing.T) {
-	cfg := loadConfig(t, nil)
+	cfg := testutil.LoadConfig(t, nil)
 	tests := []struct {
 		name string
 		log  func(*testing.T) *logb
@@ -859,7 +829,7 @@ func TestAPIHasNoAcknowledgeMuteSnoozeOrCap(t *testing.T) {
 }
 
 func TestStoppedCycleNeverAlerts(t *testing.T) {
-	cfg := loadConfig(t, nil)
+	cfg := testutil.LoadConfig(t, nil)
 
 	t.Run("stopped before time-up", func(t *testing.T) {
 		b := deepWorkLog(t)
@@ -895,7 +865,7 @@ func TestStoppedCycleNeverAlerts(t *testing.T) {
 }
 
 func TestNoRunningCycleNeverAlerts(t *testing.T) {
-	cfg := loadConfig(t, nil)
+	cfg := testutil.LoadConfig(t, nil)
 
 	t.Run("an empty log", func(t *testing.T) {
 		b, s := newLog(t), alert.NewScheduler()

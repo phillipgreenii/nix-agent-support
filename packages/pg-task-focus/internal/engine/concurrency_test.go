@@ -14,6 +14,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/engine"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/event"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/projection"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/testutil"
 )
 
 // outcome is what one goroutine got from Do.
@@ -70,7 +71,7 @@ func TestConcurrentDoIsSerialized(t *testing.T) {
 	accepted, completions := 0, 0
 	for i, o := range outs {
 		if o.err != nil {
-			rejectionOf(t, o.err, command.ReasonTaskAlreadyResolved)
+			testutil.RejectionOf(t, o.err, command.ReasonTaskAlreadyResolved)
 			continue
 		}
 		if i%10 == 0 {
@@ -151,7 +152,7 @@ func TestConcurrentCompleteSameTaskDifferentIDs(t *testing.T) {
 			ok++
 			continue
 		}
-		rejectionOf(t, o.err, command.ReasonTaskAlreadyResolved)
+		testutil.RejectionOf(t, o.err, command.ReasonTaskAlreadyResolved)
 		refused++
 	}
 	if ok != 1 || refused != 1 || h.lines() != before+1 {
@@ -257,7 +258,7 @@ func TestReadersSeeConsistentSnapshotsWhileWriting(t *testing.T) {
 	})
 	writers.Go(func() {
 		for i := range 20 {
-			next := loadConfig(t, nil)
+			next := testutil.LoadConfig(t, nil)
 			gen := h.gen + int64(i) + 1
 			gens.Store(next, gen)
 			if err := h.e.SetConfig(next, gen); err != nil {

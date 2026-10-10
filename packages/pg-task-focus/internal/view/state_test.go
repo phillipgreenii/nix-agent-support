@@ -10,6 +10,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/due"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/event"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/projection"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/testutil"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/view"
 )
 
@@ -20,7 +21,7 @@ func TestUninitializedState(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Replay: %v", err)
 			}
-			st := view.Build(m, loadConfig(t, nil), t0)
+			st := view.Build(m, testutil.LoadConfig(t, nil), t0)
 			if st.Initialized {
 				t.Error("Initialized = true for an empty log")
 			}
@@ -32,7 +33,7 @@ func TestUninitializedState(t *testing.T) {
 	}
 
 	t.Run("a bootstrapped log is initialized", func(t *testing.T) {
-		st := view.Build(bootstrapped(t).model(), loadConfig(t, nil), t0)
+		st := view.Build(bootstrapped(t).model(), testutil.LoadConfig(t, nil), t0)
 		if !st.Initialized || st.Profile != "normal" {
 			t.Errorf("Initialized = %v, Profile = %q, want true and normal", st.Initialized, st.Profile)
 		}
@@ -44,7 +45,7 @@ func TestEndedBoundaryIsInclusiveEnd(t *testing.T) {
 	weekEnd := civil.Date{Year: 2026, Month: time.October, Day: 11}
 	b := newLog(t)
 	b.batch(t0, profileOf("normal"), dayIn(day1, newYork), periodOf("week", weekStart, &weekEnd, newYork))
-	m, cfg := b.model(), loadConfig(t, nil)
+	m, cfg := b.model(), testutil.LoadConfig(t, nil)
 
 	ny, err := time.LoadLocation(newYork)
 	if err != nil {
@@ -98,7 +99,7 @@ func TestTodayUsesPeriodZoneNotHostZone(t *testing.T) {
 	b.batch(t0, profileOf("normal"),
 		dayIn(day1, "Pacific/Auckland"),
 		periodOf("week", civil.Date{Year: 2026, Month: time.October, Day: 5}, &weekEnd, newYork))
-	st := view.Build(b.model(), loadConfig(t, nil), now.In(la))
+	st := view.Build(b.model(), testutil.LoadConfig(t, nil), now.In(la))
 
 	if len(st.Periods) != 2 {
 		t.Fatalf("%d periods, want day and week", len(st.Periods))
@@ -118,7 +119,7 @@ func TestPeriodStateCarriesTheStoredPeriod(t *testing.T) {
 		func(bt event.ID) event.Payload {
 			return event.PeriodChanged{Kind: "sprint", Start: civil.Date{Year: 2026, Month: time.October, Day: 5}, End: &end, TZ: "Europe/Berlin", Label: "Sprint 12", Batch: bt}
 		})
-	st := view.Build(b.model(), loadConfig(t, nil), at(10))
+	st := view.Build(b.model(), testutil.LoadConfig(t, nil), at(10))
 	if len(st.Periods) != 2 || st.Periods[0].Kind != projection.Day || st.Periods[1].Kind != projection.Sprint {
 		t.Fatalf("Periods = %+v, want day then sprint and no week", st.Periods)
 	}
@@ -132,7 +133,7 @@ func TestPeriodStateCarriesTheStoredPeriod(t *testing.T) {
 }
 
 func TestFocusIsTheRunningCycleOnly(t *testing.T) {
-	cfg := loadConfig(t, nil)
+	cfg := testutil.LoadConfig(t, nil)
 
 	t.Run("nothing runs", func(t *testing.T) {
 		b := bootstrapped(t)
@@ -195,7 +196,7 @@ func TestFocusIsTheRunningCycleOnly(t *testing.T) {
 }
 
 func TestDimmedListsEveryPausedNotStoppedCycle(t *testing.T) {
-	cfg := loadConfig(t, nil)
+	cfg := testutil.LoadConfig(t, nil)
 	b := bootstrapped(t)
 	b.add(at(-50), startOf(cycleD, "review", 25))
 	b.add(at(-45), pauseOf(cycleD)) // paused by hand
@@ -243,7 +244,7 @@ func TestDimmedCycleCarriesItsFrozenTimer(t *testing.T) {
 	b := bootstrapped(t)
 	b.add(at(0), startOf(cycleA, "deep-work", 50))
 	b.add(at(20), pauseOf(cycleA))
-	st := view.Build(b.model(), loadConfig(t, nil), at(500))
+	st := view.Build(b.model(), testutil.LoadConfig(t, nil), at(500))
 	if len(st.Dimmed) != 1 {
 		t.Fatalf("%d dimmed cycles, want 1", len(st.Dimmed))
 	}
@@ -256,7 +257,7 @@ func TestDimmedCycleCarriesItsFrozenTimer(t *testing.T) {
 func TestNotInProfileFlag(t *testing.T) {
 	// The profile "normal" lists notifications, review and deep-work; the type
 	// page-response belongs to "on-call", and "ad-hoc" is defined nowhere.
-	cfg := loadConfig(t, nil)
+	cfg := testutil.LoadConfig(t, nil)
 	b := bootstrapped(t)
 	b.add(at(0), startOf(cycleA, "deep-work", 50))
 	b.add(at(5), interruptOf(cycleB, cycleA, "page-response", 25))
@@ -292,7 +293,7 @@ func TestCycleTypeRemovedFromConfigStillRenders(t *testing.T) {
 	m := b.model()
 
 	t.Run("the removed type keeps its snapshot and takes the defaults", func(t *testing.T) {
-		cfg := loadConfig(t, nil)
+		cfg := testutil.LoadConfig(t, nil)
 		st := view.Build(m, cfg, at(10))
 		if len(st.Dimmed) != 1 {
 			t.Fatalf("%d dimmed cycles, want the interrupted one", len(st.Dimmed))
@@ -313,7 +314,7 @@ func TestCycleTypeRemovedFromConfigStillRenders(t *testing.T) {
 	})
 
 	t.Run("a defined type takes its own alert", func(t *testing.T) {
-		cfg := loadConfig(t, nil)
+		cfg := testutil.LoadConfig(t, nil)
 		st := view.Build(m, cfg, at(10))
 		if want := cfg.Alert("deep-work"); focusOf(st).Alert != want {
 			t.Errorf("Alert = %+v, want the type's %+v", focusOf(st).Alert, want)
@@ -324,7 +325,7 @@ func TestCycleTypeRemovedFromConfigStillRenders(t *testing.T) {
 	})
 
 	t.Run("a defined type that the config later drops falls back", func(t *testing.T) {
-		cfg := loadConfig(t, func(c map[string]any) {
+		cfg := testutil.LoadConfig(t, func(c map[string]any) {
 			cycles := c["cycles"].(map[string]any)
 			delete(cycles, "deep-work")
 			profiles := c["profiles"].(map[string]any)
@@ -343,7 +344,7 @@ func TestCycleTypeRemovedFromConfigStillRenders(t *testing.T) {
 }
 
 func TestStoreIsLeftZero(t *testing.T) {
-	if st := view.Build(bootstrapped(t).model(), loadConfig(t, nil), t0); st.Store != (view.StoreHealth{}) {
+	if st := view.Build(bootstrapped(t).model(), testutil.LoadConfig(t, nil), t0); st.Store != (view.StoreHealth{}) {
 		t.Errorf("Store = %+v, want the zero value: the engine fills it from the store", st.Store)
 	}
 }
@@ -353,7 +354,7 @@ func TestStoreIsLeftZero(t *testing.T) {
 // in the log.
 func TestConfigEditedWhileHistoryExists(t *testing.T) {
 	t.Run("a task whose definition is gone still lists, orders and ages from its snapshot", func(t *testing.T) {
-		cfg := loadConfig(t, nil)
+		cfg := testutil.LoadConfig(t, nil)
 		for _, def := range []string{"retired-listed", "retired-unlisted"} {
 			if _, ok := cfg.Task(def); ok {
 				t.Fatalf("fixture task %s is defined in the configuration", def)
@@ -400,7 +401,7 @@ func TestConfigEditedWhileHistoryExists(t *testing.T) {
 	}
 
 	t.Run("the active profile is no longer defined", func(t *testing.T) {
-		cfg := loadConfig(t, func(c map[string]any) {
+		cfg := testutil.LoadConfig(t, func(c map[string]any) {
 			delete(c["profiles"].(map[string]any), "normal")
 			c["defaults"].(map[string]any)["profile"] = "on-call"
 		})
@@ -426,8 +427,8 @@ func TestConfigEditedWhileHistoryExists(t *testing.T) {
 	})
 
 	t.Run("a profile that is not active is removed", func(t *testing.T) {
-		before := view.Build(active(t).model(), loadConfig(t, nil), at(30))
-		cfg := loadConfig(t, func(c map[string]any) { delete(c["profiles"].(map[string]any), "on-call") })
+		before := view.Build(active(t).model(), testutil.LoadConfig(t, nil), at(30))
+		cfg := testutil.LoadConfig(t, func(c map[string]any) { delete(c["profiles"].(map[string]any), "on-call") })
 		if _, ok := cfg.Profile("on-call"); ok {
 			t.Fatal("the fixture still defines the removed profile")
 		}

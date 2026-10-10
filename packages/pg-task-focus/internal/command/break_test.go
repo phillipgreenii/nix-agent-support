@@ -10,6 +10,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/command"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/event"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/projection"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/testutil"
 )
 
 // runningFrom0 is the bootstrapped log with cycle A started at t0.
@@ -81,7 +82,7 @@ func TestBackfillBreakEvents(t *testing.T) {
 	})
 
 	t.Run("the golden log of a break built by Build replays", func(t *testing.T) {
-		env, _ := begun(t, loadConfig(t, nil))
+		env, _ := begun(t, testutil.LoadConfig(t, nil))
 		env, _ = apply(t, env, command.StartCycle{Type: deepWork}, at(0))
 		started := env.Model.Cycles()[0].ID
 		env, _ = apply(t, env, command.StopCycle{CycleID: started}, at(90))
@@ -181,11 +182,11 @@ func TestEndAtBeforeTheCycleStartIsStopNotAfterStart(t *testing.T) {
 	// An end at the very instant of the start is stop_not_after_start; one
 	// before the start sorts before it and is cycle_event_before_start.
 	b := runningFrom0(t)
-	r := mustReject(t, envOf(t, b, at(30)), command.StopCycle{CycleID: cycleA, EffectiveAt: ptr(at(0))}, command.ReasonStopNotAfterStart)
+	r := mustReject(t, envOf(t, b, at(30)), command.StopCycle{CycleID: cycleA, EffectiveAt: testutil.Ptr(at(0))}, command.ReasonStopNotAfterStart)
 	if r.Reason.Status() != 422 || r.Entity != string(cycleA) {
 		t.Errorf("status %d, entity %q", r.Reason.Status(), r.Entity)
 	}
-	mustReject(t, envOf(t, b, at(30)), command.StopCycle{CycleID: cycleA, EffectiveAt: ptr(at(-5))}, command.ReasonCycleEventBeforeStart)
+	mustReject(t, envOf(t, b, at(30)), command.StopCycle{CycleID: cycleA, EffectiveAt: testutil.Ptr(at(-5))}, command.ReasonCycleEventBeforeStart)
 }
 
 func TestEndAtBeforeALaterResumeIsCycleStopped(t *testing.T) {
@@ -193,7 +194,7 @@ func TestEndAtBeforeALaterResumeIsCycleStopped(t *testing.T) {
 	b.add(10, pauseOf(cycleA))
 	resume := b.add(20, resumeOf(cycleA))
 	for _, end := range []int{15, 5} {
-		r := mustReject(t, envOf(t, b, at(40)), command.StopCycle{CycleID: cycleA, EffectiveAt: ptr(at(end))}, command.ReasonCycleStopped)
+		r := mustReject(t, envOf(t, b, at(40)), command.StopCycle{CycleID: cycleA, EffectiveAt: testutil.Ptr(at(end))}, command.ReasonCycleStopped)
 		if r.Entity != string(cycleA) {
 			t.Errorf("end at %d: Entity %q", end, r.Entity)
 		}
@@ -201,7 +202,7 @@ func TestEndAtBeforeALaterResumeIsCycleStopped(t *testing.T) {
 			t.Errorf("end at 15: Events %v do not name the later resume %s", r.Events, resume)
 		}
 	}
-	p := mustPlan(t, envOf(t, b, at(40)), command.StopCycle{CycleID: cycleA, EffectiveAt: ptr(at(30))})
+	p := mustPlan(t, envOf(t, b, at(40)), command.StopCycle{CycleID: cycleA, EffectiveAt: testutil.Ptr(at(30))})
 	if got := status(t, p.Candidate, cycleA, at(30)); got != projection.Stopped {
 		t.Errorf("an end at after the resume leaves the cycle %s", got)
 	}
@@ -209,11 +210,11 @@ func TestEndAtBeforeALaterResumeIsCycleStopped(t *testing.T) {
 
 func TestEndAtOnAStoppedCycle(t *testing.T) {
 	b, stop := stoppedAt90(t)
-	note := mustNoOp(t, envOf(t, b, at(120)), command.StopCycle{CycleID: cycleA, EffectiveAt: ptr(at(100))})
+	note := mustNoOp(t, envOf(t, b, at(120)), command.StopCycle{CycleID: cycleA, EffectiveAt: testutil.Ptr(at(100))})
 	if !strings.Contains(note, "stopped") {
 		t.Errorf("note %q does not say the cycle is stopped", note)
 	}
-	r := mustReject(t, envOf(t, b, at(120)), command.StopCycle{CycleID: cycleA, EffectiveAt: ptr(at(60))}, command.ReasonCycleStopped)
+	r := mustReject(t, envOf(t, b, at(120)), command.StopCycle{CycleID: cycleA, EffectiveAt: testutil.Ptr(at(60))}, command.ReasonCycleStopped)
 	if !strings.Contains(r.Message, "correct the time of its stop") || !strings.Contains(r.Message, string(stop)) {
 		t.Errorf("message %q does not say to correct the stop %s", r.Message, stop)
 	}
