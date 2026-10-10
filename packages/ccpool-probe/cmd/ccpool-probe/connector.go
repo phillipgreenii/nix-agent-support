@@ -1,11 +1,14 @@
 // connector.go: this probe's own subprocess wrapper around
 // `pg-connector issue ...` — every call here passes
-// --backend pg-connector-issue-beads [design: Purpose, "Bead identity and
-// schema" intro, "Architecture" diagram's MUT node] and NEVER sets
-// PG_CONNECTOR_ISSUE_BEADS_DIR itself: this binary inherits its
-// environment verbatim, and the caller (a sibling ziprecruiter-repo
-// packet wrapping this role's command.argv) is responsible for setting
-// that env var [design: "Tracker targeting" paragraphs 1-3].
+// --backend <instance> (default pg-connector-issue-beads, --connector-backend
+// overrides) [design: Purpose, "Bead identity and schema" intro,
+// "Architecture" diagram's MUT node] and NEVER sets
+// PG_CONNECTOR_ISSUE_BEADS_DIR itself. The tracker is selected by which
+// registered pg-connector instance --backend names (the instance's registry
+// command carries its own --beads-dir); this binary inherits its environment
+// verbatim, so an unsuffixed registration with no --beads-dir still falls
+// back to whatever env the caller set [design: "Tracker targeting"
+// paragraphs 1-3, as amended by pg2-91y12].
 //
 // Identical shape to packages/pg-router-probe/cmd/pg-router-probe/connector.go
 // (itself adapted from packages/pg-router-source-pg-connector's own
@@ -34,10 +37,10 @@ const pgConnectorBinary = "pg-connector"
 // deployment that drops the unsuffixed registration names one of them.
 const defaultPgConnectorBackend = "pg-connector-issue-beads"
 
-// pgConnectorBackend is the backend instance name every call below passes
-// as --backend. It starts at defaultPgConnectorBackend; the run verb sets
-// it from --connector-backend (run.go) before any call is made.
-var pgConnectorBackend = defaultPgConnectorBackend
+// Every call below takes the backend instance name as an explicit
+// parameter and passes it as --backend; the run verb threads it in from
+// --connector-backend through runOptions (run.go defaultRunDeps), so there
+// is no package-level mutable state.
 
 // execCmdFactory constructs the *exec.Cmd used to invoke pg-connector.
 // Production code uses exec.CommandContext; tests swap this to spawn a
@@ -53,8 +56,8 @@ type pgConnectorResult struct {
 }
 
 // runPgConnector execs pg-connector with args, inheriting this process's
-// environment verbatim (see this file's own header comment on
-// PG_CONNECTOR_ISSUE_BEADS_DIR). The returned error is non-nil only when
+// environment verbatim (see this file's own header comment on how the
+// tracker is selected). The returned error is non-nil only when
 // the child could never even be started.
 func runPgConnector(ctx context.Context, args []string) (pgConnectorResult, error) {
 	cmd := execCmdFactory(ctx, pgConnectorBinary, args...)
@@ -148,11 +151,11 @@ const defaultDedupQuery = "escalated-all"
 // scheme is the fan-out scheme (0 ok, 2 degraded-but-usable), same
 // convention pg-router-probe's own connector.go uses for the same reason:
 // list is a fan-out op, unlike create/update/comment below.
-func listEscalated(ctx context.Context, query string, warn func(string)) ([]connectorIssue, error) {
+func listEscalated(ctx context.Context, backend, query string, warn func(string)) ([]connectorIssue, error) {
 	out, err := invokeOrFail(ctx, []string{
 		"issue", "list",
 		"--query", query,
-		"--backend", pgConnectorBackend,
+		"--backend", backend,
 		"--output", "json",
 	}, map[int]bool{0: true, 2: true}, warn)
 	if err != nil {
@@ -183,12 +186,12 @@ func metadataArgs(metadata map[string]string) []string {
 // never overwrite it — see commentIssue below) [design: "Bead identity
 // and schema" throughout; Binding decisions "Body template" closing
 // sentence].
-func createIssue(ctx context.Context, title string, labels []string, metadata map[string]string, description string, warn func(string)) (connectorIssue, error) {
+func createIssue(ctx context.Context, backend, title string, labels []string, metadata map[string]string, description string, warn func(string)) (connectorIssue, error) {
 	args := []string{
 		"issue", "create",
 		"--title", title,
 		"--description", description,
-		"--backend", pgConnectorBackend,
+		"--backend", backend,
 		"--output", "json",
 	}
 	for _, l := range labels {
@@ -218,10 +221,10 @@ func createIssue(ctx context.Context, title string, labels []string, metadata ma
 // k=v ...`, merging/setting the given metadata keys on an existing bead —
 // used to refresh the tracked comparison fields a later run's dedup
 // decision reads back via listEscalated.
-func updateIssueMetadata(ctx context.Context, id string, metadata map[string]string, warn func(string)) error {
+func updateIssueMetadata(ctx context.Context, backend, id string, metadata map[string]string, warn func(string)) error {
 	args := []string{
 		"issue", "update", id,
-		"--backend", pgConnectorBackend,
+		"--backend", backend,
 		"--output", "json",
 	}
 	args = append(args, metadataArgs(metadata)...)
@@ -232,11 +235,11 @@ func updateIssueMetadata(ctx context.Context, id string, metadata map[string]str
 // commentIssue runs `pg-connector issue comment <id> --body <body>` —
 // later updates append via comment, never overwrite the body [design:
 // "Body template" closing sentence].
-func commentIssue(ctx context.Context, id, body string, warn func(string)) error {
+func commentIssue(ctx context.Context, backend, id, body string, warn func(string)) error {
 	args := []string{
 		"issue", "comment", id,
 		"--body", body,
-		"--backend", pgConnectorBackend,
+		"--backend", backend,
 		"--output", "json",
 	}
 	_, err := invokeOrFail(ctx, args, map[int]bool{0: true}, warn)

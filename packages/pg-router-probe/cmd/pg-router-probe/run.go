@@ -179,7 +179,10 @@ type runDeps struct {
 	fetchBacklog   func(ctx context.Context, opts runOptions) (int, error)
 }
 
-func defaultRunDeps() runDeps {
+// defaultRunDeps wires the real implementations; backend is the pg-connector
+// backend instance name every connector call passes as --backend
+// (runOptions.connectorBackend).
+func defaultRunDeps(backend string) runDeps {
 	return runDeps{
 		now: time.Now,
 		fetchAlerts: func(ctx context.Context, opts runOptions) ([]grafanaAlert, error) {
@@ -188,11 +191,19 @@ func defaultRunDeps() runDeps {
 			defer cancel()
 			return client.firingAlerts(gctx, opts.ruleUIDs)
 		},
-		listEscalated:  listEscalated,
-		createIssue:    createIssue,
-		updateMetadata: updateIssueMetadata,
-		comment:        commentIssue,
-		fetchBacklog:   fetchBacklogFromStatus,
+		listEscalated: func(ctx context.Context, query string, warn func(string)) ([]connectorIssue, error) {
+			return listEscalated(ctx, backend, query, warn)
+		},
+		createIssue: func(ctx context.Context, title string, labels []string, metadata map[string]string, description string, warn func(string)) (connectorIssue, error) {
+			return createIssue(ctx, backend, title, labels, metadata, description, warn)
+		},
+		updateMetadata: func(ctx context.Context, id string, metadata map[string]string, warn func(string)) error {
+			return updateIssueMetadata(ctx, backend, id, metadata, warn)
+		},
+		comment: func(ctx context.Context, id, body string, warn func(string)) error {
+			return commentIssue(ctx, backend, id, body, warn)
+		},
+		fetchBacklog: fetchBacklogFromStatus,
 	}
 }
 
@@ -272,10 +283,9 @@ never closes beads; close one once its alert clears after remediation.`,
 		if opts.connectorBackend == "" {
 			return usageErrorf("run: --connector-backend must not be empty")
 		}
-		pgConnectorBackend = opts.connectorBackend
 		opts.haveQueueDepth = cmd.Flags().Changed("queue-depth")
 		opts.haveBacklog = cmd.Flags().Changed("backlog")
-		return runProbe(cmd, opts, defaultRunDeps())
+		return runProbe(cmd, opts, defaultRunDeps(opts.connectorBackend))
 	}
 	return cmd
 }

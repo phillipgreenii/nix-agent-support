@@ -20,7 +20,7 @@ func warnCollector() (func(string), *[]string) {
 
 func TestCreateIssueOK(t *testing.T) {
 	withFactory(t, "create_ok")
-	issue, err := createIssue(context.Background(), "title", []string{"escalated"}, map[string]string{"pg_router_escalation_fingerprint": "fp1"}, "body", noopWarn)
+	issue, err := createIssue(context.Background(), defaultPgConnectorBackend, "title", []string{"escalated"}, map[string]string{"pg_router_escalation_fingerprint": "fp1"}, "body", noopWarn)
 	if err != nil {
 		t.Fatalf("createIssue: %v", err)
 	}
@@ -35,7 +35,7 @@ func TestCreateIssueOK(t *testing.T) {
 func TestCreateIssueFail(t *testing.T) {
 	withFactory(t, "create_fail")
 	warn, msgs := warnCollector()
-	_, err := createIssue(context.Background(), "title", nil, nil, "body", warn)
+	_, err := createIssue(context.Background(), defaultPgConnectorBackend, "title", nil, nil, "body", warn)
 	if err == nil {
 		t.Fatalf("expected an error")
 	}
@@ -46,35 +46,35 @@ func TestCreateIssueFail(t *testing.T) {
 
 func TestUpdateIssueMetadataOK(t *testing.T) {
 	withFactory(t, "update_ok")
-	if err := updateIssueMetadata(context.Background(), "zr-123", map[string]string{"k": "v"}, noopWarn); err != nil {
+	if err := updateIssueMetadata(context.Background(), defaultPgConnectorBackend, "zr-123", map[string]string{"k": "v"}, noopWarn); err != nil {
 		t.Fatalf("updateIssueMetadata: %v", err)
 	}
 }
 
 func TestUpdateIssueMetadataFail(t *testing.T) {
 	withFactory(t, "update_fail")
-	if err := updateIssueMetadata(context.Background(), "zr-999", nil, noopWarn); err == nil {
+	if err := updateIssueMetadata(context.Background(), defaultPgConnectorBackend, "zr-999", nil, noopWarn); err == nil {
 		t.Fatalf("expected an error")
 	}
 }
 
 func TestCommentIssueOK(t *testing.T) {
 	withFactory(t, "comment_ok")
-	if err := commentIssue(context.Background(), "zr-123", "note", noopWarn); err != nil {
+	if err := commentIssue(context.Background(), defaultPgConnectorBackend, "zr-123", "note", noopWarn); err != nil {
 		t.Fatalf("commentIssue: %v", err)
 	}
 }
 
 func TestCommentIssueFail(t *testing.T) {
 	withFactory(t, "comment_fail")
-	if err := commentIssue(context.Background(), "zr-999", "note", noopWarn); err == nil {
+	if err := commentIssue(context.Background(), defaultPgConnectorBackend, "zr-999", "note", noopWarn); err == nil {
 		t.Fatalf("expected an error")
 	}
 }
 
 func TestListEscalatedOK(t *testing.T) {
 	withFactory(t, "list_ok_with_match")
-	issues, err := listEscalated(context.Background(), defaultDedupQuery, noopWarn)
+	issues, err := listEscalated(context.Background(), defaultPgConnectorBackend, defaultDedupQuery, noopWarn)
 	if err != nil {
 		t.Fatalf("listEscalated: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestListEscalatedOK(t *testing.T) {
 // the same "issue list" fan-out op.
 func TestListEscalatedDegradedStillOK(t *testing.T) {
 	withFactory(t, "list_degraded_empty")
-	issues, err := listEscalated(context.Background(), defaultDedupQuery, noopWarn)
+	issues, err := listEscalated(context.Background(), defaultPgConnectorBackend, defaultDedupQuery, noopWarn)
 	if err != nil {
 		t.Fatalf("listEscalated: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestListEscalatedDegradedStillOK(t *testing.T) {
 
 func TestListEscalatedTotalFailure(t *testing.T) {
 	withFactory(t, "list_total_failure")
-	_, err := listEscalated(context.Background(), defaultDedupQuery, noopWarn)
+	_, err := listEscalated(context.Background(), defaultPgConnectorBackend, defaultDedupQuery, noopWarn)
 	if err == nil {
 		t.Fatalf("expected an error for exit 3")
 	}
@@ -125,7 +125,7 @@ func TestListEscalatedHonorsExplicitTimeout(t *testing.T) {
 	defer cancel()
 
 	start := time.Now()
-	_, err := listEscalated(ctx, defaultDedupQuery, noopWarn)
+	_, err := listEscalated(ctx, defaultPgConnectorBackend, defaultDedupQuery, noopWarn)
 	elapsed := time.Since(start)
 	if err == nil {
 		t.Fatalf("expected a timeout error")
@@ -155,10 +155,10 @@ func recordedArgs(t *testing.T, fn func()) string {
 func TestEveryPgConnectorCallPinsTheBeadsBackend(t *testing.T) {
 	withFactory(t, "list_ok_with_match")
 	got := recordedArgs(t, func() {
-		_, _ = listEscalated(context.Background(), defaultDedupQuery, noopWarn)
+		_, _ = listEscalated(context.Background(), defaultPgConnectorBackend, defaultDedupQuery, noopWarn)
 	})
-	if !strings.Contains(got, "--backend") || !strings.Contains(got, pgConnectorBackend) {
-		t.Fatalf("issue list: expected --backend %s in argv, got %s", pgConnectorBackend, got)
+	if !strings.Contains(got, "--backend") || !strings.Contains(got, defaultPgConnectorBackend) {
+		t.Fatalf("issue list: expected --backend %s in argv, got %s", defaultPgConnectorBackend, got)
 	}
 	if !strings.Contains(got, defaultDedupQuery) {
 		t.Fatalf("issue list: expected the %s dedup query in argv, got %s", defaultDedupQuery, got)
@@ -171,26 +171,26 @@ func TestEveryPgConnectorCallPinsTheBeadsBackend(t *testing.T) {
 
 	withFactory(t, "create_ok")
 	got = recordedArgs(t, func() {
-		_, _ = createIssue(context.Background(), "t", []string{"escalated"}, map[string]string{"k": "v"}, "body", noopWarn)
+		_, _ = createIssue(context.Background(), defaultPgConnectorBackend, "t", []string{"escalated"}, map[string]string{"k": "v"}, "body", noopWarn)
 	})
-	if !strings.Contains(got, "--backend") || !strings.Contains(got, pgConnectorBackend) {
-		t.Fatalf("issue create: expected --backend %s in argv, got %s", pgConnectorBackend, got)
+	if !strings.Contains(got, "--backend") || !strings.Contains(got, defaultPgConnectorBackend) {
+		t.Fatalf("issue create: expected --backend %s in argv, got %s", defaultPgConnectorBackend, got)
 	}
 
 	withFactory(t, "update_ok")
 	got = recordedArgs(t, func() {
-		_ = updateIssueMetadata(context.Background(), "zr-1", map[string]string{"k": "v"}, noopWarn)
+		_ = updateIssueMetadata(context.Background(), defaultPgConnectorBackend, "zr-1", map[string]string{"k": "v"}, noopWarn)
 	})
-	if !strings.Contains(got, "--backend") || !strings.Contains(got, pgConnectorBackend) {
-		t.Fatalf("issue update: expected --backend %s in argv, got %s", pgConnectorBackend, got)
+	if !strings.Contains(got, "--backend") || !strings.Contains(got, defaultPgConnectorBackend) {
+		t.Fatalf("issue update: expected --backend %s in argv, got %s", defaultPgConnectorBackend, got)
 	}
 
 	withFactory(t, "comment_ok")
 	got = recordedArgs(t, func() {
-		_ = commentIssue(context.Background(), "zr-1", "note", noopWarn)
+		_ = commentIssue(context.Background(), defaultPgConnectorBackend, "zr-1", "note", noopWarn)
 	})
-	if !strings.Contains(got, "--backend") || !strings.Contains(got, pgConnectorBackend) {
-		t.Fatalf("issue comment: expected --backend %s in argv, got %s", pgConnectorBackend, got)
+	if !strings.Contains(got, "--backend") || !strings.Contains(got, defaultPgConnectorBackend) {
+		t.Fatalf("issue comment: expected --backend %s in argv, got %s", defaultPgConnectorBackend, got)
 	}
 }
 
@@ -267,9 +267,6 @@ func TestConnectorBackendDefaultsToUnsuffixedBeadsBackend(t *testing.T) {
 	if defaultPgConnectorBackend != "pg-connector-issue-beads" {
 		t.Fatalf("defaultPgConnectorBackend = %q", defaultPgConnectorBackend)
 	}
-	if pgConnectorBackend != defaultPgConnectorBackend {
-		t.Fatalf("pgConnectorBackend = %q, want the default %q", pgConnectorBackend, defaultPgConnectorBackend)
-	}
 	f := newRunCmd().Flags().Lookup("connector-backend")
 	if f == nil {
 		t.Fatalf("--connector-backend flag missing")
@@ -283,9 +280,7 @@ func TestConnectorBackendDefaultsToUnsuffixedBeadsBackend(t *testing.T) {
 // passes the overridden instance name and not the default (pg2-otfq2).
 func TestEveryPgConnectorCallUsesTheOverriddenBackend(t *testing.T) {
 	const override = "pg-connector-issue-beads-zr"
-	old := pgConnectorBackend
-	pgConnectorBackend = override
-	t.Cleanup(func() { pgConnectorBackend = old })
+	deps := defaultRunDeps(override)
 
 	check := func(name, got string) {
 		t.Helper()
@@ -298,29 +293,38 @@ func TestEveryPgConnectorCallUsesTheOverriddenBackend(t *testing.T) {
 	}
 
 	withFactory(t, "list_ok_with_match")
-	check("list", recordedArgs(t, func() { _, _ = listEscalated(context.Background(), defaultDedupQuery, noopWarn) }))
+	check("list", recordedArgs(t, func() { _, _ = deps.listEscalated(context.Background(), defaultDedupQuery, noopWarn) }))
 	withFactory(t, "create_ok")
 	check("create", recordedArgs(t, func() {
-		_, _ = createIssue(context.Background(), "t", []string{"escalated"}, map[string]string{"k": "v"}, "body", noopWarn)
+		_, _ = deps.createIssue(context.Background(), "t", []string{"escalated"}, map[string]string{"k": "v"}, "body", noopWarn)
 	}))
 	withFactory(t, "update_ok")
 	check("update", recordedArgs(t, func() {
-		_ = updateIssueMetadata(context.Background(), "zr-1", map[string]string{"k": "v"}, noopWarn)
+		_ = deps.updateMetadata(context.Background(), "zr-1", map[string]string{"k": "v"}, noopWarn)
 	}))
 	withFactory(t, "comment_ok")
-	check("comment", recordedArgs(t, func() { _ = commentIssue(context.Background(), "zr-1", "note", noopWarn) }))
+	check("comment", recordedArgs(t, func() { _ = deps.comment(context.Background(), "zr-1", "note", noopWarn) }))
 }
 
-// TestRunCmdConnectorBackendFlagSetsBackend drives the flag end to end
-// through cobra: the value reaches pgConnectorBackend (pg2-otfq2).
-func TestRunCmdConnectorBackendFlagSetsBackend(t *testing.T) {
-	old := pgConnectorBackend
-	t.Cleanup(func() { pgConnectorBackend = old })
-	t.Setenv("PATH", "")
-	var out, errOut bytes.Buffer
-	_ = run([]string{"run", "--connector-backend", "pg-connector-issue-beads-pg2", "--snapshot-path", t.TempDir() + "/snapshot.json"}, &out, &errOut)
-	if pgConnectorBackend != "pg-connector-issue-beads-pg2" {
-		t.Fatalf("pgConnectorBackend = %q after --connector-backend, stderr=%q", pgConnectorBackend, errOut.String())
+// TestRunCmdConnectorBackendFlagReachesTheDeps pins the flag's plumbing: the
+// run verb builds its deps from opts.connectorBackend (no package-level
+// state), so a non-default --connector-backend value must show up as
+// --backend on a real call made through those deps (pg2-otfq2, pg2-h5cmo).
+func TestRunCmdConnectorBackendFlagReachesTheDeps(t *testing.T) {
+	cmd := newRunCmd()
+	if err := cmd.Flags().Set("connector-backend", "pg-connector-issue-beads-pg2"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := cmd.Flags().GetString("connector-backend")
+	if err != nil || got != "pg-connector-issue-beads-pg2" {
+		t.Fatalf("flag = %q, %v", got, err)
+	}
+	withFactory(t, "list_ok_with_match")
+	args := recordedArgs(t, func() {
+		_, _ = defaultRunDeps(got).listEscalated(context.Background(), defaultDedupQuery, noopWarn)
+	})
+	if !strings.Contains(args, "--backend "+got) {
+		t.Fatalf("expected --backend %s in argv, got %s", got, args)
 	}
 }
 

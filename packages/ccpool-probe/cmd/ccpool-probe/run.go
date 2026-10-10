@@ -103,7 +103,10 @@ type runDeps struct {
 	comment             func(ctx context.Context, id, body string, warn func(string)) error
 }
 
-func defaultRunDeps() runDeps {
+// defaultRunDeps wires the real implementations; backend is the pg-connector
+// backend instance name every connector call passes as --backend
+// (runOptions.connectorBackend).
+func defaultRunDeps(backend string) runDeps {
 	return runDeps{
 		now:       time.Now,
 		listPools: discoverPools,
@@ -113,10 +116,18 @@ func defaultRunDeps() runDeps {
 		listAllPoolSessions: func(ctx context.Context, pool poolRef, warn func(string)) ([]ccpoolSessionRow, error) {
 			return listCcpoolSessions(ctx, pool.Dir, "", warn)
 		},
-		listEscalated:  listEscalated,
-		createIssue:    createIssue,
-		updateMetadata: updateIssueMetadata,
-		comment:        commentIssue,
+		listEscalated: func(ctx context.Context, query string, warn func(string)) ([]connectorIssue, error) {
+			return listEscalated(ctx, backend, query, warn)
+		},
+		createIssue: func(ctx context.Context, title string, labels []string, metadata map[string]string, description string, warn func(string)) (connectorIssue, error) {
+			return createIssue(ctx, backend, title, labels, metadata, description, warn)
+		},
+		updateMetadata: func(ctx context.Context, id string, metadata map[string]string, warn func(string)) error {
+			return updateIssueMetadata(ctx, backend, id, metadata, warn)
+		},
+		comment: func(ctx context.Context, id, body string, warn func(string)) error {
+			return commentIssue(ctx, backend, id, body, warn)
+		},
 	}
 }
 
@@ -157,8 +168,7 @@ func newRunCmd() *cobra.Command {
 		if opts.connectorBackend == "" {
 			return usageErrorf("run: --connector-backend must not be empty")
 		}
-		pgConnectorBackend = opts.connectorBackend
-		return runProbe(cmd, opts, defaultRunDeps())
+		return runProbe(cmd, opts, defaultRunDeps(opts.connectorBackend))
 	}
 	return cmd
 }
