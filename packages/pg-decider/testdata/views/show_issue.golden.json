@@ -1,0 +1,56 @@
+{
+  "contract": "pg-desk.view/v1",
+  "type": "issue",
+  "id": "bd-1",
+  "version": 1,
+  "as_of": "2026-09-29T14:00:00Z",
+  "stale": false,
+  "snapshot": {
+    "id": "bd-1",
+    "title": "process feedback",
+    "state": "open",
+    "url": "https://tracker.example/bd-1",
+    "labels": ["mine", "fbsum:ab12"],
+    "metadata": {
+      "dedup_key": "pr:o/r#5:process-feedback:ab12"
+    }
+  },
+  "decorations": {
+    "relationship": "",
+    "dispositions": [],
+    "urgency": "",
+    "category": ""
+  },
+  "annotations": {
+    "hidden": {
+      "value": false,
+      "reason": null
+    },
+    "wip": false,
+    "suppress": [],
+    "force_review": false,
+    "force_review_sha": null,
+    "ready_to_land": null,
+    "focus_selected": null,
+    "decider": {}
+  },
+  "links": [
+    {
+      "type": "pr",
+      "id": "o/r#5",
+      "relation": "work",
+      "title": "Add retry to client",
+      "url": "https://code.example/o/r/pull/5",
+      "state": "open",
+      "labels": ["bug"],
+      "metadata": {},
+      "assignee": "",
+      "origins": [
+        {
+          "origin": "derived:work-item"
+        }
+      ]
+    }
+  ],
+  "links_as_of": "2026-09-29T14:01:02Z"
+}

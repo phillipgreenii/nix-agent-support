@@ -203,3 +203,106 @@ func TestReadWhenPgDeskCannotBeStarted(t *testing.T) {
 		t.Fatalf("want error naming pg-desk, got %v", err)
 	}
 }
+
+func focusView(annotationsTail string) []byte {
+	return []byte(`{"contract":"pg-desk.view/v1","type":"issue","id":"bd-1","version":1,"as_of":"x","stale":false,
+		"snapshot":null,"decorations":{"relationship":"","dispositions":[],"urgency":"","category":""},
+		"annotations":{"hidden":{"value":false,"reason":null},"wip":false,"suppress":[],"force_review":false` +
+		annotationsTail + `,"decider":{}},"links":[]}`)
+}
+
+func TestViewParsesFocusSelected(t *testing.T) {
+	cases := []struct {
+		name       string
+		tail       string
+		want       FocusSelected
+		wantPeriod string
+		wantOK     bool
+	}{
+		{"absent", ``, FocusSelected{}, "", false},
+		{"null", `,"focus_selected":null`, FocusSelected{Present: true}, "", false},
+		{"none", `,"focus_selected":"none"`, FocusSelected{Present: true, Set: true, Value: "none"}, "", false},
+		{"period", `,"focus_selected":"2026-09-23"`, FocusSelected{Present: true, Set: true, Value: "2026-09-23"}, "2026-09-23", true},
+		{"empty string", `,"focus_selected":""`, FocusSelected{Present: true, Set: true}, "", false},
+		{"malformed key", `,"focus_selected":"2026-9-23"`, FocusSelected{Present: true, Set: true, Value: "2026-9-23"}, "", false},
+		{"impossible date", `,"focus_selected":"2026-13-45"`, FocusSelected{Present: true, Set: true, Value: "2026-13-45"}, "", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			v, err := Parse(focusView(c.tail))
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := v.Annotations.FocusSelected
+			if got != c.want {
+				t.Fatalf("FocusSelected = %+v, want %+v", got, c.want)
+			}
+			p, ok := got.Selected()
+			if p != c.wantPeriod || ok != c.wantOK {
+				t.Fatalf("Selected() = %q, %v; want %q, %v", p, ok, c.wantPeriod, c.wantOK)
+			}
+		})
+	}
+}
+
+func TestViewRejectsNonStringFocusSelected(t *testing.T) {
+	if _, err := Parse(focusView(`,"focus_selected":7`)); err == nil ||
+		!strings.Contains(err.Error(), "focus_selected") {
+		t.Fatalf("want focus_selected error, got %v", err)
+	}
+}
+
+func TestViewParsesForceReviewSHA(t *testing.T) {
+	v, err := Parse(focusView(`,"force_review_sha":"abc123"`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := v.Annotations.ForceReviewSHA; s == nil || *s != "abc123" {
+		t.Fatalf("ForceReviewSHA = %v", s)
+	}
+}
+
+func TestViewParsesIssueSnapshot(t *testing.T) {
+	v, err := Parse([]byte(`{"contract":"pg-desk.view/v1","type":"issue","id":"bd-9","version":1,"as_of":"x","stale":false,
+		"snapshot":{"id":"bd-9","title":"ship it","state":"open","status_category":"indeterminate","priority":"P1",
+		"issue_type":"Story","labels":["a","b"],"assignee":"me","parent":"bd-1","due_date":"2026-10-01",
+		"metadata":{"k":"v"},"unknown_member":[1,2]},
+		"decorations":{},"annotations":{},"links":[]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := IssueSnapshot{
+		ID: "bd-9", Title: "ship it", State: "open", StatusCategory: "indeterminate", Priority: "P1",
+		IssueType: "Story", Labels: []string{"a", "b"}, Assignee: "me", Parent: "bd-1", DueDate: "2026-10-01",
+		Metadata: map[string]string{"k": "v"},
+	}
+	if !reflect.DeepEqual(v.IssueSnapshot, want) {
+		t.Fatalf("IssueSnapshot = %+v, want %+v", v.IssueSnapshot, want)
+	}
+	if !reflect.DeepEqual(v.Snapshot, PRSnapshot{}) {
+		t.Fatalf("issue view must leave PRSnapshot zero: %+v", v.Snapshot)
+	}
+
+	pr, err := Parse(mustRead(t, "pr_view_minimal.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(pr.IssueSnapshot, IssueSnapshot{}) {
+		t.Fatalf("pr view must leave IssueSnapshot zero: %+v", pr.IssueSnapshot)
+	}
+}
+
+func TestViewParsesGoldenIssueView(t *testing.T) {
+	v, err := Parse(mustRead(t, "views/show_issue.golden.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.IssueSnapshot.ID != "bd-1" || v.IssueSnapshot.Title != "process feedback" ||
+		!reflect.DeepEqual(v.IssueSnapshot.Labels, []string{"mine", "fbsum:ab12"}) ||
+		v.IssueSnapshot.Metadata["dedup_key"] == "" {
+		t.Fatalf("IssueSnapshot = %+v", v.IssueSnapshot)
+	}
+	if fs := v.Annotations.FocusSelected; !fs.Present || fs.Set {
+		t.Fatalf("golden focus_selected must be a present null, got %+v", fs)
+	}
+}
