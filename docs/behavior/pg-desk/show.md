@@ -19,20 +19,20 @@ migrate --cutover`, and exits `1`.
 `--json` (or `PG_DESK_OUTPUT=json`) prints one JSON object with these top-level fields, in this
 order:
 
-| Field         | Meaning                                                                                                                                |
-| ------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `contract`    | Always `pg-desk.view/v1`.                                                                                                              |
-| `type`, `id`  | The entity's type and canonical id.                                                                                                    |
-| `version`     | The entity's snapshot version.                                                                                                         |
-| `as_of`       | When the snapshot was taken.                                                                                                           |
-| `stale`       | True when the stored snapshot is flagged stale, or when `--refresh` of this entity failed or degraded.                                 |
-| `snapshot`    | The type's pg-connector schema value (`schema.PR`, `schema.Issue`, `schema.Thread`), as stored; `null` if none is stored.              |
-| `decorations` | `relationship`, `dispositions[]` of `{comment_id, computed, override}`, `urgency` (the level) and `category`.                          |
-| `annotations` | `hidden` as `{value, reason}`, `wip`, `suppress[]`, `force_review`, `force_review_sha`, `ready_to_land` and the `decider` map of maps. |
-| `review`      | A PR's pending agent review, see below. Present for `pr` only, absent for `issue` and `thread`.                                        |
-| `links[]`     | Every link of the entity, see below.                                                                                                   |
-| `links_as_of` | The newest time any of the entity's links was last confirmed; `null` when it has none.                                                 |
-| `ci`          | A PR's CI runs for its head commit, see below. Present for `pr` only, last member; absent for `issue` and `thread`.                    |
+| Field         | Meaning                                                                                                                                                  |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `contract`    | Always `pg-desk.view/v1`.                                                                                                                                |
+| `type`, `id`  | The entity's type and canonical id.                                                                                                                      |
+| `version`     | The entity's snapshot version.                                                                                                                           |
+| `as_of`       | When the snapshot was taken.                                                                                                                             |
+| `stale`       | True when the stored snapshot is flagged stale, or when `--refresh` of this entity failed or degraded.                                                   |
+| `snapshot`    | The type's pg-connector schema value (`schema.PR`, `schema.Issue`, `schema.Thread`), as stored; `null` if none is stored.                                |
+| `decorations` | `relationship`, `dispositions[]` of `{comment_id, computed, override}`, `urgency` (the level) and `category`.                                            |
+| `annotations` | `hidden` as `{value, reason}`, `wip`, `suppress[]`, `force_review`, `force_review_sha`, `ready_to_land`, `focus_selected` and the `decider` map of maps. |
+| `review`      | A PR's pending agent review, see below. Present for `pr` only, absent for `issue` and `thread`.                                                          |
+| `links[]`     | Every link of the entity, see below.                                                                                                                     |
+| `links_as_of` | The newest time any of the entity's links was last confirmed; `null` when it has none.                                                                   |
+| `ci`          | A PR's CI runs for its head commit, see below. Present for `pr` only, last member; absent for `issue` and `thread`.                                      |
 
 `decorations` come from the stored interpretation and are empty (`""`, `[]`) for an entity that has
 none. A disposition's `override` is the `disposition.<comment_id>` annotation, or `null`.
@@ -45,6 +45,13 @@ again at a new head shows the new SHA.
 `true` or `false` once it has been written (`annotate --key ready_to_land --value true|false`), and
 `null` when it is unset. It sits beside `force_review`, and no existing member changes. It exists so
 a decider can see whether it has already written the annotation and stay idempotent.
+
+`annotations.focus_selected` is the value of the reserved `focus_selected` annotation: a string, the
+period key (an ISO date such as `2026-09-23`) or the word `none`, once it has been written (by the
+focus verbs, or `annotate --key focus_selected --value ...`), and JSON `null` when it is unset. The
+member is ALWAYS emitted, for `pr`, `issue` and `thread`, because a view that omitted it would make
+every selection read as absent to a decider. It sits beside `ready_to_land`; no existing member
+changes, and the `decider` namespace is not reused for it.
 
 ### Links
 
@@ -211,7 +218,7 @@ If the entity's own hydration fails or degrades, the stored view is still printe
   the store. For a PR it is always present (`runs` empty when there is no CI data); for `issue` and
   `thread` it is absent.
 
-- **INV-SHOW-7.** `links[].title`, `links[].priority` and `annotations.ready_to_land` MUST be read-only stored data:
+- **INV-SHOW-7.** `links[].title`, `links[].priority`, `annotations.ready_to_land` and `annotations.focus_selected` MUST be read-only stored data:
   they are copied from the linked entity's stored snapshot and the stored annotation, building them
   MUST NOT call the network or write to the store, and they MUST NOT carry a computed value.
 

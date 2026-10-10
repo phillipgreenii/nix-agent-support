@@ -18,8 +18,13 @@ flowchart LR
 - `pg-desk <type> annotate <id> --key K --value V [--origin O] [--actor A]` sets key `K` to `V`
   on the entity, replacing any earlier value. `<type>` is `pr`, `issue` or `thread`. `--origin`
   names the writer and defaults to `pg-desk`; it is stored on the row and on the change record.
-  `--key` and `--value` are required. A reserved key MUST carry its value shape (below) or the
-  verb fails and writes nothing; any other key is stored as given.
+  `--key` and one of `--value` or `--remove` are required. A reserved key MUST carry its value shape
+  (below) or the verb fails and writes nothing; any other key is stored as given.
+- `pg-desk <type> annotate <id> --key K --remove [--origin O] [--actor A]` deletes key `K`. `--remove`
+  and `--value` are mutually exclusive: giving both, or neither, is a usage error that writes
+  nothing. When the key existed it appends one `annotation_changed` record in the same transaction;
+  when it did not it prints that there was nothing to do, appends no record and exits `0`. It is the
+  generic removal form; any key, reserved or not, can be removed.
 - `pg-desk <type> suppress <id> --kind K` sets `suppress.K` to `true`. `unsuppress <id> --kind K`
   removes `suppress.K`; unsuppressing a kind that is not suppressed prints that there was nothing
   to do, appends no record and exits `0`.
@@ -46,6 +51,7 @@ flowchart LR
 | `suppress.<kind>`       | `true`                                                | `suppress`                             |
 | `force_review`          | the head SHA it was requested at                      | `pr force-review`                      |
 | `ready_to_land`         | `true` or `false`                                     | the land-ready decider, via `annotate` |
+| `focus_selected`        | a period key (`YYYY-MM-DD`) or `none`                 | the focus verbs, via `annotate`        |
 | `decider.<name>.<k>`    | any string                                            | deciders, via `annotate`               |
 
 `hidden` and `suppress.<kind>` are steps 1 and 2 of every PR rule's precedence order, so their
@@ -57,7 +63,9 @@ fourth disposition the feedback verbs accept) as `disposition.<comment>` too.
 - **INV-ANNOTATE-1.** Every successful write or removal MUST append exactly one
   `annotation_changed` record in the same transaction as the row change; a failed write MUST leave
   neither.
-- **INV-ANNOTATE-2.** A reserved key MUST be written only in its documented shape.
+- **INV-ANNOTATE-2.** A reserved key MUST be written only in its documented shape; for
+  `focus_selected` that is a calendar date written exactly as `YYYY-MM-DD` (a period key) or the
+  word `none`, and anything else (including the empty string) MUST be rejected with nothing written.
 - **INV-ANNOTATE-3.** The set path of `force-review` MUST NOT consume or clear a flag; the clear
   path (`force-review --clear`) is the only consumer of `force_review`.
 
@@ -69,8 +77,8 @@ counterpart. On an old-schema store each refuses with the store's error, which s
 
 ## Exit codes
 
-`0` on success (including unsuppressing a kind that was not suppressed and clearing a
-`force_review` that was not set); `1` on any error.
+`0` on success (including unsuppressing a kind that was not suppressed, clearing a
+`force_review` that was not set and removing an annotation that was not set); `1` on any error.
 
 ## Consumption record convention
 
@@ -86,6 +94,11 @@ decider.pr-decider.force_review_consumed=<sha>
 view). A request later set at that same head is then distinguishable from the consumed one by
 comparing `force_review_sha` with this record; a request at a newer head is fresh. Which head counts
 as fresh is the decider's rule, not pg-desk's.
+
+## Telemetry and logs
+
+`annotate` (set and `--remove`) emits nothing over OpenTelemetry or Prometheus and has no
+structured-log contract; its only output is the one stdout line naming what it did.
 
 ## Out of scope
 

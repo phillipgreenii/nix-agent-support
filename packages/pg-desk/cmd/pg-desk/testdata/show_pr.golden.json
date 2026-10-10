@@ -44,6 +44,7 @@
     "force_review": false,
     "force_review_sha": null,
     "ready_to_land": null,
+    "focus_selected": null,
     "decider": {
       "pr-decider": {
         "fail.review.head-advanced": "1"

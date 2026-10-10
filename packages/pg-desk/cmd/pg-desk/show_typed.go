@@ -131,8 +131,12 @@ type viewAnnotations struct {
 	ForceReviewSHA *string `json:"force_review_sha"`
 	// ReadyToLand is the reserved ready_to_land annotation: true or false
 	// once written, null when unset.
-	ReadyToLand *bool                        `json:"ready_to_land"`
-	Decider     map[string]map[string]string `json:"decider"`
+	ReadyToLand *bool `json:"ready_to_land"`
+	// FocusSelected is the reserved focus_selected annotation: a period key
+	// or "none" once written, null when unset. It is always emitted, so a
+	// reader can tell an unset selection from a view that predates the member.
+	FocusSelected *string                      `json:"focus_selected"`
+	Decider       map[string]map[string]string `json:"decider"`
 }
 
 // viewLink is one links[] entry. State, Labels, Metadata and Assignee are
@@ -279,6 +283,9 @@ func buildView(cfg *config.Config, st *store.Store, repo, entityType, id string,
 	case "false":
 		b := false
 		v.Annotations.ReadyToLand = &b
+	}
+	if fs, has := byKey[store.AnnotationFocusSelected]; has {
+		v.Annotations.FocusSelected = &fs
 	}
 
 	v.Decorations = viewDecorations{Dispositions: []viewDisposition{}}

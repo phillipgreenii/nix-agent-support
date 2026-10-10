@@ -132,6 +132,10 @@ func TestAnnotateRejectsBadReservedValuesAndMissingFlags(t *testing.T) {
 		{"suppress.", "true"},
 		{"disposition.c1", "open"},
 		{"force_review", " "},
+		{"focus_selected", "tomorrow"},
+		{"focus_selected", ""},
+		{"focus_selected", "2026-9-23"},
+		{"focus_selected", "2026-13-01"},
 		{" ", "x"},
 	} {
 		if _, err := runGroupCmd(t, newAnnotateCmd, "pr", "5", "--key", tc.key, "--value", tc.value); err == nil {
@@ -151,13 +155,15 @@ func TestAnnotateRejectsBadReservedValuesAndMissingFlags(t *testing.T) {
 		{"suppress.lint", "true"},
 		{"disposition.c1", "wont-fix"},
 		{"force_review", "abc123"},
+		{"focus_selected", "2026-09-23"},
+		{"focus_selected", "none"},
 	} {
 		if _, err := runGroupCmd(t, newAnnotateCmd, "pr", "5", "--key", tc.key, "--value", tc.value); err != nil {
 			t.Errorf("annotate %q=%q: %v", tc.key, tc.value, err)
 		}
 	}
-	if got := kindsOf(t, seed, "pr", "o/r#5"); len(got) != 6 {
-		t.Errorf("history = %v, want created + five annotation_changed (rejected writes append nothing)", got)
+	if got := kindsOf(t, seed, "pr", "o/r#5"); len(got) != 8 {
+		t.Errorf("history = %v, want created + seven annotation_changed (rejected writes append nothing)", got)
 	}
 }
 
@@ -400,5 +406,63 @@ func TestHiddenValueShape(t *testing.T) {
 		if err := json.Unmarshal([]byte(got), &v); err != nil {
 			t.Errorf("hiddenValue %s is not JSON: %v", got, err)
 		}
+	}
+}
+
+func TestAnnotateRemoveDeletesAnExistingKeyWithOneChangeRecord(t *testing.T) {
+	open, seed := seedLinkStore(t, [2]string{"pr", "o/r#5"})
+	withOpenSeams(t, linkTestConfig(), open)
+	if _, err := runGroupCmd(t, newAnnotateCmd, "pr", "5", "--key", "focus_selected", "--value", "2026-09-23"); err != nil {
+		t.Fatal(err)
+	}
+	before := kindsOf(t, seed, "pr", "o/r#5")
+
+	out, err := runGroupCmd(t, newAnnotateCmd, "pr", "5", "--key", "focus_selected", "--remove", "--origin", "pg-desk")
+	if err != nil {
+		t.Fatalf("annotate --remove: %v", err)
+	}
+	if !strings.Contains(out, "removed") {
+		t.Errorf("output = %q, want it to say removed", out)
+	}
+	if _, found, err := seed.GetKVAnnotation("o/r", "pr", "o/r#5", "focus_selected"); err != nil || found {
+		t.Errorf("annotation after --remove: found=%v err=%v, want it gone", found, err)
+	}
+	wantOneAnnotationChange(t, seed, "pr", "o/r#5", before, "pg-desk")
+}
+
+func TestAnnotateRemoveOfAnUnsetKeyDoesNothing(t *testing.T) {
+	open, seed := seedLinkStore(t, [2]string{"pr", "o/r#5"})
+	withOpenSeams(t, linkTestConfig(), open)
+	before := kindsOf(t, seed, "pr", "o/r#5")
+
+	out, err := runGroupCmd(t, newAnnotateCmd, "pr", "5", "--key", "focus_selected", "--remove")
+	if err != nil {
+		t.Fatalf("annotate --remove of an unset key: %v, want exit 0", err)
+	}
+	if !strings.Contains(out, "nothing to do") {
+		t.Errorf("output = %q, want it to say there was nothing to do", out)
+	}
+	if got := kindsOf(t, seed, "pr", "o/r#5"); !equalStrings(got, before) {
+		t.Errorf("history = %v, want %v (no record for an unset key)", got, before)
+	}
+}
+
+func TestAnnotateRemoveConflictsWithValueAndNeedsOneOfThem(t *testing.T) {
+	open, seed := seedLinkStore(t, [2]string{"pr", "o/r#5"})
+	withOpenSeams(t, linkTestConfig(), open)
+	if _, err := runGroupCmd(t, newAnnotateCmd, "pr", "5", "--key", "free", "--value", "x"); err != nil {
+		t.Fatal(err)
+	}
+	before := kindsOf(t, seed, "pr", "o/r#5")
+
+	if _, err := runGroupCmd(t, newAnnotateCmd, "pr", "5", "--key", "free", "--value", "x", "--remove"); err == nil {
+		t.Error("--remove with --value: error = nil, want a usage error")
+	}
+	if _, err := runGroupCmd(t, newAnnotateCmd, "pr", "5", "--key", "free"); err == nil {
+		t.Error("neither --value nor --remove: error = nil, want a usage error")
+	}
+	wantAnnotation(t, seed, "pr", "o/r#5", "free", "x", "pg-desk", "alice")
+	if got := kindsOf(t, seed, "pr", "o/r#5"); !equalStrings(got, before) {
+		t.Errorf("history = %v, want %v (a rejected call writes nothing)", got, before)
 	}
 }

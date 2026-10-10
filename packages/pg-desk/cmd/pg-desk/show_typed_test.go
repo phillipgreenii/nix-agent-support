@@ -695,3 +695,27 @@ func TestTypedShowReadyToLandIsTrueFalseOrNull(t *testing.T) {
 		t.Errorf("after false: ready_to_land = %v, want JSON false", got)
 	}
 }
+
+func TestTypedShowFocusSelectedIsStringOrNull(t *testing.T) {
+	f := newViewFixture(t)
+	for _, e := range []struct{ typ, ref, id string }{
+		{"pr", "o/r#5", "5"},
+		{"issue", "bd-1", "bd-1"},
+		{"thread", "C1/1.5", "C1/1.5"},
+	} {
+		t.Run(e.typ, func(t *testing.T) {
+			a := annotationsOf(t, e.typ, e.id)
+			if got, has := a["focus_selected"]; !has || got != nil {
+				t.Errorf("unset: focus_selected = %v (present %v), want an explicit null", got, has)
+			}
+			f.annotate(e.typ, e.ref, "focus_selected", "2026-09-23")
+			if got := annotationsOf(t, e.typ, e.id)["focus_selected"]; got != "2026-09-23" {
+				t.Errorf("after a period key: focus_selected = %v, want the JSON string", got)
+			}
+			f.annotate(e.typ, e.ref, "focus_selected", "none")
+			if got := annotationsOf(t, e.typ, e.id)["focus_selected"]; got != "none" {
+				t.Errorf("after none: focus_selected = %v, want the JSON string none", got)
+			}
+		})
+	}
+}

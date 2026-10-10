@@ -33,6 +33,11 @@ const (
 	AnnotationForceReview = "force_review"
 	// AnnotationReadyToLand marks an entity ready to land.
 	AnnotationReadyToLand = "ready_to_land"
+	// AnnotationFocusSelected records that the entity is held in the daily
+	// focus table: its value is a period key (an ISO date such as
+	// 2026-09-23) or the word "none". The focus verbs write it; deciders read
+	// it from the view's annotations.focus_selected member.
+	AnnotationFocusSelected = "focus_selected"
 
 	annotationDispositionPrefix = "disposition."
 	annotationSuppressPrefix    = "suppress."

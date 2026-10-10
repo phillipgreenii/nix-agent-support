@@ -136,6 +136,7 @@ func TestReservedKeysRoundTrip(t *testing.T) {
 		KeySuppress("stale_review"):  "true",
 		AnnotationForceReview:        "true",
 		AnnotationReadyToLand:        "true",
+		AnnotationFocusSelected:      "2026-09-23",
 		KeyDecider("triage", "note"): "seen",
 	}
 	for k, v := range want {

@@ -220,7 +220,7 @@ tables, or write any key other than the reserved keys above; those belong to the
   and write nothing. Deleting a key that does not exist changes nothing and appends nothing.
 - The reserved keys are `hidden` (JSON `{"value": true|false, "reason": text|null}`), `wip`
   (`true`/`false`), `disposition.<comment_id>` (`will-fix`, `wont-fix` or `no-action`),
-  `suppress.<kind>`, `force_review`, `ready_to_land` and `decider.<name>.<k>`. Each row records
+  `suppress.<kind>`, `force_review`, `ready_to_land`, `focus_selected` and `decider.<name>.<k>`. Each row records
   `origin`, `set_by` and `set_at`.
 - The key/value annotation API is separate from the old per-column annotation API, which keeps
   working on a version-1 store only; the key/value API refuses a version-1 store.

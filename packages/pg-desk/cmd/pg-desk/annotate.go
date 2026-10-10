@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -24,19 +25,30 @@ func init() {
 }
 
 // newAnnotateCmd builds `pg-desk <type> annotate <id> --key K --value V
-// [--origin O]`: the general key/value annotation write [design 6.9, 9.6].
+// [--origin O]` and its removal form `--key K --remove`: the general
+// key/value annotation write [design 6.9, 9.6].
 func newAnnotateCmd(entityType string) *cobra.Command {
 	var key, value, origin, actor string
+	var remove bool
 	c := &cobra.Command{
 		Use:   "annotate <id>",
 		Short: fmt.Sprintf("Set a key/value annotation on a %s", entityType),
 		Long: fmt.Sprintf(`Set the annotation --key to --value on the %s <id>, replacing any earlier value
 of that key, and append an annotation_changed record in the same transaction.
 Reserved keys (hidden, wip, disposition.<comment_id>, suppress.<kind>,
-force_review, ready_to_land) MUST carry the value shape documented for them;
-any other key is stored as given. --origin names the writer (default %q).`, entityType, annotationChangeOrigin),
+force_review, ready_to_land, focus_selected) MUST carry the value shape documented
+for them; any other key is stored as given. --origin names the writer (default %q).
+With --remove (instead of --value) the annotation --key is deleted: one
+annotation_changed record is appended when it existed, and nothing is written
+(exit 0) when it did not.`, entityType, annotationChangeOrigin),
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if remove {
+				return runAnnotateRemove(cmd, entityType, args[0], key, origin, actor)
+			}
+			if !cmd.Flags().Changed("value") {
+				return fmt.Errorf("annotate: --value is required (or --remove to delete the key)")
+			}
 			return runAnnotate(cmd, entityType, args[0], key, value, origin, actor)
 		},
 	}
@@ -44,9 +56,45 @@ any other key is stored as given. --origin names the writer (default %q).`, enti
 	c.Flags().StringVar(&value, "value", "", "Annotation value (required)")
 	c.Flags().StringVar(&origin, "origin", annotationChangeOrigin, "Who is writing the annotation")
 	c.Flags().StringVar(&actor, "actor", "", "Attribute the annotation to this actor (defaults to the configured actor)")
+	c.Flags().BoolVar(&remove, "remove", false, "Delete the annotation --key instead of setting it (exclusive with --value)")
 	_ = c.MarkFlagRequired("key")
-	_ = c.MarkFlagRequired("value")
+	c.MarkFlagsMutuallyExclusive("value", "remove")
 	return c
+}
+
+// runAnnotateRemove deletes the annotation key, appending one
+// annotation_changed record when a row existed.
+func runAnnotateRemove(cmd *cobra.Command, entityType, ref, key, origin, actorFlag string) error {
+	if strings.TrimSpace(key) == "" {
+		return fmt.Errorf("annotate: --key must not be empty")
+	}
+	if strings.TrimSpace(origin) == "" {
+		return fmt.Errorf("annotate: --origin must not be empty")
+	}
+	cfg, err := deskConfigLoad(cmd.Context())
+	if err != nil {
+		return fmt.Errorf("annotate: load config: %w", err)
+	}
+	st, err := openNewSchemaStore("annotate")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = st.Close() }()
+
+	w, err := newKVWrite(cfg, "annotate", entityType, ref, key, "", origin, actorFlag, true)
+	if err != nil {
+		return err
+	}
+	removed, err := w.remove(st)
+	if err != nil {
+		return err
+	}
+	if !removed {
+		_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s %s has no %s annotation; nothing to do\n", entityType, w.id, key)
+		return err
+	}
+	_, err = fmt.Fprintf(cmd.OutOrStdout(), "removed %s %s: %s\n", entityType, w.id, key)
+	return err
 }
 
 func runAnnotate(cmd *cobra.Command, entityType, ref, key, value, origin, actorFlag string) error {
@@ -176,6 +224,10 @@ func validateAnnotationValue(key, value string) error {
 		if value != "true" && value != "false" {
 			return bad("true or false")
 		}
+	case key == store.AnnotationFocusSelected:
+		if value != "none" && !isPeriodKey(value) {
+			return bad("a period key (YYYY-MM-DD) or none")
+		}
 	case key == store.AnnotationForceReview:
 		if strings.TrimSpace(value) == "" {
 			return bad("the head SHA it was requested at")
@@ -198,4 +250,11 @@ func validateAnnotationValue(key, value string) error {
 		}
 	}
 	return nil
+}
+
+// isPeriodKey reports whether v is a calendar date written exactly as
+// YYYY-MM-DD, the period key of the daily focus.
+func isPeriodKey(v string) bool {
+	t, err := time.Parse("2006-01-02", v)
+	return err == nil && t.Format("2006-01-02") == v
 }
