@@ -598,7 +598,9 @@ in that order. The `deterministic` tag matters: the common-case rate in the run 
 is computed from it, so tag every deterministic script you add. `p1-later` names the
 `pg-rescue-open` pg-connector query, and `pg-rescue-bead` needs a tracker (a `.beads/` directory in
 the repo, or `--tracker-dir`) and, for a repo label, `--repo-label-map`; both are machine-specific
-and belong in the consuming machine flake.
+and belong in the consuming machine flake. `--backend NAME` (default `pg-connector-issue-beads`)
+names the pg-connector backend instance every call uses, for a deployment that registers the beads
+backend only under suffixed names.
 
 `checks.<system>.test-pg-rescue-module` evaluates the module, builds the config and runs
 `pg-rescue --config "$cfg" --handlers notify -q -- true` (it must exit `0`) and

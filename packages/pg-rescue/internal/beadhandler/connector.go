@@ -16,8 +16,10 @@ const (
 	// connectorBinary is the ambient PATH name this handler execs; there is
 	// no compile-time dependency on packages/pg-connector.
 	connectorBinary = "pg-connector"
-	// connectorBackend is the one backend every call is pinned to.
-	connectorBackend = "pg-connector-issue-beads"
+	// defaultBackend is the backend instance name every call is pinned to
+	// unless --backend overrides it (pg-connector can register the beads
+	// backend under several suffixed names).
+	defaultBackend = "pg-connector-issue-beads"
 
 	// EnvTrackerDir tells the beads backend which tracker to write to. The
 	// backend does not fall back to its cwd.
@@ -72,8 +74,9 @@ func killGroup(cmd *exec.Cmd) {
 
 // connector runs `pg-connector issue ...` against one tracker.
 type connector struct {
-	env   []string // the child's complete environment
-	child *child
+	env     []string // the child's complete environment
+	child   *child
+	backend string // the pg-connector backend instance name every call passes as --backend
 }
 
 type connectorResult struct {
@@ -125,8 +128,8 @@ func (c *connector) ok(args []string) ([]byte, error) {
 }
 
 // pinned appends the flags every call carries.
-func pinned(args ...string) []string {
-	return append(args, "--backend", connectorBackend, "--output", "json")
+func (c *connector) pinned(args ...string) []string {
+	return append(args, "--backend", c.backend, "--output", "json")
 }
 
 // issue is the subset of pg-connector's issue wire shape this handler reads.
@@ -138,7 +141,7 @@ type issue struct {
 
 // list runs the named query and returns its items.
 func (c *connector) list(query string) ([]issue, error) {
-	out, err := c.ok(pinned("issue", "list", "--query", query))
+	out, err := c.ok(c.pinned("issue", "list", "--query", query))
 	if err != nil {
 		return nil, err
 	}
@@ -174,7 +177,7 @@ func (c *connector) create(s createSpec) (string, error) {
 	for k, v := range s.metadata {
 		args = append(args, "--metadata", csvPair(k, v))
 	}
-	out, err := c.ok(pinned(args...))
+	out, err := c.ok(c.pinned(args...))
 	if err != nil {
 		return "", err
 	}
@@ -192,7 +195,7 @@ func (c *connector) create(s createSpec) (string, error) {
 
 // comment adds body to item id.
 func (c *connector) comment(id, body string) error {
-	_, err := c.ok(pinned("issue", "comment", id, "--body", body))
+	_, err := c.ok(c.pinned("issue", "comment", id, "--body", body))
 	return err
 }
 
@@ -202,7 +205,7 @@ func (c *connector) addLabels(id string, labels []string) error {
 	for _, l := range labels {
 		args = append(args, "--add-label", l)
 	}
-	_, err := c.ok(pinned(args...))
+	_, err := c.ok(c.pinned(args...))
 	return err
 }
 

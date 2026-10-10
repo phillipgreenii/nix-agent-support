@@ -180,6 +180,32 @@ func TestEveryCallIsPinnedToTheBeadsBackendAsJSON(t *testing.T) {
 	}
 }
 
+func TestBackendFlagOverridesThePinnedBackend(t *testing.T) {
+	s := newScene(t, "first-attempt")
+	if code, _, e := s.run("--dedup-query", "q", "--backend", "pg-connector-issue-beads-zr"); code != 3 {
+		t.Fatalf("exit %d: %s", code, e)
+	}
+	calls := s.fake.Calls()
+	if len(calls) != 2 {
+		t.Fatalf("calls %v", calls)
+	}
+	for _, c := range calls {
+		if c.Value("backend") != "pg-connector-issue-beads-zr" {
+			t.Errorf("call %v did not use the overridden backend", c.Args)
+		}
+	}
+}
+
+func TestBackendFlagRejectsEmpty(t *testing.T) {
+	if _, err := parseOptions([]string{"--backend", ""}); err == nil {
+		t.Fatal("an empty --backend must be a usage error")
+	}
+	o, err := parseOptions(nil)
+	if err != nil || o.backend != "pg-connector-issue-beads" {
+		t.Fatalf("default backend = %v, err %v", o, err)
+	}
+}
+
 func TestBodyIsSelfContained(t *testing.T) {
 	s := newScene(t, "three-prior-attempts")
 	if code, _, e := s.run(); code != 3 {

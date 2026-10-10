@@ -120,7 +120,7 @@ func run(rt *Runtime, o *options, kid *child) (contract.Result, error) {
 	if err != nil {
 		return contract.Result{}, err
 	}
-	conn := &connector{env: childEnv(rt.Environ(), tracker, rep.RunID), child: kid}
+	conn := &connector{env: childEnv(rt.Environ(), tracker, rep.RunID), child: kid, backend: o.backend}
 
 	body, err := buildBody(o, td)
 	if err != nil {

@@ -26,6 +26,7 @@ const (
 // Usage is the synopsis printed for --help.
 const Usage = `usage: pg-rescue-bead [--priority N] [--issue-type T] [--label L]... [--repo-label L]
                       [--repo-label-map REPO=LABEL]... [--tracker-dir PATH]
+                      [--backend NAME]
                       [--title-template TEXT | --title-template-file F]
                       [--body-template TEXT | --body-template-file F]
                       [--append-instructions TEXT | --append-instructions-file F]
@@ -42,6 +43,7 @@ type options struct {
 	repoLabel    string
 	repoLabelMap map[string]string
 	trackerDir   string
+	backend      string
 
 	titleTemplate     string
 	hasTitleTemplate  bool
@@ -79,6 +81,7 @@ func parseOptions(args []string) (*options, error) {
 	fs.StringVar(&o.repoLabel, "repo-label", "", "repo label, overriding the --repo-label-map lookup")
 	fs.StringArrayVar(&repoLabelMap, "repo-label-map", nil, "REPO=LABEL (repeatable); REPO is the git toplevel's basename")
 	fs.StringVar(&o.trackerDir, "tracker-dir", "", "tracker root, overriding the cwd's git toplevel")
+	fs.StringVar(&o.backend, "backend", defaultBackend, "pg-connector backend instance name passed as --backend on every call")
 	fs.StringVar(&o.titleTemplate, "title-template", "", "title template text")
 	fs.StringVar(&o.titleTemplateFile, "title-template-file", "", "title template file")
 	fs.StringVar(&o.bodyTemplate, "body-template", "", "body template text")
@@ -113,6 +116,9 @@ func parseOptions(args []string) (*options, error) {
 	}
 	if o.priority < 0 || o.priority > maxPriority {
 		return nil, fmt.Errorf("--priority must be 0-%d, got %d", maxPriority, o.priority)
+	}
+	if o.backend == "" {
+		return nil, errors.New("--backend must not be empty")
 	}
 	if o.tailLines < 0 {
 		return nil, fmt.Errorf("--output-tail-lines must not be negative, got %d", o.tailLines)
