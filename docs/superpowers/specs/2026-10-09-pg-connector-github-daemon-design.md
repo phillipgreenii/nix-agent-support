@@ -1,9 +1,10 @@
 # pg-connector-github: a stateful, daemon-backed GitHub connector — design
 
-- **Date**: 2026-10-09 (revision 4: 2026-10-10)
+- **Date**: 2026-10-09 (revision 5: 2026-10-10)
 - **Status**: DRAFT for operator review. Nothing here is implemented; no implementation bead is filed.
   Revisions 2 and 3 fold in three independent reviews (correctness; completeness and test coverage; UX,
-  observability and standards) and verification passes over revisions 2 and 3.
+  observability and standards) and verification passes over revisions 2 and 3. Revision 5 folds in the
+  operator's answers of 2026-10-10 (rulings 11 to 14) and a further review pass.
 - **Bead**: origin `pg2-zhuiu` (handoff: live vs shadow change detection and what shadow-compare phase A
   measured). A design bead is to be filed once the operator approves the direction.
 - **Deciders**: Phillip (operator).
@@ -33,8 +34,10 @@ changed. Callers keep their commands; the answers become local reads.
 | Persistence        | The store survives restarts. Data still inside its freshness window is served after a restart with no origin call.                                                                               |
 | Change detection   | Owned by the connector. Consumers poll `changes` and acknowledge explicitly. No listing diff, sweep or PR hydration in pg-router or pg-desk for these types.                                     |
 | Change log content | Per change: kinds, the changed fields with BEFORE and AFTER values, the origin, the time.                                                                                                        |
+| CI changes         | In scope (ruling 13). A CI change is a change of the PR: it reaches the PR feed as `ci_changed`, with the data already refreshed, and `ci changes` offers the same rows in CI shape.             |
+| Platforms          | The application is platform-neutral and does all the work (ruling 12). Supervision is a thin per-platform wrapper: launchd now; Linux supervision is deferred to `pg2-opk5g`.                    |
 | `--fresh`          | Kept. Polling paths SHOULD NOT use it; a caller reading back its own out-of-band write uses it or the `refresh` op (see "Out-of-band writes by callers").                                        |
-| Registration       | PROVISIONAL (operator did not answer; reversible): the registry's `{name, command}` form, keeping the old instance names (see "Registration").                                                   |
+| Registration       | PROVISIONAL (operator has not yet confirmed; reversible): the registry's `{name, command}` form, keeping the old instance names (see "Registration").                                            |
 
 ### Operator rulings recorded by this design
 
@@ -63,6 +66,20 @@ the wording matters:
 9. Daemon down: fail `unavailable` (chosen over a read-only store fallback and over a direct fetch).
 10. Change log: field-level before and after (chosen over kinds only and over full snapshots).
 
+From the operator's answers to revision 4's open questions (Phillip, 2026-10-10, same origin bead):
+
+11. pg-pr plugin docs: "pg-pr docs can be updated." This is a scoped exception to the pg-pr freeze (repo
+    `CLAUDE.md`, "pg-pr / pg-router Development Rules") for the documentation changes this design
+    requires; it permits no new pg-pr behavior.
+12. Linux: "the should work on linux, but the daemon management is a wrapper over the running code, so it
+    can be deferred fro right now. there is already planned open work to make linux work, but that cant'
+    be done on the current machine, so ensure the app does all of the work and the osx daemon
+    wrapper/config is minimmal." The planned work is `pg2-opk5g`.
+13. CI changes: "ci changes is needed for the proper PR cateogrization. depending on the state of CI, the
+    PR may not be considerered reviewable or not."
+14. Cutover criteria: "the specified cutover criteria is good to document, but i could overwrite it if i
+    see that it is working even with some issues."
+
 ### Choices made by this design, not by the operator
 
 Each is the design's own call, open to the operator's correction: the keep-alive rule ("Keep-alive,
@@ -72,8 +89,9 @@ sidecar staying file-based until cleanup ("Writes"); client-local `capabilities`
 contract"); the socket frame ("Socket protocol"); the no-change-on-first-sighting baseline ("Query
 read"); the hard cap with `background_share` ("Scheduling and batch fill"); the daemon as the only source of upstream
 kinds ("Change kinds"); the protocol compatibility window ("Upgrade and version skew"); the metric
-catalogue and
-alert thresholds ("Observability").
+catalogue and alert thresholds ("Observability"); the settle rule that refreshes dependent groups
+before a change row is appended ("Settle"); delivering CI changes on the PR feed and the shape of
+`ci changes` ("CI changes"); the supervisor seam and the `supervisor` option ("Platforms").
 
 ## Why: what the two earlier approaches measured
 
@@ -129,10 +147,11 @@ mode is a Proxy; each field group is a Strategy.
 
 ### One binary, two modes
 
-- `pg-connector-github serve` is the daemon. On darwin it MUST run as a launchd user agent with
-  KeepAlive, registered through the HM-scoped pattern (`phillipgreenii.programs.launchdServices.userAgents.<name>`,
-  `phillipgreenii-nix-personal` ADR 0055), label `com.phillipg.pg-connector-github-daemon`. Linux scope
-  is an open question (see "Platforms").
+- `pg-connector-github serve` is the daemon. It is a foreground process that does all of its own
+  housekeeping (see "Platforms"); a supervisor only starts it and restarts it when it exits. On darwin
+  the supervisor is a launchd user agent with KeepAlive, registered through the HM-scoped pattern
+  (`phillipgreenii.programs.launchdServices.userAgents.<name>`, `phillipgreenii-nix-personal` ADR 0055),
+  label `com.phillipg.pg-connector-github-daemon`.
 - `pg-connector-github pr` and `pg-connector-github ci` are client mode (see "Client mode contract").
 - The umbrella keeps executing the backend once per call (`pkg/scriptout/exec.go`). The wire envelope
   does not change; the result shapes gain documented fields (see "Consumer changes at cutover").
@@ -140,11 +159,40 @@ mode is a Proxy; each field group is a Strategy.
 ### Platforms
 
 The repository targets macOS and Linux, and the home-manager module installs the backends on every
-platform (`home/programs/pg-connector/default.nix`). The launchd registration helper is darwin-only;
-`systemd` support for it does not exist (`service-daemon-checklist`, question 7). A Linux host with
-fail-closed clients and no daemon would answer `unavailable` for every `pr` and `ci` call. Until the
-operator decides (open question "Linux"), the design is darwin-scoped and the nix module MUST refuse to
-register `pg-connector-github` on a non-darwin host rather than install a client with no daemon.
+platform (`home/programs/pg-connector/default.nix`). Ruling 12 splits the daemon into two layers:
+
+- **The application** (`pg-connector-github serve`) MUST run unchanged on darwin and Linux and MUST do
+  everything except restart itself: create the state directory with its modes, take the
+  single-instance lock, remove a stale socket, open and migrate the store, rotate its own event log,
+  structured log and client log, emit telemetry, and drain on `SIGTERM` (stop accepting connections,
+  finish in-flight writes, checkpoint the WAL, release the lock). It reads its configuration from the
+  file named by `--config` and MUST NOT depend on the supervisor for environment, working directory or
+  log redirection beyond stdout and stderr.
+- **The supervisor wrapper** is per platform and MUST stay minimal: start `pg-connector-github serve
+--config <path>` at login with the environment of "Daemon environment and socket", and restart it when
+  it exits. On darwin that is one HM launchd user-agent entry (KeepAlive, RunAtLoad, the default
+  `manageLogs`), with no logic of its own. On Linux it does not exist yet: the `systemd` equivalent of
+  the launchd registration helper is planned work, `pg2-opk5g` (`service-daemon-checklist`, question 7),
+  which cannot be built or verified on the operator's current machine.
+
+Platform-specific code inside the binary MUST sit behind one small seam with a darwin and a Linux
+implementation, each built and unit-tested on its platform:
+
+| Concern                       | darwin                                    | Linux                                       |
+| ----------------------------- | ----------------------------------------- | ------------------------------------------- |
+| Peer credentials              | `LOCAL_PEERCRED` (`getpeereid`)           | `SO_PEERCRED`                               |
+| Socket path limit             | 104 bytes                                 | 108 bytes                                   |
+| Supervisor probe              | `launchctl print gui/$UID/<label>`        | none until `pg2-opk5g`; reports `none`      |
+| Restart hint in `unavailable` | `launchctl kickstart -k gui/$UID/<label>` | `pg-connector-github serve --config <path>` |
+
+The home-manager module gains an option `phillipgreenii.programs.pg-connector.github.supervisor`, enum
+`launchd` or `none`, defaulting to `launchd` on darwin and `none` elsewhere. With `none` the module
+installs the binary and renders the daemon config but registers no service; the operator MAY run
+`serve` by hand. Because a client with no daemon answers `unavailable` for every `pr` and `ci` call, the
+registry switch (see "Registration") MUST default to off on a host whose supervisor is `none`, and
+enabling it there MUST be a deliberate, separate setting. The old stateless backends therefore stay
+registered on Linux hosts until `pg2-opk5g` lands, and "Cleanup" MUST NOT remove them while any host
+still registers them.
 
 ### Registration
 
@@ -183,8 +231,15 @@ The home-manager module MUST therefore gain one switch, working name
 instance names in the rendered registry into the argv form above, so the lists cannot diverge. Cutover
 and rollback are a deployment-repo edit of that switch plus an apply, not a runtime toggle.
 
-This choice is PROVISIONAL: the operator was asked and did not answer. The alternatives were new instance
-names (renaming every pin and config block) or a `type` field on the wire request (an envelope change).
+This choice is PROVISIONAL until the operator confirms it. The three options:
+
+| Option                                    | What changes                                                                                                                                              | Cost                                                                                                                                                       |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A: argv form, old names (chosen)          | The registry's command for each old name                                                                                                                  | An instance name no longer names a binary: after cleanup, `pg-connector-pr-github` is a label for "the daemon's pr side". `status` MUST print the mapping. |
+| B: argv form, new names                   | Every `--backend` pin, `backends.<name>` block, `sources[]` row, umbrella ledger key, pg-desk freshness row and deployment query naming the two old names | A rename across two repositories; freshness rows under the old names become ghosts until `INV-FRESH-6` drops them                                          |
+| C: an entity `type` on the wire `Request` | `pkg/scriptout/envelope.go` and every backend's dispatch                                                                                                  | An envelope change for all connectors to serve one, against ruling 1's "this change is not a requirement for all connector implementations"                |
+
+A can be followed by B later, as a pure rename, once the old binaries are gone.
 
 ### Op coverage
 
@@ -208,6 +263,8 @@ Every op the two old backends answer, and the new ones. Sources: `pkg/provider/p
 | both     | `auth_status`           | Daemon; `unavailable` when it is down         | none (cached identity) |                                     |                  |
 | pr       | `changes` (new)         | Change log                                    | none                   |                                     |                  |
 | pr       | `changes_ack` (new)     | Change log                                    | none                   |                                     |                  |
+| ci       | `changes` (new)         | Change log, CI view (see "CI changes")        | none                   |                                     |                  |
+| ci       | `changes_ack` (new)     | Change log                                    | none                   |                                     |                  |
 | both     | `status` (new)          | Daemon; degraded local report when it is down | none                   |                                     |                  |
 | both     | `explain` (new)         | Store                                         | none                   |                                     |                  |
 | both     | `refresh` (new)         | Queues interactive refresh, returns at once   | per the queued groups  |                                     | the named groups |
@@ -227,8 +284,10 @@ spend, but stores nothing.
 - It forwards every other op with the request's own deadline (the backend deadline of
   `pkg/scriptout/limits.go` less a margin), so the daemon never assumes one.
 - Connect timeout: 2 s. On a refused connection it retries with backoff until half the deadline has
-  passed, which covers a launchd restart; then it answers `unavailable` naming the daemon label, the
-  socket path and the restart command (`launchctl kickstart -k gui/$UID/com.phillipg.pg-connector-github-daemon`).
+  passed, which covers a supervisor restart; then it answers `unavailable` naming the socket path and the
+  platform's restart hint (see "Platforms"; on darwin the label
+  `com.phillipg.pg-connector-github-daemon` and
+  `launchctl kickstart -k gui/$UID/com.phillipg.pg-connector-github-daemon`).
 - It answers `version_mismatch` only when the daemon's protocol version is outside the supported range
   (see "Upgrade and version skew").
 
@@ -281,11 +340,12 @@ is `pg-osx-bridge-api`, whose client takes a socket override from `PG_OSX_BRIDGE
   event log, log), `PG_CONNECTOR_GITHUB_CONFIG` (config file), `PG_CONNECTOR_GITHUB_GH` (the `gh`
   binary). The client honors `PG_CONNECTOR_GITHUB_SOCKET` too. The shadow harness relies on these to run
   its own daemon (see "Rollout").
-- Defaults: state under `$XDG_STATE_HOME/pg-connector-github/`, socket `sock` inside it. macOS limits
-  `sun_path` to 104 bytes; the daemon MUST refuse to start with a longer path and say so.
+- Defaults: state under `$XDG_STATE_HOME/pg-connector-github/` (`~/.local/state/pg-connector-github/`
+  when unset), socket `sock` inside it. `sun_path` is limited (104 bytes on darwin, 108 on Linux); the
+  daemon MUST refuse to start with a longer path and say so.
 - The state directory MUST be mode 0700 and the socket 0600. The daemon MUST reject a peer whose uid
-  differs from its own (`getpeereid`). It MUST hold a single-instance lock in the state directory, remove
-  a stale socket left by a dead instance, and cap a request at 1 MiB.
+  differs from its own (the peer-credential call of "Platforms"). It MUST hold a single-instance lock in
+  the state directory, remove a stale socket left by a dead instance, and cap a request at 1 MiB.
 
 ### Identity and host
 
@@ -326,6 +386,15 @@ schema MUST be assigned to exactly one group; the implementation plan carries th
 | CI   | `runs`         | Workflow runs on the PR's branch with today's output (`list_runs`: every run on the branch, jobs only for current-head failures, at most 10) | REST; the branch comes from `summary.headRefName`, so the old second `gh pr view` lookup goes away | `ci_active_ttl` while any run is queued or in progress; otherwise until the head or the rollup changes, never past `ci_max_age` |
 
 Merged and closed PRs use `terminal_ttl` for every group.
+
+The CI `runs` group belongs to the PR entity for keep-alive, versioning and the change log: a PR in the
+keep-alive set has its `runs` refreshed in the background like its other groups, and a `runs` content
+change is a change of the PR (see "CI changes"). The reason is that pg-desk decides reviewability from
+the runs, not from the rollup alone: `review_exempt_checks` and the team-PR cancelled-run rule match
+JOB names and conclusions inside non-passing runs on the head commit (`docs/behavior/pg-desk/interpret.md`,
+panel placement), so a change that leaves the rollup at `failure` (a second job failing, job results
+arriving for a failed run, a newer cancelled run superseding an older failure) can still move a PR
+between blocked and reviewable.
 
 ### Mergeability
 
@@ -438,12 +507,22 @@ at once, the burst `pg2-j0ep2` fixed. Changes that happened while there was no b
 - An entity outside the set is not refreshed. Once every group's `fetched_at` is older than `expiry`, the
   entity and its groups are evicted; change-log rows are kept for their own retention.
 
+**Settle.** A `summary` change that queues dependent groups (the bullets above) MUST NOT append its
+change row at once. The dependent groups are queued at class 2, and ONE row is appended for the entity
+when they have all been refreshed, carrying the kinds and fields of the summary AND of the dependent
+groups. So the row a consumer receives describes data that is already in the store, and the consumer's
+reads are local hits (the central idea of "Why"). If a dependent fetch fails, or `settle_timeout` passes
+first, the row is appended anyway with the unrefreshed groups left stale, so their next read goes
+through to origin; detection is delayed by at most `settle_timeout`, never lost. A refresh of a group by
+itself (a `runs` refresh on `ci_active_ttl`, a hard-age re-pull) appends its row at once.
+
 ### Scheduling and batch fill
 
 Each (entity, group) task carries a due time (`fresh_until`). Priority classes, highest first:
 
 1. Interactive: a caller is waiting.
-2. Write-invalidated and `refresh`-requested.
+2. Write-invalidated, `refresh`-requested, and dependent groups a pending change row waits on (see
+   "Settle").
 3. Due re-runs of configured queries, and overdue members of a configured query.
 4. Overdue entities in the keep-alive set, most recently accessed first.
 5. Fill: entities due within `fill_horizon`, nearest first, used only to fill spare slots of a batch that
@@ -494,6 +573,12 @@ The connector emits the UPSTREAM kinds: `reopened`, `closed`, `merged`, `draft_c
 group, from each group's before and after content. There is no `opened` kind: under the baseline rule a
 first sighting logs nothing, so a new PR reaches consumers as `entered_query` (`added`) on the query it
 joined.
+
+`ci_changed` is emitted when the `summary` rollup state changes, or when the `runs` content changes in
+any field pg-desk's interpreter reads: per run its id, attempt, workflow name, head SHA, status and
+conclusion, and per gathered job its name and conclusion. This is pg-desk's own `ci_changed` definition
+(`packages/pg-desk/internal/classify/pr.go`) widened by the job results, which that definition predates
+and reviewability now depends on. Timestamps and log URLs are not signals.
 
 pg-desk's live path computes NO kinds today. `pg-desk run pr <id>` gathers, compares a facts hash
 (`packages/pg-desk/internal/pipeline/pipeline.go`, `factsChanged`) and persists; its input is only the
@@ -553,12 +638,35 @@ entity id pg-router passes in argv. `classify.Classify` and the local kinds (`an
   `code` and `message`; no envelope field is added). After a store move-aside (see "Error
   handling") the first poll of every key gets the same answer, rather than silently starting at the tail
   and skipping what changed in between.
-- **CI.** `ci` has no configured queries, so a (consumer, kind, query) key is undefined for it. `ci changes`
-  is OUT OF SCOPE until open question "Consumers of `ci changes`" is answered; CI changes reach consumers
-  as PR changes of kind `ci_changed`.
 - **Size.** For `conversation` changes a field records the changed comment's id with its before and after
   body, each capped at `change_body_cap` bytes plus a hash of the full text; never the whole
   conversation.
+
+### CI changes
+
+Ruling 13 puts CI change delivery in scope, because CI state decides whether a PR is reviewable (see
+"Field groups"). Two surfaces, one log:
+
+- **On the PR feed (the categorization path).** A `runs` change is logged as a row of the PR (log kind
+  `pr`, the PR's id, a new PR version) with kind `ci_changed` and the run and job fields that changed.
+  It is therefore delivered by `pr changes` to `pr-mine` and `pr-team`, pg-router emits `pr.changed`,
+  and the desk-pr lane re-runs `pg-desk run pr <id>`, whose `ci list` read is a local hit on the
+  refreshed `runs`. No new pg-router source, event type or lane is needed, and one CI event triggers ONE
+  desk run, not one per feed.
+- **`ci changes` (the CI view).** `ci changes --consumer C --query Q` returns the same rows filtered to
+  those whose kinds include `ci_changed`, for members of the PR query `Q` (CI runs have no queries of
+  their own; they are keyed by their PR). Each change's `entity` is the PR's CI state at that row:
+  `{pr_id, head_sha, version, rollup, runs[]}` with the run shape of `ci list`. It has its own cursor
+  key (C, `ci`, Q), its own `changes_ack`, and the same retention, first-poll, `--reset`, `--cached` and
+  `cursor_expired:` rules as `pr changes`. A consumer that already reads `pr changes` MUST NOT also
+  subscribe to `ci changes` for the same query, or it would act twice on one event. At cutover no
+  consumer is wired to it; it exists for a CI-only consumer (for example a CI-failure notifier) without
+  making that consumer parse PR rows.
+
+The umbrella has no `ci changes` verb today (`changes` exists for `pr`, `issue`, `calendar` and `thread`;
+`cmd/pg-connector/ci.go` has `list`, `logs` and `rerun-failed`). It gains one through the generic
+`newChangesCmd`, forward-only: `ci` has no `list` query to diff, so a backend that does not declare
+`owns_changes` for `ci` answers `ci changes` with `invalid_argument`.
 
 ### Source freshness
 
@@ -626,6 +734,7 @@ All values are configurable. Each default is a starting point, to be checked by 
 | `pending_ttl`                                   | 2 min                          | The ccpool precheck acts on it; a review deleted in the browser is seen within 2 min |
 | `ci_active_ttl` / `ci_max_age`                  | 60 s / 30 min                  |                                                                                      |
 | `terminal_ttl`                                  | 24 h                           | Merged and closed PRs are effectively frozen                                         |
+| `settle_timeout`                                | 30 s                           | Bounds the delay the settle rule adds to detection                                   |
 | `keepalive_window`                              | 24 h                           |                                                                                      |
 | `expiry`                                        | 7 d                            | Matches today's tombstone retention (`cmd/pg-connector/cache_dispatch.go`)           |
 | `fill_horizon`                                  | one `summary_ttl`              | Fill with what would be due within one more cycle                                    |
@@ -665,9 +774,15 @@ The phase 1 spike MUST therefore measure the per-group cost and the `updatedAt` 
 defaults are fixed. Relaxing both `*_max_age` to 2 h cuts the re-pulls to N x 2 groups x 0.5 per hour =
 N fetches (80 at N = 80, so 160 points at 2 points per fetch and 240 at 3), which fits either case.
 
-**Per detected change**: unknown until the spike. **CI** spends REST, not points: 10 PRs with running CI
-refreshed every 60 s is at least 10 x 60 = 600 `run list` requests per hour, plus up to 10 job fetches for
-each failed head.
+**Per detected change**: unknown until the spike. **CI** spends REST, not points, at one `run list`
+request per `runs` refresh plus up to 10 job fetches for each failed head:
+
+- Active: 10 PRs with running CI refreshed every 60 s (`ci_active_ttl`) is 10 x 60 = 600 requests per
+  hour.
+- Idle: every other kept-alive PR refreshes `runs` at least once per `ci_max_age` (30 min). At N = 80
+  that is at most 80 x 2 = 160 requests per hour, fewer when head or rollup changes already refreshed it.
+- Total at N = 80: at least 600 + 160 = 760 requests per hour before job fetches, against the
+  `rest_requests_per_hour` cap of 2,000.
 
 ## Error handling
 
@@ -703,7 +818,9 @@ Walked against `service-daemon-checklist`:
 5. **Not running**: the HM bridge's `extraHealthChecks` (`phillipgreenii-nix-personal` ADR 0055, "Visibility
    to other system-scope registries") plus the `daemon.up` gauge alert below.
 6. **Restart on change**: automatic through the wrapper hash.
-7. **Linux**: not supported yet (see "Platforms").
+7. **Linux**: the application runs there; the supervisor entry is deferred to `pg2-opk5g` (see
+   "Platforms"). Questions 2 to 5 are darwin-only mechanisms today; on Linux the daemon still writes its
+   logs and pushes OTel metrics to the configured endpoint, if any.
 
 ### Event log
 
@@ -731,24 +848,25 @@ OTel, dotted names after the pa-monitor convention (`packages/pa-monitor/README.
 settings from `osConfig.phillipgreenii.observability` read null-safely. Labels MUST NOT carry an entity id
 or an ad-hoc query key; `query` is limited to configured queries and `consumer` to configured consumers.
 
-| Metric                                                    | Type           | Labels                 | Answers                                    |
-| --------------------------------------------------------- | -------------- | ---------------------- | ------------------------------------------ |
-| `pg_connector_github.daemon.up`                           | gauge          |                        | Is it running                              |
-| `pg_connector_github.budget.spent`                        | counter        | bucket, purpose, group | What it spends, and on what                |
-| `pg_connector_github.budget.remaining`                    | gauge          | bucket                 | Headroom                                   |
-| `pg_connector_github.governor.paused`                     | gauge          | bucket, reason         | Is background work held back               |
-| `pg_connector_github.queue.depth`                         | gauge          | class                  | Backlog                                    |
-| `pg_connector_github.queue.oldest_overdue_seconds`        | gauge          | class                  | Is it keeping up                           |
-| `pg_connector_github.group.staleness_seconds`             | histogram      | group                  | How far past `fresh_until` served data is  |
-| `pg_connector_github.request.duration`                    | histogram      | op, `served_from`      | Caller latency and hit ratio               |
-| `pg_connector_github.change.detection_delay_seconds`      | histogram      | kind, origin           | `at` minus the origin's `updatedAt`        |
-| `pg_connector_github.revalidation`                        | counter        | group, result          | Extended vs re-pulled vs forced by max age |
-| `pg_connector_github.batch.ids`                           | histogram      | role (due, fill)       | Batch fill                                 |
-| `pg_connector_github.query.last_success_age_seconds`      | gauge          | query                  | Is each configured query fresh             |
-| `pg_connector_github.consumer.lag_rows`                   | gauge          | consumer, query        | Is a consumer behind                       |
-| `pg_connector_github.consumer.oldest_unacked_age_seconds` | gauge          | consumer, query        | Is a consumer stuck                        |
-| `pg_connector_github.consumer.redeliveries`               | counter        | consumer, query        | An at-least-once crash loop                |
-| `pg_connector_github.store.bytes`, `.store.evictions`     | gauge, counter |                        | Store growth                               |
+| Metric                                                    | Type           | Labels                            | Answers                                    |
+| --------------------------------------------------------- | -------------- | --------------------------------- | ------------------------------------------ |
+| `pg_connector_github.daemon.up`                           | gauge          |                                   | Is it running                              |
+| `pg_connector_github.budget.spent`                        | counter        | bucket, purpose, group            | What it spends, and on what                |
+| `pg_connector_github.budget.remaining`                    | gauge          | bucket                            | Headroom                                   |
+| `pg_connector_github.governor.paused`                     | gauge          | bucket, reason                    | Is background work held back               |
+| `pg_connector_github.queue.depth`                         | gauge          | class                             | Backlog                                    |
+| `pg_connector_github.queue.oldest_overdue_seconds`        | gauge          | class                             | Is it keeping up                           |
+| `pg_connector_github.group.staleness_seconds`             | histogram      | group                             | How far past `fresh_until` served data is  |
+| `pg_connector_github.request.duration`                    | histogram      | op, `served_from`                 | Caller latency and hit ratio               |
+| `pg_connector_github.change.detection_delay_seconds`      | histogram      | kind, origin                      | `at` minus the origin's `updatedAt`        |
+| `pg_connector_github.change.settle`                       | counter        | result (settled, failed, timeout) | Does the settle rule hold or time out      |
+| `pg_connector_github.revalidation`                        | counter        | group, result                     | Extended vs re-pulled vs forced by max age |
+| `pg_connector_github.batch.ids`                           | histogram      | role (due, fill)                  | Batch fill                                 |
+| `pg_connector_github.query.last_success_age_seconds`      | gauge          | query                             | Is each configured query fresh             |
+| `pg_connector_github.consumer.lag_rows`                   | gauge          | consumer, query                   | Is a consumer behind                       |
+| `pg_connector_github.consumer.oldest_unacked_age_seconds` | gauge          | consumer, query                   | Is a consumer stuck                        |
+| `pg_connector_github.consumer.redeliveries`               | counter        | consumer, query                   | An at-least-once crash loop                |
+| `pg_connector_github.store.bytes`, `.store.evictions`     | gauge, counter |                                   | Store growth                               |
 
 **Traces**: one span per request (op, instance, `served_from`, wait), with a child span per origin call
 carrying its cost.
@@ -789,20 +907,21 @@ lock, viewer change, budget pause and resume, store move-aside or refusal, consu
 - **Faster answers.** A hit is a socket round trip; no `gh` process runs.
 - **Clear failures.** A daemon-down answer names the daemon label, the socket and the restart command.
   The ccpool precheck and every skill that calls `pg-connector pr` or `ci` MUST treat `unavailable` as
-  retryable, and their docs MUST say so (see open question "pg-pr plugin docs").
+  retryable, and their docs MUST say so, including the `claude-marketplace/pg-pr` plugin's (ruling 11).
 - **`pg-connector-github status`** answers "is it healthy, how fresh, how much is it spending" in one
   place: version and build id, uptime, store path and size, each budget bucket and any pause with its
   reason and end time, queue depth and the oldest overdue task by class, per-query `last_success_at` and
   `last_error`, auth state and viewer, change-log head `seq`, and per-consumer positions. When the daemon is
-  down it MUST still report: launchd state, socket path, store file size and age, and the log paths. Exit
+  down it MUST still report: the supervisor probe's answer (see "Platforms"), socket path, store file size
+  and age, and the log paths. Exit
   codes follow `INV-EXIT-1`: 0 healthy, 2 degraded, 3 down. `--json` gives the same as a document. The
   umbrella surfaces the same health as rows of `pg-connector auth status` and `pg-connector config validate`.
 - **`pg-connector pr explain <id>`** (and `ci explain`) answers "why is this stale": each group's
   `fetched_at`, `fresh_until`, `max_age_at`, `last_error`, queue position and the last change rows.
 - **`pg-connector pr refresh <id>`** and **`pg-connector pr refresh --query Q`** queue a class 2 refresh
   and return at once.
-- **`ci changes`** does not exist today (`changes` exists for `pr`, `issue`, `calendar` and `thread`) and
-  stays out of scope until open question "Consumers of `ci changes`" is answered.
+- **`pg-connector ci changes --consumer C --query Q`** is new (see "CI changes"); a PR's CI state
+  changes also arrive on `pr changes` as `ci_changed`, which is what pg-router and pg-desk read.
 
 ## Consumer changes at cutover
 
@@ -824,6 +943,8 @@ lock, viewer change, budget pause and resume, store move-aside or refusal, consu
 | pg-desk PR change flow (`internal/changes`, v2 tables, sweep)     | Built, unmigrated in production                                                                                                                                                     | Not used for PRs; retired                                                                                                                                                                                                                                                                             |
 | ccpool precheck (`pr review pending`)                             | Direct call                                                                                                                                                                         | Unchanged; served from `pending` (2 min TTL); `unavailable` retryable                                                                                                                                                                                                                                 |
 | Skills calling `pg-connector pr` or `ci`                          | Direct calls                                                                                                                                                                        | Unchanged; read-your-own-write per "Out-of-band writes by callers"                                                                                                                                                                                                                                    |
+| `claude-marketplace/pg-pr` plugin docs                            | Frozen with pg-pr                                                                                                                                                                   | Docs-only update under ruling 11: `unavailable` is retryable, and `pg-connector pr refresh <id>` is the read-your-own-write path                                                                                                                                                                      |
+| pg-desk CI categorization (`ci list` in gather, `interpret`)      | Re-run only when the live listing diff sees a rollup or head change                                                                                                                 | Re-run on every `ci_changed` row, including job-level changes behind an unchanged rollup (see "CI changes"); its `ci list` read is a local hit after the settle rule                                                                                                                                  |
 | pg-desk-shadow                                                    | Phase A harness                                                                                                                                                                     | Runs its own daemon as a child (see "Rollout")                                                                                                                                                                                                                                                        |
 | `pg-connector-pr-github`, `pg-connector-ci-github-actions`        | Separate binaries                                                                                                                                                                   | Kept installed until cleanup for rollback, then removed                                                                                                                                                                                                                                               |
 
@@ -831,6 +952,7 @@ The umbrella's full change list, none of which is a cache in the umbrella, so ru
 
 - forward `changes` and `changes_ack` for an `owns_changes` backend, and fail closed (never fall back to
   the ledger diff);
+- a new `ci changes` verb through the generic `newChangesCmd`, forward-only (see "CI changes");
 - for a `cache_opt_out` backend: pass the backend's annotations through, and skip `commitCacheWrites` and
   `commitCacheTombstones`;
 - add `--fresh` to `pr files`, `pr commits`, `pr review pending`, `pr list` and `ci list`, and forward it
@@ -875,6 +997,9 @@ Rules"). Phase 1 MUST edit them, alongside the ADR and before any code:
   `shadow-compare.md`.
 - `packages/pg-router-source-pg-connector/docs/behavior/README.md`; the pg-router behavior docs on sources
   and clocks; the ccpool precheck invariant `INV-CCH-22`; `pg-pr-retirement.md`.
+- The `claude-marketplace/pg-pr` plugin's docs, under ruling 11 (docs only).
+- `docs/behavior/pg-desk/changes.md` MUST state that a CI change behind an unchanged rollup re-triggers
+  categorization (see "CI changes").
 - A new behavior-docs set for `pg-connector-github` itself (stories, invariants for freshness, change
   delivery and budget).
 
@@ -917,9 +1042,13 @@ flowchart LR
    and config (`PG_CONNECTOR_GITHUB_*`) and the existing read-only `gh` shim, capped at 1,500 points per
    hour. The collector reads the daemon's change feed by calling the client directly (the umbrella
    pass-through is not live yet) and compares it with the live events: feed misses, detection delay,
-   sweep-caught events, shadow-only detections, cost. Cutover criteria, to be confirmed by the operator
-   before the run: zero unexplained misses; detection delay p90 no worse than live; GraphQL points per hour
-   inside the cap for the whole run; daemon uptime at least 95%.
+   sweep-caught events, shadow-only detections, cost, and CI-driven categorization changes (a PR moving
+   between blocked and reviewable) seen by each side. The DEFAULT cutover criteria are: zero unexplained
+   misses; detection delay p90 no worse than live; GraphQL points per hour inside the cap for the whole
+   run; daemon uptime at least 95%. The shadow report MUST state each criterion as met or not met. Under
+   ruling 14 the operator MAY cut over with criteria unmet when the run shows the daemon working; the
+   cutover bead MUST then record the operator's decision and every unmet criterion, and each unmet
+   criterion MUST get its own follow-up bead.
 5. **Cutover.** Install the daemon; switch the registry to the argv instances; turn on the umbrella
    pass-through, acknowledgement and opt-out; clear the two instances' umbrella cache and ledger files;
    retire `pr-sweep`; remove `--fresh` from pg-desk gather's `pr` reads (the `issue` reads and
@@ -929,7 +1058,8 @@ flowchart LR
    files again, restore `pr-sweep`; the posted-review sidecar is untouched, so nothing is lost.
 6. **Cleanup.** Move the posted-review sidecar into the store; remove pg-desk's PR change flow, the
    umbrella's `pr` refresher wiring (the refresher stays for `issue`, `cmd/pg-connector/changes_refresher.go`)
-   and the old packages.
+   and the old packages. The old packages MUST NOT be removed while any host still registers them (a
+   Linux host waits for `pg2-opk5g`, see "Platforms").
 
 ## Testing
 
@@ -952,6 +1082,17 @@ origin call.
   answer during a slow migration.
 - **Mergeability**: `MERGEABLE`, `UNKNOWN`, `CONFLICTING` is one change; `UNKNOWN` alone is none; the
   wire returns the carried-forward value; `--fingerprints` is stable across `UNKNOWN`.
+- **CI changes**: with the rollup held at `failure`, each of these yields exactly one `ci_changed` PR row
+  carrying the changed run or job fields: a second job failing, job results arriving for a failed run, a
+  newer cancelled run superseding an older failure of the same workflow; a timestamp-only or log-URL-only
+  change yields none. `ci changes` returns the same rows in CI shape under its own cursor and
+  acknowledgement, and filters out rows without `ci_changed`. An end-to-end case: a fixture PR whose only
+  failing job is in `review_exempt_checks` gains a non-exempt failure, the PR feed delivers one row, and
+  `pg-desk run pr` places the PR as blocked using only local reads (counting fetcher: zero origin calls
+  during the run). `ci changes` against a backend without `owns_changes` is `invalid_argument`.
+- **Settle**: a rollup change appends no row until `runs` is refreshed, then ONE row carrying both the
+  summary and `runs` fields; a dependent fetch that fails or passes `settle_timeout` still appends the
+  row, with the group left stale; a head change waits for `files`, `commits` and `runs`.
 - **Change feed**: at-least-once redelivery when the consumer dies before `changes_ack`; overlapping
   calls for one key are serialized; first poll starts at the tail; `--reset` replays; `cursor_expired`
   after retention; filtered feed delivers departures; a truncated listing records no `left_query`;
@@ -995,8 +1136,14 @@ reconcile` detects a closed PR from daemon-served reads.
   appears in the store, the change log or the event log.
 - **Observability**: the alert rules' `promtool` tests; the moved log-source glob test; pg-desk-shadow's
   `CostInWindow` and budget reader against `kind=origin` rows.
+- **Platforms**: the Go test suite, including the real-binary client tests, MUST build and pass on darwin
+  and Linux; each side of the platform seam (peer credentials, `sun_path` limit, supervisor probe,
+  restart hint) has its own test; `SIGTERM` drains in-flight writes and releases the lock, after which a
+  second `serve` starts cleanly.
 - **Nix**: the module renders the daemon config, the registry entries from one declaration, and the
-  launchd entry, in the style of `checks.<system>.test-pa-monitor-hm-launchd`; refusal on non-darwin.
+  launchd entry, in the style of `checks.<system>.test-pa-monitor-hm-launchd`; with `supervisor = "none"`
+  it installs the binary and config, registers no service, and leaves the registry switch off unless set
+  explicitly.
 - **Gap analysis**: `pg-go-mutate` over the shared library and the scheduler before the shadow run.
 - **Live**: the shadow run; after cutover, the live exercise of the pg-router sources.
 
@@ -1034,13 +1181,9 @@ To re-scope or close AFTER this spec is approved, not before:
 
 ## Open questions
 
-1. **Registration** (see "Registration"): confirm argv instances with the old names.
-2. **Linux** (see "Platforms"): no Linux use; or keep the old stateless binaries registered on Linux; or
-   build a `systemd` user unit (new work for the shared registration helper).
-3. **Cutover criteria** (see "Rollout"): confirm or change the four criteria.
-4. **Cutover budget**: the `graphql_points_per_hour` value after cutover, which depends on the live flow's
+Revision 4's questions on Linux, the cutover criteria, the pg-pr plugin docs and `ci changes` are
+answered by rulings 11 to 14. Still open:
+
+1. **Registration** (see "Registration"): confirm option A, argv instances with the old names.
+2. **Cutover budget**: the `graphql_points_per_hour` value after cutover, which depends on the live flow's
    own spend (not yet measured).
-5. **pg-pr plugin docs**: pg-pr is frozen (repo `CLAUDE.md`). Confirm that a docs-only change to
-   `claude-marketplace/pg-pr` stating `unavailable` is retryable and naming `refresh` is allowed.
-6. **Consumers of `ci changes`**: whether any consumer needs a CI feed at cutover, or CI changes are read
-   only as PR changes of kind `ci_changed`.
