@@ -1,0 +1,13 @@
+{"_type":"issue","id":"sy-0","title":"Already closed","status":"closed","closed_at":"2026-10-01T00:00:00Z","close_reason":"done"}
+{"_type":"issue","id":"sy-1","title":"Deferred task","status":"open","notes":"[unstick 2026-10-10T12:20:00Z] undeferred: defer date passed; recheck-when: on-change"}
+{"_type":"issue","id":"sy-2","title":"Human-labelled","status":"open","labels":["pb"],"comments":[{"id":1,"author":"synthetic-worker","created_at":"2026-10-10T12:25:00Z","text":"[unstick 2026-10-10T12:25:00Z] de-labelled: no human action needed; recheck-when: on-change"}]}
+{"_type":"issue","id":"sy-3","title":"Blocked on nine","status":"blocked","notes":"[unstick 2026-10-10T12:30:00Z] fix-deps: blocker retargeted; recheck-when: sy-8 closes","dependencies":[{"issue_id":"sy-3","depends_on_id":"sy-8","type":"blocks"}]}
+{"_type":"issue","id":"sy-4","title":"Stale one","status":"closed","closed_at":"2026-10-10T12:40:00Z","close_reason":"stale: superseded"}
+{"_type":"issue","id":"sy-5","title":"Still waiting","status":"open","notes":"[unstick 2026-10-10T12:35:00Z] unchanged: blocker still open; recheck-when: 2026-11-01"}
+{"_type":"issue","id":"sy-6","title":"Dead claim","status":"open","notes":"[unstick 2026-10-10T12:45:00Z] released: worker died; recheck-when: on-change"}
+{"_type":"issue","id":"sy-7","title":"Peer closes this","status":"closed","closed_at":"2026-10-10T12:10:00Z","close_reason":"done elsewhere"}
+{"_type":"issue","id":"sy-8","title":"Ready one","status":"open"}
+{"_type":"issue","id":"sy-9","title":"Ready blocker","status":"closed","closed_at":"2026-10-10T12:15:00Z","close_reason":"done"}
+{"_type":"issue","id":"sy-10","title":"Peer undefers this","status":"open"}
+{"_type":"issue","id":"sy-11","title":"Closed but unlisted","status":"closed","closed_at":"2026-10-10T12:50:00Z","close_reason":"by a peer","notes":"[unstick 2026-10-10T12:05:00Z] unchanged: old marker; recheck-when: on-change"}
+{"_type":"issue","id":"sy-20","title":"Filed during sweep","status":"open"}

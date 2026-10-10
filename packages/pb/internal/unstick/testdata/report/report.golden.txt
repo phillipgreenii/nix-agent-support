@@ -1,0 +1,44 @@
+Sweep report (start 2026-10-10T12:00:00Z, report 2026-10-10T13:00:00Z)
+HEURISTIC (bd records no closer): a bead is attributed to the sweep iff it is in a dispatched batch AND (it carries a non-unchanged sweep marker with ts >= sweep start, OR it is closed now, was non-closed before, and is listed as 'closed <id>' in results/*.md); every other change in the window is attributed to peers
+
+Counts (before -> after):
+  open: 5 -> 7 (+2 = 7 - 5)
+  blocked: 3 -> 1 (-2 = 1 - 3)
+  deferred: 2 -> 0 (-2 = 0 - 2)
+  in_progress: 1 -> 0 (-1 = 0 - 1)
+  ready: 2 -> 4 (+2 = 4 - 2)
+  open-not-ready: 8 - 5 left (sweep 2 + peers 3) + 1 entered = 4
+  changed in window 9 = sweep 5 + peers 4
+
+Markers added by outcome (5):
+  de-labelled: 1 (sy-2)
+  fix-deps: 1 (sy-3)
+  released: 1 (sy-6)
+  unchanged: 2 (sy-11, sy-5)
+  undeferred: 1 (sy-1)
+Closed (4):
+  sy-11 [peer]: by a peer
+  sy-4 [sweep]: stale: superseded
+  sy-7 [peer]: done elsewhere
+  sy-9 [peer]: done
+Undeferred (2):
+  sy-1 [sweep]: defer_until 2026-10-09T00:00:00Z -> none
+  sy-10 [peer]: defer_until 2026-10-20T00:00:00Z -> none
+De-labelled (1):
+  sy-2 [sweep]: removed labels: human
+Retargeted (1):
+  sy-3 [sweep]: blockers: removed sy-9; added sy-8
+Claims released (1):
+  sy-6
+New beads (1):
+  sy-20
+Peers (changed, not attributed to the sweep) (4):
+  sy-10: status deferred -> open; undeferred
+  sy-11: status blocked -> closed
+  sy-7: status open -> closed
+  sy-9: status open -> closed
+OPERATOR (2):
+  - decide on sy-5 policy
+  - review sy-2 label
+FOLLOWUP (1):
+  - file a bead for sy-3 cleanup
