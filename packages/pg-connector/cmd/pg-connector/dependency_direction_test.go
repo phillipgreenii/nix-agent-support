@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"io/fs"
@@ -385,6 +386,134 @@ func doThing(ctx context.Context) schema.AttentionItem { return schema.Attention
 	if len(violations) != 0 {
 		t.Fatalf("evaluateAttentionZeroImport flagged clean imports: %v", violations)
 	}
+}
+
+// scriptoutImportPath is the import path of the wire package whose bare
+// string-name wrappers the registry guard below polices.
+const scriptoutImportPath = "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
+
+// bareScriptoutWrappers are the exported string-name entry points that exec
+// the bare binary and ignore any registered argv. Every umbrella exec MUST go
+// through the Registry (Registry.Invoke / Registry.InvokeCapabilities, which
+// pass the registered Target); calling these from the umbrella would silently
+// run an instance without its flag, and cacheEnabled would fail OPEN on the
+// resulting probe error (bead pg2-h5cmo item 1, INV-REG-4).
+var bareScriptoutWrappers = map[string]bool{"Invoke": true, "InvokeCapabilities": true}
+
+// evaluateRegistryBypass parses every non-test .go file directly under dir
+// (the umbrella's package directory) and returns one violation per call
+// expression scriptout.Invoke(...) / scriptout.InvokeCapabilities(...).
+// It is AST-based, so a mention in a comment is not a violation.
+func evaluateRegistryBypass(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var violations []string
+	fset := token.NewFileSet()
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(fset, filepath.Join(dir, name), nil, 0)
+		if err != nil {
+			return nil, fmt.Errorf("parse %s: %w", name, err)
+		}
+		local := ""
+		for _, imp := range file.Imports {
+			if p, err := strconv.Unquote(imp.Path.Value); err == nil && p == scriptoutImportPath {
+				local = "scriptout"
+				if imp.Name != nil {
+					local = imp.Name.Name
+				}
+			}
+		}
+		if local == "" {
+			continue
+		}
+		ast.Inspect(file, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			if id, ok := sel.X.(*ast.Ident); ok && id.Name == local && bareScriptoutWrappers[sel.Sel.Name] {
+				violations = append(violations, fmt.Sprintf(
+					"%s:%d: calls scriptout.%s, which execs the bare binary and drops the registered argv — go through Registry.Invoke / Registry.InvokeCapabilities (INV-REG-4)",
+					name, fset.Position(call.Pos()).Line, sel.Sel.Name,
+				))
+			}
+			return true
+		})
+	}
+	return violations, nil
+}
+
+// TestUmbrellaNeverCallsBareScriptoutWrappers is the registry-bypass guard:
+// no non-test file in cmd/pg-connector calls scriptout.Invoke or
+// scriptout.InvokeCapabilities.
+func TestUmbrellaNeverCallsBareScriptoutWrappers(t *testing.T) {
+	violations, err := evaluateRegistryBypass(".")
+	if err != nil {
+		t.Fatalf("evaluateRegistryBypass: %v", err)
+	}
+	for _, v := range violations {
+		t.Error(v)
+	}
+}
+
+// TestRegistryBypass_DetectsBareWrapperCalls proves the guard is not
+// vacuous: both wrappers are flagged (including under an import alias), a
+// comment mention and the Target variants are not.
+func TestRegistryBypass_DetectsBareWrapperCalls(t *testing.T) {
+	dir := t.TempDir()
+	writeCompositionFixture(t, dir, "bad.go", `package main
+
+import (
+	"context"
+
+	so "`+scriptoutImportPath+`"
+)
+
+func bad(ctx context.Context) {
+	_, _ = so.Invoke(ctx, "b", "list", nil, nil)
+	_, _ = so.InvokeCapabilities(ctx, "b")
+}
+`)
+	writeCompositionFixture(t, dir, "good.go", `package main
+
+import (
+	"context"
+
+	"`+scriptoutImportPath+`"
+)
+
+// scriptout.Invoke(ctx, binary) in a comment is not a call.
+func good(ctx context.Context, t scriptout.Target) {
+	_, _ = scriptout.InvokeTarget(ctx, t, "list", nil, nil)
+	_, _ = scriptout.InvokeCapabilitiesTarget(ctx, t)
+}
+`)
+	writeCompositionFixture(t, dir, "bad_test.go", `package main
+
+import "`+scriptoutImportPath+`"
+
+var _, _ = scriptout.Invoke(nil, "b", "x", nil, nil)
+`)
+
+	violations, err := evaluateRegistryBypass(dir)
+	if err != nil {
+		t.Fatalf("evaluateRegistryBypass: %v", err)
+	}
+	if len(violations) != 2 {
+		t.Fatalf("violations = %v, want exactly the 2 calls in bad.go", violations)
+	}
+	assertContainsViolation(t, violations, "bad.go:10: calls scriptout.Invoke,")
+	assertContainsViolation(t, violations, "bad.go:11: calls scriptout.InvokeCapabilities,")
 }
 
 func writeCompositionFixture(t *testing.T, root, rel, content string) {

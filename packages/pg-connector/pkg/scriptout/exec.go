@@ -117,6 +117,12 @@ func callDetail(ctx context.Context, req Request, elapsed time.Duration) string 
 // don't need to substring-match. Opaque to which capability is being
 // called — matches the shape of pg-pr's existing invoke() helper.
 //
+// WARNING: Invoke execs the BARE binary name and knows nothing of a
+// registered instance's argv. The umbrella (cmd/pg-connector) MUST NOT call
+// it: go through Registry.Invoke (InvokeTarget) so a {name, command}
+// registration runs with its command arguments. A source-scan test
+// (TestUmbrellaNeverCallsBareScriptoutWrappers) enforces this.
+//
 // config is copied verbatim onto the outgoing Request's own Config member
 // (bead pg2-2j5ac.28.1, design: "the umbrella copies a registered
 // backend's backends.<binary> config block VERBATIM into every request to
@@ -219,6 +225,10 @@ type capabilitiesWireShape struct {
 // It checks for an error envelope first (see capabilitiesWireShape) so a
 // failed capabilities call surfaces as an error instead of a zero-value
 // success [bug A6].
+//
+// WARNING: like Invoke, this execs the BARE binary name. The umbrella MUST use
+// Registry.InvokeCapabilities (InvokeCapabilitiesTarget) instead; a bare
+// probe of an instance fails and cacheEnabled then fails OPEN.
 func InvokeCapabilities(ctx context.Context, binary string) (*CapabilitiesResponse, error) {
 	return InvokeCapabilitiesTarget(ctx, Target{Name: binary, Command: []string{binary}})
 }

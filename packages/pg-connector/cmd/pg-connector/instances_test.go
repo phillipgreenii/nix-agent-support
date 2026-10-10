@@ -320,3 +320,75 @@ func TestInstances_PlainStringRegistrationIsUnchanged(t *testing.T) {
 		}
 	}
 }
+
+// capabilitiesCalls returns the logged backend calls whose request op is
+// "capabilities" (bead pg2-h5cmo: the capability probes behind
+// cacheEnabled, search --fields and config validate's activity_kinds
+// summary are separate call sites from the op-dispatch path).
+func capabilitiesCalls(calls []string) []string {
+	var out []string
+	for _, c := range calls {
+		if strings.Contains(c, `"op":"capabilities"`) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// assertEveryCapabilityProbeCarriesTheFlag asserts exactly want capability
+// probes ran and every one received its instance's argv (ARGC=2,
+// --beads-dir <dir>), not the bare binary.
+func assertEveryCapabilityProbeCarriesTheFlag(t *testing.T, logPath string, want int, dirPrefix string) {
+	t.Helper()
+	probes := capabilitiesCalls(instanceCalls(t, logPath))
+	if len(probes) != want {
+		t.Fatalf("capability probes = %d (%v), want %d", len(probes), probes, want)
+	}
+	for _, c := range probes {
+		if !strings.HasPrefix(c, "ARGC=2 ARGV[--beads-dir "+dirPrefix) {
+			t.Errorf("a capability probe ran without its instance argv: %q", c)
+		}
+	}
+}
+
+func TestInstances_CacheEnabledProbeCarriesTheInstanceArgv(t *testing.T) {
+	logPath := writeInstanceBackend(t, "inst-bin")
+	writeInstancesConfig(t, "connector:\n  issue:\n"+twoInstanceList)
+	reg, err := LoadRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	enabled, err := cacheEnabled(context.Background(), reg, "issue", "inst-zr")
+	if err != nil || !enabled {
+		t.Fatalf("cacheEnabled = %v, %v; want true, nil", enabled, err)
+	}
+	assertEveryCapabilityProbeCarriesTheFlag(t, logPath, 1, "/example/zr]")
+}
+
+func TestInstances_SearchFieldsProbeCarriesTheInstanceArgv(t *testing.T) {
+	logPath := writeInstanceBackend(t, "inst-bin")
+	writeInstancesConfig(t, "search:\n"+twoInstanceSources)
+
+	if _, _, code := executePr(t, []string{"search", "x", "--fields", "not-a-field"}); code != 0 && code != 2 {
+		t.Fatalf("search exit = %d", code)
+	}
+	// One --fields validation probe per queried instance, each with its argv.
+	assertEveryCapabilityProbeCarriesTheFlag(t, logPath, 2, "/example/")
+}
+
+func TestInstances_ActivityKindsProbeCarriesTheInstanceArgv(t *testing.T) {
+	logPath := writeInstanceBackend(t, "inst-bin")
+	writeInstancesConfig(t, twoInstanceActivityConfig("/example/zr"))
+	reg, err := LoadRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The fake declares no activity_kinds, so the union is empty; the point
+	// is that each source's probe ran with its own argv.
+	if kinds := activityKindsUnion(context.Background(), reg); kinds != nil {
+		t.Fatalf("kinds = %v, want nil", kinds)
+	}
+	assertEveryCapabilityProbeCarriesTheFlag(t, logPath, 2, "/example/")
+}
