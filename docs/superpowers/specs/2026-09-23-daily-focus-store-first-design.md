@@ -1,8 +1,10 @@
 # Daily focus, store-first: phase 15 of the pg-desk/connector program
 
 - **Date**: 2026-09-23 (revised 2026-10-06 against the landed entity change flow; amended 2026-10-08 in two sessions)
-- **Status**: Draft, landed on the operator's instruction of 2026-10-07 (review first, then land)
-  so that decomposition can start from it. The ranking model, candidate set, epic slot rule and rank
+- **Status**: APPROVED to decompose (operator, 2026-10-10, "Approve as written", recorded on
+  `pg2-71x08`; the approval includes the author's calls in section 12 and requested no design change).
+  History: landed as a draft on the operator's instruction of 2026-10-07 (review first, then land)
+  so that decomposition could start from it. The ranking model, candidate set, epic slot rule and rank
   placement (section 6, D-F11) were ruled by the operator on 2026-10-05, and the minting path
   (D-F12 to D-F16) on 2026-10-06; D-F17 to D-F21 were proposed by the agent from the 2026-10-07
   five-dimension review and CONFIRMED by the operator on 2026-10-07, together with the age-key
@@ -22,8 +24,10 @@
   item selected on an earlier day keeps its bead); a bead is a candidate when it carries the label
   `pg-focus-planable` (RV-C, which supersedes the bead half of D-F23); items linked to a seed by any
   link are candidates too, one hop (RV-D); and an empty identity list warns and does not fail (RV-E).
-  The operator has now reviewed section 12's items across the two sessions of 2026-10-08, but has NOT
-  read the document line by line, and the second-session amendments have had no independent review.
+  The operator reviewed section 12's items across the two sessions of 2026-10-08 (without a line-by-line
+  read of the whole document), and the second-session amendments had two independent read-only
+  reviews, whose blocker and major findings are fixed in this text; the operator then approved the
+  document as written on 2026-10-10.
 - **Bead**: `pg2-2j5ac.27` (this design's own tracking bead; phase 15's decompose-trigger is
   `blocked-by` it)
 - **Depends on**: the entity change flow (`docs/superpowers/specs/2026-09-29-entity-change-flow-design.md`,
