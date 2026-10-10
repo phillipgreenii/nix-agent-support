@@ -641,6 +641,7 @@ func (p *parser) build() *Config {
 	order, _ := asList(p.root["group_order"])
 	for i, g := range order {
 		if s, ok := asString(g); ok {
+			c.groupOrder = append(c.groupOrder, s)
 			if _, dup := c.groupRank[s]; !dup {
 				c.groupRank[s] = i
 			}

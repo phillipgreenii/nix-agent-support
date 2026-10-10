@@ -1,27 +1,274 @@
 schema = 3
 cachePackages = [
+  'github.com/beorn7/perks/quantile',
+  'github.com/cenkalti/backoff/v5',
+  'github.com/cespare/xxhash/v2',
+  'github.com/go-logr/logr',
+  'github.com/go-logr/logr/funcr',
+  'github.com/go-logr/stdr',
+  'github.com/google/uuid',
+  'github.com/grpc-ecosystem/grpc-gateway/v2/runtime',
+  'github.com/grpc-ecosystem/grpc-gateway/v2/utilities',
+  'github.com/munnerz/goautoneg',
+  'github.com/prometheus/client_golang/prometheus',
+  'github.com/prometheus/client_golang/prometheus/promhttp',
+  'github.com/prometheus/client_model/go',
+  'github.com/prometheus/common/expfmt',
+  'github.com/prometheus/common/model',
   'github.com/santhosh-tekuri/jsonschema/v6',
   'github.com/santhosh-tekuri/jsonschema/v6/kind',
+  'github.com/spf13/cobra',
+  'github.com/spf13/pflag',
+  'go.opentelemetry.io/auto/sdk',
+  'go.opentelemetry.io/contrib/bridges/otelslog',
+  'go.opentelemetry.io/otel',
+  'go.opentelemetry.io/otel/attribute',
+  'go.opentelemetry.io/otel/baggage',
+  'go.opentelemetry.io/otel/codes',
+  'go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc',
+  'go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp',
+  'go.opentelemetry.io/otel/exporters/otlp/otlptrace',
+  'go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc',
+  'go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp',
+  'go.opentelemetry.io/otel/log',
+  'go.opentelemetry.io/otel/log/embedded',
+  'go.opentelemetry.io/otel/log/global',
+  'go.opentelemetry.io/otel/log/noop',
+  'go.opentelemetry.io/otel/metric',
+  'go.opentelemetry.io/otel/metric/embedded',
+  'go.opentelemetry.io/otel/metric/noop',
+  'go.opentelemetry.io/otel/propagation',
+  'go.opentelemetry.io/otel/sdk',
+  'go.opentelemetry.io/otel/sdk/instrumentation',
+  'go.opentelemetry.io/otel/sdk/log',
+  'go.opentelemetry.io/otel/sdk/resource',
+  'go.opentelemetry.io/otel/sdk/trace',
+  'go.opentelemetry.io/otel/semconv/v1.26.0',
+  'go.opentelemetry.io/otel/semconv/v1.37.0',
+  'go.opentelemetry.io/otel/semconv/v1.43.0',
+  'go.opentelemetry.io/otel/semconv/v1.43.0/otelconv',
+  'go.opentelemetry.io/otel/trace',
+  'go.opentelemetry.io/otel/trace/embedded',
+  'go.opentelemetry.io/otel/trace/noop',
+  'go.opentelemetry.io/proto/otlp/collector/logs/v1',
+  'go.opentelemetry.io/proto/otlp/collector/trace/v1',
+  'go.opentelemetry.io/proto/otlp/common/v1',
+  'go.opentelemetry.io/proto/otlp/logs/v1',
+  'go.opentelemetry.io/proto/otlp/resource/v1',
+  'go.opentelemetry.io/proto/otlp/trace/v1',
+  'golang.org/x/net/http/httpguts',
+  'golang.org/x/net/http2',
+  'golang.org/x/net/http2/hpack',
+  'golang.org/x/net/idna',
+  'golang.org/x/net/trace',
   'golang.org/x/sys/unix',
   'golang.org/x/text/feature/plural',
   'golang.org/x/text/language',
   'golang.org/x/text/message',
   'golang.org/x/text/message/catalog',
+  'golang.org/x/text/secure/bidirule',
+  'golang.org/x/text/transform',
+  'golang.org/x/text/unicode/bidi',
+  'golang.org/x/text/unicode/norm',
+  'google.golang.org/genproto/googleapis/api/httpbody',
+  'google.golang.org/genproto/googleapis/rpc/errdetails',
+  'google.golang.org/genproto/googleapis/rpc/status',
+  'google.golang.org/grpc',
+  'google.golang.org/grpc/attributes',
+  'google.golang.org/grpc/backoff',
+  'google.golang.org/grpc/balancer',
+  'google.golang.org/grpc/balancer/base',
+  'google.golang.org/grpc/balancer/endpointsharding',
+  'google.golang.org/grpc/balancer/grpclb/state',
+  'google.golang.org/grpc/balancer/pickfirst',
+  'google.golang.org/grpc/balancer/roundrobin',
+  'google.golang.org/grpc/binarylog/grpc_binarylog_v1',
+  'google.golang.org/grpc/channelz',
+  'google.golang.org/grpc/codes',
+  'google.golang.org/grpc/connectivity',
+  'google.golang.org/grpc/credentials',
+  'google.golang.org/grpc/credentials/insecure',
+  'google.golang.org/grpc/encoding',
+  'google.golang.org/grpc/encoding/gzip',
+  'google.golang.org/grpc/encoding/proto',
+  'google.golang.org/grpc/experimental/balancer/weight',
+  'google.golang.org/grpc/experimental/stats',
+  'google.golang.org/grpc/grpclog',
+  'google.golang.org/grpc/health/grpc_health_v1',
+  'google.golang.org/grpc/keepalive',
+  'google.golang.org/grpc/mem',
+  'google.golang.org/grpc/metadata',
+  'google.golang.org/grpc/peer',
+  'google.golang.org/grpc/resolver',
+  'google.golang.org/grpc/resolver/dns',
+  'google.golang.org/grpc/serviceconfig',
+  'google.golang.org/grpc/stats',
+  'google.golang.org/grpc/status',
+  'google.golang.org/grpc/tap',
+  'google.golang.org/protobuf/encoding/protodelim',
+  'google.golang.org/protobuf/encoding/protojson',
+  'google.golang.org/protobuf/encoding/prototext',
+  'google.golang.org/protobuf/encoding/protowire',
+  'google.golang.org/protobuf/proto',
+  'google.golang.org/protobuf/protoadapt',
+  'google.golang.org/protobuf/reflect/protoreflect',
+  'google.golang.org/protobuf/reflect/protoregistry',
+  'google.golang.org/protobuf/runtime/protoiface',
+  'google.golang.org/protobuf/runtime/protoimpl',
+  'google.golang.org/protobuf/types/known/anypb',
+  'google.golang.org/protobuf/types/known/durationpb',
+  'google.golang.org/protobuf/types/known/fieldmaskpb',
+  'google.golang.org/protobuf/types/known/structpb',
+  'google.golang.org/protobuf/types/known/timestamppb',
+  'google.golang.org/protobuf/types/known/wrapperspb',
+  'gopkg.in/yaml.v3',
   'pgregory.net/rapid'
 ]
 
 [mod]
+  [mod.'github.com/beorn7/perks']
+    version = 'v1.0.1'
+    hash = 'sha256-h75GUqfwJKngCJQVE5Ao5wnO3cfKD9lSIteoLp/3xJ4='
+
+  [mod.'github.com/cenkalti/backoff/v5']
+    version = 'v5.0.3'
+    hash = 'sha256-bKq43PPD8RM6e7HePxHaO27traqm76bkvHcTVTQ+jeY='
+
+  [mod.'github.com/cespare/xxhash/v2']
+    version = 'v2.3.0'
+    hash = 'sha256-7hRlwSR+fos1kx4VZmJ/7snR7zHh8ZFKX+qqqqGcQpY='
+
+  [mod.'github.com/go-logr/logr']
+    version = 'v1.4.4'
+    hash = 'sha256-q9HX9aelONTLsywyLY4Wc5UYCK+wG0FbSzFWisCYiIA='
+
+  [mod.'github.com/go-logr/stdr']
+    version = 'v1.2.2'
+    hash = 'sha256-rRweAP7XIb4egtT1f2gkz4sYOu7LDHmcJ5iNsJUd0sE='
+
+  [mod.'github.com/google/uuid']
+    version = 'v1.6.0'
+    hash = 'sha256-VWl9sqUzdOuhW0KzQlv0gwwUQClYkmZwSydHG2sALYw='
+
+  [mod.'github.com/grpc-ecosystem/grpc-gateway/v2']
+    version = 'v2.30.0'
+    hash = 'sha256-SKvojuMn48wxg9Dd8D0BcS4PZO3OHIFOJEMYlpvgLsk='
+
+  [mod.'github.com/munnerz/goautoneg']
+    version = 'v0.0.0-20191010083416-a7dc8b61c822'
+    hash = 'sha256-79URDDFenmGc9JZu+5AXHToMrtTREHb3BC84b/gym9Q='
+
+  [mod.'github.com/prometheus/client_golang']
+    version = 'v1.24.1'
+    hash = 'sha256-HAOFVYyPiU7hVS1XXMMjkbGgTT7/UN0zVHXYOnjr7is='
+
+  [mod.'github.com/prometheus/client_model']
+    version = 'v0.6.2'
+    hash = 'sha256-q6Fh6v8iNJN9ypD47LjWmx66YITa3FyRjZMRsuRTFeQ='
+
+  [mod.'github.com/prometheus/common']
+    version = 'v0.70.1'
+    hash = 'sha256-xlhVEswCWaBnAXn53KOUzquoDEnZVd/NcTbj52EJ6rE='
+
   [mod.'github.com/santhosh-tekuri/jsonschema/v6']
     version = 'v6.0.3'
     hash = 'sha256-r/1mhajjfamfJZpu+CeUYr7bTQGQEkmF2f4UcSQZEbA='
 
+  [mod.'github.com/spf13/cobra']
+    version = 'v1.10.2'
+    hash = 'sha256-nbRCTFiDCC2jKK7AHi79n7urYCMP5yDZnWtNVJrDi+k='
+
+  [mod.'github.com/spf13/pflag']
+    version = 'v1.0.9'
+    hash = 'sha256-YAjyYpq5BXCosVJtvYLWFG1t4gma2ylzc7ILLoj/hD8='
+
+  [mod.'go.opentelemetry.io/auto/sdk']
+    version = 'v1.2.1'
+    hash = 'sha256-73bFYhnxNf4SfeQ52ebnwOWywdQbqc9lWawCcSgofvE='
+
+  [mod.'go.opentelemetry.io/contrib/bridges/otelslog']
+    version = 'v0.21.0'
+    hash = 'sha256-LGE5EpisOEyhzerNogp8g1YJDFw9n4OpRWGIIg1wUUU='
+
+  [mod.'go.opentelemetry.io/otel']
+    version = 'v1.47.0'
+    hash = 'sha256-D4dSqVH4J9tKmnQWZFANTZ3+frHUjFIgcsvJWPSwuU4='
+
+  [mod.'go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc']
+    version = 'v0.23.0'
+    hash = 'sha256-IdWZ/L8rTlqFqwU7KVQKpU00JLzoPBC5gvUqdyXLksc='
+
+  [mod.'go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp']
+    version = 'v0.23.0'
+    hash = 'sha256-vK5qblPAdJEhd2qPkXRmnTVF23eorfWICSjmvV9VxW8='
+
+  [mod.'go.opentelemetry.io/otel/exporters/otlp/otlptrace']
+    version = 'v1.47.0'
+    hash = 'sha256-upPAkVlbXKHWBritk71OSRcSCbEI7ffueMkGewtcRq4='
+
+  [mod.'go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc']
+    version = 'v1.47.0'
+    hash = 'sha256-z/LRxCuScyH5m2mthWcCVMuaanayEPJNIfz4qQBHreg='
+
+  [mod.'go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp']
+    version = 'v1.47.0'
+    hash = 'sha256-ufaKTLJEPrGJXhDL5SoZ6V/BDkV6LwiFq0Twmi5T048='
+
+  [mod.'go.opentelemetry.io/otel/log']
+    version = 'v1.47.0'
+    hash = 'sha256-hYCHFuMmSSrMlyChIOEZMLuGYubF8IKkFLPC9yuVXdw='
+
+  [mod.'go.opentelemetry.io/otel/metric']
+    version = 'v1.47.0'
+    hash = 'sha256-ZKgYAoUSGUrI/u2qctou/GVlgJ0Kd9aMEVxudopPfFQ='
+
+  [mod.'go.opentelemetry.io/otel/sdk']
+    version = 'v1.47.0'
+    hash = 'sha256-f9JqSocWeQUExdeAcTvoGuJ9GeQ9KGyeDsLcsYRRu54='
+
+  [mod.'go.opentelemetry.io/otel/sdk/log']
+    version = 'v1.47.0'
+    hash = 'sha256-EakD3iIdS1Ym06EgUO/jlONxsE3a0tapHfjmfBMV5DA='
+
+  [mod.'go.opentelemetry.io/otel/trace']
+    version = 'v1.47.0'
+    hash = 'sha256-W0eb1RPyxX7WUXrQIg9+da00P46fRUlL2S1kgFOvAM0='
+
+  [mod.'go.opentelemetry.io/proto/otlp']
+    version = 'v1.11.0'
+    hash = 'sha256-jBcVUiab9mWgLmPsrCYK7sC2j15AJ47QJM4prnqGGkE='
+
+  [mod.'golang.org/x/net']
+    version = 'v0.59.0'
+    hash = 'sha256-EGnbU9mIAvXqx4vEIWJDt+lZgs/YsUngAFJwmFSc5Tc='
+
   [mod.'golang.org/x/sys']
-    version = 'v0.47.0'
-    hash = 'sha256-TpbRyWWqHjddP6QzUgAbaLd2EE0S+GYNRUIDJd18r98='
+    version = 'v0.48.0'
+    hash = 'sha256-u+LwI76YIeg1asQKZItD2mnL4Yvx8veLhBuL8wv60Ls='
 
   [mod.'golang.org/x/text']
-    version = 'v0.14.0'
-    hash = 'sha256-yh3B0tom1RfzQBf1RNmfdNWF1PtiqxV41jW1GVS6JAg='
+    version = 'v0.42.0'
+    hash = 'sha256-bviKbNmkN4Yf2dpgwmP6yNcZEakCcv1R+YyAxCdJGkY='
+
+  [mod.'google.golang.org/genproto/googleapis/api']
+    version = 'v0.0.0-20260928230214-8a89bd6388cc'
+    hash = 'sha256-3DgHu8gZYFpwX6UXEh1vZdKUrdCsGAkTBtslaphAcFM='
+
+  [mod.'google.golang.org/genproto/googleapis/rpc']
+    version = 'v0.0.0-20260928230214-8a89bd6388cc'
+    hash = 'sha256-qBJJ3Go2HqyEE+jp6FMafhXbMBbA/PIXvbdROnLPAYA='
+
+  [mod.'google.golang.org/grpc']
+    version = 'v1.83.2'
+    hash = 'sha256-q5VtdeJvWM7kbIvui8ncNV/+Rm+d0y/b6XkNN0/u1is='
+
+  [mod.'google.golang.org/protobuf']
+    version = 'v1.36.12'
+    hash = 'sha256-MKd0AdkWEe2A79mGPzOY5I76nMqTsGJKQNPJOKyOwkQ='
+
+  [mod.'gopkg.in/yaml.v3']
+    version = 'v3.0.1'
+    hash = 'sha256-FqL9TKYJ0XkNwJFnq9j0VvJ5ZUU1RvH/52h/f5bkYAU='
 
   [mod.'pgregory.net/rapid']
     version = 'v1.3.0'

@@ -1,0 +1,1298 @@
+openapi: 3.1.0
+jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
+info:
+  title: pg-task-focus API
+  version: 1.0.0
+  summary: The loopback HTTP API of the pg-task-focus daemon.
+  description: |
+    One contract for every client: the command-line client, the web UI, the
+    menu-bar plugin and the connector backend. It is spec-first: this document
+    is the authoritative definition of every path, parameter, body and status,
+    and a contract test fails when a registered route is missing from it or a
+    path here has no route, and validates every response the server sends in
+    the tests against it (except `/stream`, whose event format OpenAPI 3.1
+    cannot describe and which is described in prose below).
+
+    Errors are RFC 9457 `application/problem+json` with an extension member
+    `reason`, a code from the closed set below, and a `trace_id`. Every
+    condition has its own code; there is no catch-all such as an "invalid
+    timeline". Statuses keep their HTTP meaning: 400 is a malformed or
+    incomplete request (a cycle verb that does not say which of several
+    cycles it means included), 404 a thing that does not exist, 409 a conflict
+    with the current state or with other events, 422 a well-formed request
+    whose instant or content is unacceptable for its own target, and 503 an
+    unavailable store.
+
+    The daemon listens on 127.0.0.1 only. Every route, `/healthz`, `/metrics`
+    and `/stream` included, requires a `Host` header from the allowlist
+    (`127.0.0.1:<port>`, `localhost:<port>`, and the host of the configured
+    public URL) and accepts an `Origin` header only from the same allowlist
+    (`Origin: null` is refused; an absent `Origin` is permitted). A mutation
+    requires `Content-Type: application/json`, even when its body is `{}`.
+    No CORS header is ever sent, and no token is used: the daemon is loopback
+    only and single user (a recorded decision of the daemon's ADR).
+
+    `/stream` is server-sent events. It writes `event: state` with
+    `{version, store}` at once and whenever the version changes (a mutation or
+    a configuration reload), `event: store` with the store object whenever the
+    store's state changes (read-only mode begins), and a comment line
+    `: heartbeat` at least every 15 seconds. A client compares versions only
+    for inequality and refetches `/state` on any event.
+
+    Clients SHOULD send `X-Client` from the closed set `cli`, `web`,
+    `connector`, `swiftbar` (anything else is recorded as `unknown`) and a W3C
+    `traceparent`.
+servers:
+  - url: http://127.0.0.1:49210
+    description: The default listen address; the port is the `listen_port` setting.
+tags:
+  - name: state
+  - name: periods
+  - name: tasks
+  - name: cycles
+  - name: editor
+  - name: connector
+  - name: ops
+paths:
+  /api/v1/state:
+    get:
+      tags: [state]
+      operationId: getState
+      summary: The state a client shows now
+      responses:
+        "200":
+          {
+            description: The state,
+            content:
+              {
+                application/json:
+                  { schema: { $ref: "#/components/schemas/State" } },
+              },
+          }
+        "503": { $ref: "#/components/responses/NotReady" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/stream:
+    get:
+      tags: [state]
+      operationId: getStream
+      summary: Server-sent events for a change of the state version or the store
+      responses:
+        "200":
+          description: An event stream (see the description of this document).
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "503": { $ref: "#/components/responses/NotReady" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/periods/change:
+    post:
+      tags: [periods]
+      operationId: changePeriods
+      summary: Begin one or more periods as one atomic batch, or preview doing so
+      requestBody: { $ref: "#/components/requestBodies/ChangePeriods" }
+      responses:
+        "200":
+          description: The change, or its dry-run preview.
+          content:
+            {
+              application/json:
+                {
+                  schema:
+                    {
+                      oneOf:
+                        [
+                          { $ref: "#/components/schemas/Result" },
+                          { $ref: "#/components/schemas/DryRunResult" },
+                        ],
+                    },
+                },
+            }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/profile/change:
+    post:
+      tags: [periods]
+      operationId: changeProfile
+      summary: Make another profile active, or preview doing so
+      requestBody: { $ref: "#/components/requestBodies/ChangeProfile" }
+      responses:
+        "200":
+          description: The change, or its dry-run preview.
+          content:
+            {
+              application/json:
+                {
+                  schema:
+                    {
+                      oneOf:
+                        [
+                          { $ref: "#/components/schemas/Result" },
+                          { $ref: "#/components/schemas/DryRunResult" },
+                        ],
+                    },
+                },
+            }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/tasks/{id}/complete:
+    post:
+      tags: [tasks]
+      operationId: completeTask
+      summary: Complete a task
+      parameters: [{ $ref: "#/components/parameters/TaskID" }]
+      requestBody: { $ref: "#/components/requestBodies/CompleteTask" }
+      responses:
+        "200": { $ref: "#/components/responses/Mutation" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/tasks/{id}/skip:
+    post:
+      tags: [tasks]
+      operationId: skipTask
+      summary: Skip a task, for a reason
+      parameters: [{ $ref: "#/components/parameters/TaskID" }]
+      requestBody: { $ref: "#/components/requestBodies/SkipTask" }
+      responses:
+        "200": { $ref: "#/components/responses/Mutation" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/cycles/start:
+    post:
+      tags: [cycles]
+      operationId: startCycle
+      summary: Start a cycle; a running cycle is interrupted, not refused
+      requestBody: { $ref: "#/components/requestBodies/StartCycle" }
+      responses:
+        "200": { $ref: "#/components/responses/Mutation" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/cycles/pause:
+    post:
+      tags: [cycles]
+      operationId: pauseCycle
+      summary: Pause a cycle; pausing a paused cycle is a no-op
+      requestBody: { $ref: "#/components/requestBodies/CycleVerb" }
+      responses:
+        "200": { $ref: "#/components/responses/Mutation" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/cycles/resume:
+    post:
+      tags: [cycles]
+      operationId: resumeCycle
+      summary: Resume a paused cycle; resuming a running cycle is a no-op
+      requestBody: { $ref: "#/components/requestBodies/CycleVerb" }
+      responses:
+        "200": { $ref: "#/components/responses/Mutation" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/cycles/boost:
+    post:
+      tags: [cycles]
+      operationId: boostCycle
+      summary: Add minutes to a running or paused cycle
+      requestBody: { $ref: "#/components/requestBodies/BoostCycle" }
+      responses:
+        "200": { $ref: "#/components/responses/Mutation" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/cycles/stop:
+    post:
+      tags: [cycles]
+      operationId: stopCycle
+      summary: Stop a cycle; stopping a stopped cycle that is named is a no-op
+      requestBody: { $ref: "#/components/requestBodies/CycleVerb" }
+      responses:
+        "200": { $ref: "#/components/responses/Mutation" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/cycles/switch:
+    post:
+      tags: [cycles]
+      operationId: switchCycle
+      summary: Make a paused cycle the focus and pause the running one, as one batch
+      requestBody: { $ref: "#/components/requestBodies/SwitchCycle" }
+      responses:
+        "200": { $ref: "#/components/responses/Mutation" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/cycles/annotate:
+    post:
+      tags: [cycles]
+      operationId: annotateCycle
+      summary: Replace a cycle's note and key/value pairs, in any state
+      requestBody: { $ref: "#/components/requestBodies/AnnotateCycle" }
+      responses:
+        "200": { $ref: "#/components/responses/Mutation" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/cycles/break:
+    post:
+      tags: [cycles]
+      operationId: breakCycle
+      summary: Back-fill a break a cycle forgot, as one batch
+      requestBody: { $ref: "#/components/requestBodies/BreakCycle" }
+      responses:
+        "200": { $ref: "#/components/responses/Mutation" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/events:
+    get:
+      tags: [editor]
+      operationId: listEvents
+      summary: The logged events, as corrected or as first logged
+      parameters:
+        - {
+            name: from,
+            in: query,
+            schema: { $ref: "#/components/schemas/Instant" },
+            description: Inclusive lower bound on the effective instant in the chosen view.,
+          }
+        - {
+            name: to,
+            in: query,
+            schema: { $ref: "#/components/schemas/Instant" },
+            description: Exclusive upper bound.,
+          }
+        - {
+            name: type,
+            in: query,
+            style: form,
+            explode: true,
+            schema:
+              {
+                type: array,
+                items: { $ref: "#/components/schemas/EventType" },
+              },
+            description: Event types to keep; repeatable or comma separated.,
+          }
+        - {
+            name: view,
+            in: query,
+            schema: { enum: [corrected, original], default: corrected },
+          }
+      responses:
+        "200":
+          {
+            description: The events,
+            content:
+              {
+                application/json:
+                  { schema: { $ref: "#/components/schemas/Events" } },
+              },
+          }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/events/{id}/correct:
+    post:
+      tags: [editor]
+      operationId: correctEvent
+      summary: Replace fields of a stored event; the original stays in the log
+      parameters: [{ $ref: "#/components/parameters/EventID" }]
+      requestBody: { $ref: "#/components/requestBodies/Correct" }
+      responses:
+        "200": { $ref: "#/components/responses/Mutation" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/events/{id}/retract:
+    post:
+      tags: [editor]
+      operationId: retractEvent
+      summary: Take back one stored event (undo)
+      parameters: [{ $ref: "#/components/parameters/EventID" }]
+      requestBody: { $ref: "#/components/requestBodies/Retract" }
+      responses:
+        "200": { $ref: "#/components/responses/Mutation" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/batches/{id}/retract:
+    post:
+      tags: [editor]
+      operationId: retractBatch
+      summary: Take back a whole batch (undo)
+      parameters:
+        [
+          {
+            name: id,
+            in: path,
+            required: true,
+            schema: { $ref: "#/components/schemas/ULID" },
+          },
+        ]
+      requestBody: { $ref: "#/components/requestBodies/Retract" }
+      responses:
+        "200": { $ref: "#/components/responses/Mutation" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/config:
+    get:
+      tags: [state]
+      operationId: getConfig
+      summary: The resolved, validated configuration
+      responses:
+        "200":
+          {
+            description: The configuration,
+            content:
+              {
+                application/json:
+                  { schema: { $ref: "#/components/schemas/ConfigDoc" } },
+              },
+          }
+        "503": { $ref: "#/components/responses/NotReady" }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/calendar:
+    get:
+      tags: [connector]
+      operationId: getCalendar
+      summary: The running segments of cycles that overlap a window
+      parameters:
+        - {
+            name: from,
+            in: query,
+            required: true,
+            schema: { $ref: "#/components/schemas/Instant" },
+          }
+        - {
+            name: to,
+            in: query,
+            required: true,
+            schema: { $ref: "#/components/schemas/Instant" },
+          }
+        - {
+            name: calendar,
+            in: query,
+            schema: { type: string },
+            description: Empty or the fixed calendar id or name; any other name returns no events.,
+          }
+      responses:
+        "200":
+          {
+            description: The segments,
+            content:
+              {
+                application/json:
+                  { schema: { $ref: "#/components/schemas/Calendar" } },
+              },
+          }
+        default: { $ref: "#/components/responses/Problem" }
+  /api/v1/attention:
+    get:
+      tags: [connector]
+      operationId: getAttention
+      summary: The attention feed, stateless
+      responses:
+        "200":
+          {
+            description: The items,
+            content:
+              {
+                application/json:
+                  { schema: { $ref: "#/components/schemas/Attention" } },
+              },
+          }
+        "503": { $ref: "#/components/responses/NotReady" }
+        default: { $ref: "#/components/responses/Problem" }
+  /healthz:
+    get:
+      tags: [ops]
+      operationId: getHealthz
+      summary: Liveness, from process start including replay
+      responses:
+        "200":
+          {
+            description: The health document,
+            content:
+              {
+                application/json:
+                  { schema: { $ref: "#/components/schemas/Health" } },
+              },
+          }
+        default: { $ref: "#/components/responses/Problem" }
+  /readyz:
+    get:
+      tags: [ops]
+      operationId: getReadyz
+      summary: Readiness; 503 until replay has finished and the first store check has passed
+      responses:
+        "200":
+          {
+            description: Ready,
+            content:
+              {
+                application/json:
+                  { schema: { $ref: "#/components/schemas/Health" } },
+              },
+          }
+        "503": { $ref: "#/components/responses/NotReady" }
+        default: { $ref: "#/components/responses/Problem" }
+  /metrics:
+    get:
+      tags: [ops]
+      operationId: getMetrics
+      summary: Prometheus text exposition, every name prefixed pg_task_focus_
+      responses:
+        "200":
+          {
+            description: Prometheus text,
+            content: { text/plain: { schema: { type: string } } },
+          }
+        default: { $ref: "#/components/responses/Problem" }
+components:
+  parameters:
+    TaskID:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, minLength: 1 }
+      description: A task id, `<day|week|sprint>:<period start>:<definition>`.
+    EventID:
+      name: id
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/ULID" }
+  responses:
+    Mutation:
+      description: The result of a mutation; a no-op is `changed` false with a `note` and no event ids.
+      content:
+        {
+          application/json: { schema: { $ref: "#/components/schemas/Result" } },
+        }
+    Problem:
+      description: A refusal, RFC 9457. The `reason` is from the closed set.
+      content:
+        {
+          application/problem+json:
+            { schema: { $ref: "#/components/schemas/Problem" } },
+        }
+    NotReady:
+      description: Replay has not finished or the first store check has not passed (`not_ready`).
+      content:
+        {
+          application/problem+json:
+            { schema: { $ref: "#/components/schemas/Problem" } },
+        }
+  requestBodies:
+    ChangePeriods:
+      required: true
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/ChangePeriodsRequest" } },
+        }
+    ChangeProfile:
+      required: true
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/ChangeProfileRequest" } },
+        }
+    CompleteTask:
+      required: true
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/CompleteTaskRequest" } },
+        }
+    SkipTask:
+      required: true
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/SkipTaskRequest" } },
+        }
+    StartCycle:
+      required: true
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/StartCycleRequest" } },
+        }
+    CycleVerb:
+      required: true
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/CycleVerbRequest" } },
+        }
+    BoostCycle:
+      required: true
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/BoostCycleRequest" } },
+        }
+    SwitchCycle:
+      required: true
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/SwitchCycleRequest" } },
+        }
+    AnnotateCycle:
+      required: true
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/AnnotateCycleRequest" } },
+        }
+    BreakCycle:
+      required: true
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/BreakCycleRequest" } },
+        }
+    Correct:
+      required: true
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/CorrectRequest" } },
+        }
+    Retract:
+      required: true
+      content:
+        {
+          application/json:
+            { schema: { $ref: "#/components/schemas/RetractRequest" } },
+        }
+  schemas:
+    ULID: { type: string, pattern: "^[0-7][0-9A-HJKMNP-TV-Z]{25}$" }
+    Instant:
+      type: string
+      pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3,9}Z$"
+      description: An RFC 3339 instant in UTC with at least millisecond precision.
+    InstantIn:
+      type: string
+      format: date-time
+      description: An RFC 3339 instant, any offset; read as the instant it names.
+    Date: { type: string, pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" }
+    EventType:
+      type: string
+      enum:
+        - period.changed
+        - profile.changed
+        - task.materialized
+        - task.completed
+        - task.skipped
+        - task.missed
+        - task.withdrawn
+        - task.reinstated
+        - cycle.started
+        - cycle.paused
+        - cycle.resumed
+        - cycle.boosted
+        - cycle.stopped
+        - cycle.annotated
+        - event.corrected
+        - event.retracted
+        - batch.committed
+    Version:
+      type: object
+      description: The state version, the pair (log_lines, config_generation); clients compare it only for inequality.
+      required: [log_lines, config_generation]
+      additionalProperties: false
+      properties:
+        log_lines: { type: integer, minimum: 0 }
+        config_generation: { type: integer, minimum: 0 }
+    Store:
+      type: object
+      description: The event store's health. `reason` and `since` are present only while read-only; `reason` is one of a closed set of plain sentences, never free text.
+      required: [state]
+      additionalProperties: false
+      properties:
+        state: { enum: [ok, read_only] }
+        reason: { type: string }
+        since: { $ref: "#/components/schemas/Instant" }
+    Period:
+      type: object
+      required: [kind, start, end, zone, today, ended]
+      additionalProperties: false
+      properties:
+        kind: { enum: [day, week, sprint] }
+        start: { $ref: "#/components/schemas/Date" }
+        end: { $ref: "#/components/schemas/Date" }
+        label: { type: string, x-free-text: true }
+        zone: { type: string }
+        today: { $ref: "#/components/schemas/Date" }
+        ended: { type: boolean }
+        banner:
+          {
+            type: string,
+            description: "Exactly 'New day: roll over', 'New week: roll over' or 'New sprint: roll over' once the period has ended.",
+          }
+    Task:
+      type: object
+      required:
+        [
+          id,
+          kind,
+          definition,
+          cadence,
+          period_start,
+          title,
+          due,
+          due_zone,
+          status,
+          overdue,
+        ]
+      additionalProperties: false
+      properties:
+        id: { type: string }
+        kind: { enum: [day, week, sprint] }
+        definition: { type: string }
+        cadence: { enum: [daily, weekly, sprint] }
+        period_start: { $ref: "#/components/schemas/Date" }
+        title: { type: string }
+        group: { type: string }
+        link: { type: string }
+        due: { $ref: "#/components/schemas/Instant" }
+        due_zone: { type: string }
+        status: { enum: [open, completed, skipped, missed, withdrawn] }
+        overdue: { type: boolean }
+        resolved_at: { $ref: "#/components/schemas/Instant" }
+        reason: { type: string, x-free-text: true }
+    KV:
+      type: object
+      required: [key, value]
+      additionalProperties: false
+      properties:
+        key: { type: string, pattern: "^[a-z0-9_-]+$" }
+        value: { type: string, x-free-text: true }
+    AlertSettings:
+      type: object
+      description: The sounds and repeat interval the cycle's type has now; a sound is a name or null for no sound.
+      required: [sound, reminder_sound, repeat_minutes]
+      additionalProperties: false
+      properties:
+        sound: { type: [string, "null"] }
+        reminder_sound: { type: [string, "null"] }
+        repeat_minutes: { type: integer, minimum: 1 }
+    CycleBase:
+      type: object
+      description: The members every cycle has; Cycle and DimmedCycle close the object over them.
+      required:
+        [
+          id,
+          type,
+          title,
+          planned_minutes,
+          boost_minutes,
+          status,
+          elapsed_seconds,
+          remaining_seconds,
+          overtime,
+          not_in_profile,
+          kv,
+          alert,
+        ]
+      properties:
+        id: { type: string }
+        type: { type: string }
+        title: { type: string }
+        planned_minutes: { type: integer }
+        boost_minutes: { type: integer }
+        status: { enum: [running, paused, stopped] }
+        started_at: { $ref: "#/components/schemas/Instant" }
+        running_since:
+          {
+            $ref: "#/components/schemas/Instant",
+            description: The start of the open running segment (the last start or resume); the running cycle only.,
+          }
+        stopped_at: { $ref: "#/components/schemas/Instant" }
+        elapsed_seconds: { type: integer, minimum: 0 }
+        remaining_seconds: { type: integer, description: Negative in overtime. }
+        overtime: { type: boolean }
+        ends_at: { $ref: "#/components/schemas/Instant" }
+        not_in_profile: { type: boolean }
+        interrupted_by: { type: string }
+        note: { type: string, x-free-text: true }
+        kv: { type: array, items: { $ref: "#/components/schemas/KV" } }
+        alert: { $ref: "#/components/schemas/AlertSettings" }
+    Cycle:
+      allOf: [{ $ref: "#/components/schemas/CycleBase" }]
+      unevaluatedProperties: false
+    DimmedCycle:
+      allOf:
+        - { $ref: "#/components/schemas/CycleBase" }
+        - type: object
+          required: [can_switch]
+          properties:
+            can_switch: { type: boolean }
+      unevaluatedProperties: false
+    ResumeOffer:
+      type: object
+      required: [cycle, action]
+      additionalProperties: false
+      properties:
+        cycle: { $ref: "#/components/schemas/Cycle" }
+        action: { enum: [resume, switch] }
+    State:
+      type: object
+      required:
+        [
+          read_at,
+          initialized,
+          version,
+          store,
+          periods,
+          tasks,
+          next,
+          focus,
+          dimmed,
+          interrupt_stack,
+          resume_offer,
+        ]
+      additionalProperties: false
+      properties:
+        read_at: { $ref: "#/components/schemas/Instant" }
+        initialized: { type: boolean }
+        profile: { type: string }
+        version: { $ref: "#/components/schemas/Version" }
+        store: { $ref: "#/components/schemas/Store" }
+        periods: { type: array, items: { $ref: "#/components/schemas/Period" } }
+        tasks: { type: array, items: { $ref: "#/components/schemas/Task" } }
+        next:
+          { oneOf: [{ $ref: "#/components/schemas/Task" }, { type: "null" }] }
+        focus:
+          { oneOf: [{ $ref: "#/components/schemas/Cycle" }, { type: "null" }] }
+        dimmed:
+          {
+            type: array,
+            items: { $ref: "#/components/schemas/DimmedCycle" },
+            description: Every paused cycle that is not stopped,
+            most recently paused first.,
+          }
+        interrupt_stack:
+          { type: array, items: { $ref: "#/components/schemas/Cycle" } }
+        resume_offer:
+          {
+            oneOf:
+              [{ $ref: "#/components/schemas/ResumeOffer" }, { type: "null" }],
+          }
+    Result:
+      type: object
+      required: [changed, event_ids, version]
+      additionalProperties: false
+      properties:
+        changed: { type: boolean }
+        note: { type: string }
+        event_ids: { type: array, items: { type: string } }
+        batch_id: { type: string }
+        replayed: { type: boolean }
+        version: { $ref: "#/components/schemas/Version" }
+    TaskRef:
+      type: object
+      required: [id, title, overdue]
+      additionalProperties: false
+      properties:
+        id: { type: string }
+        title: { type: string }
+        overdue: { type: boolean }
+    NotMaterialized:
+      type: object
+      required: [definition, reason]
+      additionalProperties: false
+      properties:
+        definition: { type: string }
+        reason: { type: string }
+    CycleRef:
+      type: object
+      required: [id, title]
+      additionalProperties: false
+      properties:
+        id: { type: string }
+        title: { type: string }
+        status: { enum: [running, paused, stopped, not_started] }
+        started_at: { $ref: "#/components/schemas/Instant" }
+    Preview:
+      type: object
+      required:
+        [
+          leaving,
+          materialize,
+          profile_add,
+          profile_withdraw,
+          profile_reinstate,
+          not_materialized,
+          blocking_cycles,
+        ]
+      additionalProperties: false
+      properties:
+        leaving:
+          { type: array, items: { $ref: "#/components/schemas/TaskRef" } }
+        materialize:
+          { type: array, items: { $ref: "#/components/schemas/TaskRef" } }
+        profile_add:
+          { type: array, items: { $ref: "#/components/schemas/TaskRef" } }
+        profile_withdraw:
+          { type: array, items: { $ref: "#/components/schemas/TaskRef" } }
+        profile_reinstate:
+          { type: array, items: { $ref: "#/components/schemas/TaskRef" } }
+        not_materialized:
+          {
+            type: array,
+            items: { $ref: "#/components/schemas/NotMaterialized" },
+          }
+        blocking_cycles:
+          { type: array, items: { $ref: "#/components/schemas/CycleRef" } }
+    DryRunResult:
+      type: object
+      description: What the real request would affect at `state_version`; nothing was appended. Carry `state_version` back as `expected_version`.
+      required: [dry_run, preview, state_version]
+      additionalProperties: false
+      properties:
+        dry_run: { const: true }
+        note: { type: string }
+        preview: { $ref: "#/components/schemas/Preview" }
+        state_version: { $ref: "#/components/schemas/Version" }
+    EventView:
+      type: object
+      required: [id, event, corrected_by, retracted]
+      additionalProperties: false
+      properties:
+        id: { type: string }
+        event: { $ref: "../schemas/event.schema.json" }
+        original: { $ref: "../schemas/event.schema.json" }
+        corrected_by: { type: array, items: { type: string } }
+        retracted: { type: boolean }
+        retracted_by: { type: string }
+    Events:
+      type: object
+      required: [view, events]
+      additionalProperties: false
+      properties:
+        view: { enum: [corrected, original] }
+        events:
+          { type: array, items: { $ref: "#/components/schemas/EventView" } }
+    Segment:
+      type: object
+      required: [id, title, start, end, notes]
+      additionalProperties: false
+      properties:
+        id:
+          {
+            type: string,
+            description: The id of the event that opened the segment.,
+          }
+        title: { type: string }
+        start: { $ref: "#/components/schemas/Instant" }
+        end: { $ref: "#/components/schemas/Instant" }
+        notes:
+          {
+            type: string,
+            description: "The key/value block (the reserved cycle_type first), a line that is exactly '---', then the free-text note.",
+          }
+    Calendar:
+      type: object
+      required: [as_of, stale, calendar_id, calendar, events]
+      additionalProperties: false
+      properties:
+        as_of: { $ref: "#/components/schemas/Instant" }
+        stale: { const: false }
+        calendar_id: { const: focus-cycles }
+        calendar: { type: string }
+        events: { type: array, items: { $ref: "#/components/schemas/Segment" } }
+    AttentionGroup:
+      type: object
+      required: [key, label]
+      additionalProperties: false
+      properties:
+        key: { type: string }
+        label: { type: string }
+    AttentionItem:
+      type: object
+      required: [type, id, summary, severity, group]
+      additionalProperties: false
+      properties:
+        type: { enum: [task, cycle, store] }
+        id: { type: string }
+        summary: { type: string }
+        severity: { enum: [low, medium, high] }
+        group: { $ref: "#/components/schemas/AttentionGroup" }
+        url: { type: string }
+    Attention:
+      type: object
+      required: [as_of, items]
+      additionalProperties: false
+      properties:
+        as_of: { $ref: "#/components/schemas/Instant" }
+        items:
+          { type: array, items: { $ref: "#/components/schemas/AttentionItem" } }
+    ProblemDetails:
+      type: object
+      required: []
+      additionalProperties: false
+      properties:
+        entity: { type: string }
+        events: { type: array, items: { type: string } }
+        instants:
+          { type: array, items: { $ref: "#/components/schemas/Instant" } }
+        cycles:
+          { type: array, items: { $ref: "#/components/schemas/CycleRef" } }
+        store: { $ref: "#/components/schemas/Store" }
+    Reason:
+      type: string
+      description: The closed set of reasons, each with its own status. Every code names its own problem; there is none for a generic "invalid timeline".
+      enum:
+        - invalid_request
+        - invalid_zone
+        - unknown_profile
+        - unknown_cycle_type
+        - reserved_key
+        - cycle_ambiguous
+        - unknown_task
+        - unknown_cycle
+        - unknown_event
+        - no_running_cycle
+        - cycle_stopped
+        - another_cycle_running
+        - interrupted_cycle_not_running
+        - cycle_active
+        - cycle_segments_overlap
+        - break_ends_at_stop
+        - clock_behind_log
+        - task_already_resolved
+        - task_withdrawn
+        - task_not_withdrawn
+        - task_materialized_twice
+        - task_without_period
+        - task_before_profile
+        - period_unchanged
+        - id_conflict
+        - stale_preview
+        - batch_has_dependents
+        - cycle_has_dependents
+        - invalid_correction
+        - future_effective_at
+        - stop_not_after_start
+        - empty_running_segment
+        - cycle_event_before_start
+        - resolution_before_materialization
+        - period_out_of_order
+        - store_unavailable
+        - not_ready
+        - forbidden_host
+        - forbidden_origin
+        - unsupported_media_type
+        - not_found
+        - method_not_allowed
+        - internal_error
+    Problem:
+      type: object
+      description: |
+        An RFC 9457 problem. `detail` is a plain sentence naming the entity, the
+        instants and the event ids involved; `details` holds the same facts in
+        structured form. Every instant in a message is UTC followed, in
+        parentheses, by the same instant in the active day period's zone. A
+        `store_unavailable` carries `store`: its `state` is `read_only` when the
+        store is read-only (restart is the only recovery) and `ok` when the
+        append was rolled back (the outcome is unknown; retry with the same `id`).
+      required: [type, title, status, detail, reason, trace_id]
+      additionalProperties: false
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status:
+          { type: integer, enum: [400, 403, 404, 405, 409, 415, 422, 500, 503] }
+        detail: { type: string }
+        instance: { type: string }
+        reason: { $ref: "#/components/schemas/Reason" }
+        trace_id: { type: string }
+        details: { $ref: "#/components/schemas/ProblemDetails" }
+        store: { $ref: "#/components/schemas/Store" }
+        health: { $ref: "#/components/schemas/Health" }
+    Health:
+      type: object
+      required:
+        [
+          status,
+          ready,
+          version,
+          schema_version,
+          uptime_seconds,
+          replay,
+          last_append,
+          store,
+          config,
+          recovery,
+          alerts,
+        ]
+      additionalProperties: false
+      properties:
+        status: { enum: [starting, ok, degraded] }
+        ready: { type: boolean }
+        failing_check: { type: string }
+        version: { type: string }
+        schema_version: { type: integer }
+        uptime_seconds: { type: number, minimum: 0 }
+        replay:
+          type: object
+          required: [events, duration_seconds]
+          additionalProperties: false
+          properties:
+            events: { type: integer }
+            duration_seconds: { type: number }
+        last_append:
+          {
+            oneOf: [{ $ref: "#/components/schemas/Instant" }, { type: "null" }],
+          }
+        store:
+          type: object
+          required: [state, writable, size_bytes]
+          additionalProperties: false
+          properties:
+            state: { enum: [ok, read_only] }
+            reason: { type: string }
+            since: { $ref: "#/components/schemas/Instant" }
+            writable: { type: boolean }
+            size_bytes: { type: integer, minimum: 0 }
+        config:
+          type: object
+          description: "`reload_error` names the problems by path only and never echoes a configured value."
+          required: [valid, digest, loaded_at, restart_required]
+          additionalProperties: false
+          properties:
+            valid: { type: boolean }
+            digest: { type: string }
+            loaded_at:
+              {
+                oneOf:
+                  [{ $ref: "#/components/schemas/Instant" }, { type: "null" }],
+              }
+            reload_error: { type: string }
+            restart_required:
+              { type: array, items: { enum: [listen_port, public_url] } }
+        recovery:
+          type: object
+          required: [torn_tail, uncommitted_batches]
+          additionalProperties: false
+          properties:
+            torn_tail: { type: boolean }
+            uncommitted_batches: { type: integer, minimum: 0 }
+        alerts:
+          type: object
+          required: [next_reminder]
+          additionalProperties: false
+          properties:
+            running_cycle: { type: string }
+            next_reminder:
+              {
+                oneOf:
+                  [{ $ref: "#/components/schemas/Instant" }, { type: "null" }],
+              }
+    ConfigAlert:
+      type: object
+      required: [sound, reminder_sound, repeat_minutes]
+      additionalProperties: false
+      properties:
+        sound: { type: [string, "null"] }
+        reminder_sound: { type: [string, "null"] }
+        repeat_minutes: { type: integer }
+    DueRule:
+      type: object
+      required: [at, tz]
+      additionalProperties: false
+      properties:
+        at: { type: string, pattern: "^[0-2][0-9]:[0-5][0-9]$" }
+        tz: { type: string }
+        weekday: { enum: [sun, mon, tue, wed, thu, fri, sat] }
+        day: { type: integer, minimum: 1 }
+    ConfigDoc:
+      type: object
+      required:
+        [digest, listen_port, defaults, group_order, profiles, tasks, cycles]
+      additionalProperties: false
+      properties:
+        digest: { type: string }
+        listen_port: { type: integer }
+        public_url: { type: string }
+        defaults:
+          type: object
+          required:
+            [
+              cycle_minutes,
+              boost_minutes,
+              profile,
+              max_future_skew_seconds,
+              alert,
+              attention,
+            ]
+          additionalProperties: false
+          properties:
+            cycle_minutes: { type: integer }
+            boost_minutes: { type: array, items: { type: integer } }
+            profile: { type: string }
+            max_future_skew_seconds: { type: integer }
+            alert: { $ref: "#/components/schemas/ConfigAlert" }
+            attention:
+              type: object
+              required:
+                [due_soon_minutes, overtime_high_minutes, stale_pause_minutes]
+              additionalProperties: false
+              properties:
+                due_soon_minutes: { type: integer }
+                overtime_high_minutes: { type: integer }
+                stale_pause_minutes: { type: integer }
+        group_order: { type: array, items: { type: string } }
+        profiles:
+          type: array
+          items:
+            type: object
+            required: [name, daily, weekly, sprint, cycles]
+            additionalProperties: false
+            properties:
+              name: { type: string }
+              daily: { type: array, items: { type: string } }
+              weekly: { type: array, items: { type: string } }
+              sprint: { type: array, items: { type: string } }
+              cycles: { type: array, items: { type: string } }
+        tasks:
+          type: array
+          items:
+            type: object
+            required: [id, title, cadence, due]
+            additionalProperties: false
+            properties:
+              id: { type: string }
+              title: { type: string }
+              cadence: { enum: [daily, weekly, sprint] }
+              group: { type: string }
+              link: { type: string }
+              due: { $ref: "#/components/schemas/DueRule" }
+        cycles:
+          type: array
+          items:
+            type: object
+            required: [id, title, minutes, keys, alert]
+            additionalProperties: false
+            properties:
+              id: { type: string }
+              title: { type: string }
+              minutes: { type: integer }
+              keys: { type: array, items: { type: string } }
+              alert: { $ref: "#/components/schemas/ConfigAlert" }
+    ChangePeriodsRequest:
+      type: object
+      required: [changes]
+      additionalProperties: false
+      properties:
+        id:
+          {
+            $ref: "#/components/schemas/ULID",
+            description: The idempotency id; it is the batch id.,
+          }
+        changes:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [kind, start, tz]
+            additionalProperties: false
+            properties:
+              kind: { enum: [day, week, sprint] }
+              start: { $ref: "#/components/schemas/Date" }
+              end:
+                {
+                  $ref: "#/components/schemas/Date",
+                  description: Required for week and sprint.,
+                }
+              tz: { type: string }
+              label: { type: string, x-free-text: true }
+        effective_at: { $ref: "#/components/schemas/InstantIn" }
+        profile: { type: string }
+        overrides:
+          type: array
+          items:
+            type: object
+            required: [task_id, reason]
+            additionalProperties: false
+            properties:
+              task_id: { type: string }
+              reason: { type: string, x-free-text: true }
+        skip_all_reason: { type: string, x-free-text: true }
+        expected_version: { $ref: "#/components/schemas/Version" }
+        dry_run: { type: boolean }
+    ChangeProfileRequest:
+      type: object
+      required: [profile]
+      additionalProperties: false
+      properties:
+        id: { $ref: "#/components/schemas/ULID" }
+        profile: { type: string }
+        expected_version: { $ref: "#/components/schemas/Version" }
+        dry_run: { type: boolean }
+    CompleteTaskRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        id: { $ref: "#/components/schemas/ULID" }
+        effective_at: { $ref: "#/components/schemas/InstantIn" }
+    SkipTaskRequest:
+      type: object
+      required: [reason]
+      additionalProperties: false
+      properties:
+        id: { $ref: "#/components/schemas/ULID" }
+        reason: { type: string, x-free-text: true, description: Non-blank. }
+        effective_at: { $ref: "#/components/schemas/InstantIn" }
+    StartCycleRequest:
+      type: object
+      required: [type]
+      additionalProperties: false
+      properties:
+        id: { $ref: "#/components/schemas/ULID" }
+        type: { type: string }
+        minutes: { type: integer, minimum: 1 }
+        effective_at: { $ref: "#/components/schemas/InstantIn" }
+    CycleVerbRequest:
+      type: object
+      description: "`cycle_id` is optional; with several candidates and none named the request is `cycle_ambiguous`, with none `no_running_cycle`."
+      additionalProperties: false
+      properties:
+        id: { $ref: "#/components/schemas/ULID" }
+        cycle_id: { type: string }
+        effective_at: { $ref: "#/components/schemas/InstantIn" }
+    BoostCycleRequest:
+      type: object
+      required: [minutes]
+      additionalProperties: false
+      properties:
+        id: { $ref: "#/components/schemas/ULID" }
+        cycle_id: { type: string }
+        minutes: { type: integer, minimum: 1 }
+        effective_at: { $ref: "#/components/schemas/InstantIn" }
+    SwitchCycleRequest:
+      type: object
+      required: [to]
+      additionalProperties: false
+      properties:
+        id: { $ref: "#/components/schemas/ULID" }
+        to:
+          {
+            type: string,
+            description: The paused cycle that becomes the focus.,
+          }
+        effective_at: { $ref: "#/components/schemas/InstantIn" }
+    AnnotateCycleRequest:
+      type: object
+      description: The whole form each time; the latest annotation replaces the earlier.
+      additionalProperties: false
+      properties:
+        id: { $ref: "#/components/schemas/ULID" }
+        cycle_id: { type: string }
+        note: { type: string, x-free-text: true }
+        kv: { type: array, items: { $ref: "#/components/schemas/KV" } }
+    BreakCycleRequest:
+      type: object
+      required: [cycle_id, from, to]
+      additionalProperties: false
+      properties:
+        id: { $ref: "#/components/schemas/ULID" }
+        cycle_id: { type: string }
+        from: { $ref: "#/components/schemas/InstantIn" }
+        to: { $ref: "#/components/schemas/InstantIn" }
+    CorrectRequest:
+      type: object
+      required: [fields]
+      additionalProperties: false
+      properties:
+        id: { $ref: "#/components/schemas/ULID" }
+        fields:
+          {
+            type: object,
+            minProperties: 1,
+            description: "Replacement values for effective_at and the target's non-identity data fields, each whole.",
+          }
+        reason: { type: string, x-free-text: true }
+    RetractRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        id: { $ref: "#/components/schemas/ULID" }
+        reason: { type: string, x-free-text: true }

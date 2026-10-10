@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/due"
@@ -160,6 +161,7 @@ type Config struct {
 	publicURL  string
 	groupRank  map[string]int
 	groups     int // len(group_order), the rank of every group not listed
+	groupOrder []string
 	profiles   map[string]Profile
 	tasks      map[string]TaskDef
 	cycles     map[string]CycleDef
@@ -212,6 +214,48 @@ func (c *Config) CycleType(id string) (CycleDef, bool) {
 	}
 	t.Keys = append([]string(nil), t.Keys...)
 	return t, true
+}
+
+// GroupOrder returns group_order as written, a group listed twice included.
+func (c *Config) GroupOrder() []string { return append([]string(nil), c.groupOrder...) }
+
+// Profiles lists every profile, ordered by name, as copies.
+func (c *Config) Profiles() []Profile {
+	out := make([]Profile, 0, len(c.profiles))
+	for _, name := range sortedNames(c.profiles) {
+		p, _ := c.Profile(name)
+		out = append(out, p)
+	}
+	return out
+}
+
+// Tasks lists every task definition, ordered by id, as copies.
+func (c *Config) Tasks() []TaskDef {
+	out := make([]TaskDef, 0, len(c.tasks))
+	for _, id := range sortedNames(c.tasks) {
+		t, _ := c.Task(id)
+		out = append(out, t)
+	}
+	return out
+}
+
+// CycleTypes lists every cycle type, ordered by id, as copies.
+func (c *Config) CycleTypes() []CycleDef {
+	out := make([]CycleDef, 0, len(c.cycles))
+	for _, id := range sortedNames(c.cycles) {
+		t, _ := c.CycleType(id)
+		out = append(out, t)
+	}
+	return out
+}
+
+func sortedNames[V any](m map[string]V) []string {
+	names := make([]string, 0, len(m))
+	for n := range m {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // ListenPort returns the port the daemon listens on.

@@ -77,6 +77,19 @@ type Result struct {
 	Replayed bool
 	Version  Version
 	Preview  *command.Preview
+	// Stages are the stages a handled request went through, with the
+	// instants each took, for a trace: "validate" (the plan and the candidate
+	// replay), and for a request that appended, "append", "fsync" (inside
+	// append) and "project" (the adoption). They are wall-clock readings, not
+	// the injected clock's, and never part of an answer replayed from the
+	// record of request ids.
+	Stages []Stage
+}
+
+// Stage is one stage of a handled request.
+type Stage struct {
+	Name       string
+	Start, End time.Time
 }
 
 // Snapshot is a consistent reading of the engine: the model, the
@@ -248,7 +261,9 @@ func (e *Engine) Do(ctx context.Context, c command.Command) (Result, error) {
 	if h := e.st.Health(); h.ReadOnly {
 		return Result{}, e.reportRejection(storeUnavailable(ReadOnlyMessage(h)))
 	}
+	validateStart := time.Now()
 	plan, err := command.Build(e.env(), c)
+	validate := Stage{Name: "validate", Start: validateStart, End: time.Now()}
 	if err != nil {
 		return Result{}, e.reportBuildErr(err)
 	}
@@ -257,9 +272,14 @@ func (e *Engine) Do(ctx context.Context, c command.Command) (Result, error) {
 		if hash != "" {
 			e.noOps.put(&noOp{id: id, hash: hash, result: r})
 		}
+		r.Stages = []Stage{validate}
 		return r, nil
 	}
-	return e.commit(plan)
+	res, err := e.commit(plan)
+	if err == nil {
+		res.Stages = append([]Stage{validate}, res.Stages...)
+	}
+	return res, err
 }
 
 // lookup is step (b) of Do: done is set when the request is answered.
@@ -317,7 +337,9 @@ func (e *Engine) env() command.Env {
 // A panic in the observer or OnHealthChange while the store is made read-only
 // is dropped: the panic that got there is the one re-raised.
 func (e *Engine) commit(plan command.Plan) (Result, error) {
+	appendStart := time.Now()
 	stats, err := e.st.Append(plan.Events)
+	appendEnd := time.Now()
 	if err != nil {
 		return Result{}, e.appendFailed(err)
 	}
@@ -357,6 +379,7 @@ func (e *Engine) commit(plan command.Plan) (Result, error) {
 		return Result{}, e.reportRejection(storeUnavailable(ReadOnlyMessage(h) + ". " + msgStoredNotAdopted))
 	}
 
+	projectStart := time.Now()
 	e.state.Lock()
 	e.model = plan.Candidate
 	e.version.LogLines = plan.Candidate.Lines()
@@ -364,6 +387,11 @@ func (e *Engine) commit(plan command.Plan) (Result, error) {
 	e.state.Unlock()
 	settled = true
 	result.Version = v
+	result.Stages = []Stage{
+		{Name: "append", Start: appendStart, End: appendEnd},
+		{Name: "fsync", Start: appendEnd.Add(-stats.SyncDuration), End: appendEnd},
+		{Name: "project", Start: projectStart, End: time.Now()},
+	}
 	e.observeAppend(plan.Events, stats)
 	e.observeCorrections(plan.Events)
 	e.callbacks.commit(v)

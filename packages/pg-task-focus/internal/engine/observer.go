@@ -30,6 +30,7 @@ type Observer interface {
 	// zero, so summing the calls of one append gives its totals. A daemon that
 	// records the append latency MUST observe Duration only when it is
 	// non-zero, or every later event of a batch counts as a zero-length append.
+	// SyncDuration, the fsync's share of Duration, is split the same way.
 	Appended(t event.Type, s store.AppendStats)
 	// AppendFailed is called when a request reached the store and failed
 	// there: "write" (the write failed), "fsync" (its sync failed) or

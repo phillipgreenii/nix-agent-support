@@ -1,0 +1,467 @@
+# pg-task-focus unified-alerting rules (bead pg2-t7me1.2), following the pg-desk
+# grafana/alerting precedent: a uid, `for`, noDataState, execErrState, a severity and an
+# annotation that names the remedy. Metric names are the final exposition names of
+# packages/pg-task-focus/internal/obs (the catalog); the Go test in that package parses
+# this file and checks that every metric a rule reads is in the REAL scraped output.
+#
+# refId A is plain PromQL and refId C a single threshold stage, so any rule can be wrapped
+# and run under `promtool test rules` the way packages/beads-exporter does.
+#
+# The folder "Focus" converges BY TITLE with the dashboard provider of the same folder (never
+# pin a folderUid: Grafana alerting provisioning ignores it, grafana/grafana#125079).
+#
+# "Daemon down" uses noDataState Alerting because an absent series, once the module is
+# enabled, means the process is down or refuses to start: a daemon that refuses to start never
+# serves /metrics, so it shows as this rule plus the Error log line (flushed before exit, with
+# the log source's smallest errorAlert threshold), not as the restart-loop rule, which covers
+# a daemon that runs and then crashes. All telemetry stays on this machine.
+#
+# Registered via phillipgreenii.observability.alertRuleFiles from
+# darwin/modules/pg-task-focus/default.nix. Delivery is Grafana's notification policy.
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: pg-task-focus-alerts
+    folder: Focus
+    interval: 1m
+    rules:
+      - uid: pg-task-focus-daemon-down
+        title: pg-task-focus daemon down
+        condition: C
+        for: 5m
+        noDataState: Alerting
+        execErrState: Error
+        labels:
+          severity: critical
+        annotations:
+          __dashboardUid__: pg-task-focus
+          summary: "pg-task-focus has not answered a scrape for over 5 minutes"
+          description: 'up{job="pg-task-focus"} has been 0, or has gone missing, for over 5 minutes: the daemon is down, refusing to start (a corrupt log, an unknown event version, a second daemon holding the lock, a bad configuration, or an active profile the configuration no longer defines) or its listener is not on the scraped port. Read the last Error line of the launchd log under ~/.local/state/pg-task-focus/, run `pg-task-focus check` and `pg-task-focus config check`, then restart com.phillipg.pg-task-focus. A daemon that refuses to start never serves /metrics, so this rule, not the restart-loop rule, is the one that sees it.'
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: 'up{job="pg-task-focus"}'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [1]
+      - uid: pg-task-focus-not-ready
+        title: pg-task-focus not ready (stuck replay)
+        condition: C
+        for: 2m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+        annotations:
+          __dashboardUid__: pg-task-focus
+          summary: "pg-task-focus has not finished replaying the log for over 2 minutes"
+          description: "pg_task_focus_ready has been 0 for over 2 minutes: the replay of events.jsonl is stuck or very slow, or the first store writability check keeps failing. Check pg_task_focus_replay_duration_seconds from earlier starts, the data directory's free space and permissions, and /readyz for the failing check."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "pg_task_focus_ready"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [1]
+      - uid: pg-task-focus-store-unwritable
+        title: pg-task-focus store not writable
+        condition: C
+        for: 2m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+        annotations:
+          __dashboardUid__: pg-task-focus
+          summary: "pg-task-focus cannot write to its data directory"
+          description: "The writability probe (create and remove a temp file, open events.jsonl for append) has failed for over 2 minutes. Mutations will fail until it clears. Check that the disk is not full and the data directory is still there and owned by the user."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "pg_task_focus_store_writable"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [1]
+      - uid: pg-task-focus-store-read-only
+        title: pg-task-focus store is read-only
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+        annotations:
+          __dashboardUid__: pg-task-focus
+          summary: "pg-task-focus entered read-only mode: restart it to recover"
+          description: "A failed append could not be rolled back or its fsync failed, so the store refuses every mutation until the process restarts and runs crash recovery (reads keep working). Every client shows READ-ONLY with the reason. Restart com.phillipg.pg-task-focus; a mutation that answered 503 has an unknown outcome, so retry it with the same id."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "pg_task_focus_store_read_only"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+      - uid: pg-task-focus-append-failures
+        title: pg-task-focus appends failing
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+        annotations:
+          __dashboardUid__: pg-task-focus
+          summary: "pg-task-focus failed to append an event in the last 10 minutes"
+          description: "pg_task_focus_append_failures_total{stage} increased: stage write means the write failed, fsync that the sync failed, project that the events are durable but the new state could not be adopted. Look at the Error log lines for the cause; a write failure that rolled back leaves the store writable, the others make it read-only (see the store read-only rule)."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "sum(increase(pg_task_focus_append_failures_total[10m]))"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+      - uid: pg-task-focus-config-reload-failing
+        title: pg-task-focus configuration reload failing
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          __dashboardUid__: pg-task-focus
+          summary: "pg-task-focus has been running on an older configuration for 10+ minutes"
+          description: "The last SIGHUP reload was refused (a bad document, or one that removes the active profile) and the previous configuration is still in force. Run `pg-task-focus config check` on the rendered file for the problems and their paths; /healthz config.reload_error names them by path only."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "pg_task_focus_config_valid"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [1]
+      - uid: pg-task-focus-restart-loop
+        title: pg-task-focus restart loop
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+        annotations:
+          __dashboardUid__: pg-task-focus
+          summary: "pg-task-focus restarted 3 or more times in 30 minutes"
+          description: "The daemon runs and then crashes (a daemon that refuses to start is the daemon-down rule's). Look at the Error and panic lines in the launchd log just before each restart."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 1800
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "changes(pg_task_focus_start_timestamp_seconds[30m])"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gte
+                    params: [3]
+      - uid: pg-task-focus-startup-recovery
+        title: pg-task-focus recovered the end of its log
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          __dashboardUid__: pg-task-focus
+          summary: "pg-task-focus trimmed a torn tail or an uncommitted batch at its last start"
+          description: "A crash left an unacknowledged final line or batch, and startup recovery copied those bytes to a sidecar (events.jsonl.recovered-<UTC stamp>-<n> beside the log) and truncated the log to its last committed record. Nothing acknowledged was lost; inspect the sidecar if you doubt it. Clears an hour after the start."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "max(pg_task_focus_startup_recovery) and on() ((time() - pg_task_focus_start_timestamp_seconds) < 3600)"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+      - uid: pg-task-focus-sound-failing
+        title: pg-task-focus alert sound or notification failing
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          __dashboardUid__: pg-task-focus
+          summary: "pg-task-focus could not play an overtime sound or send its notification"
+          description: "Playback or notification failed in the last hour (it never affects the cycle). Check that the configured sound names exist in /System/Library/Sounds, /Library/Sounds or ~/Library/Sounds, that afplay and osascript run for this user, and that notifications are allowed."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 3600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "sum(increase(pg_task_focus_alert_failures_total[1h]))"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+      - uid: pg-task-focus-slow-replay
+        title: pg-task-focus replay is slow
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: info
+        annotations:
+          __dashboardUid__: pg-task-focus
+          summary: "the last pg-task-focus startup replay took more than 5 seconds"
+          description: "A sizing flag, not a fault: every start replays the whole log and every mutation validates by replaying it. When this stays high, a snapshot (not designed yet) is worth a bead."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "pg_task_focus_replay_duration_seconds"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [5]
+      - uid: pg-task-focus-stuck-overtime
+        title: pg-task-focus cycle stuck in overtime
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          __dashboardUid__: pg-task-focus
+          summary: "a pg-task-focus cycle has been over its planned time for more than an hour"
+          description: "A running cycle is more than 3600 seconds past its planned end; the reminder sound has been repeating. Stop it (`pg-task-focus cycle stop`), or end it at the time you really stopped with --at."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: "max(pg_task_focus_cycle_overtime_seconds)"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [3600]

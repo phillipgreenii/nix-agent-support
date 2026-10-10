@@ -401,6 +401,13 @@
           pg-rescue = final.callPackage ./packages/pg-rescue {
             inherit (goBuilders) mkGoApp;
           };
+          # pg-task-focus: Pattern A (ADR 0008), the daemon + CLI of the focus
+          # routine (epic pg2-t7me1, sub-project 2: bead pg2-t7me1.2). The core
+          # library (sub-project 1) lives in the same module under internal/;
+          # it needs no local `replace`/modRoot.
+          pg-task-focus = final.callPackage ./packages/pg-task-focus {
+            inherit (goBuilders) mkGoApp;
+          };
           # ccpool-probe: Pattern A (ADR 0008), same shape as
           # pg-router-probe above — a standalone deterministic health
           # probe over ccpool's own operational health from pg-router's
@@ -3602,9 +3609,10 @@
                 gomod2nixToml = ./packages/pg-decider/gomod2nix.toml;
               };
 
-              # pg-task-focus (bead pg2-t7me1.1) - whole-module Go test gate. Pattern
-              # A: flat src at the module dir, no local replace. No overlay package
-              # and no default.nix until sub-project 2 adds a `package main`.
+              # pg-task-focus (beads pg2-t7me1.1, pg2-t7me1.2) - whole-module Go test
+              # gate. Pattern A: flat src at the module dir, no local replace. The
+              # daemon's tests bind ephemeral loopback ports and run the real daemon
+              # against it, so the darwin sandbox must allow local networking.
               # The property tests run with rapid's seed pinned to 1 and no
               # failure file, so this check is deterministic and writes nothing
               # into the source tree; developers and the commit-time test hook
@@ -3623,6 +3631,7 @@
                   (_: {
                     RAPID_SEED = "1";
                     RAPID_NOFAILFILE = "true";
+                    __darwinAllowLocalNetworking = true;
                   });
 
               # pg-desk-shadow (bead pg2-nu7h0) - whole-module Go test gate. Pattern
@@ -10556,6 +10565,7 @@
               beads-exporter-contract
               ccpool-probe
               pg-rescue
+              pg-task-focus
               integrate-branch-support
               pg-desk
               pg-desk-attention

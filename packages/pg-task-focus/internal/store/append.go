@@ -42,10 +42,12 @@ func (e *AppendError) Unwrap() error { return e.Err }
 // AppendStats describes a successful Append.
 type AppendStats struct {
 	// Events is the number of events written, Bytes their size with their
-	// newlines, and Duration the time the write and the fsync took.
-	Events   int
-	Bytes    int64
-	Duration time.Duration
+	// newlines, Duration the time the write and the fsync took, and
+	// SyncDuration the part of it the fsync took.
+	Events       int
+	Bytes        int64
+	Duration     time.Duration
+	SyncDuration time.Duration
 }
 
 // Append writes the events as newline-terminated lines with ONE Write, then
@@ -88,11 +90,16 @@ func (s *Store) Append(evs []event.Event) (AppendStats, error) {
 	if err != nil {
 		return AppendStats{}, s.failedWrite(err)
 	}
+	syncStart := time.Now()
 	if err := s.log.Sync(); err != nil {
 		return AppendStats{}, s.failedSync(err)
 	}
+	syncDone := time.Now()
 	s.size.Add(int64(len(buf)))
-	return AppendStats{Events: len(evs), Bytes: int64(len(buf)), Duration: time.Since(start)}, nil
+	return AppendStats{
+		Events: len(evs), Bytes: int64(len(buf)),
+		Duration: syncDone.Sub(start), SyncDuration: syncDone.Sub(syncStart),
+	}, nil
 }
 
 // refuse reports why no append can be attempted, or nil.

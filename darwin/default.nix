@@ -13,6 +13,7 @@
     ./modules/pg-connector-issue-beads
     ./modules/pg-rescue
     ./modules/pg-desk-serve
+    ./modules/pg-task-focus
     ./modules/ccpool
     ./modules/pg-router-ccpool-handler
     ./modules/pg-ccaudit
