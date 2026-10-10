@@ -308,6 +308,37 @@ pre_land_check() {
   esac
 }
 
+# NIX_FALLBACK_DIRS_DEFAULT: where a system-installed nix lives when the
+# caller's PATH does not carry it (a pg-router pool worker's PATH is only the
+# ccpool tool store paths plus /etc/profiles/per-user/*/bin and /usr/bin, so a
+# bare `nix` is not found even though /run/current-system/sw/bin/nix exists;
+# bead pg2-hrw24). Colon-separated, tried in order.
+NIX_FALLBACK_DIRS_DEFAULT="/run/current-system/sw/bin:/nix/var/nix/profiles/default/bin:/etc/profiles/per-user/${USER:-nobody}/bin"
+
+# reinstall_needs_nix <command>: succeed when the command text invokes `nix` as a
+# word. A `-` or `_` neighbour (a repo directory like phillipgreenii-nix-x, or a
+# nix-store hash name) does not count; `/nix/` and a bare `nix run` do.
+reinstall_needs_nix() {
+  [[ $1 =~ (^|[^A-Za-z0-9_-])nix([^A-Za-z0-9_-]|$) ]]
+}
+
+# find_nix_dir: print the directory holding an executable `nix` from the
+# fallback list (INTEGRATE_BRANCH_NIX_FALLBACK_DIRS overrides the default; the
+# override exists for tests), or nothing when none has one. Only consulted when
+# `command -v nix` already failed.
+find_nix_dir() {
+  local dirs="${INTEGRATE_BRANCH_NIX_FALLBACK_DIRS-$NIX_FALLBACK_DIRS_DEFAULT}" d
+  local -a parts
+  IFS=: read -r -a parts <<<"$dirs"
+  for d in "${parts[@]}"; do
+    if [ -n "$d" ] && [ -x "$d/nix" ]; then
+      printf '%s' "$d"
+      return 0
+    fi
+  done
+  return 0
+}
+
 # bundle_refresh <old primary sha>: FF-4 (spec 4.5, D5). Run from the canonical
 # clone AFTER a successful ff-merge. When the landed diff (<old>..HEAD)
 # touches a stamp input -- flake.lock, flake.nix, or a stampPaths entry of the
@@ -316,7 +347,7 @@ pre_land_check() {
 # `FF-4: bundle refresh ...` line and ALWAYS returns 0: a refresh that is
 # skipped, cannot start, or later fails is reported, never a failed land.
 bundle_refresh() {
-  local old="$1" common pgdir top gen="" cmd="" repo job out rc=0
+  local old="$1" common pgdir top gen="" cmd="" repo job out rc=0 nixdir=""
   local -a inputs=(flake.lock flake.nix)
   local p touched
 
@@ -351,6 +382,18 @@ bundle_refresh() {
   if [ -z "$cmd" ]; then
     echo "FF-4: bundle refresh skipped ($pgdir/reinstall is empty)"
     return 0
+  fi
+  # The recorded reinstall command is `nix run ...`. A caller whose PATH lacks
+  # nix (a pg-router pool worker) would otherwise get a background job that
+  # dies with exit 127 in the bgrun log while this line claims "started": resolve
+  # nix here and say so loudly, in this command's own output, when it is absent.
+  if reinstall_needs_nix "$cmd" && ! command -v nix >/dev/null 2>&1; then
+    nixdir="$(find_nix_dir)"
+    if [ -z "$nixdir" ]; then
+      echo "FF-4: bundle refresh NOT started (nix is not on PATH and was not found in ${INTEGRATE_BRANCH_NIX_FALLBACK_DIRS-$NIX_FALLBACK_DIRS_DEFAULT}); run in the background with nix on PATH: $cmd"
+      return 0
+    fi
+    printf -v cmd 'export PATH=%q:"$PATH"; %s' "$nixdir" "$cmd"
   fi
   if ! command -v bgrun >/dev/null 2>&1; then
     echo "FF-4: bundle refresh NOT started (bgrun is not on PATH); run in the background: $cmd"

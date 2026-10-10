@@ -35,8 +35,12 @@ Options:
                       that moved the primary branch from <old-sha>. When the
                       landed diff touches a stamp input (flake.lock,
                       flake.nix, the bundle's stampPaths), start the clone's
-                      pg-hooks `reinstall` command through bgrun. Prints one
-                      `FF-4: bundle refresh ...` line and always exits 0
+                      pg-hooks `reinstall` command through bgrun. A `nix`
+                      command is resolved without trusting the caller's PATH
+                      (falls back to /run/current-system/sw/bin); when nix is
+                      found nowhere the line says NOT started and names nix.
+                      Prints one `FF-4: bundle refresh ...` line and always
+                      exits 0
   -h, --help          Show this help message
   -v, --version       Show version information
 HELP

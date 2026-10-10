@@ -465,9 +465,14 @@ bundle — and the clone has a bundle, this starts the one-line command in
 `<CC>`'s `.git/pg-hooks/reinstall` in the background through `bgrun` (job
 `pg-hooks-refresh-<repo>`; check it with `bgcheck`). It prints exactly one
 `FF-4: bundle refresh ...` line and **always exits 0**: a refresh that is
-skipped (no bundle), not needed, cannot start (no `bgrun`, a job already
-running) or later fails is **reported in the outcome report, never a failed
-land**. The handler MUST NOT wait for the refresh, retry it, or fail the land
+skipped (no bundle), not needed, cannot start (no `bgrun`, no `nix`, a job
+already running) or later fails is **reported in the outcome report, never a
+failed land**. A recorded `nix run ...` command is resolved without relying on
+the caller's `PATH` (a pg-router pool worker's `PATH` lacks
+`/run/current-system/sw/bin`): the tool falls back to the system nix and puts
+its directory on the job's `PATH`; only when nix is found nowhere does it print
+`FF-4: bundle refresh NOT started (nix is not on PATH ...)` with the manual
+command, in its own output rather than only in the `bgrun` log. The handler MUST NOT wait for the refresh, retry it, or fail the land
 over it, and MUST NOT run the `reinstall` command in the foreground.
 
 ### FF-4b — Remove the worktree

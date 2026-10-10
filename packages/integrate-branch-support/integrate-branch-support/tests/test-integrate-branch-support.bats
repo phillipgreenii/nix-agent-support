@@ -820,6 +820,111 @@ land_commit() {
   [[ "$output" == *"touch $STUB_BIN/reinstall-ran"* ]]
 }
 
+# --- --bundle-refresh nix resolution (pg2-hrw24) ----------------------------
+# A pg-router pool worker's PATH lacks /run/current-system/sw/bin, so the
+# recorded `nix run ...` reinstall command died with exit 127 in the bgrun log
+# while the land reported "started". The tool now resolves nix itself.
+
+# make_nix_bundle_state: like make_bundle_state, but the recorded reinstall
+# command invokes `nix` (a marker-touching `nix`, never actually run by the
+# tool).
+make_nix_bundle_state() {
+  local common
+  make_bundle_state
+  common="$(git rev-parse --path-format=absolute --git-common-dir)"
+  printf '(cd %s && nix run .#install-pre-commit-hooks)\n' "$TEST_DIR" \
+    >"$common/pg-hooks/reinstall"
+}
+
+# run_scrubbed_nix <fallback dirs> <args...>: run the tool with PATH reduced to
+# STUB_BIN (real tools linked + the bgrun stub) so nix is genuinely absent from
+# PATH, with INTEGRATE_BRANCH_NIX_FALLBACK_DIRS pointing at <fallback dirs>.
+run_scrubbed_nix() {
+  local fallback="$1" saved_path="$PATH"
+  shift
+  link_real_tools
+  ln -s "$(command -v basename)" "$STUB_BIN/basename"
+  PATH="$STUB_BIN"
+  INTEGRATE_BRANCH_NIX_FALLBACK_DIRS="$fallback" run bash "$BIN" "$@"
+  PATH="$saved_path"
+}
+
+@test "bundle-refresh: nix on PATH leaves the recorded command untouched" {
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  make_nix_bundle_state
+  printf '#!/bin/sh\nexit 0\n' >"$STUB_BIN/nix"
+  chmod +x "$STUB_BIN/nix"
+  stub_bgrun
+  local old
+  old="$(land_commit flake.nix)"
+  run bash "$BIN" --bundle-refresh "$old"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "FF-4: bundle refresh started"* ]]
+  grep -qxF "arg=(cd $TEST_DIR && nix run .#install-pre-commit-hooks)" "$STUB_BIN/bgrun-calls"
+}
+
+@test "bundle-refresh: nix missing from PATH but at a fallback dir is put on the job's PATH" {
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  make_nix_bundle_state
+  local fb
+  fb="$(mktemp -d)"
+  printf '#!/bin/sh\nexit 0\n' >"$fb/nix"
+  chmod +x "$fb/nix"
+  stub_bgrun
+  local old
+  old="$(land_commit flake.nix)"
+  run_scrubbed_nix "/nonexistent-dir:$fb" --bundle-refresh "$old"
+  rm -rf "$fb"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "FF-4: bundle refresh started"* ]]
+  [ "$(grep -c '^call$' "$STUB_BIN/bgrun-calls")" -eq 1 ]
+  # The job command prepends the fallback dir to PATH, then runs the recorded command.
+  grep -qF "arg=export PATH=" "$STUB_BIN/bgrun-calls"
+  grep -F "arg=export PATH=" "$STUB_BIN/bgrun-calls" | grep -qF "$fb"
+  grep -F "arg=export PATH=" "$STUB_BIN/bgrun-calls" | grep -qF "nix run .#install-pre-commit-hooks"
+}
+
+@test "bundle-refresh: nix found nowhere is a loud immediate message naming nix, exit 0, nothing started" {
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  make_nix_bundle_state
+  stub_bgrun
+  local old
+  old="$(land_commit flake.nix)"
+  run_scrubbed_nix "/nonexistent-dir" --bundle-refresh "$old"
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 1 ]
+  [[ "$output" == "FF-4: bundle refresh NOT started (nix is not on PATH"* ]]
+  [[ "$output" == *"/nonexistent-dir"* ]]
+  [[ "$output" == *"nix run .#install-pre-commit-hooks"* ]]
+  [ ! -e "$STUB_BIN/bgrun-calls" ]
+}
+
+@test "bundle-refresh: a reinstall command that does not use nix is not gated on nix" {
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  make_bundle_state
+  stub_bgrun
+  local old
+  old="$(land_commit flake.lock)"
+  run_scrubbed_nix "/nonexistent-dir" --bundle-refresh "$old"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "FF-4: bundle refresh started"* ]]
+  grep -qxF "arg=touch $STUB_BIN/reinstall-ran" "$STUB_BIN/bgrun-calls"
+}
+
+@test "bundle-refresh: a repo name containing -nix- does not trigger the nix gate" {
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  make_bundle_state
+  local common
+  common="$(git rev-parse --path-format=absolute --git-common-dir)"
+  printf '(cd /w/phillipgreenii-nix-agent-support && ./reinstall.sh)\n' >"$common/pg-hooks/reinstall"
+  stub_bgrun
+  local old
+  old="$(land_commit flake.lock)"
+  run_scrubbed_nix "/nonexistent-dir" --bundle-refresh "$old"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "FF-4: bundle refresh started"* ]]
+}
+
 @test "bundle-refresh: an unresolvable old sha is skipped, never a failure" {
   git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
   make_bundle_state
