@@ -9793,8 +9793,9 @@
                   same ${fixtures + "/beads-attention-unset.yaml"} ${rendered.beadsAttentionUnset}
                   # the SAME golden is the Go registry's parse fixture, so the
                   # Nix-rendered output, the golden and the Go parser are tied
-                  # together byte for byte
-                  cmp ${fixtures + "/instances.yaml"} ${./packages/pg-connector/cmd/pg-connector/testdata/registry-instances.yaml}
+                  # together (compared semantically, like every other golden
+                  # here, so a prettier reindent of either copy cannot trip it)
+                  same ${fixtures + "/instances.yaml"} ${./packages/pg-connector/cmd/pg-connector/testdata/registry-instances.yaml}
                   ${lib.optionalString (!rendered.malformedInstancesRejected) ''
                     echo "a malformed pg-connector instance still evaluates" >&2
                     exit 1
