@@ -36,17 +36,20 @@ func (d *Daemon) Routes() []string { return d.srv.Routes() }
 func (d *Daemon) Engine() *engine.Engine { return d.eng }
 
 // Alerter is the alert runner, for tests.
-func (d *Daemon) Alerter() *Alerter { return d.alerter }
+func (d *Daemon) Alerter() *Alerter { return d.alerter.Load() }
 
 // Done is closed once the daemon has shut down.
 func (d *Daemon) Done() <-chan struct{} { return d.done }
 
-// alertsReading is the scheduler's reading for /healthz.
+// alertsReading is the scheduler's reading for /healthz. The HTTP server calls
+// it from its own goroutines, which are serving before wire has built the
+// alerter: it reports none until then.
 func (d *Daemon) alertsReading() server.AlertsReading {
-	if d.alerter == nil {
+	a := d.alerter.Load()
+	if a == nil {
 		return server.AlertsReading{}
 	}
-	id, next, ok := d.alerter.Reading()
+	id, next, ok := a.Reading()
 	if !ok {
 		return server.AlertsReading{}
 	}
@@ -72,14 +75,15 @@ func (d *Daemon) wire(ctx context.Context) {
 			notifier = sys
 		}
 	}
-	d.alerter = NewAlerter(e, d.clk, player, notifier, d.log, d.metrics)
+	alerter := NewAlerter(e, d.clk, player, notifier, d.log, d.metrics)
+	d.alerter.Store(alerter) // the server is already serving: this hands it the alerter
 	d.metrics.RegisterProjection(source{d})
 
 	e.OnCommit(func(v engine.Version) {
 		defer d.recoverCallback("OnCommit")
 		d.metrics.StateVersion.Set(float64(v.LogLines))
 		d.srv.Notify()
-		d.alerter.Poll() // the scheduler is poll-driven: poll after every commit
+		alerter.Poll() // the scheduler is poll-driven: poll after every commit
 	})
 	e.OnHealthChange(func(h engine.Health) {
 		defer d.recoverCallback("OnHealthChange")
@@ -95,8 +99,8 @@ func (d *Daemon) wire(ctx context.Context) {
 	}
 	d.metrics.SetReadOnly(e.Health().ReadOnly)
 
-	go d.alerter.Run(ctx)
-	d.alerter.Poll()
+	go alerter.Run(ctx)
+	alerter.Poll()
 
 	// The first store writability check gates readiness; later ones feed the
 	// gauge and never gate reads.
@@ -235,7 +239,7 @@ func (d *Daemon) Reload() error {
 	d.srv.SetConfigState(server.ConfigState{Valid: true, Digest: next.Digest(), LoadedAt: now, RestartRequired: restart})
 	d.setLoadedAt(now)
 	d.log.Info("configuration reloaded", "config_digest", next.Digest())
-	d.alerter.Poll() // a reload may change a cycle type's sound or interval
+	d.alerter.Load().Poll() // a reload may change a cycle type's sound or interval
 	return nil
 }
 
@@ -296,10 +300,11 @@ func (s source) Snapshot() (engine.Snapshot, bool) {
 func (s source) Now() time.Time { return s.d.clk.Now() }
 
 func (s source) NextReminder() (time.Time, bool) {
-	if s.d.alerter == nil {
+	a := s.d.alerter.Load()
+	if a == nil {
 		return time.Time{}, false
 	}
-	_, at, ok := s.d.alerter.Reading()
+	_, at, ok := a.Reading()
 	return at, ok
 }
 

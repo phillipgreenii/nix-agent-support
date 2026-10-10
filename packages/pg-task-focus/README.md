@@ -95,6 +95,12 @@ ephemeral loopback port with a fake clock and a fake sound player, driven over H
 command line, every request and response validated against `api/openapi.yaml`. The nix gate is
 `checks.<system>.pg-task-focus-go-tests`.
 
+A race guard covers the health reads: `internal/daemon/health_concurrency_test.go` reads `/readyz`,
+`/healthz` and `/metrics` from before the listener is bound, through several starts, forty reloads
+and a stop. It can fail only under `go test -race`, which the commit-time `run-unit-tests` hook
+runs. A daemon field that is written once the HTTP server is serving (the alerter, `Daemon.alerter`)
+MUST be published through an atomic or a lock, never read as a plain field.
+
 The web UI's logic is tested with `node --test` (no dependencies), run from inside the Go tests:
 `web/web_test.go` runs the unit tests of the page's modules (`web/test/*.test.mjs`) and scans the
 sources for what the page must never do, and `internal/daemon/webui_e2e_test.go` runs the page's own

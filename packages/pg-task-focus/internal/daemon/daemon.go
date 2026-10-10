@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -92,9 +93,15 @@ type Daemon struct {
 	http    *http.Server
 	ln      net.Listener
 	eng     *engine.Engine
-	alerter *Alerter
 	clk     clock.Clock
 	otel    obs.ShutdownFunc
+
+	// alerter is built by wire, after the HTTP server is serving, and read by
+	// the goroutines that serve /healthz, /readyz and /metrics. It MUST reach
+	// them through this pointer and never through a plain field: the atomic
+	// store is what makes everything NewAlerter wrote visible to a reader that
+	// sees the pointer. It is nil until wire has run.
+	alerter atomic.Pointer[Alerter]
 
 	mu       sync.Mutex
 	cfg      *config.Config

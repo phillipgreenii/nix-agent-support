@@ -29,6 +29,14 @@ const minWait = 500 * time.Millisecond
 // callbacks call Poll) and at the instant the scheduler names. A missed or an
 // extra sound under rare circumstances is accepted (operator ruling,
 // 2026-10-09). Alerts are derived from the projection and are never events.
+//
+// Once built, an Alerter is safe for concurrent use: every field is set by
+// NewAlerter and never assigned again, the scheduler guards its own memory
+// and the engine its state. That covers Reading, which the HTTP server calls
+// from its own goroutines, but only for a goroutine that was handed the
+// Alerter through a synchronizing operation: the daemon publishes it through
+// an atomic pointer, and a plain field written after the server is serving
+// would race with the fields NewAlerter writes.
 type Alerter struct {
 	eng     *engine.Engine
 	clock   clock.Clock
