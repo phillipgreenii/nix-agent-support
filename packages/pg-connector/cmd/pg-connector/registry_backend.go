@@ -45,13 +45,19 @@ const cacheKeySeparator = "__"
 
 // validateRefName applies the name rules shared by plain strings and the
 // name: of a mapping: the existing validateBackendName rules (non-empty, no
-// path separator) plus the new no-"__" rule.
+// path separator) plus the no-"__" rule and the no-leading/trailing-"_" rule.
+// A trailing "_" corrupts a joined key: name "a_" with query "q" joins to
+// "a___q", which splits back as backend "a", query "_q". A leading "_" is
+// rejected for symmetry (it would merge into the preceding separator).
 func validateRefName(key, name string) error {
 	if err := validateBackendName(key, name); err != nil {
 		return err
 	}
 	if strings.Contains(name, cacheKeySeparator) {
 		return fmt.Errorf("registry: %s: backend name %q must not contain %q (it is the cache and ledger key separator)", key, name, cacheKeySeparator)
+	}
+	if strings.HasPrefix(name, "_") || strings.HasSuffix(name, "_") {
+		return fmt.Errorf("registry: %s: backend name %q must not start or end with %q (it would merge into the %q cache and ledger key separator)", key, name, "_", cacheKeySeparator)
 	}
 	return nil
 }
@@ -87,6 +93,8 @@ func decodeBackendRef(key string, idx int, n *yaml.Node) (backendRef, error) {
 		return backendRef{Name: name, Command: []string{name}}, nil
 	case yaml.MappingNode:
 		return decodeInstanceMapping(key, where, n)
+	case yaml.AliasNode:
+		return backendRef{}, fmt.Errorf("registry: %s: YAML aliases are not supported in a backend entry; write the bare binary name or {name, command} mapping out in full", where)
 	default:
 		return backendRef{}, fmt.Errorf("registry: %s: a backend must be a bare binary name or a {name, command} mapping, got %s", where, nodeKindName(n.Kind))
 	}
@@ -124,6 +132,9 @@ func decodeInstanceMapping(key, where string, n *yaml.Node) (backendRef, error) 
 	if len(commandNode.Content) == 0 {
 		return backendRef{}, fmt.Errorf("registry: %s: backend %q: command must not be an empty list", key, name)
 	}
+	// An empty-string word AFTER command[0] is accepted on purpose: exec
+	// passes it through as an empty argument, and a flag value of "" can be
+	// legitimate. Only command[0] (the binary) must be non-empty.
 	command := make([]string, 0, len(commandNode.Content))
 	for j, w := range commandNode.Content {
 		if w.Kind != yaml.ScalarNode || w.Tag == "!!null" {

@@ -298,6 +298,8 @@ func nodeKindName(k yaml.Kind) string {
 		return "a single value"
 	case yaml.MappingNode:
 		return "a mapping"
+	case yaml.AliasNode:
+		return "a YAML alias (aliases are not supported; write the value out)"
 	default:
 		return "an unrecognized YAML node"
 	}

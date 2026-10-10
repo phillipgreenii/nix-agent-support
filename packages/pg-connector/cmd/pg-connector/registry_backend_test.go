@@ -167,6 +167,46 @@ func TestRegistryInstances_Errors(t *testing.T) {
 			listIssue, `must not contain "__"`,
 		},
 		{
+			"name with trailing underscore", "connector:\n  issue:\n    - {name: a_, command: [bin]}\n",
+			listIssue, `must not start or end with "_"`,
+		},
+		{
+			"name with leading underscore", "connector:\n  issue:\n    - {name: _a, command: [bin]}\n",
+			listIssue, `must not start or end with "_"`,
+		},
+		{
+			"plain name with trailing underscore", "connector:\n  issue:\n    - a_\n",
+			listIssue, `must not start or end with "_"`,
+		},
+		{
+			"name that is only underscores", "connector:\n  issue:\n    - {name: _, command: [bin]}\n",
+			listIssue, `must not start or end with "_"`,
+		},
+		{
+			"duplicate name key", "connector:\n  issue:\n    - {name: a, name: b, command: [bin]}\n",
+			listIssue, `unknown or duplicate key "name"`,
+		},
+		{
+			"duplicate command key", "connector:\n  issue:\n    - {name: a, command: [bin], command: [other]}\n",
+			listIssue, `unknown or duplicate key "command"`,
+		},
+		{
+			"alias entry", "connector:\n  issue:\n    - &x {name: a, command: [bin]}\n    - *x\n",
+			listIssue, "connector.issue[1]: YAML aliases are not supported",
+		},
+		{
+			"alias as plain entry", "connector:\n  issue:\n    - &x a\n    - *x\n",
+			listIssue, "connector.issue[1]: YAML aliases are not supported",
+		},
+		{
+			"alias as name value", "x: &n a\nconnector:\n  issue:\n    - {name: *n, command: [bin]}\n",
+			listIssue, "backend name must be a string, got a YAML alias",
+		},
+		{
+			"alias as command value", "x: &c [bin]\nconnector:\n  issue:\n    - {name: a, command: *c}\n",
+			listIssue, "command must be a list of strings (an argv list), not a YAML alias",
+		},
+		{
 			"scm list rejected", "connector:\n  scm: [a]\n",
 			func(r *Registry) error { _, err := r.Single("scm"); return err }, "must be a single backend binary name",
 		},
@@ -283,5 +323,20 @@ backends:
 	}
 	if c, _ := reg.BackendConfig("bin"); c != nil {
 		t.Errorf("config keyed by the binary must not exist, got %s", c)
+	}
+}
+
+// An empty-string word after command[0] is accepted on purpose (exec passes
+// an empty argument through; only the binary word must be non-empty), while
+// an interior underscore in a name is fine and round-trips through the
+// ledger filename (bead pg2-h5cmo item 3).
+func TestRegistryInstances_EmptyLaterCommandWordAndInteriorUnderscoreAccepted(t *testing.T) {
+	reg := mustParse(t, "connector:\n  issue:\n    - {name: a_b, command: [bin, --flag, \"\"]}\n")
+	if got := reg.Command("a_b"); !reflect.DeepEqual(got, []string{"bin", "--flag", ""}) {
+		t.Errorf("Command = %q", got)
+	}
+	key := LedgerKey{Type: "issue", Backend: "a_b", Query: "q"}
+	if got, ok := ledgerKeyFromFileName(ledgerFileName(key)); !ok || got != key {
+		t.Errorf("ledger round trip = %+v, %v; want %+v", got, ok, key)
 	}
 }
