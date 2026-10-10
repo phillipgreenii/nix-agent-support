@@ -856,3 +856,34 @@ func TestExcludedLabelsMatchDrainBeads(t *testing.T) {
 		t.Fatalf("order drifted: %q vs %q", m[1], ExcludedLabelsCSV)
 	}
 }
+
+// A focus-item bead is held by the decider: a sweep must never review it, in
+// EVERY status, whatever its defer date, blockers or markers. A claimed one
+// stays a claim candidate and is never a target.
+func TestFocusItemExcludedFromTargets(t *testing.T) {
+	rows := []Row{
+		trMk("f-deferred", trStatus(StatusDeferred), trLabel("focus-item"), trDeferUntil("2026-09-02T00:00:00Z")),
+		trMk("f-blocked", trStatus(StatusBlocked), trLabel("focus-item")),
+		trMk("f-open", trLabel("focus-item")),
+		trMk("f-claimed", trStatus(StatusInProgress), trLabel("focus-item"), trAssignee("someone")),
+		trMk("plain", trStatus(StatusBlocked)),
+	}
+	res := trRun(t, rows, nil, TriageOptions{Full: true})
+	trEq(t, "targets", res.Targets, []string{"plain"})
+	trEq(t, "review", res.Review, []string{"plain"})
+	trEq(t, "focus excluded", res.FocusExcluded, []string{"f-blocked", "f-deferred", "f-open"})
+	if res.Counts.FocusExcluded != 3 || res.Counts.Targets != 1 {
+		t.Fatalf("counts = %+v", res.Counts)
+	}
+	var claimed []string
+	for _, c := range res.ClaimCandidates {
+		claimed = append(claimed, c.ID)
+	}
+	trEq(t, "claim candidates", claimed, []string{"f-claimed"})
+
+	// Narrowing must not resurrect a focus bead, and the exclusion count is
+	// independent of the narrowing.
+	narrowed := trRun(t, rows, nil, TriageOptions{IDPrefix: "f-"})
+	trEq(t, "narrowed targets", narrowed.Targets, nil)
+	trEq(t, "narrowed focus excluded", narrowed.FocusExcluded, []string{"f-blocked", "f-deferred", "f-open"})
+}

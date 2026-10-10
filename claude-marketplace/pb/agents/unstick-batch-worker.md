@@ -125,18 +125,31 @@ already cached in `WORKDIR/probes/gate-check.json`.
    only in your results file.
 9. **Sweep marker:** every reviewed bead that stays OPEN gets exactly one marker, and it MUST
    be the LAST mutation of that bead in this sweep.
-   - Do dependency edits and comments first. Take the timestamp from
-     `date -u +%Y-%m-%dT%H:%M:%SZ` immediately before writing the marker.
-   - Write it in the same `bd update` as any label, defer, or status change:
+   - Do dependency edits and comments first, then generate the marker line with
+     `pb unstick marker` immediately before writing it. Never build the line by hand and never
+     call `date`: pb stamps the current UTC time itself.
 
      ```text
-     --append-notes "[unstick YYYY-MM-DDTHH:MM:SSZ] <outcome>: <reason>; recheck-when: <YYYY-MM-DD | <bead-id> closes | on-change>"
+     pb unstick marker --outcome <outcome> --reason "<reason>" --recheck-when <YYYY-MM-DD | "<bead-id> closes" | on-change>
      ```
 
-   - The marker MUST be plain text (no backticks, `$`, or quotes), because the next sweep
-     parses it to skip beads whose reason is still valid. Make `reason` specific. Use
-     `on-change` for a bead that waits on a person (a design session or a decision), and a
-     date or `<bead-id> closes` otherwise.
+     It prints exactly one line of the form
+     `[unstick YYYY-MM-DDTHH:MM:SSZ] <outcome>: <reason>; recheck-when: <recheck>`. A bad
+     value exits non-zero with the reason (exit 1) and prints no marker: fix the argument and
+     rerun. `<outcome>` matches `[a-z][a-z-]*` (for example `unchanged`, `undeferred`,
+     `retargeted`, `deps-fixed`, `unlabelled`, `released`).
+
+   - Write the printed line, verbatim, in the same `bd update` as any label, defer, or status
+     change: `--append-notes "<printed line>"`. Run `pb unstick marker` as its own command and
+     paste its output into the `bd update` call (no `$(...)`).
+   - To validate a line (or lines) you already have, pipe them to `pb unstick marker --check`
+     (reads stdin, exits non-zero if any does not conform). `--check --export FILE` also lists
+     beads whose notes or comments hold a malformed marker.
+   - The marker MUST be plain text (no backticks, `$`, quotes, newlines, or the text
+     `; recheck-when:` inside the reason): `pb unstick marker` rejects those, and the next
+     sweep parses the marker to skip beads whose reason is still valid. Make `reason`
+     specific. Use `on-change` for a bead that waits on a person (a design session or a
+     decision), and a date or `<bead-id> closes` otherwise.
    - Long evidence goes in a comment, BEFORE the marker: write it to a file with Write, then
      run `bd comment <id> --file <path>`.
    - A closed bead gets no marker; its close reason is its record.
@@ -185,7 +198,18 @@ unpaused when you finish, and you MUST state its final state in your reply.
 
 ## Output
 
-Write full per-bead findings to `WORKDIR/results/<BATCH>.md`. Your reply MUST be terse:
+Write full per-bead findings to `WORKDIR/results/<BATCH>.md`. The report's attribution reads
+exactly one thing from that file: for EVERY bead you close, the file MUST contain a line of this
+exact form, one bead per line, with nothing before it except an optional list bullet:
+
+```text
+closed <bead-id>: <reason>
+```
+
+Any other line is free text and ignored. Prose such as `closed tc-1 because it was stale` does
+NOT match; the id must be followed by `: `. Your reply (the hand-back) stays the terse
+per-bead summary below; the results file is where the `closed` lines go. Your reply MUST be
+terse:
 
 - one line per bead:
   `<id>: <unchanged|undeferred|retargeted|deps-fixed|unlabelled|closed|skipped|filed <new-id>> — <≤15-word reason>`;

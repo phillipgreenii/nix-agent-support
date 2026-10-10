@@ -11,7 +11,8 @@
     "live_skip": 1,
     "marker_skip": 1,
     "review": 3,
-    "drainable": 1
+    "drainable": 1,
+    "focus_excluded": 0
   },
   "partition": "targets 5 = live 1 + marker 1 + review 3",
   "batches": [
@@ -57,6 +58,7 @@
     "triage-live.txt",
     "triage-marker.txt",
     "triage-review.txt",
+    "triage-skip-focus-item.txt",
     "triage-targets.txt"
   ]
 }

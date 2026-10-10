@@ -23,4 +23,5 @@ written:
   <WORKDIR>/triage-live.txt
   <WORKDIR>/triage-marker.txt
   <WORKDIR>/triage-review.txt
+  <WORKDIR>/triage-skip-focus-item.txt
   <WORKDIR>/triage-targets.txt

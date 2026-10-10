@@ -4332,8 +4332,8 @@
                     touch $out
                   '';
 
-              # pb — 10 internal suites (gate ×4, bd, pn, patchid, discover,
-              # duration, run). git on PATH for the real-git unit tests; bd/pn
+              # pb — the internal suites (gate, bd, pn, patchid, discover, duration, run,
+              # unstick). git on PATH for the real-git unit tests; bd/pn
               # tests t.Skip when their tool is absent (matches pb/default.nix
               # nativeCheckInputs). contract/smoke-tagged files stay off by default.
               pb-go-tests = pkgs._agentSupportGoBuilders.mkGoTest {

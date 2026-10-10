@@ -55,7 +55,7 @@ func TestPrepare_orchestration(t *testing.T) {
 
 	for _, p := range []string{
 		"export.jsonl", "ready.json", "prepare.json", "progress.txt", "followups.txt",
-		"triage-targets.txt", "triage-live.txt", "triage-marker.txt", "triage-review.txt",
+		"triage-targets.txt", "triage-live.txt", "triage-marker.txt", "triage-review.txt", "triage-skip-focus-item.txt",
 		"triage-inprog.txt", "triage-assigned_open.txt", "triage-drain.txt",
 		"batches/B01", "facts/B01.json", "probes/gate-check.json",
 	} {
@@ -64,14 +64,15 @@ func TestPrepare_orchestration(t *testing.T) {
 		}
 	}
 	wantLists := map[string]string{
-		"triage-targets.txt":       "a-2\na-3\na-4\na-5\na-6\n",
-		"triage-live.txt":          "a-2\n",
-		"triage-marker.txt":        "a-5\n",
-		"triage-review.txt":        "a-3\na-4\na-6\n",
-		"triage-inprog.txt":        "a-7\n",
-		"triage-assigned_open.txt": "a-9\n",
-		"triage-drain.txt":         "a-1\n",
-		"batches/B01":              "a-3\na-4\na-6\n",
+		"triage-targets.txt":         "a-2\na-3\na-4\na-5\na-6\n",
+		"triage-live.txt":            "a-2\n",
+		"triage-marker.txt":          "a-5\n",
+		"triage-review.txt":          "a-3\na-4\na-6\n",
+		"triage-inprog.txt":          "a-7\n",
+		"triage-assigned_open.txt":   "a-9\n",
+		"triage-drain.txt":           "a-1\n",
+		"triage-skip-focus-item.txt": "",
+		"batches/B01":                "a-3\na-4\na-6\n",
 	}
 	for p, want := range wantLists {
 		if got := readFile(t, filepath.Join(w, p)); got != want {

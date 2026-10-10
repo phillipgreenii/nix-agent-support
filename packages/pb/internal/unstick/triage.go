@@ -27,6 +27,11 @@ const (
 	issueTypeEpic = "epic"
 	issueTypeGate = "gate"
 	labelHuman    = "human"
+	// labelFocusItem marks a focus bead held by the decider. A sweep must
+	// never review, undefer, re-date, re-edge or close one (a closed focus
+	// bead is never reopened), so it is excluded from TARGETS in EVERY
+	// status. Mirrors unstick-beads.md SKIP-focus-item.
+	labelFocusItem = "focus-item"
 )
 
 // Review reasons recorded in TriageResult.ReviewReasons.
@@ -86,6 +91,8 @@ type TriageCounts struct {
 	MarkerSkip int `json:"marker_skip"`
 	Review     int `json:"review"`
 	Drainable  int `json:"drainable"`
+	// FocusExcluded counts focus-item beads removed from TARGETS.
+	FocusExcluded int `json:"focus_excluded"`
 }
 
 // TriageResult is the deterministic outcome of Triage. Every id list is sorted
@@ -97,6 +104,10 @@ type TriageResult struct {
 	Live       []string
 	MarkerSkip []string
 	Review     []string
+	// FocusExcluded lists unclaimed focus-item beads (any status) removed
+	// from the target set. They belong to none of Live, MarkerSkip or Review
+	// and are sent to no worker.
+	FocusExcluded []string
 	// ReviewReasons maps each REVIEW id to why it was not skipped.
 	ReviewReasons map[string]string
 	// Drainable is ready minus excluded labels, epics and templates
@@ -223,6 +234,12 @@ func Triage(rows []Row, ready []ReadyRow, opts TriageOptions, now time.Time) Tri
 
 	for _, id := range candidateTargets {
 		row, _ := t.g.Row(id)
+		// SKIP-focus-item comes FIRST: before narrowing, LIVE, markers and
+		// every override.
+		if row.HasLabel(labelFocusItem) {
+			res.FocusExcluded = append(res.FocusExcluded, id)
+			continue
+		}
 		if opts.Label != "" && !row.HasLabel(opts.Label) {
 			continue
 		}
@@ -246,6 +263,7 @@ func Triage(rows []Row, ready []ReadyRow, opts TriageOptions, now time.Time) Tri
 	res.Counts.LiveSkip = len(res.Live)
 	res.Counts.MarkerSkip = len(res.MarkerSkip)
 	res.Counts.Review = len(res.Review)
+	res.Counts.FocusExcluded = len(res.FocusExcluded)
 	return res
 }
 

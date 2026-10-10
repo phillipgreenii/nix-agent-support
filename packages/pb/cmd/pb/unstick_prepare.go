@@ -170,6 +170,7 @@ func runPrepare(cmd *cobra.Command, env unstickEnv, w unstick.Workdir, root stri
 		{"triage-live.txt", res.Live},
 		{"triage-marker.txt", res.MarkerSkip},
 		{"triage-review.txt", res.Review},
+		{"triage-skip-focus-item.txt", res.FocusExcluded},
 		{"triage-inprog.txt", res.InProgress},
 		{"triage-assigned_open.txt", res.AssignedOpen},
 		{"triage-drain.txt", res.Drainable},
@@ -255,7 +256,7 @@ func countsMap(c unstick.TriageCounts) map[string]int {
 	return map[string]int{
 		"open": c.Open, "blocked": c.Blocked, "deferred": c.Deferred, "in_progress": c.InProgress,
 		"ready": c.Ready, "targets": c.Targets, "live_skip": c.LiveSkip, "marker_skip": c.MarkerSkip,
-		"review": c.Review, "drainable": c.Drainable,
+		"review": c.Review, "drainable": c.Drainable, "focus_excluded": c.FocusExcluded,
 	}
 }
 
