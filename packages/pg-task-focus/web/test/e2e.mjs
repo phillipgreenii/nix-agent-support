@@ -92,9 +92,13 @@ class FetchEventSource {
 
 let clockMs = Date.parse("2026-10-07T12:50:00.000Z"); // 08:50 in New York
 async function setClock(iso) {
-  clockMs = Date.parse(iso);
+  // The daemon's clock and the page's are two clocks. A read the page makes between the two moves
+  // would pair one clock's time with the other's, so let the page's own refreshes (the stream
+  // events of what it just did) finish, then move the daemon's clock and the page's together.
+  await sleep(80);
   const r = await realFetch(`${CONTROL}/clock?at=${encodeURIComponent(iso)}`);
   assert.equal(r.status, 204, "the control server set the daemon's clock");
+  clockMs = Date.parse(iso);
 }
 
 const { doc, root } = newRoot();

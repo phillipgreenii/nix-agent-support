@@ -33,7 +33,7 @@ decide them:
 ## Decision
 
 1. **No framework, no bundler, no npm: native ES modules served as they are written.** The client is
-   about two dozen `.mjs` files under `packages/pg-task-focus/web/assets/` and one stylesheet, loaded by
+   about thirty `.mjs` files under `packages/pg-task-focus/web/assets/` and one stylesheet, loaded by
    `index.html` with `<script type="module">`. Nothing is compiled, minified or fetched at build time, so
    nothing has to be vendored and the Nix build is unchanged except that the assets are in the source
    tree it already copies. The browsers the operator uses support native modules, `<dialog>`, `Intl`
@@ -41,7 +41,7 @@ decide them:
    conservative option for this repository, and the reasons it is not a regret are that the UI has five
    screens and one small state tree, and that a framework would be the largest thing in the page.
 2. **A tiny virtual-tree renderer makes the whole view a pure function.** Views are functions from a
-   model to a tree of plain objects (`h(tag, props, ...children)`), and a 100-line patcher applies the
+   model to a tree of plain objects (`h(tag, props, ...children)`), and a patcher of about 150 lines applies the
    tree to the DOM, reusing elements by key and leaving a focused field alone. Because a view produces
    data and not DOM nodes, node's built-in test runner can assert on what the page says and which
    controls are enabled (the read-only rule, the dimmed cycles, the period modal's blocked confirm)
