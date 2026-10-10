@@ -45,13 +45,23 @@ func (b *Backend) logSkip(path, reason string) {
 // configured repo_paths entry in order, then every repo discovered under
 // repo_search_paths (see repoList), and concatenates the per-repo items.
 // Dedupe by id is NOT done here;
-// ListActivity does it over the final list.
+// ListActivity does it over the final list. When the op deadline fires after
+// at least one repo was read, the repos already read come back with
+// truncated=true instead of an error.
 func (b *Backend) collectCommits(ctx context.Context, cfg Config, emails []string, since, before time.Time) ([]schema.ActivityItem, bool, error) {
 	asOf := b.now().UTC().Format(time.RFC3339)
 	items := []schema.ActivityItem{}
 	for _, repo := range b.repoList(cfg) {
 		got, ok, err := b.collectRepoCommits(ctx, repo, cfg.IncludeMerges, emails, since, before, asOf)
 		if err != nil {
+			// The op deadline (or a cancel) fired mid-read: keep every repo
+			// already read and say so with truncated=true, which the caller
+			// MUST treat as incomplete coverage, rather than discarding them.
+			// With nothing read yet there is nothing to keep: the error stands.
+			if ctx.Err() != nil && len(items) > 0 {
+				b.logSkip(repo, "deadline reached; returning the repos already read as a truncated result")
+				return items, true, nil
+			}
 			return nil, false, err
 		}
 		if !ok {
@@ -100,9 +110,10 @@ func (b *Backend) collectRepoCommits(ctx context.Context, repo string, includeMe
 		return nil, false, fmt.Errorf("pg-connector-activity-git: read commits of %s: %w", repo, err)
 	}
 
-	ident := repoIdent(ctx, b.runner, repo)
+	// Filter first, then enrich the survivors in one batch: the git cost of
+	// enrichment must not scale with the commit count (pg2-sgj06).
 	seen := map[string]bool{}
-	items = []schema.ActivityItem{}
+	var kept []commitRecord
 	for _, c := range commits {
 		if seen[c.sha] || !emailListed(emails, c.email) {
 			continue
@@ -114,10 +125,21 @@ func (b *Backend) collectRepoCommits(ctx context.Context, repo string, includeMe
 		if !c.when.Before(before) {
 			continue
 		}
-		det, err := enrichCommit(ctx, b.runner, repo, c.sha)
-		if err != nil {
-			return nil, false, fmt.Errorf("pg-connector-activity-git: enrich commit of %s: %w", repo, err)
-		}
+		kept = append(kept, c)
+	}
+	shas := make([]string, len(kept))
+	for i, c := range kept {
+		shas[i] = c.sha
+	}
+	details, err := enrichCommits(ctx, b.runner, repo, shas)
+	if err != nil {
+		return nil, false, fmt.Errorf("pg-connector-activity-git: enrich commits of %s: %w", repo, err)
+	}
+
+	ident := repoIdent(ctx, b.runner, repo)
+	items = []schema.ActivityItem{}
+	for _, c := range kept {
+		det := details[c.sha]
 		labels := []string{"repo:" + ident}
 		if det.branch != "" {
 			labels = append(labels, "branch:"+det.branch)

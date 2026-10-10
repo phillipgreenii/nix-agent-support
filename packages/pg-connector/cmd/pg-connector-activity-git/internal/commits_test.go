@@ -69,12 +69,18 @@ func TestCollect_ExactEmailAndRangeDecidedHere(t *testing.T) {
 		case "rev-parse":
 			return ".git", nil
 		case "log":
+			if len(args) > 1 && args[1] == "--no-walk=unsorted" {
+				// the batched line counts of the enriched commits
+				return "\x1es1\n\n1\t0\tf\n\x1es3\n\n2\t1\tg", nil
+			}
 			logArgs = args
 			return log, nil
 		case "for-each-ref":
-			return "refs/heads/main", nil
-		case "diff-tree":
-			return "", nil
+			return "s1 refs/heads/main", nil
+		case "merge-base":
+			return "s1", nil
+		case "rev-list":
+			return "s1\ns3 s1", nil
 		}
 		return "", errors.New("exit status 1") // no origin remote
 	}}
@@ -88,6 +94,16 @@ func TestCollect_ExactEmailAndRangeDecidedHere(t *testing.T) {
 	}
 	if got := subjects(items); strings.Join(got, "|") != "keep|since is inclusive, email case-insensitive" {
 		t.Errorf("subjects = %v, want keep and the since-boundary commit", got)
+	}
+
+	// Enrichment comes from the batched reads: s1 sits on main (+1 -0), s3 on
+	// no single head (+2 -1).
+	if !strings.Contains(strings.Join(items[0].Labels, ","), "branch:main") ||
+		!strings.Contains(string(items[0].Fields), `"insertions":1,`) ||
+		strings.Contains(strings.Join(items[1].Labels, ","), "branch:") ||
+		!strings.Contains(string(items[1].Fields), `"insertions":2`) ||
+		!strings.Contains(string(items[1].Fields), `"deletions":1`) {
+		t.Errorf("enrichment lost: %v %s | %v %s", items[0].Labels, items[0].Fields, items[1].Labels, items[1].Fields)
 	}
 
 	joined := strings.Join(logArgs, " ")
