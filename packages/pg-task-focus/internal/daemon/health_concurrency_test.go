@@ -99,8 +99,16 @@ func (h *healthReaders) badAnswers() []string {
 // bound, through several starts and stops (the instants in which a read can
 // meet a half-wired daemon are few, so each start is only a chance of it), and
 // then, on the last start, keeps reading /readyz, /healthz and /metrics through
-// forty reloads that move a running cycle's deadline across the clock (the
-// alerter's reading of that cycle is what the reads walk), and through the stop.
+// forty reloads and through the stop.
+//
+// The reloads leave the running cycle's deadline alone: its planned minutes are
+// frozen into its start event, so editing the type's minutes would change
+// nothing. They alternate what the scheduler does read on every poll, the
+// type's alert.repeat_minutes, while the cycle is in overtime. Each reload then
+// changes the next reminder the scheduler computes, and each one that finds a
+// reminder due plays it, which rewrites the scheduler's memory of the cycle
+// while the reads walk that memory and that repeat (the alerter's reading of
+// the cycle).
 func TestHealthReadsAreSynchronisedWithStartReloadAndStop(t *testing.T) {
 	e := newEnv2(t, options{}) // the port and the configuration exist; nothing listens yet
 	readers := newHealthReaders(e.url)
@@ -131,12 +139,15 @@ func TestHealthReadsAreSynchronisedWithStartReloadAndStop(t *testing.T) {
 	e.clock.Set(local(9, 50)) // its time is up
 	e.d.Alerter().Poll()
 
-	// Reload. Each one polls the scheduler, which rewrites that memory while
-	// the readers read it.
+	// Reload. The clock moves on a minute per reload, so a reload that sets
+	// repeat_minutes to 1 finds a reminder due: the scheduler plays it and
+	// rewrites its memory of the cycle while the readers read it. One that sets
+	// 2 finds none and only moves the next reminder.
 	for i := range 40 {
-		minutes := 50 + 10*(i%2)
+		repeat := 2 - i%2
 		e.writeConfig(func(c map[string]any) {
-			c["cycles"].(map[string]any)["deep-work"].(map[string]any)["minutes"] = minutes
+			deepWork := c["cycles"].(map[string]any)["deep-work"].(map[string]any)
+			deepWork["alert"].(map[string]any)["repeat_minutes"] = repeat
 		})
 		if err := e.d.Reload(); err != nil {
 			t.Fatalf("reload %d: %v\nlog:\n%s", i, err, e.log.String())
