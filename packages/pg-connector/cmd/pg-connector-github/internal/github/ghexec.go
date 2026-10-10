@@ -1,0 +1,144 @@
+package github
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"strings"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/gitenv"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
+)
+
+// CLI is the token-protected gateway through which this backend invokes the
+// `gh` binary. Every invocation resolves a GitHub token FIRST and injects it
+// as the child's single GH_TOKEN, which buys two guarantees (bead pg2-ilzq9):
+//
+//   - `gh` is NEVER executed without a resolved token. An unauthenticated gh
+//     starts its own interactive login — the observed symptom was repeated auth
+//     screens and a crashing browser under the launchd sync agent. When the
+//     token cannot be resolved, Command/Run return an error wrapping
+//     ErrGHAuthInvalid (== vcs.ErrAuthInvalid) *before* any process is created,
+//     and the message names `gh auth login` so the fix is actionable.
+//   - No ambient credential leaks into the child: envWithGHToken strips any
+//     inherited GH_TOKEN/GITHUB_TOKEN and appends exactly one resolved
+//     GH_TOKEN.
+//
+// Callers reach it two ways. Run/RunStdin hand the whole invocation over
+// (stdout bytes plus gh-auth classification) and are what every production
+// call site in this package (github.go's Provider methods) actually uses.
+// Command returns the prepared *exec.Cmd for a caller that must wire it up
+// itself — no in-module production site does today, but the tests exercise
+// it directly (ghexec_test.go) to assert on the constructed cmd.Env/Args
+// without spawning a real gh.
+//
+// The `gh auth token` exec in token.go is the ONE gh invocation that does not
+// go through here, and must stay that way: it is how the token is obtained, so
+// routing it through this preflight would be circular. That exemption is
+// asserted by TestGHExecChokePoint, which fails if any other file in the module
+// execs gh directly.
+type CLI struct{ r *cliGHRunner }
+
+// NewCLI returns a CLI backed by the default token source (GH_TOKEN /
+// GITHUB_TOKEN, else gh's own stored credential). Construction performs no
+// I/O; the token is resolved on first use and cached on success, so one CLI
+// value amortizes keychain reads across calls.
+func NewCLI() *CLI { return NewCLIWithOptions(Options{}) }
+
+// DefaultBinary is the gh executable name used when Options.Binary is empty;
+// it is what every call of the pg-connector-pr-github original makes.
+const DefaultBinary = "gh"
+
+// Options configures a CLI built by NewCLIWithOptions. The zero value is
+// exactly NewCLI: the `gh` binary found on PATH, no GH_HOST, the default
+// token chain.
+type Options struct {
+	// Binary is the gh executable path or name; empty means DefaultBinary.
+	// It is used for the main call AND for the `gh auth token` child.
+	Binary string
+	// Host, when non-empty, is passed to every gh child as GH_HOST (the main
+	// call and the `gh auth token` child alike), appended AFTER the strip of
+	// an inherited GH_HOST/GH_CONFIG_DIR so it is the only GH_HOST the child
+	// sees. Empty leaves GH_HOST unset in the child (gh's own default host).
+	Host string
+	// TokenSource overrides the token chain; nil means the default chain
+	// (GH_TOKEN/GITHUB_TOKEN, else `gh auth token` via Binary and Host).
+	TokenSource TokenSource
+}
+
+// NewCLIWithOptions returns a CLI configured by o. Construction performs no
+// I/O.
+func NewCLIWithOptions(o Options) *CLI {
+	bin := o.Binary
+	if bin == "" {
+		bin = DefaultBinary
+	}
+	src := o.TokenSource
+	if src == nil {
+		src = defaultTokenSource(bin, o.Host)
+	}
+	return &CLI{r: &cliGHRunner{src: src, bin: bin, host: o.Host}}
+}
+
+// NewCLIWithTokenSource returns a CLI backed by src. Tests use it to force a
+// resolved token, or a resolution failure, without touching the environment.
+func NewCLIWithTokenSource(src TokenSource) *CLI {
+	return NewCLIWithOptions(Options{TokenSource: src})
+}
+
+// Command resolves a token and returns a ready-to-run `gh <args...>` with the
+// token injected into its env. On resolution failure it returns a nil *exec.Cmd
+// and an error wrapping ErrGHAuthInvalid: no process is created, so a caller
+// that honors the error cannot reach an unauthenticated gh.
+func (c *CLI) Command(ctx context.Context, args ...string) (*exec.Cmd, error) {
+	return c.r.command(ctx, args...)
+}
+
+// Run invokes `gh <args...>` and returns its stdout.
+func (c *CLI) Run(ctx context.Context, args ...string) ([]byte, error) {
+	return c.r.Run(ctx, args...)
+}
+
+// RunStdin invokes `gh <args...>` feeding stdin to the subprocess.
+func (c *CLI) RunStdin(ctx context.Context, stdin []byte, args ...string) ([]byte, error) {
+	return c.r.RunStdin(ctx, stdin, args...)
+}
+
+// command is the choke point: token first, process second. Every gh invocation
+// in this module (except the token resolver itself) is built here.
+//
+// gh resolves "which repository am I talking about" by shelling out to git in
+// its working directory (`git remote -v` / `git rev-parse`), and those git
+// children inherit gh's environment. A leaked GIT_DIR/GIT_WORK_TREE/etc.
+// therefore redirects gh's git children exactly as it would redirect a direct
+// git call (see internal/gitenv), and gh's answer ends up describing the
+// LEAKED repository rather than the one a caller pointed it at via cmd.Dir or
+// --repo (bead pg2-5xn2j; mechanism proven on pg2-67h4y, fixed for direct git
+// exec sites on pg2-lx41y). gitenv.Hermetic is the same allowlist those git
+// sites use: it drops the GIT_DIR family while leaving gh's own needs (PATH,
+// HOME, GH_*, proxies, SSH) untouched.
+func (r *cliGHRunner) command(ctx context.Context, args ...string) (*exec.Cmd, error) {
+	tok, err := r.token(ctx)
+	if err != nil {
+		// A lookup that never finished (killed at the per-call budget or by a
+		// signal) did not judge the credential: report it WITHOUT
+		// ErrGHAuthInvalid so it surfaces as unavailable, not as "run `gh auth
+		// login`" [bead pg2-ev2uf]. gh is still not executed.
+		if errors.Is(err, errTokenLookupInterrupted) {
+			return nil, fmt.Errorf("gh %s: GitHub credential lookup did not complete: %w",
+				strings.Join(args, " "), err)
+		}
+		return nil, fmt.Errorf("gh %s: no usable GitHub credential; run `gh auth login`: %w",
+			strings.Join(args, " "), errors.Join(ErrGHAuthInvalid, err))
+	}
+	cmd := exec.CommandContext(ctx, r.binary(), args...)
+	cmd.Env = envWithGHHost(envWithGHToken(gitenv.Hermetic(os.Environ()), tok), r.host)
+	// See scriptout.DefaultWaitDelay's doc comment for why this is needed
+	// even though ctx already carries a deadline: it bounds Cmd.Wait's own
+	// residual wait for the stdout/stderr pipes to close, independent of
+	// killing the direct gh child [bead pg2-332z8 #13].
+	cmd.WaitDelay = scriptout.DefaultWaitDelay
+	return cmd, nil
+}

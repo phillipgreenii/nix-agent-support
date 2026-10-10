@@ -1,0 +1,38 @@
+{
+  "jobs": [
+    {
+      "completedAt": "2026-10-02T14:05:31Z",
+      "conclusion": "success",
+      "databaseId": 70010,
+      "name": "changes",
+      "startedAt": "2026-10-02T14:03:02Z",
+      "status": "completed",
+      "steps": [
+        {
+          "conclusion": "success",
+          "name": "Set up job",
+          "number": 1,
+          "status": "completed"
+        }
+      ],
+      "url": "https://github.com/foo/bar/actions/runs/1001/job/70010"
+    },
+    {
+      "completedAt": "2026-10-02T14:21:44Z",
+      "conclusion": "failure",
+      "databaseId": 70011,
+      "name": "build-test-validate",
+      "startedAt": "2026-10-02T14:05:40Z",
+      "status": "completed",
+      "steps": [
+        {
+          "conclusion": "failure",
+          "name": "Run tests",
+          "number": 4,
+          "status": "completed"
+        }
+      ],
+      "url": "https://github.com/foo/bar/actions/runs/1001/job/70011"
+    }
+  ]
+}

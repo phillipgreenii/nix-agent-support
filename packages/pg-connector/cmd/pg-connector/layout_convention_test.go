@@ -17,7 +17,12 @@ import (
 // subpackages, bead pg2-7vgn5 — see below) and pkg/eventlog (the shared
 // writer behind every backend's OWN event log, bead pg2-kjdfi: common event
 // fields, rotation, path rule and call timing only — each backend keeps its
-// own log path, event shape and alert rules) may be shared across backend
+// own log path, event shape and alert rules) and pkg/connectord (the shared
+// daemon library behind a daemon-backed connector — store primitives, scheduler,
+// governor, change log, socket and process scaffolding — whose own
+// subpackages are shared surface via allowedSharedLayoutPrefixes; only its
+// GENERIC parts live here, each connector's upstream-specific code stays in
+// its cmd/<binary>/internal/) may be shared across backend
 // boundaries — every backend's own code must live in main or under its own
 // cmd/<binary>/internal/.
 var allowedSharedLayout = map[string]bool{
@@ -25,6 +30,9 @@ var allowedSharedLayout = map[string]bool{
 	"pkg/provider":  true,
 	"pkg/scriptout": true,
 	"pkg/eventlog":  true,
+	// pkg/connectord is the daemon library's own root package (doc.go); its
+	// subpackages are covered by the "pkg/connectord/" prefix below.
+	"pkg/connectord": true,
 }
 
 // Both prefixes name a package whose OWN per-something subpackages are
@@ -35,7 +43,7 @@ var allowedSharedLayout = map[string]bool{
 // author needs to import them (conformance.Run and friends) to validate
 // their own implementation against the canonical wire shape, exactly the
 // gap the design doc's Appendix A "Wire protocol and testing" flagged.
-var allowedSharedLayoutPrefixes = []string{"pkg/provider/", "pkg/scriptout/"}
+var allowedSharedLayoutPrefixes = []string{"pkg/provider/", "pkg/scriptout/", "pkg/connectord/"}
 
 // mainPackageClause matches a Go source file's package clause declaring
 // "package main" as the first non-blank statement on its own line. Go

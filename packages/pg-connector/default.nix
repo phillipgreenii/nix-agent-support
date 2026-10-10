@@ -61,6 +61,7 @@ mkGoApp {
       ./cmd
       ./pkg
       ./default.nix
+      ./pg-connector-github.nix
       ./pg-connector-pr-github.nix
       ./pg-connector-ci-github-actions.nix
       ./pg-connector-issue-beads.nix

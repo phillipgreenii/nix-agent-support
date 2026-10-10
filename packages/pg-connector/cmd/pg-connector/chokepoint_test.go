@@ -77,6 +77,12 @@ func TestGHExecChokePoint(t *testing.T) {
 		filepath.Join("cmd", "pg-connector-pr-github", "internal", "github", "token.go"):          true,
 		filepath.Join("cmd", "pg-connector-ci-github-actions", "internal", "github", "ghexec.go"): true,
 		filepath.Join("cmd", "pg-connector-ci-github-actions", "internal", "github", "token.go"):  true,
+		// pg-connector-github's own copy of the pr-github pair (bead pg2-z5fax.2.1);
+		// its binary path and GH_HOST are configurable, so the literal-"gh"
+		// regex above no longer matches it, but the pair stays the one place gh
+		// is built.
+		filepath.Join("cmd", "pg-connector-github", "internal", "github", "ghexec.go"): true,
+		filepath.Join("cmd", "pg-connector-github", "internal", "github", "token.go"):  true,
 	}
 
 	var offenders []string

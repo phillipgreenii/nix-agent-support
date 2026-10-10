@@ -1,0 +1,198 @@
+// resolver.go: resolves a PR id to the (repo, head branch) pair the ported
+// GitHub Actions client needs — `gh run list` filters by branch, not PR
+// [carry-over basis, per this packet's contract's PRResolver hook].
+//
+// Composition-boundary decision (bug fix, supersedes this file's original
+// choice): this resolver used to shell out to the pg-connector umbrella's
+// own "pr show <id>" verb, which in turn dispatched to the sibling
+// pg-connector-pr-github backend. That is a Tier-2 backend (this one)
+// calling back into the Tier-1 caller that dispatches it — a shape the
+// design's composition-authorization for process composition never covered:
+// that authorization is scoped to standalone attention/search plugins, a
+// fundamentally different position in the call graph (a leaf composing
+// pg-connector's verbs, not one of the things being composed calling back
+// into its own composer) — never to a Tier-2 backend like this one
+// (INV-COMP-1; interfaces.md's "The composition boundary").
+//
+// The module's own layout convention (layout_convention_test.go)'s
+// compiler-enforced backend isolation (independent internal/ trees per
+// backend) also forecloses the alternative of importing the
+// pg-connector-pr-github backend's own concrete Provider in-process: its
+// construction lives under a different backend's private internal/ tree,
+// which this backend cannot import even if it wanted to — only
+// pkg/schema+pkg/provider+pkg/scriptout are shared, and those are
+// interfaces/wire-shapes, not implementations.
+//
+// The repo half of what "pr show" returned was never actually an
+// independent GitHub read anyway: pg-connector-pr-github's own toSchemaPR
+// (provider.go) just echoes back the repo it parsed out of the PR id string
+// via its formatPRID/parsePRID convention, "<owner>/<repo>#<number>". Only
+// the branch is a genuine live GitHub read (gh pr view's headRefName). So
+// this resolver now does directly, with no subprocess of any pg-connector
+// binary, exactly what this packet's own contract already named as the
+// fallback ("a minimal direct GitHub branch lookup"): parse repo+number out
+// of the id itself — recognizing the same "<owner>/<repo>#<number>"
+// convention independently (not by importing pg-connector-pr-github's
+// private parsePRID, which the module's layout convention
+// (layout_convention_test.go) forbids anyway) because it is the natural,
+// minimum-information encoding of a GitHub PR's identity, not a private
+// implementation detail — then resolve the head branch with one direct `gh
+// pr view` call over the SAME ghRunner gateway (provider.go) this backend
+// already uses for run list/logs/rerun: one more read against a system this
+// backend already talks to, no new dependency, no new trust boundary.
+package ciprovider
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strconv"
+	"strings"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
+)
+
+// PRResolver resolves a PR id to the repo and head branch GitHub Actions
+// needs to enumerate its runs. The production implementation
+// (ghPRResolver) resolves directly against GitHub over this backend's own
+// gh gateway; tests inject a fake.
+type PRResolver interface {
+	Resolve(ctx context.Context, prID string) (repo, branch string, err error)
+}
+
+// ghPRResolver is the production PRResolver: repo comes from parsing the PR
+// id's own "<owner>/<repo>#<number>" convention (no GitHub call needed for
+// that half — see this file's doc comment); branch is read live from GitHub
+// via `gh pr view`, over the same ghRunner gateway (provider.go) this
+// backend's other ops already use.
+type ghPRResolver struct {
+	gh ghRunner
+}
+
+// newGHPRResolver returns the production PRResolver, wired to gh — the same
+// ghRunner instance Backend uses for run list/logs/rerun, so there is
+// exactly one gh gateway per Backend.
+func newGHPRResolver(gh ghRunner) *ghPRResolver {
+	return &ghPRResolver{gh: gh}
+}
+
+// parsePRID parses this system's "<owner>/<repo>#<number>" GitHub PR id
+// convention — independently recognized here (not imported from the
+// pg-connector-pr-github backend's own parsePRID, which the module's
+// layout convention's compiler-enforced backend isolation
+// (layout_convention_test.go) makes impossible to import) because it's the
+// natural,
+// minimum-information encoding of a GitHub PR's identity: an owner/repo
+// pair plus a PR number, the same shape pg-connector-pr-github's own
+// formatPRID mints and parsePRID round-trips.
+func parsePRID(id string) (repo string, number int, err error) {
+	i := strings.LastIndex(id, "#")
+	if i < 0 {
+		return "", 0, fmt.Errorf("pg-connector-ci-github-actions: pr id %q is not in \"<owner>/<repo>#<number>\" form", id)
+	}
+	repo = id[:i]
+	if !strings.Contains(repo, "/") {
+		return "", 0, fmt.Errorf("pg-connector-ci-github-actions: pr id %q's repo part %q is not in owner/name form", id, repo)
+	}
+	n, convErr := strconv.Atoi(id[i+1:])
+	if convErr != nil || n <= 0 {
+		return "", 0, fmt.Errorf("pg-connector-ci-github-actions: pr id %q's number part is not a positive integer", id)
+	}
+	return repo, n, nil
+}
+
+// defaultRateReservePoints is the GraphQL budget the resolver leaves
+// untouched when config.rate_reserve_points is absent — the same default (and
+// the same config key) pg-connector-pr-github applies, so one setting governs
+// both backends.
+const defaultRateReservePoints = 1000
+
+// rateReservePoints resolves the configured reserve from the request's own
+// config block (scriptout.ConfigFromContext); an absent block, an absent key
+// or a malformed one means the default. A local copy of the sibling backend's
+// helper: the module's layout convention forbids importing its internal/ tree.
+func rateReservePoints(config json.RawMessage) int {
+	if len(config) == 0 {
+		return defaultRateReservePoints
+	}
+	var cfg struct {
+		RateReservePoints *int `json:"rate_reserve_points"`
+	}
+	if err := scriptout.Decode(config, &cfg); err != nil || cfg.RateReservePoints == nil {
+		return defaultRateReservePoints
+	}
+	return *cfg.RateReservePoints
+}
+
+// rateLimitWire is the shape of `gh api graphql -f query='{ rateLimit {
+// remaining } }'`'s stdout.
+type rateLimitWire struct {
+	Data struct {
+		RateLimit struct {
+			Remaining int `json:"remaining"`
+		} `json:"rateLimit"`
+	} `json:"data"`
+}
+
+// checkRateReserve reads the GraphQL rate-limit remainder (an uncharged
+// query) and answers unavailable, without the caller reading anything, when it
+// is below config.rate_reserve_points. A failed or unparseable read is
+// classified like any other gh failure and also stops the caller: with no
+// reading, the guard cannot say the budget is safe.
+func (r *ghPRResolver) checkRateReserve(ctx context.Context) error {
+	raw, err := r.gh.Run(ctx, "api", "graphql", "-f", "query={ rateLimit { remaining } }")
+	if err != nil {
+		return classifyGHError(err)
+	}
+	var wire rateLimitWire
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		return fmt.Errorf("pg-connector-ci-github-actions: parse rate limit JSON: %w", err)
+	}
+	reserve := rateReservePoints(scriptout.ConfigFromContext(ctx))
+	if remaining := wire.Data.RateLimit.Remaining; remaining < reserve {
+		return scriptout.WrapError(scriptout.ErrUnavailable, fmt.Sprintf(
+			"pg-connector-ci-github-actions: GraphQL rate limit remaining (%d) is below the configured reserve (%d)", remaining, reserve,
+		))
+	}
+	return nil
+}
+
+// ghPRView is the slice of `gh pr view --json headRefName`'s shape this
+// resolver needs.
+type ghPRView struct {
+	HeadRefName string `json:"headRefName"`
+}
+
+// Resolve implements PRResolver against real GitHub. classifyGHError
+// (provider.go) is reused unchanged for error classification — no separate
+// wire-error-code-to-sentinel map is needed here, since this resolver
+// never decodes a pg-connector scriptout envelope any more. A prID that
+// doesn't even parse into this backend's own "<owner>/<repo>#<number>" id
+// shape is a caller-input-validation failure, not a backend-health one, so
+// it is wrapped ErrInvalidArgument rather than left unwrapped (previously
+// fell through to scriptout's own "unavailable" fallback — the same defect
+// class as classifyGHError's not_found gap [bug pg2-r9iok]).
+func (r *ghPRResolver) Resolve(ctx context.Context, prID string) (string, string, error) {
+	repo, number, err := parsePRID(prID)
+	if err != nil {
+		return "", "", scriptout.WrapError(scriptout.ErrInvalidArgument, err.Error())
+	}
+	// The `gh pr view` below is this backend's one GraphQL read (run list /
+	// run view / logs / rerun are REST), so it is the one call the GraphQL
+	// reserve guards (bead pg2-ir8bs; same gate as pg-connector-pr-github).
+	if err := r.checkRateReserve(ctx); err != nil {
+		return "", "", err
+	}
+	raw, err := r.gh.Run(ctx, "pr", "view", strconv.Itoa(number), "--repo", repo, "--json", "headRefName")
+	if err != nil {
+		return "", "", classifyGHError(err)
+	}
+	var view ghPRView
+	if err := json.Unmarshal(raw, &view); err != nil {
+		return "", "", fmt.Errorf("pg-connector-ci-github-actions: parse gh pr view JSON for %s: %w", prID, err)
+	}
+	if view.HeadRefName == "" {
+		return "", "", fmt.Errorf("pg-connector-ci-github-actions: gh pr view %s returned no head branch", prID)
+	}
+	return repo, view.HeadRefName, nil
+}

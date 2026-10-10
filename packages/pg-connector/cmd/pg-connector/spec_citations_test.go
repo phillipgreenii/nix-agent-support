@@ -97,6 +97,7 @@ func TestNoSectionSignCitationsUnderPgConnector(t *testing.T) {
 	sawGoTest := false
 	wantNixFiles := map[string]bool{
 		"default.nix":                        false,
+		"pg-connector-github.nix":            false,
 		"pg-connector-pr-github.nix":         false,
 		"pg-connector-ci-github-actions.nix": false,
 		"pg-connector-issue-beads.nix":       false,

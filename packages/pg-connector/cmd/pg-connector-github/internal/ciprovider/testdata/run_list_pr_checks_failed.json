@@ -1,0 +1,32 @@
+[
+  {
+    "databaseId": 1001,
+    "name": "PR Checks",
+    "status": "completed",
+    "conclusion": "FAILURE",
+    "url": "https://github.com/foo/bar/actions/runs/1001",
+    "headBranch": "feat/x",
+    "headSha": "deadbeef",
+    "attempt": 1
+  },
+  {
+    "databaseId": 1002,
+    "name": "lint",
+    "status": "completed",
+    "conclusion": "SUCCESS",
+    "url": "https://github.com/foo/bar/actions/runs/1002",
+    "headBranch": "feat/x",
+    "headSha": "deadbeef",
+    "attempt": 1
+  },
+  {
+    "databaseId": 900,
+    "name": "PR Checks",
+    "status": "completed",
+    "conclusion": "FAILURE",
+    "url": "https://github.com/foo/bar/actions/runs/900",
+    "headBranch": "feat/x",
+    "headSha": "oldsha",
+    "attempt": 1
+  }
+]

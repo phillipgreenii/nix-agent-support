@@ -1,0 +1,2242 @@
+package github
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"reflect"
+	"regexp"
+	"strings"
+	"testing"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/api"
+)
+
+// fakeGH replays canned responses keyed by the first two arguments
+// ("pr list", "pr view"). Each call records args for assertion.
+type fakeGH struct {
+	responses map[string][]byte
+	errs      map[string]error
+	calls     [][]string
+	stdins    [][]byte // captured RunStdin payloads (for asserting POST bodies)
+}
+
+func newFakeGH() *fakeGH {
+	return &fakeGH{
+		responses: map[string][]byte{},
+		errs:      map[string]error{},
+	}
+}
+
+func (f *fakeGH) Run(_ context.Context, args ...string) ([]byte, error) {
+	f.calls = append(f.calls, append([]string(nil), args...))
+	key := strings.Join(args[:min(2, len(args))], " ")
+	if err, ok := f.errs[key]; ok {
+		return nil, err
+	}
+	if resp, ok := f.responses[key]; ok {
+		return resp, nil
+	}
+	return []byte("[]"), nil
+}
+
+func (f *fakeGH) RunStdin(_ context.Context, stdin []byte, args ...string) ([]byte, error) {
+	f.calls = append(f.calls, append([]string(nil), args...))
+	f.stdins = append(f.stdins, append([]byte(nil), stdin...))
+	key := strings.Join(args[:min(2, len(args))], " ")
+	if err, ok := f.errs[key]; ok {
+		return nil, err
+	}
+	if resp, ok := f.responses[key]; ok {
+		return resp, nil
+	}
+	return []byte("{}"), nil
+}
+
+const samplePRList = `[
+  {
+    "number": 42,
+    "title": "feat: do x",
+    "headRefName": "feat/x",
+    "baseRefName": "main",
+    "url": "https://github.com/foo/bar/pull/42",
+    "author": {"login": "phillipg", "name": "Phillip"},
+    "isDraft": false,
+    "state": "OPEN",
+    "mergedAt": "",
+    "closedAt": ""
+  },
+  {
+    "number": 43,
+    "title": "feat: do y",
+    "headRefName": "feat/y",
+    "baseRefName": "main",
+    "url": "https://github.com/foo/bar/pull/43",
+    "author": {"login": "phillipg", "name": "Phillip"},
+    "isDraft": true,
+    "state": "OPEN",
+    "mergedAt": "",
+    "closedAt": ""
+  }
+]`
+
+const samplePRView = `{
+  "number": 42,
+  "title": "feat: do x",
+  "headRefName": "feat/x",
+  "baseRefName": "main",
+  "url": "https://github.com/foo/bar/pull/42",
+  "author": {"login": "phillipg", "name": "Phillip"},
+  "isDraft": false,
+  "state": "MERGED",
+  "mergedAt": "2026-05-19T12:00:00Z",
+  "closedAt": "2026-05-19T12:00:00Z"
+}`
+
+func TestListMyPRs_ParsesAndConverts(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr list"] = []byte(samplePRList)
+	p := NewWithRunner(gh)
+
+	prs, err := p.ListMyPRs(context.Background(), "foo/bar")
+	if err != nil {
+		t.Fatalf("ListMyPRs: %v", err)
+	}
+	if len(prs) != 2 {
+		t.Fatalf("expected 2 PRs, got %d", len(prs))
+	}
+	if prs[0].Repo != "foo/bar" || prs[0].Number != 42 || prs[0].Author != "phillipg" {
+		t.Fatalf("PR[0]: %+v", prs[0])
+	}
+	if prs[0].State != "open" {
+		t.Fatalf("state should be lowercased: %q", prs[0].State)
+	}
+	if !prs[1].Draft {
+		t.Fatalf("expected PR[1] draft=true")
+	}
+
+	// Verify gh args.
+	last := gh.calls[len(gh.calls)-1]
+	want := []string{"pr", "list", "--repo", "foo/bar", "--state", "open", "--author", "@me"}
+	for i, w := range want {
+		if last[i] != w {
+			t.Fatalf("gh args[%d]: got %q want %q (full: %v)", i, last[i], w, last)
+		}
+	}
+}
+
+func TestListTeamPRs_MergesByNumber(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr list"] = []byte(samplePRList)
+	p := NewWithRunner(gh)
+
+	prs, err := p.ListTeamPRs(context.Background(), "foo/bar", []string{"phillipg", "alice", ""})
+	if err != nil {
+		t.Fatalf("ListTeamPRs: %v", err)
+	}
+	// Both calls return the same PRs; dedup keeps two entries.
+	if len(prs) != 2 {
+		t.Fatalf("expected 2 deduped PRs, got %d", len(prs))
+	}
+	// Two non-empty members → two gh invocations.
+	authorArgs := 0
+	for _, c := range gh.calls {
+		for i, a := range c {
+			if a == "--author" && i+1 < len(c) && c[i+1] != "" {
+				authorArgs++
+			}
+		}
+	}
+	if authorArgs != 2 {
+		t.Fatalf("expected 2 --author invocations, got %d (calls: %v)", authorArgs, gh.calls)
+	}
+}
+
+func TestGetPR_ParsesView(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr view"] = []byte(samplePRView)
+	p := NewWithRunner(gh)
+
+	pr, err := p.GetPR(context.Background(), "foo/bar", 42)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	if pr.Number != 42 {
+		t.Fatalf("number: %d", pr.Number)
+	}
+	if pr.State != "merged" {
+		t.Fatalf("state: %q", pr.State)
+	}
+	if !pr.Merged {
+		t.Fatalf("expected Merged=true when mergedAt is set")
+	}
+	if pr.MergedAt != "2026-05-19T12:00:00Z" {
+		t.Fatalf("MergedAt: got %q want %q (pg2-ew4kf: the snapshot layer's retention window is measured from this)", pr.MergedAt, "2026-05-19T12:00:00Z")
+	}
+}
+
+func TestGetPR_ParsesReviewRequests(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr view"] = []byte(`{
+		"number": 7, "title": "t", "state": "OPEN", "author": {"login": "zara"},
+		"reviewRequests": [
+			{"__typename": "User", "login": "phillipg"},
+			{"__typename": "Team", "name": "core-team", "slug": "core-team"}
+		]
+	}`)
+	p := NewWithRunner(gh)
+
+	pr, err := p.GetPR(context.Background(), "foo/bar", 7)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	// Users become RequestedReviewers; teams (no login) are excluded.
+	if len(pr.RequestedReviewers) != 1 || pr.RequestedReviewers[0] != "phillipg" {
+		t.Fatalf("RequestedReviewers = %v, want [phillipg] (team excluded)", pr.RequestedReviewers)
+	}
+	// The --json field set must request reviewRequests, or gh returns nothing.
+	if len(gh.calls) == 0 || !strings.Contains(strings.Join(gh.calls[0], " "), "reviewRequests") {
+		t.Errorf("gh pr view must request the reviewRequests field; args=%v", gh.calls)
+	}
+}
+
+func TestGetPR_ParsesAssignees(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr view"] = []byte(`{
+		"number": 7, "title": "t", "state": "OPEN", "author": {"login": "teammate"},
+		"assignees": [
+			{"login": "me"},
+			{"login": "teammate"}
+		]
+	}`)
+	p := NewWithRunner(gh)
+
+	pr, err := p.GetPR(context.Background(), "o/r", 7)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	want := []string{"me", "teammate"}
+	if len(pr.Assignees) != len(want) {
+		t.Fatalf("Assignees = %v, want %v", pr.Assignees, want)
+	}
+	for i, w := range want {
+		if pr.Assignees[i] != w {
+			t.Fatalf("Assignees[%d] = %q, want %q (full: %v)", i, pr.Assignees[i], w, pr.Assignees)
+		}
+	}
+	// The --json field set must request assignees, or gh returns nothing.
+	if len(gh.calls) == 0 || !strings.Contains(strings.Join(gh.calls[0], " "), "assignees") {
+		t.Errorf("gh pr view must request the assignees field; args=%v", gh.calls)
+	}
+}
+
+func TestGetPR_AssigneeWithNoLoginIsFiltered(t *testing.T) {
+	// Defensive: every entry gh's assignees field actually returns carries a
+	// login, but a login-less entry (if the shape ever allowed one) must be
+	// filtered out rather than surfacing an empty string, mirroring how
+	// ReviewRequests filters out teams.
+	gh := newFakeGH()
+	gh.responses["pr view"] = []byte(`{
+		"number": 8, "title": "t", "state": "OPEN", "author": {"login": "teammate"},
+		"assignees": [
+			{"login": "me"},
+			{"login": ""}
+		]
+	}`)
+	p := NewWithRunner(gh)
+
+	pr, err := p.GetPR(context.Background(), "o/r", 8)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	if len(pr.Assignees) != 1 || pr.Assignees[0] != "me" {
+		t.Fatalf("Assignees = %v, want [me] (login-less entry filtered out)", pr.Assignees)
+	}
+}
+
+func TestGetPR_ValidatesInput(t *testing.T) {
+	p := NewWithRunner(newFakeGH())
+	if _, err := p.GetPR(context.Background(), "", 1); err == nil {
+		t.Fatalf("expected error for empty repo")
+	}
+	if _, err := p.GetPR(context.Background(), "no-slash", 1); err == nil {
+		t.Fatalf("expected error for non-owner/name repo")
+	}
+	if _, err := p.GetPR(context.Background(), "a/b", 0); err == nil {
+		t.Fatalf("expected error for PR number=0")
+	}
+}
+
+// TestGetPR_ReviewRequests_IncludesLoginsAndTeamSlugs proves the bead
+// pg2-2j5ac.28.2 ReviewRequests field carries BOTH individual logins and
+// team slugs — unlike RequestedReviewers (above), which deliberately
+// excludes teams for the "requested of me" self-match use.
+func TestGetPR_ReviewRequests_IncludesLoginsAndTeamSlugs(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr view"] = []byte(`{
+		"number": 7, "title": "t", "state": "OPEN", "author": {"login": "zara"},
+		"reviewRequests": [
+			{"__typename": "User", "login": "phillipg"},
+			{"__typename": "Team", "name": "core-team", "slug": "core-team"}
+		]
+	}`)
+	p := NewWithRunner(gh)
+
+	pr, err := p.GetPR(context.Background(), "foo/bar", 7)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	want := []string{"phillipg", "core-team"}
+	if len(pr.ReviewRequests) != len(want) {
+		t.Fatalf("ReviewRequests = %v, want %v", pr.ReviewRequests, want)
+	}
+	for i, w := range want {
+		if pr.ReviewRequests[i] != w {
+			t.Fatalf("ReviewRequests[%d] = %q, want %q (full: %v)", i, pr.ReviewRequests[i], w, pr.ReviewRequests)
+		}
+	}
+}
+
+func TestGetPR_ParsesMergeableAndMergeStateStatus(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr view"] = []byte(`{
+		"number": 7, "title": "t", "state": "OPEN", "author": {"login": "zara"},
+		"mergeable": "CONFLICTING", "mergeStateStatus": "DIRTY"
+	}`)
+	p := NewWithRunner(gh)
+
+	pr, err := p.GetPR(context.Background(), "foo/bar", 7)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	if pr.Mergeable != "CONFLICTING" || pr.MergeStateStatus != "DIRTY" {
+		t.Fatalf("Mergeable/MergeStateStatus = %q/%q, want CONFLICTING/DIRTY", pr.Mergeable, pr.MergeStateStatus)
+	}
+	if !pr.HasConflict() {
+		t.Fatal("HasConflict() = false, want true for CONFLICTING/DIRTY")
+	}
+	// The --json field set must request mergeable/mergeStateStatus, or gh
+	// returns nothing (bead pg2-2j5ac.28.2).
+	joined := strings.Join(gh.calls[0], " ")
+	if !strings.Contains(joined, "mergeable") || !strings.Contains(joined, "mergeStateStatus") {
+		t.Errorf("gh pr view must request mergeable/mergeStateStatus; args=%v", gh.calls)
+	}
+}
+
+// TestGetPR_ParsesPerCheckOutcomes pins the per-check view (bead pg2-fnqqi): names (CheckRun name, workflow
+// name, StatusContext context) and outcomes classified by the same rule the
+// rollup folds.
+func TestGetPR_ParsesPerCheckOutcomes(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr view"] = []byte(`{
+		"number": 7, "title": "t", "state": "OPEN", "author": {"login": "zara"},
+		"statusCheckRollup": [
+			{"__typename": "CheckRun", "name": "unit", "workflowName": "ci", "status": "COMPLETED", "conclusion": "FAILURE"},
+			{"__typename": "CheckRun", "name": "lint", "workflowName": "ci", "status": "COMPLETED", "conclusion": "SUCCESS"},
+			{"__typename": "CheckRun", "name": "e2e", "workflowName": "nightly", "status": "IN_PROGRESS"},
+			{"__typename": "StatusContext", "context": "legacy/status", "state": "ERROR"}
+		]
+	}`)
+	p := NewWithRunner(gh)
+
+	pr, err := p.GetPR(context.Background(), "foo/bar", 7)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	want := []api.Check{
+		{Name: "unit", Workflow: "ci", Outcome: api.CheckFailure},
+		{Name: "lint", Workflow: "ci", Outcome: api.CheckSuccess},
+		{Name: "e2e", Workflow: "nightly", Outcome: api.CheckPending},
+		{Name: "legacy/status", Outcome: api.CheckFailure},
+	}
+	if !reflect.DeepEqual(pr.Checks, want) {
+		t.Fatalf("Checks = %+v, want %+v", pr.Checks, want)
+	}
+	if pr.ChecksRollup != "failure" {
+		t.Fatalf("ChecksRollup = %q, want failure", pr.ChecksRollup)
+	}
+}
+
+func TestGetPR_ParsesChecksRollup(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr view"] = []byte(`{
+		"number": 7, "title": "t", "state": "OPEN", "author": {"login": "zara"},
+		"statusCheckRollup": [
+			{"__typename": "CheckRun", "status": "COMPLETED", "conclusion": "SUCCESS"}
+		]
+	}`)
+	p := NewWithRunner(gh)
+
+	pr, err := p.GetPR(context.Background(), "foo/bar", 7)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	if pr.ChecksRollup != "success" {
+		t.Fatalf("ChecksRollup = %q, want success", pr.ChecksRollup)
+	}
+	if !strings.Contains(strings.Join(gh.calls[0], " "), "statusCheckRollup") {
+		t.Errorf("gh pr view must request statusCheckRollup; args=%v", gh.calls)
+	}
+}
+
+func TestGetPR_ChecksRollup_NoChecksIsNone(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr view"] = []byte(`{"number": 7, "title": "t", "state": "OPEN", "author": {"login": "zara"}}`)
+	p := NewWithRunner(gh)
+
+	pr, err := p.GetPR(context.Background(), "foo/bar", 7)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	if pr.ChecksRollup != "none" {
+		t.Fatalf("ChecksRollup = %q, want none", pr.ChecksRollup)
+	}
+}
+
+// TestGetPR_ParsesReviewCount proves prListFields' widened "reviews"
+// field (bead pg2-2j5ac.30.6) decodes into api.PR.ReviewCount via a plain
+// len() -- no review's own fields are ever read, only the array length.
+// This is the show path's review_count source (bead pg2-2j5ac.52.6.1): the
+// same reviews connection the list path counts through
+// reviews { totalCount }, with no extra fetch. (List's old per-matched-PR
+// supplemental fetch, which used to reuse this call, no longer exists.)
+func TestGetPR_ParsesReviewCount(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr view"] = []byte(`{
+		"number": 7, "title": "t", "state": "OPEN", "author": {"login": "zara"},
+		"reviews": [
+			{"id": "PRR_1", "state": "APPROVED"},
+			{"id": "PRR_2", "state": "COMMENTED"},
+			{"id": "PRR_3", "state": "CHANGES_REQUESTED"}
+		]
+	}`)
+	p := NewWithRunner(gh)
+
+	pr, err := p.GetPR(context.Background(), "foo/bar", 7)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	if pr.ReviewCount != 3 {
+		t.Fatalf("ReviewCount = %d, want 3", pr.ReviewCount)
+	}
+	if !strings.Contains(strings.Join(gh.calls[0], " "), "reviews") {
+		t.Errorf("gh pr view must request reviews; args=%v", gh.calls)
+	}
+}
+
+// TestGetPR_ParsesSummaryFields proves prListFields carries id, updatedAt and
+// reviewDecision (bead pg2-2j5ac.52.6.1) and that they decode into
+// api.PR.NodeID/UpdatedAt/ReviewDecision. The fake runner returns its canned
+// JSON whatever arguments it is given, so the decode assertions alone cannot
+// catch a field missing from the --json argument; the second half splits that
+// argument on commas and requires each name as a WHOLE field. A substring
+// check would be vacuous for "id": it already sits inside headRefOid.
+func TestGetPR_ParsesSummaryFields(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr view"] = []byte(`{
+		"id": "PR_kwDOSynthetic7",
+		"number": 7, "title": "t", "state": "OPEN", "author": {"login": "zara"},
+		"updatedAt": "2026-09-14T10:00:00Z",
+		"reviewDecision": "CHANGES_REQUESTED"
+	}`)
+	p := NewWithRunner(gh)
+
+	pr, err := p.GetPR(context.Background(), "foo/bar", 7)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	if pr.NodeID != "PR_kwDOSynthetic7" {
+		t.Errorf("NodeID = %q, want %q", pr.NodeID, "PR_kwDOSynthetic7")
+	}
+	if pr.UpdatedAt != "2026-09-14T10:00:00Z" {
+		t.Errorf("UpdatedAt = %q, want %q", pr.UpdatedAt, "2026-09-14T10:00:00Z")
+	}
+	if pr.ReviewDecision != "CHANGES_REQUESTED" {
+		t.Errorf("ReviewDecision = %q, want %q", pr.ReviewDecision, "CHANGES_REQUESTED")
+	}
+
+	args := gh.calls[0]
+	jsonArg := ""
+	for i, a := range args {
+		if a == "--json" && i+1 < len(args) {
+			jsonArg = args[i+1]
+			break
+		}
+	}
+	if jsonArg == "" {
+		t.Fatalf("gh pr view call carries no --json argument: %v", args)
+	}
+	fields := map[string]bool{}
+	for _, f := range strings.Split(jsonArg, ",") {
+		fields[f] = true
+	}
+	for _, want := range []string{"id", "updatedAt", "reviewDecision"} {
+		if !fields[want] {
+			t.Errorf("--json argument lacks the whole field %q: %s", want, jsonArg)
+		}
+	}
+}
+
+// TestGetPR_ReviewCount_NoReviewsIsZero proves an absent/empty reviews
+// array decodes to ReviewCount 0, not a nil-slice panic.
+func TestGetPR_ReviewCount_NoReviewsIsZero(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr view"] = []byte(`{"number": 7, "title": "t", "state": "OPEN", "author": {"login": "zara"}}`)
+	p := NewWithRunner(gh)
+
+	pr, err := p.GetPR(context.Background(), "foo/bar", 7)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	if pr.ReviewCount != 0 {
+		t.Fatalf("ReviewCount = %d, want 0", pr.ReviewCount)
+	}
+}
+
+// TestChecksRollupFromContexts_FoldRules is a table-driven test of the
+// fold rule checksRollupFromContexts implements (bead pg2-2j5ac.28.2): a
+// mix of outcomes across both CheckRun and StatusContext shapes, proving
+// failure wins over pending, which wins over success.
+func TestChecksRollupFromContexts_FoldRules(t *testing.T) {
+	type ctx = statusCheckContext
+	cases := []struct {
+		name string
+		in   []ctx
+		want string
+	}{
+		{"empty", nil, "none"},
+		{"single success CheckRun", []ctx{{Status: "COMPLETED", Conclusion: "SUCCESS"}}, "success"},
+		{"single running CheckRun", []ctx{{Status: "IN_PROGRESS"}}, "pending"},
+		{"single failed CheckRun", []ctx{{Status: "COMPLETED", Conclusion: "FAILURE"}}, "failure"},
+		{"legacy StatusContext success", []ctx{{State: "SUCCESS"}}, "success"},
+		{"legacy StatusContext pending", []ctx{{State: "PENDING"}}, "pending"},
+		{"legacy StatusContext failure", []ctx{{State: "FAILURE"}}, "failure"},
+		{"failure wins over pending", []ctx{{Status: "IN_PROGRESS"}, {Status: "COMPLETED", Conclusion: "FAILURE"}}, "failure"},
+		{"pending wins over success", []ctx{{Status: "COMPLETED", Conclusion: "SUCCESS"}, {Status: "IN_PROGRESS"}}, "pending"},
+		{"success plus neutral is success", []ctx{{Status: "COMPLETED", Conclusion: "SUCCESS"}, {Status: "COMPLETED", Conclusion: "NEUTRAL"}}, "success"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := checksRollupFromContexts(c.in); got != c.want {
+				t.Fatalf("checksRollupFromContexts(%+v) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
+// connResp wraps one page of a pullRequest connection in the GraphQL envelope.
+func connResp(field string, total int, hasNext bool, cursor, nodes string) []byte {
+	return []byte(fmt.Sprintf(`{"data":{"rateLimit":{"cost":1},"repository":{"pullRequest":{%q:{"totalCount":%d,"pageInfo":{"hasNextPage":%t,"endCursor":%q},"nodes":[%s]}}}}}`,
+		field, total, hasNext, cursor, nodes))
+}
+
+func TestGetFiles_ParsesAndConverts(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["api graphql"] = connResp("files", 2, false, "", `
+		{"path": "a.go", "additions": 5, "deletions": 1},
+		{"path": "b.go", "additions": 0, "deletions": 3}`)
+	p := NewWithRunner(gh)
+
+	files, err := p.GetFiles(context.Background(), "foo/bar", 7)
+	if err != nil {
+		t.Fatalf("GetFiles: %v", err)
+	}
+	if len(files) != 2 || files[0].Path != "a.go" || files[0].Additions != 5 || files[0].Deletions != 1 {
+		t.Fatalf("files = %+v", files)
+	}
+	if files[1].Path != "b.go" || files[1].Deletions != 3 {
+		t.Fatalf("files[1] = %+v", files[1])
+	}
+	joined := strings.Join(gh.calls[0], " ")
+	for _, want := range []string{"api graphql", "files(first: 100", "rateLimit { cost remaining resetAt }", "owner=foo", "name=bar", "number=7"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("gh call missing %q; args=%v", want, gh.calls[0])
+		}
+	}
+}
+
+// A files connection longer than one page is read to its end, the cursor
+// threaded through.
+func TestGetFiles_PagesThroughTheConnection(t *testing.T) {
+	gh := &sequencedGH{responses: [][]byte{
+		connResp("files", 2, true, "C1", `{"path": "a.go", "additions": 1, "deletions": 0}`),
+		connResp("files", 2, false, "", `{"path": "b.go", "additions": 2, "deletions": 0}`),
+	}}
+	files, err := NewWithRunner(gh).GetFiles(context.Background(), "foo/bar", 7)
+	if err != nil {
+		t.Fatalf("GetFiles: %v", err)
+	}
+	if len(files) != 2 || files[1].Path != "b.go" {
+		t.Fatalf("files = %+v, want both pages", files)
+	}
+	if !strings.Contains(strings.Join(gh.calls[1], " "), "after=C1") {
+		t.Errorf("second page call lacks the cursor: %v", gh.calls[1])
+	}
+}
+
+func TestGetFiles_ValidatesInput(t *testing.T) {
+	p := NewWithRunner(newFakeGH())
+	if _, err := p.GetFiles(context.Background(), "", 1); err == nil {
+		t.Fatalf("expected error for empty repo")
+	}
+	if _, err := p.GetFiles(context.Background(), "a/b", 0); err == nil {
+		t.Fatalf("expected error for PR number=0")
+	}
+}
+
+func TestGetFiles_PropagatesGHError(t *testing.T) {
+	gh := newFakeGH()
+	gh.errs["api graphql"] = errors.New("boom: auth required")
+	p := NewWithRunner(gh)
+
+	if _, err := p.GetFiles(context.Background(), "foo/bar", 7); err == nil {
+		t.Fatal("expected error to propagate")
+	}
+}
+
+// A PR number GitHub cannot resolve (null pullRequest) reads like gh's own
+// unresolved-node error, so the backend's not-found classification applies.
+func TestGetFilesAndCommits_UnresolvedPRReadsAsNotFound(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["api graphql"] = []byte(`{"data":{"rateLimit":{"cost":1},"repository":{"pullRequest":null}}}`)
+	p := NewWithRunner(gh)
+	for name, run := range map[string]func() error{
+		"files":   func() error { _, err := p.GetFiles(context.Background(), "foo/bar", 7); return err },
+		"commits": func() error { _, err := p.GetCommits(context.Background(), "foo/bar", 7); return err },
+	} {
+		err := run()
+		if err == nil || !strings.Contains(err.Error(), "Could not resolve to a PullRequest") {
+			t.Errorf("%s: err = %v, want the unresolved-PR error", name, err)
+		}
+	}
+}
+
+func TestGetCommits_ParsesAndConverts(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["api graphql"] = connResp("commits", 2, false, "", `
+		{"commit": {"oid": "abc123", "messageHeadline": "fix bug", "authors": {"nodes": [{"user": {"login": "alice"}}]}}},
+		{"commit": {"oid": "def456", "messageHeadline": "no linked account", "authors": {"nodes": [{"user": null}]}}}`)
+	p := NewWithRunner(gh)
+
+	commits, err := p.GetCommits(context.Background(), "foo/bar", 7)
+	if err != nil {
+		t.Fatalf("GetCommits: %v", err)
+	}
+	if len(commits) != 2 || commits[0].SHA != "abc123" || commits[0].Author != "alice" || commits[0].Message != "fix bug" {
+		t.Fatalf("commits[0] = %+v", commits[0])
+	}
+	// A commit whose author has no linked GitHub account carries an empty
+	// Author rather than erroring (design's own binding decision).
+	if commits[1].SHA != "def456" || commits[1].Author != "" {
+		t.Fatalf("commits[1] = %+v", commits[1])
+	}
+	joined := strings.Join(gh.calls[0], " ")
+	for _, want := range []string{"api graphql", "commits(first: 100", "rateLimit { cost remaining resetAt }", "number=7"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("gh call missing %q; args=%v", want, gh.calls[0])
+		}
+	}
+}
+
+func TestGetCommits_NoAuthorsIsEmptyAuthor(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["api graphql"] = connResp("commits", 1, false, "", `
+		{"commit": {"oid": "abc123", "messageHeadline": "fix bug", "authors": {"nodes": []}}}`)
+	p := NewWithRunner(gh)
+
+	commits, err := p.GetCommits(context.Background(), "foo/bar", 7)
+	if err != nil {
+		t.Fatalf("GetCommits: %v", err)
+	}
+	if len(commits) != 1 || commits[0].Author != "" {
+		t.Fatalf("commits = %+v, want one entry with empty Author", commits)
+	}
+}
+
+func TestGetCommits_ValidatesInput(t *testing.T) {
+	p := NewWithRunner(newFakeGH())
+	if _, err := p.GetCommits(context.Background(), "", 1); err == nil {
+		t.Fatalf("expected error for empty repo")
+	}
+	if _, err := p.GetCommits(context.Background(), "a/b", 0); err == nil {
+		t.Fatalf("expected error for PR number=0")
+	}
+}
+
+func TestGetCommits_PropagatesGHError(t *testing.T) {
+	gh := newFakeGH()
+	gh.errs["pr view"] = errors.New("boom: auth required")
+	p := NewWithRunner(gh)
+
+	if _, err := p.GetCommits(context.Background(), "foo/bar", 7); err == nil {
+		t.Fatal("expected error to propagate")
+	}
+}
+
+func TestListMyPRs_PropagatesGHError(t *testing.T) {
+	gh := newFakeGH()
+	gh.errs["pr list"] = errors.New("boom: auth required")
+	p := NewWithRunner(gh)
+
+	_, err := p.ListMyPRs(context.Background(), "foo/bar")
+	if err == nil {
+		t.Fatalf("expected error to propagate")
+	}
+	if !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("error should wrap underlying: got %q", err.Error())
+	}
+}
+
+func TestListMyPRs_EmptyArrayIsZeroPRs(t *testing.T) {
+	gh := newFakeGH()
+	p := NewWithRunner(gh)
+
+	prs, err := p.ListMyPRs(context.Background(), "foo/bar")
+	if err != nil {
+		t.Fatalf("ListMyPRs: %v", err)
+	}
+	if len(prs) != 0 {
+		t.Fatalf("expected 0 PRs, got %d", len(prs))
+	}
+}
+
+// ----------------------------------------------------------------------
+// body + labels on the REST list path
+// ----------------------------------------------------------------------
+
+const samplePRListWithBodyAndLabels = `[
+  {
+    "number": 99,
+    "title": "feat: body and labels",
+    "headRefName": "feat/body-labels",
+    "headRefOid": "abc123",
+    "baseRefName": "main",
+    "url": "https://github.com/foo/bar/pull/99",
+    "author": {"login": "phillipg", "name": "Phillip"},
+    "isDraft": false,
+    "state": "OPEN",
+    "mergedAt": "",
+    "closedAt": "",
+    "additions": 5,
+    "deletions": 2,
+    "changedFiles": 1,
+    "body": "some text",
+    "labels": [{"name": "p0"}, {"name": "bug"}]
+  }
+]`
+
+func TestListMyPRs_BodyAndLabels(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr list"] = []byte(samplePRListWithBodyAndLabels)
+	p := NewWithRunner(gh)
+
+	prs, err := p.ListMyPRs(context.Background(), "foo/bar")
+	if err != nil {
+		t.Fatalf("ListMyPRs: %v", err)
+	}
+	if len(prs) != 1 {
+		t.Fatalf("expected 1 PR, got %d", len(prs))
+	}
+	pr := prs[0]
+	if pr.Body != "some text" {
+		t.Fatalf("Body: got %q, want %q", pr.Body, "some text")
+	}
+	want := []string{"p0", "bug"}
+	if len(pr.Labels) != len(want) {
+		t.Fatalf("Labels: got %v, want %v", pr.Labels, want)
+	}
+	for i, w := range want {
+		if pr.Labels[i] != w {
+			t.Fatalf("Labels[%d]: got %q, want %q", i, pr.Labels[i], w)
+		}
+	}
+}
+
+// ----------------------------------------------------------------------
+// SearchPRs / RateLimitRemaining tests (bead pg2-2j5ac.28.1)
+// ----------------------------------------------------------------------
+
+const sampleSearchPRs = `[
+  {
+    "number": 7,
+    "title": "fix: bug",
+    "url": "https://github.com/owner/repo/pull/7",
+    "state": "OPEN",
+    "body": "fixes a thing",
+    "isDraft": false,
+    "author": {"login": "octocat"},
+    "labels": [{"name": "bug"}, {"name": "p1"}],
+    "repository": {"nameWithOwner": "owner/repo"},
+    "updatedAt": "2026-09-14T10:00:00Z",
+    "commentsCount": 5
+  }
+]`
+
+func TestSearchPRs_ParsesAndConverts(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["search prs"] = []byte(sampleSearchPRs)
+	p := NewWithRunner(gh)
+
+	prs, err := p.SearchPRs(context.Background(), "is:open author:@me")
+	if err != nil {
+		t.Fatalf("SearchPRs: %v", err)
+	}
+	if len(prs) != 1 {
+		t.Fatalf("expected 1 PR, got %d", len(prs))
+	}
+	pr := prs[0]
+	if pr.Repo != "owner/repo" || pr.Number != 7 || pr.Title != "fix: bug" || pr.Author != "octocat" {
+		t.Fatalf("unexpected PR: %+v", pr)
+	}
+	if pr.State != "open" {
+		t.Fatalf("State = %q, want lowercased %q", pr.State, "open")
+	}
+	if len(pr.Labels) != 2 || pr.Labels[0] != "bug" || pr.Labels[1] != "p1" {
+		t.Fatalf("Labels = %v", pr.Labels)
+	}
+	// UpdatedAt/CommentCount (bead pg2-2j5ac.30.6): two of the six raw
+	// fields a future GitHub fingerprint cursor needs, carried directly by
+	// gh search prs' own --json field list at no extra call cost.
+	if pr.UpdatedAt != "2026-09-14T10:00:00Z" {
+		t.Fatalf("UpdatedAt = %q, want %q", pr.UpdatedAt, "2026-09-14T10:00:00Z")
+	}
+	if pr.CommentCount != 5 {
+		t.Fatalf("CommentCount = %d, want 5", pr.CommentCount)
+	}
+}
+
+// TestSearchPRs_RequestsUpdatedAtAndCommentsCount proves the widened
+// searchPRFields --json value (bead pg2-2j5ac.30.6) actually asks gh for
+// updatedAt/commentsCount, or gh would return neither field at all.
+func TestSearchPRs_RequestsUpdatedAtAndCommentsCount(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["search prs"] = []byte(sampleSearchPRs)
+	p := NewWithRunner(gh)
+
+	if _, err := p.SearchPRs(context.Background(), "is:open"); err != nil {
+		t.Fatalf("SearchPRs: %v", err)
+	}
+	last := gh.calls[len(gh.calls)-1]
+	joined := strings.Join(last, " ")
+	if !strings.Contains(joined, "updatedAt") || !strings.Contains(joined, "commentsCount") {
+		t.Fatalf("expected --json to request updatedAt and commentsCount: %v", last)
+	}
+}
+
+// TestSearchPRs_FlagsPrecedeDoubleDash proves --json/--limit are placed
+// BEFORE the "--" positional terminator (query.go — everything after
+// "--" is a literal positional, never re-parsed as a flag).
+func TestSearchPRs_FlagsPrecedeDoubleDash(t *testing.T) {
+	gh := newFakeGH()
+	p := NewWithRunner(gh)
+	if _, err := p.SearchPRs(context.Background(), "-label:bug"); err != nil {
+		t.Fatalf("SearchPRs: %v", err)
+	}
+	last := gh.calls[len(gh.calls)-1]
+	if last[0] != "search" || last[1] != "prs" {
+		t.Fatalf("expected search prs: %v", last)
+	}
+	dashIdx := -1
+	for i, a := range last {
+		if a == "--" {
+			dashIdx = i
+			break
+		}
+	}
+	if dashIdx == -1 {
+		t.Fatalf("expected a \"--\" terminator: %v", last)
+	}
+	if last[len(last)-1] != "-label:bug" {
+		t.Fatalf("expected the query as the final positional after \"--\": %v", last)
+	}
+	if !containsArg(last[:dashIdx], "--json") || !containsArg(last[:dashIdx], "--limit") {
+		t.Fatalf("expected --json/--limit BEFORE the \"--\" terminator: %v", last)
+	}
+}
+
+func containsArg(args []string, want string) bool {
+	for _, a := range args {
+		if a == want {
+			return true
+		}
+	}
+	return false
+}
+
+// TestSearchPRs_MultiQualifierQuery_SplitsIntoSeparateArgs is the pg2-76vsd
+// regression test: a 2+ qualifier query string (e.g. "is:pr is:open
+// repo:X") must reach `gh` as SEPARATE positional arguments after "--",
+// never as one argument containing embedded spaces — passing it as one
+// argument makes gh's own parser read everything past the first
+// qualifier's colon as that qualifier's (space-containing, then quoted)
+// value, matching nothing (reproduced live against the real `gh search
+// prs` binary: a single merged argv element returned q=is:"open
+// repo:X", 0 results, while separate elements returned q=is:open
+// repo:X, real results).
+func TestSearchPRs_MultiQualifierQuery_SplitsIntoSeparateArgs(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["search prs"] = []byte(sampleSearchPRs)
+	p := NewWithRunner(gh)
+
+	if _, err := p.SearchPRs(context.Background(), "is:pr is:open repo:ZR-Private/ziprecruiter"); err != nil {
+		t.Fatalf("SearchPRs: %v", err)
+	}
+
+	last := gh.calls[len(gh.calls)-1]
+	dashIdx := -1
+	for i, a := range last {
+		if a == "--" {
+			dashIdx = i
+			break
+		}
+	}
+	if dashIdx == -1 {
+		t.Fatalf("expected a \"--\" terminator: %v", last)
+	}
+	positionals := last[dashIdx+1:]
+	want := []string{"is:pr", "is:open", "repo:ZR-Private/ziprecruiter"}
+	if len(positionals) != len(want) {
+		t.Fatalf("expected %d separate positional args (one per qualifier), got %d: %v",
+			len(want), len(positionals), positionals)
+	}
+	for i, w := range want {
+		if positionals[i] != w {
+			t.Fatalf("positional[%d] = %q, want %q (full: %v)", i, positionals[i], w, positionals)
+		}
+	}
+	// The bug's exact failure shape: the WHOLE query merged into one argv
+	// element must never appear.
+	for _, a := range positionals {
+		if strings.Contains(a, " ") {
+			t.Fatalf("no single positional arg must contain an embedded space (that's the bug): %v", positionals)
+		}
+	}
+}
+
+// TestSearchPRs_QuotedQualifierValueStaysOneToken proves a GitHub
+// exact-phrase qualifier value (e.g. label:"needs review") is NOT split on
+// its own internal space — only whitespace OUTSIDE a quoted span is a
+// token boundary.
+func TestSearchPRs_QuotedQualifierValueStaysOneToken(t *testing.T) {
+	gh := newFakeGH()
+	p := NewWithRunner(gh)
+
+	if _, err := p.SearchPRs(context.Background(), `is:open label:"needs review"`); err != nil {
+		t.Fatalf("SearchPRs: %v", err)
+	}
+
+	last := gh.calls[len(gh.calls)-1]
+	dashIdx := -1
+	for i, a := range last {
+		if a == "--" {
+			dashIdx = i
+			break
+		}
+	}
+	positionals := last[dashIdx+1:]
+	want := []string{"is:open", `label:"needs review"`}
+	if len(positionals) != len(want) {
+		t.Fatalf("expected %d positional args, got %d: %v", len(want), len(positionals), positionals)
+	}
+	for i, w := range want {
+		if positionals[i] != w {
+			t.Fatalf("positional[%d] = %q, want %q (full: %v)", i, positionals[i], w, positionals)
+		}
+	}
+}
+
+// TestSplitSearchQualifiers is a table-driven unit test of the tokenizer
+// SearchPRs relies on to avoid bug pg2-76vsd.
+func TestSplitSearchQualifiers(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want []string
+	}{
+		{"empty", "", nil},
+		{"single qualifier", "is:open", []string{"is:open"}},
+		{"two qualifiers", "is:pr is:open", []string{"is:pr", "is:open"}},
+		{
+			"three qualifiers", "is:pr is:open repo:ZR-Private/ziprecruiter",
+			[]string{"is:pr", "is:open", "repo:ZR-Private/ziprecruiter"},
+		},
+		{"leading exclusion qualifier", "-label:bug is:open", []string{"-label:bug", "is:open"}},
+		{"extra whitespace collapses", "  is:pr   is:open  ", []string{"is:pr", "is:open"}},
+		{
+			"quoted value keeps its internal space",
+			`is:open label:"needs review"`,
+			[]string{"is:open", `label:"needs review"`},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := splitSearchQualifiers(c.in)
+			if len(got) != len(c.want) {
+				t.Fatalf("splitSearchQualifiers(%q) = %v, want %v", c.in, got, c.want)
+			}
+			for i, w := range c.want {
+				if got[i] != w {
+					t.Fatalf("splitSearchQualifiers(%q)[%d] = %q, want %q (full: %v)", c.in, i, got[i], w, got)
+				}
+			}
+		})
+	}
+}
+
+func TestSearchPRs_PropagatesGHError(t *testing.T) {
+	gh := newFakeGH()
+	gh.errs["search prs"] = errors.New("boom")
+	p := NewWithRunner(gh)
+
+	if _, err := p.SearchPRs(context.Background(), "is:open"); err == nil {
+		t.Fatal("expected an error")
+	}
+}
+
+// ----------------------------------------------------------------------
+// SearchPRsEnriched tests (bead pg2-aehpr: batched-query replacement for
+// List's own old SearchPRs + per-matched-PR GetPR/ReviewThreadCount
+// fan-out — design doc "pg-connector-pr-github: replace N+1 GraphQL fetch
+// with one batched query per search string", section 6/7).
+//
+// sequencedGH (below newFakeGH's own single-response-per-key map cannot
+// serve this suite's pagination tests: every call this method issues is
+// `gh api graphql ...`, so newFakeGH's own "first two args" keying scheme
+// would answer every page identically) replays a FIXED SEQUENCE of
+// responses/errors in call order instead, letting a pagination test hand
+// back a different page on each successive call.
+// ----------------------------------------------------------------------
+
+// sequencedGH is a ghRunner double that replays a fixed sequence of
+// responses in call order.
+type sequencedGH struct {
+	responses [][]byte
+	errs      []error
+	calls     [][]string
+}
+
+func (s *sequencedGH) Run(_ context.Context, args ...string) ([]byte, error) {
+	i := len(s.calls)
+	s.calls = append(s.calls, append([]string(nil), args...))
+	if i < len(s.errs) && s.errs[i] != nil {
+		return nil, s.errs[i]
+	}
+	if i < len(s.responses) {
+		return s.responses[i], nil
+	}
+	return []byte("{}"), nil
+}
+
+func (s *sequencedGH) RunStdin(ctx context.Context, _ []byte, args ...string) ([]byte, error) {
+	return s.Run(ctx, args...)
+}
+
+const sampleBatchedSearchPage = `{
+  "data": {
+    "search": {
+      "pageInfo": {"hasNextPage": false, "endCursor": ""},
+      "nodes": [
+        {
+          "id": "PR_kwDOSynthetic7",
+          "number": 7,
+          "title": "fix: bug",
+          "url": "https://github.com/owner/repo/pull/7",
+          "state": "OPEN",
+          "body": "fixes a thing",
+          "isDraft": false,
+          "updatedAt": "2026-09-14T10:00:00Z",
+          "reviewDecision": "REVIEW_REQUIRED",
+          "mergeable": "CONFLICTING",
+          "author": {"login": "octocat"},
+          "repository": {"nameWithOwner": "owner/repo"},
+          "labels": {"nodes": [{"name": "bug"}, {"name": "p1"}]},
+          "comments": {"totalCount": 5},
+          "reviews": {"totalCount": 2},
+          "headRefOid": "deadbeef",
+          "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]}
+        }
+      ]
+    }
+  }
+}`
+
+func TestSearchPRsEnriched_ParsesAndConverts(t *testing.T) {
+	gh := &sequencedGH{responses: [][]byte{[]byte(sampleBatchedSearchPage)}}
+	p := NewWithRunner(gh)
+
+	prs, err := p.SearchPRsEnriched(context.Background(), "is:open author:@me")
+	if err != nil {
+		t.Fatalf("SearchPRsEnriched: %v", err)
+	}
+	if len(prs) != 1 {
+		t.Fatalf("expected 1 PR, got %d: %+v", len(prs), prs)
+	}
+	pr := prs[0]
+	if pr.Repo != "owner/repo" || pr.Number != 7 || pr.Title != "fix: bug" || pr.Author != "octocat" {
+		t.Fatalf("unexpected PR: %+v", pr)
+	}
+	if pr.State != "open" {
+		t.Fatalf("State = %q, want lowercased %q", pr.State, "open")
+	}
+	if pr.HeadSHA != "deadbeef" {
+		t.Fatalf("HeadSHA = %q, want %q", pr.HeadSHA, "deadbeef")
+	}
+	if pr.ChecksRollup != "success" {
+		t.Fatalf("ChecksRollup = %q, want %q", pr.ChecksRollup, "success")
+	}
+	if pr.UpdatedAt != "2026-09-14T10:00:00Z" {
+		t.Fatalf("UpdatedAt = %q, want %q", pr.UpdatedAt, "2026-09-14T10:00:00Z")
+	}
+	if pr.CommentCount != 5 {
+		t.Fatalf("CommentCount = %d, want 5", pr.CommentCount)
+	}
+	if pr.NodeID != "PR_kwDOSynthetic7" {
+		t.Fatalf("NodeID = %q, want %q", pr.NodeID, "PR_kwDOSynthetic7")
+	}
+	if pr.ReviewDecision != "REVIEW_REQUIRED" {
+		t.Fatalf("ReviewDecision = %q, want %q", pr.ReviewDecision, "REVIEW_REQUIRED")
+	}
+	if pr.ReviewCount != 2 {
+		t.Fatalf("ReviewCount = %d, want 2", pr.ReviewCount)
+	}
+	if pr.Mergeable != "CONFLICTING" {
+		t.Fatalf("Mergeable = %q, want %q (carried verbatim)", pr.Mergeable, "CONFLICTING")
+	}
+	if len(pr.Labels) != 2 || pr.Labels[0] != "bug" || pr.Labels[1] != "p1" {
+		t.Fatalf("Labels = %v", pr.Labels)
+	}
+	if pr.Body != "fixes a thing" {
+		t.Fatalf("Body = %q, want %q", pr.Body, "fixes a thing")
+	}
+	if pr.Draft {
+		t.Fatal("Draft = true, want false (fixture's own isDraft: false)")
+	}
+}
+
+// TestSearchPRsEnriched_InjectsIsPRQualifier proves this method prepends
+// "is:pr " to the caller's own query before sending it as the search()
+// connection's $q variable: talking to GitHub's raw type: ISSUE search
+// connection directly (rather than through gh's own `search prs`
+// subcommand, which does this same narrowing internally) would otherwise
+// silently start matching plain issues too.
+func TestSearchPRsEnriched_InjectsIsPRQualifier(t *testing.T) {
+	gh := &sequencedGH{responses: [][]byte{[]byte(`{"data":{"search":{"pageInfo":{"hasNextPage":false},"nodes":[]}}}`)}}
+	p := NewWithRunner(gh)
+
+	if _, err := p.SearchPRsEnriched(context.Background(), "is:open author:@me"); err != nil {
+		t.Fatalf("SearchPRsEnriched: %v", err)
+	}
+	joined := strings.Join(gh.calls[0], " ")
+	if !strings.Contains(joined, "q=is:pr is:open author:@me") {
+		t.Fatalf("expected the $q variable to be prefixed with \"is:pr \": %v", gh.calls[0])
+	}
+}
+
+// TestSearchPRsEnriched_QueryRequestsExpectedFields pins the query text
+// this method sends against silent regression — the design doc's own
+// MUST-cover fields (headRefOid/statusCheckRollup for HeadSHA/
+// ChecksRollup, the labels(first: 20) bound, the search() connection's
+// own pagination args).
+func TestSearchPRsEnriched_QueryRequestsExpectedFields(t *testing.T) {
+	gh := &sequencedGH{responses: [][]byte{[]byte(`{"data":{"search":{"pageInfo":{"hasNextPage":false},"nodes":[]}}}`)}}
+	p := NewWithRunner(gh)
+
+	if _, err := p.SearchPRsEnriched(context.Background(), "is:open"); err != nil {
+		t.Fatalf("SearchPRsEnriched: %v", err)
+	}
+	joined := strings.Join(gh.calls[0], " ")
+	for _, want := range []string{
+		fmt.Sprintf("search(query: $q, type: ISSUE, first: %d, after: $after)", searchBatchedPageSize),
+		"labels(first: 20)",
+		"statusCheckRollup",
+		"headRefOid",
+		"repository { nameWithOwner }",
+		// summary fields (bead pg2-2j5ac.52.6.1). "id" is checked below as a
+		// whole token: as a bare substring it already sits inside "headRefOid".
+		"reviewDecision",
+		"reviews { totalCount }",
+		"mergeable",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expected the query to contain %q: %v", want, gh.calls[0])
+		}
+	}
+	// merge_state_status moves with every CI status change and base-branch
+	// push, so it MUST stay show-path only (operator ruling 2026-09-29).
+	if strings.Contains(joined, "mergeStateStatus") {
+		t.Fatalf("the list query must NOT select mergeStateStatus: %v", gh.calls[0])
+	}
+	if !regexp.MustCompile(`(^|\s)id(\s|$)`).MatchString(joined) {
+		t.Fatalf("expected the query to select the PR's own id as a whole token: %v", gh.calls[0])
+	}
+}
+
+// TestSearchPRsEnriched_PaginatesPastFirstPage is the design doc's own
+// MUST-cover pagination test: a synthetic two-page fixture (a live repo
+// with >100 simultaneously open matches is not a reliable thing to
+// depend on for a test) proves this method fetches every page — not just
+// the first 100 — and threads the previous page's own endCursor into the
+// next call's "after" variable, while the FIRST call carries no "after"
+// at all (a first/full fetch has no prior cursor).
+func TestSearchPRsEnriched_PaginatesPastFirstPage(t *testing.T) {
+	page1 := `{"data":{"search":{"pageInfo":{"hasNextPage":true,"endCursor":"CURSOR1"},"nodes":[
+	  {"number":1,"url":"https://github.com/owner/repo/pull/1","state":"OPEN","repository":{"nameWithOwner":"owner/repo"},"headRefOid":"sha1","commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"PENDING"}}}]}}
+	]}}}`
+	page2 := `{"data":{"search":{"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[
+	  {"number":2,"url":"https://github.com/owner/repo/pull/2","state":"OPEN","repository":{"nameWithOwner":"owner/repo"},"headRefOid":"sha2","commits":{"nodes":[]}}
+	]}}}`
+	gh := &sequencedGH{responses: [][]byte{[]byte(page1), []byte(page2)}}
+	p := NewWithRunner(gh)
+
+	prs, err := p.SearchPRsEnriched(context.Background(), "is:open author:@me")
+	if err != nil {
+		t.Fatalf("SearchPRsEnriched: %v", err)
+	}
+	if len(prs) != 2 {
+		t.Fatalf("expected 2 PRs across 2 pages, got %d: %+v", len(prs), prs)
+	}
+	if prs[0].Number != 1 || prs[1].Number != 2 {
+		t.Fatalf("unexpected PR order/identity: %+v", prs)
+	}
+	if len(gh.calls) != 2 {
+		t.Fatalf("expected exactly 2 gh api graphql calls (one per page), got %d", len(gh.calls))
+	}
+	if joined := strings.Join(gh.calls[0], " "); strings.Contains(joined, "after=") {
+		t.Fatalf("the first call must not carry an \"after\" cursor: %v", gh.calls[0])
+	}
+	if joined := strings.Join(gh.calls[1], " "); !strings.Contains(joined, "after=CURSOR1") {
+		t.Fatalf("the second call must carry the first page's own endCursor as \"after\": %v", gh.calls[1])
+	}
+}
+
+// TestSearchPRsEnriched_NoChecks_MapsToNone covers the "zero check runs"
+// edge case the design doc's own verify-first note flags: a commit with
+// no checks at all decodes statusCheckRollup as JSON null (or, here, an
+// empty commits connection), which MUST map to "none", not a Go zero
+// value silently masquerading as some other state.
+func TestSearchPRsEnriched_NoChecks_MapsToNone(t *testing.T) {
+	page := `{"data":{"search":{"pageInfo":{"hasNextPage":false},"nodes":[
+	  {"number":1,"url":"https://github.com/o/r/pull/1","state":"OPEN","repository":{"nameWithOwner":"o/r"},"commits":{"nodes":[]}}
+	]}}}`
+	gh := &sequencedGH{responses: [][]byte{[]byte(page)}}
+	p := NewWithRunner(gh)
+
+	prs, err := p.SearchPRsEnriched(context.Background(), "is:open")
+	if err != nil {
+		t.Fatalf("SearchPRsEnriched: %v", err)
+	}
+	if len(prs) != 1 || prs[0].ChecksRollup != "none" {
+		t.Fatalf("prs = %+v, want exactly 1 PR with ChecksRollup \"none\"", prs)
+	}
+}
+
+// TestSearchPRsEnriched_SkipsNonPRNodes proves a search() result node
+// whose inline `... on PullRequest` fragment did not match (Number stays
+// 0) is skipped rather than emitted as a bogus zero-identity PR.
+func TestSearchPRsEnriched_SkipsNonPRNodes(t *testing.T) {
+	page := `{"data":{"search":{"pageInfo":{"hasNextPage":false},"nodes":[{}]}}}`
+	gh := &sequencedGH{responses: [][]byte{[]byte(page)}}
+	p := NewWithRunner(gh)
+
+	prs, err := p.SearchPRsEnriched(context.Background(), "is:open")
+	if err != nil {
+		t.Fatalf("SearchPRsEnriched: %v", err)
+	}
+	if len(prs) != 0 {
+		t.Fatalf("prs = %+v, want none (the non-PR node must be skipped)", prs)
+	}
+}
+
+func TestSearchPRsEnriched_PropagatesGHError(t *testing.T) {
+	gh := &sequencedGH{errs: []error{errors.New("boom")}}
+	p := NewWithRunner(gh)
+
+	if _, err := p.SearchPRsEnriched(context.Background(), "is:open"); err == nil {
+		t.Fatal("expected an error")
+	}
+}
+
+func TestSearchPRsEnriched_MalformedJSON(t *testing.T) {
+	gh := &sequencedGH{responses: [][]byte{[]byte("not json")}}
+	p := NewWithRunner(gh)
+
+	if _, err := p.SearchPRsEnriched(context.Background(), "is:open"); err == nil {
+		t.Fatal("expected a parse error")
+	}
+}
+
+// TestStatusStateToChecksRollup is a table-driven unit test of the
+// design doc's own recommended StatusState -> ChecksRollup mapping —
+// all six real GraphQL StatusState outcomes (EXPECTED/ERROR included,
+// not just the four values today's checksRollupFromContexts fold
+// produces) plus the "no rollup at all" empty-string case.
+func TestStatusStateToChecksRollup(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"empty (no statusCheckRollup / no commits)", "", "none"},
+		{"pending", "PENDING", "pending"},
+		{"expected (not yet started)", "EXPECTED", "pending"},
+		{"success", "SUCCESS", "success"},
+		{"failure", "FAILURE", "failure"},
+		{"error", "ERROR", "failure"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := statusStateToChecksRollup(c.in); got != c.want {
+				t.Fatalf("statusStateToChecksRollup(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
+func TestRateLimitRemaining_ParsesRemainder(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["api graphql"] = []byte(`{"data":{"rateLimit":{"remaining":1234}}}`)
+	p := NewWithRunner(gh)
+
+	remaining, err := p.RateLimitRemaining(context.Background())
+	if err != nil {
+		t.Fatalf("RateLimitRemaining: %v", err)
+	}
+	if remaining != 1234 {
+		t.Fatalf("remaining = %d, want 1234", remaining)
+	}
+}
+
+func TestReadRateLimit_ParsesRemainderAndReset(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["api graphql"] = []byte(`{"data":{"rateLimit":{"remaining":1234,"resetAt":"2026-10-03T14:00:00Z"}}}`)
+	p := NewWithRunner(gh)
+
+	rl, err := p.ReadRateLimit(context.Background())
+	if err != nil {
+		t.Fatalf("ReadRateLimit: %v", err)
+	}
+	if rl.Remaining != 1234 || rl.ResetAt != "2026-10-03T14:00:00Z" {
+		t.Fatalf("rl = %+v, want {1234 2026-10-03T14:00:00Z}", rl)
+	}
+	// The query must actually ask GitHub for resetAt, or the field is always empty.
+	if len(gh.calls) != 1 || !strings.Contains(strings.Join(gh.calls[0], " "), "resetAt") {
+		t.Fatalf("query did not request resetAt: %v", gh.calls)
+	}
+}
+
+func TestReadRateLimit_MissingResetIsEmpty(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["api graphql"] = []byte(`{"data":{"rateLimit":{"remaining":7}}}`)
+	rl, err := NewWithRunner(gh).ReadRateLimit(context.Background())
+	if err != nil {
+		t.Fatalf("ReadRateLimit: %v", err)
+	}
+	if rl.Remaining != 7 || rl.ResetAt != "" {
+		t.Fatalf("rl = %+v", rl)
+	}
+}
+
+func TestRateLimitRemaining_PropagatesGHError(t *testing.T) {
+	gh := newFakeGH()
+	gh.errs["api graphql"] = errors.New("boom")
+	p := NewWithRunner(gh)
+
+	if _, err := p.RateLimitRemaining(context.Background()); err == nil {
+		t.Fatal("expected an error")
+	}
+}
+
+func TestRateLimitRemaining_MalformedJSON(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["api graphql"] = []byte(`not json`)
+	p := NewWithRunner(gh)
+
+	if _, err := p.RateLimitRemaining(context.Background()); err == nil {
+		t.Fatal("expected a parse error")
+	}
+}
+
+// ----------------------------------------------------------------------
+// Write path tests (AddComment, PostReview)
+// ----------------------------------------------------------------------
+
+func TestAddComment_PostsToIssueEndpoint(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["api repos/foo/bar/issues/42/comments"] = []byte(
+		`{"node_id":"IC_kw","user":{"login":"phillipg"},"body":"hi"}`,
+	)
+	p := NewWithRunner(gh)
+
+	c, err := p.AddComment(context.Background(), "foo/bar", 42, "hi")
+	if err != nil {
+		t.Fatalf("AddComment: %v", err)
+	}
+	if c.ID != "IC_kw" || c.Author != "phillipg" {
+		t.Fatalf("unexpected comment: %+v", c)
+	}
+}
+
+func TestAddComment_EmptyBodyRejected(t *testing.T) {
+	p := NewWithRunner(newFakeGH())
+	if _, err := p.AddComment(context.Background(), "foo/bar", 42, "  "); err == nil {
+		t.Fatalf("expected error for whitespace-only body")
+	}
+}
+
+// decodeLastReviewPayload unmarshals the most recent captured RunStdin payload.
+func decodeLastReviewPayload(t *testing.T, gh *fakeGH) map[string]any {
+	t.Helper()
+	if len(gh.stdins) == 0 {
+		t.Fatalf("no RunStdin payload captured")
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(gh.stdins[len(gh.stdins)-1], &payload); err != nil {
+		t.Fatalf("payload not valid JSON: %v (%s)", err, gh.stdins[len(gh.stdins)-1])
+	}
+	return payload
+}
+
+// TestPostReview_PayloadShape is the pg2-pipw 422 fix, verified against the
+// replayed POST payload: commit_id anchors inline comments to the reviewed
+// commit; a line comment is sent with line+side; an un-anchorable (PR-level or
+// whole-file) comment is FOLDED into the body (NOT sent as an invalid entry with
+// subject_type, which GitHub rejected with 422).
+func TestPostReview_PayloadShape(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["api repos/foo/bar/pulls/42/reviews"] = []byte(
+		`{"node_id":"RV_kw","state":"PENDING","body":"the body"}`,
+	)
+	p := NewWithRunner(gh)
+
+	rev, err := p.PostReview(context.Background(), "foo/bar", 42, "deadbeef",
+		"top-level body",
+		[]api.Comment{
+			{Path: "main.go", Line: 12, Body: "rename x"},
+			{Path: "", Body: "PR-level note"},
+			{Path: "readme.md", Body: "missing section"}, // whole-file (no line)
+		})
+	if err != nil {
+		t.Fatalf("PostReview: %v", err)
+	}
+	if rev.ID != "RV_kw" || rev.State != "pending" {
+		t.Fatalf("unexpected review: %+v", rev)
+	}
+
+	payload := decodeLastReviewPayload(t, gh)
+	raw := string(gh.stdins[len(gh.stdins)-1])
+
+	if payload["commit_id"] != "deadbeef" {
+		t.Errorf("commit_id must anchor to the reviewed commit; got %v", payload["commit_id"])
+	}
+	if strings.Contains(raw, "subject_type") {
+		t.Errorf("payload must NOT contain subject_type (422 cause): %s", raw)
+	}
+	// The un-anchorable comments must be folded into the body.
+	body, _ := payload["body"].(string)
+	if !strings.Contains(body, "PR-level note") || !strings.Contains(body, "missing section") {
+		t.Errorf("PR-level + whole-file comments must fold into body; body=%q", body)
+	}
+	// Exactly one inline comment (main.go:12) survives as a comments[] entry.
+	comments, _ := payload["comments"].([]any)
+	if len(comments) != 1 {
+		t.Fatalf("expected exactly 1 inline comment, got %d: %s", len(comments), raw)
+	}
+	c0 := comments[0].(map[string]any)
+	if c0["path"] != "main.go" || c0["line"].(float64) != 12 || c0["side"] != "RIGHT" {
+		t.Errorf("inline comment shape wrong: %+v", c0)
+	}
+	// A single-line comment must carry NO span keys, so adding multi-line support
+	// left this payload byte-identical (pg2-3c8mo).
+	if strings.Contains(raw, "start_line") || strings.Contains(raw, "start_side") {
+		t.Errorf("a single-line comment must not send start_line/start_side: %s", raw)
+	}
+}
+
+// TestPostReview_MultiLineCommentSendsStartLine is pg2-3c8mo AC1/AC4: a finding
+// that spans several lines posts as a GitHub MULTI-line review comment
+// (start_line..line), rather than being truncated to one endpoint.
+func TestPostReview_MultiLineCommentSendsStartLine(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["api repos/foo/bar/pulls/42/reviews"] = []byte(`{"node_id":"RV_kw","state":"PENDING"}`)
+	p := NewWithRunner(gh)
+
+	if _, err := p.PostReview(context.Background(), "foo/bar", 42, "deadbeef", "",
+		[]api.Comment{{Path: "main.go", StartLine: 10, Line: 12, Body: "this whole block leaks"}}); err != nil {
+		t.Fatalf("PostReview: %v", err)
+	}
+
+	payload := decodeLastReviewPayload(t, gh)
+	raw := string(gh.stdins[len(gh.stdins)-1])
+	comments, _ := payload["comments"].([]any)
+	if len(comments) != 1 {
+		t.Fatalf("expected exactly 1 inline comment, got %d: %s", len(comments), raw)
+	}
+	c0 := comments[0].(map[string]any)
+	if c0["start_line"] == nil {
+		t.Fatalf("a multi-line finding must post as a multi-line comment (start_line), got %+v", c0)
+	}
+	if c0["start_line"].(float64) != 10 || c0["line"].(float64) != 12 {
+		t.Errorf("span = start_line %v/line %v, want 10/12", c0["start_line"], c0["line"])
+	}
+	if c0["side"] != "RIGHT" || c0["start_side"] != "RIGHT" {
+		t.Errorf("both sides must be RIGHT for a new-file span: %+v", c0)
+	}
+	// The body must not have been folded into the review body instead.
+	if body, _ := payload["body"].(string); strings.Contains(body, "leaks") {
+		t.Errorf("a multi-line comment must post inline, not fold into the body: %q", body)
+	}
+}
+
+// TestPostReview_DegenerateStartLineIsDropped: `review post` reads the staged
+// FILE with a plain json.Unmarshal, so a hand-edited draft can carry a span
+// GitHub would 422 (start_line not strictly before line). The provider drops the
+// span and still posts the comment, instead of failing the whole review.
+func TestPostReview_DegenerateStartLineIsDropped(t *testing.T) {
+	for name, c := range map[string]api.Comment{
+		"start_line equals line": {Path: "main.go", StartLine: 12, Line: 12, Body: "x"},
+		"start_line after line":  {Path: "main.go", StartLine: 20, Line: 12, Body: "x"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			gh := newFakeGH()
+			gh.responses["api repos/foo/bar/pulls/42/reviews"] = []byte(`{"node_id":"RV_kw","state":"PENDING"}`)
+			p := NewWithRunner(gh)
+			if _, err := p.PostReview(context.Background(), "foo/bar", 42, "", "", []api.Comment{c}); err != nil {
+				t.Fatalf("PostReview: %v", err)
+			}
+			raw := string(gh.stdins[len(gh.stdins)-1])
+			if strings.Contains(raw, "start_line") {
+				t.Errorf("a degenerate span must not reach the wire (422): %s", raw)
+			}
+			comments, _ := decodeLastReviewPayload(t, gh)["comments"].([]any)
+			if len(comments) != 1 {
+				t.Fatalf("the comment itself must still post, got %d: %s", len(comments), raw)
+			}
+		})
+	}
+}
+
+// TestPostReview_EmptyReviewSkipsPost: a review with neither body nor
+// anchorable comments must NOT POST (an empty pending review is a 422); it
+// returns a no-op review so the caller clears the staged draft.
+func TestPostReview_EmptyReviewSkipsPost(t *testing.T) {
+	gh := newFakeGH()
+	p := NewWithRunner(gh)
+	rev, err := p.PostReview(context.Background(), "foo/bar", 42, "deadbeef", "", nil)
+	if err != nil {
+		t.Fatalf("PostReview: %v", err)
+	}
+	if rev == nil || rev.State != "pending" {
+		t.Errorf("expected a no-op pending review, got %+v", rev)
+	}
+	for _, c := range gh.calls {
+		if len(c) >= 2 && c[0] == "api" && strings.Contains(c[1], "/reviews") {
+			t.Errorf("must NOT POST an empty review (422); saw call %v", c)
+		}
+	}
+}
+
+// TestPostReview_NoCommitIDOmitsField: the CLI post path passes commitID="",
+// which must omit commit_id (GitHub anchors to the latest commit).
+func TestPostReview_NoCommitIDOmitsField(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["api repos/foo/bar/pulls/42/reviews"] = []byte(`{"node_id":"RV_1","state":"PENDING"}`)
+	p := NewWithRunner(gh)
+	if _, err := p.PostReview(context.Background(), "foo/bar", 42, "", "body", nil); err != nil {
+		t.Fatalf("PostReview: %v", err)
+	}
+	if _, present := decodeLastReviewPayload(t, gh)["commit_id"]; present {
+		t.Errorf("commit_id must be omitted when commitID is empty")
+	}
+}
+
+// ----------------------------------------------------------------------
+// Phase 3 write-path tests
+// ----------------------------------------------------------------------
+
+func TestCreatePR_PostsTitleBodyHeadBaseAndDraft(t *testing.T) {
+	gh := newFakeGH()
+	// Stub stdout from `gh pr create` (URL line).
+	gh.responses["pr create"] = []byte("https://github.com/foo/bar/pull/42\n")
+	gh.responses["pr view"] = []byte(samplePRView)
+	p := NewWithRunner(gh)
+
+	pr, err := p.CreatePR(context.Background(), "foo/bar", true, "feat: x", "the body", "feat/x", "main", nil, nil)
+	if err != nil {
+		t.Fatalf("CreatePR: %v", err)
+	}
+	if pr.Number != 42 {
+		t.Fatalf("pr.Number: got %d want 42", pr.Number)
+	}
+	// Verify the underlying args.
+	found := false
+	for _, c := range gh.calls {
+		if len(c) >= 2 && c[0] == "pr" && c[1] == "create" {
+			found = true
+			joined := strings.Join(c, " ")
+			if !strings.Contains(joined, "--draft") {
+				t.Fatalf("expected --draft flag: %v", c)
+			}
+			if !strings.Contains(joined, "--base main") {
+				t.Fatalf("expected --base main: %v", c)
+			}
+			if !strings.Contains(joined, "--head feat/x") {
+				t.Fatalf("expected --head feat/x: %v", c)
+			}
+			if !strings.Contains(joined, "--body-file -") {
+				t.Fatalf("expected --body-file -: %v", c)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected pr create call, got %v", gh.calls)
+	}
+}
+
+func TestCreatePR_WithoutDraft(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr create"] = []byte("https://github.com/foo/bar/pull/7\n")
+	gh.responses["pr view"] = []byte(samplePRView)
+	p := NewWithRunner(gh)
+
+	if _, err := p.CreatePR(context.Background(), "foo/bar", false, "t", "b", "h", "main", nil, nil); err != nil {
+		t.Fatalf("CreatePR: %v", err)
+	}
+	for _, c := range gh.calls {
+		if len(c) >= 2 && c[0] == "pr" && c[1] == "create" {
+			joined := strings.Join(c, " ")
+			if strings.Contains(joined, "--draft") {
+				t.Fatalf("expected NO --draft flag when draft=false: %v", c)
+			}
+		}
+	}
+}
+
+func TestCreatePR_PushesReviewersAndLabels(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr create"] = []byte("https://github.com/foo/bar/pull/55\n")
+	gh.responses["pr view"] = []byte(samplePRView)
+	p := NewWithRunner(gh)
+
+	_, err := p.CreatePR(context.Background(), "foo/bar", true, "t", "b", "feat/x", "main",
+		[]string{"alice", "bob"},
+		[]string{"area/cli", " priority/p2 "})
+	if err != nil {
+		t.Fatalf("CreatePR: %v", err)
+	}
+	var createArgs []string
+	for _, c := range gh.calls {
+		if len(c) >= 2 && c[0] == "pr" && c[1] == "create" {
+			createArgs = c
+			break
+		}
+	}
+	if createArgs == nil {
+		t.Fatalf("expected pr create call, got %v", gh.calls)
+	}
+	joined := strings.Join(createArgs, " ")
+	// One --reviewer per entry.
+	if strings.Count(joined, "--reviewer alice") != 1 {
+		t.Errorf("expected --reviewer alice once: %v", createArgs)
+	}
+	if strings.Count(joined, "--reviewer bob") != 1 {
+		t.Errorf("expected --reviewer bob once: %v", createArgs)
+	}
+	if strings.Count(joined, "--label area/cli") != 1 {
+		t.Errorf("expected --label area/cli: %v", createArgs)
+	}
+	if strings.Count(joined, "--label priority/p2") != 1 {
+		t.Errorf("expected --label priority/p2 (trimmed): %v", createArgs)
+	}
+}
+
+func TestCreatePR_OmitsReviewerAndLabelFlagsWhenEmpty(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr create"] = []byte("https://github.com/foo/bar/pull/77\n")
+	gh.responses["pr view"] = []byte(samplePRView)
+	p := NewWithRunner(gh)
+
+	if _, err := p.CreatePR(context.Background(), "foo/bar", true, "t", "b", "h", "main",
+		nil, nil); err != nil {
+		t.Fatalf("CreatePR: %v", err)
+	}
+	for _, c := range gh.calls {
+		if len(c) >= 2 && c[0] == "pr" && c[1] == "create" {
+			joined := strings.Join(c, " ")
+			if strings.Contains(joined, "--reviewer") {
+				t.Fatalf("expected no --reviewer flag when reviewers is empty: %v", c)
+			}
+			if strings.Contains(joined, "--label") {
+				t.Fatalf("expected no --label flag when labels is empty: %v", c)
+			}
+		}
+	}
+}
+
+func TestCreatePR_ValidatesInputs(t *testing.T) {
+	p := NewWithRunner(newFakeGH())
+	ctx := context.Background()
+	if _, err := p.CreatePR(ctx, "", true, "t", "b", "h", "m", nil, nil); err == nil {
+		t.Fatalf("expected error for empty repo")
+	}
+	if _, err := p.CreatePR(ctx, "a/b", true, "", "b", "h", "m", nil, nil); err == nil {
+		t.Fatalf("expected error for empty title")
+	}
+	if _, err := p.CreatePR(ctx, "a/b", true, "t", "b", "", "m", nil, nil); err == nil {
+		t.Fatalf("expected error for empty branch")
+	}
+	if _, err := p.CreatePR(ctx, "a/b", true, "t", "b", "h", "", nil, nil); err == nil {
+		t.Fatalf("expected error for empty base")
+	}
+}
+
+func TestUpdatePR_SendsBodyOnStdin(t *testing.T) {
+	gh := newFakeGH()
+	p := NewWithRunner(gh)
+	if err := p.UpdatePR(context.Background(), "foo/bar", 42, "new body"); err != nil {
+		t.Fatalf("UpdatePR: %v", err)
+	}
+	last := gh.calls[len(gh.calls)-1]
+	if last[0] != "pr" || last[1] != "edit" || last[2] != "42" {
+		t.Fatalf("expected pr edit 42: %v", last)
+	}
+	joined := strings.Join(last, " ")
+	if !strings.Contains(joined, "--body-file -") {
+		t.Fatalf("expected --body-file -: %v", last)
+	}
+}
+
+func TestSetDraft_TogglesViaPrReady(t *testing.T) {
+	gh := newFakeGH()
+	p := NewWithRunner(gh)
+	// draft=false → mark ready (no --undo)
+	if err := p.SetDraft(context.Background(), "foo/bar", 42, false); err != nil {
+		t.Fatalf("SetDraft(false): %v", err)
+	}
+	last := gh.calls[len(gh.calls)-1]
+	if strings.Join(last, " ") != "pr ready 42 --repo foo/bar" {
+		t.Fatalf("SetDraft(false) args: %v", last)
+	}
+	// draft=true → undo back to draft
+	if err := p.SetDraft(context.Background(), "foo/bar", 42, true); err != nil {
+		t.Fatalf("SetDraft(true): %v", err)
+	}
+	last = gh.calls[len(gh.calls)-1]
+	if !strings.Contains(strings.Join(last, " "), "--undo") {
+		t.Fatalf("SetDraft(true) should include --undo: %v", last)
+	}
+}
+
+func TestSetAutomerge_OnOff(t *testing.T) {
+	gh := newFakeGH()
+	p := NewWithRunner(gh)
+	if err := p.SetAutomerge(context.Background(), "foo/bar", 42, true); err != nil {
+		t.Fatalf("SetAutomerge(true): %v", err)
+	}
+	last := gh.calls[len(gh.calls)-1]
+	joined := strings.Join(last, " ")
+	if !strings.Contains(joined, "--auto") || !strings.Contains(joined, "--squash") {
+		t.Fatalf("expected --auto --squash: %v", last)
+	}
+	if err := p.SetAutomerge(context.Background(), "foo/bar", 42, false); err != nil {
+		t.Fatalf("SetAutomerge(false): %v", err)
+	}
+	last = gh.calls[len(gh.calls)-1]
+	if !strings.Contains(strings.Join(last, " "), "--disable-auto") {
+		t.Fatalf("expected --disable-auto: %v", last)
+	}
+}
+
+func TestMerge_PostsSquash(t *testing.T) {
+	gh := newFakeGH()
+	p := NewWithRunner(gh)
+	if err := p.Merge(context.Background(), "foo/bar", 42); err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	last := gh.calls[len(gh.calls)-1]
+	joined := strings.Join(last, " ")
+	if !strings.Contains(joined, "--squash") {
+		t.Fatalf("expected --squash: %v", last)
+	}
+}
+
+func TestClose_InvokesPrClose(t *testing.T) {
+	gh := newFakeGH()
+	p := NewWithRunner(gh)
+	if err := p.Close(context.Background(), "foo/bar", 42); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	last := gh.calls[len(gh.calls)-1]
+	if last[0] != "pr" || last[1] != "close" || last[2] != "42" {
+		t.Fatalf("expected pr close 42: %v", last)
+	}
+}
+
+func TestReplyToThread_PostsGraphQL(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["api graphql"] = []byte(
+		`{"data":{"addPullRequestReviewThreadReply":{"comment":{"id":"PRC_1","body":"hi","author":{"login":"phillipg"}}}}}`,
+	)
+	p := NewWithRunner(gh)
+	c, err := p.ReplyToThread(context.Background(), "foo/bar", "PRRT_xxx", "hi")
+	if err != nil {
+		t.Fatalf("ReplyToThread: %v", err)
+	}
+	if c.ID != "PRC_1" || c.Author != "phillipg" || c.ThreadID != "PRRT_xxx" {
+		t.Fatalf("unexpected comment: %+v", c)
+	}
+}
+
+func TestReplyToThread_ValidatesInputs(t *testing.T) {
+	p := NewWithRunner(newFakeGH())
+	if _, err := p.ReplyToThread(context.Background(), "foo/bar", "", "body"); err == nil {
+		t.Fatalf("expected error for empty thread id")
+	}
+	if _, err := p.ReplyToThread(context.Background(), "foo/bar", "x", "  "); err == nil {
+		t.Fatalf("expected error for empty body")
+	}
+}
+
+func TestResolveThread_PostsGraphQL(t *testing.T) {
+	gh := newFakeGH()
+	p := NewWithRunner(gh)
+	if err := p.ResolveThread(context.Background(), "foo/bar", "PRRT_xxx"); err != nil {
+		t.Fatalf("ResolveThread: %v", err)
+	}
+	last := gh.calls[len(gh.calls)-1]
+	if last[0] != "api" || last[1] != "graphql" {
+		t.Fatalf("expected api graphql: %v", last)
+	}
+	joined := strings.Join(last, " ")
+	if !strings.Contains(joined, "threadId=PRRT_xxx") {
+		t.Fatalf("expected threadId arg: %v", last)
+	}
+}
+
+func TestMinimizeComment_PostsGraphQL(t *testing.T) {
+	gh := newFakeGH()
+	p := NewWithRunner(gh)
+	if err := p.MinimizeComment(context.Background(), "IC_xxx", "OUTDATED"); err != nil {
+		t.Fatalf("MinimizeComment: %v", err)
+	}
+	last := gh.calls[len(gh.calls)-1]
+	if last[0] != "api" || last[1] != "graphql" {
+		t.Fatalf("expected api graphql: %v", last)
+	}
+	joined := strings.Join(last, " ")
+	if !strings.Contains(joined, "id=IC_xxx") {
+		t.Fatalf("expected id arg: %v", last)
+	}
+	if !strings.Contains(joined, "classifier=OUTDATED") {
+		t.Fatalf("expected classifier arg: %v", last)
+	}
+}
+
+// ----------------------------------------------------------------------
+// ReviewThreadCount (bead pg2-2j5ac.30.7)
+// ----------------------------------------------------------------------
+
+func TestReviewThreadCount_ParsesTotalCount(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["api graphql"] = []byte(
+		`{"data":{"repository":{"pullRequest":{"reviewThreads":{"totalCount":4}}}}}`,
+	)
+	p := NewWithRunner(gh)
+	got, err := p.ReviewThreadCount(context.Background(), "foo/bar", 42)
+	if err != nil {
+		t.Fatalf("ReviewThreadCount: %v", err)
+	}
+	if got != 4 {
+		t.Fatalf("ReviewThreadCount = %d, want 4", got)
+	}
+	last := gh.calls[len(gh.calls)-1]
+	if last[0] != "api" || last[1] != "graphql" {
+		t.Fatalf("expected api graphql: %v", last)
+	}
+	joined := strings.Join(last, " ")
+	if !strings.Contains(joined, "owner=foo") || !strings.Contains(joined, "name=bar") || !strings.Contains(joined, "number=42") {
+		t.Fatalf("expected owner/name/number args: %v", last)
+	}
+}
+
+// TestReviewThreadCount_PropagatesGHError proves a `gh` failure (a
+// transient GraphQL error, auth failure, …) propagates unwrapped exactly
+// like ReviewsWithCommit's own `p.gh.Run` failure does — provider.go's
+// List call site is the one that classifies and fails the whole call,
+// matching the existing GetPR supplemental-fetch failure handling this
+// packet's binding decision requires reusing rather than reinventing.
+func TestReviewThreadCount_PropagatesGHError(t *testing.T) {
+	gh := newFakeGH()
+	gh.errs["api graphql"] = errors.New("boom")
+	p := NewWithRunner(gh)
+	if _, err := p.ReviewThreadCount(context.Background(), "foo/bar", 42); err == nil {
+		t.Fatal("expected error to propagate")
+	}
+}
+
+func TestReviewThreadCount_MalformedJSON(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["api graphql"] = []byte(`not json`)
+	p := NewWithRunner(gh)
+	if _, err := p.ReviewThreadCount(context.Background(), "foo/bar", 42); err == nil {
+		t.Fatal("expected parse error")
+	}
+}
+
+// TestReviewThreadCount_EmptyResponseDegradesToZero proves a `gh api
+// graphql` call that succeeds but returns a degenerate/empty response
+// body degrades sanely to a zero count rather than crashing List — this
+// packet's acceptance criterion for a "failure/empty-response case
+// degrading sanely." json.Unmarshal of "{}" leaves every nested field at
+// its zero value, so the parsed totalCount is simply 0 — no error, no
+// panic — matching this backend's existing convention elsewhere (e.g.
+// ReviewsWithCommit's own null-commit handling) of treating a missing
+// GraphQL field as its zero value.
+func TestReviewThreadCount_EmptyResponseDegradesToZero(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["api graphql"] = []byte(`{}`)
+	p := NewWithRunner(gh)
+	got, err := p.ReviewThreadCount(context.Background(), "foo/bar", 42)
+	if err != nil {
+		t.Fatalf("ReviewThreadCount: %v", err)
+	}
+	if got != 0 {
+		t.Fatalf("ReviewThreadCount = %d, want 0 for an empty response", got)
+	}
+}
+
+func TestReviewThreadCount_ValidatesInputs(t *testing.T) {
+	p := NewWithRunner(newFakeGH())
+	if _, err := p.ReviewThreadCount(context.Background(), "", 1); err == nil {
+		t.Fatal("expected error for empty repo")
+	}
+	if _, err := p.ReviewThreadCount(context.Background(), "no-slash", 1); err == nil {
+		t.Fatal("expected error for repo not in owner/name form")
+	}
+	if _, err := p.ReviewThreadCount(context.Background(), "foo/bar", 0); err == nil {
+		t.Fatal("expected error for non-positive PR number")
+	}
+}
+
+// ----------------------------------------------------------------------
+// Title + diff-stats population tests (Task 3)
+// ----------------------------------------------------------------------
+
+func TestGetPRPopulatesTitleAndDiffStats(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr view"] = []byte(`{
+		"number":7,"state":"OPEN","title":"Fix bar",
+		"headRefName":"f","baseRefName":"main",
+		"author":{"login":"me"},"url":"u",
+		"isDraft":false,"mergedAt":"","closedAt":"",
+		"additions":10,"deletions":3,"changedFiles":2
+	}`)
+	p := NewWithRunner(gh)
+	got, err := p.GetPR(context.Background(), "owner/repo", 7)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	if got.Title != "Fix bar" {
+		t.Fatalf("Title: got %q want %q", got.Title, "Fix bar")
+	}
+	if got.Additions != 10 {
+		t.Fatalf("Additions: got %d want 10", got.Additions)
+	}
+	if got.Deletions != 3 {
+		t.Fatalf("Deletions: got %d want 3", got.Deletions)
+	}
+	if got.ChangedFiles != 2 {
+		t.Fatalf("ChangedFiles: got %d want 2", got.ChangedFiles)
+	}
+	// Verify that the --json field list includes the new fields.
+	last := gh.calls[len(gh.calls)-1]
+	joined := strings.Join(last, " ")
+	for _, field := range []string{"additions", "deletions", "changedFiles", "title"} {
+		if !strings.Contains(joined, field) {
+			t.Fatalf("expected %q in gh args: %v", field, last)
+		}
+	}
+}
+
+func TestListMyPRsPopulatesTitle(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr list"] = []byte(`[{
+		"number":11,"title":"Add feature","headRefName":"feat/add",
+		"baseRefName":"main","url":"https://github.com/foo/bar/pull/11",
+		"author":{"login":"alice"},"isDraft":false,"state":"OPEN",
+		"mergedAt":"","closedAt":"",
+		"additions":5,"deletions":1,"changedFiles":1
+	}]`)
+	p := NewWithRunner(gh)
+
+	prs, err := p.ListMyPRs(context.Background(), "foo/bar")
+	if err != nil {
+		t.Fatalf("ListMyPRs: %v", err)
+	}
+	if len(prs) != 1 {
+		t.Fatalf("expected 1 PR, got %d", len(prs))
+	}
+	if prs[0].Title != "Add feature" {
+		t.Fatalf("Title: got %q want %q", prs[0].Title, "Add feature")
+	}
+	if prs[0].Additions != 5 {
+		t.Fatalf("Additions: got %d want 5", prs[0].Additions)
+	}
+	if prs[0].Deletions != 1 {
+		t.Fatalf("Deletions: got %d want 1", prs[0].Deletions)
+	}
+	if prs[0].ChangedFiles != 1 {
+		t.Fatalf("ChangedFiles: got %d want 1", prs[0].ChangedFiles)
+	}
+}
+
+func TestGetPRPopulatesHeadSHA(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr view"] = []byte(`{
+		"number":7,"state":"OPEN","title":"feat","headRefName":"feat/x",
+		"headRefOid":"cafebabe1234","baseRefName":"main",
+		"author":{"login":"alice"},"url":"u",
+		"isDraft":false,"mergedAt":"","closedAt":"",
+		"additions":0,"deletions":0,"changedFiles":0
+	}`)
+	p := NewWithRunner(gh)
+	got, err := p.GetPR(context.Background(), "owner/repo", 7)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	if got.HeadSHA != "cafebabe1234" {
+		t.Errorf("HeadSHA: got %q want cafebabe1234", got.HeadSHA)
+	}
+	// Verify headRefOid is in the --json field list.
+	last := gh.calls[len(gh.calls)-1]
+	joined := strings.Join(last, " ")
+	if !strings.Contains(joined, "headRefOid") {
+		t.Fatalf("expected headRefOid in gh --json fields: %v", last)
+	}
+}
+
+func TestListMyPRsPopulatesHeadSHA(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr list"] = []byte(`[{
+		"number":11,"title":"Add feature","headRefName":"feat/add",
+		"headRefOid":"beefdead","baseRefName":"main",
+		"url":"https://github.com/foo/bar/pull/11",
+		"author":{"login":"alice"},"isDraft":false,"state":"OPEN",
+		"mergedAt":"","closedAt":"",
+		"additions":0,"deletions":0,"changedFiles":0
+	}]`)
+	p := NewWithRunner(gh)
+	prs, err := p.ListMyPRs(context.Background(), "foo/bar")
+	if err != nil {
+		t.Fatalf("ListMyPRs: %v", err)
+	}
+	if len(prs) != 1 {
+		t.Fatalf("expected 1 PR, got %d", len(prs))
+	}
+	if prs[0].HeadSHA != "beefdead" {
+		t.Errorf("HeadSHA: got %q want beefdead", prs[0].HeadSHA)
+	}
+}
+
+func TestListTeamPRsPopulatesTitle(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr list"] = []byte(`[{
+		"number":99,"title":"Team PR","headRefName":"team/feat",
+		"baseRefName":"main","url":"https://github.com/foo/bar/pull/99",
+		"author":{"login":"bob"},"isDraft":false,"state":"OPEN",
+		"mergedAt":"","closedAt":"",
+		"additions":20,"deletions":4,"changedFiles":3
+	}]`)
+	p := NewWithRunner(gh)
+
+	prs, err := p.ListTeamPRs(context.Background(), "foo/bar", []string{"bob"})
+	if err != nil {
+		t.Fatalf("ListTeamPRs: %v", err)
+	}
+	if len(prs) != 1 {
+		t.Fatalf("expected 1 PR, got %d", len(prs))
+	}
+	if prs[0].Title != "Team PR" {
+		t.Fatalf("Title: got %q want %q", prs[0].Title, "Team PR")
+	}
+	if prs[0].Additions != 20 {
+		t.Fatalf("Additions: got %d want 20", prs[0].Additions)
+	}
+}
+
+// TestGetPR_ParsesBaseSHA proves the show path decodes baseRefOid into
+// api.PR.BaseSHA (bead pg2-2j5ac.52.6.2) and requests it as a WHOLE field of
+// the --json argument (the fake runner returns canned JSON whatever the
+// arguments, so the decode alone cannot catch a missing field).
+func TestGetPR_ParsesBaseSHA(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr view"] = []byte(`{
+		"number": 7, "title": "t", "state": "OPEN", "author": {"login": "zara"},
+		"baseRefOid": "0123456789abcdef0123456789abcdef01234567"
+	}`)
+	p := NewWithRunner(gh)
+
+	pr, err := p.GetPR(context.Background(), "foo/bar", 7)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	if pr.BaseSHA != "0123456789abcdef0123456789abcdef01234567" {
+		t.Errorf("BaseSHA = %q", pr.BaseSHA)
+	}
+
+	args := gh.calls[0]
+	jsonArg := ""
+	for i, a := range args {
+		if a == "--json" && i+1 < len(args) {
+			jsonArg = args[i+1]
+			break
+		}
+	}
+	if jsonArg == "" {
+		t.Fatalf("gh pr view call carries no --json argument: %v", args)
+	}
+	found := false
+	for _, f := range strings.Split(jsonArg, ",") {
+		if f == "baseRefOid" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("--json argument lacks the whole field baseRefOid: %s", jsonArg)
+	}
+}
+
+// TestGetPR_EmptyBaseRefOidIsEmptyBaseSHA proves an absent baseRefOid is never
+// synthesized into a BaseSHA.
+func TestGetPR_EmptyBaseRefOidIsEmptyBaseSHA(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["pr view"] = []byte(`{"number": 7, "title": "t", "state": "OPEN", "author": {"login": "zara"}}`)
+	pr, err := NewWithRunner(gh).GetPR(context.Background(), "foo/bar", 7)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	if pr.BaseSHA != "" {
+		t.Errorf("BaseSHA = %q, want empty", pr.BaseSHA)
+	}
+}
+
+// TestSearchPRsEnriched_NeverFillsBaseSHA proves the list path neither
+// requests nor fills the base commit (bead pg2-2j5ac.52.6.2): a base commit in
+// list summaries would mark every open PR changed whenever its base branch
+// moves.
+func TestSearchPRsEnriched_NeverFillsBaseSHA(t *testing.T) {
+	if strings.Contains(searchBatchedQuery, "baseRefOid") {
+		t.Fatal("searchBatchedQuery must not request baseRefOid")
+	}
+	page := strings.Replace(sampleBatchedSearchPage,
+		`"headRefOid": "deadbeef",`,
+		`"headRefOid": "deadbeef", "baseRefOid": "feedface",`, 1)
+	if page == sampleBatchedSearchPage {
+		t.Fatal("fixture substitution did not apply")
+	}
+	gh := &sequencedGH{responses: [][]byte{[]byte(page)}}
+	prs, err := NewWithRunner(gh).SearchPRsEnriched(context.Background(), "is:open author:@me")
+	if err != nil {
+		t.Fatalf("SearchPRsEnriched: %v", err)
+	}
+	if len(prs) != 1 {
+		t.Fatalf("expected 1 PR, got %d", len(prs))
+	}
+	if prs[0].BaseSHA != "" {
+		t.Errorf("BaseSHA = %q, want empty on the list path", prs[0].BaseSHA)
+	}
+}
+
+// TestSearchPRsActivity_RequestsCreatedClosedAndLimit proves the activity
+// search asks gh for createdAt/closedAt and the caller's result limit, keeps
+// every flag before the "--" terminator, and decodes both timestamps.
+func TestSearchPRsActivity_RequestsCreatedClosedAndLimit(t *testing.T) {
+	gh := newFakeGH()
+	gh.responses["search prs"] = []byte(`[{
+	  "number": 9, "title": "t", "url": "https://github.com/owner/repo/pull/9",
+	  "state": "CLOSED", "isDraft": false, "author": {"login": "octocat"},
+	  "labels": [], "repository": {"nameWithOwner": "owner/repo"},
+	  "createdAt": "2026-09-01T08:00:00Z", "closedAt": "2026-09-02T09:30:00Z"
+	}]`)
+	p := NewWithRunner(gh)
+
+	prs, err := p.SearchPRsActivity(context.Background(), "author:octocat is:unmerged closed:2026-09-01T00:00:00Z..2026-10-01T00:00:00Z", 1000)
+	if err != nil {
+		t.Fatalf("SearchPRsActivity: %v", err)
+	}
+	if len(prs) != 1 || prs[0].CreatedAt != "2026-09-01T08:00:00Z" || prs[0].ClosedAt != "2026-09-02T09:30:00Z" {
+		t.Fatalf("unexpected PRs: %+v", prs)
+	}
+	last := gh.calls[len(gh.calls)-1]
+	joined := strings.Join(last, " ")
+	for _, want := range []string{"createdAt", "closedAt", "--limit 1000"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expected %q in gh args: %v", want, last)
+		}
+	}
+	dash := -1
+	for i, a := range last {
+		if a == "--" {
+			dash = i
+		}
+	}
+	if dash < 0 || last[dash+1] != "author:octocat" || last[dash+2] != "is:unmerged" {
+		t.Fatalf("qualifiers must follow --, one per argument: %v", last)
+	}
+	for _, a := range last[dash+1:] {
+		if strings.HasPrefix(a, "--") {
+			t.Fatalf("flag after --: %v", last)
+		}
+	}
+}
+
+// TestSearchPRs_DoesNotRequestActivityFields proves the plain search request
+// is unchanged: it never asks for createdAt/closedAt.
+func TestSearchPRs_DoesNotRequestActivityFields(t *testing.T) {
+	gh := newFakeGH()
+	p := NewWithRunner(gh)
+	if _, err := p.SearchPRs(context.Background(), "is:open"); err != nil {
+		t.Fatalf("SearchPRs: %v", err)
+	}
+	joined := strings.Join(gh.calls[len(gh.calls)-1], " ")
+	if strings.Contains(joined, "createdAt") || strings.Contains(joined, "closedAt") {
+		t.Fatalf("plain search must not request activity fields: %s", joined)
+	}
+}
+
+// ----------------------------------------------------------------------
+// ListReviewsSubmitted tests
+// ----------------------------------------------------------------------
+
+func TestListReviewsSubmitted_CarriesSubmittedAt(t *testing.T) {
+	const withTimes = `{
+  "reviews": [
+    {"id": "PRR_a", "author": {"login": "alice"}, "state": "APPROVED", "body": "", "submittedAt": "2026-09-05T10:00:00Z"},
+    {"id": "PRR_b", "author": {"login": "alice"}, "state": "PENDING", "body": "draft", "submittedAt": ""}
+  ]
+}`
+	gh := newFakeGH()
+	gh.responses["pr view"] = []byte(withTimes)
+	p := NewWithRunner(gh)
+
+	got, err := p.ListReviewsSubmitted(context.Background(), "foo/bar", 42)
+	if err != nil {
+		t.Fatalf("ListReviewsSubmitted: %v", err)
+	}
+	if len(got) != 2 || got[0].SubmittedAt != "2026-09-05T10:00:00Z" || got[0].ID != "PRR_a" || got[0].State != "APPROVED" {
+		t.Fatalf("got %+v, want first review with its submitted_at", got)
+	}
+	if got[1].SubmittedAt != "" {
+		t.Errorf("pending review SubmittedAt = %q, want empty", got[1].SubmittedAt)
+	}
+}
+
+func TestListReviewsSubmitted_ValidatesInput(t *testing.T) {
+	p := NewWithRunner(newFakeGH())
+	if _, err := p.ListReviewsSubmitted(context.Background(), "no-slash", 1); err == nil {
+		t.Fatal("want error for bad repo")
+	}
+	if _, err := p.ListReviewsSubmitted(context.Background(), "a/b", 0); err == nil {
+		t.Fatal("want error for bad number")
+	}
+}
