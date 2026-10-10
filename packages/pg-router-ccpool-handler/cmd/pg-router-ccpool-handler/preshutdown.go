@@ -439,8 +439,15 @@ func closeSinglePhase(ctx context.Context, cc ccpool.Runner, open worktree.Opene
 			"session", s.ExternalID, "cwd", s.CWD)
 		return true
 	}
-	if wm, err := open(ctx, s.CWD); err != nil {
-		slog.Warn("teardown: worktree remove failed (cwd may not be inside a git repository)",
+	if wm, err := open(ctx, s.CWD); errors.Is(err, gitclient.ErrNotARepository) {
+		// cwd is not inside any git repository (pg2-tp8rx: the non-git
+		// workspace root a drain session runs in), so there is no worktree to
+		// remove -- expected, not a failure. Warning here drowned out genuine
+		// teardown failures; only a non-sentinel open error still warns below.
+		slog.Info("teardown: no worktree to remove (cwd is not inside a git repository)",
+			"session", s.ExternalID, "cwd", s.CWD)
+	} else if err != nil {
+		slog.Warn("teardown: worktree remove failed (cannot open the cwd's git repository)",
 			"session", s.ExternalID, "cwd", s.CWD, "err", err)
 	} else if err := wm.RemoveWorktree(ctx, s.CWD, true); err != nil {
 		slog.Warn("teardown: worktree remove failed (cwd may not be a linked worktree)",

@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"sync"
@@ -780,5 +782,63 @@ func TestTeardownAllSessions_keepsWorktreeSharedWithLeaseSupervisedPeer(t *testi
 	}
 	if len(open.Removed) != 0 || len(open.BranchDeletes) != 0 {
 		t.Errorf("a worktree shared with a supervised session must be kept; removed=%v deletes=%v", open.Removed, open.BranchDeletes)
+	}
+}
+
+// TestCloseSinglePhase_worktreeRemoveWarnOnlyForRealFailures pins pg2-tp8rx:
+// a session whose cwd is not inside any git repository (the non-git
+// workspace root /Users/phillipg/phillipg_mbp that drain-pg2/drain-zr
+// sessions run in) has no worktree to remove, so its teardown must not emit
+// the "worktree remove failed" WARN -- the noise would mask genuine teardown
+// failures. Open's real failure wraps gitclient.ErrNotARepository, so the
+// fake wraps it the same way. A genuine failure (Open failing for any other
+// reason, or RemoveWorktree failing for a repo-backed cwd) must still warn.
+// In every shape the session still counts as purged.
+func TestCloseSinglePhase_worktreeRemoveWarnOnlyForRealFailures(t *testing.T) {
+	const cwd = "/Users/phillipg/phillipg_mbp"
+	tests := []struct {
+		name     string
+		open     func(context.Context, string) (gitclient.WorktreeManager, error)
+		wantWarn bool
+	}{
+		{
+			name: "cwd not inside a git repository does not warn",
+			open: func(_ context.Context, dir string) (gitclient.WorktreeManager, error) {
+				return nil, fmt.Errorf("%w: %s: git rev-parse --path-format=absolute --git-common-dir: exit 128", gitclient.ErrNotARepository, dir)
+			},
+		},
+		{
+			name: "open failing for another reason still warns",
+			open: func(context.Context, string) (gitclient.WorktreeManager, error) {
+				return nil, errors.New("git: permission denied")
+			},
+			wantWarn: true,
+		},
+		{
+			name:     "remove failing for a repo-backed cwd still warns",
+			open:     (&fakeWorktreeOpener{RemoveErrAt: map[string]bool{cwd: true}}).Open,
+			wantWarn: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			old := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+			defer slog.SetDefault(old)
+
+			cc := &fakeCC{}
+			s := ccpool.Session{ExternalID: "drain-pg2-pg2-x", State: ccpool.StateIdle, CWD: cwd}
+			if !closeSinglePhase(context.Background(), cc, tc.open, "/repo/root", s, false) {
+				t.Fatal("closeSinglePhase = false, want true: the row was purged")
+			}
+			if len(cc.Closed) != 1 {
+				t.Errorf("session must be closed; closed=%v", cc.Closed)
+			}
+			got := strings.Contains(buf.String(), "level=WARN") && strings.Contains(buf.String(), "worktree remove failed")
+			if got != tc.wantWarn {
+				t.Errorf("worktree-remove WARN emitted = %v, want %v; log:\n%s", got, tc.wantWarn, buf.String())
+			}
+		})
 	}
 }
