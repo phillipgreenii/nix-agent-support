@@ -339,3 +339,6 @@ none of them well, and a future backend is free to pick whatever chain fits its 
 - Amended by bead `pg2-55k6y` (operator ruling 2026-10-09), which made the umbrella's fan-outs run
   their backend calls in parallel while keeping registration-order output (Decision item 12,
   above).
+- Amended by ADR 0090 (draft, 2026-10-10), which lifts the uniformity statement ("every Tier-2
+  backend stays uniformly simple and stateless", Decision item 10): a connector MAY be stateful and
+  MAY run one daemon per upstream rate-limit domain, and a backend's own local store (Decision item 6) is the governing rule.

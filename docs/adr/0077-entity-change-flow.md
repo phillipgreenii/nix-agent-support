@@ -82,6 +82,11 @@ re-read. A read-only, side-effect-free cross-entity view over stored facts, such
 rank, lives in pg-desk; minting work from a selection remains a decider's decision. No decision-log
 row is added and S1 to S35 are unchanged.
 
+**Amended 2026-10-10** (ADR 0090, draft): rows S29, S30 and S31 are read with ADR 0090 for a backend
+that declares `owns_changes`: change detection and the remote sweep live in that backend, and
+pg-router keeps only the clocks of consumer polls, so an upstream read clock MAY live in a
+daemon-backed backend. No decision-log row is added and S1 to S35 are unchanged.
+
 **Approval and provenance.** The operator (Phillip) approved the design and its implementation plan
 on 2026-09-29 ("if good, consider it approved and continue", recorded on bead `pg2-2j5ac.51`). The
 generic entity pipeline design that this flow governs where the two overlap (bead `pg2-2j5ac.46`)
