@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -34,7 +36,7 @@ func (m *memLogs) Export(_ context.Context, recs []sdklog.Record) error {
 	for i := range recs {
 		fmt.Fprintf(&m.text, "%s ", recs[i].Body().String())
 		recs[i].WalkAttributes(func(kv attribute.KeyValue) bool {
-			fmt.Fprintf(&m.text, "%s=%s ", kv.Key, kv.Value.Emit())
+			fmt.Fprintf(&m.text, "%s=%s ", kv.Key, kv.Value.String())
 			return true
 		})
 		m.text.WriteString("\n")
@@ -149,7 +151,7 @@ func TestPrivacyCanary(t *testing.T) {
 	for _, sp := range spans.GetSpans() {
 		fmt.Fprintf(spanText, "%s ", sp.Name)
 		for _, kv := range sp.Attributes {
-			fmt.Fprintf(spanText, "%s=%s ", kv.Key, kv.Value.Emit())
+			fmt.Fprintf(spanText, "%s=%s ", kv.Key, kv.Value.String())
 		}
 	}
 	if spanText.Len() == 0 {
@@ -182,4 +184,48 @@ func TestPrivacyCanary(t *testing.T) {
 	}
 	_ = json.RawMessage(nil)
 	_ = slog.LevelInfo
+}
+
+// The startup replay is a trace of its own, with a quarantine child when the
+// end of the log was recovered.
+func TestReplaySpanAndQuarantineChild(t *testing.T) {
+	spans := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(spans))
+	e := newEnv(t, options{tracing: tp})
+	e.bootstrap()
+	e.d.Stop()
+	// A torn tail: bytes with no newline at the end of the log.
+	f, err := os.OpenFile(filepath.Join(e.dir, "events.jsonl"), os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(`{"v":1,"id":"torn`); err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+	spans.Reset()
+	e.start(nil)
+	names := map[string]bool{}
+	for _, sp := range spans.GetSpans() {
+		names[sp.Name] = true
+	}
+	if !names["pg-task-focus.replay"] || !names["pg-task-focus.replay.quarantine"] {
+		t.Errorf("spans after a recovering start: %v", names)
+	}
+	// The recovery is reported by health and by metric.
+	var h struct {
+		Recovery struct {
+			TornTail bool `json:"torn_tail"`
+		}
+	}
+	e.get("/healthz").json(t, &h)
+	if !h.Recovery.TornTail {
+		t.Error("/healthz recovery.torn_tail is false after a recovery")
+	}
+	if v, _ := sampleValue(e.scrape()["pg_task_focus_startup_recovery"], map[string]string{"kind": "torn_tail"}); v != 1 {
+		t.Errorf("startup_recovery{torn_tail} = %v, want 1", v)
+	}
+	if v, _ := sampleValue(e.scrape()["pg_task_focus_last_append_timestamp_seconds"], nil); v == 0 {
+		t.Error("last_append_timestamp_seconds is 0 after a restart over a non-empty log")
+	}
 }

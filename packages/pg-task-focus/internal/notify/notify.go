@@ -12,7 +12,6 @@ package notify
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -162,7 +161,3 @@ func (f *Fake) Notified() []Notification {
 	defer f.mu.Unlock()
 	return append([]Notification(nil), f.Notifications...)
 }
-
-// Unavailable is what a player or notifier reports on a host with no way to
-// do it.
-var Unavailable = errors.New("no sound or notification facility on this host")

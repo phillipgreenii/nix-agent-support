@@ -286,7 +286,6 @@ type reqInfo struct {
 	id      string
 	client  string
 	traceID string
-	status  int
 	fields  []slog.Attr
 	reason  string
 }
@@ -496,6 +495,7 @@ func isJSON(ct string) bool {
 }
 
 func (s *Server) refuse(w http.ResponseWriter, r *http.Request, reason command.Reason, detail string) {
+	s.countRefusal(reason)
 	s.writeProblem(w, r, wire.Simple(reason, detail, r.URL.Path, info(r.Context()).traceID))
 }
 

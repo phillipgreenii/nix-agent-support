@@ -140,3 +140,17 @@ func TestPlaceholderPage(t *testing.T) {
 		t.Errorf("the page's route label is /: %v", v)
 	}
 }
+
+// The refusals the HTTP layer makes itself are counted by reason like the engine's.
+func TestTransportRefusalsAreCounted(t *testing.T) {
+	e := newEnv(t, options{})
+	e.raw("GET", "/api/v1/state", nil, map[string]string{"Host": "evil.example"})
+	e.raw("POST", "/api/v1/cycles/start", []byte(`{}`), map[string]string{"Content-Type": "text/plain"})
+	e.raw("POST", "/api/v1/cycles/start", []byte(`{"bogus":1}`), map[string]string{"Content-Type": "application/json"})
+	f := e.scrape()["pg_task_focus_rejections_total"]
+	for _, reason := range []string{"forbidden_host", "unsupported_media_type", "invalid_request"} {
+		if v, _ := sampleValue(f, map[string]string{"reason": reason}); v != 1 {
+			t.Errorf("rejections_total{reason=%q} = %v, want 1", reason, v)
+		}
+	}
+}

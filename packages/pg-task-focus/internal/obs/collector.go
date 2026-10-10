@@ -230,9 +230,8 @@ func activeDay(m *projection.Model, now time.Time) (time.Time, time.Time, bool) 
 		return time.Time{}, time.Time{}, false
 	}
 	loc := p.TZ.Location()
-	today := civil.Date{}
 	t := now.In(loc)
-	today = civil.Date{Year: t.Year(), Month: t.Month(), Day: t.Day()}
+	today := civil.Date{Year: t.Year(), Month: t.Month(), Day: t.Day()}
 	start := time.Date(today.Year, today.Month, today.Day, 0, 0, 0, 0, loc)
 	end := time.Date(today.Year, today.Month, today.Day+1, 0, 0, 0, 0, loc)
 	return start.UTC(), end.UTC(), true

@@ -29,7 +29,7 @@ func freePort(t *testing.T) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 	return ln.Addr().(*net.TCPAddr).Port
 }
 
@@ -53,7 +53,7 @@ func get(t *testing.T, port int, path string, v any) int {
 	if err != nil {
 		return 0
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if v != nil {
 		_ = json.NewDecoder(res.Body).Decode(v)
 	}
@@ -75,7 +75,7 @@ func TestServeReloadsOnSIGHUPAndStopsOnSIGTERM(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer logFile.Close()
+	defer func() { _ = logFile.Close() }()
 	cmd.Stdout, cmd.Stderr = logFile, logFile
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)

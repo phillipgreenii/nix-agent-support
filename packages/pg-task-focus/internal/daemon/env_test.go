@@ -87,7 +87,7 @@ func freePort(t *testing.T) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 	return ln.Addr().(*net.TCPAddr).Port
 }
 
@@ -235,7 +235,7 @@ func (e *env) raw(method, path string, body []byte, hdr map[string]string) resp 
 	if err != nil {
 		e.t.Fatalf("%s %s: %v", method, path, err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	b, err := io.ReadAll(res.Body)
 	if err != nil {
 		e.t.Fatal(err)

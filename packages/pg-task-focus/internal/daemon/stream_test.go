@@ -37,7 +37,7 @@ func (e *env) openStream(t *testing.T) *stream {
 	}
 	s := &stream{cancel: cancel, ch: make(chan sseEvent, 64), hb: make(chan struct{}, 64)}
 	go func() {
-		defer res.Body.Close()
+		defer func() { _ = res.Body.Close() }()
 		sc := bufio.NewScanner(res.Body)
 		var ev sseEvent
 		for sc.Scan() {

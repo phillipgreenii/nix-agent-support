@@ -23,11 +23,6 @@ func displayZone(s wire.State) *time.Location {
 	return time.UTC
 }
 
-// clock writes an instant as "09:30 America/New_York".
-func clock(t wire.Instant, loc *time.Location) string {
-	return t.Time().In(loc).Format("15:04") + " " + loc.String()
-}
-
 // dur writes a length as "1h15m", "12m" or "45s".
 func dur(seconds int64) string {
 	if seconds < 0 {

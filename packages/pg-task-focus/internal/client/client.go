@@ -108,7 +108,7 @@ func (c *Client) Do(ctx context.Context, method, path string, body any) ([]byte,
 	if err != nil {
 		return nil, c.unreachable(err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	b, err := io.ReadAll(io.LimitReader(res.Body, 16<<20))
 	if err != nil {
 		return nil, c.unreachable(err)
@@ -173,7 +173,7 @@ func (c *Client) Stream(ctx context.Context, fn func(Event) error) error {
 	if err != nil {
 		return c.unreachable(err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(io.LimitReader(res.Body, 1<<20))
 		var p wire.Problem

@@ -150,7 +150,7 @@ func TestTimeInputReadsAnyOffsetAsAnInstant(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{"At":"2026-10-07T09:30:00-04:00"}`), &in); err != nil {
 		t.Fatal(err)
 	}
-	if want := time.Date(2026, 10, 7, 13, 30, 0, 0, time.UTC); !in.At.Time.Equal(want) {
+	if want := time.Date(2026, 10, 7, 13, 30, 0, 0, time.UTC); !in.At.Equal(want) {
 		t.Errorf("At = %v, want %v", in.At.Time, want)
 	}
 	for _, bad := range []string{`{"At":"yesterday"}`, `{"At":5}`, `{"At":"2026-10-07"}`} {

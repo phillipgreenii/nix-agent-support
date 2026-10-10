@@ -56,8 +56,15 @@ func (s *Server) writeProblem(w http.ResponseWriter, r *http.Request, p wire.Pro
 	_, _ = w.Write(append(b, '\n'))
 }
 
+// countRefusal counts a refusal the HTTP layer makes itself. A refusal the
+// engine makes is counted by the engine's observer, so none is counted twice.
+func (s *Server) countRefusal(reason command.Reason) {
+	s.metrics.Rejections.WithLabelValues(string(reason)).Inc()
+}
+
 // invalid sends a 400 invalid_request with a sentence.
 func (s *Server) invalid(w http.ResponseWriter, r *http.Request, format string, args ...any) {
+	s.countRefusal(command.ReasonInvalidRequest)
 	s.writeProblem(w, r, wire.Simple(command.ReasonInvalidRequest, fmt.Sprintf(format, args...), r.URL.Path, info(r.Context()).traceID))
 }
 
@@ -65,6 +72,7 @@ func (s *Server) invalid(w http.ResponseWriter, r *http.Request, format string, 
 // writability check has not passed.
 func (s *Server) notReady(w http.ResponseWriter, r *http.Request) {
 	check, _ := s.failing.Load().(string)
+	s.countRefusal(command.ReasonNotReady)
 	detail := "The service is starting: replay has not finished or the first store check has not passed."
 	if check != "" {
 		detail += " Failing check: " + check + "."

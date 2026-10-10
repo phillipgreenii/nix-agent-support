@@ -16,7 +16,6 @@ import (
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
-	logglobal "go.opentelemetry.io/otel/log/global"
 	lognoop "go.opentelemetry.io/otel/log/noop"
 	"go.opentelemetry.io/otel/propagation"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
@@ -42,13 +41,13 @@ func Init(ctx context.Context, serviceName, version string, warn func(string)) S
 	endpoint := strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
 	if endpoint == "" {
 		otel.SetTracerProvider(noop.NewTracerProvider())
-		logglobal.SetLoggerProvider(lognoop.NewLoggerProvider())
+		otel.SetLoggerProvider(lognoop.NewLoggerProvider())
 		return none
 	}
 	if !Loopback(endpoint) {
 		warn(fmt.Sprintf("OTLP endpoint %q is not on the loopback interface; telemetry stays local, so traces and logs are no-op", endpoint))
 		otel.SetTracerProvider(noop.NewTracerProvider())
-		logglobal.SetLoggerProvider(lognoop.NewLoggerProvider())
+		otel.SetLoggerProvider(lognoop.NewLoggerProvider())
 		return none
 	}
 	res := buildResource(ctx, serviceName, version)
@@ -82,10 +81,10 @@ func Init(ctx context.Context, serviceName, version string, warn func(string)) S
 	}
 	if err != nil {
 		warn(fmt.Sprintf("OTel log exporter failed to start (%v); OTLP logs are no-op", err))
-		logglobal.SetLoggerProvider(lognoop.NewLoggerProvider())
+		otel.SetLoggerProvider(lognoop.NewLoggerProvider())
 	} else {
 		lp := sdklog.NewLoggerProvider(sdklog.WithProcessor(sdklog.NewBatchProcessor(logExp)), sdklog.WithResource(res))
-		logglobal.SetLoggerProvider(lp)
+		otel.SetLoggerProvider(lp)
 		shutdowns = append(shutdowns, lp.Shutdown)
 	}
 	return func(ctx context.Context) error {

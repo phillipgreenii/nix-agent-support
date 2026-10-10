@@ -292,7 +292,7 @@ func TestProjectionGaugesSurviveARestart(t *testing.T) {
 	for _, name := range []string{"pg_task_focus_tasks", "pg_task_focus_task_resolutions", "pg_task_focus_cycle_active"} {
 		a, b := before[name], after[name]
 		for _, m := range a.Metric {
-			var match map[string]string = map[string]string{}
+			match := map[string]string{}
 			for _, l := range m.Label {
 				match[l.GetName()] = l.GetValue()
 			}

@@ -261,7 +261,9 @@ func TestCLIExitCodes(t *testing.T) {
 	e.cli("cycle", "pause").want(t, cli.ExitUnreachable)
 	e.cli("nonsense").want(t, cli.ExitUsage)
 	e.cli("status", "--bogus").want(t, cli.ExitUsage)
-	e.cli("task").want(t, cli.ExitOK) // a group prints its help
+	e.cli("task").want(t, cli.ExitOK)                         // a group prints its help
+	e.cli("completion", "zsh").want(t, cli.ExitOK, "compdef") // shell completion is provided
+	e.cli("--version").want(t, cli.ExitOK, "pg-task-focus version test")
 	e.cli("cycle", "boost", "x", "y", "--minutes", "1").want(t, cli.ExitUsage)
 }
 

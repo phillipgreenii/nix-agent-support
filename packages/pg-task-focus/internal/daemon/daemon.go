@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/clock"
@@ -236,6 +237,7 @@ func loadConfig(path string) (*config.Config, error) {
 // applies the startup checks. The error is a *StartupError wrapping the cause.
 func (d *Daemon) open() error {
 	d.log.Info("replay start", "data_dir", d.p.DataDir)
+	opened := time.Now()
 	obsv := d.compose()
 	eng, err := engine.Open(engine.Options{
 		Dir: d.p.DataDir, FS: d.p.FS, Config: d.cfg, ConfigGeneration: d.gen, Clock: d.clk, NewID: d.p.NewID, Observer: obsv,
@@ -252,7 +254,24 @@ func (d *Daemon) open() error {
 		return &StartupError{Stage: "active_profile", Err: err}
 	}
 	d.eng = eng
+	d.replaySpans(opened)
 	return nil
+}
+
+// replaySpans records the startup replay as a trace: a replay span, with a
+// quarantine child when recovery trimmed the end of the log.
+func (d *Daemon) replaySpans(opened time.Time) {
+	tracer := d.tracerProvider().Tracer(obs.ScopeName)
+	d.mu.Lock()
+	replay, rec := d.replay, d.recovery
+	d.mu.Unlock()
+	ctx, span := tracer.Start(context.Background(), "pg-task-focus.replay", trace.WithTimestamp(opened))
+	obs.Attrs(span, attribute.Int("events", replay.Events))
+	if rec.TornTail || rec.UncommittedBatches > 0 {
+		_, q := tracer.Start(ctx, "pg-task-focus.replay.quarantine", trace.WithTimestamp(opened))
+		q.End(trace.WithTimestamp(opened))
+	}
+	span.End(trace.WithTimestamp(opened.Add(replay.Duration)))
 }
 
 // CheckActiveProfile refuses a log whose active profile the configuration no

@@ -2,7 +2,6 @@ package daemon_test
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -210,5 +209,3 @@ func TestCheckActiveProfileAcceptsAnEmptyLog(t *testing.T) {
 		t.Fatal("an undefined active profile passed")
 	}
 }
-
-func marshalJSON(v any) string { b, _ := json.Marshal(v); return string(b) }

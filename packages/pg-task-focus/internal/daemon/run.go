@@ -90,6 +90,9 @@ func (d *Daemon) wire(ctx context.Context) {
 		d.srv.Notify()
 	})
 	d.metrics.StateVersion.Set(float64(e.Version().LogLines))
+	if log := e.Snapshot().Model.Log(); len(log) > 0 {
+		d.metrics.MarkAppend(log[len(log)-1].At.Time()) // the last append before this process, from the log itself
+	}
 	d.metrics.SetReadOnly(e.Health().ReadOnly)
 
 	go d.alerter.Run(ctx)
