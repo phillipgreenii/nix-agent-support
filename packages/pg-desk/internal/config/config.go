@@ -39,6 +39,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -164,6 +165,35 @@ type Config struct {
 	// ConsumerStaleAfterRaw is consumer_stale_after (a duration such as
 	// "7d"); empty means unset.
 	ConsumerStaleAfterRaw string `yaml:"consumer_stale_after,omitempty" json:"consumer_stale_after,omitempty"`
+
+	// Focus is the focus block (docs/behavior/pg-desk/config.md, "Focus
+	// keys"): the daily-focus rank's time zone, coverage backlog bound,
+	// pending-gate age and Jira operator identities. Read them through
+	// FocusTimeZone, FocusCoverageBacklogMax, FocusPendingGateAge and
+	// FocusOperatorIdentities, which own the documented defaults.
+	Focus FocusConfig `yaml:"focus,omitempty" json:"focus,omitempty"`
+	// BeadIDPattern is bead_id_pattern: a regular expression telling a bead
+	// id from any other issue id (an issue whose id matches is a bead). Empty
+	// means unset. Read it through BeadIDRegexp().
+	BeadIDPattern string `yaml:"bead_id_pattern,omitempty" json:"bead_id_pattern,omitempty"`
+}
+
+// FocusConfig is config.yaml's focus block. Later packets add keys to it
+// (priority map, suppressed kind); each documents its own key.
+type FocusConfig struct {
+	// TimeZone is an IANA zone name; empty means the process-local zone.
+	TimeZone string `yaml:"time_zone,omitempty" json:"time_zone,omitempty"`
+	// CoverageBacklogMax is the backlog count above which coverage is
+	// incomplete; nil means 10% of the active count of the type (see
+	// FocusCoverageBacklogMax). A pointer so an explicit 0 is rejected
+	// rather than mistaken for unset.
+	CoverageBacklogMax *int `yaml:"coverage_backlog_max,omitempty" json:"coverage_backlog_max,omitempty"`
+	// PendingGateAge is a duration such as "30m"; empty means
+	// DefaultFocusPendingGateAge.
+	PendingGateAge string `yaml:"pending_gate_age,omitempty" json:"pending_gate_age,omitempty"`
+	// OperatorIdentities lists the assignee strings that make a Jira issue
+	// the operator's. An empty or absent list is valid.
+	OperatorIdentities []string `yaml:"operator_identities,omitempty" json:"operator_identities,omitempty"`
 }
 
 // Defaults for the entity-change-flow keys (design 9.10, 8.4, 8.5).
@@ -177,6 +207,8 @@ const (
 	DefaultReconcileAge        = 30 * time.Minute
 	DefaultSweepMaxPerPoll     = 20
 	DefaultHydrationMaxPerPoll = 50
+	// DefaultFocusPendingGateAge is focus.pending_gate_age's default.
+	DefaultFocusPendingGateAge = 30 * time.Minute
 )
 
 // WatchConfig is config.yaml's watch block: per entity type, the named
@@ -298,6 +330,65 @@ func (c *Config) ConsumerStaleAfter() time.Duration {
 	return durationOrDefault(c.ConsumerStaleAfterRaw, 0)
 }
 
+// FocusTimeZone returns the zone named by focus.time_zone, else time.Local.
+// An unknown zone name is rejected at load, so the fallback to time.Local on
+// a lookup failure is unreachable for a loaded Config.
+func (c *Config) FocusTimeZone() *time.Location {
+	if strings.TrimSpace(c.Focus.TimeZone) == "" {
+		return time.Local
+	}
+	loc, err := time.LoadLocation(strings.TrimSpace(c.Focus.TimeZone))
+	if err != nil {
+		return time.Local
+	}
+	return loc
+}
+
+// FocusCoverageBacklogMax returns focus.coverage_backlog_max when set, else
+// 10% of active rounded up (at least 1 when active > 0; 0 when active <= 0).
+func (c *Config) FocusCoverageBacklogMax(active int) int {
+	if c.Focus.CoverageBacklogMax != nil {
+		return *c.Focus.CoverageBacklogMax
+	}
+	if active <= 0 {
+		return 0
+	}
+	return (active + 9) / 10
+}
+
+// FocusPendingGateAge returns focus.pending_gate_age (default 30m).
+func (c *Config) FocusPendingGateAge() time.Duration {
+	return durationOrDefault(c.Focus.PendingGateAge, DefaultFocusPendingGateAge)
+}
+
+// FocusOperatorIdentities returns focus.operator_identities with each entry
+// trimmed; nil when the list is empty or absent.
+func (c *Config) FocusOperatorIdentities() []string {
+	if len(c.Focus.OperatorIdentities) == 0 {
+		return nil
+	}
+	out := make([]string, len(c.Focus.OperatorIdentities))
+	for i, id := range c.Focus.OperatorIdentities {
+		out[i] = strings.TrimSpace(id)
+	}
+	return out
+}
+
+// BeadIDRegexp returns the compiled bead_id_pattern, or nil when unset. It is
+// not named BeadIDPattern because the Config field already is (Go forbids a
+// field and a method of one name). The pattern is unanchored: a deployment
+// that needs an exact match supplies an anchored pattern.
+func (c *Config) BeadIDRegexp() *regexp.Regexp {
+	if strings.TrimSpace(c.BeadIDPattern) == "" {
+		return nil
+	}
+	re, err := regexp.Compile(c.BeadIDPattern)
+	if err != nil {
+		return nil
+	}
+	return re
+}
+
 // durationOrDefault parses a value already validated by finalize; an empty
 // or (impossible after validation) unparseable value yields def.
 func durationOrDefault(v string, def time.Duration) time.Duration {
@@ -388,6 +479,41 @@ func validateChangeFlow(cfg *Config) error {
 	} {
 		if n.val != nil && *n.val <= 0 {
 			return fmt.Errorf("%s %d must be positive", n.key, *n.val)
+		}
+	}
+	return nil
+}
+
+// validateFocus validates the focus keys and bead_id_pattern; every error
+// names the offending key. An empty or absent operator_identities is valid
+// (RV-E: it is a notice at show time, never a load failure).
+func validateFocus(cfg *Config) error {
+	if tz := strings.TrimSpace(cfg.Focus.TimeZone); tz != "" {
+		if _, err := time.LoadLocation(tz); err != nil {
+			return fmt.Errorf("focus.time_zone %q: %w", cfg.Focus.TimeZone, err)
+		}
+	} else if cfg.Focus.TimeZone != "" {
+		return fmt.Errorf("focus.time_zone %q: must not be blank", cfg.Focus.TimeZone)
+	}
+	if n := cfg.Focus.CoverageBacklogMax; n != nil && *n <= 0 {
+		return fmt.Errorf("focus.coverage_backlog_max %d must be positive", *n)
+	}
+	if v := cfg.Focus.PendingGateAge; v != "" {
+		if _, err := parseDayDuration(v); err != nil {
+			return fmt.Errorf("focus.pending_gate_age: %w", err)
+		}
+	}
+	for i, id := range cfg.Focus.OperatorIdentities {
+		if strings.TrimSpace(id) == "" {
+			return fmt.Errorf("focus.operator_identities[%d]: identity must not be empty", i)
+		}
+	}
+	if p := cfg.BeadIDPattern; p != "" {
+		if strings.TrimSpace(p) == "" {
+			return fmt.Errorf("bead_id_pattern %q: must not be blank", p)
+		}
+		if _, err := regexp.Compile(p); err != nil {
+			return fmt.Errorf("bead_id_pattern %q: %w", p, err)
 		}
 	}
 	return nil
@@ -874,6 +1000,9 @@ func finalize(cfg *Config) error {
 		return fmt.Errorf("sync: %w", err)
 	}
 	if err := validateChangeFlow(cfg); err != nil {
+		return err
+	}
+	if err := validateFocus(cfg); err != nil {
 		return err
 	}
 	if err := validateAreaLabels(cfg.AreaLabels); err != nil {

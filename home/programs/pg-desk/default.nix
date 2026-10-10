@@ -70,6 +70,17 @@ let
     max_per_poll = cfg.hydration.maxPerPoll;
   };
 
+  # Focus keys (focus.*, bead_id_pattern): each key only when set, and the
+  # focus block only when any key in it is set, so an existing consumer's
+  # config.yaml is byte-identical. The names are the loader's own
+  # (packages/pg-desk/internal/config/config.go, FocusConfig).
+  renderedFocus = lib.filterAttrs (_: v: v != null) {
+    time_zone = cfg.focus.timeZone;
+    coverage_backlog_max = cfg.focus.coverageBacklogMax;
+    pending_gate_age = cfg.focus.pendingGateAge;
+    operator_identities = cfg.focus.operatorIdentities;
+  };
+
   # The only attention.ordering.ties value pg-desk's config loader accepts
   # (besides unset). MUST equal AttentionTiesDefault in
   # packages/pg-desk/internal/config/config.go; test-pg-desk-module greps that
@@ -156,6 +167,8 @@ let
   // lib.optionalAttrs (renderedWatch != { }) { watch = renderedWatch; }
   // lib.optionalAttrs (renderedSweep != { }) { sweep = renderedSweep; }
   // lib.optionalAttrs (renderedHydration != { }) { hydration = renderedHydration; }
+  // lib.optionalAttrs (renderedFocus != { }) { focus = renderedFocus; }
+  // lib.optionalAttrs (cfg.beadIdPattern != null) { bead_id_pattern = cfg.beadIdPattern; }
   // lib.optionalAttrs (cfg.changeLogRetention != null) {
     change_log_retention = cfg.changeLogRetention;
   }
@@ -564,6 +577,61 @@ in
           renderable. Null uses pg-desk's default, 50.
         '';
       };
+    };
+
+    # Focus keys (daily-focus design, section 12 (m)). All null by default and
+    # omitted from the rendered config.yaml when null; pg-desk's own defaults
+    # then apply.
+    focus = {
+      timeZone = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = ''
+          config.yaml's focus.time_zone (an IANA zone name such as
+          "America/New_York"): the zone in which the focus day rolls over.
+          Null uses the process-local zone.
+        '';
+      };
+      coverageBacklogMax = lib.mkOption {
+        type = lib.types.nullOr lib.types.ints.positive;
+        default = null;
+        description = ''
+          config.yaml's focus.coverage_backlog_max: the backlog count above
+          which coverage is reported incomplete. Positive only: pg-desk
+          rejects an explicit 0, so none is renderable. Null uses 10% of the
+          active count of the type, rounded up.
+        '';
+      };
+      pendingGateAge = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = ''
+          config.yaml's focus.pending_gate_age (a duration such as "30m"):
+          how old an unminted selection may be before `doctor` gates on it.
+          Null uses pg-desk's default, "30m".
+        '';
+      };
+      operatorIdentities = lib.mkOption {
+        type = lib.types.nullOr (lib.types.listOf lib.types.str);
+        default = null;
+        description = ''
+          config.yaml's focus.operator_identities: the assignee strings (a
+          Jira display name or email) that make a Jira issue the operator's
+          for focus candidacy. Serves Jira only. Null renders nothing; an
+          empty list is valid and means no Jira issue is a candidate by
+          assignment.
+        '';
+      };
+    };
+    beadIdPattern = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      description = ''
+        config.yaml's bead_id_pattern (a regular expression): tells a bead id
+        from any other issue id; an issue whose id matches is a bead. The
+        match is unanchored, so supply an anchored pattern for an exact
+        match. Null renders nothing.
+      '';
     };
 
     changeLogRetention = lib.mkOption {

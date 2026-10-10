@@ -56,6 +56,8 @@ func TestConfigCoversAllSection78Keys(t *testing.T) {
 		"freshness",
 		// Entity-change-flow keys (design 9.10).
 		"watch", "sweep", "hydration", "change_log_retention", "consumer_stale_after",
+		// Focus keys (daily-focus design, section 12 (m)).
+		"focus", "bead_id_pattern",
 	}
 	sort.Strings(want)
 	if !reflect.DeepEqual(got, want) {
@@ -93,6 +95,7 @@ func TestConfigCoversAllSection78Keys(t *testing.T) {
 		{"WatchThreadConfig", reflect.TypeOf(WatchThreadConfig{}), []string{"queries", "active_window"}},
 		{"SweepConfig", reflect.TypeOf(SweepConfig{}), []string{"max_age", "max_per_poll", "reconcile_age"}},
 		{"HydrationConfig", reflect.TypeOf(HydrationConfig{}), []string{"max_per_poll"}},
+		{"FocusConfig", reflect.TypeOf(FocusConfig{}), []string{"time_zone", "coverage_backlog_max", "pending_gate_age", "operator_identities"}},
 	}
 	for _, c := range cases {
 		gotSub := yamlTags(c.typ)
@@ -950,6 +953,114 @@ func TestLoadFile_ReviewSettleWindowInvalidFails(t *testing.T) {
 			_, err := LoadFile(p)
 			if err == nil || !strings.Contains(err.Error(), "review_settle_window") {
 				t.Fatalf("LoadFile: err = %v, want a review_settle_window validation error", err)
+			}
+		})
+	}
+}
+
+// focusBase is a minimal valid config the focus tests append blocks to.
+const focusBase = "self_login: me\nrepos:\n  - remote: github.com/o/r\n"
+
+func TestFocusKeys_Defaults(t *testing.T) {
+	cfg, err := LoadFile(writeYAML(t, t.TempDir(), focusBase))
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	if got := cfg.FocusTimeZone(); got != time.Local {
+		t.Errorf("FocusTimeZone = %v, want time.Local", got)
+	}
+	if got := cfg.FocusPendingGateAge(); got != 30*time.Minute {
+		t.Errorf("FocusPendingGateAge = %v, want 30m", got)
+	}
+	if got := cfg.FocusOperatorIdentities(); got != nil {
+		t.Errorf("FocusOperatorIdentities = %v, want nil", got)
+	}
+	if got := cfg.BeadIDRegexp(); got != nil {
+		t.Errorf("BeadIDRegexp = %v, want nil", got)
+	}
+}
+
+func TestFocusKeys_Explicit(t *testing.T) {
+	cfg, err := LoadFile(writeYAML(t, t.TempDir(), focusBase+`
+focus:
+  time_zone: America/New_York
+  coverage_backlog_max: 7
+  pending_gate_age: 45m
+  operator_identities:
+    - "  Jane Doe "
+    - jane@example.com
+bead_id_pattern: '^pg2-[a-z0-9]+(\.[0-9]+)*$'
+`))
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	if got := cfg.FocusTimeZone().String(); got != "America/New_York" {
+		t.Errorf("FocusTimeZone = %q", got)
+	}
+	if got := cfg.FocusCoverageBacklogMax(1000); got != 7 {
+		t.Errorf("FocusCoverageBacklogMax = %d, want 7", got)
+	}
+	if got := cfg.FocusPendingGateAge(); got != 45*time.Minute {
+		t.Errorf("FocusPendingGateAge = %v, want 45m", got)
+	}
+	want := []string{"Jane Doe", "jane@example.com"}
+	if got := cfg.FocusOperatorIdentities(); !reflect.DeepEqual(got, want) {
+		t.Errorf("FocusOperatorIdentities = %q, want %q", got, want)
+	}
+	re := cfg.BeadIDRegexp()
+	if re == nil || !re.MatchString("pg2-abc.4") || re.MatchString("PROJ-12") {
+		t.Errorf("BeadIDRegexp = %v: wrong match behavior", re)
+	}
+}
+
+func TestFocusCoverageBacklogMax_DefaultIsTenPercentRoundedUp(t *testing.T) {
+	cfg, err := LoadFile(writeYAML(t, t.TempDir(), focusBase))
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	for active, want := range map[int]int{-1: 0, 0: 0, 1: 1, 9: 1, 10: 1, 11: 2, 20: 2, 21: 3, 100: 10} {
+		if got := cfg.FocusCoverageBacklogMax(active); got != want {
+			t.Errorf("FocusCoverageBacklogMax(%d) = %d, want %d", active, got, want)
+		}
+	}
+}
+
+func TestFocusKeys_EmptyOperatorIdentitiesIsValid(t *testing.T) {
+	for name, block := range map[string]string{
+		"empty list": "focus:\n  operator_identities: []\n",
+		"absent":     "focus:\n  time_zone: UTC\n",
+		"no block":   "",
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg, err := LoadFile(writeYAML(t, t.TempDir(), focusBase+block))
+			if err != nil {
+				t.Fatalf("LoadFile: %v", err)
+			}
+			if got := cfg.FocusOperatorIdentities(); len(got) != 0 {
+				t.Errorf("FocusOperatorIdentities = %v, want empty", got)
+			}
+		})
+	}
+}
+
+func TestLoadFile_FocusInvalidValuesFail(t *testing.T) {
+	for name, tc := range map[string]struct{ block, key string }{
+		"unknown zone":             {"focus:\n  time_zone: Mars/Olympus", "focus.time_zone"},
+		"blank zone":               {"focus:\n  time_zone: \"  \"", "focus.time_zone"},
+		"zero backlog":             {"focus:\n  coverage_backlog_max: 0", "focus.coverage_backlog_max"},
+		"negative backlog":         {"focus:\n  coverage_backlog_max: -2", "focus.coverage_backlog_max"},
+		"unparseable gate age":     {"focus:\n  pending_gate_age: soon", "focus.pending_gate_age"},
+		"zero gate age":            {"focus:\n  pending_gate_age: 0s", "focus.pending_gate_age"},
+		"negative gate age":        {"focus:\n  pending_gate_age: -5m", "focus.pending_gate_age"},
+		"empty identity":           {"focus:\n  operator_identities: [a, \"\"]", "focus.operator_identities[1]"},
+		"whitespace-only identity": {"focus:\n  operator_identities: [\"   \"]", "focus.operator_identities[0]"},
+		"uncompilable pattern":     {"bead_id_pattern: '(unclosed'", "bead_id_pattern"},
+		"blank pattern":            {"bead_id_pattern: '  '", "bead_id_pattern"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := LoadFile(writeYAML(t, t.TempDir(), focusBase+tc.block+"\n"))
+			if err == nil || !strings.Contains(err.Error(), tc.key) {
+				t.Fatalf("LoadFile: err = %v, want an error naming %q", err, tc.key)
 			}
 		})
 	}

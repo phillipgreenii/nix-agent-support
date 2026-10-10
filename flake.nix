@@ -6850,6 +6850,39 @@
                     repos = [ { remote = "phillipgreenii/example-repo"; } ];
                     watch.issue.queries = [ "example-issue-query" ];
                   };
+                  # Focus keys (focus.*, bead_id_pattern): absent by default
+                  # (hmEnabled), rendered under the loader's key names when
+                  # set. Synthetic values only.
+                  hmFocus = evalHM {
+                    enable = true;
+                    selfLogin = "phillipgreenii";
+                    repos = [ { remote = "phillipgreenii/example-repo"; } ];
+                    focus = {
+                      timeZone = "America/New_York";
+                      coverageBacklogMax = 7;
+                      pendingGateAge = "45m";
+                      operatorIdentities = [
+                        "Example Person"
+                        "example@example.com"
+                      ];
+                    };
+                    beadIdPattern = "^example-[a-z0-9]+$";
+                  };
+                  # A single focus key renders only its own key.
+                  hmFocusPartial = evalHM {
+                    enable = true;
+                    selfLogin = "phillipgreenii";
+                    repos = [ { remote = "phillipgreenii/example-repo"; } ];
+                    focus.timeZone = "UTC";
+                  };
+                  # All-null focus options (and an explicit empty identity
+                  # list is NOT null, so it renders).
+                  hmFocusEmptyIdentities = evalHM {
+                    enable = true;
+                    selfLogin = "phillipgreenii";
+                    repos = [ { remote = "phillipgreenii/example-repo"; } ];
+                    focus.operatorIdentities = [ ];
+                  };
                   # The loader rejects an explicit 0 for max_per_poll, so the
                   # options must not admit one: evaluating the rendered file's
                   # derivation must throw.
@@ -7031,6 +7064,29 @@
                   ! grep -qE '^  (pr|thread):' "$p"
                   ! grep -qE '^(sweep|hydration|change_log_retention|consumer_stale_after):' "$p"
                   ! grep -q 'active_window' "$p"
+
+                  # Focus keys: none rendered by default (all options null).
+                  ! grep -qE '^(focus|bead_id_pattern):' "$d"
+                  ! grep -qE 'time_zone|coverage_backlog_max|pending_gate_age|operator_identities' "$d"
+                  # All five render under the loader's key names when set.
+                  fo=${hmFocus.xdg.configFile."pg-desk/config.yaml".source}
+                  grep -q '^focus:' "$fo"
+                  grep -q '^  time_zone: America/New_York$' "$fo"
+                  grep -q '^  coverage_backlog_max: 7$' "$fo"
+                  grep -q '^  pending_gate_age: 45m$' "$fo"
+                  sed -n '/^  operator_identities:/,/^[a-z]/p' "$fo" | grep -q 'Example Person'
+                  sed -n '/^  operator_identities:/,/^[a-z]/p' "$fo" | grep -q 'example@example.com'
+                  grep -q '^bead_id_pattern:' "$fo"
+                  grep -qF 'example-[a-z0-9]+$' "$fo"
+                  # A partial setting renders only its own key.
+                  fp=${hmFocusPartial.xdg.configFile."pg-desk/config.yaml".source}
+                  grep -q '^focus:' "$fp"
+                  grep -q '^  time_zone: UTC$' "$fp"
+                  ! grep -qE 'coverage_backlog_max|pending_gate_age|operator_identities|bead_id_pattern' "$fp"
+                  # An explicit empty identity list is set, not null: it renders.
+                  fe=${hmFocusEmptyIdentities.xdg.configFile."pg-desk/config.yaml".source}
+                  grep -q '^  operator_identities: \[\]$' "$fe"
+                  ! grep -qE 'time_zone|coverage_backlog_max|pending_gate_age|bead_id_pattern' "$fe"
 
                   touch $out
                 '';
