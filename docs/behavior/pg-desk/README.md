@@ -121,7 +121,7 @@ packets.
 
 ## Realization gaps
 
-This set's **realization-gap register** (method `INV-23`): intended behavior this set's
+This set's **realization-gap register**: intended behavior this set's
 implementation has not yet built, one row per gap. The daemon-backed GitHub backend that the
 changes, consumer, freshness and refresh docs describe does not exist yet, so the rows below record
 where pg-desk's own flow still stands.
