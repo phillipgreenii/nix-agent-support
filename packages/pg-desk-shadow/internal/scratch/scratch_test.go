@@ -108,7 +108,7 @@ backends:
 search:
   queries: {mine: "is:pr author:@me"}
 `
-	out, err := DerivePRConfig([]byte(live))
+	out, err := DerivePRConfig([]byte(live), "/scratch/beads-ws")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,5 +193,74 @@ func TestManifestRoundTripAndPolicy(t *testing.T) {
 	}
 	if _, err := (Layout{Root: t.TempDir()}).Load(); err == nil {
 		t.Error("loading an unprepared directory must fail")
+	}
+}
+
+const livePRInstances = `
+connector:
+  issue:
+    - pg-connector-issue-jira
+    - {name: pg-connector-issue-jira-2, command: [some-binary]}
+    - {name: tracker-jira, command: [pg-connector-issue-beads, --beads-dir, /live/zr]}
+    - {name: beads-pg2, command: [pg-connector-issue-beads, --beads-dir, /live/pg2]}
+    - {name: beads-zr, command: [pg-connector-issue-beads, "--beads-dir=/live/zr", --other]}
+    - {name: plain, command: [pg-connector-issue-beads]}
+activity:
+  sources:
+    - {name: beads-pg2, command: [pg-connector-issue-beads, --beads-dir, /live/pg2]}
+    - {name: via-jira-binary, command: [pg-connector-issue-jira, --site, x]}
+`
+
+// TestDerivePRConfigPinsBeadsDir covers pg2-ghmw0: the --beads-dir word of a
+// registered instance beats BEADS_DIR, so it must be rewritten to the scratch
+// policy directory; and a {name, command} mapping that names Jira is removed.
+func TestDerivePRConfigPinsBeadsDir(t *testing.T) {
+	out, err := DerivePRConfig([]byte(livePRInstances), "/scratch/beads-ws")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	if strings.Contains(s, "/live/") {
+		t.Errorf("a live tracker path survived:\n%s", s)
+	}
+	if strings.Contains(strings.ToLower(s), "jira") {
+		t.Errorf("a Jira mapping survived:\n%s", s)
+	}
+	m := decode(t, out)
+	issue := m["connector"].(map[string]any)["issue"].([]any)
+	var names []string
+	for _, e := range issue {
+		em := e.(map[string]any)
+		names = append(names, em["name"].(string))
+		cmd := fmt.Sprint(em["command"])
+		switch em["name"] {
+		case "beads-pg2":
+			if cmd != "[pg-connector-issue-beads --beads-dir /scratch/beads-ws]" {
+				t.Errorf("split form: %s", cmd)
+			}
+		case "beads-zr":
+			if cmd != "[pg-connector-issue-beads --beads-dir=/scratch/beads-ws --other]" {
+				t.Errorf("= form: %s", cmd)
+			}
+		case "plain":
+			if cmd != "[pg-connector-issue-beads]" {
+				t.Errorf("a command without the flag is untouched: %s", cmd)
+			}
+		}
+	}
+	if fmt.Sprint(names) != "[beads-pg2 beads-zr plain]" {
+		t.Errorf("surviving instances = %v", names)
+	}
+	if got := len(m["activity"].(map[string]any)["sources"].([]any)); got != 1 {
+		t.Errorf("activity sources = %d, want 1 (the Jira-binary one is removed)", got)
+	}
+}
+
+func TestDerivePRConfigRefusesAnUnpinnableBeadsDir(t *testing.T) {
+	if _, err := DerivePRConfig([]byte("x:\n  - {name: a, command: [b, --beads-dir]}\n"), "/scratch/beads-ws"); err == nil {
+		t.Error("a --beads-dir with no value cannot be pinned and must be refused")
+	}
+	if _, err := DerivePRConfig([]byte("x: 1\n"), ""); err == nil {
+		t.Error("an empty pin directory must be refused")
 	}
 }

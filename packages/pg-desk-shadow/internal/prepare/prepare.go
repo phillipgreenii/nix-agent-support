@@ -181,7 +181,7 @@ func Prepare(ctx context.Context, o Options) (scratch.Layout, scratch.Manifest, 
 	if err != nil {
 		return l, m, err
 	}
-	prYAML, err := scratch.DerivePRConfig(livePR)
+	prYAML, err := scratch.DerivePRConfig(livePR, info.BeadsDir)
 	if err != nil {
 		return l, m, err
 	}

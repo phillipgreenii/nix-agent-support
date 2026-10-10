@@ -112,7 +112,12 @@ directory and never starts a dolt server.
   - **passthrough.** `beads_dir` is the live workspace, used read-only through the machine `bd`. Kept for
     completeness; expect denials, which stop the run.
 - **pg-connector config.** A copy of the live `pg-pr` config (a read-only nix-store symlink in the
-  live tree; the per-author search split is already live, `pg2-kn9n1`) minus the Jira backend.
+  live tree; the per-author search split is already live, `pg2-kn9n1`) minus the Jira backend (a Jira
+  string, a map key naming it, and a `{name, command}` instance whose name or binary names it), with
+  every `--beads-dir` word of a registered instance command (`--beads-dir <dir>` or `--beads-dir=<dir>`)
+  rewritten to the configured beads workspace. A `--beads-dir` flag beats `BEADS_DIR`, so a live tracker
+  path left in a copied command would read the live trackers instead of the read-only one (`pg2-ghmw0`);
+  in passthrough mode every instance therefore reads the one configured workspace.
 - **PATH and shims.** The machine `bd` (history: before the 2026-10-08 shared-database schema
   migration, the router wrapper's bundled `bd` 1.3.1 failed against the then-unmigrated shared
   database in `pg2-x3h8c.12` with "table not found: leases"; the migration has since been applied),
@@ -336,7 +341,9 @@ reboot and router applies WILL occur: they are recorded and excluded from misses
 - **INV-SHADOW-1.** The collector MUST refuse to start, and every tick MUST re-verify, that
   `XDG_STATE_HOME`, `XDG_RUNTIME_DIR` and `TMPDIR` are under the scratch directory and not the live
   state, that `PG_DESK_CONFIG` and `PG_PR_CONFIG` equal the scratch copies, and that `BEADS_DIR` and
-  `PG_CONNECTOR_ISSUE_BEADS_DIR` equal the configured read-only beads directory.
+  `PG_CONNECTOR_ISSUE_BEADS_DIR` equal the configured read-only beads directory, and that every `--beads-dir` word in a registered
+  command of the scratch `PG_PR_CONFIG` names that same directory (under the scratch directory in
+  hermetic bd mode).
 - **INV-SHADOW-2.** No child process MAY write outside the scratch directory: the child tree runs
   under the sandbox, and a failed start-up probe or any denial stops the run.
 - **INV-SHADOW-3.** The `gh` and `bd` shims MUST reject every write verb and every verb not known to

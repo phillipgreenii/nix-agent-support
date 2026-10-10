@@ -18,12 +18,78 @@ func policy(t *testing.T) Policy {
 		BinDir: filepath.Join(root, "bin"), DeskConfig: filepath.Join(root, "config", "pg-desk.yaml"), PRConfig: filepath.Join(root, "config", "pg-pr.yaml"),
 		BeadsDir: filepath.Join(home, "beads-ws"), Home: home, LiveRoots: []string{filepath.Join(home, ".local", "state")},
 	}
-	for _, d := range []string{p.StateHome, p.RuntimeDir, p.TmpDir, p.BinDir, p.BeadsDir} {
+	for _, d := range []string{p.StateHome, p.RuntimeDir, p.TmpDir, p.BinDir, p.BeadsDir, filepath.Dir(p.PRConfig)} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
+	writePR(t, p, "connector:\n  issue:\n    - command: [pg-connector-issue-beads, --beads-dir, "+p.BeadsDir+"]\n      name: beads-a\n")
 	return p
+}
+
+func writePR(t *testing.T, p Policy, body string) {
+	t.Helper()
+	if err := os.WriteFile(p.PRConfig, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestVerifyPinsTheBakedInBeadsDir covers pg2-ghmw0: a --beads-dir word baked
+// into a registered command beats BEADS_DIR, so Verify must read the scratch
+// pg-pr config and refuse any --beads-dir that is not the policy directory.
+func TestVerifyPinsTheBakedInBeadsDir(t *testing.T) {
+	p := policy(t)
+	env := ChildEnv(p, "/usr/bin:/bin")
+	live := filepath.Join(Resolve(t.TempDir()), "live-tracker")
+	cases := map[string]string{
+		"live dir, split word": "connector:\n  issue:\n    - command: [pg-connector-issue-beads, --beads-dir, " + live + "]\n      name: a\n",
+		"live dir, = form":     "search:\n  sources:\n    - command: [pg-connector-issue-beads, \"--beads-dir=" + live + "\"]\n      name: a\n",
+		"second one is live":   "x:\n  - command: [b, --beads-dir, " + p.BeadsDir + "]\n    name: a\n  - command: [b, --beads-dir, " + live + "]\n    name: b\n",
+		"flag with no value":   "x:\n  - command: [b, --beads-dir]\n    name: a\n",
+		"not a YAML document":  "a: [unterminated\n",
+	}
+	for name, body := range cases {
+		writePR(t, p, body)
+		err := Verify(env, p)
+		if err == nil {
+			t.Errorf("%s: Verify accepted a config that reads %s", name, live)
+			continue
+		}
+		if !strings.Contains(err.Error(), "PG_PR_CONFIG") {
+			t.Errorf("%s: error %q does not name PG_PR_CONFIG", name, err)
+		}
+	}
+	// Both spellings of the policy directory pass, and so does a config with no flag.
+	for name, body := range map[string]string{
+		"split":   "x:\n  - command: [b, --beads-dir, " + p.BeadsDir + "]\n    name: a\n",
+		"= form":  "x:\n  - command: [b, \"--beads-dir=" + p.BeadsDir + "\"]\n    name: a\n",
+		"no flag": "x:\n  - command: [b]\n    name: a\n",
+	} {
+		writePR(t, p, body)
+		if err := Verify(env, p); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if err := os.Remove(p.PRConfig); err != nil {
+		t.Fatal(err)
+	}
+	if err := Verify(env, p); err == nil {
+		t.Error("an unreadable scratch pg-pr config must be refused")
+	}
+}
+
+func TestVerifyHermeticKeepsBakedInBeadsDirInScratch(t *testing.T) {
+	p := policy(t)
+	p.BeadsDir = ""
+	env := ChildEnv(p, "/usr/bin:/bin")
+	writePR(t, p, "x:\n  - command: [b, --beads-dir, "+filepath.Join(p.Scratch, "beads-ws")+"]\n    name: a\n")
+	if err := Verify(env, p); err != nil {
+		t.Fatal(err)
+	}
+	writePR(t, p, "x:\n  - command: [b, --beads-dir, "+t.TempDir()+"]\n    name: a\n")
+	if err := Verify(env, p); err == nil {
+		t.Error("hermetic mode must refuse a --beads-dir outside the scratch directory")
+	}
 }
 
 func set(env []string, k, v string) []string {
@@ -89,6 +155,7 @@ func TestVerifyRefusesEachVariable(t *testing.T) {
 func TestVerifyHermeticRefusesBeadsVars(t *testing.T) {
 	p := policy(t)
 	p.BeadsDir = ""
+	writePR(t, p, "x:\n  - command: [b]\n    name: a\n")
 	base := ChildEnv(p, "/usr/bin:/bin")
 	if err := Verify(base, p); err != nil {
 		t.Fatal(err)

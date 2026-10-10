@@ -54,7 +54,8 @@ pg-desk-shadow prepare --scratch "$HOME/pg-desk-shadow/phase-a-2026-10-08"
    `pg-desk migrate --cutover` on the copy;
 3. writes the scratch `pg-desk` config (`sync.mode: off`, no ticket patterns, no Jira, `beads_dir`
    pointing at a scratch stub workspace, `watch.pr.queries: [mine, team]`, `sweep.max_age: 8760h`) and
-   the scratch `pg-pr` config (no Jira backend);
+   the scratch `pg-pr` config (no Jira backend; every `--beads-dir` in a registered instance command
+   pinned to the same beads workspace, `pg2-ghmw0`);
 4. builds `<scratch>/bin` (unwrapped tool binaries and the `gh`/`bd` shims) and the run manifest
    (`run.json`: build ids, bd mode, parameters, `T0`);
 5. WARM-UP (skip with `--no-seed`, phase B): per watched query one

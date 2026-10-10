@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/phillipgreenii/pg-desk-shadow/internal/safety"
 )
 
 // DeskParams are the values the scratch pg-desk config overrides.
@@ -118,11 +120,18 @@ func DeriveDeskConfig(live []byte, p DeskParams) ([]byte, DeskInfo, error) {
 	return out, info, nil
 }
 
-// DerivePRConfig removes the Jira backend from a live pg-pr (pg-connector)
-// config: Jira entries in every string list and every backend map key that
-// names it. The result is a standalone file, so the live config (a read-only
-// nix-store symlink) is never touched.
-func DerivePRConfig(live []byte) ([]byte, error) {
+// DerivePRConfig turns a live pg-pr (pg-connector) config into the scratch one.
+// It removes the Jira backend (a Jira string in a list, a map key naming it, and
+// a {name, command} instance whose name or binary names it), and pins every
+// --beads-dir word of a registered command to beadsDir, the policy's beads
+// directory. The flag beats BEADS_DIR, so leaving a live tracker path in place
+// would read the live trackers instead of the read-only one (pg2-ghmw0). The
+// result is a standalone file, so the live config (a read-only nix-store
+// symlink) is never touched.
+func DerivePRConfig(live []byte, beadsDir string) ([]byte, error) {
+	if beadsDir == "" {
+		return nil, fmt.Errorf("pg-pr config: a beads directory to pin --beads-dir to is required")
+	}
 	var doc any
 	if err := yaml.Unmarshal(live, &doc); err != nil {
 		return nil, fmt.Errorf("pg-pr config: %w", err)
@@ -130,10 +139,33 @@ func DerivePRConfig(live []byte) ([]byte, error) {
 	if doc == nil {
 		return nil, fmt.Errorf("pg-pr config is empty")
 	}
-	return yaml.Marshal(stripJira(doc))
+	out, err := pinBeadsDir(stripJira(doc), beadsDir)
+	if err != nil {
+		return nil, fmt.Errorf("pg-pr config: %w", err)
+	}
+	return yaml.Marshal(out)
 }
 
 func isJira(s string) bool { return strings.Contains(strings.ToLower(s), "jira") }
+
+// isJiraEntry reports whether a list element registers the Jira backend: a
+// string naming it, or a {name, command} instance whose name or binary does.
+func isJiraEntry(e any) bool {
+	switch t := e.(type) {
+	case string:
+		return isJira(t)
+	case map[string]any:
+		if n, ok := t["name"].(string); ok && isJira(n) {
+			return true
+		}
+		if cmd, ok := t["command"].([]any); ok && len(cmd) > 0 {
+			if bin, ok := cmd[0].(string); ok && isJira(bin) {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 func stripJira(v any) any {
 	switch t := v.(type) {
@@ -149,7 +181,7 @@ func stripJira(v any) any {
 	case []any:
 		var out []any
 		for _, e := range t {
-			if s, ok := e.(string); ok && isJira(s) {
+			if isJiraEntry(e) {
 				continue
 			}
 			out = append(out, stripJira(e))
@@ -160,4 +192,37 @@ func stripJira(v any) any {
 		return out
 	}
 	return v
+}
+
+// pinBeadsDir rewrites the directory of every --beads-dir word in every list.
+func pinBeadsDir(v any, dir string) (any, error) {
+	switch t := v.(type) {
+	case map[string]any:
+		for k, val := range t {
+			nv, err := pinBeadsDir(val, dir)
+			if err != nil {
+				return nil, err
+			}
+			t[k] = nv
+		}
+	case []any:
+		for i := range t {
+			if _, valueIdx, ok := safety.BeadsDirWord(t, i); ok {
+				if valueIdx < 0 {
+					return nil, fmt.Errorf("a %s word has no directory to pin", safety.BeadsDirFlag)
+				}
+				if valueIdx == i {
+					t[i] = safety.BeadsDirFlag + "=" + dir
+				} else {
+					t[valueIdx] = dir
+				}
+			}
+			nv, err := pinBeadsDir(t[i], dir)
+			if err != nil {
+				return nil, err
+			}
+			t[i] = nv
+		}
+	}
+	return v, nil
 }

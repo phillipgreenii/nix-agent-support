@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // Policy names the only locations a child may be pointed at.
@@ -112,6 +114,9 @@ func Verify(env []string, p Policy) error {
 			return fmt.Errorf("safety: %s=%q differs from the configured read-only beads directory %s", name, got, p.BeadsDir)
 		}
 	}
+	if err := verifyPRConfigBeadsDirs(p); err != nil {
+		return err
+	}
 	if m["BEADS_DOLT_AUTO_START"] != "0" {
 		return fmt.Errorf("safety: BEADS_DOLT_AUTO_START must be 0 (got %q): no dolt server may be started", m["BEADS_DOLT_AUTO_START"])
 	}
@@ -125,6 +130,78 @@ func Verify(env []string, p Policy) error {
 	}
 	if m["HOME"] != p.Home {
 		return fmt.Errorf("safety: HOME=%q differs from %q", m["HOME"], p.Home)
+	}
+	return nil
+}
+
+// BeadsDirFlag is the flag a pg-connector issue-beads instance command carries
+// to name its tracker. The flag beats BEADS_DIR and PG_CONNECTOR_ISSUE_BEADS_DIR,
+// so a baked-in one defeats the sandbox's read-only pin (pg2-ghmw0).
+const BeadsDirFlag = "--beads-dir"
+
+// BeadsDirWord inspects words[i] as a --beads-dir flag. It returns the
+// directory it names and valueIdx, the index of the word holding the value
+// (i for the `--beads-dir=<dir>` form, i+1 for the split form). ok is false
+// when words[i] is not the flag; valueIdx is -1 when the split form has no
+// value word.
+func BeadsDirWord(words []any, i int) (dir string, valueIdx int, ok bool) {
+	w, _ := words[i].(string)
+	if v, found := strings.CutPrefix(w, BeadsDirFlag+"="); found {
+		return v, i, true
+	}
+	if w != BeadsDirFlag {
+		return "", 0, false
+	}
+	if i+1 < len(words) {
+		if v, isStr := words[i+1].(string); isStr {
+			return v, i + 1, true
+		}
+	}
+	return "", -1, true
+}
+
+// verifyPRConfigBeadsDirs refuses a scratch pg-pr config whose registered
+// commands carry a --beads-dir other than the policy directory. With no policy
+// beads directory (hermetic bd mode) the flag may only name a path under the
+// scratch directory.
+func verifyPRConfigBeadsDirs(p Policy) error {
+	raw, err := os.ReadFile(p.PRConfig)
+	if err != nil {
+		return fmt.Errorf("safety: PG_PR_CONFIG %s cannot be read to check its --beads-dir words: %w", p.PRConfig, err)
+	}
+	var doc any
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		return fmt.Errorf("safety: PG_PR_CONFIG %s is not valid YAML: %w", p.PRConfig, err)
+	}
+	var bad error
+	var walk func(v any)
+	walk = func(v any) {
+		switch t := v.(type) {
+		case map[string]any:
+			for _, e := range t {
+				walk(e)
+			}
+		case []any:
+			for i, e := range t {
+				if dir, _, ok := BeadsDirWord(t, i); ok && bad == nil {
+					bad = checkBeadsDir(dir, p)
+				}
+				walk(e)
+			}
+		}
+	}
+	walk(doc)
+	return bad
+}
+
+func checkBeadsDir(dir string, p Policy) error {
+	switch {
+	case dir == "":
+		return fmt.Errorf("safety: PG_PR_CONFIG %s has a %s with no directory", p.PRConfig, BeadsDirFlag)
+	case p.BeadsDir != "" && resolve(dir) != resolve(p.BeadsDir):
+		return fmt.Errorf("safety: PG_PR_CONFIG %s bakes in %s %s, which differs from the configured read-only beads directory %s", p.PRConfig, BeadsDirFlag, dir, p.BeadsDir)
+	case p.BeadsDir == "" && !Under(dir, p.Scratch):
+		return fmt.Errorf("safety: PG_PR_CONFIG %s bakes in %s %s, which is not under the scratch directory %s (hermetic bd mode)", p.PRConfig, BeadsDirFlag, dir, p.Scratch)
 	}
 	return nil
 }
