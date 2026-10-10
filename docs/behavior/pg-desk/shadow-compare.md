@@ -15,9 +15,17 @@ the `pg-desk` binary. It is generic and config-driven: it reads whatever `pg-des
 configuration the operator already has and MUST NOT contain organization identifiers.
 
 **Phase A scope.** Detection only, with the REMOTE re-hydration tier effectively off (see
-[Warm-up](#warm-up-seeding-the-scratch-store)). Out of scope: phase B (default tiers, no seeding,
-`pg2-dngh6`), the cutover, any change to the live flow, deciders or the old sync, and fixing defects
-found (each gets its own bead).
+[Warm-up](#warm-up-seeding-the-scratch-store)). Out of scope: phase B of the old flow (default
+tiers, no seeding, `pg2-dngh6`), which is SUPERSEDED (see the next paragraph), the cutover, any
+change to the live flow, deciders or the old sync, and fixing defects found (each gets its own
+bead).
+
+**What this document now plans.** The sections from "Definitions" on record the phase A tooling and
+its measured observations, and they stay as the evidence the program cites. They are NOT the plan
+for the next shadow run: for `pr` and `ci` the next shadow run is the daemon's, described in
+["The next shadow run: the daemon"](#the-next-shadow-run-the-daemon), because the daemon-backed
+GitHub backend (ADR 0090) replaces pg-desk's own PR change flow. Phase B of the old flow
+(`pg2-dngh6`) is superseded: it would have measured a flow that is retired.
 
 ```mermaid
 flowchart LR
@@ -44,6 +52,32 @@ flowchart LR
     RR --> REP
     REP --> OUT["markdown + JSON, HMAC labels only"]
 ```
+
+## The next shadow run: the daemon
+
+For `pr` and `ci` the next shadow run measures the daemon-backed GitHub backend against the live
+change flow. The harness named in this document stays the measuring instrument; what it runs
+beside the live flow changes.
+
+- **INV-SHADOW-11.** The shadow run MUST start the daemon as `pg-desk-shadow`'s own child, with its
+  own socket, its own state directory and its own configuration (the `PG_CONNECTOR_GITHUB_*`
+  variables), and the existing read-only `gh` shim. It MUST NOT share the live daemon's socket,
+  state or configuration, because the shadow run is a measurement beside the live flow and MUST NOT
+  write to or perturb it. The daemon's GraphQL spend under the shadow run is capped by default at
+  1,500 points per hour, because it runs alongside the live flow on the same token; the operator MAY
+  raise that cap.
+- **INV-SHADOW-12.** The collector MUST read the daemon's change feed by calling the connector's
+  client directly, and MUST compare it with the live events. The comparison MUST cover: feed misses,
+  detection delay, sweep-caught events, shadow-only detections, cost, and CI-driven categorization
+  changes (a PR moving between blocked and reviewable) as seen by each side. Those measurements
+  keep the definitions of "Definitions" and "Metrics" below, with the daemon's feed in the place of
+  the fingerprint change detection.
+- **INV-SHADOW-13.** The DEFAULT cutover criteria are four: zero unexplained misses; detection
+  delay p90 no worse than live; GraphQL points per hour inside the cap for the whole run; daemon
+  uptime at least 95 percent. The shadow report MUST state each criterion as met or not met.
+- **INV-SHADOW-14.** The operator MAY cut over with criteria unmet when the run shows the daemon
+  working. The cutover bead MUST then record the operator's decision and every unmet criterion, and
+  each unmet criterion MUST get its own follow-up bead.
 
 ## Definitions
 
@@ -154,7 +188,7 @@ create|comment|edit|close|reopen|delete|lock|unlock|transfer|pin|unpin`, `gh rep
 
 ## Warm-up: seeding the scratch store
 
-A WARM-UP SIMPLIFICATION, not the treatment bead `pg2-5rb3t` weighs (phase B measures that one).
+A WARM-UP SIMPLIFICATION, not the treatment bead `pg2-5rb3t` weighs (phase B measured that one, and is superseded).
 After `pg-desk migrate --cutover` every `pr` row has NULL `hydrated_at` and NULL `list_fp`, and the
 sweep tier ignores `sweep.max_age` for never-hydrated rows (`remoteDueTime` returns the zero time for
 an empty `hydrated_at`, and `pickOldest` ranks it first), so raising `max_age` alone does not disable
@@ -180,7 +214,7 @@ NULL OR hydrated_at='')` returns 0, and the first ticks show zero `origin=sweep`
 
 The report MUST say that the remote tier is effectively off because `hydrated_at` is seeded and
 `sweep.max_age` is 8760h, and that the local reconcile tier (`sweep.reconcile_age`, default 30m)
-stays ON. `prepare --no-seed` skips steps 1 to 3 (phase B); every row carries a phase tag.
+stays ON. `prepare --no-seed` skips steps 1 to 3 (the superseded phase B); every row carries a phase tag.
 
 ## Collector tick
 
@@ -321,7 +355,7 @@ the stuck-hash fix `pg2-7vz6p` lands mid-run the baseline changes). PR ids in an
 scratch directory are replaced with an HMAC label (`pr-` plus 8 hex of HMAC-SHA256 under a per-run
 random key kept only in the scratch directory); no title, login, repo slug or bead id appears in a
 report, a bead comment or a collector error message. `report --combine DIR...` merges the phase-tagged
-ticks of several scratch directories (phase B). `report --selftest` runs the whole pipeline on
+ticks of several scratch directories (the superseded phase B). `report --selftest` runs the whole pipeline on
 synthetic logs.
 
 ## Stop and kill criteria
