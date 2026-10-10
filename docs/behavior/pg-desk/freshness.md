@@ -77,6 +77,21 @@ source, this one judges whether anything still polls it.
 - **If every row of a backend is abandoned, they all count.** Nothing polls the backend any more,
   and the indicator MUST NOT turn a dead poller into an all-clear or make the source vanish.
 
+## Where the ledger's times come from
+
+pg-desk's reader of the ledger does not change. What changes is who stamps the ledger for a backend
+that owns its changes (the daemon-backed GitHub backend for `pr` and `ci`): that backend returns, on
+every forwarded `changes` answer, a per-query `sources_freshness[]` carrying the time of its last
+whole-query origin answer and its last error, and the connector's umbrella stamps the ledger's
+`refreshed_at` and `last_error` from it, and the consumer's `last_seen` on every forwarded call.
+
+- **The ledger keys stay `(backend, query)`.** No row becomes a ghost and the abandoned-row rule
+  (INV-FRESH-6) keeps working from the stamped `last_seen`.
+- **A cache answer does not advance freshness** (INV-FRESH-2). The backend counts only a whole-query
+  answer from the origin as a success.
+- **pg-desk still stamps nothing of its own.** It reads the ledger and records the success, the
+  error and the last poll exactly as in "Recording".
+
 ## Surfaces
 
 - **`pg-desk freshness --json`.** Read-only and offline: it reads the store and, for the threshold
@@ -113,7 +128,7 @@ nothing reads.
 **Threshold.** 15 minutes is 15 poll periods at 60 seconds, or 7.5 at 120 seconds, so several
 consecutive failed ticks, such as a short stretch of rate-limit refusals, do not raise the
 indicator, while a sustained outage does within a quarter of an hour. It is below the 30-minute
-`pr-sweep` cycle, so the indicator appears before the slow recovery path would have repaired
+reconcile cycle, so the indicator appears before the slow recovery path would have repaired
 anything.
 
 ## Invariants
@@ -143,6 +158,9 @@ anything.
   has no recorded success MUST still read unknown and stale (INV-FRESH-4). When every row of a
   backend is abandoned they MUST all count. Applying the rule MUST NOT delete a ledger file or a
   store row.
+- **INV-FRESH-7.** For a backend that owns its changes, the ledger times pg-desk reads MUST come from
+  that backend's own record of its last whole-query origin answer and last error, and a cache
+  answer MUST NOT advance them.
 
 ## Telemetry and logs
 

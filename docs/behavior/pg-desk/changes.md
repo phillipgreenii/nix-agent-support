@@ -1,15 +1,21 @@
 # pg-desk — changes
 
-`pg-desk <type> changes --consumer NAME [--query Q] [--cached] [--reset] [--limit N] [--json]`, for
-`<type>` one of `pr`, `issue`, is the list-and-diff change feed: it lists each watched query with
-pg-connector's fingerprints, compares them with the fingerprints it stored at each entity's last
-hydration, hydrates and classifies only the entities that differ, and hands the caller the
-change-log records past its cursor as the `pg-desk.changes/v1` envelope (entity-change-flow design
-6.2, 9.2, 9.3). Besides the list-and-diff core it keeps the watched set
-honest: an entity that dropped out of every watched query is confirmed by one `show` read and then becomes
-closed, merged or removed, an entity terminal in
-its source system (for a Jira issue, one whose status category is `done`) stops being active, a rolling sweep re-hydrates the active entities by age, and
-a per-poll hydration budget bounds the detail reads (design 6.1, 8.4, 8.5).
+`pg-desk <type> changes --consumer NAME [--query Q] [--cached] [--reset] [--limit N] [--json]` is the
+list-and-diff change feed that pg-desk itself runs for the types whose backend does not own its
+changes (today `issue`): it lists each watched query with pg-connector's fingerprints, compares them
+with the fingerprints it stored at each entity's last hydration, hydrates and classifies only the
+entities that differ, and hands the caller the change-log records past its cursor as the
+`pg-desk.changes/v1` envelope (entity-change-flow design 6.2, 9.2, 9.3). Besides the list-and-diff
+core it keeps the watched set honest: an entity that dropped out of every watched query is confirmed
+by one `show` read and then becomes closed, merged or removed, an entity terminal in its source
+system (for a Jira issue, one whose status category is `done`) stops being active, a rolling sweep
+re-hydrates the active entities by age, and a per-poll hydration budget bounds the detail reads
+(design 6.1, 8.4, 8.5).
+
+For the `pr` and `ci` types pg-desk does NOT run this flow. The daemon-backed GitHub backend owns
+change detection, the baseline, the age sweep and the per-PR hydration for them, so pg-desk's own PR
+change flow is retired (see "Who owns change detection"). Everything below the next section describes
+the flow for the types pg-desk still serves itself, unless a passage says otherwise.
 
 ```mermaid
 flowchart LR
@@ -21,7 +27,48 @@ flowchart LR
     OUT -->|"after the flush"| ADV["advance cursor"]
 ```
 
+## Who owns change detection
+
+ADR 0090 lets a backend that declares it owns its changes decide what changed for its own types, so
+for `pr` and `ci` the owner is the daemon-backed GitHub backend, not pg-desk. The behavior of that
+backend (what it detects, its feed, its acknowledgement and its freshness) is the subject of the
+behavior-docs set for the GitHub connector backend; this document names that set by its role and
+does not restate it.
+
+- **The backend owns detection for `pr` and `ci`.** The detection baseline, the age sweep and the
+  per-PR hydration that pg-desk's own flow used for `pr` belong to the backend. pg-desk MUST NOT
+  keep a baseline, run a sweep or hydrate entities in order to detect a PR or CI change, and the
+  backend, not pg-desk, owns the consumers' cursors for those types.
+- **pg-desk reacts to the feed, it does not classify it.** The backend's feed decides WHETHER a
+  desk run is triggered for a PR; the run itself decides what to do from the facts it gathers. After
+  cutover the backend is the only source of the upstream change kinds for PRs, and pg-desk does not
+  need them. `refresh` (see [`refresh.md`](refresh.md)) remains the only verb that classifies a
+  change.
+- **A CI change behind an unchanged rollup re-triggers categorization.** A change to a PR's CI runs
+  or jobs is delivered on the PR feed as a PR change of kind `ci_changed`, naming the run and job
+  fields that changed, so a PR whose rollup state did not move but whose runs or jobs did is still
+  delivered, and the desk run for that PR re-categorizes it. One CI event triggers ONE desk run, not
+  one per feed. This matters because CI state decides whether a PR is reviewable.
+- **Detection bound.** A CI change that the rollup shows is seen within one summary freshness window
+  plus the backend's settle time. A change behind an unchanged rollup is seen within the active-run
+  window while a run on the current head is active, within the failed-run window while the current
+  head has a non-passing run (the case that decides reviewability), and otherwise within the CI
+  maximum age. Runs on an older head never make a PR active. The windows are the backend's
+  configuration, not pg-desk's.
+- **Recovery of a failed desk run.** The local reconcile tier of pg-desk's own flow (see "Rolling
+  age sweep") is not used for `pr`. A run that did not complete is recovered by the backend's
+  acknowledged feed, which redelivers every row a consumer did not acknowledge, and by the periodic
+  reconcile lanes that remain: the scheduler's slow full-sweep backstop and `pg-desk reconcile` (see
+  [`operator-commands.md`](operator-commands.md)).
+- **Mergeability noise cannot reach the run.** The backend carries a PR's last known mergeability
+  forward, so a transient mergeability answer does not change the facts a run compares.
+- **A CI-only feed is PLANNED.** The connector's `ci changes` feed, for a consumer that wants CI
+  changes without parsing PR rows, is planned and is not available; pg-desk does not use it.
+
 ## Behavior
+
+The rest of this document describes the flow pg-desk runs itself, which serves the types whose
+backend does not own its changes (`issue`); it is retired for `pr`.
 
 - **List-and-diff (default).** For each watched query of `<type>` (`watch.<type>.queries`),
   pg-desk runs `pg-connector <type> list --query <q> --fingerprints --output json`: the whole
@@ -104,7 +151,7 @@ flowchart LR
 
 ## Active entities, removal and source-terminal deactivation
 
-An entity is **active** while BOTH hold (design 6.1): it is non-terminal in its source system
+This section describes the flow pg-desk runs itself, not the retired `pr` flow. An entity is **active** while BOTH hold (design 6.1): it is non-terminal in its source system
 (open PR; issue not terminal, see "What counts as a terminal issue" below; thread with a reply inside `watch.thread.active_window`)
 AND at least one currently watched query still returns it. Only active entities are swept or
 replayed by `--reset`.
@@ -179,7 +226,8 @@ deactivation:
 
 ## Rolling age sweep: two tiers (design 8.4)
 
-On every real call pg-desk also runs an age sweep with two tiers. Both are rolling (OLDEST due
+This sweep belongs to the flow pg-desk runs itself and is not run for `pr` (see "Who owns change
+detection"). On every real call pg-desk also runs an age sweep with two tiers. Both are rolling (OLDEST due
 first), both are capped per call at `sweep.max_per_poll` (default 20; the cap applies to each tier
 separately), and in both the cap only carries work forward: an entity the cap does not reach stays
 due and is selected on the next call, nothing is queued and nothing is dropped. Inactive entities
@@ -219,7 +267,7 @@ top-level `pg-desk sweep` bulk backfill is unrelated and unchanged.
 
 ## Hydration budget (design 8.5)
 
-`hydration.max_per_poll` (default 50) caps the DETAIL reads per call across both sources: the
+The budget belongs to the flow pg-desk runs itself and does not apply to `pr`. `hydration.max_per_poll` (default 50) caps the DETAIL reads per call across both sources: the
 added/changed entities first, then the remote sweep batch, so a tight budget starves the sweep
 first. The local reconcile tier reads nothing remote and is outside the budget.
 `--reset` replays are exempt (see `--reset`).
@@ -270,6 +318,10 @@ NOT read it as proof that a comment was added.
 
 ## Invariants
 
+INV-CHANGES-1 to INV-CHANGES-12 govern the flow pg-desk runs itself, which serves the types whose
+backend does not own its changes (`issue`); they do not apply to `pr`, whose flow is retired.
+INV-CHANGES-13 to INV-CHANGES-15 govern `pr` and `ci`.
+
 - **INV-CHANGES-1.** The consumer's cursor MUST advance only after the envelope was written, and
   never on `--cached`.
 - **INV-CHANGES-2.** A total failure MUST log nothing and leave the cursor where it was.
@@ -296,6 +348,14 @@ changes`.
   and its membership untouched, and a degraded, truncated or failed listing MUST NOT cause a read.
 - **INV-CHANGES-12.** The local reconcile tier MUST make no remote call and no hydration, and the
   record it appends MUST leave the entity's `hydrated_at`, active flag and list fingerprint unchanged.
+- **INV-CHANGES-13.** For `pr` and `ci`, pg-desk MUST NOT own change detection: it MUST NOT keep a
+  detection baseline, run an age sweep or hydrate entities in order to find a change, and the
+  backend that owns those changes, not pg-desk, MUST own the consumers' cursors.
+- **INV-CHANGES-14.** A CI change behind an unchanged rollup MUST re-trigger categorization of the
+  PR it belongs to, once per change and not once per feed.
+- **INV-CHANGES-15.** A desk run that did not complete for a PR MUST still be recovered with no
+  decider acknowledgement protocol and with no local reconcile tier in pg-desk, through the
+  backend's redelivery of unacknowledged feed rows and the periodic reconcile lanes.
 
 ## Telemetry and logs
 

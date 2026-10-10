@@ -4,8 +4,15 @@
 through the entity-change pipeline: it reads the entity from pg-connector, classifies the change
 against the previous snapshot, writes the snapshot and appends one `change_log` record, all in one
 transaction (entity-change-flow design 6.9, 9.12). It is the operator's targeted counterpart of the
-list-and-diff `changes` verb. The old top-level `run` verb is unchanged and stays until the cutover
+list-and-diff `changes` verb, which pg-desk still runs for the types whose backend does not own its
+changes. The old top-level `run` verb is unchanged and stays until the cutover
 phase deletes it.
+
+`refresh` is the only verb that classifies a change. For `pr` and `ci` the daemon-backed backend owns
+change detection and supplies the upstream change kinds, and pg-desk's own PR change flow, which
+was the classifier's other caller, is retired (see [`changes.md`](changes.md), "Who owns change
+detection"). `refresh` stays as the operator's targeted, local classify-and-record verb; it does not
+ask the backend what changed, and it does not use the backend's feed or its cursors.
 
 ## Behavior
 
@@ -60,6 +67,8 @@ error, which says to run `pg-desk migrate --cutover`, and exits `1`.
 - **INV-REFRESH-2.** A refresh of an absent entity MUST fail with exit `3` and MUST NOT make the
   entity inactive.
 - **INV-REFRESH-3.** The only binary this verb execs is `pg-connector`, through the gather layer.
+- **INV-REFRESH-4.** `refresh` MUST remain the only verb that classifies a change once pg-desk's own PR
+  change flow is retired, and it MUST NOT depend on the backend's change feed.
 
 ## Telemetry and logs
 

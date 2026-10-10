@@ -1,11 +1,17 @@
 # pg-desk — consumer lifecycle
 
 A consumer is a named reader of the change log for one entity type (for example a menu bar plugin
-that reads `pg-desk pr changes --as <name>`). Its registration is one `(name, type)` row holding a
+that reads `pg-desk issue changes --consumer <name>`). Its registration is one `(name, type)` row holding a
 cursor (the highest change record it has been handed and confirmed) and `seen_at` (when it last
 read). Two verbs under each type group manage those rows (entity-change-flow design 6.9):
 `pg-desk <type> consumer list` and `pg-desk <type> consumer forget <name>`, for `<type>` one of
-`pr`, `issue`, `thread`.
+`issue`, `thread`.
+
+For `pr` pg-desk keeps no change log and no consumer rows: the daemon-backed backend owns the
+change feed for `pr` and `ci`, so it owns the consumers' cursors and their retention, and pg-desk's
+own PR change flow is retired (see [`changes.md`](changes.md), "Who owns change detection"). The
+consumer verbs and everything below describe the change log pg-desk itself keeps, which serves the
+types whose backend does not own its changes (`issue`, `thread`).
 
 ```mermaid
 flowchart LR
@@ -40,6 +46,8 @@ flowchart LR
   same name under another type, and every other consumer, MUST be untouched.
 - **INV-CONSUMER-2.** After `forget`, change-log pruning MUST NOT wait for that consumer.
 - **INV-CONSUMER-3.** `list` and `forget` MUST NOT register a consumer or stamp `seen_at`.
+- **INV-CONSUMER-4.** For `pr` and `ci`, pg-desk MUST NOT hold a consumer's cursor: the backend that
+  owns those changes holds it.
 
 ## Old-schema refusal
 
