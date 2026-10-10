@@ -41,9 +41,25 @@ func suiteFocusLinks(entityID, anchorID string) []map[string]any {
 	}
 }
 
+// suitePlanBytes renders the plan of every rule EXCEPT focus.item. That rule
+// reads the focus bead by design (its skip carries the bead's id and state,
+// and a view that shows no selection holds an open bead), so the invariant
+// under test is about every OTHER rule.
 func suitePlanBytes(t *testing.T, v *view.View) (js, text []byte) {
 	t.Helper()
 	res := suiteDecide(v)
+	skipped, actions := res.Skipped[:0:0], res.Actions[:0:0]
+	for _, s := range res.Skipped {
+		if s.Rule != focusRuleID {
+			skipped = append(skipped, s)
+		}
+	}
+	for _, a := range res.Actions {
+		if a.Rule != focusRuleID {
+			actions = append(actions, a)
+		}
+	}
+	res.Skipped, res.Actions = skipped, actions
 	var jb, tb bytes.Buffer
 	if err := plan.JSON(&jb, res); err != nil {
 		t.Fatal(err)

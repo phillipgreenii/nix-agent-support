@@ -13,6 +13,7 @@ import (
 	"github.com/phillipgreenii/pg-decider/internal/decide"
 	"github.com/phillipgreenii/pg-decider/internal/exitcode"
 	"github.com/phillipgreenii/pg-decider/internal/plan"
+	"github.com/phillipgreenii/pg-decider/internal/rules"
 )
 
 // planFn is the replaceable seam for `plan` behavior (tests stub it). It runs
@@ -33,14 +34,21 @@ var planFn = func(ctx context.Context, out, errOut io.Writer, typ, id string, as
 		fmt.Fprintf(errOut, "pg-decider: no decider is registered for entity type %q\n", typ)
 		return exitcode.Failure
 	}
-	// plan reads the configuration only for the area_labels vocabulary, so the
-	// plan it prints shows the labels apply would write (bead pg2-fsrzf).
+	// plan reads the configuration for the area_labels vocabulary (so the plan
+	// it prints shows the labels apply would write, bead pg2-fsrzf) and for the
+	// focus rule's bead_id_pattern and focus_priority_map.
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(errOut, "pg-decider: %v\n", err)
 		return exitcode.Failure
 	}
-	res := arealabels.Apply(decide.Decide(v, typ), v, cfg)
+	// A view lacking annotations.focus_selected fails the run closed: nothing
+	// is printed as a plan, because a strike could not be told from "unknown".
+	if err := rules.CheckFocusView(v, typ); err != nil {
+		fmt.Fprintf(errOut, "pg-decider: cannot plan %s %s: %v\n", typ, id, err)
+		return exitcode.ViewUnreadable
+	}
+	res := arealabels.Apply(decide.DecideWith(v, typ, cfg), v, cfg)
 	if asJSON {
 		err = plan.JSON(out, res)
 	} else {

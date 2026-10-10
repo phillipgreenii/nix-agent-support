@@ -24,11 +24,12 @@ import (
 	"github.com/phillipgreenii/pg-decider/internal/workitem"
 )
 
-// suiteRuleIDs are the twelve PR rules the sibling packets register.
+// suiteRuleIDs are the twelve PR rules the sibling packets register plus
+// focus.item, which is registered for both the pr and the issue entity type.
 var suiteRuleIDs = []string{
 	"all.closed", "all.reopened", "anchor.lazy", "anchor.backfill", "anchor.priority",
 	"adoption", "adoption.node-id", "review.head-advanced", "feedback.digest-changed",
-	"fixci.failing-on-head", "conflict.present", "land.ready",
+	"fixci.failing-on-head", "conflict.present", "land.ready", "focus.item",
 }
 
 func suiteRaw(t *testing.T, name string) []byte {
@@ -148,7 +149,10 @@ func suiteWantShapes(t *testing.T, name string, res action.PlanResult, want ...s
 	}
 }
 
-// The trigger fixtures between them make every registered rule act.
+// The trigger fixtures between them make every registered rule act except
+// focus.item, which acts only on a view that selects the entity (or strikes a
+// linked focus bead); the testdata/focus fixtures cover it, one per entity
+// type the rule is registered for.
 var suiteTriggerFixtures = []string{
 	"pr_new_everything", "pr_anchor_drift", "pr_merged_open_anchor", "pr_reopened_anchor_closed",
 }
@@ -176,16 +180,24 @@ func TestHiddenEntityYieldsZeroActions(t *testing.T) {
 			acted[a.Rule] = true
 		}
 	}
+	for _, a := range suiteDecide(focusLoad(t, "pr_selected")).Actions {
+		acted[a.Rule] = true
+	}
 	for _, id := range ids {
 		if !acted[id] {
-			t.Errorf("rule %q acts on none of the trigger fixtures %v; the hidden check would be vacuous for it", id, suiteTriggerFixtures)
+			t.Errorf("rule %q acts on none of the trigger fixtures %v or the focus pr fixture; the hidden check would be vacuous for it", id, suiteTriggerFixtures)
 		}
+	}
+	// The issue rule set holds focus.item alone; it acts on the issue fixture.
+	if got := decide.Decide(focusLoad(t, "issue_selected"), decide.EntityTypeIssue).Actions; len(got) != 1 || got[0].Rule != focusRuleID {
+		t.Fatalf("the focus issue fixture must yield exactly one focus.item action, got %+v", got)
 	}
 
 	cases := map[string]*view.View{"pr_hidden (committed)": suiteLoad(t, "pr_hidden")}
 	for _, name := range suiteTriggerFixtures {
 		cases[name+" (hidden)"] = suitePatch(t, name, suiteHide)
 	}
+	cases["focus pr_selected (hidden)"] = focusPatch(t, "pr_selected", suiteHide)
 	for name, v := range cases {
 		t.Run(name, func(t *testing.T) {
 			if !v.Annotations.Hidden.Value {

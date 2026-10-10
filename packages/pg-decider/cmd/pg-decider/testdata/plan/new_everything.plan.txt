@@ -17,3 +17,4 @@ skipped:
   adoption          not matched
   adoption.node-id  not matched
   land.ready        not matched
+  focus.item        not matched  cause=not-selected

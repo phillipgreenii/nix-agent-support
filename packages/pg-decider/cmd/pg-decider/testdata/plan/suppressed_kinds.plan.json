@@ -112,6 +112,13 @@
     {
       "rule": "land.ready",
       "reason": "not matched"
+    },
+    {
+      "rule": "focus.item",
+      "reason": "not matched",
+      "facts": {
+        "cause": "not-selected"
+      }
     }
   ]
 }

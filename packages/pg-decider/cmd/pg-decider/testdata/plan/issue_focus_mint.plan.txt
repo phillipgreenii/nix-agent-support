@@ -1,0 +1,7 @@
+issue ACME-7  -
+linked work: none
+
+actions:
+  create  focus-item  rule=focus.item  period=2026-10-10 source_id=ACME-7 source_type=issue transition=mint
+
+skipped:

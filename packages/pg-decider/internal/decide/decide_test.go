@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/pg-decider/internal/action"
+	"github.com/phillipgreenii/pg-decider/internal/config"
 	"github.com/phillipgreenii/pg-decider/internal/view"
 	"github.com/phillipgreenii/pg-decider/internal/workitem"
 )
@@ -427,5 +428,31 @@ func TestNoCloserIdentityIsReadAnywhere(t *testing.T) {
 				t.Errorf("%s mentions %q", f, w)
 			}
 		}
+	}
+}
+
+// DecideWith hands the configuration to every rule through Input.Config, and
+// Decide is DecideWith with none.
+func TestDecideWithPassesTheConfigToRules(t *testing.T) {
+	et := t.Name()
+	var seen []*config.Config
+	Register(et, 10, &fakeRule{id: "a", result: func(in Input) Result {
+		seen = append(seen, in.Config)
+		return Result{}
+	}})
+	cfg := &config.Config{BeadIDPattern: "^x"}
+	DecideWith(prView(), et, cfg)
+	Decide(prView(), et)
+	if len(seen) != 2 || seen[0] != cfg || seen[1] != nil {
+		t.Fatalf("configs seen = %v, want [cfg nil]", seen)
+	}
+}
+
+func TestFocusOrdinalFollowsEveryPRRuleAndTheEntityTypeNamesAreExact(t *testing.T) {
+	if EntityTypeIssue != "issue" || EntityTypePR != "pr" {
+		t.Fatalf("entity type constants = %q %q", EntityTypeIssue, EntityTypePR)
+	}
+	if OrdinalFocusItem <= OrdinalLandReady {
+		t.Fatalf("OrdinalFocusItem %d must follow OrdinalLandReady %d", OrdinalFocusItem, OrdinalLandReady)
 	}
 }

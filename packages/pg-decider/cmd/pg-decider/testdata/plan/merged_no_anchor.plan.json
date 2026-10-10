@@ -76,6 +76,13 @@
       "facts": {
         "pr_state": "merged"
       }
+    },
+    {
+      "rule": "focus.item",
+      "reason": "not matched",
+      "facts": {
+        "cause": "not-selected"
+      }
     }
   ]
 }

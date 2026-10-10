@@ -64,6 +64,7 @@ uphold. The rule ids registered so far, in evaluation order:
 | `review.head-advanced`    | `review-pr`               |
 | `feedback.digest-changed` | `process-feedback`        |
 | `fixci.failing-on-head`   | `fix-ci`                  |
+| `focus.item`              | `focus-item`              |
 
 A rule is added to this table in the change that registers it.
 
@@ -83,9 +84,10 @@ The invariants of this set are numbered `INV-DECIDER-<n>` across the docs, in RF
 
 ## Scope
 
-In scope: the `pr` entity type, the only type with a decider today. `pg-decider plan` and `apply`
-accept the types `pr`, `issue` and `thread`; for a type with no registered rules, both exit `1`
-with a message saying no decider is registered for that type.
+In scope: the `pr` entity type, which carries the PR rules, and the `issue` entity type, whose only
+rule is `focus.item` (which also runs for a `pr`). `pg-decider plan` and `apply` accept the types
+`pr`, `issue` and `thread`; for a type with no registered rules (`thread`), both exit `1` with a
+message saying no decider is registered for that type.
 
 Out of scope for the whole set:
 

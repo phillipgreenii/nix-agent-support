@@ -100,3 +100,49 @@ func TestPlanResultJSONKeys(t *testing.T) {
 		t.Fatalf("skipped JSON: %s (%v)", m["skipped"], err)
 	}
 }
+
+// A hold or a release of a focus bead is an update carrying Status (and
+// ClearDefer for a release); both print under their JSON names and are
+// omitted when unset, so no other action's JSON changes.
+func TestUpdateActionCarriesStatus(t *testing.T) {
+	target := "bd-1"
+	hold := Action{
+		Op: OpUpdate, Kind: "focus-item", Target: &target, Rule: "focus.item",
+		Fields: Fields{Status: "deferred", Metadata: map[string]string{"focus_hold": "struck"}},
+	}
+	release := Action{
+		Op: OpUpdate, Kind: "focus-item", Target: &target, Rule: "focus.item",
+		Fields: Fields{Status: "open", ClearDefer: true, Metadata: map[string]string{"focus_hold": "released"}},
+	}
+
+	fieldsOf := func(a Action) map[string]any {
+		t.Helper()
+		b, err := json.Marshal(a)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m struct{ Fields map[string]any }
+		if err := json.Unmarshal(b, &m); err != nil {
+			t.Fatal(err)
+		}
+		return m.Fields
+	}
+	h := fieldsOf(hold)
+	if h["status"] != "deferred" {
+		t.Errorf("hold status = %v", h["status"])
+	}
+	if _, has := h["clear_defer"]; has {
+		t.Errorf("a hold must not print clear_defer: %v", h)
+	}
+	r := fieldsOf(release)
+	if r["status"] != "open" || r["clear_defer"] != true {
+		t.Errorf("release fields = %v, want status open and clear_defer true", r)
+	}
+	plain := fieldsOf(Action{Op: OpUpdate, Fields: Fields{Title: "t"}})
+	if _, has := plain["status"]; has {
+		t.Errorf("an update without a status must omit it: %v", plain)
+	}
+	if _, has := plain["clear_defer"]; has {
+		t.Errorf("an update without clear_defer must omit it: %v", plain)
+	}
+}

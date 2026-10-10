@@ -17,3 +17,4 @@ skipped:
   fixci.failing-on-head    not matched  pr_state=merged
   conflict.present         not matched  pr_state=merged
   land.ready               not matched  pr_state=merged
+  focus.item               not matched  cause=not-selected

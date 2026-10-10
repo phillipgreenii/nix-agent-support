@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/phillipgreenii/pg-decider/internal/action"
+	"github.com/phillipgreenii/pg-decider/internal/config"
 	"github.com/phillipgreenii/pg-decider/internal/view"
 	"github.com/phillipgreenii/pg-decider/internal/workitem"
 )
@@ -24,6 +25,14 @@ import (
 // Actions follow rule ordinal, then the order the rule returned them. Both
 // lists are non-nil.
 func Decide(v *view.View, entityType string) action.PlanResult {
+	return DecideWith(v, entityType, nil)
+}
+
+// DecideWith is Decide with the decider's configuration handed to every rule
+// through Input.Config (focus.item reads bead_id_pattern and
+// focus_priority_map from it). The configuration is data: DecideWith stays a
+// pure function of the view and that data. A nil cfg is the zero Config.
+func DecideWith(v *view.View, entityType string, cfg *config.Config) action.PlanResult {
 	rules := RulesFor(entityType)
 	res := action.PlanResult{Actions: []action.Action{}, Skipped: []action.Skip{}}
 	if v == nil {
@@ -48,7 +57,7 @@ func Decide(v *view.View, entityType string) action.PlanResult {
 		}
 	}
 
-	in := Input{View: v, Items: workitem.BuildIndex(v), EntityType: entityType}
+	in := Input{View: v, Items: workitem.BuildIndex(v), EntityType: entityType, Config: cfg}
 	var evaluated []Rule
 	for _, r := range rules {
 		if k := r.Kind(); k != "" && suppressed[k] {

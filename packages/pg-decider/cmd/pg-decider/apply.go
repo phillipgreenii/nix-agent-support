@@ -20,12 +20,14 @@ import (
 	"github.com/phillipgreenii/pg-decider/internal/failure"
 	"github.com/phillipgreenii/pg-decider/internal/item"
 	"github.com/phillipgreenii/pg-decider/internal/metrics"
+	"github.com/phillipgreenii/pg-decider/internal/rules"
 	"github.com/phillipgreenii/pg-decider/internal/view"
 )
 
-// decideFn computes the action list from the view; tests swap it.
-var decideFn = func(v *view.View, entityType string) action.PlanResult {
-	return decide.Decide(v, entityType)
+// decideFn computes the action list from the view and the configuration (the
+// rules read it as data); tests swap it.
+var decideFn = func(v *view.View, entityType string, cfg *config.Config) action.PlanResult {
+	return decide.DecideWith(v, entityType, cfg)
 }
 
 // applyCommand is the factory every pg-connector and pg-desk write goes
@@ -62,7 +64,13 @@ var applyFn = func(ctx context.Context, out, errOut io.Writer, typ, id string, i
 		fmt.Fprintf(errOut, "pg-decider: %v\n", err)
 		return exitcode.Failure
 	}
-	plan := arealabels.Apply(decideFn(v, typ), v, cfg)
+	// A view lacking annotations.focus_selected fails the run closed, before
+	// any hook runs and before anything is written.
+	if err := rules.CheckFocusView(v, typ); err != nil {
+		fmt.Fprintf(errOut, "pg-decider: cannot apply %s %s: %v\n", typ, id, err)
+		return exitcode.ViewUnreadable
+	}
+	plan := arealabels.Apply(decideFn(v, typ, cfg), v, cfg)
 	res := apply.Run(ctx, apply.Input{
 		Type: typ, ID: id, View: v, Actions: plan.Actions, Item: it, Hooks: applyHooks(v, typ, id),
 		Env: apply.Env{Command: applyCommand, Config: cfg, Clock: time.Now, Stderr: errOut},

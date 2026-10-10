@@ -49,7 +49,7 @@ func TestPlanJSONForPRHasExactlyActionsAndSkipped(t *testing.T) {
 
 func TestPlanWithoutADeciderForTheTypeExits1(t *testing.T) {
 	withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("pr_view_minimal.json"))
-	for _, typ := range []string{"issue", "thread"} {
+	for _, typ := range []string{"thread"} {
 		out, errOut, code := runCLI(t, "plan", typ, "x")
 		if code != 1 || out != "" || !strings.Contains(errOut, "no decider") || !strings.Contains(errOut, typ) {
 			t.Fatalf("%s: code=%d out=%q err=%q", typ, code, out, errOut)

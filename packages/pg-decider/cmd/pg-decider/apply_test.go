@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/pg-decider/internal/action"
+	"github.com/phillipgreenii/pg-decider/internal/config"
 	"github.com/phillipgreenii/pg-decider/internal/exitcode"
 	"github.com/phillipgreenii/pg-decider/internal/view"
 )
@@ -27,7 +28,7 @@ func recordWrites(t *testing.T, actions []action.Action, stdout string, exit str
 	var recs []execRec
 	origDecide, origCmd := decideFn, applyCommand
 	t.Cleanup(func() { decideFn, applyCommand = origDecide, origCmd })
-	decideFn = func(_ *view.View, _ string) action.PlanResult {
+	decideFn = func(_ *view.View, _ string, _ *config.Config) action.PlanResult {
 		return action.PlanResult{Actions: actions, Skipped: []action.Skip{}}
 	}
 	applyCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
@@ -101,7 +102,10 @@ func TestApplyFromItemReadsTheViewExactlyOnceAndNeverDecidesFromTheKind(t *testi
 	decides := 0
 	recordWrites(t, nil, `{"result":{}}`, "0")
 	innerDecide := decideFn
-	decideFn = func(v *view.View, typ string) action.PlanResult { decides++; return innerDecide(v, typ) }
+	decideFn = func(v *view.View, typ string, cfg *config.Config) action.PlanResult {
+		decides++
+		return innerDecide(v, typ, cfg)
+	}
 	_, errOut, code := runCLI(t, "apply", "pr", "acme/widgets#42", "--from-item", fixture("routed_item.json"))
 	if code != 0 || decides != 1 || reads != 1 {
 		t.Fatalf("code %d decides %d view reads %d err %q", code, decides, reads, errOut)
@@ -123,7 +127,7 @@ func TestApplyBadConfigExits1BeforeAnyWrite(t *testing.T) {
 func TestApplyWithoutADeciderForTheTypeExits1(t *testing.T) {
 	withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("pr_view_minimal.json"))
 	recs := recordWrites(t, nil, `{"result":{}}`, "0")
-	_, errOut, code := runCLI(t, "apply", "issue", "x")
+	_, errOut, code := runCLI(t, "apply", "thread", "x")
 	if code != exitcode.Failure || !strings.Contains(errOut, "no decider") || len(*recs) != 0 {
 		t.Fatalf("code %d err %q", code, errOut)
 	}

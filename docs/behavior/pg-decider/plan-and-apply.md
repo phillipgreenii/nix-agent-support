@@ -62,9 +62,11 @@ Otherwise each rule is evaluated against the current view.
 A merged or closed PR is dead. Unlike hidden and suppressed, this is not a step the engine
 evaluates before the rules: each rule applies the liveness test itself, so the rule set as a whole
 MUST uphold it (`INV-DECIDER-25`). Only the rules that keep the anchor in step with the PR and
-close its open work MAY act on a terminal PR; every other rule skips it as `not matched`. A
-terminal PR that has no anchor and no work items therefore yields no action at all: nothing is
-created for it only to be closed again on the next run.
+close its open work MAY act on a terminal PR, and so MAY the `focus.item` rule, which holds an
+unclaimed focus bead of a terminal source (see "The `focus.item` rule" in
+[`work-items.md`](work-items.md)); every other rule skips it as `not matched`. A terminal PR that
+has no anchor and no work items therefore yields no action at all: nothing is created for it only
+to be closed again on the next run (`focus.item` mints nothing for a terminal source).
 
 ### Skip reasons
 
@@ -146,9 +148,12 @@ before anything else happens.
 | `0`  | Every action was applied or deduped, or none was needed                                                      |
 | `1`  | Usage or other error: bad arguments, unknown entity type, no decider for the type, unreadable item or config |
 | `2`  | Some actions failed or were skipped for a failed dependency, or a hook failed; captured and retried next run |
-| `3`  | The view could not be read; nothing was applied                                                              |
+| `3`  | The view could not be read, or lacks `annotations.focus_selected`; nothing was applied                       |
 
-`plan` uses `0`, `1` and `3` the same way; it never exits `2` because it executes nothing.
+`plan` uses `0`, `1` and `3` the same way; it never exits `2` because it executes nothing. A view of
+an entity type the `focus.item` rule serves (`pr` or `issue`) whose `annotations` carries no
+`focus_selected` member at all fails the run closed with exit `3` before any rule or hook runs (see
+"A view without the annotation" in [`work-items.md`](work-items.md)).
 
 ### The audit comment
 
@@ -285,6 +290,8 @@ is written even for a run that planned nothing.
   counters line to stderr whose counts satisfy `planned = applied + deduped + failed + skipped` for
   every rule.
 - **INV-DECIDER-25.** For a merged or closed PR, the rules that keep the anchor in step with the PR
-  and close its open work are the only ones that MAY act; every other rule MUST skip it, so a
-  terminal PR with no anchor and no work items MUST yield no action, and no work item or
+  and close its open work are the only ones that MAY act, with one deliberate exception: the
+  `focus.item` rule MAY hold (one `update` of status and marker, never a `create`, `reopen` or
+  `close`) an unclaimed focus bead whose source is the terminal PR. Every other rule MUST skip it,
+  so a terminal PR with no anchor and no work items MUST yield no action, and no work item or
   annotation MUST be created, reopened or updated for it.

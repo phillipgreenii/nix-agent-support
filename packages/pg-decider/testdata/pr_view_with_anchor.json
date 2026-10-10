@@ -57,6 +57,7 @@
     "category": "ready-to-land"
   },
   "annotations": {
+    "focus_selected": null,
     "hidden": {
       "value": false,
       "reason": null

@@ -17,3 +17,4 @@ skipped:
   feedback.digest-changed  not matched     unaddressed=0
   fixci.failing-on-head    not matched
   conflict.present         already handled  base_sha=b45e000 head_sha=9f3c1e2 item=bd-5
+  focus.item               not matched      cause=not-selected

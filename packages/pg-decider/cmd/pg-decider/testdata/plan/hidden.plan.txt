@@ -16,3 +16,4 @@ skipped:
   fixci.failing-on-head    hidden  reason=parked by the operator
   conflict.present         hidden  reason=parked by the operator
   land.ready               hidden  reason=parked by the operator
+  focus.item               hidden  reason=parked by the operator

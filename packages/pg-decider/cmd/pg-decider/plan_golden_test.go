@@ -33,27 +33,46 @@ var updateGolden = flag.Bool("update", false, "rewrite the golden plan files und
 
 const goldenEntityID = "acme/widgets#42"
 
-// goldenScenarios maps a scenario (the golden file stem) to its view fixture.
-var goldenScenarios = []struct{ name, fixture string }{
+// goldenScenario names a scenario (the golden file stem), its view fixture and
+// the entity; typ and id default to the PR of goldenEntityID.
+type goldenScenario struct{ name, fixture, typ, id string }
+
+// goldenScenarios are the golden plan scenarios.
+var goldenScenarios = []goldenScenario{
 	// Every rule hidden.
-	{"hidden", "pr_hidden"},
+	{name: "hidden", fixture: "pr_hidden"},
 	// A new PR with a conflict, failing CI and unaddressed feedback: creates,
 	// the anchor first.
-	{"new_everything", "pr_new_everything"},
+	{name: "new_everything", fixture: "pr_new_everything"},
 	// Two kinds suppressed; the other kinds still act.
-	{"suppressed_kinds", "pr_all_kinds_suppressed"},
+	{name: "suppressed_kinds", fixture: "pr_all_kinds_suppressed"},
 	// Anchor drift, adoption, a node_id rewrite and a ready_to_land
 	// annotation; an open review item at the current head (review-pending)
 	// and an open conflict item for the current context (already handled).
-	{"anchor_drift", "pr_anchor_drift"},
+	{name: "anchor_drift", fixture: "pr_anchor_drift"},
 	// A merged PR: the open children and the anchor close.
-	{"merged_open_anchor", "pr_merged_open_anchor"},
+	{name: "merged_open_anchor", fixture: "pr_merged_open_anchor"},
 	// A merged or closed PR with no anchor and no work items: every rule
 	// skips, so nothing is created for a dead PR.
-	{"merged_no_anchor", "pr_merged_no_anchor"},
-	{"closed_no_anchor", "pr_closed_no_anchor"},
+	{name: "merged_no_anchor", fixture: "pr_merged_no_anchor"},
+	{name: "closed_no_anchor", fixture: "pr_closed_no_anchor"},
 	// An open PR whose anchor was closed: the anchor reopens.
-	{"reopened_anchor", "pr_reopened_anchor_closed"},
+	{name: "reopened_anchor", fixture: "pr_reopened_anchor_closed"},
+	// An ISSUE source selected into the focus plan with no focus bead: the one
+	// focus.item create, the only rule of the issue rule set.
+	{name: "issue_focus_mint", fixture: "issue_focus_selected", typ: "issue", id: "ACME-7"},
+}
+
+// entity is the scenario's entity type and id.
+func (sc goldenScenario) entity() (typ, id string) {
+	typ, id = sc.typ, sc.id
+	if typ == "" {
+		typ = "pr"
+	}
+	if id == "" {
+		id = goldenEntityID
+	}
+	return typ, id
 }
 
 func goldenPath(scenario, ext string) string {
@@ -82,7 +101,8 @@ func TestGoldenPlanOutput(t *testing.T) {
 		} {
 			t.Run(sc.name+"/"+form.ext, func(t *testing.T) {
 				withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture(filepath.Join("views", sc.fixture+".json")))
-				args := append([]string{"plan", "pr", goldenEntityID}, form.args...)
+				typ, id := sc.entity()
+				args := append([]string{"plan", typ, id}, form.args...)
 				out, errOut, code := runCLI(t, args...)
 				if code != exitcode.OK || errOut != "" {
 					t.Fatalf("code=%d err=%q", code, errOut)
@@ -139,7 +159,8 @@ func TestGoldenPlansCoverEverySkipReasonAndOp(t *testing.T) {
 			reasons[s.Reason] = true
 			seen[s.Rule] = true
 		}
-		for _, r := range decide.RulesFor(decide.EntityTypePR) {
+		typ, _ := sc.entity()
+		for _, r := range decide.RulesFor(typ) {
 			if !seen[r.ID()] {
 				t.Errorf("%s: rule %s is in neither actions nor skipped", sc.name, r.ID())
 			}

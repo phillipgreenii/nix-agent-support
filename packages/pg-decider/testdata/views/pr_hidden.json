@@ -41,6 +41,7 @@
     "category": ""
   },
   "annotations": {
+    "focus_selected": null,
     "hidden": {
       "value": true,
       "reason": "parked by the operator"

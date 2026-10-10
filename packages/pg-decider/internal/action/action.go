@@ -48,8 +48,14 @@ type Fields struct {
 	AddLabels    []string          `json:"add_labels,omitempty"`    // on update
 	RemoveLabels []string          `json:"remove_labels,omitempty"` // on update
 	Metadata     map[string]string `json:"metadata,omitempty"`
-	Value        *string           `json:"value,omitempty"` // annotate: value to set
-	Clear        bool              `json:"clear,omitempty"` // annotate: remove the key
+	// Status is the status an update sets ("deferred" to hold a focus bead,
+	// "open" to release it); the apply packet renders it to the connector.
+	Status string `json:"status,omitempty"`
+	// ClearDefer clears an update's deferral (a release); the apply packet
+	// renders it to the connector as --clear-defer.
+	ClearDefer bool    `json:"clear_defer,omitempty"`
+	Value      *string `json:"value,omitempty"` // annotate: value to set
+	Clear      bool    `json:"clear,omitempty"` // annotate: remove the key
 }
 
 // Action is one write a decider wants applied.

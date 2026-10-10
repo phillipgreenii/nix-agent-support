@@ -140,6 +140,13 @@
         "head_sha": "9f3c1e2",
         "item": "bd-5"
       }
+    },
+    {
+      "rule": "focus.item",
+      "reason": "not matched",
+      "facts": {
+        "cause": "not-selected"
+      }
     }
   ]
 }

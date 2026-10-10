@@ -16,3 +16,4 @@ skipped:
   fixci.failing-on-head    not matched  pr_state=closed
   conflict.present         not matched  pr_state=closed
   land.ready               not matched  pr_state=closed
+  focus.item               not matched  cause=not-selected

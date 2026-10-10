@@ -1,0 +1,29 @@
+{
+  "actions": [
+    {
+      "op": "create",
+      "kind": "focus-item",
+      "target": null,
+      "fields": {
+        "title": "Focus ACME-7 - Crash on startup",
+        "issue_type": "bug",
+        "description": "Focus item for issue ACME-7 (https://tracker.example/ACME-7)",
+        "priority": "P1",
+        "labels": ["focus-item"],
+        "metadata": {
+          "dedup_key": "issue:ACME-7:focus-item",
+          "source_id": "ACME-7",
+          "source_type": "issue"
+        }
+      },
+      "rule": "focus.item",
+      "facts": {
+        "period": "2026-10-10",
+        "source_id": "ACME-7",
+        "source_type": "issue",
+        "transition": "mint"
+      }
+    }
+  ],
+  "skipped": []
+}

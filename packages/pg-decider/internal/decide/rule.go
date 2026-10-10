@@ -13,6 +13,7 @@ package decide
 
 import (
 	"github.com/phillipgreenii/pg-decider/internal/action"
+	"github.com/phillipgreenii/pg-decider/internal/config"
 	"github.com/phillipgreenii/pg-decider/internal/view"
 	"github.com/phillipgreenii/pg-decider/internal/workitem"
 )
@@ -23,6 +24,10 @@ type Input struct {
 	View       *view.View
 	Items      *workitem.Index
 	EntityType string
+	// Config is the decider's configuration, read as data (a rule never
+	// loads it and never reads the environment); nil when the caller has none
+	// (a nil Config behaves like the zero Config).
+	Config *config.Config
 }
 
 // Result is one rule's outcome for one view: zero or more actions, or exactly
@@ -68,10 +73,16 @@ const (
 	OrdinalFixCIFailingOnHead    = 80
 	OrdinalConflictPresent       = 90
 	OrdinalLandReady             = 100
+	// OrdinalFocusItem runs after every PR rule, so a focus bead's mint, hold
+	// or release is planned after the rules that could close a work item.
+	OrdinalFocusItem = 110
 )
 
-// EntityTypePR is the one entity type that ships a decider on day one (S20).
+// EntityTypePR is the entity type that ships a decider on day one (S20).
 const EntityTypePR = "pr"
+
+// EntityTypeIssue is the entity type whose only decider rule is focus.item.
+const EntityTypeIssue = "issue"
 
 // SkipReasons is the complete skip-reason vocabulary (design 7.2): exactly
 // five values, in the order the design lists them.

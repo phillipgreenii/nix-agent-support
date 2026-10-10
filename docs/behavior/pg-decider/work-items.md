@@ -152,7 +152,8 @@ Further, for every kind:
   is never a second item.
 - A merged or closed PR is dead, so the decider creates no work item for it, anchor included, and
   does not reopen one for it, unless the item is the anchor's own mirror or close (see "Terminal
-  entities" and `INV-DECIDER-25` in [`plan-and-apply.md`](plan-and-apply.md)).
+  entities" and `INV-DECIDER-25` in [`plan-and-apply.md`](plan-and-apply.md)). The one other write
+  is the `focus.item` hold of an unclaimed focus bead whose source is terminal.
 - A changed `fbsum` digest alone is not more feedback. A cycle is raised only for comments that no
   earlier cycle covers.
 - Items without a `dedup_key` that belong to the PR (matched by exact title, by the anchor title
@@ -161,8 +162,9 @@ Further, for every kind:
 - An open item labeled `human` is parked work. It counts as existing for dedup, and the decider
   MUST NOT recreate it or relabel it.
 - Who closed an item, or how, is not recorded by the decider and never changes its behavior. The
-  decider reads an item's state only: open, or closed. There is no notion of a closure being
-  dismissed by a person.
+  decider reads an item's state only: open, or closed (the `focus.item` rule also reads a focus
+  bead's finer status, assignee and hold marker; see "The `focus.item` rule"). There is no notion of
+  a closure being dismissed by a person.
 
 ```mermaid
 flowchart TD
@@ -177,11 +179,79 @@ flowchart TD
 
 ## The `focus.item` rule
 
-The `focus.item` rule mints, holds and releases focus beads. The decider registers no rule for the
-`issue` entity type yet, so no `focus.item` condition is in force. The change that registers the
-rule MUST record its condition in THIS section; this section is the durable home of that condition,
-and [`README.md`](README.md) names it as the one place a rule's condition lives outside the PR rule
-table. Until then this doc specifies only the work-item contract above.
+The `focus.item` rule mints, holds and releases focus beads. It is one rule, registered for both
+the `issue` and the `pr` entity types, tied to the `focus-item` kind (so a suppressed `focus-item`
+kind skips it) and evaluated after every PR rule. For a PR it runs inside the hidden and suppressed
+precedence of [`plan-and-apply.md`](plan-and-apply.md): a hidden or suppressed source gets no focus
+bead and no change to the one it has. This section is the durable home of the rule's condition, and
+[`README.md`](README.md) names it as the one place a rule's condition lives outside the PR rule
+table.
+
+The rule decides from the source entity's own view alone. The view says whether the source is
+selected through the annotation `focus_selected`: a period key (a date, `YYYY-MM-DD`) means selected,
+and `none`, the empty string and an unset value (`null`) all mean not selected. A value that is
+neither a period key nor one of those three is malformed, and the rule skips it as `not matched`
+whatever beads exist. A view in which the annotation is ABSENT is not the same as one in which it is
+unset: the run fails closed (see "A view without the annotation" below).
+
+**Terms.** A bead is **claimed** when its state is `in_progress` or its assignee is non-empty. It
+is **held** only when ALL THREE hold: its status is `deferred`, its `focus_hold` marker is `struck`,
+and its assignee is empty. Every other open bead is **in play**. A source is **terminal** when it is
+a merged or closed PR, or an issue that is done: for an issue, its status category is `done`, or,
+when the tracker gives no category (always for beads), its state is one of `closed`, `done`,
+`resolved`, `cancelled`, `canceled` or `wontfix`.
+
+### What the rule plans
+
+| Transition      | When                                                                                                                             | Plan                                                                                                       |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `mint`          | The source is selected, live, has no focus bead and its id is not a bead id                                                      | One `create` of the bead shape above                                                                       |
+| `hold`          | The source is not selected, and the bead's status is exactly `open`, it is unclaimed and it is not held                          | One `update`: status `deferred`, no end date, metadata `focus_hold=struck`                                 |
+| `release`       | The source is selected and live, and the bead is held                                                                            | One `update`: status `open`, deferral cleared, metadata `focus_hold=released`; the assignee is not touched |
+| `release`       | The source is selected and live, and the bead is open, unclaimed and carries a stale `struck` marker (it was undeferred by hand) | One metadata-only `update` rewriting the marker to `released`                                              |
+| `hold_terminal` | The source is terminal, and the bead's status is exactly `open` and it is unclaimed (selected or not, marker or not)             | The same single `update` as a hold                                                                         |
+
+No bead is minted for a terminal source, nor for an issue whose id matches `bead_id_pattern` (an
+epic or a plain bd task: its id already is a bead id; a PR is never one). A reselect of a terminal
+source holds, and never releases, its bead. A source that already has a focus bead is never given a
+second one, however the first was closed.
+
+Every other state is a skip, with a reason from the closed vocabulary of
+[`plan-and-apply.md`](plan-and-apply.md) and a `cause` fact naming the row. A skip of a source that
+has a focus bead also carries the bead's id and state.
+
+| Bead state                                                     | Selected source                         | Not selected source             | Skip reason       |
+| -------------------------------------------------------------- | --------------------------------------- | ------------------------------- | ----------------- |
+| No bead                                                        | `mint` (live) or skip `source-terminal` | skip `not-selected`             | `not matched`     |
+| `open`, unclaimed, marker absent or `released`                 | skip `in-play`                          | `hold`                          | `already handled` |
+| `open`, unclaimed, marker `struck`                             | `release` (marker rewrite only)         | `hold`                          | `already handled` |
+| `in_progress`, or assigned (whatever the status and marker)    | skip `claimed`                          | skip `claimed`                  | `already handled` |
+| `deferred`, marker `struck`, unassigned (held)                 | `release`                               | skip `held`                     | `already handled` |
+| `deferred` with no marker, or marker `released` (someone else) | skip `deferred-by-someone-else`         | skip `deferred-by-someone-else` | `already handled` |
+| `blocked`, `pinned`, `hooked` or any other status              | skip `status-not-open`                  | skip `status-not-open`          | `already handled` |
+| `closed`                                                       | skip `closed`                           | skip `closed`                   | `already handled` |
+| Terminal source, bead `open` and unclaimed                     | `hold_terminal`                         | `hold_terminal`                 | `already handled` |
+| Terminal source, bead held                                     | skip `held-source-terminal`             | skip `held-source-terminal`     | `already handled` |
+
+A terminal source otherwise follows the row of its bead's state (claimed, someone else's, closed and
+the rest are left alone). A bead whose item is `open` but has open children is decided here like any
+other open bead; whether a hold goes through then depends on the apply step's own live checks, which
+[`plan-and-apply.md`](plan-and-apply.md) specifies. A bead a worker or a sweep closed is `closed` to
+the rule, which does not read who closed it or why, and the rule never plans a `close` or a
+`reopen` for a focus bead. A hold and a release are both `update` actions: the only fields they add
+to the action are a status and a deferral clearing.
+
+The plan names its transition in `facts.transition` (`mint`, `hold`, `release` or `hold_terminal`).
+The rule is idempotent by construction: after the hold the view shows the marker, so a re-run on an
+unchanged view writes nothing; a held bead is only released by a reselect, and a later strike
+overwrites `released` with `struck`.
+
+### A view without the annotation
+
+A view whose `annotations` carries no `focus_selected` member at all (an older pg-desk, or a
+rollback) MUST fail the run closed: `plan` and `apply` print the reason `view-lacks-focus_selected`
+on stderr and exit `3`, before any rule or hook runs and with nothing written. A present `null` is
+not absent: it means unset.
 
 ## Invariants
 
@@ -189,11 +259,17 @@ table. Until then this doc specifies only the work-item contract above.
   `<type>:<id>:<kind>` plus the kind's context suffix, and the key MUST live in the work item.
 - **INV-DECIDER-2.** A work item that exists for the current context, open or closed, MUST NOT be
   recreated; a decider MAY only reopen or refresh it where its rule says a new context warrants it.
+  The one other write is the `focus.item` rule's hold and release of an existing focus bead (a
+  status and metadata `update`, never a `reopen` or a `close`), which is a change of the bead's
+  availability and not a new item.
 - **INV-DECIDER-3.** The `id` form and the `node_id` form of a dedup key MUST be treated as the
   same identity, so that a rename or transfer does not orphan an existing work item.
 - **INV-DECIDER-4.** An open work item labeled `human` MUST count as existing work: the decider
   MUST NOT recreate it or change its labels.
 - **INV-DECIDER-5.** No decider behavior MAY depend on who closed a work item or how it was closed;
-  the decider MUST read only whether the item is open or closed.
+  the decider MUST read only whether the item is open or closed. The `focus.item` rule additionally
+  reads a focus bead's other status (`in_progress`, `deferred`, `blocked`, `pinned`, `hooked`), its
+  assignee and its `focus_hold` marker, and nothing about a closure: a bead closed for any reason
+  reads `closed`.
 - **INV-DECIDER-6.** A new feedback cycle MUST be raised only for comments no earlier cycle
   covers; a changed digest alone MUST NOT raise or reopen a cycle.

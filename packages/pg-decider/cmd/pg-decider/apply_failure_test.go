@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/pg-decider/internal/action"
+	"github.com/phillipgreenii/pg-decider/internal/config"
 	"github.com/phillipgreenii/pg-decider/internal/exitcode"
 	"github.com/phillipgreenii/pg-decider/internal/view"
 )
@@ -24,7 +25,7 @@ func scriptedWrites(t *testing.T, decide func(v *view.View) []action.Action, res
 	var recs []execRec
 	origDecide, origCmd := decideFn, applyCommand
 	t.Cleanup(func() { decideFn, applyCommand = origDecide, origCmd })
-	decideFn = func(v *view.View, _ string) action.PlanResult {
+	decideFn = func(v *view.View, _ string, _ *config.Config) action.PlanResult {
 		return action.PlanResult{Actions: decide(v), Skipped: []action.Skip{}}
 	}
 	applyCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
