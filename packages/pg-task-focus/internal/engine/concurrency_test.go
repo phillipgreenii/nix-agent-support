@@ -197,7 +197,9 @@ func TestDoChecksTheContextBeforeWaitingForTheWritePath(t *testing.T) {
 
 // TestReadersSeeConsistentSnapshotsWhileWriting runs Snapshot, State and
 // Version against Do and SetConfig; under -race it also checks the locking.
-// Every snapshot's version MUST describe its model and its configuration.
+// Every snapshot's version MUST describe its model and its configuration, and
+// every reader MUST see the state move: it reads once before the writers
+// start and once after they finish, and those two versions differ.
 func TestReadersSeeConsistentSnapshotsWhileWriting(t *testing.T) {
 	h := newHarness(t, nil)
 	h.bootstrap()
@@ -207,29 +209,43 @@ func TestReadersSeeConsistentSnapshotsWhileWriting(t *testing.T) {
 	var gens sync.Map // *config.Config -> its generation
 	gens.Store(h.cfg, h.gen)
 	stop := make(chan struct{})
-	var readers sync.WaitGroup
-	for range 4 {
+	var readers, primed sync.WaitGroup
+	const nReaders = 4
+	seen := make([]map[engine.Version]bool, nReaders)
+	for i := range nReaders {
+		seen[i] = map[engine.Version]bool{}
+		primed.Add(1)
 		readers.Go(func() {
-			for {
-				select {
-				case <-stop:
-					return
-				default:
-				}
+			// read checks one snapshot and records its version.
+			read := func() bool {
 				snap := h.e.Snapshot()
 				if snap.Version.LogLines != snap.Model.Lines() {
 					t.Errorf("Snapshot version %+v with a model of %d lines", snap.Version, snap.Model.Lines())
-					return
+					return false
 				}
 				if g, ok := gens.Load(snap.Config); !ok || g.(int64) != snap.Version.ConfigGeneration {
 					t.Errorf("Snapshot config of generation %v (known %v), version %+v", g, ok, snap.Version)
-					return
+					return false
 				}
+				seen[i][snap.Version] = true
+				return true
+			}
+			ok := read()
+			primed.Done()
+			for ok {
+				select {
+				case <-stop:
+					read() // the state after the writers finished
+					return
+				default:
+				}
+				ok = read()
 				_ = h.e.State(local(9, 10))
 				_ = h.e.Version()
 			}
 		})
 	}
+	primed.Wait() // every reader has read the state before any write
 	var writers sync.WaitGroup
 	writers.Go(func() {
 		for range 40 {
@@ -253,6 +269,11 @@ func TestReadersSeeConsistentSnapshotsWhileWriting(t *testing.T) {
 	writers.Wait()
 	close(stop)
 	readers.Wait()
+	for i, versions := range seen {
+		if len(versions) < 2 {
+			t.Errorf("reader %d saw %d distinct versions %v, want the state to move under it", i, len(versions), versions)
+		}
+	}
 	if v := h.e.Version(); v.LogLines != h.lines() {
 		t.Errorf("Version %+v, file %d lines", v, h.lines())
 	}

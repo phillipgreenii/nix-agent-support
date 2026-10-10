@@ -224,9 +224,7 @@ func TestTaskCarriesTheMaterializationSnapshot(t *testing.T) {
 }
 
 // rollover appends the rollover batch that leaves day1 for day2 at 875
-// minutes (00:05 in New York on the 8th), marking the task missed, and
-// materializes the day2 task.
-// rollover rolls the day over to day2 at 875: id is missed and day2's
+// minutes (00:05 in New York on the 8th): id is marked missed and day2's
 // post-plan, due a day after day1's, is materialized.
 func rollover(b *logb, id event.TaskID) {
 	next := func(bt event.ID) event.Payload {

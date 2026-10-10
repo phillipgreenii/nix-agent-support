@@ -286,11 +286,13 @@ func (c ChangePeriods) validate(b *builder) (map[event.TaskID]string, string, er
 
 // sizedPayloads are the events of the request whose size depends on what the
 // client wrote, for the size check: each period change (with its zone when it
-// loads, else a placeholder: an unknown zone is judged later), the profile change, a skip with each override reason,
-// and a skip with the shared reason of each open task it may skip (the open
-// tasks of the cadences that change), each with its real id, so the check
-// cannot pass a skip the real id would make too long. With no such task the
-// shared reason is sized beside a placeholder task id.
+// loads, else a placeholder: an unknown zone is judged later), the profile
+// change, a skip with each override reason, and a skip with the shared reason
+// of each open task it may skip (the open tasks of the cadences that change,
+// but not a task with an override, which takes the override's reason), each
+// with its real id, so the check cannot pass a skip the real id would make too
+// long. With no such task the shared reason is sized beside a placeholder task
+// id.
 func (c ChangePeriods) sizedPayloads(b *builder, overrides map[event.TaskID]string, skipAll string) []event.Payload {
 	var out []event.Payload
 	for _, ch := range c.Changes {
@@ -315,6 +317,9 @@ func (c ChangePeriods) sizedPayloads(b *builder, overrides map[event.TaskID]stri
 	}
 	sized := false
 	for _, task := range b.env.Model.Tasks() {
+		if _, overridden := overrides[task.ID]; overridden {
+			continue // its skip carries the override's reason, sized above
+		}
 		if task.Status == projection.Open && cadences[task.Cadence] {
 			out = append(out, event.TaskSkipped{TaskID: task.ID, Reason: skipAll, Batch: placeholderID})
 			sized = true

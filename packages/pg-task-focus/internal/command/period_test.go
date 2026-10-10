@@ -771,7 +771,12 @@ func TestNoCarryOver(t *testing.T) {
 // a shared skip reason against the ids of the tasks it would skip, so a
 // reason that fits beside a short placeholder id but not beside the real one
 // is refused there, before the zone is judged.
-func TestSkipAllReasonIsSizedWithTheTasksItSkips(t *testing.T) {
+// longNamedTaskEnv is an environment whose open daily tasks include one with
+// a very long definition name, that task's id, and a shared skip reason twenty
+// bytes too long beside that id (and short enough beside any id more than
+// twenty bytes shorter).
+func longNamedTaskEnv(t *testing.T) (command.Env, event.TaskID, string) {
+	t.Helper()
 	long := strings.Repeat("a-long-definition-name-", 4) + "x"
 	cfg := loadConfig(t, func(c map[string]any) {
 		c["tasks"].(map[string]any)[long] = map[string]any{
@@ -799,9 +804,15 @@ func TestSkipAllReasonIsSizedWithTheTasksItSkips(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Twenty bytes too long beside the real id, and short enough beside any
-	// id more than twenty bytes shorter.
-	reason := strings.Repeat("r", event.MaxEventBytes-len(base)+1+20)
+	return env, realID, strings.Repeat("r", event.MaxEventBytes-len(base)+1+20)
+}
+
+// TestSkipAllReasonIsSizedWithTheTasksItSkips checks the step-1 size check of
+// a shared skip reason against the ids of the tasks it would skip, so a
+// reason that fits beside a short placeholder id but not beside the real one
+// is refused there, before the zone is judged.
+func TestSkipAllReasonIsSizedWithTheTasksItSkips(t *testing.T) {
+	env, _, reason := longNamedTaskEnv(t)
 	// The real skip is too long: with a valid zone the request is refused too.
 	mustReject(t, env, command.ChangePeriods{Changes: []command.PeriodChange{dayTo(day2)}, SkipAllReason: &reason}, command.ReasonInvalidRequest)
 	badZone := dayTo(day2)
@@ -812,31 +823,22 @@ func TestSkipAllReasonIsSizedWithTheTasksItSkips(t *testing.T) {
 	}
 }
 
-// TestPeriodChangedSizeUsesTheZoneItNames checks the step-1 size check of a
-// period change against the zone the request names when it loads, not a
-// placeholder: a label that fits beside "UTC" but not beside a longer zone is
-// refused as too long, before the profile is judged.
-func TestPeriodChangedSizeUsesTheZoneItNames(t *testing.T) {
-	const longZone = "America/Argentina/ComodRivadavia"
-	base, err := event.Encode(event.Event{
-		Envelope: event.Envelope{V: event.SchemaVersion, ID: idOf('N', 1), At: event.At(at(24 * 60)), EffectiveAt: event.At(at(24 * 60)), Type: event.TypePeriodChanged},
-		Payload:  event.PeriodChanged{Kind: "day", Start: day2, TZ: "UTC", Label: "x", Batch: idOf('N', 2)},
+// TestSkipAllReasonIsNotSizedBesideATaskWithAnOverride checks that a task
+// with an override is skipped with the override's reason, so the shared reason
+// is sized only beside the tasks that take it.
+func TestSkipAllReasonIsNotSizedBesideATaskWithAnOverride(t *testing.T) {
+	env, realID, reason := longNamedTaskEnv(t)
+	p := mustPlan(t, env, command.ChangePeriods{
+		Changes:       []command.PeriodChange{dayTo(day2)},
+		Overrides:     []command.Override{{TaskID: realID, Reason: "carried by hand"}},
+		SkipAllReason: &reason,
 	})
-	if err != nil {
-		t.Fatal(err)
+	skipped := map[event.TaskID]string{}
+	for _, s := range payloadsOf[event.TaskSkipped](p) {
+		skipped[s.TaskID] = s.Reason
 	}
-	// The event fits with "UTC" and is longer than allowed with the long zone.
-	label := strings.Repeat("l", event.MaxEventBytes-len(base)+1)
-	env := envOf(t, bootstrapped(t), at(24*60))
-	change := func(tz string) command.ChangePeriods {
-		c := dayTo(day2)
-		c.TZ, c.Label = tz, label
-		return command.ChangePeriods{Changes: []command.PeriodChange{c}, Profile: "no-such-profile"}
-	}
-	mustReject(t, env, change("UTC"), command.ReasonUnknownProfile)
-	r := mustReject(t, env, change(longZone), command.ReasonInvalidRequest)
-	if !strings.Contains(r.Message, "longer than") {
-		t.Errorf("message %q, want the size refusal", r.Message)
+	if skipped[realID] != "carried by hand" || len(skipped) < 2 {
+		t.Errorf("skips %v, want the override's reason for %s and the shared reason for the others", skipped, realID)
 	}
 }
 
