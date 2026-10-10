@@ -10731,7 +10731,7 @@
                 assert has "export PG_TASK_FOCUS_SWIFTBAR_DUE_SOON_MIN=45\n" (
                   textOf customised "plugins-elsewhere/pg-task-focus.sh"
                 );
-                assert has "export PG_TASK_FOCUS_SWIFTBAR_BOOST_MINUTES='15'\n" (
+                assert has "export PG_TASK_FOCUS_SWIFTBAR_BOOST_MINUTES=15\n" (
                   textOf customised "plugins-elsewhere/pg-task-focus.sh"
                 );
                 # disabled, or non-darwin: no entry
