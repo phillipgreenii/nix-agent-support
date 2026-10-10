@@ -343,6 +343,19 @@ NOT read it as proof that a comment was added.
   `change_flow.hydration_failures.<type>`, `change_flow.occ_retries.<type>`, and the per-entity
   `change_flow.degraded.<type>` set) for `status`, `doctor` and `/metrics`; an entity degraded in
   two consecutive hydrations counts as repeatedly degraded.
+- **Per-query listing status.** After every real (non-`--cached`) call, for each watched query the
+  call consulted, `changes` writes the store `meta` key `change_flow.listing.<type>.<query>`
+  holding the JSON `{"status": ..., "reason": ..., "at": ...}`: `status` is `ok`, `degraded` or
+  `failed` and `reason` is the same short text that query's envelope `sources[]` entry carries
+  (empty for `ok`), both exactly as the envelope reports them; `at` is the RFC3339 time of the call.
+  A later call overwrites the entry, so a `failed` query reads `ok` again after one good call. A
+  total-failure call (exit `3`) still writes its `failed` entries. A `--cached` call writes
+  nothing (it consults no tracker), and a query the call did not consult (`--query` named another)
+  keeps the entry it had. The write is best-effort: a meta write error is a stderr warning and
+  never fails the call. Store-only readers (`focus show`'s coverage header, the `/metrics` listing
+  gauge, `doctor`) read these keys through `changes.ReadListingStatuses`, which returns a type's
+  entries sorted by query and skips an undecodable value rather than failing. Telemetry: the write
+  emits no OpenTelemetry or Prometheus output and logs only that warning.
 
 ## Old-schema refusal
 

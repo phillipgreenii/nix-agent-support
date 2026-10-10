@@ -501,16 +501,16 @@ the change log and cursors, and fast, consistent local reads for the console and
 
 Existing tables (`docs/behavior/pg-desk/store-schema.md`) are kept and extended; schema 9.11.
 
-| Table            | Status                                                              | Holds                                    |
-| ---------------- | ------------------------------------------------------------------- | ---------------------------------------- |
-| `entity`         | extended: `version`, `hydrated_at`, `active`                        | latest snapshot per `(type, id)`         |
-| `interpretation` | kept; `sync_error` column dropped                                   | decorations, recomputed on hydration     |
-| `xref`           | extended: `origin`, `relation`, `actor`, `acted_at`, `reason` (S25) | cross-entity links, derived and external |
-| `annotation`     | generalized to key/value (9.6)                                      | sticky operator and decider data         |
-| `change_log`     | new                                                                 | append-only change records               |
-| `consumer`       | new                                                                 | per-consumer, per-type cursor            |
-| `ledger`         | removed                                                             | —                                        |
-| `meta`           | kept                                                                | schema version, heartbeat/run times      |
+| Table            | Status                                                              | Holds                                                                                                                      |
+| ---------------- | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `entity`         | extended: `version`, `hydrated_at`, `active`                        | latest snapshot per `(type, id)`                                                                                           |
+| `interpretation` | kept; `sync_error` column dropped                                   | decorations, recomputed on hydration                                                                                       |
+| `xref`           | extended: `origin`, `relation`, `actor`, `acted_at`, `reason` (S25) | cross-entity links, derived and external                                                                                   |
+| `annotation`     | generalized to key/value (9.6)                                      | sticky operator and decider data                                                                                           |
+| `change_log`     | new                                                                 | append-only change records                                                                                                 |
+| `consumer`       | new                                                                 | per-consumer, per-type cursor                                                                                              |
+| `ledger`         | removed                                                             | —                                                                                                                          |
+| `meta`           | kept                                                                | schema version, heartbeat/run times, per-query listing status (`change_flow.listing.<type>.<query>`, written by `changes`) |
 
 This table and every other reference in this design to an entity's `(type, id)` or an annotation's
 `(type, id, key)` use the envelope/view's own canonical naming (9.3, 9.5, 9.6). The real SQLite

@@ -79,6 +79,10 @@ type Engine struct {
 	Hydrator Hydrator
 	Now      func() time.Time
 	Warn     io.Writer
+
+	// setMeta replaces Store.SetMeta for the best-effort listing-status
+	// write; tests use it to inject a write failure.
+	setMeta func(key, value string) error
 }
 
 // Outcome tells the caller how a call that delivered an envelope ended.
@@ -213,6 +217,16 @@ func (e *Engine) Run(ctx context.Context, opts Options, emit func(Envelope) erro
 		} else {
 			sources = append(sources, Source{Query: r.query, Status: StatusOK})
 		}
+	}
+	// Persist each consulted query's listing status (incl. on total failure)
+	// so store-only readers can report coverage. Best-effort: a write error
+	// is a warning, never a failed call.
+	set := e.setMeta
+	if set == nil {
+		set = e.Store.SetMeta
+	}
+	if err := recordListing(set, opts.EntityType, e.now().UTC().Format(time.RFC3339), sources); err != nil {
+		e.warnf("changes: persist listing status: %v\n", err)
 	}
 	for _, f := range st.side {
 		e.warnf("%s\n", f)

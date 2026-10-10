@@ -171,7 +171,13 @@ entity_id)` is unique, and `(repo, entity_type, entity_id)` is a foreign key to 
   pre-cutover binary does not remove them. The code that reads and writes them belongs to the
   `focus` command group, not to the cutover.
 
-- **`meta`** is unchanged in shape; `schema_version` becomes `2`.
+- **`meta`** is unchanged in shape; `schema_version` becomes `2`. The change flow's `changes` call
+  keeps, per type and watched query, its last listing status in the key
+  `change_flow.listing.<type>.<query>` (value: JSON `{"status": "ok"|"degraded"|"failed",
+"reason": <the envelope sources[] reason, empty for ok>, "at": <RFC3339 time of the call>}`).
+  It is written after every non-`--cached` call for each consulted query, so that read-only
+  consumers (`focus show`'s coverage header, the `/metrics` listing gauge, `doctor`) can tell a
+  failed or truncated category without a tracker call; see [`changes.md`](changes.md).
 
 The cutover does not append to `change_log`, register any consumer, write any row of the focus
 tables, or write any key other than the reserved keys above; those belong to the work that uses these tables.
