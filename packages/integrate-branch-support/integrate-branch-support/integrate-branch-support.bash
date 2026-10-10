@@ -315,11 +315,13 @@ pre_land_check() {
 # bead pg2-hrw24). Colon-separated, tried in order.
 NIX_FALLBACK_DIRS_DEFAULT="/run/current-system/sw/bin:/nix/var/nix/profiles/default/bin:/etc/profiles/per-user/${USER:-nobody}/bin"
 
-# reinstall_needs_nix <command>: succeed when the command text invokes `nix` as a
-# word. A `-` or `_` neighbour (a repo directory like phillipgreenii-nix-x, or a
-# nix-store hash name) does not count; `/nix/` and a bare `nix run` do.
+# reinstall_needs_nix <command>: succeed when the command text invokes a bare
+# `nix` (one that needs PATH lookup) as a command word: at the start or after
+# whitespace or a shell separator, and followed by whitespace or the end. A path
+# component (/nix/store/..., /nix/var/nix/builds/...), a dashed name (a repo
+# directory like phillipgreenii-nix-x) and an absolute /path/to/nix do not count.
 reinstall_needs_nix() {
-  [[ $1 =~ (^|[^A-Za-z0-9_-])nix([^A-Za-z0-9_-]|$) ]]
+  [[ $1 =~ (^|[[:space:];\&\|\(\`])nix([[:space:]]|$) ]]
 }
 
 # find_nix_dir: print the directory holding an executable `nix` from the

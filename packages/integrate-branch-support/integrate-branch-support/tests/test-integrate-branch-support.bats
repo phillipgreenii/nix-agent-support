@@ -925,6 +925,21 @@ run_scrubbed_nix() {
   [[ "$output" == "FF-4: bundle refresh started"* ]]
 }
 
+@test "bundle-refresh: a /nix/ path component or an absolute nix path does not trigger the nix gate" {
+  git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+  make_bundle_state
+  local common
+  common="$(git rev-parse --path-format=absolute --git-common-dir)"
+  printf '(cd /nix/var/nix/builds/x && /nix/store/abc-nix-2/bin/nix run .#install-pre-commit-hooks)\n' \
+    >"$common/pg-hooks/reinstall"
+  stub_bgrun
+  local old
+  old="$(land_commit flake.lock)"
+  run_scrubbed_nix "/nonexistent-dir" --bundle-refresh "$old"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "FF-4: bundle refresh started"* ]]
+}
+
 @test "bundle-refresh: an unresolvable old sha is skipped, never a failure" {
   git -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
   make_bundle_state
