@@ -223,13 +223,15 @@ func fanOutPRList(ctx context.Context, reg *Registry, backends []string, query s
 	if fingerprints {
 		out.Fingerprints = make(map[string]string)
 	}
-	for _, b := range backends {
-		config, err := listBackendConfig(reg, b, bounds)
-		if err != nil {
-			out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDegraded, Reason: err.Error()})
+	calls := invokeAll(ctx, reg, backends, "list", map[string]any{"query": query, "cursor": nil, "ids_only": idsOnly},
+		func(b string) (json.RawMessage, error) { return listBackendConfig(reg, b, bounds) })
+	for i, b := range backends {
+		call := calls[i]
+		if call.cfgErr != nil {
+			out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDegraded, Reason: call.cfgErr.Error()})
 			continue
 		}
-		resp, err := reg.Invoke(ctx, b, "list", map[string]any{"query": query, "cursor": nil, "ids_only": idsOnly}, config)
+		resp, err := call.resp, call.err
 		if err != nil {
 			// A bounded call never serves the cache fallback: the cache
 			// holds every live entry for the backend regardless of age, so

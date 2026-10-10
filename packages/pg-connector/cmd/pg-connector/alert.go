@@ -56,13 +56,14 @@ func fanOutAlertList(ctx context.Context, reg *Registry, backends []string, quer
 		PresentIDs: make([]string, 0),
 		Sources:    make([]SourceResult, 0, len(backends)),
 	}
-	for _, b := range backends {
-		config, err := reg.BackendConfig(b)
-		if err != nil {
-			out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDegraded, Reason: err.Error()})
+	calls := invokeAll(ctx, reg, backends, "list", map[string]any{"query": query, "ids_only": idsOnly}, registryConfig(reg))
+	for i, b := range backends {
+		call := calls[i]
+		if call.cfgErr != nil {
+			out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDegraded, Reason: call.cfgErr.Error()})
 			continue
 		}
-		resp, err := reg.Invoke(ctx, b, "list", map[string]any{"query": query, "ids_only": idsOnly}, config)
+		resp, err := call.resp, call.err
 		if err != nil {
 			out.Sources = append(out.Sources, classifyListSource(b, err))
 			continue
@@ -147,13 +148,14 @@ func fanOutAlertHistory(ctx context.Context, reg *Registry, backends []string, s
 		"until": until.Format(time.RFC3339),
 		"query": query,
 	}
-	for _, b := range backends {
-		config, err := reg.BackendConfig(b)
-		if err != nil {
-			out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDegraded, Reason: err.Error()})
+	calls := invokeAll(ctx, reg, backends, "list_history", args, registryConfig(reg))
+	for i, b := range backends {
+		call := calls[i]
+		if call.cfgErr != nil {
+			out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDegraded, Reason: call.cfgErr.Error()})
 			continue
 		}
-		resp, err := reg.Invoke(ctx, b, "list_history", args, config)
+		resp, err := call.resp, call.err
 		if err != nil {
 			if errors.Is(err, scriptout.ErrUnknownOp) {
 				out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDisabled, Reason: "not applicable"})

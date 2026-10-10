@@ -120,13 +120,14 @@ func fanOutThreadList(ctx context.Context, reg *Registry, backends []string, que
 		PresentIDs: make([]string, 0),
 		Sources:    make([]SourceResult, 0, len(backends)),
 	}
-	for _, b := range backends {
-		config, err := reg.BackendConfig(b)
-		if err != nil {
-			out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDegraded, Reason: err.Error()})
+	calls := invokeAll(ctx, reg, backends, "list", map[string]any{"query": query, "ids_only": idsOnly}, registryConfig(reg))
+	for i, b := range backends {
+		call := calls[i]
+		if call.cfgErr != nil {
+			out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDegraded, Reason: call.cfgErr.Error()})
 			continue
 		}
-		resp, err := reg.Invoke(ctx, b, "list", map[string]any{"query": query, "ids_only": idsOnly}, config)
+		resp, err := call.resp, call.err
 		if err != nil {
 			out.Sources = append(out.Sources, classifyListSource(b, err))
 			continue

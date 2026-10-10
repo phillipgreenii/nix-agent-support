@@ -157,6 +157,12 @@ Every fan-out response also carries a `sources[]` row per backend actually queri
 reported only as a stderr line. Full contract:
 [`docs/behavior/invariants.md`](docs/behavior/invariants.md)'s `INV-EXIT-1`/`INV-EXIT-2`/`INV-OUT-1`.
 
+A fan-out calls its backends **in parallel** (bead `pg2-55k6y`, `INV-FANOUT-1`), so a down or slow
+backend delays only its own row, but it still reports them in registration order. The number of
+simultaneous backend calls is capped by `state.fanout_concurrency` in the shared config file
+(default 8; `1` runs them one after another). An id-keyed targeted op's try-each resolution across
+several registered backends stays sequential.
+
 ## Package layout
 
 ```

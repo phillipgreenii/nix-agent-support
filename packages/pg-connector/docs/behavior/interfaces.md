@@ -708,7 +708,9 @@ detect`); invoke a **fan-out** op across every backend registered for a capabili
   resolves an otherwise-ambiguous multi-backend registration explicitly (`INV-REG-2`).
 - **Outcome reporting.** A targeted call's outcome is the umbrella's own **targeted** exit-code
   scheme (`0`/`4`/`1`); a fan-out call's outcome is the **fan-out** scheme (`0`/`2`/`3`) plus a
-  `sources[]` row per backend queried — `INV-EXIT-1` and `INV-OUT-1` state both in full. These are
+  `sources[]` row per backend queried — `INV-EXIT-1` and `INV-OUT-1` state both in full. A
+  fan-out queries its backends concurrently and still reports them in registration order
+  (`INV-FANOUT-1`); the id-keyed try-each resolution above is sequential by design. These are
   pg-connector's **own** CLI exit codes, a layer distinct from — and never built from —
   `INTF-WIRE`'s plain `0`/`1`.
 - **Output mode.** `--output` defaults to `json` — the same stable, machine-readable envelope

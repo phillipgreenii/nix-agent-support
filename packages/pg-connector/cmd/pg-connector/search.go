@@ -80,18 +80,20 @@ func fanOutSearch(ctx context.Context, reg *Registry, backends []string, query s
 	// (misconfigured host) result still marshals its sources[] field as
 	// [] rather than null [bug A15].
 	out := FanOutOutcome{Sources: make([]SourceResult, 0, len(backends))}
-	for _, b := range backends {
-		// Per-call config (bead pg2-ttk9t, following the 2026-09-18 search
-		// time-bound design): the backend's static block with the optional
-		// search_since/search_before merged on. Provider.Search's Go
-		// signature is unchanged; a backend that wants the bound reads it
-		// from scriptout.SearchRangeFromContext.
-		config, cfgErr := searchBackendConfig(reg, b, bounds)
-		if cfgErr != nil {
-			out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDegraded, Reason: cfgErr.Error()})
+	// Per-call config (bead pg2-ttk9t, following the 2026-09-18 search
+	// time-bound design): the backend's static block with the optional
+	// search_since/search_before merged on. Provider.Search's Go
+	// signature is unchanged; a backend that wants the bound reads it
+	// from scriptout.SearchRangeFromContext.
+	calls := invokeAll(ctx, reg, backends, "search", searchOpArgs{Query: query, Fields: fields},
+		func(b string) (json.RawMessage, error) { return searchBackendConfig(reg, b, bounds) })
+	for i, b := range backends {
+		call := calls[i]
+		if call.cfgErr != nil {
+			out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDegraded, Reason: call.cfgErr.Error()})
 			continue
 		}
-		resp, err := reg.Invoke(ctx, b, "search", searchOpArgs{Query: query, Fields: fields}, config)
+		resp, err := call.resp, call.err
 		if err != nil {
 			if errors.Is(err, scriptout.ErrUnknownOp) {
 				out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDisabled, Reason: "not applicable"})
@@ -180,12 +182,13 @@ func knownSearchFields(ctx context.Context, reg *Registry, backends []string) ma
 	for f := range coreSearchFieldNames {
 		known[f] = true
 	}
-	for _, b := range backends {
-		resp, err := reg.InvokeCapabilities(ctx, b)
-		if err != nil || resp == nil {
+	// The probes run in parallel (fanout.go); the vocabularies are merged
+	// serially, so known is never written concurrently.
+	for _, p := range capabilitiesAll(ctx, reg, backends) {
+		if p == nil {
 			continue
 		}
-		addVocabularyFieldNames(known, resp.Vocabulary[searchAttributesVocabularyKey])
+		addVocabularyFieldNames(known, p.Vocabulary[searchAttributesVocabularyKey])
 	}
 	return known
 }

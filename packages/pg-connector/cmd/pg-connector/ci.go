@@ -107,13 +107,14 @@ func fanOutCIList(ctx context.Context, reg *Registry, backends []string, prID st
 		Runs:    make([]schema.CIRun, 0),
 		Sources: make([]SourceResult, 0, len(backends)),
 	}
-	for _, b := range backends {
-		config, err := reg.BackendConfig(b)
-		if err != nil {
-			out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDegraded, Reason: err.Error()})
+	calls := invokeAll(ctx, reg, backends, "list_runs", map[string]string{"pr_id": prID}, registryConfig(reg))
+	for i, b := range backends {
+		call := calls[i]
+		if call.cfgErr != nil {
+			out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDegraded, Reason: call.cfgErr.Error()})
 			continue
 		}
-		resp, err := reg.Invoke(ctx, b, "list_runs", map[string]string{"pr_id": prID}, config)
+		resp, err := call.resp, call.err
 		if err != nil {
 			if errors.Is(err, scriptout.ErrUnknownOp) {
 				out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDisabled, Reason: "not applicable"})

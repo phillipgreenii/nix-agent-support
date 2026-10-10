@@ -498,7 +498,7 @@ in
     state = lib.mkOption {
       type = lib.types.attrsOf lib.types.anything;
       default = { };
-      description = "The `state:` block rendered into the shared config file (e.g. `consumer_prune_after`).";
+      description = "The `state:` block rendered into the shared config file (e.g. `consumer_prune_after`, `fanout_concurrency`).";
     };
 
     configSchemaVersion = lib.mkOption {

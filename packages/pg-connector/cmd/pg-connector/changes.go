@@ -343,95 +343,118 @@ func ledgerInstanceDiscriminator(entityType string) string {
 func fanOutChanges(ctx context.Context, reg *Registry, entityType string, backends []string, query, consumerID string, cached, reset bool) []changesBackendResult {
 	pruneAfter := resolveConsumerPruneAfter(reg)
 	instance := ledgerInstanceDiscriminator(entityType)
-	results := make([]changesBackendResult, 0, len(backends))
-	for _, b := range backends {
-		key := LedgerKey{Type: entityType, Backend: b, Query: query, Instance: instance}
-		res := changesBackendResult{backend: b, key: key}
+	// Backends run in parallel (fanout.go). Each owns a distinct ledger file
+	// (LedgerKey carries the backend) and a distinct per-backend cache file, so
+	// no two goroutines ever touch the same state; the results are returned
+	// in registration order and every cross-backend commit (cache writes,
+	// tombstones, the response) happens serially in the caller afterwards.
+	slots := fanOutEach(ctx, reg, backends, func(ctx context.Context, b string) changesBackendResult {
+		return fanOutChangesOne(ctx, reg, entityType, b, query, consumerID, cached, reset, pruneAfter, instance)
+	})
+	results := make([]changesBackendResult, len(slots))
+	for i, s := range slots {
+		if s.Err != nil {
+			// A panic (or ctx ending before this backend's turn) degrades
+			// only this backend's row and leaves its ledger unadvanced.
+			results[i] = changesBackendResult{
+				backend:     backends[i],
+				key:         LedgerKey{Type: entityType, Backend: backends[i], Query: query, Instance: instance},
+				status:      SourceDegraded,
+				reason:      s.Err.Error(),
+				skipAdvance: true,
+			}
+			continue
+		}
+		results[i] = s.Val
+	}
+	return results
+}
 
-		l, err := loadLedger(key)
-		if err != nil {
+// fanOutChangesOne is one backend's share of fanOutChanges: the per-backend
+// ledger refresh and merge (this file's header comment, steps 1-3).
+func fanOutChangesOne(ctx context.Context, reg *Registry, entityType, b, query, consumerID string, cached, reset bool, pruneAfter time.Duration, instance string) changesBackendResult {
+	key := LedgerKey{Type: entityType, Backend: b, Query: query, Instance: instance}
+	res := changesBackendResult{backend: b, key: key}
+
+	l, err := loadLedger(key)
+	if err != nil {
+		res.status = SourceDegraded
+		res.reason = err.Error()
+		res.skipAdvance = true
+		return res
+	}
+	if reset {
+		l.ResetConsumer(consumerID)
+	}
+	// Captured AFTER any --reset, so 0 on both a genuinely fresh
+	// ledger and a just-reset consumer — mergeChanges below treats
+	// those two cases identically, by design.
+	preCursor := l.Consumers[consumerID].Cursor
+
+	var refreshChanges []LedgerChange
+	if cached {
+		res.status = SourceSucceeded
+	} else {
+		var truncated bool
+		var listFn func(json.RawMessage) ([]json.RawMessage, []string, json.RawMessage, bool, error)
+		if after, ok := refresherEnabled(ctx, reg, entityType, b); ok {
+			// Refresher mode (INV-CACHE-6, INV-CACHE-7): membership plus
+			// a fetch of only the new or aged members.
+			res.pass = &refreshPass{}
+			listFn = refresherListFn(ctx, reg, entityType, b, query, l, after, res.pass, &truncated)
+		} else {
+			listFn = changesListFn(ctx, reg, b, query, &truncated, &res.listed)
+		}
+		var refreshErr error
+		refreshChanges, refreshErr = l.Refresh(listFn)
+		if refreshErr != nil {
+			sr := classifyListSource(b, refreshErr)
+			res.status = sr.Status
+			res.reason = sr.Reason
+			res.skipAdvance = true
+			if errors.Is(refreshErr, scriptout.ErrQueryNotRecognized) {
+				// Rule 3: Evict itself deletes the on-disk file: no
+				// separate saveLedger call (ledger.go's own Evict doc
+				// comment — saveLedger would just recreate what Evict
+				// just removed).
+				l.Evict(key, time.Now(), pruneAfter, true)
+			}
+			// Any other error: design section 5.2, "leaves its file
+			// untouched for that refresh" — no Evict, no advance, and
+			// the in-memory l (which may carry a --reset) is never
+			// saved. The ONE write is the freshness stamp
+			// (INV-LEDGER-FRESH-3), made against a fresh copy.
+			if !errors.Is(refreshErr, scriptout.ErrQueryNotRecognized) {
+				recordFailedFetch(key, refreshErr)
+			}
+			return res
+		}
+		l.Evict(key, time.Now(), pruneAfter, false)
+		// INV-LEDGER-FRESH-1/-2: only here, after a completed
+		// non-cached origin answer, does the ledger learn a fetch
+		// happened. A truncated answer is recorded as a partial, not a
+		// success (INV-FRESH-3).
+		// A refresher pass in which a fetch failed is partial too, however
+		// complete its membership was (INV-CACHE-6).
+		partial := truncated || (res.pass != nil && res.pass.incomplete)
+		l.RecordFetchOutcome(time.Now(), partial, nil)
+		if err := saveLedger(key, l); err != nil {
 			res.status = SourceDegraded
 			res.reason = err.Error()
 			res.skipAdvance = true
-			results = append(results, res)
-			continue
+			return res
 		}
-		if reset {
-			l.ResetConsumer(consumerID)
-		}
-		// Captured AFTER any --reset, so 0 on both a genuinely fresh
-		// ledger and a just-reset consumer — mergeChanges below treats
-		// those two cases identically, by design.
-		preCursor := l.Consumers[consumerID].Cursor
-
-		var refreshChanges []LedgerChange
-		if cached {
-			res.status = SourceSucceeded
-		} else {
-			var truncated bool
-			var listFn func(json.RawMessage) ([]json.RawMessage, []string, json.RawMessage, bool, error)
-			if after, ok := refresherEnabled(ctx, reg, entityType, b); ok {
-				// Refresher mode (INV-CACHE-6, INV-CACHE-7): membership plus
-				// a fetch of only the new or aged members.
-				res.pass = &refreshPass{}
-				listFn = refresherListFn(ctx, reg, entityType, b, query, l, after, res.pass, &truncated)
-			} else {
-				listFn = changesListFn(ctx, reg, b, query, &truncated, &res.listed)
-			}
-			var refreshErr error
-			refreshChanges, refreshErr = l.Refresh(listFn)
-			if refreshErr != nil {
-				sr := classifyListSource(b, refreshErr)
-				res.status = sr.Status
-				res.reason = sr.Reason
-				res.skipAdvance = true
-				if errors.Is(refreshErr, scriptout.ErrQueryNotRecognized) {
-					// Rule 3: Evict itself deletes the on-disk file: no
-					// separate saveLedger call (ledger.go's own Evict doc
-					// comment — saveLedger would just recreate what Evict
-					// just removed).
-					l.Evict(key, time.Now(), pruneAfter, true)
-				}
-				// Any other error: design section 5.2, "leaves its file
-				// untouched for that refresh" — no Evict, no advance, and
-				// the in-memory l (which may carry a --reset) is never
-				// saved. The ONE write is the freshness stamp
-				// (INV-LEDGER-FRESH-3), made against a fresh copy.
-				if !errors.Is(refreshErr, scriptout.ErrQueryNotRecognized) {
-					recordFailedFetch(key, refreshErr)
-				}
-				results = append(results, res)
-				continue
-			}
-			l.Evict(key, time.Now(), pruneAfter, false)
-			// INV-LEDGER-FRESH-1/-2: only here, after a completed
-			// non-cached origin answer, does the ledger learn a fetch
-			// happened. A truncated answer is recorded as a partial, not a
-			// success (INV-FRESH-3).
-			// A refresher pass in which a fetch failed is partial too, however
-			// complete its membership was (INV-CACHE-6).
-			partial := truncated || (res.pass != nil && res.pass.incomplete)
-			l.RecordFetchOutcome(time.Now(), partial, nil)
-			if err := saveLedger(key, l); err != nil {
-				res.status = SourceDegraded
-				res.reason = err.Error()
-				res.skipAdvance = true
-				results = append(results, res)
-				continue
-			}
-			res.truncated = partial
-			res.status = SourceSucceeded
-		}
-
-		var confirmed map[string]json.RawMessage
-		if res.pass != nil {
-			confirmed = res.pass.confirmed
-		}
-		res.entries = mergeChanges(b, l, consumerID, preCursor, refreshChanges, entityType, reg, confirmed)
-		res.ledger = l
-		results = append(results, res)
+		res.truncated = partial
+		res.status = SourceSucceeded
 	}
-	return results
+
+	var confirmed map[string]json.RawMessage
+	if res.pass != nil {
+		confirmed = res.pass.confirmed
+	}
+	res.entries = mergeChanges(b, l, consumerID, preCursor, refreshChanges, entityType, reg, confirmed)
+	res.ledger = l
+	return res
 }
 
 // recordFailedFetch persists the freshness stamp for a failed origin fetch

@@ -134,7 +134,8 @@ const OpListActivity = "list_activity"
 // (pg2-m79ch, pg2-4ae4q), ListBackendTimeout is not touched, and every other
 // op keeps the hung-gh bound handlers are sized against. The op key applies to
 // EVERY backend's list_activity, so a hung one can now take up to
-// ListActivityExecTimeout instead of DefaultExecTimeout in a serial fan-out.
+// ListActivityExecTimeout instead of DefaultExecTimeout; fan-outs run their calls
+// in parallel (INV-FANOUT-1), so that delays only its own source.
 const ListActivityBackendTimeout = 60 * time.Second
 
 // ListActivityExecTimeout is the umbrella's exec deadline for a

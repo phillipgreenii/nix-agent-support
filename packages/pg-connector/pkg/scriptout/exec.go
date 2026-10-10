@@ -44,8 +44,10 @@ var execCmdFactory = exec.CommandContext
 // execTimeout var) and the *exec.Cmd's WaitDelay is set to
 // DefaultWaitDelay, so a hung backend binary — or one whose own grandchild
 // holds its stdout pipe open — is killed and reaped within a bounded time
-// rather than hanging this call (and, since pg-connector's own fan-outs
-// dispatch serially, every backend queued behind it) forever [bead #13].
+// rather than hanging this call forever [bead #13]. (pg-connector's own
+// fan-outs used to dispatch serially, so a hung backend also delayed every
+// backend queued behind it; they now run their calls in parallel, so it
+// costs only its own deadline, bead pg2-55k6y, INV-FANOUT-1.)
 // Folded stderr is capped via TruncateForFold, so a runaway or unexpectedly
 // verbose backend binary cannot inflate the returned error without bound
 // [bead #26].

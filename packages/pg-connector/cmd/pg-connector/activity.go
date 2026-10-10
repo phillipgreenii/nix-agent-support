@@ -94,9 +94,9 @@ func resolveActivityBackends(reg *Registry, pinned string) ([]string, error) {
 }
 
 // fanOutActivityList sends list_activity (range in the op args, static
-// backends.<name> block as config) to every backend in backends, in order,
-// building one sources[] row per backend and concatenating each succeeding
-// backend's items.
+// backends.<name> block as config) to every backend in backends in parallel
+// (fanout.go), building one sources[] row per backend and concatenating each
+// succeeding backend's items, both in registration order.
 func fanOutActivityList(ctx context.Context, reg *Registry, backends []string, args schema.ActivityListArgs) ActivityOutcome {
 	// Both slices start non-nil so a zero-source result still marshals
 	// sources/items as [] rather than null.
@@ -104,13 +104,14 @@ func fanOutActivityList(ctx context.Context, reg *Registry, backends []string, a
 		Sources: make([]activitySourceRow, 0, len(backends)),
 		Items:   make([]activityRow, 0),
 	}
-	for _, b := range backends {
-		config, err := reg.BackendConfig(b)
-		if err != nil {
-			out.Sources = append(out.Sources, activitySourceRow{Source: b, Status: SourceDegraded, Reason: err.Error()})
+	calls := invokeAll(ctx, reg, backends, "list_activity", args, registryConfig(reg))
+	for i, b := range backends {
+		call := calls[i]
+		if call.cfgErr != nil {
+			out.Sources = append(out.Sources, activitySourceRow{Source: b, Status: SourceDegraded, Reason: call.cfgErr.Error()})
 			continue
 		}
-		resp, err := reg.Invoke(ctx, b, "list_activity", args, config)
+		resp, err := call.resp, call.err
 		if err != nil {
 			if errors.Is(err, scriptout.ErrUnknownOp) {
 				out.Sources = append(out.Sources, activitySourceRow{Source: b, Status: SourceDisabled, Reason: "not applicable"})

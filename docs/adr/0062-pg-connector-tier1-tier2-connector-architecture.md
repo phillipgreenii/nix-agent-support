@@ -255,6 +255,68 @@ none of them well, and a future backend is free to pick whatever chain fits its 
     neither instance primary and no unsuffixed instance. The registry behavior is recorded as
     invariant `INV-REG-4` in `packages/pg-connector/docs/behavior/invariants.md`.
 
+12. **Fan-outs run their backend calls in parallel; the output order does not change.** (Amendment,
+    bead `pg2-55k6y`, operator ruling of Phillip, 2026-10-09: "fan-outs MUST run in parallel so
+    that no backend being down or slow holds up the others; output order stays deterministic and
+    unchanged".) The umbrella's fan-outs used to call their backends one after another, with no
+    recorded rationale, so one wedged backend added its whole per-op deadline to every call that
+    included it and delayed every backend queued behind it. They now go through one helper
+    (`packages/pg-connector/cmd/pg-connector/fanout.go`, `fanOutEach`) that runs the per-backend
+    calls concurrently and returns the results in an index-addressed slice, so each fan-out folds
+    them front to back and emits its `sources[]` rows and concatenated or grouped results in
+    REGISTRATION order whatever the completion order. The invariant is `INV-FANOUT-1` in
+    `packages/pg-connector/docs/behavior/invariants.md`. Covered: `pr`/`issue`/`thread`/`mail`/
+    `calendar`/`alert`/`ci` lists, `alert history`, `attention list`, `search` (and its
+    capabilities probe), `activity list` (and the `activity_kinds` probe), `auth status`,
+    `config validate`, and the per-backend work of `pr`/`issue`/`calendar`/`thread` `changes`.
+    Design decisions:
+    - **Concurrency cap: configurable, default 8.** `state.fanout_concurrency` (a positive
+      integer in the shared config file's `state:` block, read like `consumer_prune_after`; absent,
+      non-numeric or below 1 means the default) bounds the number of simultaneous backend calls,
+      each of which is one subprocess. 8 is above the number of backends any host registers today
+      (two beads trackers, jira, pr-github, slack, calendar, mail, alert and the activity
+      sources), so by default every backend runs at once, while an unusually large registry still
+      cannot fork an unbounded number of processes. `1` restores the old strictly serial behavior
+      and is the escape hatch should a backend ever prove unsafe to overlap.
+    - **Per-backend deadline unchanged.** The helper adds no deadline; `scriptout` still applies
+      its per-op exec deadline to each call, so a hung backend still costs its own deadline, and
+      the fan-out costs the slowest backend instead of the sum. Cancelling the caller's context
+      stops backends not yet started and cancels those running (their exec is context-bound).
+    - **Failure isolation.** A call returning an error, an undecodable answer, or panicking yields
+      that backend's own `degraded` row (a recovered panic becomes a per-backend error); it never
+      aborts siblings. No goroutine outlives the fan-out. With one backend, or a cap of 1, the
+      call runs inline on the caller's goroutine.
+    - **Only the calls are concurrent.** Per-backend config is resolved serially before any call
+      starts, and each fan-out still assembles its outcome, decodes results, serves the cache
+      fallback and writes live entities to the entity cache serially in registration order, so
+      the shared outcome and the umbrella's cache writers never see two goroutines. The one
+      exception is `changes`, whose per-backend ledger refresh runs inside the backend's own
+      goroutine; that is safe because every ledger and cache file is keyed by (type, backend,
+      query, instance) and each backend is handled by exactly one goroutine.
+    - **Shared-state audit.** (a) Umbrella entity cache and delta ledger: per-key files written by
+      temp file plus rename, one writer per key per call, as above. (b) `Registry`: read-only
+      after load (`BackendConfig` and `StateValue` are called serially up front; `Invoke` and
+      `InvokeCapabilities` only read the command map); `scriptout`'s timeout and exec-factory
+      variables are read-only outside tests; the package has no other mutable globals. (c) The
+      backends' event log (`events.jsonl`, shared by the two beads instances and by concurrent
+      calls generally): each event is one `O_APPEND` write and rotation takes an `flock`, so
+      concurrent processes were already safe by design, and a fan-out only makes that overlap
+      more likely. (d) `pr-github`'s GraphQL budget (`rate_reserve_points`): the gate reads the
+      LIVE remaining points from GitHub on each call and holds no counter shared between calls,
+      and a fan-out still sends each backend exactly one call, so total points spent are
+      unchanged. The only new exposure is time-of-check slack when two `pr-github` instances
+      sharing one token overlap, which can overshoot the reserve by at most one call's cost per
+      instance; the reserve exists to be a margin, and `fanout_concurrency: 1` removes the
+      overlap if that ever matters. Its per-PR `flock` and posted-comment sidecar guard
+      `review submit` only, a targeted op that never fans out. (e) The per-entity single-flight
+      lock (`show`'s read-through) is a cross-process `flock` already built for concurrent
+      callers and is on a targeted path.
+    - **Not a fan-out, not parallelized.** `INV-REG-2`'s try-each resolution of an id-keyed op
+      (`DispatchTargeted`, `DispatchTargetedOptional`, `show` with cache fallback,
+      `lookupShowCache`) stops at the first answer and includes write ops (`comment`,
+      `transition`), so it stays sequential in registration order. A `--backend` pin runs one
+      call, as before.
+
 ## Related Decisions
 
 - Realizes the Tier-1/Tier-2 split first proposed in
@@ -274,3 +336,6 @@ none of them well, and a future backend is free to pick whatever chain fits its 
 - Amended by bead `pg2-91y12` (operator rulings 2026-10-09), which generalized registry entries
   from bare binary names to `{name, command}` instances (Decision item 11, above) so one backend
   binary can be registered more than once.
+- Amended by bead `pg2-55k6y` (operator ruling 2026-10-09), which made the umbrella's fan-outs run
+  their backend calls in parallel while keeping registration-order output (Decision item 12,
+  above).

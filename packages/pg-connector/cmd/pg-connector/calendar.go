@@ -120,13 +120,14 @@ func fanOutCalendarList(ctx context.Context, reg *Registry, backends []string, s
 		"end":      end.Format(time.RFC3339),
 		"calendar": calendar,
 	}
-	for _, b := range backends {
-		config, err := reg.BackendConfig(b)
-		if err != nil {
-			out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDegraded, Reason: err.Error()})
+	calls := invokeAll(ctx, reg, backends, "list_events", args, registryConfig(reg))
+	for i, b := range backends {
+		call := calls[i]
+		if call.cfgErr != nil {
+			out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDegraded, Reason: call.cfgErr.Error()})
 			continue
 		}
-		resp, err := reg.Invoke(ctx, b, "list_events", args, config)
+		resp, err := call.resp, call.err
 		if err != nil {
 			if errors.Is(err, scriptout.ErrUnknownOp) {
 				out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDisabled, Reason: "not applicable"})

@@ -388,6 +388,23 @@ status`/`config validate`.
   MUST live in this JSON body, never as a stderr `WARNING:` line. `count` MUST be that backend's
   own raw, pre-merge item count, unaffected by any later cross-backend deduplication a fan-out's
   own merge stage performs.
+- **`INV-FANOUT-1`** <!-- uuid: 995aa786-40bc-444a-a31d-eba8fe3d8c27 --> — A fan-out MUST issue its per-backend calls concurrently,
+  so that a backend being down or slow delays only its own row: the fan-out's wall clock is that
+  of its slowest backend, never the sum of every backend's deadline (operator ruling, Phillip,
+  2026-10-09, bead pg2-55k6y). The concurrency is bounded by `state.fanout_concurrency` (a
+  positive integer; default 8; `1` runs the calls strictly one after another). The response MUST
+  stay deterministic and byte-identical to a serial run's: `sources[]` rows and every
+  concatenated or grouped result are emitted in REGISTRATION order regardless of completion
+  order. Each backend call keeps its own per-op deadline; a backend that fails, answers
+  undecodably, or panics MUST yield its own `degraded` row and MUST NOT abort, delay or reorder
+  its siblings. The concurrency applies to the per-backend work only: assembling the response
+  and the entity-cache writes of `list` stay serial, in registration order. The one umbrella
+  state written from a backend's own goroutine is `changes`' per-backend delta ledger (its
+  refresh, save and freshness stamp), and each backend owns its own ledger and cache key
+  (`INV-REG-4`), so no umbrella state is shared between concurrent calls. A
+  single-backend call and a `--backend` pin run exactly as before. `INV-REG-2`'s try-each
+  resolution of an id-keyed op is NOT a fan-out: it stays sequential, in registration order,
+  because it stops at the first answer and a write op MUST NOT be sent to every backend.
 
 ## Cross-cutting capability aggregation
 

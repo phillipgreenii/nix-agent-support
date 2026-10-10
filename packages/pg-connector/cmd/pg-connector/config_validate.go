@@ -120,9 +120,9 @@ func FanOutConfigValidate(ctx context.Context, reg *Registry, backends []string)
 	// (misconfigured host) result still marshals its sources[] field as
 	// [] rather than null [bug A15].
 	out := FanOutOutcome{Sources: make([]SourceResult, 0, len(backends))}
-	for _, b := range backends {
-		out.Sources = append(out.Sources, configValidateOne(ctx, reg, b))
-	}
+	out.Sources = append(out.Sources, sourceRows(backends, fanOutEach(ctx, reg, backends, func(ctx context.Context, b string) SourceResult {
+		return configValidateOne(ctx, reg, b)
+	}))...)
 	return out
 }
 
@@ -251,12 +251,12 @@ func activityKindsUnion(ctx context.Context, reg *Registry) []string {
 		return nil
 	}
 	known := map[string]bool{}
-	for _, b := range sources {
-		resp, err := reg.InvokeCapabilities(ctx, b)
-		if err != nil || resp == nil {
+	// Probes run in parallel (fanout.go); the union is merged serially.
+	for _, p := range capabilitiesAll(ctx, reg, sources) {
+		if p == nil {
 			continue
 		}
-		addVocabularyFieldNames(known, resp.Vocabulary[activityKindsVocabularyKey])
+		addVocabularyFieldNames(known, p.Vocabulary[activityKindsVocabularyKey])
 	}
 	if len(known) == 0 {
 		return nil
