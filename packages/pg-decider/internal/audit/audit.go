@@ -73,7 +73,9 @@ func (Hook) Finish(context.Context, apply.Env, []apply.Event) error { return nil
 //	seq: <n>|none
 //	at: <RFC 3339 UTC>
 //
-// seq is "none" when apply ran without --from-item.
+// seq is "none" when apply ran without --from-item. The facts of a focus.item
+// write include facts.transition (mint, hold, release or hold_terminal): one
+// rule id covers the four transitions, and the comment tells them apart.
 func Body(ev apply.Event, at time.Time) string {
 	seq := "none"
 	if ev.HasSeq {

@@ -12,6 +12,7 @@ import (
 	"github.com/phillipgreenii/pg-decider/internal/config"
 	"github.com/phillipgreenii/pg-decider/internal/decide"
 	"github.com/phillipgreenii/pg-decider/internal/exitcode"
+	"github.com/phillipgreenii/pg-decider/internal/metrics"
 	"github.com/phillipgreenii/pg-decider/internal/plan"
 	"github.com/phillipgreenii/pg-decider/internal/rules"
 )
@@ -46,6 +47,7 @@ var planFn = func(ctx context.Context, out, errOut io.Writer, typ, id string, as
 	// is printed as a plan, because a strike could not be told from "unknown".
 	if err := rules.CheckFocusView(v, typ); err != nil {
 		fmt.Fprintf(errOut, "pg-decider: cannot plan %s %s: %v\n", typ, id, err)
+		_ = metrics.EmitFailureLine(errOut, typ, id, rules.FocusAbsentReason)
 		return exitcode.ViewUnreadable
 	}
 	res := arealabels.Apply(decide.DecideWith(v, typ, cfg), v, cfg)

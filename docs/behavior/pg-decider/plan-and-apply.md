@@ -193,7 +193,8 @@ before anything else happens.
 `plan` uses `0`, `1` and `3` the same way; it never exits `2` because it executes nothing. A view of
 an entity type the `focus.item` rule serves (`pr` or `issue`) whose `annotations` carries no
 `focus_selected` member at all fails the run closed with exit `3` before any rule or hook runs (see
-"A view without the annotation" in [`work-items.md`](work-items.md)).
+"A view without the annotation" in [`work-items.md`](work-items.md)). Before it exits, the failed-closed
+run prints one counters line with `failures` (see "Run counters"), and still writes nothing.
 
 ### The audit comment
 
@@ -214,6 +215,12 @@ at: 2026-10-05T12:00:00Z
 - `facts` is the compact JSON object of the facts the rule keyed on, keys sorted.
 - `seq` is the routed item's sequence number, or `none` for a run without `--from-item`.
 - `at` is the time of the run in UTC, RFC 3339.
+
+The `focus.item` rule covers four transitions under one rule id, so its comment is told apart by
+`facts.transition`, one of `mint`, `hold`, `release` or `hold_terminal`. The comment of an applied
+focus bead write therefore carries `rule: focus.item` and, among the facts the rule keyed on,
+`"transition":"hold"` (or the other three). A hold, release or terminal hold the live re-read
+abandoned (`skipped-stale`) writes no comment.
 
 A comment is written for an applied `create`, `update`, `reopen` or `close`. None is written for a
 `deduped`, `failed`, `skipped-dependency` or `skipped-stale` action, nor for an `annotate` (pg-desk's change log
@@ -291,11 +298,65 @@ is written even for a run that planned nothing.
 }
 ```
 
-- `rules` is an object keyed by rule id, never null, and holds a rule only if it planned an action.
+- `rules` is an object keyed by rule id, never null, and holds a rule only if it planned an action or
+  (for `focus.item`) had a counted skip.
 - `planned` is every action of the rule, and `planned = applied + deduped + failed + skipped`.
   `skipped` counts `skipped-dependency` and `skipped-stale` outcomes, which are not failures.
 - `escalations` is the number of escalation items the run created.
 - Members MAY be added to `v1`; none will be removed or change meaning.
+
+The members below are additive. Each is omitted when it does not apply, so the line of a run without
+focus activity keeps the shape above.
+
+```json
+{
+  "contract": "pg-decider.run-counters/v1",
+  "type": "issue",
+  "id": "ACME-7",
+  "rules": {
+    "focus.item": {
+      "planned": 2,
+      "applied": 1,
+      "deduped": 0,
+      "failed": 0,
+      "skipped": 1,
+      "transitions": {
+        "hold": { "applied": 1 },
+        "release": { "skipped-stale": 1 }
+      },
+      "skips": { "claimed": 1 }
+    }
+  },
+  "escalations": 0,
+  "seq": 17,
+  "from_item": "item-1"
+}
+```
+
+- `transitions` (per rule) counts the rule's actions by the `facts.transition` they carry (`mint`,
+  `hold`, `release`, `hold_terminal`) and then by the outcome word they ended in (`applied`,
+  `deduped`, `failed`, `skipped-dependency`, `skipped-stale`). One rule id covers four transitions,
+  hence the object: `{"hold":{"applied":1,"skipped-stale":1}}` is one hold that was written and one
+  that was abandoned. Today only `focus.item` carries it.
+- `skips` (per rule) counts every skip of a source that has a focus bead (the skip's facts name the
+  bead), keyed by the skip's `facts.cause`, for example `claimed`, `held` or `in-play`. A source with
+  a focus bead whose rule planned no action therefore still emits a counter, so a strike that never
+  takes effect is visible. The rule then appears in `rules` with `planned` zero. A skip of a source
+  with no focus bead, and any skip of another rule, is not counted.
+- `seq` and `from_item` (line level) are the change-log sequence of the routed item that triggered
+  the run and its id; both are omitted for a run without `--from-item`. A pg-desk `focus select`
+  records its run id and per-entity `seq`, so a select, the decider's actions and a bead hold join
+  through them without a transcript.
+- `failures` (line level) is a map from reason to count, present only on the line of a run that
+  failed closed. A view that lacks `annotations.focus_selected` prints one line with
+  `"rules":{}` and `"failures":{"view-lacks-focus_selected":1}` and exits `3`, writing nothing; `plan`
+  prints the same line on stderr before exiting `3`.
+
+Volume and telemetry. The line is the decider's only telemetry: it emits nothing over OpenTelemetry
+or Prometheus, and logs the counters line and its error lines on stderr. Once the issue decider role
+binds `<type>.changed`, a run happens for every change of an entity and for every
+`sweep.reconcile_age` pass, so the volume is one line per active entity per `sweep.reconcile_age`,
+idle runs included; a log pipeline MUST expect that rate.
 
 ## Invariants
 
@@ -338,7 +399,8 @@ is written even for a run that planned nothing.
 - **INV-DECIDER-20.** Each `apply` run that reaches its action list MUST write exactly one run
   counters line to stderr whose counts satisfy `planned = applied + deduped + failed + skipped` for
   every rule. The outcome set is `applied`, `deduped`, `failed`, `skipped-dependency` and
-  `skipped-stale`; the last two are counted under `skipped`.
+  `skipped-stale`; the last two are counted under `skipped`. The additive members `transitions`,
+  `skips`, `seq`, `from_item` and `failures` MUST NOT change what any existing member means.
 - **INV-DECIDER-25.** For a merged or closed PR, the rules that keep the anchor in step with the PR
   and close its open work are the only ones that MAY act, with one deliberate exception: the
   `focus.item` rule MAY hold (one `update` of status and marker, never a `create`, `reopen` or

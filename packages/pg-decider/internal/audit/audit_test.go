@@ -327,3 +327,59 @@ func TestSkippedStaleFocusHoldPostsNoComment(t *testing.T) {
 		t.Fatalf("an abandoned write must post no comment: %q", cs)
 	}
 }
+
+// The audit comment of every applied focus.item write carries the rule id and
+// facts.transition, one comment per transition; the facts the rule keyed on
+// ride along unchanged.
+func TestFocusItemCommentsCarryTheRuleIDAndFactsTransition(t *testing.T) {
+	for _, tc := range []struct {
+		transition string
+		op         action.Op
+	}{
+		{"mint", action.OpCreate},
+		{"hold", action.OpUpdate},
+		{"release", action.OpUpdate},
+		{"hold_terminal", action.OpUpdate},
+	} {
+		t.Run(tc.transition, func(t *testing.T) {
+			ev := apply.Event{
+				Action: action.Action{
+					Op: tc.op, Kind: "focus-item", Rule: "focus.item",
+					Facts: map[string]any{"transition": tc.transition, "source_type": "issue", "source_id": "ACME-7"},
+				},
+				Outcome: apply.OutcomeApplied, WorkItemID: "bd-1", Seq: 9, HasSeq: true,
+			}
+			want := "pg-decider audit\nrule: focus.item\nop: " + string(tc.op) + "\n" +
+				`facts: {"source_id":"ACME-7","source_type":"issue","transition":"` + tc.transition + `"}` + "\n" +
+				"seq: 9\nat: 2026-10-05T12:00:00Z\n"
+			if got := Body(ev, fixedNow); got != want {
+				t.Fatalf("body:\n got %q\nwant %q", got, want)
+			}
+		})
+	}
+}
+
+// Through the hook: an applied focus hold posts one comment naming the rule
+// and the transition.
+func TestAnAppliedFocusHoldPostsOneCommentCarryingFactsTransition(t *testing.T) {
+	f := newFake(t, func(string) (string, int) { return `{"result":{}}`, 0 })
+	env := envFor(f, nil)
+	hold := apply.Event{
+		Action: action.Action{
+			Op: action.OpUpdate, Kind: "focus-item", Rule: "focus.item", Target: str("bd-1"),
+			Facts: map[string]any{"transition": "hold"},
+		},
+		Outcome: apply.OutcomeApplied, WorkItemID: "bd-1",
+	}
+	if err := New().After(context.Background(), env, hold); err != nil {
+		t.Fatal(err)
+	}
+	cs := f.comments()
+	if len(cs) != 1 || !strings.Contains(cs[0], "rule: focus.item") || !strings.Contains(cs[0], `"transition":"hold"`) {
+		t.Fatalf("comments %q", cs)
+	}
+	hold.Outcome = apply.OutcomeSkippedStale
+	if err := New().After(context.Background(), env, hold); err != nil || len(f.comments()) != 1 {
+		t.Fatalf("a skipped-stale hold must post no comment: err %v comments %q", err, f.comments())
+	}
+}

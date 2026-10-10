@@ -173,7 +173,7 @@ func TestApplyInstallsTheFailureAndMetricsHooksAndEscalatesWithTheExactRunCounte
 		`"r.dup":{"planned":2,"applied":1,"deduped":1,"failed":0,"skipped":0},` +
 		`"r.fail":{"planned":1,"applied":0,"deduped":0,"failed":1,"skipped":0},` +
 		`"r.ok":{"planned":1,"applied":1,"deduped":0,"failed":0,"skipped":0}},` +
-		`"escalations":1}`
+		`"escalations":1,"seq":17,"from_item":"item-1"}`
 	var lines []string
 	for _, l := range strings.Split(errOut, "\n") {
 		if strings.Contains(l, `"contract":"pg-decider.run-counters/v1"`) {

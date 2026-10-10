@@ -44,6 +44,24 @@ func focusViewWithout(t *testing.T, name string) string {
 	return p
 }
 
+// assertFailureLine requires exactly one counters line on stderr, the counted
+// failure of a run that failed closed: failures {view-lacks-focus_selected: 1}
+// and nothing else.
+func assertFailureLine(t *testing.T, errOut, typ, id string) {
+	t.Helper()
+	want := `{"contract":"pg-decider.run-counters/v1","type":"` + typ + `","id":"` + id + `","rules":{},"escalations":0,` +
+		`"failures":{"view-lacks-focus_selected":1}}`
+	var lines []string
+	for _, l := range strings.Split(errOut, "\n") {
+		if strings.Contains(l, "run-counters") {
+			lines = append(lines, l)
+		}
+	}
+	if len(lines) != 1 || lines[0] != want {
+		t.Fatalf("counters lines %q want exactly %q\nstderr %q", lines, want, errOut)
+	}
+}
+
 func TestPlanFailsClosedWhenFocusSelectedIsAbsent(t *testing.T) {
 	for _, tc := range []struct{ typ, id, fixture string }{
 		{"pr", "acme/widgets#42", fixture("pr_view_minimal.json")},
@@ -63,6 +81,7 @@ func TestPlanFailsClosedWhenFocusSelectedIsAbsent(t *testing.T) {
 				!strings.Contains(errOut, "view-lacks-focus_selected") || !strings.Contains(errOut, "annotations.focus_selected") {
 				t.Fatalf("code=%d out=%q err=%q", code, out, errOut)
 			}
+			assertFailureLine(t, errOut, tc.typ, tc.id)
 		})
 	}
 }
@@ -88,9 +107,7 @@ func TestApplyFailsClosedWhenFocusSelectedIsAbsentAndWritesNothing(t *testing.T)
 			if len(*recs) != 0 || decided {
 				t.Fatalf("a failed-closed run must write nothing and decide nothing: decided=%v execs=%+v", decided, *recs)
 			}
-			if strings.Contains(errOut, "run-counters") {
-				t.Fatalf("no counters line is printed before the telemetry packet adds it: %q", errOut)
-			}
+			assertFailureLine(t, errOut, tc.typ, tc.id)
 		})
 	}
 }

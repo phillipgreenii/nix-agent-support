@@ -37,9 +37,11 @@ var applyCommand apply.CmdFactory = exec.CommandContext
 // applyHooks returns the per-action hooks of an apply run, in call order: the
 // audit comment, then the failure counter and escalation, then the run
 // counters (which count the escalations the failure hook created).
-var applyHooks = func(v *view.View, typ, id string) []apply.Hook {
+var applyHooks = func(v *view.View, typ, id string, it *item.Routed, skipped []action.Skip) []apply.Hook {
 	fail := failure.New(v, typ, id)
 	run := metrics.New(v, typ, id)
+	run.Routed(it)
+	run.Skipped(skipped)
 	fail.OnEscalate(run.Escalated)
 	return []apply.Hook{audit.New(), fail, run}
 }
@@ -68,11 +70,12 @@ var applyFn = func(ctx context.Context, out, errOut io.Writer, typ, id string, i
 	// any hook runs and before anything is written.
 	if err := rules.CheckFocusView(v, typ); err != nil {
 		fmt.Fprintf(errOut, "pg-decider: cannot apply %s %s: %v\n", typ, id, err)
+		_ = metrics.EmitFailureLine(errOut, typ, id, rules.FocusAbsentReason)
 		return exitcode.ViewUnreadable
 	}
 	plan := arealabels.Apply(decideFn(v, typ, cfg), v, cfg)
 	res := apply.Run(ctx, apply.Input{
-		Type: typ, ID: id, View: v, Actions: plan.Actions, Item: it, Hooks: applyHooks(v, typ, id),
+		Type: typ, ID: id, View: v, Actions: plan.Actions, Item: it, Hooks: applyHooks(v, typ, id, it, plan.Skipped),
 		Env: apply.Env{Command: applyCommand, Config: cfg, Clock: time.Now, Stderr: errOut},
 	})
 	for _, ev := range res.Events {
