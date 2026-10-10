@@ -133,6 +133,10 @@ pb gate attach-verified-child --impl <beadid> --title <t> --gate <repo>=<sha> [-
 
 - `--impl`, `--title`, `--gate` (repeatable — one per changed repo) and `--actor` are
   required. `--reason` defaults to `post-deploy verify for <impl>`.
+- `--title` MUST be at most 500 characters (bd's cap, counted in runes). A longer title is
+  rejected with exit `1` before any `pn`/`bd` call, so nothing is created; keep the title a
+  short summary and put the long check list in a `bd comment --file` on the child. A `bd`
+  failure always carries bd's own message (bd reports `--json` errors on stdout).
 - Human output: `child=<id> gates=<n>`. `--json` emits the `AttachResult` envelope
   (`child`, `gates`, `comment_failed`) instead.
 

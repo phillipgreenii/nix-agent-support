@@ -3,7 +3,9 @@ package bd
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/pb/internal/run"
@@ -225,5 +227,91 @@ func TestComment_argv(t *testing.T) {
 	if err := (Client{R: f}).Comment(context.Background(), "/db", "pg2-a",
 		"post-deploy verification gated as pg2-c (pn:applied).", "s"); err != nil {
 		t.Fatalf("Comment: %v", err)
+	}
+}
+
+// bd reports --json errors on STDOUT with an empty stderr; every wrapped call
+// must still say what bd said (pg2-cjakt).
+func TestCreateBead_surfacesBdJSONErrorFromStdout(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("bd", []string{"-C", "/db", "create", "t", "--actor", "s", "--json"},
+		run.Result{Stdout: `{"error":"title must be 500 characters or less (got 660)"}`, ExitCode: 1},
+		errors.New("bd -C /db create t --actor s --json: exit 1: "))
+	_, err := (Client{R: f}).CreateBead(context.Background(), "/db", "t", "", "", "s")
+	if err == nil || !strings.Contains(err.Error(), "title must be 500 characters or less (got 660)") {
+		t.Fatalf("err = %v, want bd's own message", err)
+	}
+}
+
+func TestCreateBead_surfacesNonJSONStdout(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("bd", []string{"-C", "/db", "create", "t", "--actor", "s", "--json"},
+		run.Result{Stdout: "Error: something plain\n", ExitCode: 1},
+		errors.New("bd create: exit 1: "))
+	_, err := (Client{R: f}).CreateBead(context.Background(), "/db", "t", "", "", "s")
+	if err == nil || !strings.Contains(err.Error(), "Error: something plain") {
+		t.Fatalf("err = %v, want the stdout text", err)
+	}
+}
+
+func TestCreateBead_emptyOutputStillSaysSomething(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("bd", []string{"-C", "/db", "create", "t", "--actor", "s", "--json"},
+		run.Result{ExitCode: 1}, errors.New("bd create: exit 1: "))
+	_, err := (Client{R: f}).CreateBead(context.Background(), "/db", "t", "", "", "s")
+	if err == nil || !strings.Contains(err.Error(), "no output from bd") {
+		t.Fatalf("err = %v, want \"no output from bd\"", err)
+	}
+}
+
+func TestWrappedErrorsNeverEndEmpty_allBdCalls(t *testing.T) {
+	ctx := context.Background()
+	calls := map[string]func(Client) error{
+		"gate list":    func(c Client) error { _, e := c.ListGates(ctx, "/db"); return e },
+		"gate create":  func(c Client) error { _, e := c.CreateGate(ctx, "/db", "b", "pn:applied", "id", ""); return e },
+		"set-metadata": func(c Client) error { return c.SetMetadata(ctx, "/db", "i", "k", "v") },
+		"await-id":     func(c Client) error { return c.SetAwaitID(ctx, "/db", "i", "a") },
+		"gate resolve": func(c Client) error { return c.ResolveGate(ctx, "/db", "i", "") },
+		"add-label":    func(c Client) error { return c.AddLabel(ctx, "/db", "i", "human") },
+		"create":       func(c Client) error { _, e := c.CreateBead(ctx, "/db", "t", "", "", "s"); return e },
+		"ready":        func(c Client) error { _, e := c.ReadyIDs(ctx, "/db"); return e },
+		"update defer": func(c Client) error { return c.UpdateDefer(ctx, "/db", "i", "", "s") },
+		"comment":      func(c Client) error { return c.Comment(ctx, "/db", "i", "x", "s") },
+	}
+	for name, call := range calls {
+		c := Client{R: failingRunner{res: run.Result{Stdout: `{"error":"bd said no"}`, ExitCode: 1}}}
+		err := call(c)
+		if err == nil || !strings.Contains(err.Error(), "bd said no") {
+			t.Errorf("%s: err = %v, want bd's stdout message", name, err)
+		}
+		c = Client{R: failingRunner{res: run.Result{ExitCode: 1}}}
+		if err := call(c); err == nil || !strings.Contains(err.Error(), "no output from bd") {
+			t.Errorf("%s (empty): err = %v, want \"no output from bd\"", name, err)
+		}
+	}
+}
+
+// failingRunner fails every call with a CLIRunner-shaped error whose trailing
+// message is empty (what an stderr-only capture produces under --json).
+type failingRunner struct{ res run.Result }
+
+func (f failingRunner) Run(_ context.Context, name string, args []string, _ run.Options) (run.Result, error) {
+	return f.res, fmt.Errorf("%s %s: exit %d: ", name, strings.Join(args, " "), f.res.ExitCode)
+}
+
+func TestValidateTitle(t *testing.T) {
+	if err := ValidateTitle(strings.Repeat("a", 500)); err != nil {
+		t.Errorf("500 chars: %v", err)
+	}
+	err := ValidateTitle(strings.Repeat("a", 501))
+	if err == nil || !strings.Contains(err.Error(), "500") || !strings.Contains(err.Error(), "501") {
+		t.Errorf("501 chars: err = %v, want it to name the 500 limit and the got length", err)
+	}
+	// Counted in runes (bd's unit was not verified): 500 multibyte runes pass.
+	if err := ValidateTitle(strings.Repeat("é", 500)); err != nil {
+		t.Errorf("500 runes: %v", err)
+	}
+	if err := ValidateTitle(strings.Repeat("é", 501)); err == nil {
+		t.Error("501 runes: want error")
 	}
 }

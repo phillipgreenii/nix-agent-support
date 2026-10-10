@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/phillipgreenii/pb/internal/run"
 )
@@ -24,6 +26,33 @@ type Gate struct {
 
 type Client struct {
 	R run.Runner
+}
+
+// MaxTitleLen is bd 1.3.1's cap on a bead title ("title must be 500 characters
+// or less (got N)").
+const MaxTitleLen = 500
+
+// ValidateTitle rejects a title bd would refuse, so the caller fails BEFORE any
+// bd call. Length is counted in RUNES: bd's own unit (bytes vs runes) was not
+// verified, and if bd counts bytes a multibyte title near the cap still fails
+// at bd, whose message wrapErr now surfaces.
+func ValidateTitle(title string) error {
+	if n := utf8.RuneCountInString(title); n > MaxTitleLen {
+		return fmt.Errorf("title is %d characters; bd allows at most %d. Keep the title a short summary and put the long text in a bd comment --file or the description", n, MaxTitleLen)
+	}
+	return nil
+}
+
+// wrapErr wraps a failed bd call as "<op>: <runner error>" and guarantees bd's
+// own reason is present: under --json bd reports errors on STDOUT, which an
+// stderr-only runner error drops (pg2-cjakt). It appends run.Detail unless the
+// runner error already carries it.
+func wrapErr(op string, res run.Result, err error) error {
+	d := run.Detail("bd", res)
+	if strings.Contains(err.Error(), d) {
+		return fmt.Errorf("%s: %w", op, err)
+	}
+	return fmt.Errorf("%s: %w [bd: %s]", op, err, d)
 }
 
 func bdEnv() []string {
@@ -46,7 +75,7 @@ func (c Client) ListGates(ctx context.Context, dir string) ([]Gate, error) {
 		[]string{"-C", dir, "gate", "list", "--limit", "0", "--json"},
 		run.Options{Env: bdEnv()})
 	if err != nil {
-		return nil, fmt.Errorf("bd gate list in %q: %w", dir, err)
+		return nil, wrapErr(fmt.Sprintf("bd gate list in %q", dir), res, err)
 	}
 	var env listEnvelope
 	if err := json.Unmarshal([]byte(res.Stdout), &env); err != nil {
@@ -64,7 +93,7 @@ func (c Client) CreateGate(ctx context.Context, dir, blocks, awaitType, awaitID,
 	args = append(args, "--json")
 	res, err := c.R.Run(ctx, "bd", args, run.Options{Env: bdEnv()})
 	if err != nil {
-		return "", fmt.Errorf("bd gate create: %w", err)
+		return "", wrapErr("bd gate create", res, err)
 	}
 	var env createEnvelope
 	if err := json.Unmarshal([]byte(res.Stdout), &env); err != nil {
@@ -78,11 +107,11 @@ func (c Client) CreateGate(ctx context.Context, dir, blocks, awaitType, awaitID,
 
 // SetMetadata sets metadata.<key>=<value> on issue id.
 func (c Client) SetMetadata(ctx context.Context, dir, id, key, value string) error {
-	_, err := c.R.Run(ctx, "bd",
+	res, err := c.R.Run(ctx, "bd",
 		[]string{"-C", dir, "update", id, "--set-metadata", key + "=" + value},
 		run.Options{Env: bdEnv()})
 	if err != nil {
-		return fmt.Errorf("bd update --set-metadata: %w", err)
+		return wrapErr("bd update --set-metadata", res, err)
 	}
 	return nil
 }
@@ -94,11 +123,11 @@ func (c Client) SetMetadata(ctx context.Context, dir, id, key, value string) err
 // recovers the patch-id for such a SHA, it rewrites the gate in place so it is
 // immune to the SHA being rewritten or pruned later.
 func (c Client) SetAwaitID(ctx context.Context, dir, id, awaitID string) error {
-	_, err := c.R.Run(ctx, "bd",
+	res, err := c.R.Run(ctx, "bd",
 		[]string{"-C", dir, "update", id, "--await-id", awaitID},
 		run.Options{Env: bdEnv()})
 	if err != nil {
-		return fmt.Errorf("bd update --await-id: %w", err)
+		return wrapErr("bd update --await-id", res, err)
 	}
 	return nil
 }
@@ -109,9 +138,9 @@ func (c Client) ResolveGate(ctx context.Context, dir, id, reason string) error {
 	if reason != "" {
 		args = append(args, "--reason", reason)
 	}
-	_, err := c.R.Run(ctx, "bd", args, run.Options{Env: bdEnv()})
+	res, err := c.R.Run(ctx, "bd", args, run.Options{Env: bdEnv()})
 	if err != nil {
-		return fmt.Errorf("bd gate resolve %s: %w", id, err)
+		return wrapErr(fmt.Sprintf("bd gate resolve %s", id), res, err)
 	}
 	return nil
 }
@@ -126,11 +155,11 @@ func (c Client) HasBead(ctx context.Context, dir, id string) bool {
 // AddLabel adds a label to issue id (convert-to-human stale action: label "human"
 // → surfaces in `bd human list`).
 func (c Client) AddLabel(ctx context.Context, dir, id, label string) error {
-	_, err := c.R.Run(ctx, "bd",
+	res, err := c.R.Run(ctx, "bd",
 		[]string{"-C", dir, "update", id, "--add-label", label},
 		run.Options{Env: bdEnv()})
 	if err != nil {
-		return fmt.Errorf("bd update --add-label: %w", err)
+		return wrapErr("bd update --add-label", res, err)
 	}
 	return nil
 }
@@ -153,6 +182,9 @@ type readyEnvelope struct {
 // CreateBead creates a bead titled title (born deferred until deferUntil when
 // non-empty, with deps such as "discovered-from:<id>") and returns the new id.
 func (c Client) CreateBead(ctx context.Context, dir, title, deferUntil, deps, actor string) (string, error) {
+	if err := ValidateTitle(title); err != nil {
+		return "", err
+	}
 	args := []string{"-C", dir, "create", title}
 	if deferUntil != "" {
 		args = append(args, "--defer", deferUntil)
@@ -163,7 +195,7 @@ func (c Client) CreateBead(ctx context.Context, dir, title, deferUntil, deps, ac
 	args = append(args, "--actor", actor, "--json")
 	res, err := c.R.Run(ctx, "bd", args, run.Options{Env: bdEnv()})
 	if err != nil {
-		return "", fmt.Errorf("bd create: %w", err)
+		return "", wrapErr("bd create", res, err)
 	}
 	return parseCreatedBeadID(res.Stdout)
 }
@@ -195,7 +227,7 @@ func (c Client) ReadyIDs(ctx context.Context, dir string) ([]string, error) {
 	res, err := c.R.Run(ctx, "bd", []string{"-C", dir, "ready", "--json", "-n", "0"},
 		run.Options{Env: bdEnv()})
 	if err != nil {
-		return nil, fmt.Errorf("bd ready in %q: %w", dir, err)
+		return nil, wrapErr(fmt.Sprintf("bd ready in %q", dir), res, err)
 	}
 	var env readyEnvelope
 	if err := json.Unmarshal([]byte(res.Stdout), &env); err != nil {
@@ -213,22 +245,22 @@ func (c Client) ReadyIDs(ctx context.Context, dir string) ([]string, error) {
 
 // UpdateDefer sets (or, with deferUntil == "", clears) the defer on issue id.
 func (c Client) UpdateDefer(ctx context.Context, dir, id, deferUntil, actor string) error {
-	_, err := c.R.Run(ctx, "bd",
+	res, err := c.R.Run(ctx, "bd",
 		[]string{"-C", dir, "update", id, "--defer", deferUntil, "--actor", actor},
 		run.Options{Env: bdEnv()})
 	if err != nil {
-		return fmt.Errorf("bd update --defer: %w", err)
+		return wrapErr("bd update --defer", res, err)
 	}
 	return nil
 }
 
 // Comment appends a comment to issue id.
 func (c Client) Comment(ctx context.Context, dir, id, text, actor string) error {
-	_, err := c.R.Run(ctx, "bd",
+	res, err := c.R.Run(ctx, "bd",
 		[]string{"-C", dir, "comment", id, text, "--actor", actor},
 		run.Options{Env: bdEnv()})
 	if err != nil {
-		return fmt.Errorf("bd comment: %w", err)
+		return wrapErr("bd comment", res, err)
 	}
 	return nil
 }

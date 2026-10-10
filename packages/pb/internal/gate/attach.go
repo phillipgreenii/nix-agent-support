@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	"github.com/phillipgreenii/pb/internal/bd"
 )
 
 var (
@@ -47,6 +49,11 @@ type AttachResult struct {
 // The ordering closes the fleet-claim race: the child is never simultaneously
 // workable and ungated.
 func Attach(ctx context.Context, d CreateDeps, p AttachParams) (AttachResult, error) {
+	// Before ANY external call: an over-long title would otherwise only fail at
+	// bd create, after pn/bd probes (pg2-cjakt).
+	if err := bd.ValidateTitle(p.Title); err != nil {
+		return AttachResult{}, err
+	}
 	if len(p.Gates) == 0 {
 		return AttachResult{}, errors.New("at least one gate is required")
 	}

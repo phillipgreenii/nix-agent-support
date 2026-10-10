@@ -42,6 +42,10 @@ create the verification child deferred, prove it is absent from bd ready,
 attach one pn:applied gate per --gate <repo-key>=<sha>, un-defer, re-prove
 absence, and comment the link on the implementation bead.
 
+--title is capped at 500 characters (bd's limit); a longer one is rejected with
+exit 1 before anything is created. Keep it a short summary and put the long
+check list in a bd comment on the child.
+
 Exit codes: 0 fully gated; 1 generic failure; 3 gating incomplete and the
 child was LEFT DEFERRED (safe — route the impl bead to STUCK); 4 the child
 could not be proven un-workable (do NOT close the impl bead).`,

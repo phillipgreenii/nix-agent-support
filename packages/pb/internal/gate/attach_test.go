@@ -3,6 +3,7 @@ package gate
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/pb/internal/bd"
@@ -160,5 +161,56 @@ func TestAttach_commentFailureIsNotFatal(t *testing.T) {
 	}
 	if !out.CommentFailed {
 		t.Error("CommentFailed must be reported")
+	}
+}
+
+func TestAttach_titleOver500RejectedBeforeAnyCall(t *testing.T) {
+	f := run.NewFakeRunner()
+	p := attachParams()
+	p.Title = strings.Repeat("t", 501)
+	_, err := Attach(context.Background(), attachDeps(f), p)
+	if err == nil || !strings.Contains(err.Error(), "500") {
+		t.Fatalf("err = %v, want a message naming the 500-character limit", err)
+	}
+	if errors.Is(err, ErrGatingIncomplete) || errors.Is(err, ErrChildMayBeWorkable) {
+		t.Errorf("a title typo is a plain exit-1 error, got %v", err)
+	}
+	if len(f.Calls()) != 0 {
+		t.Errorf("no pn/bd/git call may run (nothing may be created): %v", f.Calls())
+	}
+}
+
+func TestAttach_title500Accepted(t *testing.T) {
+	f := run.NewFakeRunner()
+	long := strings.Repeat("t", 500)
+	f.AddResponse("pn", []string{"workspace", "info", "--json"}, run.Result{Stdout: createInfoJSON}, nil)
+	f.AddResponse("bd", []string{"-C", "/ws", "show", "pg2-impl", "--json"}, run.Result{Stdout: "{}"}, nil)
+	f.AddResponse("bd", []string{
+		"-C", "/ws", "create", long, "--defer", "2126-01-01", "--deps", "discovered-from:pg2-impl",
+		"--actor", "sess-1", "--json",
+	}, run.Result{Stdout: `{"data":{"id":"pg2-child"}}`}, nil)
+	f.AddResponse("bd", []string{"-C", "/ws", "ready", "--json", "-n", "0"}, run.Result{Stdout: `{"data":[]}`}, nil)
+	p := attachParams()
+	p.Title = long
+	// The inner gate step fails on the unscripted calls; the point is that the
+	// 500-char title got PAST validation and reached bd create.
+	_, err := Attach(context.Background(), attachDeps(f), p)
+	if err == nil || !errors.Is(err, ErrGatingIncomplete) {
+		t.Fatalf("err = %v, want to reach the gating step", err)
+	}
+}
+
+func TestAttach_createFailureCarriesBdStdoutMessage(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("pn", []string{"workspace", "info", "--json"}, run.Result{Stdout: createInfoJSON}, nil)
+	f.AddResponse("bd", []string{"-C", "/ws", "show", "pg2-impl", "--json"}, run.Result{Stdout: "{}"}, nil)
+	f.AddResponse("bd", []string{
+		"-C", "/ws", "create", "verify thing after apply (pg2-impl)",
+		"--defer", "2126-01-01", "--deps", "discovered-from:pg2-impl",
+		"--actor", "sess-1", "--json",
+	}, run.Result{Stdout: `{"error":"validation failed"}`, ExitCode: 1}, errors.New("bd create: exit 1: "))
+	_, err := Attach(context.Background(), attachDeps(f), attachParams())
+	if err == nil || !strings.Contains(err.Error(), "validation failed") {
+		t.Fatalf("err = %v, want bd's message", err)
 	}
 }

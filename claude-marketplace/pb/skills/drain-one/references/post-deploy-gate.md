@@ -15,11 +15,17 @@ link on the impl bead):
 ```bash
 pb gate attach-verified-child \
   --impl <impl-id> \
-  --title "verify <thing> works after apply (<impl-id>): <concrete checks>" \
+  --title "verify <thing> works after apply (<impl-id>): <short summary>" \
   --gate <repo-key>=<landed-sha> \
   --actor "ID"
 # one --gate per changed repo; the child unblocks only when ALL are applied
 ```
+
+`--title` MUST stay a SHORT summary: bd rejects a title over 500 characters
+(`title must be 500 characters or less`), and `pb` refuses it up front with exit
+`1` before creating anything. Put the long list of concrete post-apply checks in
+the child's description or a comment instead, after the call succeeds:
+`bd comment <child> --file <checks.md> --actor "ID"`.
 
 Pin `<landed-sha>` to the sha the lander reported AND you verified in LAND's
 check — never HEAD, never a re-read of the shared primary branch (a peer may
@@ -41,6 +47,9 @@ have advanced either). Branch on the exit code:
   transient: a mistyped `--gate` repo key (fix it and re-run — nothing was
   created), or a repo genuinely outside the workspace (take the FALLBACK below
   instead).
+- `1` with `500 characters` in the error → the `--title` was too long (nothing was
+  created): shorten it to a summary and re-run, moving the checks into a
+  `bd comment --file` on the child.
 - any other non-zero → transient-vs-genuine per the Rules; retry once, then
   STUCK.
 

@@ -53,7 +53,7 @@ type CLIRunner struct{}
 const waitDelay = 2 * time.Second
 
 // Run executes name with args. A non-zero exit returns a non-nil error whose
-// message includes a trimmed stderr tail; Result is still populated (ExitCode set).
+// message includes the failure detail (stderr and stdout error text, see Detail); Result is still populated (ExitCode set).
 func (CLIRunner) Run(ctx context.Context, name string, args []string, opts Options) (Result, error) {
 	parent := ctx
 	if opts.Timeout > 0 {
@@ -99,7 +99,7 @@ func (CLIRunner) Run(ctx context.Context, name string, args []string, opts Optio
 		if errors.As(err, &ee) {
 			res.ExitCode = ee.ExitCode()
 			return res, fmt.Errorf("%s %s: exit %d: %s",
-				name, strings.Join(args, " "), res.ExitCode, strings.TrimSpace(res.Stderr))
+				name, strings.Join(args, " "), res.ExitCode, Detail(name, res))
 		}
 		return res, fmt.Errorf("%s %s: %w (is %s on PATH?)", name, strings.Join(args, " "), err, name)
 	}

@@ -133,3 +133,44 @@ func TestCLIRunner_parentCancelIsNotATimeout(t *testing.T) {
 		t.Fatalf("err = %v, want a non-timeout error", err)
 	}
 }
+
+func TestDetail(t *testing.T) {
+	cases := []struct {
+		name string
+		res  Result
+		want string
+	}{
+		{"stderr only", Result{Stderr: " boom \n"}, "boom"},
+		{"json error string on stdout", Result{Stdout: `{"error":"title must be 500 characters or less (got 660)"}`}, "title must be 500 characters or less (got 660)"},
+		{"json error object on stdout", Result{Stdout: `{"data":null,"error":{"message":"bad thing","code":2}}`}, "bad thing"},
+		{"json message on stdout", Result{Stdout: `{"message":"nope"}`}, "nope"},
+		{"plain stdout text", Result{Stdout: "Error: unknown flag\n"}, "Error: unknown flag"},
+		{"json without error keeps raw text", Result{Stdout: `{"data":null}`}, `{"data":null}`},
+		{"stderr and stdout", Result{Stderr: "warn", Stdout: `{"error":"bad"}`}, "warn; bad"},
+		{"both empty", Result{}, "no output from bd"},
+	}
+	for _, c := range cases {
+		if got := Detail("bd", c.res); got != c.want {
+			t.Errorf("%s: Detail = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+func TestDetail_truncatesHugeStdout(t *testing.T) {
+	got := Detail("bd", Result{Stdout: strings.Repeat("x", 5000)})
+	if len(got) > 1100 || !strings.Contains(got, "truncated") {
+		t.Errorf("len=%d, want truncated to ~1000 bytes with a marker", len(got))
+	}
+}
+
+func TestCLIRunner_errorCarriesStdoutWhenStderrEmpty(t *testing.T) {
+	r := CLIRunner{}
+	_, err := r.Run(context.Background(), "sh", []string{"-c", `printf '{"error":"on stdout"}'; exit 1`}, Options{})
+	if err == nil || !strings.Contains(err.Error(), "on stdout") {
+		t.Fatalf("err = %v, want it to carry the stdout error text", err)
+	}
+	_, err = r.Run(context.Background(), "sh", []string{"-c", "exit 1"}, Options{})
+	if err == nil || strings.HasSuffix(strings.TrimSpace(err.Error()), ":") {
+		t.Fatalf("err = %v, must not end with an empty message after the colon", err)
+	}
+}
