@@ -11,8 +11,9 @@ invariants, with no implementation detail below that floor. It covers the **core
 of five sub-projects (the event log, the projection and timer math derived from it, time and zones,
 configuration, and the validation of every change by replaying the log the change would produce), and
 the **service** of the second (the running daemon and its HTTP API, the command-line client, and what
-the service exports to be observed). The web UI, the connector backend and the menu-bar plugin each
-land in a later sub-project and add their own docs to this directory. A behavior change to the library
+the service exports to be observed), and the **connector backend** of the fourth (the small program
+that turns the service's calendar and attention reads into the operator's connector). The web UI and
+the menu-bar plugin each land in a later sub-project and add their own docs to this directory. A behavior change to the library
 or the service MUST edit these docs in the same change; the reasons behind the main decisions are in
 `docs/adr/0088-pg-task-focus-event-log-and-projection.md` and
 `docs/adr/0091-pg-task-focus-daemon-api-and-observability.md`.
@@ -88,21 +89,23 @@ The terms this library owns. Other sub-projects reuse them and MUST NOT redefine
 | [`service.md`](service.md)                           | The running service: exposure to a browser, the API contract, startup, readiness, reload, shutdown, the overtime sound and notification, read-only mode, the reads other tools use |
 | [`command-line.md`](command-line.md)                 | The command-line client: verbs, naming, times, machine output, exit codes, retries, the offline checks                                                                             |
 | [`observability.md`](observability.md)               | What the service exports: logs, metrics, traces, health, the dashboard, the alert rules, and the promise that none of it holds free text                                           |
+| [`connector.md`](connector.md)                       | The connector backend: calendar events as running segments, the attention feed, the notes block, the launch-per-request decision, failure and read-only reporting, registration    |
 
 ## Interfaces
 
 Every boundary the library exposes is an interface. A counterparty's participation is **essential**
 when the product is nonsense without it and **optional** when the product runs untouched without it.
 
-| Interface      | Defined in                                           | Boundary                                                       | Counterparty (kind)        | Participation |
-| -------------- | ---------------------------------------------------- | -------------------------------------------------------------- | -------------------------- | ------------- |
-| `INTF-LOG`     | [`event-log.md`](event-log.md)                       | The durable log: one event per line, appended                  | `ACTOR-HOST` (actor)       | essential     |
-| `INTF-REQUEST` | [`event-log.md`](event-log.md)                       | Requests in; results and the closed catalog of refusals out    | `ACTOR-CLIENT` (actor)     | essential     |
-| `INTF-STATE`   | [`periods-and-rollover.md`](periods-and-rollover.md) | The state a client reads, including the store health           | `ACTOR-CLIENT` (actor)     | essential     |
-| `INTF-CONFIG`  | [`configuration.md`](configuration.md)               | The configuration file in; its problems out                    | `ACTOR-CONFIGURER` (actor) | essential     |
-| `INTF-HOST`    | [`time-and-zones.md`](time-and-zones.md)             | The clock, zone rules and the machine's zone hints in          | `ACTOR-HOST` (actor)       | essential     |
-| `INTF-ALERT`   | [`cycles-and-timer.md`](cycles-and-timer.md)         | The alert due now, and when the next could fall due            | `ACTOR-CLIENT` (actor)     | optional      |
-| `INTF-API`     | [`service.md`](service.md)                           | The service's one HTTP interface, its stream and its ops reads | `ACTOR-CLIENT` (actor)     | essential     |
+| Interface      | Defined in                                           | Boundary                                                                       | Counterparty (kind)        | Participation |
+| -------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------ | -------------------------- | ------------- |
+| `INTF-LOG`     | [`event-log.md`](event-log.md)                       | The durable log: one event per line, appended                                  | `ACTOR-HOST` (actor)       | essential     |
+| `INTF-REQUEST` | [`event-log.md`](event-log.md)                       | Requests in; results and the closed catalog of refusals out                    | `ACTOR-CLIENT` (actor)     | essential     |
+| `INTF-STATE`   | [`periods-and-rollover.md`](periods-and-rollover.md) | The state a client reads, including the store health                           | `ACTOR-CLIENT` (actor)     | essential     |
+| `INTF-CONFIG`  | [`configuration.md`](configuration.md)               | The configuration file in; its problems out                                    | `ACTOR-CONFIGURER` (actor) | essential     |
+| `INTF-HOST`    | [`time-and-zones.md`](time-and-zones.md)             | The clock, zone rules and the machine's zone hints in                          | `ACTOR-HOST` (actor)       | essential     |
+| `INTF-ALERT`   | [`cycles-and-timer.md`](cycles-and-timer.md)         | The alert due now, and when the next could fall due                            | `ACTOR-CLIENT` (actor)     | optional      |
+| `INTF-API`     | [`service.md`](service.md)                           | The service's one HTTP interface, its stream and its ops reads                 | `ACTOR-CLIENT` (actor)     | essential     |
+| `INTF-CONN`    | [`connector.md`](connector.md)                       | One request in and one response out per launch, in the connector's wire format | `ACTOR-CLIENT` (actor)     | optional      |
 
 ## Invariants
 
@@ -118,6 +121,7 @@ it where there is one:
 - `INV-SVC-1` to `INV-SVC-17` are in [`service.md`](service.md).
 - `INV-CLI-1` to `INV-CLI-12` are in [`command-line.md`](command-line.md).
 - `INV-OBS-1` to `INV-OBS-10` are in [`observability.md`](observability.md).
+- `INV-CONN-1` to `INV-CONN-12` are in [`connector.md`](connector.md).
 
 ### Operator rulings and where they are stated
 
@@ -146,6 +150,8 @@ it where there is one:
 | The service is loopback-only, behind a Host and Origin allowlist, with no authentication token                                              | 2026-10-07 | `INV-SVC-1`, `INV-SVC-2`, `INV-SVC-3`                                |
 | A missed or an extra overtime sound under rare circumstances is not a problem; the scheduler is polled after every commit                   | 2026-10-09 | `INV-SVC-12`                                                         |
 | A log whose active profile the configuration no longer defines is refused at start (daemon designer's decision, reversible by the operator) | 2026-10-10 | `INV-SVC-10`                                                         |
+| The connector backend is launched once per request, not resident (the connector backend designer's decision, reversible by the operator)    | 2026-10-10 | `INV-CONN-1`                                                         |
+| While the store is read-only the connector reports a high-severity item that names the restart                                              | 2026-10-08 | `INV-CONN-9`                                                         |
 
 ## Scope
 
@@ -162,9 +168,9 @@ and notification, the reads the connector uses, the command-line client, and the
 traces, health, dashboard and alert rules the service exports.
 
 **Extent (out)** — the rendering of the web UI and the menu-bar plugin, including every string a human
-reads there; the connector backend that turns the calendar and attention reads into the
-connector's own wire format; and the deployment's local reverse proxy. Each belongs to a later
-sub-project or to the consuming configuration, and its own docs.
+reads there; the connector's own Tier-1 and Tier-2 contract, which the connector's behavior docs own; and
+the deployment's local reverse proxy. Each belongs to a later sub-project or to the consuming
+configuration, and its own docs.
 
 **Floor** — the set speaks in events, batches, requests, instants, zones, periods, tasks, cycles,
 segments, alerts and refusal codes. It never names a package, a function, a data structure or a
@@ -178,13 +184,12 @@ row per gap, each keyed by the element it is against. The intent is settled and 
 has not caught up. The library's and the service's own invariants are realized by the sub-projects
 that wrote them; the rows below are what persists beyond them.
 
-| Element         | Intended                                                                                                                                       | Where the implementation stands                                                                                                                                               |
-| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `INV-LOG-22`    | Every client shows the READ-ONLY sentence, a client already open is told at once, and a future terminal UI does the same                       | The service, the command line and the attention feed carry it; the web UI, the menu-bar plugin and the connector backend are built in sub-projects 3 to 5 and none exists yet |
-| `INV-CYCLE-6`   | Every client shows the resume offer persistently as "Resume `<title>`?", with Switch while another cycle runs                                  | The service and the command line show it; the web UI and the menu-bar plugin are built in sub-projects 3 and 5                                                                |
-| `INV-PERIOD-16` | Every client shows "New day: roll over", "New week: roll over" and "New sprint: roll over" exactly, and pre-fills the change                   | The service and the command line do; the web UI and the menu-bar plugin are built in sub-projects 3 and 5                                                                     |
-| `INV-PERIOD-8`  | The web UI and the period-roll command carry the preview's version back on confirm                                                             | The period-roll command does; the web UI is built in sub-project 3                                                                                                            |
-| `INV-PERIOD-19` | A client blocks confirmation while a cycle blocks the change and offers Stop and End at for each; the period-roll command exits unsuccessfully | The period-roll command does; the web UI is built in sub-project 3                                                                                                            |
-| `INV-CORR-16`   | The corrections editor shows the original and corrected views and a before-and-after timeline                                                  | The service lists both views and the command line prints them; the timeline preview is built in sub-project 3                                                                 |
-| `INV-CYCLE-7`   | A cycle paused longer than the configured limit becomes an attention item                                                                      | The service's attention feed has it; the connector backend that publishes the feed is built in sub-project 4                                                                  |
-| `INV-TIME-10`   | A command-line client defaults the zone from the machine, and a web client from the browser                                                    | The command line does; the web client is built in sub-project 3                                                                                                               |
+| Element         | Intended                                                                                                                                       | Where the implementation stands                                                                                                                                                   |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `INV-LOG-22`    | Every client shows the READ-ONLY sentence, a client already open is told at once, and a future terminal UI does the same                       | The service, the command line, the attention feed and the connector backend carry it; the web UI and the menu-bar plugin are built in sub-projects 3 and 5 and neither exists yet |
+| `INV-CYCLE-6`   | Every client shows the resume offer persistently as "Resume `<title>`?", with Switch while another cycle runs                                  | The service and the command line show it; the web UI and the menu-bar plugin are built in sub-projects 3 and 5                                                                    |
+| `INV-PERIOD-16` | Every client shows "New day: roll over", "New week: roll over" and "New sprint: roll over" exactly, and pre-fills the change                   | The service and the command line do; the web UI and the menu-bar plugin are built in sub-projects 3 and 5                                                                         |
+| `INV-PERIOD-8`  | The web UI and the period-roll command carry the preview's version back on confirm                                                             | The period-roll command does; the web UI is built in sub-project 3                                                                                                                |
+| `INV-PERIOD-19` | A client blocks confirmation while a cycle blocks the change and offers Stop and End at for each; the period-roll command exits unsuccessfully | The period-roll command does; the web UI is built in sub-project 3                                                                                                                |
+| `INV-CORR-16`   | The corrections editor shows the original and corrected views and a before-and-after timeline                                                  | The service lists both views and the command line prints them; the timeline preview is built in sub-project 3                                                                     |
+| `INV-TIME-10`   | A command-line client defaults the zone from the machine, and a web client from the browser                                                    | The command line does; the web client is built in sub-project 3                                                                                                                   |

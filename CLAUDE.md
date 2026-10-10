@@ -103,6 +103,9 @@ observability registrations (`metricsTargets`, `logSources`, `alertRuleFiles`, `
 are system-scope options, so they live in `darwin/modules/pg-task-focus`, which follows the HM flag
 across `home-manager.users` (`test-pg-task-focus-darwin-module`). The public URL's reverse-proxy
 registration belongs to the consuming flake (see `packages/pg-task-focus/README.md`).
+`connector.enable` (bead `pg2-t7me1.4`) registers the `pg-connector-calendar-task-focus` backend with
+the pg-connector HM module, deriving its `base_url` from `listenPort`; the attribute is skipped, not
+an error, when pg-connector's module is not imported (`test-pg-task-focus-hm-connector`).
 
 ## Status Line (`home/programs/claude-status-line`)
 

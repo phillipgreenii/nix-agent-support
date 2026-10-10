@@ -50,6 +50,17 @@ MUST forward the request's `Host` header unchanged (or rewrite it to `127.0.0.1:
 forward to `127.0.0.1:<listen_port>`, and MUST NOT buffer `/api/v1/stream` (server-sent events). The
 daemon works with no proxy.
 
+## The connector backend
+
+The calendar and attention reads (`GET /api/v1/calendar`, `GET /api/v1/attention`) are consumed by
+`pg-connector-calendar-task-focus`, a Tier-2 backend that lives with the other backends in
+`packages/pg-connector/cmd/pg-connector-calendar-task-focus` (its own Go module is `pg-connector`'s,
+so it depends on `api/openapi.yaml` and never on this module's packages). It is launched once per
+request. Set `phillipgreenii.programs.pg-task-focus.connector.enable` to register it with the
+`pg-connector` home module: the registration derives its address from `listenPort`. The behavior is
+in `docs/behavior/pg-task-focus/connector.md`, and the flake check
+`test-pg-connector-calendar-task-focus-contract` fails when the OpenAPI schemas it decodes change.
+
 ## Tests
 
 `go test ./...` runs everything, including the daemon's end-to-end tests: a real daemon on an

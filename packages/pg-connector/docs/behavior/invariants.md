@@ -648,7 +648,9 @@ status`, `config validate`) MUST report that backend's row as `disabled` with a 
 > Operator ruling (Phillip, 2026-10-02, bead `pg2-pf1rb`): "lower attention for dailying meetings,
 > higher attentino for 15 minutes before and highest for the duration of the meeting." Realized by
 > `pg-connector-calendar-osx-bridge`'s `list_attention`; the rules below bind every `calendar`
-> backend that answers `list_attention`.
+> backend that reports calendar events as attention items. A `calendar` backend whose attention
+> items are not calendar events is outside them: `pg-connector-calendar-task-focus` reports the
+> focus service's tasks and cycles (`INV-CONN-7` in `docs/behavior/pg-task-focus`).
 
 - **`INV-CAL-2`** <!-- uuid: a75011e5-d5f9-4ef1-b501-33231f795c9a --> — A `calendar` backend MUST
   report each event in its `list_attention` result at a `severity` determined by where `now` falls
