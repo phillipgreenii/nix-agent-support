@@ -284,6 +284,39 @@ first. The local reconcile tier reads nothing remote and is outside the budget.
 - A budget-exhausted poll keeps the consumer cursor semantics unchanged: it advances only after the
   flush, over the records actually delivered.
 
+## Issue-dependency hydration (`hydration.read_issue_deps`)
+
+`hydration.read_issue_deps` (boolean, default `false`; home-module option `hydration.readIssueDeps`)
+switches issue-dependency hydration on. It applies to every path that hydrates an issue: `changes`,
+`refresh`, `run issue`, `sweep` and `reconcile` all hydrate through the one gatherer the pipeline
+builds, and that gatherer reads the key.
+
+- **Off (the default).** An issue hydration reads `issue show` only. The stored facts carry
+  `issue_show` and no `issue_deps`.
+- **On.** After `issue show`, the hydration also reads `pg-connector issue deps <id> --full` and
+  stores its result as `issue_deps` beside `issue_show`: the RECURSIVE set the issue is blocked BY. It
+  costs one extra connector read per issue hydration (it does not draw on `hydration.max_per_poll`,
+  which counts hydrations). A failed or `not_found` deps read fails the hydration, so a stored
+  `issue_deps` is never stale relative to its `issue_show`.
+- **What it is for.** The daily-focus rank's "unblocks" key. An issue whose stored facts carry
+  `issue_deps` is "available" to it; one without (the key was off when it was last hydrated) ranks
+  with the key at 0 and is counted as unavailable, not as zero by evidence.
+- **Direct edges are not behind the switch.** The one-level typed edges (`issue_show.deps`, each
+  `{id, type}`) are stored whether or not the key is on. `issue_deps` is recursive and the Jira
+  backend returns it empty, so it is NOT the source of the reverse index: the index
+  (`dependency.IssueDependents`, below) is built from the direct edges only.
+
+**The reverse-edge index.** `dependency.IssueDependents`, in `internal/dependency`, is the issue
+counterpart of the PR `Resolver.DependentsOf`. Built once per read from the stored issue entities, it
+answers `DependentsOf(issueID)`: the sorted ids of the issues blocked BY `issueID` directly. An issue
+B is a dependent of A when B's stored `issue_show.deps` holds an edge `{id: A, type: blocks}`; only
+edges of type `blocks` count, one hop only. For a chain A blocked by B and B blocked by C,
+`DependentsOf(C)` is `[B]` and `DependentsOf(B)` is `[A]`. A dependent is listed only while its
+entity is active and the caller's terminal predicate (the rank passes one built over
+`classify.SourceTerminal` and its injected clock) does not hold; the index itself reads no clock and
+refuses an unmigrated store. `Available(issueID)` is true when the issue's own stored facts carry
+`issue_deps`. The index reads the store only: no connector call, no tracker call.
+
 ## Issue `comments_changed` is an `updated_at` proxy
 
 The landed issue payload carries no comment field. For issues, `comments_changed` therefore means
@@ -318,8 +351,9 @@ NOT read it as proof that a comment was added.
 
 ## Invariants
 
-INV-CHANGES-1 to INV-CHANGES-12 govern the flow pg-desk runs itself, which serves the types whose
-backend does not own its changes (`issue`); they do not apply to `pr`, whose flow is retired.
+INV-CHANGES-1 to INV-CHANGES-12, INV-CHANGES-16 and INV-CHANGES-17 govern the flow pg-desk runs
+itself, which serves the types whose backend does not own its changes (`issue`); they do not apply
+to `pr`, whose flow is retired.
 INV-CHANGES-13 to INV-CHANGES-15 govern `pr` and `ci`.
 
 - **INV-CHANGES-1.** The consumer's cursor MUST advance only after the envelope was written, and
@@ -356,6 +390,12 @@ changes`.
 - **INV-CHANGES-15.** A desk run that did not complete for a PR MUST still be recovered with no
   decider acknowledgement protocol and with no local reconcile tier in pg-desk, through the
   backend's redelivery of unacknowledged feed rows and the periodic reconcile lanes.
+- **INV-CHANGES-16.** With `hydration.read_issue_deps` false an issue hydration MUST NOT call
+  `issue deps`, and with it true MUST store its `--full` result as `issue_deps` or fail the
+  hydration; the direct `issue_show.deps` edges MUST be stored either way.
+- **INV-CHANGES-17.** The issue reverse-edge index MUST count DIRECT, `blocks`-typed edges only,
+  MUST exclude inactive and (by the caller's predicate) terminal dependents, and MUST report an
+  issue without stored `issue_deps` as unavailable rather than as having no dependents.
 
 ## Telemetry and logs
 

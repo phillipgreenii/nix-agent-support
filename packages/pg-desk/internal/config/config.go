@@ -254,6 +254,10 @@ type HydrationConfig struct {
 	// MaxPerPoll caps hydrations per poll; nil means
 	// DefaultHydrationMaxPerPoll.
 	MaxPerPoll *int `yaml:"max_per_poll,omitempty" json:"max_per_poll,omitempty"`
+	// ReadIssueDeps is read_issue_deps: when true, every hydrated issue's
+	// stored facts also carry `issue deps <id> --full` (issue_deps). False
+	// (the default, and what an unset key means) hydrates issue_show only.
+	ReadIssueDeps bool `yaml:"read_issue_deps,omitempty" json:"read_issue_deps,omitempty"`
 }
 
 // DefaultInProgressStatuses is the status set jira.in_progress_statuses
@@ -315,6 +319,13 @@ func (c *Config) HydrationMaxPerPoll() int {
 		return DefaultHydrationMaxPerPoll
 	}
 	return *c.Hydration.MaxPerPoll
+}
+
+// HydrationReadIssueDeps returns hydration.read_issue_deps (default false):
+// whether issue hydration also reads `issue deps <id> --full`. Safe on a nil
+// Config.
+func (c *Config) HydrationReadIssueDeps() bool {
+	return c != nil && c.Hydration.ReadIssueDeps
 }
 
 // ChangeLogRetention returns change_log_retention, or ZERO when unset so the

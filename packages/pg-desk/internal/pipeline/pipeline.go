@@ -207,6 +207,10 @@ func WithRunRecordWriter(w io.Writer) Option {
 // caller owns st's lifecycle (open and Close); Pipeline never closes it.
 func New(cfg *config.Config, st *store.Store, opts ...Option) *Pipeline {
 	g := gather.NewGatherer(cfg, st)
+	// hydration.read_issue_deps (default false): this is the gatherer that
+	// hydrates issues for run, refresh, changes, sweep and reconcile, so the
+	// switch must be set before EntityGatherers snapshots it.
+	g.SetReadIssueDeps(cfg.HydrationReadIssueDeps())
 	p := &Pipeline{
 		cfg:             cfg,
 		store:           st,

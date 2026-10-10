@@ -6838,7 +6838,10 @@
                       maxPerPoll = 7;
                       reconcileAge = "15m";
                     };
-                    hydration.maxPerPoll = 9;
+                    hydration = {
+                      maxPerPoll = 9;
+                      readIssueDeps = true;
+                    };
                     changeLogRetention = "21d";
                     consumerStaleAfter = "3d";
                   };
@@ -7055,6 +7058,7 @@
                   grep -q '^  reconcile_age: 15m$' "$w"
                   grep -q '^hydration:' "$w"
                   grep -q '^  max_per_poll: 9$' "$w"
+                  grep -q '^  read_issue_deps: true$' "$w"
                   grep -q '^change_log_retention: 21d$' "$w"
                   grep -q '^consumer_stale_after: 3d$' "$w"
                   # A partial setting renders only its own block.

@@ -118,6 +118,16 @@ is not a pending-review record are all failures.
 
 The read is read-only: gather posts, deletes and submits no review and writes no bead.
 
+## Issue facts and `issue_deps` (issue entity seam)
+
+The issue adapter of the generic entity seam stores `issue_show` (the connector's `issue show
+<id> --fresh` result, whose `deps` field holds the DIRECT typed edges `{id, type}`) and, only when
+`hydration.read_issue_deps` is true, `issue_deps` (`issue deps <id> --full`: the recursive set the
+issue is blocked by). The key, its default (`false`) and the failure rule (a failed deps read fails
+the hydration) are in [`changes.md`](changes.md), "Issue-dependency hydration". The switch is read
+where the pipeline builds the gatherer that hydrates issues, so `changes`, `refresh` and `run issue`
+all honor it.
+
 ## Exit codes, telemetry, and logs
 
 Gather has no exit code of its own; it contributes to `run`'s exit code (`0` on success or a

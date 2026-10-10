@@ -94,7 +94,7 @@ func TestConfigCoversAllSection78Keys(t *testing.T) {
 		{"WatchTypeConfig", reflect.TypeOf(WatchTypeConfig{}), []string{"queries"}},
 		{"WatchThreadConfig", reflect.TypeOf(WatchThreadConfig{}), []string{"queries", "active_window"}},
 		{"SweepConfig", reflect.TypeOf(SweepConfig{}), []string{"max_age", "max_per_poll", "reconcile_age"}},
-		{"HydrationConfig", reflect.TypeOf(HydrationConfig{}), []string{"max_per_poll"}},
+		{"HydrationConfig", reflect.TypeOf(HydrationConfig{}), []string{"max_per_poll", "read_issue_deps"}},
 		{"FocusConfig", reflect.TypeOf(FocusConfig{}), []string{"time_zone", "coverage_backlog_max", "pending_gate_age", "operator_identities"}},
 	}
 	for _, c := range cases {
@@ -621,6 +621,9 @@ func TestChangeFlowKeys_Defaults(t *testing.T) {
 	if got := cfg.HydrationMaxPerPoll(); got != 50 {
 		t.Errorf("HydrationMaxPerPoll = %d, want 50", got)
 	}
+	if cfg.HydrationReadIssueDeps() {
+		t.Errorf("HydrationReadIssueDeps = true, want the false default")
+	}
 	if got := cfg.ChangeLogRetention(); got != 0 {
 		t.Errorf("ChangeLogRetention = %v, want 0", got)
 	}
@@ -645,6 +648,7 @@ sweep:
   max_per_poll: 5
 hydration:
   max_per_poll: 9
+  read_issue_deps: true
 change_log_retention: 14d
 consumer_stale_after: 36h
 `))
@@ -675,11 +679,24 @@ consumer_stale_after: 36h
 	if got := cfg.HydrationMaxPerPoll(); got != 9 {
 		t.Errorf("HydrationMaxPerPoll = %d", got)
 	}
+	if !cfg.HydrationReadIssueDeps() {
+		t.Errorf("HydrationReadIssueDeps = false, want true")
+	}
 	if got := cfg.ChangeLogRetention(); got != 14*24*time.Hour {
 		t.Errorf("ChangeLogRetention = %v", got)
 	}
 	if got := cfg.ConsumerStaleAfter(); got != 36*time.Hour {
 		t.Errorf("ConsumerStaleAfter = %v", got)
+	}
+}
+
+func TestHydrationReadIssueDeps_NilConfigAndBadType(t *testing.T) {
+	var nilCfg *Config
+	if nilCfg.HydrationReadIssueDeps() {
+		t.Error("nil Config must report false")
+	}
+	if _, err := LoadFile(writeYAML(t, t.TempDir(), changeFlowBase+"\nhydration:\n  read_issue_deps: maybe\n")); err == nil {
+		t.Error("a non-boolean hydration.read_issue_deps must be a load error")
 	}
 }
 

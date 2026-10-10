@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -193,4 +194,66 @@ func TestRunCmdIssue_Jira_RemovedChange(t *testing.T) {
 			t.Errorf("facts = %s, want the re-read state", ent.Facts)
 		}
 	})
+}
+
+// issueShowAndDepsScript is a fake pg-connector that answers `issue show` and
+// `issue deps <key> --full` for key, appending every call's arguments to
+// logPath so a test can see which verbs ran.
+func issueShowAndDepsScript(key, logPath string) string {
+	return fmt.Sprintf(`
+echo "$*" >> %[2]q
+case "$1 $2 $3" in
+  "issue show %[1]s")
+    printf '%%s' '{"protocolVersion":1,"schemaVersion":7,"result":{"id":"%[1]s","title":"t","state":"open","assignee":"Someone","issue_type":"Task","as_of":"2026-10-06T00:00:00Z","deps":[{"id":"bd-blocker","type":"blocks"}]}}'
+    exit 0;;
+  "issue deps %[1]s")
+    printf '%%s' '{"protocolVersion":1,"schemaVersion":7,"result":{"ids":["bd-blocker"],"entities":[]}}'
+    exit 0;;
+esac
+exit 4`, key, logPath)
+}
+
+// hydration.read_issue_deps switches `issue deps --full` on for the gatherer
+// pipeline.New builds, the one run, refresh and changes all hydrate through:
+// off (the default) it is never called and the stored facts carry no
+// issue_deps; on, it is called once and its result is stored beside issue_show.
+func TestRunCmdIssue_HydrationReadIssueDepsSwitch(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		on       bool
+		wantDeps bool
+	}{
+		{"off by default", false, false},
+		{"on", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logPath := filepath.Join(t.TempDir(), "calls.log")
+			installFakePGConnector(t, issueShowAndDepsScript("PROJ-99", logPath))
+			cfg := watchedJiraCfg()
+			cfg.Hydration.ReadIssueDeps = tc.on
+
+			st, err := runIssueForTest(t, cfg, "PROJ-99", "added")
+			if err != nil {
+				t.Fatalf("run issue PROJ-99: %v", err)
+			}
+			raw, err := os.ReadFile(logPath)
+			if err != nil {
+				t.Fatalf("read call log: %v", err)
+			}
+			calledDeps := strings.Contains(string(raw), "issue deps PROJ-99 --full")
+			if calledDeps != tc.wantDeps {
+				t.Errorf("issue deps --full called = %v, want %v; calls:\n%s", calledDeps, tc.wantDeps, raw)
+			}
+			ent, found, err := st.GetEntity("acme/widgets", "issue", "PROJ-99")
+			if err != nil || !found {
+				t.Fatalf("GetEntity: found=%v err=%v", found, err)
+			}
+			if has := strings.Contains(ent.Facts, `"issue_deps"`); has != tc.wantDeps {
+				t.Errorf("stored facts carry issue_deps = %v, want %v: %s", has, tc.wantDeps, ent.Facts)
+			}
+			if !strings.Contains(ent.Facts, `"id":"bd-blocker","type":"blocks"`) {
+				t.Errorf("stored facts lost the direct issue_show.deps edge: %s", ent.Facts)
+			}
+		})
+	}
 }

@@ -30,6 +30,11 @@ report that as a notice and exit `0`; `doctor` reports it and does not gate on i
 and case-sensitive against the stored assignee trimmed of surrounding whitespace; the Jira owner
 field is not read.
 
+**A related key documented elsewhere.** `hydration.read_issue_deps` (home-module option
+`hydration.readIssueDeps`, boolean, default `false`) is what makes the rank's unblocks key
+computable for issues; it is specified in [`changes.md`](changes.md), "Issue-dependency
+hydration". A non-boolean value is a load error naming the key.
+
 ## Invariants
 
 - **INV-CONFIG-1.** Every focus key and `bead_id_pattern` MUST be optional: a configuration that sets

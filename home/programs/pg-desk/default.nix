@@ -68,6 +68,7 @@ let
   };
   renderedHydration = lib.filterAttrs (_: v: v != null) {
     max_per_poll = cfg.hydration.maxPerPoll;
+    read_issue_deps = cfg.hydration.readIssueDeps;
   };
 
   # Focus keys (focus.*, bead_id_pattern): each key only when set, and the
@@ -575,6 +576,17 @@ in
           config.yaml's hydration.max_per_poll: the cap on hydrations per
           poll. Positive only: pg-desk rejects an explicit 0, so none is
           renderable. Null uses pg-desk's default, 50.
+        '';
+      };
+      readIssueDeps = lib.mkOption {
+        type = lib.types.nullOr lib.types.bool;
+        default = null;
+        description = ''
+          config.yaml's hydration.read_issue_deps: when true, every hydrated
+          issue's stored facts also carry `pg-connector issue deps <id> --full`
+          (the recursive set the issue is blocked by), which the daily-focus
+          rank's unblocks key reads. Costs one extra connector read per issue
+          hydration. Null (and false) leave it off: pg-desk's default.
         '';
       };
     };
