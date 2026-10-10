@@ -9652,9 +9652,19 @@
                         };
                       };
                     };
+                  # The module writes the plugin only when
+                  # pkgs.stdenv.hostPlatform.isDarwin, so the default eval presents a
+                  # darwin host (this check also runs on linux builders); the `linux`
+                  # case below overrides it explicitly.
+                  darwinPkgs = pkgs // {
+                    stdenv = {
+                      hostPlatform.isDarwin = true;
+                    };
+                  };
+
                   evalWith =
                     {
-                      pkgs' ? pkgs,
+                      pkgs' ? darwinPkgs,
                       cfg,
                     }:
                     (lib.evalModules {
