@@ -30,7 +30,9 @@ const pgConnectorBinary = "pg-connector"
 var execCmdFactory = exec.CommandContext
 
 // issueClient wraps the subset of `pg-connector issue` this package needs:
-// create/update/transition, pinned to cfg.AgentTrackerBackend when set
+// create/update/transition (plus the live `issue children` read, which
+// handleClosure uses to find children the ledger and work-beads never saw),
+// pinned to cfg.AgentTrackerBackend when set
 // (design section 7.5: "Sync writes only agent signals, only through
 // pg-connector issue, pinned to agent_tracker_backend" — Config.
 // AgentTrackerBackend, present but unused before this packet, starts being
@@ -160,6 +162,38 @@ func (c *issueClient) Transition(ctx context.Context, id, state string) error {
 	return err
 }
 
+// liveChild is the subset of schema.Issue `issue children` entries this
+// package reads.
+type liveChild struct {
+	ID     string `json:"id"`
+	State  string `json:"state"`
+	Parent string `json:"parent"`
+}
+
+// Children execs `pg-connector issue children <id>`: a LIVE read of id's
+// non-closed direct children (never the entity cache, so a stale cache cannot
+// make a bead look childless). handleClosure uses it to find children that
+// neither the ledger nor Facts.WorkBeads know about (bead pg2-ubvmh). A
+// failure is returned as an error, never as "no children"; the caller decides
+// whether it can proceed without the read.
+func (c *issueClient) Children(ctx context.Context, id string) ([]liveChild, error) {
+	args := []string{"issue", "children", id}
+	args = append(args, c.backendFlag()...)
+	raw, err := c.targetedRaw(ctx, args)
+	if err != nil {
+		return nil, err
+	}
+	var res struct {
+		Children []liveChild `json:"children"`
+	}
+	if len(raw) > 0 {
+		if decErr := json.Unmarshal(raw, &res); decErr != nil {
+			return nil, fmt.Errorf("sync: decode pg-connector %v result: %w", args, decErr)
+		}
+	}
+	return res.Children, nil
+}
+
 // backendFlag pins dispatch to cfg.AgentTrackerBackend when configured —
 // design section 7.5's "pinned to agent_tracker_backend".
 func (c *issueClient) backendFlag() []string {
@@ -235,6 +269,22 @@ type wireError struct {
 // create/update/transition has a meaningful "not found is fine" case the
 // way gather's removed re-read does.
 func (c *issueClient) targetedCall(ctx context.Context, args []string) (issueResult, error) {
+	raw, err := c.targetedRaw(ctx, args)
+	if err != nil {
+		return issueResult{}, err
+	}
+	var res issueResult
+	if len(raw) > 0 {
+		if decErr := json.Unmarshal(raw, &res); decErr != nil {
+			return issueResult{}, fmt.Errorf("sync: decode pg-connector %v result: %w", args, decErr)
+		}
+	}
+	return res, nil
+}
+
+// targetedRaw is targetedCall's transport: it runs the verb, classifies the
+// exit code, and returns the envelope's undecoded result payload.
+func (c *issueClient) targetedRaw(ctx context.Context, args []string) (json.RawMessage, error) {
 	cmd := execCmdFactory(ctx, pgConnectorBinary, args...)
 	if env := c.issueBeadsDirEnv(); len(env) > 0 {
 		base := cmd.Env
@@ -254,7 +304,7 @@ func (c *issueClient) targetedCall(ctx context.Context, args []string) (issueRes
 		if errors.As(runErr, &exitErr) {
 			exitCode = exitErr.ExitCode()
 		} else {
-			return issueResult{}, fmt.Errorf("sync: exec pg-connector %v: %w", args, runErr)
+			return nil, fmt.Errorf("sync: exec pg-connector %v: %w", args, runErr)
 		}
 	}
 
@@ -262,20 +312,14 @@ func (c *issueClient) targetedCall(ctx context.Context, args []string) (issueRes
 	case 0:
 		var env wireEnvelope
 		if decErr := json.Unmarshal(stdout.Bytes(), &env); decErr != nil {
-			return issueResult{}, fmt.Errorf("sync: decode pg-connector %v stdout: %w", args, decErr)
+			return nil, fmt.Errorf("sync: decode pg-connector %v stdout: %w", args, decErr)
 		}
-		var res issueResult
-		if len(env.Result) > 0 {
-			if decErr := json.Unmarshal(env.Result, &res); decErr != nil {
-				return issueResult{}, fmt.Errorf("sync: decode pg-connector %v result: %w", args, decErr)
-			}
-		}
-		return res, nil
+		return env.Result, nil
 	case 4:
-		return issueResult{}, &ConnectorError{Args: args, ExitCode: exitCode, Code: "not_found"}
+		return nil, &ConnectorError{Args: args, ExitCode: exitCode, Code: "not_found"}
 	default:
 		code, detail := wireErrorDetail(stdout.Bytes())
-		return issueResult{}, &ConnectorError{Args: args, ExitCode: exitCode, Code: code, Detail: detail}
+		return nil, &ConnectorError{Args: args, ExitCode: exitCode, Code: code, Detail: detail}
 	}
 }
 

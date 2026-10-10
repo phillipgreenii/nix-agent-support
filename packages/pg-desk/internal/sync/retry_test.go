@@ -42,6 +42,23 @@ func TestClassify(t *testing.T) {
 		{"version_mismatch", connErr("version_mismatch"), ClassNonTransient},
 		{"query_not_recognized", connErr("query_not_recognized"), ClassNonTransient},
 		{"unknown sync.mode", fmt.Errorf("%w %q (want off, plan, or apply)", errUnknownMode, "sideways"), ClassNonTransient},
+		// bd >= 1.3.1's refusal to close a parent with open children (bead
+		// pg2-ubvmh) arrives wrapped as connector code "unavailable" but cannot
+		// self-heal: needs a person, never retried.
+		{"bd open-child refusal (unavailable)", &ConnectorError{
+			Args: []string{"issue", "transition", "zr-7c0en", "--state", "closed"}, ExitCode: 1, Code: "unavailable",
+			Detail: "unavailable: cannot close zr-7c0en: 1 open child issue(s); close children first or use --force to override",
+		}, ClassNonTransient},
+		{"bd open-child refusal (no error code)", &ConnectorError{
+			Args: []string{"issue", "transition", "zr-7c0en"}, ExitCode: 1,
+			Detail: "cannot close zr-7c0en: 3 open child issue(s); close children first",
+		}, ClassNonTransient},
+		{"wrapped bd open-child refusal", fmt.Errorf("pipeline: sync pr 7: %w", fmt.Errorf("sync: close anchor zr-7c0en: %w",
+			&ConnectorError{ExitCode: 1, Code: "unavailable", Detail: "unavailable: cannot close zr-7c0en: 1 open child issue(s); close children first"})), ClassNonTransient},
+		// The refusal is recognized by its message, not by "unavailable"
+		// alone: an unrelated unavailable close failure still retries.
+		{"unavailable close failure that is not the refusal", &ConnectorError{ExitCode: 1, Code: "unavailable", Detail: "unavailable: cannot close zr-7c0en: database is locked"}, ClassTransient},
+		{"open-child words outside a close refusal", &ConnectorError{ExitCode: 1, Code: "unavailable", Detail: "unavailable: listing open child issue(s) failed: chdir /x: no such file or directory"}, ClassTransient},
 		// Classification sees through the wrapping every sync and pipeline
 		// layer adds.
 		{"wrapped non-transient", fmt.Errorf("pipeline: sync pr 7: %w", fmt.Errorf("sync: create anchor: %w", connErr("unauthenticated"))), ClassNonTransient},

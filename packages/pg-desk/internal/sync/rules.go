@@ -3,6 +3,7 @@ package sync
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -182,12 +183,13 @@ const maxClosureDepth = 8
 // (packages/pg-pr/internal/beadsbridge/bridge.go's CascadeCloseMergeRequest,
 // which closed every direct child via ListChildrenOfPR): after the anchor and
 // the two ledger-tracked cycle beads, EVERY other open parent-child
-// dependent of the anchor found in Facts.WorkBeads is closed too (pg2-kftf9.7:
-// improvised children such as "Human: unblock ..." beads were left open
-// after merge). Unlike pg-pr this cannot enumerate children itself; it is
-// limited to what the work-beads query returned, and only reaches children
-// filed with --parent <anchor>. Every closed bead's own open descendants
-// (children, grandchildren, ...) in the work-beads read close first,
+// dependent of the anchor is closed too (pg2-kftf9.7: improvised children
+// such as "Human: unblock ..." beads were left open after merge). Children
+// come from Facts.WorkBeads AND a live `issue children` read per closed bead
+// (openChildIDs, pg2-ubvmh: the --change removed gather returns no
+// work-beads, and the work-beads query never lists every kind of child), and
+// only children filed with --parent <anchor> are reached. Every closed bead's
+// own open descendants (children, grandchildren, ...) close first,
 // depth-first (closeOpenDescendants). History: pg2-ryexi
 // added the review-pr request to the cascade (it went stale at ~8x
 // process-feedback's rate when only the feedback cycle closed here).
@@ -281,7 +283,11 @@ func (rc *runContext) closeCascadedChild(ctx context.Context, kind, label, beadI
 // whole closure so a malformed graph cannot loop or close a bead twice; a
 // nesting deeper than maxClosureDepth fails the run rather than walking on.
 func (rc *runContext) closeOpenDescendants(ctx context.Context, parentID string, depth int, seen map[string]bool) error {
-	for _, id := range openChildrenOf(rc.workBeads, parentID) {
+	ids, err := rc.openChildIDs(ctx, parentID)
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
 		if seen[id] {
 			continue
 		}
@@ -299,6 +305,59 @@ func (rc *runContext) closeOpenDescendants(ctx context.Context, parentID string,
 		}
 	}
 	return nil
+}
+
+// openChildIDs is every not-yet-closed direct child of parentID that
+// closeOpenDescendants must close: the children Facts.WorkBeads lists, plus
+// the children a LIVE `pg-connector issue children` read reports (bead
+// pg2-ubvmh).
+//
+// The live read is what makes the cascade complete. A `--change removed`
+// re-read (the only gather a confirmed closure ever runs) fetches no
+// work-beads at all, and even the ordinary work-beads query lists only
+// merge-request beads and process-feedback:/review-pr: tasks, so a child filed
+// by anything else (a legacy pg-pr bead, an improvised worker bead) was
+// invisible here and bd >= 1.3.1 then refused to close the parent. Closing
+// only what the live read names is safe: it returns the DIRECT, non-closed
+// children of parentID by bd's own parent edge; an entry whose parent field
+// names another bead, or that is already closed, is skipped here too.
+//
+// Apply mode only: plan mode closes nothing, so it needs no read. Neither does
+// a closure whose anchor the ledger already records as closed: a re-delivered
+// removal of a finished PR stays a no-op (zero connector calls) instead of
+// paying a live read per bead. A backend
+// that lacks the optional op (unknown_op) or does not know the bead
+// (not_found) falls back to Facts.WorkBeads alone, the behavior before the
+// read existed; any other failure fails the run (closed, retried), because
+// closing the parent on a partial view of its children is exactly the defect.
+func (rc *runContext) openChildIDs(ctx context.Context, parentID string) ([]string, error) {
+	ids := openChildrenOf(rc.workBeads, parentID)
+	if rc.mode != ModeApply || rc.ledgerAnchor.LastSyncedContentHash == closedSentinel {
+		return ids, nil
+	}
+	live, err := rc.syncer.client.Children(ctx, parentID)
+	if err != nil {
+		var ce *ConnectorError
+		if errors.As(err, &ce) && (ce.Code == "unknown_op" || ce.Code == "not_found") {
+			return ids, nil
+		}
+		return nil, fmt.Errorf("sync: list open children of %s: %w", parentID, err)
+	}
+	have := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		have[id] = true
+	}
+	for _, c := range live {
+		if c.ID == "" || c.ID == parentID || c.State == "closed" || have[c.ID] {
+			continue
+		}
+		if c.Parent != "" && c.Parent != parentID {
+			continue
+		}
+		have[c.ID] = true
+		ids = append(ids, c.ID)
+	}
+	return ids, nil
 }
 
 // reconcile applies the Anchor/Feedback-cycle/Review-request rules for an

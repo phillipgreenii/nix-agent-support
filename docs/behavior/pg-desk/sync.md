@@ -96,9 +96,14 @@ prompts that read these shapes, in the same change:
   The cascade is type-blind, like pg-pr's own cascade-close
   (`beadsbridge.CascadeCloseMergeRequest`): every open direct child of the anchor (a bead
   filed with `--parent <anchor>`) that the work-beads query returned is closed too, whatever its
-  title or type (`pg2-kftf9.7`; e.g. an improvised "Human: unblock ..." bead). It reaches only
-  children present in the work-beads results, closing each bead's own open descendants
-  (grandchildren and deeper, to a bounded depth) before the bead itself, children first and the
+  title or type (`pg2-kftf9.7`; e.g. an improvised "Human: unblock ..." bead). Children come
+  from two reads, merged: the work-beads results, and a live `pg-connector issue children` read
+  of each bead being closed, so a child the ledger and the work-beads query never saw (a legacy
+  child filed by the retired pg-pr daemon; the closure's own `--change removed` re-read gathers no
+  work-beads at all) is closed too (`pg2-ubvmh`). A failed live read fails the run rather than
+  closing the anchor on a partial view of its children; a backend without that op falls back to
+  the work-beads results alone. Each bead's own open descendants (grandchildren and deeper, to a
+  bounded depth) close before the bead itself, children first and the
   anchor last, because `bd` 1.3.1 refuses to close a parent with an open child. A failed close
   leaves the anchor open, and unstamped, for the next run. An earlier
   revision closed only the feedback cycle, leaving review-pr beads open at a far higher stale
@@ -225,7 +230,9 @@ be retried automatically when the failure needs a person (operator ruling, 2026-
   and every failure not named in the next bullet count as transient.
 - **Needs a person (non-transient)** — authentication (`unauthenticated`), validation
   (`invalid_argument`), and config or version problems (`unknown_op`, `query_not_recognized`,
-  `version_mismatch`, an unknown `sync.mode`).
+  `version_mismatch`, an unknown `sync.mode`), and `bd`'s refusal to close a parent that still has
+  open children (`cannot close <id>: N open child issue(s)`; carried as `unavailable`, recognized
+  by its message, `pg2-ubvmh`): a child the closure did not close stays open until a person acts.
 
 Every failed run of a PR that has a recorded `sync_error` counts one attempt, whichever stage
 failed, and the latest failure decides the class. A transient row is retried with exponential

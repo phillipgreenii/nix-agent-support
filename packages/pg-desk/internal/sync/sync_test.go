@@ -180,6 +180,30 @@ func helperMain() {
 		}
 		os.Stdout.WriteString(fmt.Sprintf(`{"protocolVersion":1,"schemaVersion":6,"result":{"id":%q,"state":"closed","metadata":%s}}`, args[2], md))
 		os.Exit(0)
+	case "children":
+		// `issue children <id>`: the live read of id's non-closed direct
+		// children (bead pg2-ubvmh). GO_HELPER_CHILDREN_FAIL_CODE fails it
+		// with that wire code; GO_HELPER_CHILDREN_RAW is a verbatim result
+		// object; otherwise the answer derives from GO_HELPER_PARENT_OF (the
+		// same child:parent edges bd's refusal uses), minus every child that
+		// already has a recorded close, so a bead is a live child exactly while
+		// bd would still count it as an open child.
+		if code := os.Getenv("GO_HELPER_CHILDREN_FAIL_CODE"); code != "" {
+			writeWireError(code, "injected "+code+" failure")
+		}
+		result := os.Getenv("GO_HELPER_CHILDREN_RAW")
+		if result == "" {
+			closed := closedBeadsSoFar()
+			var kids []string
+			for _, e := range strings.Split(os.Getenv("GO_HELPER_PARENT_OF"), ",") {
+				if child, parent, ok := strings.Cut(e, ":"); ok && parent == args[2] && !closed[child] {
+					kids = append(kids, fmt.Sprintf(`{"id":%q,"title":"live child","state":"open","parent":%q}`, child, parent))
+				}
+			}
+			result = `{"children":[` + strings.Join(kids, ",") + `]}`
+		}
+		os.Stdout.WriteString(`{"protocolVersion":1,"schemaVersion":9,"result":` + result + `}`)
+		os.Exit(0)
 	case "update", "transition":
 		id := ""
 		if len(args) > 2 {
@@ -207,6 +231,23 @@ func helperMain() {
 		os.Stderr.WriteString("unexpected issue verb: " + args[1])
 		os.Exit(99)
 	}
+}
+
+// closedBeadsSoFar is every bead id with a recorded `issue transition <id>
+// ... closed` call.
+func closedBeadsSoFar() map[string]bool {
+	b, _ := os.ReadFile(os.Getenv("GO_HELPER_CALLS_RECORD_FILE"))
+	closed := map[string]bool{}
+	for _, line := range strings.Split(strings.TrimRight(string(b), "\n"), "\n") {
+		var rec callRecord
+		if json.Unmarshal([]byte(line), &rec) != nil || len(rec.Args) < 3 {
+			continue
+		}
+		if rec.verb() == "issue transition" && strings.Contains(strings.Join(rec.Args, " "), "closed") {
+			closed[rec.Args[2]] = true
+		}
+	}
+	return closed
 }
 
 // openDescendantsAtThisCall counts how many descendants of id (reached through

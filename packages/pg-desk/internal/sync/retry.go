@@ -2,6 +2,7 @@ package sync
 
 import (
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
@@ -53,8 +54,23 @@ var nonTransientCodes = map[string]bool{
 	"query_not_recognized": true,
 }
 
+// isOpenChildRefusal reports whether detail is bd >= 1.3.1's refusal to close
+// a parent that still has open children ("cannot close <id>: <N> open child
+// issue(s); close children first or use --force to override"). pg-connector's
+// beads backend wraps that refusal as wire code "unavailable", so the code
+// alone cannot tell it from an environmental failure; the message is the
+// stable discriminator. Both fragments are required so an unrelated failure
+// that merely mentions children, or a different close failure, stays
+// transient. Retrying cannot clear it: a child exists that the closure did not
+// close, and only a person (or a fix to the closure's child discovery) lifts
+// it (bead pg2-ubvmh: it burned the whole 10-retry backoff budget).
+func isOpenChildRefusal(detail string) bool {
+	return strings.Contains(detail, "cannot close") && strings.Contains(detail, "open child issue")
+}
+
 // Classify returns ClassNonTransient when err's chain carries a
-// *ConnectorError whose wire code is in nonTransientCodes, or is Sync's own
+// *ConnectorError whose wire code is in nonTransientCodes or whose detail is
+// bd's open-child close refusal (isOpenChildRefusal), or is Sync's own
 // unknown-sync.mode config error, and ClassTransient for everything else.
 //
 // Transient therefore covers pg-connector's "unavailable" code (its code for
@@ -72,7 +88,7 @@ func Classify(err error) ErrorClass {
 		return ClassNonTransient
 	}
 	var ce *ConnectorError
-	if errors.As(err, &ce) && nonTransientCodes[ce.Code] {
+	if errors.As(err, &ce) && (nonTransientCodes[ce.Code] || isOpenChildRefusal(ce.Detail)) {
 		return ClassNonTransient
 	}
 	return ClassTransient
