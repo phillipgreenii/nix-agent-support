@@ -1,9 +1,9 @@
 # pg-connector-github: a stateful, daemon-backed GitHub connector — design
 
-- **Date**: 2026-10-09 (revision 3: 2026-10-10)
+- **Date**: 2026-10-09 (revision 4: 2026-10-10)
 - **Status**: DRAFT for operator review. Nothing here is implemented; no implementation bead is filed.
   Revisions 2 and 3 fold in three independent reviews (correctness; completeness and test coverage; UX,
-  observability and standards) and a verification pass over revision 2.
+  observability and standards) and verification passes over revisions 2 and 3.
 - **Bead**: origin `pg2-zhuiu` (handoff: live vs shadow change detection and what shadow-compare phase A
   measured). A design bead is to be filed once the operator approves the direction.
 - **Deciders**: Phillip (operator).
@@ -70,8 +70,8 @@ revalidation and expiry"); explicit acknowledgement of the change feed and its c
 feed"); the field-group split and every default value ("Field groups", "Defaults"); the posted-review
 sidecar staying file-based until cleanup ("Writes"); client-local `capabilities` ("Client mode
 contract"); the socket frame ("Socket protocol"); the no-change-on-first-sighting baseline ("Query
-read"); the hard cap with `background_share` ("Scheduling and batch fill"); pg-desk keeping its own
-classifier ("Change kinds"); the protocol compatibility window ("Upgrade and version skew"); the metric
+read"); the hard cap with `background_share` ("Scheduling and batch fill"); the daemon as the only source of upstream
+kinds ("Change kinds"); the protocol compatibility window ("Upgrade and version skew"); the metric
 catalogue and
 alert thresholds ("Observability").
 
@@ -394,7 +394,8 @@ Op: `list --query Q` (with `--ids-only`, `--fingerprints` and `--since` as today
 
 A query NAME must be configured; an unknown name answers `query_not_recognized` (see "Ownership"). A
 query KEY is the name plus its arguments. Arguments that only filter a configured query's result
-(`--since`, as `sweep --since 40m` and agents use it) are applied locally to that query's cached ids by
+(`--since`, as `sweep --since 40m` and agents use it, and `--before`; both reach the backend as
+`list_since` and `list_before`, `pkg/scriptout/timerange.go`) are applied locally to that query's cached ids by
 their summaries' `updatedAt`, so they cost no origin call. Arguments that change what GitHub is asked
 make an AD-HOC key, cached under `adhoc_query_ttl`.
 
@@ -443,7 +444,7 @@ Each (entity, group) task carries a due time (`fresh_until`). Priority classes, 
 
 1. Interactive: a caller is waiting.
 2. Write-invalidated and `refresh`-requested.
-3. Overdue members of a configured query.
+3. Due re-runs of configured queries, and overdue members of a configured query.
 4. Overdue entities in the keep-alive set, most recently accessed first.
 5. Fill: entities due within `fill_horizon`, nearest first, used only to fill spare slots of a batch that
    is already going out. Fill MUST NOT displace a due task.
@@ -487,19 +488,25 @@ This keeps ruling 4 ("--fresh will not be used normally") while allowing a read-
 
 ### Change kinds
 
-The connector emits the UPSTREAM kinds: `opened`, `reopened`, `closed`, `merged`, `draft_changed`,
+The connector emits the UPSTREAM kinds: `reopened`, `closed`, `merged`, `draft_changed`,
 `head_changed`, `base_changed`, `ci_changed`, `mergeability_changed`, `review_changed`,
 `feedback_changed`, `renamed`, `removed`, `entered_query`, `left_query`. The daemon classifies per
-group, from each group's before and after content.
+group, from each group's before and after content. There is no `opened` kind: under the baseline rule a
+first sighting logs nothing, so a new PR reaches consumers as `entered_query` (`added`) on the query it
+joined.
 
-pg-desk KEEPS its own classifier unchanged (`packages/pg-desk/internal/classify`): it compares whole
-gathered snapshots, now gathered from local reads, and also computes its LOCAL kinds
-(`annotation_changed`, `link_changed`, `work_changed`). Its input is only the entity id that pg-router
-passes in argv, so the daemon's kinds and fields never reach it, and do not need to: they decide WHETHER
-a run is triggered, while pg-desk decides what the run does. The two stay consistent on mergeability
-without shared code, because the wire returns the carried-forward value (see "Mergeability"), so
-pg-desk's snapshots see `UNKNOWN` only when GitHub has never reported a known value. Any other
-divergence costs at most one run that finds nothing to do.
+pg-desk's live path computes NO kinds today. `pg-desk run pr <id>` gathers, compares a facts hash
+(`packages/pg-desk/internal/pipeline/pipeline.go`, `factsChanged`) and persists; its input is only the
+entity id pg-router passes in argv. `classify.Classify` and the local kinds (`annotation_changed`,
+`link_changed`, `work_changed`) have one caller, `RunEntityChange`
+(`internal/pipeline/entity_change.go`), which only `internal/changes` and `pg-desk refresh` call. So:
+
+- After cutover the daemon is the ONLY source of upstream kinds for PRs. pg-desk does not need them: the
+  feed decides WHETHER a run is triggered, and the run decides what to do from its facts hash.
+- Retiring `internal/changes` leaves `pg-desk refresh` as the classifier's only caller. `classify` and the
+  local kinds stay as they are for `refresh`; whether to retire them with it is left to the cleanup phase.
+- Mergeability noise cannot reach pg-desk's facts hash, because the wire returns the carried-forward value
+  (see "Mergeability").
 
 ### Change feed
 
@@ -513,8 +520,11 @@ divergence costs at most one run that finds nothing to do.
 - Result shape (`schemaVersion` bumped): today's `{sources[], changes[{change, source, entity}]}`
   (`changes.go`, result types) is kept, and each change gains `seq`, `kinds` and `fields`. `change` maps
   as: `entered_query` gives `added`; `left_query` and `removed` give `removed`; anything else gives
-  `changed`. `entity` is the current summary-level entity, carrying `version` and `head_sha` as the
-  pg-router adapter's event id needs (`packages/pg-router-source-pg-connector/docs/behavior/README.md`).
+  `changed`. `entity` is the summary-level entity with its `version` and `head_sha` set to the ROW'S OWN
+  values (those recorded with the change), not the entity's current ones. The pg-router adapter hashes
+  both into its event id (`packages/pg-router-source-pg-connector/cmd/pg-router-source-pg-connector/changes.go`),
+  so a redelivered row keeps its event id even after a newer change, and two rows for one PR in one poll
+  get two ids.
   Each `sources[]` row gains `next_seq`: the log position SCANNED up to, which can be past the last
   returned row because rows for non-members are skipped. Its existing `version` field carries the
   daemon's per-key position count, so a reader that compares it keeps working.
@@ -538,8 +548,9 @@ divergence costs at most one run that finds nothing to do.
   tail, deliberately.
 - `--cached` keeps its meaning: answer from the store without running Q, even if Q is stale.
 - **Retention.** Rows are kept for `change_log_retention`; a key unseen for `consumer_stale_after` is
-  dropped. A key whose position fell outside retention is answered `invalid_argument` with the reason
-  `cursor_expired` and the instruction to re-run with `--reset`. After a store move-aside (see "Error
+  dropped. A key whose position fell outside retention is answered `invalid_argument` whose `message`
+  starts with `cursor_expired:` and tells the caller to re-run with `--reset` (`scriptout.Error` has only
+  `code` and `message`; no envelope field is added). After a store move-aside (see "Error
   handling") the first poll of every key gets the same answer, rather than silently starting at the tail
   and skipping what changed in between.
 - **CI.** `ci` has no configured queries, so a (consumer, kind, query) key is undefined for it. `ci changes`
@@ -565,7 +576,7 @@ no row becomes a ghost. `status --json` exposes the same values.
 
 On start the daemon takes its lock, opens the store, applies migrations and serves every group still
 inside its `fresh_until` with no origin call (ruling 3). It MUST accept connections before a long
-migration and answer `unavailable` with the reason `migrating` meanwhile, so an apply's health check does
+migration and answer `unavailable` with a `migrating:` message meanwhile, so an apply's health check does
 not time out. The scheduler rebuilds its queue from stored due times; after a long outage the governor
 limits the catch-up rate, so a restart never spends more than the configured budget.
 
@@ -670,7 +681,7 @@ each failed head.
 | Viewer changed                                       | Identity-scoped data is flushed (see "Identity and host").                                                                                                                               |
 | PR deleted or inaccessible                           | Tombstoned and recorded as `removed`.                                                                                                                                                    |
 | Daemon crash                                         | launchd restarts it; store writes are transactional; clients retry inside half their deadline, then answer `unavailable`.                                                                |
-| Migration running                                    | `unavailable` with reason `migrating`.                                                                                                                                                   |
+| Migration running                                    | `unavailable` with a `migrating:` message.                                                                                                                                               |
 | Store corrupt or migration fails                     | The store is moved aside with a timestamp, the daemon starts empty with the governor limiting refill, and an alert fires. Moved-aside stores older than `expiry` are deleted.            |
 | Store newer than the binary                          | Refuse to start; alert; never move aside.                                                                                                                                                |
 | Protocol outside N and N-1                           | `version_mismatch`.                                                                                                                                                                      |
@@ -795,26 +806,26 @@ lock, viewer change, budget pause and resume, store move-aside or refusal, consu
 
 ## Consumer changes at cutover
 
-| Consumer                                                          | Today                                                                                                       | After                                                                                                                                                                                                                                                                                                 |
-| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Umbrella `changes` for `pr`                                       | Ledger-based diff of repeated `list` calls (`cmd/pg-connector/changes.go`)                                  | Forwarded when the capabilities declare `owns_changes`; the umbrella flushes, then sends `changes_ack` with `next_seq`; it stamps the ledger's `refreshed_at` and `last_error` from `sources_freshness[]` and the consumer's `last_seen`; it MUST NOT fall back to the ledger diff for such a backend |
-| Umbrella cache for `pr` and `ci`                                  | Read-through and stale fallback (`cmd/pg-connector/cache_policy.go`)                                        | Off through `cache_opt_out`; the backend's `served_from`, `stale`, `age_seconds` and `groups[]` are passed through unchanged                                                                                                                                                                          |
-| Umbrella cache and ledger files for the two instances             | `$XDG_STATE_HOME/pg-connector/cache/pr__pg-connector-pr-github.json` and the ledger files                   | Cleared at cutover and again at rollback, so neither side serves the other's state                                                                                                                                                                                                                    |
-| pg-router `pr-mine`, `pr-team` (deployment config)                | `pr changes` with consumer `pg-router` and `--retry-window`                                                 | Unchanged command line; served by the daemon. GitHub cadence moves to the daemon's `query_ttl`; pg-router keeps its consumer-poll clock (60 s)                                                                                                                                                        |
-| pg-router `pr-sweep`                                              | `sweep pr --since 40m mine team` every 30 min, emits `pr.reconcile`                                         | Retired: the daemon's revalidation and hard ages do its job                                                                                                                                                                                                                                           |
-| pg-router `pr-sweep-full`                                         | Every 6 h, `pg-router-source-pg-connector sweep pr mine team`, emits `pr.reconcile`                         | Kept as the 6 h backstop for changes missed without a baseline; its `--ids-only` listing is served from the query cache, so it costs no extra GitHub reads                                                                                                                                            |
-| pg-router `desk-reconcile`                                        | Every 30 min, `pg-desk heartbeat-item`, emits `desk.reconcile`                                              | Unchanged: it reads pg-desk's own store, not GitHub                                                                                                                                                                                                                                                   |
-| pg-router-source-pg-connector adapter                             | Decodes `changes[]{change, source, entity}`, event id from `{change, source, entity_id, head_sha, version}` | Decodes the added `seq`, `kinds`, `fields`; the event id stays stable because `version` is per entity                                                                                                                                                                                                 |
-| desk-pr lane (`pg-desk run pr <id>`)                              | About 8 reads to origin per PR                                                                              | The same calls without `--fresh`, served locally                                                                                                                                                                                                                                                      |
-| pg-desk classifier                                                | Classifies every run                                                                                        | Unchanged (see "Change kinds"); consistent on mergeability through the carried-forward wire value                                                                                                                                                                                                     |
-| pg-desk `head_check` (`pr show --fresh`) and `issue show --fresh` | Fresh reads                                                                                                 | Kept: the head check is a write precondition (read-your-own-write), and `issue` is another backend                                                                                                                                                                                                    |
-| `darwin/modules/pg-connector-pr-github`                           | Log source and alerts for the old backend                                                                   | Kept installed until cleanup, so a rollback is still observed, then removed                                                                                                                                                                                                                           |
-| pg-desk freshness and the menu bar data-age row                   | Reads the umbrella ledger                                                                                   | Unchanged reader; the ledger is stamped from `sources_freshness[]`                                                                                                                                                                                                                                    |
-| pg-desk PR change flow (`internal/changes`, v2 tables, sweep)     | Built, unmigrated in production                                                                             | Not used for PRs; retired                                                                                                                                                                                                                                                                             |
-| ccpool precheck (`pr review pending`)                             | Direct call                                                                                                 | Unchanged; served from `pending` (2 min TTL); `unavailable` retryable                                                                                                                                                                                                                                 |
-| Skills calling `pg-connector pr` or `ci`                          | Direct calls                                                                                                | Unchanged; read-your-own-write per "Out-of-band writes by callers"                                                                                                                                                                                                                                    |
-| pg-desk-shadow                                                    | Phase A harness                                                                                             | Runs its own daemon as a child (see "Rollout")                                                                                                                                                                                                                                                        |
-| `pg-connector-pr-github`, `pg-connector-ci-github-actions`        | Separate binaries                                                                                           | Kept installed until cleanup for rollback, then removed                                                                                                                                                                                                                                               |
+| Consumer                                                          | Today                                                                                                                                                                               | After                                                                                                                                                                                                                                                                                                 |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Umbrella `changes` for `pr`                                       | Ledger-based diff of repeated `list` calls (`cmd/pg-connector/changes.go`)                                                                                                          | Forwarded when the capabilities declare `owns_changes`; the umbrella flushes, then sends `changes_ack` with `next_seq`; it stamps the ledger's `refreshed_at` and `last_error` from `sources_freshness[]` and the consumer's `last_seen`; it MUST NOT fall back to the ledger diff for such a backend |
+| Umbrella cache for `pr` and `ci`                                  | Read-through and stale fallback (`cmd/pg-connector/cache_policy.go`)                                                                                                                | Off through `cache_opt_out`; the backend's `served_from`, `stale`, `age_seconds` and `groups[]` are passed through unchanged                                                                                                                                                                          |
+| Umbrella cache and ledger files for the two instances             | `$XDG_STATE_HOME/pg-connector/cache/pr__pg-connector-pr-github.json` and the ledger files                                                                                           | Cleared at cutover and again at rollback, so neither side serves the other's state                                                                                                                                                                                                                    |
+| pg-router `pr-mine`, `pr-team` (deployment config)                | `pr changes` with consumer `pg-router` and `--retry-window`                                                                                                                         | Unchanged command line; served by the daemon. GitHub cadence moves to the daemon's `query_ttl`; pg-router keeps its consumer-poll clock (60 s)                                                                                                                                                        |
+| pg-router `pr-sweep`                                              | `sweep pr --since 40m mine team` every 30 min, emits `pr.reconcile`                                                                                                                 | Retired: the daemon's revalidation and hard ages do its job                                                                                                                                                                                                                                           |
+| pg-router `pr-sweep-full`                                         | Every 6 h, `pg-router-source-pg-connector sweep pr mine team`, emits `pr.reconcile`                                                                                                 | Kept as the 6 h backstop for changes missed without a baseline; its `--ids-only` listing is served from the query cache, so it costs no extra GitHub reads                                                                                                                                            |
+| pg-router `desk-reconcile`                                        | Every 30 min (ticked by `pg-desk heartbeat-item`), runs `pg-desk reconcile`: `pr list --query Q --ids-only` (`internal/gather/openids.go`) and `pr show <id> --fresh` per candidate | Kept. Both reads are served by the daemon (its `pr` gather reads lose `--fresh`), so it costs no extra GitHub reads; its closure detection then rests on the daemon's confirming read before `left_query` (see "Query read")                                                                          |
+| pg-router-source-pg-connector adapter                             | Decodes `changes[]{change, source, entity}`, event id from `{change, source, entity_id, head_sha, version}`                                                                         | Decodes the added `seq`, `kinds`, `fields`; the event id stays stable because each row carries its own `version` and `head_sha` (see "Change feed")                                                                                                                                                   |
+| desk-pr lane (`pg-desk run pr <id>`)                              | About 8 reads to origin per PR                                                                                                                                                      | The same calls without `--fresh`, served locally                                                                                                                                                                                                                                                      |
+| pg-desk classifier                                                | Called only by `RunEntityChange` (`internal/changes`, `pg-desk refresh`); the run path uses a facts hash                                                                            | Kept for `pg-desk refresh` only (see "Change kinds"); upstream kinds come from the daemon                                                                                                                                                                                                             |
+| pg-desk `head_check` (`pr show --fresh`) and `issue show --fresh` | Fresh reads                                                                                                                                                                         | Kept: the head check is a write precondition (read-your-own-write), and `issue` is another backend                                                                                                                                                                                                    |
+| `darwin/modules/pg-connector-pr-github`                           | Log source and alerts for the old backend                                                                                                                                           | Kept installed until cleanup, so a rollback is still observed, then removed                                                                                                                                                                                                                           |
+| pg-desk freshness and the menu bar data-age row                   | Reads the umbrella ledger                                                                                                                                                           | Unchanged reader; the ledger is stamped from `sources_freshness[]`                                                                                                                                                                                                                                    |
+| pg-desk PR change flow (`internal/changes`, v2 tables, sweep)     | Built, unmigrated in production                                                                                                                                                     | Not used for PRs; retired                                                                                                                                                                                                                                                                             |
+| ccpool precheck (`pr review pending`)                             | Direct call                                                                                                                                                                         | Unchanged; served from `pending` (2 min TTL); `unavailable` retryable                                                                                                                                                                                                                                 |
+| Skills calling `pg-connector pr` or `ci`                          | Direct calls                                                                                                                                                                        | Unchanged; read-your-own-write per "Out-of-band writes by callers"                                                                                                                                                                                                                                    |
+| pg-desk-shadow                                                    | Phase A harness                                                                                                                                                                     | Runs its own daemon as a child (see "Rollout")                                                                                                                                                                                                                                                        |
+| `pg-connector-pr-github`, `pg-connector-ci-github-actions`        | Separate binaries                                                                                                                                                                   | Kept installed until cleanup for rollback, then removed                                                                                                                                                                                                                                               |
 
 The umbrella's full change list, none of which is a cache in the umbrella, so ruling 1 holds:
 
@@ -966,10 +977,12 @@ origin call.
 - **pg-router adapter**: decodes the new fields; a redelivered row (same entity version) yields the same
   event id, including under `--retry-window`; two content changes on one head yield two event ids.
 - **pg-desk**: gather's `pr` reads without `--fresh`, `issue` reads and `head_check` with it; freshness
-  and abandoned-row handling with the new stamping; local kinds still computed.
+  and abandoned-row handling with the new stamping; `pg-desk refresh` still classifies; `pg-desk
+reconcile` detects a closed PR from daemon-served reads.
 - **Baselines and positions**: a first fetch logs no change; a query's first complete run logs no
   `entered_query`; a quiet query's `next_seq` advances past other entities' rows and its lag stays zero;
-  after a store move-aside every key's first poll is `invalid_argument` with reason `cursor_expired`.
+  after a store move-aside every key's first poll is `invalid_argument` with a `cursor_expired:` message;
+  a redelivered row keeps its event id after a newer change to the same PR.
 - **Query keys**: `--since` is answered from the configured query's cache with no origin call; an unknown
   name is `query_not_recognized`; an ad-hoc key is cached and not re-run.
 - **Budget**: no class spends past the cap; background stops at `background_share`; nothing spends below
