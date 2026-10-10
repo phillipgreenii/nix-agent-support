@@ -60,6 +60,9 @@ Options:
   lacks Full Disk Access, e.g. for ~/.Trash) is reported as
   "size: unknown (no Full Disk Access)", never as the misleading 0 du
   prints; `list` likewise shows "size unavailable (no Full Disk Access)".
+  A dry-run command that exits non-zero with the same denial prints
+  "(dry run unavailable (no Full Disk Access))" in place of its partial
+  output (e.g. the "0" of `ls -la ~/.Trash | wc -l`).
 
 Size contract (what a printed size means):
   A size says what the number means. Each registry item MAY declare,

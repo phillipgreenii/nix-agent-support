@@ -1262,7 +1262,15 @@ cmd_reclaim() {
           unknown_count=$((unknown_count + 1))
         fi
       else
-        pgdr_print_dry_run_output "$path" "$verbose" "$dry_out"
+        if pgdr_tcc_denied "$dry_out"; then
+          # macOS TCC denial (bead pg2-uctbw): a dry run like
+          # `ls -la ~/.Trash | wc -l` prints a misleading "0" next to ls's
+          # "Operation not permitted"; drop the partial output for an
+          # explicit reason, as the size path does.
+          printf '(dry run unavailable (no Full Disk Access))\n'
+        else
+          pgdr_print_dry_run_output "$path" "$verbose" "$dry_out"
+        fi
         echo "pg-disk-reclaimer: dry-run command for '$id' exited non-zero" >&2
         overall_status=1
       fi

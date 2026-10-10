@@ -1167,6 +1167,43 @@ size_item() {
   [[ "$output" == *"partial: size: 2.0M"* ]]
 }
 
+# macOS TCC denial in the DRY-RUN command (bead pg2-uctbw): the trash item's
+# `ls -la ~/.Trash | wc -l` prints ls's "Operation not permitted" on stderr and
+# wc prints a misleading "0"; under the wrapper's pipefail the pipeline exits
+# non-zero. The count must never be shown as 0.
+@test "cmd_reclaim dry run reports a TCC-denied dry-run command as unavailable (no Full Disk Access), not the misleading 0" {
+  mkdir -p "$TEST_DIR/trashy"
+  install_size_registry "$(size_item trashy "$TEST_DIR/trashy" 'echo 4' "set -o pipefail; { echo \"ls: /x/.Trash: Operation not permitted\" >&2; false; } | wc -l")"
+  run --separate-stderr cmd_reclaim --aggressiveness 1
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"trashy: size: 4K"* ]]
+  [[ "$output" == *"(dry run unavailable (no Full Disk Access))"* ]]
+  [[ "$output" != *"Operation not permitted"* ]]
+  local zero_lines
+  zero_lines=$(grep -cE '^[[:space:]]*0[[:space:]]*$' <<<"$output" || true)
+  [ "$zero_lines" -eq 0 ]
+  [[ "$stderr" == *"dry-run command for 'trashy' exited non-zero"* ]]
+}
+
+@test "cmd_reclaim dry run still shows a non-TCC failing dry-run command's output unchanged" {
+  mkdir -p "$TEST_DIR/failing"
+  install_size_registry "$(size_item failing "$TEST_DIR/failing" 'echo 4' "echo 'ls: x: Permission denied'; echo 7; exit 1")"
+  run cmd_reclaim --aggressiveness 1
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"ls: x: Permission denied"* ]]
+  [[ "$output" == *"7"* ]]
+  [[ "$output" != *"no Full Disk Access"* ]]
+}
+
+@test "cmd_reclaim dry run does not treat 'Operation not permitted' text in a SUCCESSFUL dry-run command as a TCC denial" {
+  mkdir -p "$TEST_DIR/texty"
+  install_size_registry "$(size_item texty "$TEST_DIR/texty" 'echo 4' "echo 'Operation not permitted is just text'")"
+  run cmd_reclaim --aggressiveness 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Operation not permitted is just text"* ]]
+  [[ "$output" != *"no Full Disk Access"* ]]
+}
+
 @test "cmd_reclaim total sums only the known sizes and counts the unknown ones" {
   mkdir -p "$TEST_DIR/a" "$TEST_DIR/b" "$TEST_DIR/c"
   install_size_registry \
