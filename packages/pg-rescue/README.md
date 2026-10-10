@@ -596,16 +596,64 @@ Default instances. Each field is set with `mkDefault`, so any one can be overrid
 The default chain `sync` runs `flake-lock-conflict`, `fix-small`, `fix-large`, `p1-later`, `notify`,
 in that order. The `deterministic` tag matters: the common-case rate in the run log's measurements
 is computed from it, so tag every deterministic script you add. `p1-later` names the
-`pg-rescue-open` pg-connector query, and `pg-rescue-bead` needs a tracker (a `.beads/` directory in
-the repo, or `--tracker-dir`) and, for a repo label, `--repo-label-map`; both are machine-specific
-and belong in the consuming machine flake. `--backend NAME` (default `pg-connector-issue-beads`)
-names the pg-connector backend instance every call uses, for a deployment that registers the beads
-backend only under suffixed names.
+`pg-rescue-open` pg-connector query, and `pg-rescue-bead` needs to be told which tracker to file in
+and, for a repo label, `--repo-label-map`; both are machine-specific and belong in the consuming
+machine flake (see "Which tracker `pg-rescue-bead` files in" below).
 
 `checks.<system>.test-pg-rescue-module` evaluates the module, builds the config and runs
 `pg-rescue --config "$cfg" --handlers notify -q -- true` (it must exit `0`) and
 `pg-rescue check --chain sync` (every default handler binary must resolve). It also asserts the
 override behaviour above.
+
+### Which tracker `pg-rescue-bead` files in
+
+Every `pg-connector` call the handler makes carries one `--backend`: a beads backend instance. Which
+instance depends on the failing command's repo.
+
+- `--backend-map REPO=INSTANCE` (repeatable). `REPO` is the basename of the git toplevel containing
+  the failing command's working directory, the same key `--repo-label-map` uses. A repo with an
+  entry files through `INSTANCE` on every call: the `--dedup-query` list, the create, and an
+  `--annotate`'s comment and label update. A later entry for the same `REPO` wins.
+- `--backend NAME` (default `pg-connector-issue-beads`) serves every other repo, and a failure that
+  ran outside a git repository.
+- A malformed entry (no `=`, an empty `REPO`, an empty `INSTANCE`) is a usage error and exits `1`.
+- There is no fallback. If the instance cannot be reached, or is not registered, the handler exits
+  `1`; it never retries on `--backend`.
+- The label and the instance are separate lookups on the same key: `--repo-label` and
+  `--repo-label-map` choose the repo label, `--backend-map` chooses the tracker, and neither changes
+  the other.
+- pg-connector looks the `--dedup-query` name up in the chosen instance's own `queries`, so every
+  instance a run can use (each `--backend-map` instance and `--backend`) MUST define it.
+
+A machine flake that files one repo's failures in its own tracker and everything else in another
+(the repo and instance names are yours):
+
+```nix
+handlers.p1-later.command = [
+  "pg-rescue-bead"
+  "--priority"
+  "1"
+  "--dedup-query"
+  "pg-rescue-open"
+  "--backend"
+  "pg-connector-issue-beads-home"
+  "--backend-map"
+  "work-repo=pg-connector-issue-beads-work"
+];
+```
+
+**The tracker variable.** A beads backend registered without its own `--beads-dir` takes its tracker
+from `PG_CONNECTOR_ISSUE_BEADS_DIR`, and refuses to run with none. An instance registered with
+`--beads-dir` ignores the variable: the flag wins. So the handler sets it only where it can matter.
+
+- A repo with a `--backend-map` entry: the operator named an instance, which carries its own
+  tracker, so the handler looks for none. The repo need not hold a `.beads/` directory, the variable
+  is not set, and an inherited `PG_CONNECTOR_ISSUE_BEADS_DIR` or `BEADS_DIR` is removed from the
+  child's environment, so nothing ambient can pick a tracker.
+- Any other repo (the generic `--backend` path): `--tracker-dir PATH` if given, else the git
+  toplevel of the failing command's working directory when it holds a `.beads/` directory, else the
+  handler exits `1` before calling `pg-connector`. It never guesses.
+- `--tracker-dir` is honored on both paths.
 
 ## Integration tests
 

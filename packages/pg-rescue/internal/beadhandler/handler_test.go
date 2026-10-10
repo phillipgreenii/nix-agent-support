@@ -206,6 +206,178 @@ func TestBackendFlagRejectsEmpty(t *testing.T) {
 	}
 }
 
+// Neutral instance names for the --backend-map tests; the handler treats them
+// as opaque pg-connector backend names.
+const (
+	instanceAlpha = "pg-connector-issue-beads-alpha"
+	instanceBeta  = "pg-connector-issue-beads-beta"
+)
+
+func TestBackendMapPicksTheBackendForTheFailingRepo(t *testing.T) {
+	const def = "pg-connector-issue-beads"
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"no map: the default backend", nil, def},
+		{"map hit", []string{"--backend-map", "the-repo=" + instanceAlpha}, instanceAlpha},
+		{"map miss uses the default backend", []string{"--backend-map", "other=" + instanceAlpha}, def},
+		{"map miss uses --backend", []string{"--backend", instanceBeta, "--backend-map", "other=" + instanceAlpha}, instanceBeta},
+		{"map hit beats --backend", []string{"--backend", instanceBeta, "--backend-map", "the-repo=" + instanceAlpha}, instanceAlpha},
+		{
+			"the matching entry is the one used",
+			[]string{"--backend-map", "other=" + instanceBeta, "--backend-map", "the-repo=" + instanceAlpha, "--backend-map", "third=" + instanceBeta},
+			instanceAlpha,
+		},
+		{"a later entry for the same repo wins", []string{"--backend-map", "the-repo=" + instanceBeta, "--backend-map", "the-repo=" + instanceAlpha}, instanceAlpha},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newScene(t, "first-attempt")
+			// The dedup query makes the run two calls (list, create), so
+			// "every call" is checked, not just the one that files the item.
+			if code, _, e := s.run(append([]string{"--dedup-query", "q"}, tc.args...)...); code != 3 {
+				t.Fatalf("exit %d: %s", code, e)
+			}
+			calls := s.fake.Calls()
+			if len(calls) != 2 {
+				t.Fatalf("calls %v", calls)
+			}
+			for _, c := range calls {
+				if got := c.Value("backend"); got != tc.want {
+					t.Errorf("%s: --backend %q, want %q (%v)", c.Verb(), got, tc.want, c.Args)
+				}
+			}
+		})
+	}
+}
+
+func TestBackendMapAppliesToAnnotate(t *testing.T) {
+	s := newScene(t, "first-attempt")
+	if code, _, e := s.run("--annotate", "pg2-abc", "--add-label", "x", "--backend-map", "the-repo="+instanceAlpha); code != 3 {
+		t.Fatalf("exit %d: %s", code, e)
+	}
+	calls := s.fake.Calls()
+	if len(calls) != 2 || calls[0].Verb() != "comment" || calls[1].Verb() != "update" {
+		t.Fatalf("calls %v", calls)
+	}
+	for _, c := range calls {
+		if got := c.Value("backend"); got != instanceAlpha {
+			t.Errorf("%s: --backend %q, want %q", c.Verb(), got, instanceAlpha)
+		}
+	}
+}
+
+func TestBackendMapNeedsAGitToplevel(t *testing.T) {
+	s := newScene(t, "first-attempt")
+	s.top = ""
+	if code, _, e := s.run("--tracker-dir", s.repo, "--backend-map", "the-repo="+instanceAlpha); code != 3 {
+		t.Fatalf("exit %d: %s", code, e)
+	}
+	if got := only(t, s.fake.Calls(), "create").Value("backend"); got != "pg-connector-issue-beads" {
+		t.Errorf("--backend %q: the map must not match without a toplevel", got)
+	}
+}
+
+// The repo is the git toplevel's basename, found from a cwd below it, exactly
+// as --repo-label-map finds it: not the cwd's own basename.
+func TestBackendMapResolvesTheRepoFromTheGitToplevel(t *testing.T) {
+	s := newScene(t, "first-attempt")
+	repo := gittest.New(t, gitfixture.RepoOptions{Name: "real-repo"}).Dir
+	sub := filepath.Join(repo, "pkg", "deep")
+	if err := os.MkdirAll(sub, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	s.rep.Command.Cwd = sub
+	rt := s.runtime()
+	rt.Env = tmpldata.DefaultEnv()
+	var out, errb bytes.Buffer
+	args := []string{"--backend-map", "deep=" + instanceBeta, "--backend-map", filepath.Base(repo) + "=" + instanceAlpha}
+	if code := Main(rt, args, &out, &errb); code != 3 {
+		t.Fatalf("exit %d: %s", code, errb.String())
+	}
+	if got := only(t, s.fake.Calls(), "create").Value("backend"); got != instanceAlpha {
+		t.Errorf("--backend %q, want the toplevel's entry %q", got, instanceAlpha)
+	}
+}
+
+// The label and the backend are two lookups on one repo key, and neither
+// changes the other.
+func TestBackendMapAndTheRepoLabelAreIndependent(t *testing.T) {
+	const def = "pg-connector-issue-beads"
+	cases := []struct {
+		name        string
+		args        []string
+		wantLabels  string
+		wantBackend string
+	}{
+		{"label map and backend map on the same repo", []string{"--repo-label-map", "the-repo=tr", "--backend-map", "the-repo=" + instanceAlpha}, "pg-rescue|tr", instanceAlpha},
+		{"--repo-label does not stop the backend map", []string{"--repo-label", "forced", "--backend-map", "the-repo=" + instanceAlpha}, "pg-rescue|forced", instanceAlpha},
+		{"backend map alone adds no repo label", []string{"--backend-map", "the-repo=" + instanceAlpha}, "pg-rescue", instanceAlpha},
+		{"a label map entry alone does not pick a backend", []string{"--repo-label-map", "the-repo=tr"}, "pg-rescue|tr", def},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newScene(t, "first-attempt")
+			if code, _, e := s.run(tc.args...); code != 3 {
+				t.Fatalf("exit %d: %s", code, e)
+			}
+			c := only(t, s.fake.Calls(), "create")
+			if got := strings.Join(c.Values("labels"), "|"); got != tc.wantLabels {
+				t.Errorf("labels %q, want %q", got, tc.wantLabels)
+			}
+			if got := c.Value("backend"); got != tc.wantBackend {
+				t.Errorf("--backend %q, want %q", got, tc.wantBackend)
+			}
+		})
+	}
+}
+
+func TestFailingMappedBackendDoesNotFallBackToTheDefault(t *testing.T) {
+	s := newScene(t, "first-attempt")
+	s.fake.Fail("create", 1, "instance unreachable")
+	code, stdout, stderr := s.run("--backend-map", "the-repo="+instanceAlpha)
+	if code != 1 || stdout != "" || !strings.Contains(stderr, "instance unreachable") {
+		t.Errorf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	calls := s.fake.Calls()
+	if len(calls) != 1 || calls[0].Value("backend") != instanceAlpha {
+		t.Errorf("no retry on another backend is allowed: %v", calls)
+	}
+}
+
+func TestBackendMapRejectsMalformedEntries(t *testing.T) {
+	for _, entry := range []string{"", "norepo", "repo=", "=instance", "="} {
+		t.Run(entry, func(t *testing.T) {
+			_, err := parseOptions([]string{"--backend-map", entry})
+			if err == nil || !strings.Contains(err.Error(), "--backend-map") || !strings.Contains(err.Error(), "REPO=INSTANCE") {
+				t.Errorf("--backend-map %q: err %v, want a usage error naming the flag and REPO=INSTANCE", entry, err)
+			}
+		})
+	}
+	if _, err := parseOptions([]string{"--backend-map", "a=" + instanceAlpha, "--backend-map", "norepo"}); err == nil {
+		t.Error("one good entry must not excuse a malformed one")
+	}
+	// The shared parser keeps each flag's own wording.
+	if _, err := parseOptions([]string{"--repo-label-map", "norepo"}); err == nil || !strings.Contains(err.Error(), "--repo-label-map") || !strings.Contains(err.Error(), "REPO=LABEL") {
+		t.Errorf("--repo-label-map error %v", err)
+	}
+}
+
+func TestBackendMapEntriesAreParsed(t *testing.T) {
+	o, err := parseOptions([]string{"--backend-map", "a=" + instanceAlpha, "--backend-map", "b=" + instanceBeta})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(o.backendMap) != 2 || o.backendMap["a"] != instanceAlpha || o.backendMap["b"] != instanceBeta {
+		t.Errorf("backendMap %v", o.backendMap)
+	}
+	if o, err := parseOptions(nil); err != nil || len(o.backendMap) != 0 {
+		t.Errorf("no --backend-map: %v, err %v", o, err)
+	}
+}
+
 func TestBodyIsSelfContained(t *testing.T) {
 	s := newScene(t, "three-prior-attempts")
 	if code, _, e := s.run(); code != 3 {
@@ -500,6 +672,81 @@ func TestTrackerDirOverridesTheDerivedTracker(t *testing.T) {
 	}
 }
 
+// A repo with a --backend-map entry is served by an instance the operator
+// named, and an instance carries its own tracker (its --beads-dir beats the
+// tracker variables). So the handler neither needs a .beads directory nor
+// hands the backend a tracker, and nothing inherited may pick one either.
+func TestMappedRepoNeedsNoTrackerAndHandsTheBackendNone(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		hasBeads bool
+	}{
+		{"no .beads directory", false},
+		{"a .beads directory is not used either", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("PG_CONNECTOR_ISSUE_BEADS_DIR", "/wrong/tracker")
+			t.Setenv("BEADS_DIR", "/also/wrong")
+			s := newScene(t, "first-attempt")
+			if !tc.hasBeads {
+				if err := os.RemoveAll(filepath.Join(s.repo, ".beads")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if code, _, e := s.run("--dedup-query", "q", "--backend-map", "the-repo="+instanceAlpha); code != 3 {
+				t.Fatalf("exit %d: %s", code, e)
+			}
+			calls := s.fake.Calls()
+			if len(calls) != 2 {
+				t.Fatalf("calls %v", calls)
+			}
+			for _, c := range calls {
+				if c.TrackerDir != "" || c.BeadsDir != "" {
+					t.Errorf("%s: PG_CONNECTOR_ISSUE_BEADS_DIR=%q BEADS_DIR=%q, want neither", c.Verb(), c.TrackerDir, c.BeadsDir)
+				}
+				if c.Actor != "pg-rescue/20261002T140311Z-7f3a9c2e" {
+					t.Errorf("%s: actor %q", c.Verb(), c.Actor)
+				}
+			}
+		})
+	}
+}
+
+func TestMappedRepoStillHonorsAnExplicitTrackerDir(t *testing.T) {
+	s := newScene(t, "first-attempt")
+	elsewhere := t.TempDir()
+	if code, _, e := s.run("--tracker-dir", elsewhere, "--backend-map", "the-repo="+instanceAlpha); code != 3 {
+		t.Fatalf("exit %d: %s", code, e)
+	}
+	c := only(t, s.fake.Calls(), "create")
+	if c.TrackerDir != elsewhere || c.Value("backend") != instanceAlpha {
+		t.Errorf("tracker %q backend %q, want %q and %q", c.TrackerDir, c.Value("backend"), elsewhere, instanceAlpha)
+	}
+}
+
+func TestMappedRepoStillRejectsAMissingTrackerDir(t *testing.T) {
+	s := newScene(t, "first-attempt")
+	code, _, stderr := s.run("--tracker-dir", filepath.Join(s.repo, "nope"), "--backend-map", "the-repo="+instanceAlpha)
+	if code != 1 || !strings.Contains(stderr, "not a directory") || len(s.fake.Calls()) != 0 {
+		t.Errorf("code=%d stderr=%q calls=%v", code, stderr, s.fake.Calls())
+	}
+}
+
+// A map that misses leaves the generic path as it was: the default backend has
+// no tracker of its own, so one is still required and never guessed.
+func TestUnmappedRepoStillNeedsATracker(t *testing.T) {
+	s := newScene(t, "first-attempt")
+	if err := os.RemoveAll(filepath.Join(s.repo, ".beads")); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr := s.run("--backend-map", "other="+instanceAlpha)
+	// "no beads tracker found" is the tracker error itself; the usage text a
+	// usage error appends also names --tracker-dir, so that alone proves nothing.
+	if code != 1 || stdout != "" || !strings.Contains(stderr, "no beads tracker found") || len(s.fake.Calls()) != 0 {
+		t.Errorf("code=%d stdout=%q stderr=%q calls=%v", code, stdout, stderr, s.fake.Calls())
+	}
+}
+
 func TestNoBeadsDirAndNoTrackerDirExits1(t *testing.T) {
 	s := newScene(t, "first-attempt")
 	if err := os.RemoveAll(filepath.Join(s.repo, ".beads")); err != nil {
@@ -771,6 +1018,9 @@ func TestUsageErrorsExit1NotTheDeclinedCode(t *testing.T) {
 		"negative tail":            {"--output-tail-lines", "-1"},
 		"bad map entry":            {"--repo-label-map", "norepo"},
 		"empty map label":          {"--repo-label-map", "repo="},
+		"bad backend-map entry":    {"--backend-map", "norepo"},
+		"empty backend-map repo":   {"--backend-map", "=instance"},
+		"empty backend-map name":   {"--backend-map", "repo="},
 		"add-label alone":          {"--add-label", "x"},
 		"annotate with dedup":      {"--annotate", "pg2-x", "--dedup-query", "q"},
 		"title template and file":  {"--title-template", "t", "--title-template-file", "f"},
@@ -792,8 +1042,14 @@ func TestUsageErrorsExit1NotTheDeclinedCode(t *testing.T) {
 
 func TestHelp(t *testing.T) {
 	s := newScene(t, "first-attempt")
-	if code, stdout, _ := s.run("--help"); code != 0 || !strings.HasPrefix(stdout, "usage: pg-rescue-bead") {
+	code, stdout, _ := s.run("--help")
+	if code != 0 || !strings.HasPrefix(stdout, "usage: pg-rescue-bead") {
 		t.Errorf("code=%d stdout=%q", code, stdout)
+	}
+	for _, want := range []string{"[--backend NAME]", "[--backend-map REPO=INSTANCE]..."} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("usage lacks %q:\n%s", want, stdout)
+		}
 	}
 }
 

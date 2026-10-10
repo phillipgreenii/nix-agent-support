@@ -921,9 +921,9 @@ idea (11/12) MAY be carried over as a `meta.error_kind`.
 
 ### 8.3 `pg-rescue-bead`
 
-Files a self-contained deferral through `pg-connector issue create --backend
-pg-connector-issue-beads`, or annotates an existing item. On success it exits `3` (`deferred`),
-both when it creates an item and when it updates one.
+Files a self-contained deferral through `pg-connector issue create --backend <instance>` (default
+instance `pg-connector-issue-beads`; see "Backend"), or annotates an existing item. On success it
+exits `3` (`deferred`), both when it creates an item and when it updates one.
 
 | Argument                                                     | Default                                   | Purpose                                                              |
 | ------------------------------------------------------------ | ----------------------------------------- | -------------------------------------------------------------------- |
@@ -933,6 +933,8 @@ both when it creates an item and when it updates one.
 | `--repo-label L`                                             | none                                      | Sets the repo label, overriding the `--repo-label-map` lookup        |
 | `--repo-label-map REPO=LABEL` (repeatable)                   | none                                      | Maps a git toplevel basename to its repo label; see "Repo label"     |
 | `--tracker-dir PATH`                                         | derived                                   | Overrides the tracker; see "Tracker" below                           |
+| `--backend NAME`                                             | `pg-connector-issue-beads`                | Backend instance for a repo with no `--backend-map` entry            |
+| `--backend-map REPO=INSTANCE` (repeatable)                   | none                                      | Maps a git toplevel basename to its backend instance; see "Backend"  |
 | `--title-template TEXT`, `--title-template-file F`           | `pg-rescue: {{.Cmd}} failed in {{.Repo}}` | Title                                                                |
 | `--body-template TEXT`, `--body-template-file F`             | built-in                                  | Replaces the body                                                    |
 | `--append-instructions TEXT`, `--append-instructions-file F` | none                                      | Appended to the body                                                 |
@@ -943,18 +945,36 @@ both when it creates an item and when it updates one.
 
 **Tracker**
 
-- The beads backend does not fall back to cwd. It requires `PG_CONNECTOR_ISSUE_BEADS_DIR`.
-- The handler sets that variable on its `pg-connector` child to the tracker it resolves, in this
-  order:
+- A beads backend registered without its own `--beads-dir` does not fall back to cwd. It requires
+  `PG_CONNECTOR_ISSUE_BEADS_DIR`. An instance registered with `--beads-dir` ignores that variable:
+  the flag wins.
+- For a repo with no `--backend-map` entry (the generic `--backend` path), the handler sets that
+  variable on its `pg-connector` child to the tracker it resolves, in this order:
   1. `--tracker-dir PATH`, if given. It MUST be an existing directory.
   2. Otherwise, the git toplevel of the report's cwd (`.Cwd`), if that toplevel contains `.beads/`.
 - If neither yields a tracker, it exits `1` before any call to `pg-connector`: `--tracker-dir` is
   required in that case. If the tracker is unreachable, it also exits `1`. It never falls back to
   another tracker.
+- For a repo with a `--backend-map` entry, it resolves no tracker (see "Backend"). `--tracker-dir`
+  is still honored there.
 - No workspace repo-to-tracker lookup exists in code. The workspace's repo-to-label table is
   machine-local and names a private repo, so this public handler MUST NOT hardcode one. Everything
   that is specific to a machine arrives through arguments.
 - It sets `PG_CONNECTOR_ISSUE_BEADS_ACTOR=pg-rescue/<run-id>`, for attribution.
+
+**Backend**
+
+- Every `pg-connector` call carries one `--backend`: the `--backend-map REPO=INSTANCE` entry for the
+  basename of the git toplevel containing `.Cwd` (the same key `--repo-label-map` uses), else
+  `--backend NAME` (default `pg-connector-issue-beads`). A later entry for the same `REPO` wins.
+  With no git toplevel, no entry matches.
+- A malformed entry (no `=`, an empty `REPO`, an empty `INSTANCE`) is a usage error: exit `1`.
+- A repo with an entry is served by an instance the operator named. The instance carries its own
+  tracker (its `--beads-dir` beats `PG_CONNECTOR_ISSUE_BEADS_DIR`), so the handler resolves no
+  tracker for it: the repo need not hold `.beads/`, the variable is not set, and an inherited
+  `PG_CONNECTOR_ISSUE_BEADS_DIR` or `BEADS_DIR` is removed from the child's environment.
+- A failing instance is a failure (exit `1`). The handler never retries on `--backend`.
+- The repo label and the backend are independent lookups on the same key.
 
 **Repo label**
 
@@ -984,7 +1004,7 @@ Instructions come only from `--append-instructions` and the body template. The t
 
 **Deduplication** (when `--dedup-query` is given)
 
-- The handler runs the named query and filters on the client side for
+- The handler runs the named query, on the chosen backend instance, and filters on the client side for
   `metadata.pg_rescue_fingerprint == $PG_RESCUE_FINGERPRINT`. This follows the
   `pg-router-probe --dedup-query` precedent.
 - On a match, it comments the new report on that item and reports `Updated <id>`.
@@ -1280,6 +1300,8 @@ The external binaries are faked on `PATH` (the `testdata/fake-claude` precedent 
 - **`pg-rescue-bead`:**
   - body contents, default title, `--title=` with newlines stripped
   - label and repo-label derivation, `PG_CONNECTOR_ISSUE_BEADS_DIR` and `ACTOR` set
+  - `--backend-map`: a hit, a miss (the `--backend` default) and a malformed entry; the chosen
+    `--backend` reaches every `pg-connector` argv; a mapped repo needs no tracker
   - dedup: a match produces a comment and `Updated`; a closed match is ignored and a new item is
     created; no `--dedup-query` means no dedup
   - `--annotate` and `--add-label`

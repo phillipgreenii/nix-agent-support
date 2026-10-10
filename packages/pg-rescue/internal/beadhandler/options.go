@@ -26,7 +26,7 @@ const (
 // Usage is the synopsis printed for --help.
 const Usage = `usage: pg-rescue-bead [--priority N] [--issue-type T] [--label L]... [--repo-label L]
                       [--repo-label-map REPO=LABEL]... [--tracker-dir PATH]
-                      [--backend NAME]
+                      [--backend NAME] [--backend-map REPO=INSTANCE]...
                       [--title-template TEXT | --title-template-file F]
                       [--body-template TEXT | --body-template-file F]
                       [--append-instructions TEXT | --append-instructions-file F]
@@ -44,6 +44,7 @@ type options struct {
 	repoLabelMap map[string]string
 	trackerDir   string
 	backend      string
+	backendMap   map[string]string
 
 	titleTemplate     string
 	hasTitleTemplate  bool
@@ -72,7 +73,7 @@ var errHelp = pflag.ErrHelp
 // "declined", so a usage error must never use pflag's customary 2.
 func parseOptions(args []string) (*options, error) {
 	o := &options{}
-	var repoLabelMap []string
+	var repoLabelMap, backendMap []string
 	fs := pflag.NewFlagSet("pg-rescue-bead", pflag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.IntVar(&o.priority, "priority", defaultPriority, "bd priority 0-4 (0 is the highest)")
@@ -81,7 +82,8 @@ func parseOptions(args []string) (*options, error) {
 	fs.StringVar(&o.repoLabel, "repo-label", "", "repo label, overriding the --repo-label-map lookup")
 	fs.StringArrayVar(&repoLabelMap, "repo-label-map", nil, "REPO=LABEL (repeatable); REPO is the git toplevel's basename")
 	fs.StringVar(&o.trackerDir, "tracker-dir", "", "tracker root, overriding the cwd's git toplevel")
-	fs.StringVar(&o.backend, "backend", defaultBackend, "pg-connector backend instance name passed as --backend on every call")
+	fs.StringVar(&o.backend, "backend", defaultBackend, "pg-connector backend instance name passed as --backend on every call, for a repo with no --backend-map entry")
+	fs.StringArrayVar(&backendMap, "backend-map", nil, "REPO=INSTANCE (repeatable); REPO is the git toplevel's basename, as for --repo-label-map; a mapped repo uses that backend instance instead of --backend")
 	fs.StringVar(&o.titleTemplate, "title-template", "", "title template text")
 	fs.StringVar(&o.titleTemplateFile, "title-template-file", "", "title template file")
 	fs.StringVar(&o.bodyTemplate, "body-template", "", "body template text")
@@ -142,24 +144,27 @@ func parseOptions(args []string) (*options, error) {
 	if len(o.addLabels) > 0 && o.annotate == "" {
 		return nil, errors.New("--add-label requires --annotate")
 	}
-	m, err := parseRepoLabelMap(repoLabelMap)
-	if err != nil {
+	var err error
+	if o.repoLabelMap, err = parseRepoMap("repo-label-map", "REPO=LABEL", repoLabelMap); err != nil {
 		return nil, err
 	}
-	o.repoLabelMap = m
+	if o.backendMap, err = parseRepoMap("backend-map", "REPO=INSTANCE", backendMap); err != nil {
+		return nil, err
+	}
 	return o, nil
 }
 
-// parseRepoLabelMap turns REPO=LABEL entries into a map; a later entry for the
-// same REPO wins.
-func parseRepoLabelMap(entries []string) (map[string]string, error) {
+// parseRepoMap turns the REPO=VALUE entries of --flag into a map; a later entry
+// for the same REPO wins. shape names the entry's form in the error. Both
+// per-repo maps parse through it so they key, and reject, alike.
+func parseRepoMap(flag, shape string, entries []string) (map[string]string, error) {
 	m := map[string]string{}
 	for _, e := range entries {
-		repo, label, ok := strings.Cut(e, "=")
-		if !ok || repo == "" || label == "" {
-			return nil, fmt.Errorf("--repo-label-map %q: want REPO=LABEL with both parts non-empty", e)
+		repo, value, ok := strings.Cut(e, "=")
+		if !ok || repo == "" || value == "" {
+			return nil, fmt.Errorf("--%s %q: want %s with both parts non-empty", flag, e, shape)
 		}
-		m[repo] = label
+		m[repo] = value
 	}
 	return m, nil
 }

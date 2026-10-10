@@ -17,13 +17,20 @@ const (
 	// no compile-time dependency on packages/pg-connector.
 	connectorBinary = "pg-connector"
 	// defaultBackend is the backend instance name every call is pinned to
-	// unless --backend overrides it (pg-connector can register the beads
-	// backend under several suffixed names).
+	// unless --backend or a --backend-map entry overrides it (pg-connector can
+	// register the beads backend under several suffixed names).
 	defaultBackend = "pg-connector-issue-beads"
 
-	// EnvTrackerDir tells the beads backend which tracker to write to. The
-	// backend does not fall back to its cwd.
+	// EnvTrackerDir tells a beads backend registered WITHOUT its own
+	// --beads-dir which tracker to write to; that backend does not fall back to
+	// its cwd. An instance registered with --beads-dir ignores it (the flag
+	// wins), so it matters only on the generic default-backend path; see
+	// trackerFor.
 	EnvTrackerDir = "PG_CONNECTOR_ISSUE_BEADS_DIR"
+	// envBeadsDir is the variable such a backend falls back to when
+	// EnvTrackerDir is unset. The handler removes it from the child's
+	// environment when it hands the backend no tracker of its own.
+	envBeadsDir = "BEADS_DIR"
 	// EnvActor attributes the backend's writes to this handler's run.
 	EnvActor = "PG_CONNECTOR_ISSUE_BEADS_ACTOR"
 

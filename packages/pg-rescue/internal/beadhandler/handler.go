@@ -116,11 +116,12 @@ func run(rt *Runtime, o *options, kid *child) (contract.Result, error) {
 	td := templateData{Data: data, FiledAt: rt.Now().UTC().Format(time.RFC3339)}
 
 	top := toplevel(rt.Env, data.Cwd)
-	tracker, err := resolveTracker(o.trackerDir, top, data.Cwd)
+	backend, mapped := backendFor(o, top)
+	tracker, err := trackerFor(o.trackerDir, top, data.Cwd, mapped)
 	if err != nil {
 		return contract.Result{}, err
 	}
-	conn := &connector{env: childEnv(rt.Environ(), tracker, rep.RunID), child: kid, backend: o.backend}
+	conn := &connector{env: childEnv(rt.Environ(), tracker, rep.RunID), child: kid, backend: backend}
 
 	body, err := buildBody(o, td)
 	if err != nil {
@@ -223,6 +224,43 @@ func toplevel(env tmpldata.Env, cwd string) string {
 	return top
 }
 
+// repoKey is what --repo-label-map and --backend-map look a repo up by: the
+// basename of the git toplevel containing the failing command's cwd. It is ""
+// when there is no toplevel, which neither map ever holds a key for, so neither
+// matches a failure outside a git repository.
+func repoKey(top string) string {
+	if top == "" {
+		return ""
+	}
+	return filepath.Base(top)
+}
+
+// backendFor is the pg-connector backend instance every call of this run goes
+// through: the --backend-map entry for the repo, else --backend. mapped says
+// the entry exists, i.e. the operator named an instance for this repo.
+func backendFor(o *options, top string) (backend string, mapped bool) {
+	if b, ok := o.backendMap[repoKey(top)]; ok {
+		return b, true
+	}
+	return o.backend, false
+}
+
+// trackerFor is the tracker root the handler hands the backend through
+// PG_CONNECTOR_ISSUE_BEADS_DIR, or "" when it hands none. That variable only
+// serves a backend registered without its own --beads-dir; an instance
+// registered with one ignores it. A repo with a --backend-map entry is served
+// by an instance the operator named, which is taken to carry its own tracker,
+// so the handler looks for none: the repo need not hold a .beads directory,
+// and a failure there files through the instance wherever it ran. An explicit
+// --tracker-dir is honored either way. Any other repo is served by the generic
+// --backend, which has no tracker of its own, so one is required (resolveTracker).
+func trackerFor(flagDir, top, cwd string, mapped bool) (string, error) {
+	if mapped && flagDir == "" {
+		return "", nil
+	}
+	return resolveTracker(flagDir, top, cwd)
+}
+
 // resolveTracker picks the tracker root: --tracker-dir if given, else the git
 // toplevel of cwd when it holds a .beads directory. It never guesses.
 func resolveTracker(flagDir, top, cwd string) (string, error) {
@@ -248,16 +286,23 @@ func isDir(p string) bool {
 }
 
 // childEnv is base with the tracker and the actor set, replacing any value
-// base already carried.
+// base already carried. With no tracker (see trackerFor) the handler selects
+// none, and nothing inherited may: both variables a backend would otherwise
+// fall back to are removed too, so the tracker is the instance's own or there
+// is none, never whichever one the caller's environment happened to name.
 func childEnv(base []string, tracker, runID string) []string {
 	out := make([]string, 0, len(base)+2)
 	for _, kv := range base {
-		if strings.HasPrefix(kv, EnvTrackerDir+"=") || strings.HasPrefix(kv, EnvActor+"=") {
+		if strings.HasPrefix(kv, EnvTrackerDir+"=") || strings.HasPrefix(kv, EnvActor+"=") ||
+			(tracker == "" && strings.HasPrefix(kv, envBeadsDir+"=")) {
 			continue
 		}
 		out = append(out, kv)
 	}
-	return append(out, EnvTrackerDir+"="+tracker, EnvActor+"=pg-rescue/"+runID)
+	if tracker != "" {
+		out = append(out, EnvTrackerDir+"="+tracker)
+	}
+	return append(out, EnvActor+"=pg-rescue/"+runID)
 }
 
 // labelsFor is pg-rescue, the repo label, then the --label values, without
@@ -266,8 +311,8 @@ func childEnv(base []string, tracker, runID string) []string {
 // is guessed.
 func labelsFor(o *options, top string) []string {
 	repo := o.repoLabel
-	if repo == "" && top != "" {
-		repo = o.repoLabelMap[filepath.Base(top)]
+	if key := repoKey(top); repo == "" && key != "" {
+		repo = o.repoLabelMap[key]
 	}
 	seen := map[string]bool{}
 	var out []string

@@ -27,6 +27,7 @@ while [ -e "$d/call.$n.args" ]; do n=$((n + 1)); done
 printf '%s\0' "$@" > "$d/call.$n.args"
 {
   echo "dir=$PG_CONNECTOR_ISSUE_BEADS_DIR"
+  echo "beads_dir=$BEADS_DIR"
   echo "actor=$PG_CONNECTOR_ISSUE_BEADS_ACTOR"
 } > "$d/call.$n.env"
 verb="$2"
@@ -55,8 +56,11 @@ type FakeConnector struct {
 // Call is one recorded pg-connector invocation.
 type Call struct {
 	Args []string
-	// TrackerDir and Actor are the PG_CONNECTOR_ISSUE_BEADS_* values the call saw.
+	// TrackerDir and Actor are the PG_CONNECTOR_ISSUE_BEADS_* values the call
+	// saw; BeadsDir is the BEADS_DIR it saw. Each is "" when the variable was
+	// unset (or empty).
 	TrackerDir string
+	BeadsDir   string
 	Actor      string
 }
 
@@ -132,6 +136,8 @@ func (f *FakeConnector) Calls() []Call {
 			switch k, v, _ := strings.Cut(line, "="); k {
 			case "dir":
 				c.TrackerDir = v
+			case "beads_dir":
+				c.BeadsDir = v
 			case "actor":
 				c.Actor = v
 			}
