@@ -54,3 +54,44 @@ make that skip a failure.
 Removing an entry from `testdata/expected-diff.json` (for example `S26`) makes the gate, and so the
 check, fail naming the unexplained difference. Adding an entry for a difference that does not occur
 fails it too.
+
+## Running the focus contract test
+
+`TestFocusHoldReleaseCycleRealBD` (`internal/apply/focus_realbd_test.go`) proves what a real `bd`
+does with the focus hold and release, which the recorded-argv tests
+(`TestFocusHoldArgvVector`, `TestFocusReleaseArgvVector`) cannot: it drives `apply.Run` against a
+real `pg-connector` and `bd` in a disposable workspace (mint, hold, release, a metadata merge, and a
+claimed bead). It is opt-in and is NOT part of any nix check. The workspace is a fresh temp
+directory initialised with a time-based `bd init --prefix`; `bd` 1.3.1 uses an embedded Dolt engine
+there, so no dolt server is started, and the real beads workspace is never named.
+
+Name the binaries with absolute paths:
+
+| Variable                            | Binary                                                               |
+| ----------------------------------- | -------------------------------------------------------------------- |
+| `PG_DECIDER_FOCUS_PG_CONNECTOR_BIN` | `pg-connector` (`.#packages.<sys>.pg-connector`)                     |
+| `PG_DECIDER_FOCUS_BD_BIN`           | `bd` (`command -v bd`)                                               |
+| `PG_DECIDER_FOCUS_PG_DESK_BIN`      | `pg-desk`, or a stub script that accepts `issue refresh` and exits 0 |
+| `PG_DECIDER_FOCUS_REQUIRE_BINARIES` | optional; anything but empty or `0` makes a missing binary a failure |
+
+Skip versus fail: with the three binary variables unset the test SKIPS with a message naming the
+missing ones, so a plain `go test ./...` stays green. With `PG_DECIDER_FOCUS_REQUIRE_BINARIES` set,
+a missing binary FAILS the run instead. A variable that names something that is not an executable
+file always fails.
+
+The pg-connector backend `pg-connector-issue-beads` is found on `PATH` (the test puts the
+`pg-connector` and `bd` directories first), so put a build of the backend under test first:
+
+```bash
+cd packages/pg-decider
+ib="$(nix build ../..#pg-connector-issue-beads --no-link --print-out-paths)"
+PATH="$ib/bin:$PATH" \
+PG_DECIDER_FOCUS_REQUIRE_BINARIES=1 \
+PG_DECIDER_FOCUS_PG_CONNECTOR_BIN="$(nix build ../..#pg-connector --no-link --print-out-paths)/bin/pg-connector" \
+PG_DECIDER_FOCUS_BD_BIN="$(command -v bd)" \
+PG_DECIDER_FOCUS_PG_DESK_BIN="$(nix build ../..#pg-desk --no-link --print-out-paths)/bin/pg-desk" \
+  nice -n 10 go test -p 4 -count=1 -v -run TestFocusHoldReleaseCycleRealBD ./internal/apply/
+```
+
+The test does not depend on `pg-desk` behavior (a failed refresh only prints a warning), so a stub
+is enough for `PG_DECIDER_FOCUS_PG_DESK_BIN`.
