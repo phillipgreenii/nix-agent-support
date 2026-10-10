@@ -127,6 +127,13 @@ obliges to exist and to name no backend/system; `INTF-WIRE` is the interface tha
 | `activity`  | `list_activity`    | `{since?, before}` (RFC3339; `since` optional and inclusive, `before` required and exclusive) → `{items: []ActivityItem, truncated}` (`{id, kind, entity_type, entity_id, occurred_at, summary, as_of, stale}` + optional `approximate`, `url`, `labels`, plus an opaque `fields` map); schema version 1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | fan-out only — every backend registered under the top-level `activity.sources` key; no targeted form at all (`--backend` pins one source) |
 | _(any)_     | `capabilities`     | (no args) → the bespoke discovery shape                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | common; every backend MUST answer it                                                                                                      |
 | _(any)_     | `auth_status`      | (no args) → `{state, detail?}`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | common but **optional** — present only if the backend's concrete provider implements `AuthChecker` (`INV-AUTH-1`)                         |
+| `pr`        | `changes`          | `{query, consumer, cached?, reset?}` → `{sources: [{backend, status, version, next_seq, truncated, reason}], sources_freshness, changes: [{change, source, entity, seq, kinds, fields}]}` — OPTIONAL: only a backend that declares `owns_changes` answers it, and the umbrella forwards it to such a backend instead of diffing the ledger (`INV-CACHE-9`; the section "A daemon-backed backend" below)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | fan-out forward-only: every registered `pr` backend that declares `owns_changes`, unless `--backend` pins one                             |
+| `pr`        | `changes_ack`      | `{consumer, query, next_seq}` → no result payload (`result: null`) — OPTIONAL like `changes`; the umbrella sends it only after the `changes` output is flushed, with the `next_seq` it received                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | targeted, once per queried source                                                                                                         |
+| `ci`        | `changes`          | PLANNED, not available. `{query, consumer, cached?, reset?}` → the same shape as `pr` `changes`, where each change's `entity` is the PR's current CI state `{pr_id, rollup, runs}`; OPTIONAL, answered only by a backend that declares `owns_changes`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | PLANNED: fan-out forward-only, as for `pr` `changes`                                                                                      |
+| `ci`        | `changes_ack`      | PLANNED, not available. `{consumer, query, next_seq}` → no result payload (`result: null`); the pair of `ci` `changes`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | PLANNED: targeted, once per queried source                                                                                                |
+| `pr`, `ci`  | `explain`          | PLANNED, not available. `{id}` → for each field group the backend keeps: when it was fetched, until when it is fresh, when it must be refetched, its last error, the head and base it was fetched for, its queue position, any pending settle row (the awaited groups and the deadline) and the last change rows; OPTIONAL                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | PLANNED: targeted                                                                                                                         |
+| `pr`, `ci`  | `refresh`          | PLANNED, not available. `{id}` or `{query}` → queues an interactive refresh and returns at once, without waiting for it; OPTIONAL                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | PLANNED: targeted                                                                                                                         |
+| _(any)_     | `status`           | (no args) → the backend's own health report (see the section "A daemon-backed backend" below); OPTIONAL, offered only by a daemon-backed backend                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | common but **optional**                                                                                                                   |
 
 `issue`'s `transition` target state, and a `capabilities` response's `vocabulary`, are
 per-backend-declared rather than one fixed cross-backend enum, because the issue trackers this
@@ -369,7 +376,11 @@ by the design of record's own section 4.2, has no CLI surface here: it has no sc
 registry entry, and no backend anywhere in this module yet, landing only in a later phase) is the
 umbrella-facing surface over the on-disk delta ledger (`ledger.go`): one independent ledger per
 `(type, backend, query)`, tracking a fetch cursor, an entity hash index, a version counter, and
-per-consumer cursor positions.
+per-consumer cursor positions. This describes `changes` for a backend that does not own its
+changes. For a backend that declares `owns_changes` the umbrella forwards `changes` and
+`changes_ack` to the backend instead of diffing the ledger (`INV-CACHE-9`), as the section "A
+daemon-backed backend" below describes. `ci` has no `changes` verb here today; `ci changes`
+(PLANNED, not available) is for a backend that declares `owns_changes` only.
 
 - `pg-connector <type> changes --query <name> --consumer <id> [--cached] [--reset] [--backend <b>]`
   is a **fan-out** op, same exit-code scheme as `list` (`0`/`2`/`3`, `query_not_recognized`
@@ -430,7 +441,9 @@ per-consumer cursor positions.
 Phase 14 (bead `pg2-2j5ac.42.2`, docket `pg2-2j5ac.42`) wires the umbrella's own on-disk entity
 cache (`cache.go`, bead `pg2-2j5ac.42.1`'s Go API — no CLI surface of its own) into `pr`/`issue`
 `show`, `list`, and `changes` so that a backend answering `unavailable` is served from cache
-instead of failing outright, per the design of record's section 5.6:
+instead of failing outright, per the design of record's section 5.6. The whole section is scoped
+to a backend that does not own its cache: for a backend that declares `cache_opt_out` the umbrella
+holds no cache entry to fall back to, so an `unavailable` answer stays `unavailable` (`INV-CACHE-9`).
 
 - **`show`** (`cache_dispatch.go`'s `dispatchShowWithCache`) mirrors `DispatchTargeted`'s own
   try-each policy over every registered backend (or the pinned one), but on that backend's own
@@ -490,8 +503,10 @@ instead of failing outright, per the design of record's section 5.6:
 ### Read-through, provenance and the refresher — the cache as a policy, not only a fallback
 
 Bead `pg2-cw6b3.2` turns the entity cache from a failure fallback into a read policy for `pr` and
-`issue` (`INV-CACHE-2`..`INV-CACHE-8`). Two `state:` keys, in the same registry file and with the
-same duration syntax (`<N>d` or a Go duration) as `cache_max_age`, tune it:
+`issue` (`INV-CACHE-2`..`INV-CACHE-8`). It applies to a backend that does not own its cache; a
+backend that declares `cache_opt_out` and `owns_changes` is outside it (`INV-CACHE-9`). Two `state:`
+keys, in the same registry file and with the same duration syntax (`<N>d` or a Go duration) as
+`cache_max_age`, tune it:
 
 | `state:` key          | Default               | Meaning                                                                                      |
 | --------------------- | --------------------- | -------------------------------------------------------------------------------------------- |
@@ -557,6 +572,120 @@ it only has to meet the contract the policy reads, and does:
 - The read-through (`cache_read_ttl`) applies to `issue show` for Jira as it does for `pr show`; the
   refresher stays opt-in (`cache_refresh_after`), and a Jira `show` costs one `pjira issue` call
   plus, for an operator-assigned issue, one `pjira search` call for the attention facts.
+
+### A daemon-backed backend — forwarded `changes`, acknowledgement, freshness and `unavailable`
+
+A **daemon-backed backend** (see the [glossary](glossary.md); ADR 0090) keeps its own store, so for
+the types it serves it owns the entity cache and decides what changed. It says so in its
+`capabilities` answer with two declarations, `owns_changes` and `cache_opt_out`. This section
+describes what crosses `INTF-WIRE` and `INTF-CLI` for such a backend, and the umbrella's own
+obligations toward it (`INV-CACHE-9`, `INV-LEDGER-FRESH-5`). A backend that declares neither keeps
+every behavior of the sections above (`INV-CACHE-1`). The wire envelope does not change; result
+shapes gain the fields named below, and the `changes` result's `schemaVersion` is bumped.
+
+- **`capabilities` never needs the daemon.** The backend answers `capabilities`, both declarations
+  included, without contacting its daemon. A `capabilities` call that failed would make the
+  umbrella's cache decision fail open (`INV-CACHE-8`), silently re-enabling the umbrella cache and
+  the ledger diff and hiding the outage; answering statically keeps an outage visible, as
+  `unavailable` on every op that needs the daemon.
+- **Reads pass annotations through.** For a `cache_opt_out` backend the umbrella passes each
+  answer's own annotations through unchanged — `served_from`, `stale`, `age_seconds`, and the added
+  `groups[]` (the freshness of each field group the answer was built from) — and writes no cache
+  entry and no tombstone for it (`INV-CACHE-9`). `show`, `list`, `files`, `commits`,
+  `review_pending` and `list_runs` keep their request and result shapes; only `groups[]` is added.
+- **`--fresh`.** `pr files`, `pr commits`, `pr review pending`, `pr list` and `ci list` accept
+  `--fresh` (as `show` already does), forwarded as `fresh: true`. For such a backend it is the
+  backend that decides how current its answer is (`INV-CACHE-8`). A caller that changed a PR outside
+  the backend (a push, a PR creation) and reads it back MUST pass `--fresh` on that read, or run
+  `pr refresh <id>` (PLANNED, not available) after its own write; a polling path SHOULD NOT use
+  either.
+- **`changes` is forwarded, and fails closed.** For a backend that declares `owns_changes`, the
+  call `pg-connector <type> changes --query <name> --consumer <id> [--cached] [--reset]` is
+  forwarded to the backend and never falls back to a ledger diff of repeated `list` calls. If the
+  backend cannot answer, that source is `degraded` with the `unavailable` reason, no change is
+  delivered, and the consumer's position does not move (`INV-CACHE-9`). `--query` stays required.
+  `--cached` answers from what the backend already has without running the query, and `--reset`
+  replays the query's current members as `added` and moves the consumer to the tail of the log,
+  deliberately.
+- **Result shape.** Each change keeps `{change, source, entity}` and gains `seq` (its position in
+  the backend's change log), `kinds` (what kind of change it was) and `fields` (each changed field
+  with its before and after value). `change` maps from the kinds: `entered_query` is `added`,
+  `left_query` and `removed` are `removed`, anything else is `changed`. `entity` is the summary-level
+  entity with its `version` and `head_sha` set to the values recorded WITH that change, not the
+  entity's current ones, so a redelivered change keeps the identity it had and two changes to one
+  entity in one poll stay distinct. Each `sources[]` row gains `next_seq`, the log position scanned
+  up to, which can be past the last returned change because changes to entities outside the query
+  are skipped; its `version` field carries the backend's per-key position count, so a reader that
+  compares it keeps working.
+- **Acknowledgement is explicit.** A change is NOT acknowledged by being returned. The umbrella
+  forwards `changes`, flushes its output to the caller, and only then sends `changes_ack` with the
+  consumer, the query and the `next_seq` it received (`INV-CACHE-9`). A consumer that crashes before
+  the flush receives the same changes again: delivery is at-least-once. A poll that returns no
+  change still acknowledges its `next_seq`, so a quiet query's position keeps moving. A first poll
+  of a new (consumer, kind, query) key starts at the tail of the log, after the query's baseline
+  exists, so a new consumer is not handed every open entity at once.
+- **Retention and `cursor_expired:`.** The backend keeps change-log rows for a configured retention
+  and drops a key a consumer has not used for a configured time. A key whose position fell outside
+  retention is answered `invalid_argument` whose `message` starts with `cursor_expired:` and tells
+  the caller to re-run with `--reset`; the error envelope gains no field. After the backend moved
+  its store aside to recover from corruption, the first poll of every key gets the same answer,
+  rather than silently starting at the tail and skipping what changed in between.
+- **Freshness stamps.** Every forwarded `changes` answer carries `sources_freshness[]`, one entry
+  per configured query: the time of the backend's last whole-query origin answer (`last_success_at`)
+  and its last error (`last_error`). The umbrella stamps `refreshed_at` and `last_error` on the
+  ledger's `(type, backend, query)` key from it, and stamps the consumer's `last_seen` on every
+  forwarded call (`INV-LEDGER-FRESH-5`). A cache answer never advances `refreshed_at`
+  (`INV-LEDGER-FRESH-2`).
+- **`ci changes` (PLANNED, not available).** `pg-connector ci changes --consumer <id> --query <name>`
+  is the CI view of the same log: it returns the changes of the PRs in the PR query `<name>` whose
+  kinds include `ci_changed`, `entered_query`, `left_query` or `removed`, each with the PR's current
+  CI state as its `entity`. A PR's CI state changes also arrive on `pr changes` as `ci_changed`, so a
+  consumer reads one feed or the other, never both: the backend answers `invalid_argument` naming the
+  existing key when one consumer asks for both feeds of one query. For a `ci` backend that does NOT
+  declare `owns_changes` the umbrella itself answers `invalid_argument` for that source, naming the
+  instance and saying it does not own changes; it does not forward the call. `ci changes` (PLANNED)
+  has the same acknowledgement, retention, `--cached` and `--reset` rules as `pr changes`.
+- **`pr explain`, `ci explain` and `pr refresh` (PLANNED, not available).** The verbs
+  `pr explain <id>` (PLANNED) and `ci explain <id>` (PLANNED) answer "why is this stale" from the
+  backend's `explain` op: for each field group, when it was fetched, until when it is fresh, when
+  it must be refetched, its last error, the head and base it was fetched for, its queue position,
+  any pending settle row, and the last change rows. The verbs `pr refresh <id>` (PLANNED) and
+  `pr refresh --query <name>` (PLANNED) queue an interactive refresh and return at once, without
+  waiting for it.
+- **`unavailable` names where to look.** When the backend's daemon cannot be reached, the call is
+  answered `unavailable` with a message that names the socket path and the supervisor's restart
+  hint for the platform. The backend first retries a refused connection with backoff for part of the
+  request's own deadline, which covers a supervisor restart, and the message `migrating:` marks a
+  daemon that is still migrating its store. The umbrella has no cache entry to fall back to for such
+  a backend (`INV-CACHE-9`), so a read against a down daemon fails rather than serving old content.
+  A caller, and every skill or tool that calls `pg-connector pr` or `ci`, MUST treat `unavailable`
+  as retryable. `version_mismatch` is answered only when the daemon's protocol version is outside
+  the range the backend supports; a difference of build inside that range is reported by `status`,
+  not as an error. No new error code exists: every failure uses the seven-value taxonomy
+  (`INV-ERR-1`).
+- **`status`.** A daemon-backed backend MAY offer a `status` op answering whether it is healthy, how
+  fresh it is and how much it is spending: version and build, uptime, the store's location and size,
+  each upstream rate-limit budget and any pause with its reason and end, queue depth and the oldest
+  overdue task per class, each query's last success and last error, the auth state, the change
+  log's head, pending settle rows, each consumer's position, and which registry name each instance
+  serves. When the daemon is down it still reports the supervisor probe's answer, the socket path,
+  the store file's size and age, and the log paths. Its exit codes follow `INV-EXIT-1` (`0` healthy,
+  `2` degraded, `3` down), and `--json` gives the same as a document. The umbrella surfaces the same
+  health as rows of `auth status` and `config validate`.
+
+```mermaid
+sequenceDiagram
+    participant C as consumer
+    participant UMB as umbrella
+    participant BE as daemon-backed backend (INTF-WIRE)
+    C->>UMB: changes --query Q --consumer C
+    UMB->>BE: changes {query, consumer}
+    BE-->>UMB: changes[seq, kinds, fields], sources[next_seq], sources_freshness[]
+    UMB->>UMB: stamp ledger refreshed_at, last_error and last_seen (INV-LEDGER-FRESH-5)
+    UMB-->>C: output written and flushed
+    UMB->>BE: changes_ack {consumer, query, next_seq}
+    Note over UMB,BE: a crash before the flush leaves the position unmoved: at-least-once
+```
 
 ### `attention`/`search` — the two cross-cutting, fan-out-only capabilities
 
@@ -661,6 +790,12 @@ that backend's dispatch table, which the umbrella's own fan-out already recogniz
 (the wire-level `unknown_op` code) and reports as `disabled: "not applicable"`, never a forced or
 meaningless answer (`INV-AUTH-1`).
 
+For a daemon-backed backend `auth_status` is answered by the daemon from its cached identity, so a
+daemon that is down answers `unavailable` rather than a stale `OK`. The backend's own `status` op
+then tells the operator why: `auth status` and `config validate` show the backend's health as rows
+beside its auth state, from `status`, which degrades locally when the daemon is down (the section
+"A daemon-backed backend" below, `INV-CACHE-9`).
+
 ### The composition boundary
 
 A Tier-2 backend's own op handler MUST resolve any data it needs from a **different** capability
@@ -680,9 +815,10 @@ not authorize (`INV-COMP-1`).
 - **What the operator can do.** Invoke a **targeted** op against the one backend registered for a
   capability (`pr show`, `pr files`, `pr commits`, `pr review submit`, `pr review pending`, `issue show/create/comment/
 transition/update/close/deps/children`, `ci logs`, `ci rerun-failed`, `alert show`, `mail show`, `mail mark-read`, `mail mark-unread`, `mail archive`, `mail unarchive`, `mail attachment fetch`, `scm worktree add/remove/list`, `scm branch
-detect`); invoke a **fan-out** op across every backend registered for a capability (`pr list`,
+detect`; against a daemon-backed backend also `pr explain` (PLANNED), `ci explain` (PLANNED) and
+  `pr refresh` (PLANNED), none of them available yet); invoke a **fan-out** op across every backend registered for a capability (`pr list`,
   `pr changes`, `issue list`, `issue changes`, `ci list`, `auth status`, `calendar list`,
-  `calendar changes`, `alert list`, `alert history`, `mail list`, `mail search`; `alert show` is targeted), across every backend
+  `calendar changes`, `alert list`, `alert history`, `mail list`, `mail search`; `alert show` is targeted; against a daemon-backed backend also `ci changes` (PLANNED, not available)), across every backend
   registered under the top-level `attention.sources`/`search.sources`/`activity.sources` keys (`attention list`,
   `search <query>`, `activity list`), or across every backend registered for **any** entity-type capability
   (`config validate`); inspect or reset the on-disk delta ledger or the umbrella entity cache
@@ -707,6 +843,16 @@ detect`); invoke a **fan-out** op across every backend registered for a capabili
   pins the fan-out to that one backend instead of querying every registered backend of the type,
   and on an id-less write with no meaningful fan-out (`issue create`) it is how an operator
   resolves an otherwise-ambiguous multi-backend registration explicitly (`INV-REG-2`).
+- **`--fresh`.** `pr show` and `issue show` accept `--fresh` (the read-through section), and
+  `pr files`, `pr commits`, `pr review pending`, `pr list` and `ci list` accept it too, as a leaf
+  flag like `--backend`. The umbrella forwards it as `fresh: true`; against a backend that owns its
+  cache it is that backend that decides how current its answer is (`INV-CACHE-8`, `INV-CACHE-9`).
+- **A daemon-backed backend's outcomes.** A call against a backend whose daemon cannot be reached
+  ends as the ordinary `unavailable` failure, with a message naming the socket and the restart
+  hint: exit `1` for a targeted call, a `degraded` `sources[]` row for a fan-out call, and a
+  forwarded `changes` source delivers nothing and moves no position (`INV-CACHE-9`, `INV-EXIT-1`).
+  A caller MUST treat that `unavailable` as retryable. `auth status` and `config validate` carry the
+  backend's own health as rows from its `status` op, and that op reports even when the daemon is down.
 - **Outcome reporting.** A targeted call's outcome is the umbrella's own **targeted** exit-code
   scheme (`0`/`4`/`1`); a fan-out call's outcome is the **fan-out** scheme (`0`/`2`/`3`) plus a
   `sources[]` row per backend queried — `INV-EXIT-1` and `INV-OUT-1` state both in full. A

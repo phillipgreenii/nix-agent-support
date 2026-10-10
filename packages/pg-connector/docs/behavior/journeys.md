@@ -64,6 +64,12 @@ See the [glossary](glossary.md), [actors](actors.md), [interfaces](interfaces.md
   actually read and a later review of the new head is still seen as needed, and be told plainly
   when the commit I name is not one the PR has. _(→ `USECASE-TARGETED-CALL`; `INV-REVHEAD-1`,
   `INV-REVHEAD-2`, `INV-REVHEAD-3`.)_
+- **`STORY-OP-12`** <!-- uuid: eced1e3e-d6a9-4ff5-9081-24442d63e4e4 --> — poll what changed for a
+  query from a backend that decides for itself what changed, receiving every change at least once
+  and acknowledging only what I have actually received, and — when that backend's daemon is down —
+  get a clear, retryable `unavailable` that names where to look rather than an empty "nothing
+  changed" or old content the umbrella does not hold. _(→ `USECASE-POLL-CHANGES`,
+  `USECASE-DAEMON-DOWN-READ`; `INV-CACHE-9`, `INV-LEDGER-FRESH-5`, `INV-ERR-1`, `INV-EXIT-1`.)_
 
 ## Journey
 
@@ -76,7 +82,7 @@ invocation as it travels from the operator to a registered backend and back.
 _Requires:_ `INV-CAP-1`, `INV-WIRE-1`, `INV-REG-1`, `INV-REG-2`, `INV-EXIT-1`, `INV-OUT-1`,
 `GOAL-MIN-1`.
 _Includes:_ `USECASE-CREATE-BACKEND`, `USECASE-REGISTER-BACKEND`, `USECASE-TARGETED-CALL`,
-`USECASE-FANOUT-CALL`, `USECASE-CHOOSE-OUTPUT`.
+`USECASE-FANOUT-CALL`, `USECASE-CHOOSE-OUTPUT`, `USECASE-POLL-CHANGES`, `USECASE-DAEMON-DOWN-READ`.
 
 **The arc.** A backend implementer builds a Tier-2 backend against a capability's Provider
 interface and the wire protocol (`USECASE-CREATE-BACKEND`) and registers it under
@@ -85,7 +91,10 @@ interface and the wire protocol (`USECASE-CREATE-BACKEND`) and registers it unde
 outcome via the targeted exit-code scheme (`USECASE-TARGETED-CALL`); a **fan-out** op queries
 every registered backend of a type/capability at once and reports a `sources[]` row per backend
 plus the fan-out exit-code scheme (`USECASE-FANOUT-CALL`). Either kind of call is rendered in
-whichever presentation mode the operator chose (`USECASE-CHOOSE-OUTPUT`).
+whichever presentation mode the operator chose (`USECASE-CHOOSE-OUTPUT`). When the registered
+backend is a daemon-backed one that owns its changes, a polling consumer's `changes` call is
+forwarded to it and acknowledged only after the output is flushed (`USECASE-POLL-CHANGES`), and a
+read against its unreachable daemon ends as a retryable `unavailable` (`USECASE-DAEMON-DOWN-READ`).
 
 ```mermaid
 flowchart TD
@@ -399,6 +408,104 @@ flowchart TD
     row -->|"reachable, firing"| some["succeeded: render items"]
     row -->|"unavailable or malformed"| unk["degraded: render unknown or incomplete"]
 ```
+
+### `USECASE-POLL-CHANGES` — poll a daemon-backed backend's `changes` and acknowledge only what was delivered <!-- uuid: 95adcf12-95c5-4bfb-90db-1532eed2ca77 -->
+
+**Actor:** `ACTOR-OP` (a polling consumer: a scheduler role or a script).
+**Level:** user-goal.
+**Preconditions:** the target capability has a backend that declares `owns_changes`
+(`INTF-WIRE`'s section "A daemon-backed backend"), and the consumer polls with a stable
+`--consumer` name and a `--query` the backend recognizes.
+**Intent:** learn every change to the entities of one query, at least once and in order, without
+the umbrella deciding what changed, so a crash between receiving and acting loses nothing.
+_Requires:_ `INV-CACHE-9`, `INV-LEDGER-FRESH-5`, `INV-LEDGER-FRESH-2`, `INV-EXIT-1`, `INV-OUT-1`,
+`INV-ERR-1`.
+_Includes:_ `USECASE-CHOOSE-OUTPUT`.
+
+**Flow.** The consumer runs `changes --query Q --consumer C`. The umbrella forwards the call to the
+backend instead of diffing its ledger (`INV-CACHE-9`) and receives the changes after C's
+acknowledged position for Q, each with its `seq`, `kinds` and `fields`, a `next_seq` per source, and
+`sources_freshness[]`. It stamps the ledger's `refreshed_at` and `last_error` for each of the
+backend's queries and the consumer's `last_seen` from that answer (`INV-LEDGER-FRESH-5`), writes the
+output to the consumer and flushes it, and only then sends `changes_ack` with the `next_seq` it
+received. The rows are not acknowledged by being returned: a consumer that crashes before the flush
+is handed the same changes again on its next poll. A poll that returns no change still sends
+`changes_ack`, so a quiet query's position keeps moving. The first poll of a new
+(consumer, kind, query) key starts at the tail of the log, so a new consumer is not handed every open
+entity at once. The result is rendered per the operator's chosen output mode
+(`USECASE-CHOOSE-OUTPUT`) and the call's exit code follows `INV-EXIT-1`.
+
+```mermaid
+sequenceDiagram
+    participant C as consumer
+    participant UMB as umbrella
+    participant BE as daemon-backed backend
+    C->>UMB: changes --query Q --consumer C
+    UMB->>BE: changes {query, consumer}
+    BE-->>UMB: changes (seq, kinds, fields), next_seq, sources_freshness[]
+    UMB->>UMB: stamp refreshed_at, last_error, last_seen (INV-LEDGER-FRESH-5)
+    UMB-->>C: write and flush the output
+    UMB->>BE: changes_ack {consumer, query, next_seq}
+    Note over C,BE: crash before the flush: no ack, the next poll redelivers (at-least-once)
+```
+
+Extensions:
+
+- The backend cannot answer (its daemon is down): the source is `degraded` with the `unavailable`
+  reason, nothing is delivered, no `changes_ack` is sent and the position does not move, and the
+  umbrella never falls back to a ledger diff (`INV-CACHE-9`). The consumer retries the same poll
+  (`USECASE-DAEMON-DOWN-READ`).
+- The consumer's position fell outside the backend's retention, or the backend recovered from a
+  corrupt store: the call is answered `invalid_argument` whose message starts with `cursor_expired:`
+  and tells the consumer to re-run with `--reset`, which replays the query's current members as
+  `added` and moves the consumer to the tail of the log (`INV-ERR-1`).
+- `--cached`: the backend answers from what it already has without running the query, and the answer
+  advances no `refreshed_at` (`INV-LEDGER-FRESH-2`).
+- The consumer wants the CI view of the same query: `ci changes` (PLANNED, not available) returns
+  the PR rows whose kinds include `ci_changed`, `entered_query`, `left_query` or `removed`, with the
+  same acknowledgement and retention rules. Against a `ci` backend that does not declare
+  `owns_changes` the umbrella itself answers `invalid_argument` for that source, naming the instance
+  and saying it does not own changes, and does not forward the call.
+
+### `USECASE-DAEMON-DOWN-READ` — read from a daemon-backed backend whose daemon is down, and retry <!-- uuid: 85f23c4e-f32c-4b58-bfa9-f0975195541c -->
+
+**Actor:** `ACTOR-OP` (a person, a script, or a skill that reads `pr` or `ci`).
+**Level:** user-goal.
+**Preconditions:** the target capability has a daemon-backed backend that declares `cache_opt_out`,
+and its daemon cannot be reached.
+**Intent:** tell an outage from a real answer, learn where to look, and recover by retrying, without
+the umbrella serving old content it does not hold or hiding the outage.
+_Requires:_ `INV-CACHE-9`, `INV-ERR-1`, `INV-EXIT-1`, `INV-OUT-1`.
+_Includes:_ `USECASE-TARGETED-CALL`, `USECASE-FANOUT-CALL`.
+
+**Flow.** The umbrella still learns the backend's declarations, because the backend answers
+`capabilities` without its daemon (`INTF-WIRE`), so the outage is never mistaken for a backend that
+opted out of the cache. The read is forwarded; the backend retries a refused connection for part of
+the request's deadline, then answers `unavailable` with a message naming the socket path and the
+supervisor's restart hint. The umbrella holds no cache entry for this backend and so serves nothing
+in its place (`INV-CACHE-9`): a targeted read exits `1`, and a fan-out read reports the source
+`degraded` (`INV-EXIT-1`, `INV-OUT-1`). The caller treats `unavailable` as retryable, retries after
+a short wait, and gets a normal answer once the supervisor has restarted the daemon. The operator
+who needs the cause reads the backend's own `status`, which still reports the supervisor probe's
+answer, the socket path, the store's size and age, and the log paths when the daemon is down, and
+which `auth status` and `config validate` also show as rows.
+
+```mermaid
+flowchart TD
+    read["caller reads pr or ci"] --> fwd["umbrella forwards to the backend (cache_opt_out: no umbrella cache)"]
+    fwd --> up{"daemon reachable?"}
+    up -->|"yes"| ans["answer with served_from, stale, age_seconds, groups[]"]
+    up -->|"no, refused: backoff within the deadline"| una["unavailable: names the socket and the restart hint (INV-ERR-1)"]
+    una --> retry["caller treats it as retryable and retries"]
+    retry --> read
+```
+
+Extensions:
+
+- The daemon answers `unavailable` with a `migrating:` message: it is up but still migrating its
+  store, and the caller retries as above.
+- The caller needs a read of its own write after a push or a PR creation: it passes `--fresh` on the
+  read or runs `pr refresh <id>` (PLANNED, not available); a polling caller does neither.
 
 ### `USECASE-BACKEND-OBSERVABILITY` — keep a backend's own health out of attention and in its own telemetry <!-- uuid: a4bd8e4a-e378-496e-8d6b-42bfd7f119b8 -->
 
