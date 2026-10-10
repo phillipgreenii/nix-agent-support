@@ -42,6 +42,32 @@ func TestPgConnector_IssueGrantedVerbs_Approve(t *testing.T) {
 	}
 }
 
+// TestPgConnector_BackendFlag_StillApprove pins the current escalation-triager
+// convention (bead pg2-y1fhh/pg2-1qhls): the tracker instance is chosen with
+// --backend <instance> on each granted issue verb, in any position (after the
+// id, before the verb, glued with '='). --backend is a per-leaf String flag, so
+// the resource/verb resolver skips it and its value.
+func TestPgConnector_BackendFlag_StillApprove(t *testing.T) {
+	cmds := []string{
+		"pg-connector issue show pg2-itxtv --backend pg-connector-issue-beads-x",
+		"pg-connector issue comment pg2-itxtv --backend pg-connector-issue-beads-x --body hi",
+		"pg-connector issue update pg2-itxtv --backend pg-connector-issue-beads-x --add-label human",
+		"pg-connector issue close pg2-itxtv --backend pg-connector-issue-beads-x",
+		"pg-connector issue close pg2-itxtv --backend=pg-connector-issue-beads-x",
+		"pg-connector issue close --backend pg-connector-issue-beads-x pg2-itxtv",
+		"pg-connector issue --backend pg-connector-issue-beads-x close pg2-itxtv",
+	}
+	for _, cmd := range cmds {
+		if got := evalPgConnector(t, cmd); got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s (%s), want Approve", cmd, got.Decision, got.Reason)
+		}
+	}
+	// An ungranted verb must stay unclaimed even when it carries --backend.
+	if got := evalPgConnector(t, "pg-connector issue create --backend pg-connector-issue-beads-x --title x"); got.Decision != hookio.NoOpinion {
+		t.Errorf("issue create with --backend: got %s (%s), want NoOpinion", got.Decision, got.Reason)
+	}
+}
+
 // TestPgConnector_EnvVarPrefix_StillApprove is the bead pg2-r848s regression
 // case: the escalation-triager's prompt instructs it to prefix EVERY
 // pg-connector invocation with PG_CONNECTOR_ISSUE_BEADS_DIR=<dir> (per

@@ -6,7 +6,27 @@
 // home/programs/pg-router-ccpool-handler/default.nix's defaultAllowedTools) —
 // for `permissionMode=dontAsk` dispatch (bead pg2-r848s).
 //
-// # Root cause this closes
+// # Current convention: --backend, not an env-var prefix (bead pg2-1qhls)
+//
+// The escalation-triager prompts no longer prefix `pg-connector` with
+// `PG_CONNECTOR_ISSUE_BEADS_DIR=<dir>` (that prefix was inert; bead pg2-y1fhh
+// repointed the prompts). They now select the tracker instance by passing
+// `--backend <instance>` on the verb itself, e.g. `pg-connector issue close
+// <id> --backend <instance> ...`. This rule needs no change for that shape:
+// pgConnectorCommandPath skips flags (and a String flag's value) when locating
+// the resource/verb pair, and --backend is registered per leaf as a String flag
+// (pg-connector's backend_flag.go addBackendFlag), so it is skipped wherever it
+// sits and `issue show/comment/update/close ... --backend X` is still approved.
+// Pinned by TestPgConnector_IssueGrantedVerbs_Approve and
+// TestPgConnector_BackendFlag_StillApprove.
+//
+// The env-var-prefix handling is retained, not removed: cmdparse still lifts a
+// leading `VAR=value` into EnvVars before this rule runs, so the prefixed shape
+// stays approved (TestPgConnector_EnvVarPrefix_StillApprove). The next section
+// describes that HISTORICAL root cause (bead pg2-r848s), which is why the rule
+// exists; it is no longer the live prompt convention.
+//
+// # Root cause this closes (historical: the env-prefix convention)
 //
 // pg2-fjnyi's live verification (test bead pg2-itxtv, 2026-09-29) found that a
 // pg2-escalation-triager dispatch got `pg-connector issue *` (even `--help`)
