@@ -30,7 +30,7 @@ func (b *logb) taskIn(def string, c due.Cadence, period civil.Date) func(event.I
 	return func(bt event.ID) event.Payload {
 		return event.TaskMaterialized{
 			TaskID: event.NewTaskID(c, period, def), Definition: def, Cadence: c, Period: period,
-			Title: "Task " + def, Link: exampleLink, Due: event.At(at(60)),
+			Title: "Task " + def, Link: exampleLink, Due: event.At(at(0)),
 			DueRule: due.Rule{At: civil.TimeOfDay{Hour: 9, Minute: 30}, TZ: z}, Batch: bt,
 		}
 	}
@@ -200,7 +200,7 @@ func TestTaskCarriesTheMaterializationSnapshot(t *testing.T) {
 	task := mustTask(t, m, id)
 	if task.ID != id || task.Definition != "post-plan" || task.Cadence != due.Daily || task.PeriodStart != day1 ||
 		task.Title != "Task post-plan" || task.Link != exampleLink || task.Group != "" ||
-		!task.Due.Equal(at(60)) || task.DueRule.At != (civil.TimeOfDay{Hour: 9, Minute: 30}) ||
+		!task.Due.Equal(at(0)) || task.DueRule.At != (civil.TimeOfDay{Hour: 9, Minute: 30}) ||
 		task.DueRule.TZ.Name() != "America/New_York" || task.Status != Open {
 		t.Errorf("Task = %+v", task)
 	}

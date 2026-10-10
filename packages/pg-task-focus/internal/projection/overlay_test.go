@@ -106,7 +106,7 @@ func materialized(t *testing.T, n, min int, batch event.ID) event.Event {
 	return ev(n, min, event.TaskMaterialized{
 		TaskID: taskA, Definition: "post-plan", Cadence: due.Daily,
 		Period: civil.Date{Year: 2026, Month: time.October, Day: 7},
-		Title:  "Post the plan", Link: exampleLink, Due: event.At(at(60)),
+		Title:  "Post the plan", Link: exampleLink, Due: event.At(at(0)),
 		DueRule: due.Rule{At: civil.TimeOfDay{Hour: 9, Minute: 30}, TZ: z},
 		Batch:   batch,
 	})
