@@ -81,28 +81,6 @@
         "Overdue": true
       },
       {
-        "Kind": "day",
-        "Task": {
-          "ID": "day:2026-10-08:end-of-day-summary",
-          "Definition": "end-of-day-summary",
-          "Cadence": "daily",
-          "PeriodStart": "2026-10-08",
-          "Title": "Post the end-of-day summary",
-          "Group": "End of day",
-          "Link": "",
-          "Due": "2026-10-08T21:30:00Z",
-          "DueRule": {
-            "at": "17:30",
-            "tz": "America/New_York"
-          },
-          "Status": "open",
-          "ResolvedAt": null,
-          "Reason": ""
-        },
-        "GroupRank": 2,
-        "Overdue": false
-      },
-      {
         "Kind": "week",
         "Task": {
           "ID": "week:2026-10-05:weekly-update",
@@ -174,7 +152,7 @@
     },
     "Focus": {
       "Cycle": {
-        "ID": "01M4A899G09R0000000000000S",
+        "ID": "01M4A899G09R0000000000000T",
         "Type": "page-response",
         "Title": "Page response",
         "PlannedMinutes": 25,
@@ -205,7 +183,7 @@
     "Dimmed": [
       {
         "Cycle": {
-          "ID": "01M4A899G09R0000000000000R",
+          "ID": "01M4A899G09R0000000000000S",
           "Type": "deep-work",
           "Title": "Deep work cycle",
           "PlannedMinutes": 50,
@@ -219,7 +197,7 @@
               "OpenedBy": "01M4A899G08W0000000000000D"
             }
           ],
-          "InterruptedBy": "01M4A899G09R0000000000000S",
+          "InterruptedBy": "01M4A899G09R0000000000000T",
           "Note": "",
           "KV": null
         },
@@ -238,7 +216,7 @@
     "InterruptStack": [
       {
         "Cycle": {
-          "ID": "01M4A899G09R0000000000000R",
+          "ID": "01M4A899G09R0000000000000S",
           "Type": "deep-work",
           "Title": "Deep work cycle",
           "PlannedMinutes": 50,
@@ -252,7 +230,7 @@
               "OpenedBy": "01M4A899G08W0000000000000D"
             }
           ],
-          "InterruptedBy": "01M4A899G09R0000000000000S",
+          "InterruptedBy": "01M4A899G09R0000000000000T",
           "Note": "",
           "KV": null
         },

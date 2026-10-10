@@ -15,6 +15,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/civil"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/clock"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/command"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/due"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/engine"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/event"
@@ -50,11 +51,18 @@ type goldenScenario struct {
 	log  func(t *testing.T) []byte
 }
 
-// scripted is a scenario log written by driving an engine with script.
+// scripted is a scenario log written by driving an engine with script, on the
+// example configuration.
 func scripted(script func(g *goldenRun)) func(t *testing.T) []byte {
+	return scriptedWith(nil, script)
+}
+
+// scriptedWith is scripted on the example configuration after edit has changed
+// its generic tree; a nil edit leaves it as it is.
+func scriptedWith(edit func(c map[string]any), script func(g *goldenRun)) func(t *testing.T) []byte {
 	return func(t *testing.T) []byte {
 		t.Helper()
-		g := newGoldenRun(t)
+		g := newGoldenRun(t, loadConfig(t, edit))
 		script(g)
 		return g.logBytes()
 	}
@@ -64,7 +72,7 @@ var goldenScenarios = []goldenScenario{
 	{name: "normal-day", now: oct(7, 11, 45), log: scripted(normalDay)},
 	{name: "dst-week", now: time.Date(2026, time.November, 1, 8, 20, 0, 0, time.UTC), log: scripted(dstWeek)},
 	{name: "sprint", now: oct(19, 9, 10), log: scripted(sprint)},
-	{name: "on-call-switch", now: oct(8, 9, 40), log: scripted(onCallSwitch)},
+	{name: "on-call-switch", now: oct(8, 9, 40), log: scriptedWith(onCallTasks, onCallSwitch)},
 	{name: "interrupt-chain", now: oct(7, 9, 50), log: scripted(interruptChain)},
 	{name: "forgotten-lunch", now: oct(7, 13, 30), log: scripted(forgottenLunch)},
 	{name: "corrections", now: oct(7, 10, 0), log: scripted(corrections)},
@@ -78,9 +86,9 @@ type goldenRun struct {
 	clientN uint32
 }
 
-func newGoldenRun(t *testing.T) *goldenRun {
+func newGoldenRun(t *testing.T, cfg *config.Config) *goldenRun {
 	t.Helper()
-	return &goldenRun{harness: newHarness(t, nil)}
+	return &goldenRun{harness: newHarness(t, cfg)}
 }
 
 // id is the next client id of the scenario.
@@ -300,29 +308,54 @@ func sprint(g *goldenRun) {
 // its own, back to normal at the end of the day, and on call again on
 // Thursday with the profile change riding inside the day's rollover. On
 // Thursday a deep-work cycle, which the on-call profile does not list,
-// starts and is interrupted by a page response at 09:20. The example
-// configuration gives both profiles the same tasks, so the changes add,
-// withdraw and reinstate no task.
+// starts and is interrupted by a page response at 09:20. The scenario's
+// configuration (onCallTasks) takes the end-of-day summary off the on-call
+// profile's daily list, so going on call withdraws that day's summary, going
+// back reinstates it, and the Thursday rollover that stays on call
+// materializes none.
 func onCallSwitch(g *goldenRun) {
 	d := dayOf(7)
+	summary := daily(d, "end-of-day-summary")
 	g.commit(oct(7, 8, 50), bootstrapCmd(g.id()))
 	g.complete(oct(7, 8, 55), daily(d, "plan-day"))
 	deep, _ := g.startCycle(oct(7, 9, 0), deepWork)
 	g.stop(oct(7, 9, 50), deep)
 	g.commit(oct(7, 10, 0), command.ChangeProfile{ID: g.id(), Profile: "on-call"})
+	if got := g.task(summary).Status; got != projection.Withdrawn {
+		g.t.Fatalf("going on call left the end-of-day summary %s, want withdrawn", got)
+	}
 	page, _ := g.startCycle(oct(7, 10, 5), "page-response")
 	g.stop(oct(7, 10, 40), page)
 	g.commit(oct(7, 10, 45), command.AnnotateCycle{ID: g.id(), CycleID: page, Note: "Restarted the worker", KV: []event.KV{
 		{Key: "incident", Value: "https://example.test/incidents/1"},
 	}})
 	g.commit(oct(7, 17, 0), command.ChangeProfile{ID: g.id(), Profile: "normal"})
-	g.complete(oct(7, 17, 25), daily(d, "end-of-day-summary"))
+	if got := g.task(summary).Status; got != projection.Open {
+		g.t.Fatalf("going back to normal left the end-of-day summary %s, want open", got)
+	}
+	g.complete(oct(7, 17, 25), summary)
 
 	next := dayOf(8)
 	g.commit(oct(8, 8, 50), command.ChangePeriods{ID: g.id(), Changes: []command.PeriodChange{dayChange(next)}, Profile: "on-call"})
+	if _, ok := g.e.Snapshot().Model.Task(daily(next, "end-of-day-summary")); ok {
+		g.t.Fatal("the Thursday rollover on call materialized an end-of-day summary")
+	}
 	g.complete(oct(8, 8, 55), daily(next, "plan-day"))
 	g.startCycle(oct(8, 9, 0), deepWork)
 	g.startCycle(oct(8, 9, 20), "page-response")
+}
+
+// onCallTasks gives the on-call profile a shorter daily list than the normal
+// one: no end-of-day summary.
+func onCallTasks(c map[string]any) {
+	p := c["profiles"].(map[string]any)["on-call"].(map[string]any)
+	var daily []any
+	for _, def := range p["daily"].([]any) {
+		if def != "end-of-day-summary" {
+			daily = append(daily, def)
+		}
+	}
+	p["daily"] = daily
 }
 
 // interruptChain is a morning of interruptions. Deep work (A) starts at 09:00;
@@ -396,7 +429,7 @@ func corrections(g *goldenRun) {
 // that newline removed, as a crash in the middle of a write leaves it.
 func corruptTail(t *testing.T) []byte {
 	t.Helper()
-	g := newGoldenRun(t)
+	g := newGoldenRun(t, nil)
 	normalDay(g)
 	good := g.logBytes()
 	rev := g.focus()
