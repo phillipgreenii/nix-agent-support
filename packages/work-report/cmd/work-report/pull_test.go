@@ -381,8 +381,16 @@ func TestPullPGRouterSucceedingPullClosesTheBead(t *testing.T) {
 	if err != nil || strings.TrimSpace(out) != "[]" {
 		t.Fatalf("out=%q err=%v", out, err)
 	}
-	if got := len(issueCalls(rec.Calls(), "close")); got != 1 {
-		t.Errorf("close calls = %d; want 1", got)
+	closes := issueCalls(rec.Calls(), "close")
+	if len(closes) != 1 {
+		t.Fatalf("close calls = %d; want 1", len(closes))
+	}
+	// pg2-sqc5v: the close targets the registered tracker the unpinned lookup
+	// found, not a hard-coded backend name.
+	for i, a := range closes[0] {
+		if a == "--backend" && closes[0][i+1] != fake.TrackerBackend {
+			t.Errorf("close used --backend %q; want %q", closes[0][i+1], fake.TrackerBackend)
+		}
 	}
 }
 
@@ -500,8 +508,8 @@ func TestPullReconcilesInEveryOutputMode(t *testing.T) {
 
 func TestPullPassesTheEnvBackendToEveryIssueCall(t *testing.T) {
 	for name, tc := range map[string]struct{ env, want string }{
-		"default":  {"", "pg-connector-issue-beads"},
-		"override": {"pg-connector-issue-beads-pg2", "pg-connector-issue-beads-pg2"},
+		"discovered": {"", fake.TrackerBackend},
+		"override":   {"pg-connector-issue-beads-zr", "pg-connector-issue-beads-zr"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			isolate(t)

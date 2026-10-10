@@ -108,7 +108,7 @@ func newPullCmd() *cobra.Command {
 				// the tracker may be unreachable and a transient lock must not open
 				// beads, so a pull that could not run reconciles nothing.
 				var recErr error
-				items, recErr = degraded.Reconcile(cmd.Context(), deps.Conn, degraded.ResolveBackend(os.Getenv(degraded.EnvBackend)), res.Rows, rng,
+				items, recErr = degraded.Reconcile(cmd.Context(), deps.Conn, os.Getenv(degraded.EnvBackend), res.Rows, rng,
 					now.In(loc), repullCommand(rangeSpec, sources))
 				if recErr != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "work-report: degraded-source bead reconcile: %v\n", recErr)

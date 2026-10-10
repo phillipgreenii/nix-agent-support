@@ -42,7 +42,10 @@ in
   # Mirrors home/programs/pg-desk's shape (typed options ->
   # `pkgs.formats.yaml {}`.generate -> xdg.configFile). No organization
   # identifiers appear here: every deployment value (which backends, their
-  # labels, the tracker pin) is the consuming flake's configuration.
+  # labels, the tracker pin) is the consuming flake's configuration. The
+  # tracker pin (WORK_REPORT_ISSUE_BACKEND) is optional: unset, work-report
+  # discovers the one registered issue backend that defines the
+  # `escalated-all` dedupe query (pg2-sqc5v).
   options.phillipgreenii.programs.work-report = {
     enable = lib.mkEnableOption "work-report (durable store and reports over pg-connector's activity sources)";
     package = lib.mkPackageOption pkgs "work-report" { };

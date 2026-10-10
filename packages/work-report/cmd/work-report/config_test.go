@@ -29,6 +29,8 @@ func isolate(t *testing.T) string {
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "cfg"))
 	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
+	// a developer's tracker pin must not leak into the discovery tests
+	t.Setenv("WORK_REPORT_ISSUE_BACKEND", "")
 	return home
 }
 

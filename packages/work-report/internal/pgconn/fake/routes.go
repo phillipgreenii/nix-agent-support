@@ -18,12 +18,41 @@ type IssueEntity struct {
 	State  string   `json:"state,omitempty"`
 }
 
-// IssueListRoute answers `issue list` with the given entities.
+// TrackerBackend is the registered issue backend the default IssueListRoute
+// reports as the one that answered the dedup query, i.e. the tracker a
+// discovering caller must pin its follow-up calls to.
+const TrackerBackend = "pg-connector-issue-beads-pg2"
+
+// SourceRow is one `issue list` sources[] row.
+type SourceRow struct {
+	Source string `json:"source"`
+	Status string `json:"status"`
+	Count  int    `json:"count"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// IssueListRoute answers `issue list` with the given entities, reporting
+// TrackerBackend as the single backend that ran the query and the registered
+// jira and -zr instances as disabled ("query not recognized"), the shape the
+// real fan-out has when only the tracker defines the dedup query.
 func IssueListRoute(entities ...IssueEntity) Route {
+	return IssueListRouteSources([]SourceRow{
+		{Source: "pg-connector-issue-jira", Status: "disabled", Reason: "not applicable: query not recognized"},
+		{Source: "pg-connector-issue-beads-zr", Status: "disabled", Reason: "not applicable: query not recognized"},
+		{Source: TrackerBackend, Status: "succeeded", Count: len(entities)},
+	}, entities...)
+}
+
+// IssueListRouteSources answers `issue list` with the given sources[] rows and
+// entities.
+func IssueListRouteSources(sources []SourceRow, entities ...IssueEntity) Route {
 	if entities == nil {
 		entities = []IssueEntity{}
 	}
-	return Route{Match: []string{"issue", "list"}, Stdout: mustJSON(map[string]any{"entities": entities, "sources": []any{}})}
+	if sources == nil {
+		sources = []SourceRow{}
+	}
+	return Route{Match: []string{"issue", "list"}, Stdout: mustJSON(map[string]any{"entities": entities, "sources": sources})}
 }
 
 // IssueCreateRoute answers `issue create` with a created issue of the given id

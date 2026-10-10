@@ -47,7 +47,7 @@ func okRow(source string) pull.OutcomeRow {
 
 func reconcile(t *testing.T, rows ...pull.OutcomeRow) ([]degraded.Item, error) {
 	t.Helper()
-	return degraded.Reconcile(context.Background(), pgconn.NewExec(), degraded.DefaultBackend, rows, rng, now, repull)
+	return degraded.Reconcile(context.Background(), pgconn.NewExec(), "", rows, rng, now, repull)
 }
 
 // verbs returns "<noun> <verb>" for each recorded call.
@@ -112,8 +112,8 @@ func TestFirstDegradedPullCreatesOneBead(t *testing.T) {
 	if len(list) != 1 {
 		t.Fatalf("issue list calls = %v", list)
 	}
-	if flagValue(list[0], "--query") != "escalated-all" || flagValue(list[0], "--backend") != "pg-connector-issue-beads" {
-		t.Errorf("dedup lookup argv = %q; want --query escalated-all --backend pg-connector-issue-beads", list[0])
+	if flagValue(list[0], "--query") != "escalated-all" || flagValue(list[0], "--backend") != "" {
+		t.Errorf("dedup lookup argv = %q; want --query escalated-all and no --backend pin (the tracker is discovered from the fan-out)", list[0])
 	}
 	for _, c := range calls {
 		for _, a := range c {
@@ -136,8 +136,8 @@ func TestFirstDegradedPullCreatesOneBead(t *testing.T) {
 	if !reflect.DeepEqual(labels, []string{"escalated", "work-report"}) {
 		t.Errorf("labels = %v", labels)
 	}
-	if flagValue(c, "--backend") != "pg-connector-issue-beads" {
-		t.Errorf("create is not pinned to the issue backend: %q", c)
+	if flagValue(c, "--backend") != fake.TrackerBackend {
+		t.Errorf("create is not pinned to the discovered tracker %s: %q", fake.TrackerBackend, c)
 	}
 	body := flagValue(c, "--description")
 	for _, want := range []string{
@@ -345,12 +345,119 @@ func TestAbsentConnectorIsAnError(t *testing.T) {
 	}
 }
 
-func TestResolveBackend(t *testing.T) {
-	if got := degraded.ResolveBackend(""); got != "pg-connector-issue-beads" {
-		t.Errorf("default backend = %q", got)
+// registeredIssueBackends are the issue backend names the live pg-connector
+// registry exposes today (jira, and one beads instance per tracker). The stale
+// literal pg-connector-issue-beads is deliberately NOT among them: it was
+// retired by the instance split, and pinning --backend to it makes pg-connector
+// fail with "not registered" (pg2-sqc5v).
+var registeredIssueBackends = []string{"pg-connector-issue-jira", "pg-connector-issue-beads-zr", "pg-connector-issue-beads-pg2"}
+
+// registeredBackendsRoute is the fan-out answer where only the last registered
+// backend defines the dedup query; the others report disabled.
+func registeredBackendsRoute(entities ...fake.IssueEntity) fake.Route {
+	var rows []fake.SourceRow
+	for i, name := range registeredIssueBackends {
+		if i == len(registeredIssueBackends)-1 {
+			rows = append(rows, fake.SourceRow{Source: name, Status: "succeeded", Count: len(entities)})
+		} else {
+			rows = append(rows, fake.SourceRow{Source: name, Status: "disabled", Reason: "not applicable: query not recognized"})
+		}
 	}
-	if got := degraded.ResolveBackend("pg-connector-issue-beads-pg2"); got != "pg-connector-issue-beads-pg2" {
-		t.Errorf("override backend = %q", got)
+	return fake.IssueListRouteSources(rows, entities...)
+}
+
+// TestDiscoveredBackendIsARegisteredName pins the backend lookup against the
+// registered backend names: with no override, every issue call after the
+// unpinned lookup passes --backend equal to a name the registry reports, never
+// a literal the code carries.
+func TestDiscoveredBackendIsARegisteredName(t *testing.T) {
+	rec := fake.Install(
+		t,
+		registeredBackendsRoute(fake.IssueEntity{ID: "bd-1", Title: "work-report: backend-a degraded"}, fake.IssueEntity{ID: "bd-2", Title: "work-report: backend-c degraded"}),
+		fake.ConfigValidateRoute(),
+		fake.IssueCreateRoute("bd-3"),
+		fake.IssueCommentRoute(),
+		fake.IssueCloseRoute(),
+	)
+	if _, err := reconcile(t, degradedRow("backend-a"), degradedRow("backend-b"), okRow("backend-c")); err != nil {
+		t.Fatal(err)
+	}
+	want := registeredIssueBackends[len(registeredIssueBackends)-1]
+	var seen []string
+	for _, c := range rec.Calls() {
+		if c[0] != "issue" {
+			continue
+		}
+		seen = append(seen, c[1])
+		if c[1] == "list" {
+			if got := flagValue(c, "--backend"); got != "" {
+				t.Errorf("the discovery lookup must be unpinned, got --backend %q", got)
+			}
+			continue
+		}
+		got := flagValue(c, "--backend")
+		if got != want {
+			t.Errorf("issue %s used --backend %q; want the registered tracker %q", c[1], got, want)
+		}
+		if !contains(registeredIssueBackends, got) {
+			t.Errorf("issue %s used --backend %q, which is not a registered backend %v", c[1], got, registeredIssueBackends)
+		}
+	}
+	sort.Strings(seen)
+	if !reflect.DeepEqual(seen, []string{"close", "comment", "create", "list"}) {
+		t.Errorf("issue verbs exercised = %v; want list, comment, create and close", seen)
+	}
+}
+
+func contains(list []string, s string) bool {
+	for _, x := range list {
+		if x == s {
+			return true
+		}
+	}
+	return false
+}
+
+func TestAmbiguousOrAbsentTrackerIsAnErrorNamingTheRemedy(t *testing.T) {
+	cases := map[string]struct {
+		sources []fake.SourceRow
+		want    []string
+	}{
+		"several backends define the query": {
+			sources: []fake.SourceRow{
+				{Source: "pg-connector-issue-beads-zr", Status: "succeeded"},
+				{Source: "pg-connector-issue-beads-pg2", Status: "succeeded"},
+			},
+			want: []string{"several", "pg-connector-issue-beads-zr", "pg-connector-issue-beads-pg2", degraded.EnvBackend},
+		},
+		"no backend defines the query": {
+			sources: []fake.SourceRow{{Source: "pg-connector-issue-jira", Status: "disabled", Reason: "query not recognized"}},
+			want:    []string{"no registered issue backend", "pg-connector-issue-jira", degraded.EnvBackend},
+		},
+		"the only candidate is degraded": {
+			sources: []fake.SourceRow{
+				{Source: "pg-connector-issue-jira", Status: "disabled"},
+				{Source: "pg-connector-issue-beads-pg2", Status: "degraded", Reason: "dolt unreachable"},
+			},
+			want: []string{"pg-connector-issue-beads-pg2", "degraded", "dolt unreachable"},
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			rec := fake.Install(t, fake.IssueListRouteSources(tc.sources), fake.ConfigValidateRoute(), fake.IssueCreateRoute("bd-1"))
+			items, err := reconcile(t, degradedRow("backend-a"))
+			if err == nil || len(items) != 0 {
+				t.Fatalf("items=%+v err=%v; want an error and no items", items, err)
+			}
+			for _, w := range tc.want {
+				if !strings.Contains(err.Error(), w) {
+					t.Errorf("error %q lacks %q", err, w)
+				}
+			}
+			if got := find(rec.Calls(), "issue", "create"); len(got) != 0 {
+				t.Errorf("no bead may be created against a guessed tracker: %v", got)
+			}
+		})
 	}
 }
 

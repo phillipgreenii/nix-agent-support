@@ -16,9 +16,13 @@
 // "escalated-all", never the ready-only "escalated-work" (which hides a bead
 // once it is claimed, human-labeled or deferred, and so duplicates it). The
 // tracker is selected by the registered pg-connector backend instance every
-// call passes as --backend (DefaultBackend or WORK_REPORT_ISSUE_BACKEND); this
-// package never sets PG_CONNECTOR_ISSUE_BEADS_DIR (an instance without its own
-// --beads-dir falls back to the inherited environment).
+// call passes as --backend: WORK_REPORT_ISSUE_BACKEND when set, otherwise the
+// one registered issue backend that defines the dedup query (found by the
+// unpinned lookup itself; see pickTracker). No backend name is hard-coded, so
+// a registration rename or split cannot leave the lifecycle querying a name
+// that no longer exists. This package never sets PG_CONNECTOR_ISSUE_BEADS_DIR
+// (an instance without its own --beads-dir falls back to the inherited
+// environment).
 package degraded
 
 import (
@@ -35,12 +39,10 @@ import (
 )
 
 const (
-	// DefaultBackend is the issue backend instance every call pins to unless
-	// EnvBackend names another.
-	DefaultBackend = "pg-connector-issue-beads"
 	// EnvBackend names the pg-connector backend instance (a suffixed
 	// registration of the beads backend, pg2-91y12) that every call passes as
-	// --backend. Unset or empty means DefaultBackend.
+	// --backend. Unset or empty means the tracker is discovered from the
+	// registered issue backends (pg2-sqc5v).
 	EnvBackend = "WORK_REPORT_ISSUE_BACKEND"
 	// DedupQuery lists every non-closed escalated bead (open, in_progress,
 	// blocked, deferred, human-labeled).
@@ -62,14 +64,6 @@ type Item struct {
 	Metadata  pull.OutcomeRow `json:"metadata"`
 }
 
-// ResolveBackend returns override, or DefaultBackend when override is empty.
-func ResolveBackend(override string) string {
-	if override == "" {
-		return DefaultBackend
-	}
-	return override
-}
-
 // Title is the title key of a source's degraded bead.
 func Title(source string) string { return "work-report: " + source + " degraded" }
 
@@ -78,8 +72,8 @@ func Title(source string) string { return "work-report: " + source + " degraded"
 // MUST be expressed in the configured zone: an Item expires at the end of the
 // local day of now.Location() plus six hours. repull is the exact
 // "work-report pull ..." command line printed in a created bead's body. backend
-// is the pg-connector issue backend instance every call passes as --backend
-// (see ResolveBackend).
+// is the pg-connector issue backend instance every call passes as --backend;
+// empty means discover it from the registered issue backends (pickTracker).
 //
 // A failure to reach the tracker never aborts the whole reconcile: the items
 // that could be built are returned together with a non-nil (joined) error.
@@ -89,7 +83,7 @@ func Reconcile(ctx context.Context, conn pgconn.Runner, backend string, rows []p
 		return items, nil
 	}
 
-	open, err := listOpen(ctx, conn, backend)
+	open, backend, err := listOpen(ctx, conn, backend)
 	if err != nil {
 		return items, fmt.Errorf("look up open degraded-source beads: %w", err)
 	}
@@ -294,17 +288,29 @@ type entity struct {
 }
 
 // listOpen runs the dedup query and indexes the open beads by title. The first
-// bead with a given title wins.
-func listOpen(ctx context.Context, conn pgconn.Runner, backend string) (map[string]entity, error) {
-	out, err := call(ctx, conn, okFanOut, "issue", "list", "--query", DedupQuery, "--backend", backend, "--output", "json")
+// bead with a given title wins. A non-empty backend pins the lookup to it; an
+// empty one fans out across every registered issue backend and returns the
+// tracker the fan-out identified (pickTracker) together with its beads.
+func listOpen(ctx context.Context, conn pgconn.Runner, backend string) (map[string]entity, string, error) {
+	args := []string{"issue", "list", "--query", DedupQuery, "--output", "json"}
+	if backend != "" {
+		args = append(args, "--backend", backend)
+	}
+	out, err := call(ctx, conn, okFanOut, args...)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	var doc struct {
-		Entities []entity `json:"entities"`
+		Entities []entity    `json:"entities"`
+		Sources  []sourceRow `json:"sources"`
 	}
 	if err := json.Unmarshal(out, &doc); err != nil {
-		return nil, fmt.Errorf("decode issue list document: %w", err)
+		return nil, "", fmt.Errorf("decode issue list document: %w", err)
+	}
+	if backend == "" {
+		if backend, err = pickTracker(doc.Sources); err != nil {
+			return nil, "", err
+		}
 	}
 	open := map[string]entity{}
 	for _, e := range doc.Entities {
@@ -312,7 +318,53 @@ func listOpen(ctx context.Context, conn pgconn.Runner, backend string) (map[stri
 			open[e.Title] = e
 		}
 	}
-	return open, nil
+	return open, backend, nil
+}
+
+// sourceRow is one sources[] row of a fan-out document.
+type sourceRow struct {
+	Source string `json:"source"`
+	Status string `json:"status"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// statusDisabled is the fan-out status of a backend the call does not apply
+// to, e.g. one that does not define the requested named query.
+const statusDisabled = "disabled"
+
+// pickTracker names the backend that holds the degraded-source beads: the one
+// registered issue backend the unpinned dedup lookup did not report as
+// disabled, because a backend that does not define DedupQuery reports
+// "disabled: query not recognized". Zero or several such backends, or a single
+// one that is itself degraded, is an error naming the candidates and the
+// EnvBackend remedy, never a guess.
+func pickTracker(sources []sourceRow) (string, error) {
+	var candidates []sourceRow
+	for _, s := range sources {
+		if s.Status != statusDisabled {
+			candidates = append(candidates, s)
+		}
+	}
+	switch len(candidates) {
+	case 0:
+		var registered []string
+		for _, s := range sources {
+			registered = append(registered, s.Source)
+		}
+		return "", fmt.Errorf("no registered issue backend defines the %q query (registered: %v); define it on the tracker's backend or set %s",
+			DedupQuery, registered, EnvBackend)
+	case 1:
+		if c := candidates[0]; c.Status != "succeeded" {
+			return "", fmt.Errorf("tracker backend %s is %s: %s", c.Source, c.Status, c.Reason)
+		}
+		return candidates[0].Source, nil
+	}
+	names := make([]string, len(candidates))
+	for i, c := range candidates {
+		names[i] = c.Source
+	}
+	return "", fmt.Errorf("several registered issue backends define the %q query (%v); set %s to the tracker's backend",
+		DedupQuery, names, EnvBackend)
 }
 
 func create(ctx context.Context, conn pgconn.Runner, backend, title, body string) (string, error) {
