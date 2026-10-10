@@ -1,0 +1,13 @@
+{
+  "data": [
+    { "id": "sx-ready1", "status": "open", "issue_type": "task" },
+    {
+      "id": "sx-ready2",
+      "status": "open",
+      "issue_type": "task",
+      "labels": ["human"]
+    },
+    { "id": "sx-epic1", "status": "open", "issue_type": "epic" }
+  ],
+  "schema_version": 1
+}

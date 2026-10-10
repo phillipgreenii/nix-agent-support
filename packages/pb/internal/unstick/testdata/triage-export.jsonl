@@ -1,0 +1,13 @@
+{"_type":"issue","id":"sx-ready1","title":"Ready one","status":"open","priority":2,"issue_type":"task","updated_at":"2026-10-01T09:00:00Z","assignee":null,"labels":null}
+{"_type":"issue","id":"sx-ready2","title":"Ready parked human","status":"open","priority":2,"issue_type":"task","labels":["human"],"updated_at":"2026-10-01T09:00:00Z"}
+{"_type":"issue","id":"sx-live1","title":"Waits on ready one","status":"blocked","priority":2,"issue_type":"task","updated_at":"2026-10-02T09:00:00Z","dependencies":[{"issue_id":"sx-live1","depends_on_id":"sx-ready1","type":"blocks","created_at":"2026-10-02T09:00:00Z","metadata":"{}"}]}
+{"_type":"issue","id":"sx-live2","title":"Waits on in-progress","status":"blocked","priority":2,"issue_type":"task","updated_at":"2026-10-02T09:00:00Z","dependencies":[{"issue_id":"sx-live2","depends_on_id":"sx-ip1","type":"blocks"}]}
+{"_type":"issue","id":"sx-rev1","title":"Waits on parked human bead","status":"blocked","priority":2,"issue_type":"task","updated_at":"2026-10-02T09:00:00Z","dependencies":[{"issue_id":"sx-rev1","depends_on_id":"sx-ready2","type":"blocks"}]}
+{"_type":"issue","id":"sx-skip1","title":"Already swept","status":"blocked","priority":2,"issue_type":"task","updated_at":"2026-10-09T10:05:00Z","notes":"[unstick 2026-10-09T10:00:00Z] unchanged: still waits on a human decision; recheck-when: on-change","dependencies":[{"issue_id":"sx-skip1","depends_on_id":"sx-ready2","type":"blocks"}]}
+{"_type":"issue","id":"sx-def1","title":"Deferred far out","status":"deferred","priority":3,"issue_type":"task","defer_until":"2027-01-01T00:00:00Z","updated_at":"2026-10-02T09:00:00Z"}
+{"_type":"issue","id":"sx-ip1","title":"Being worked","status":"in_progress","priority":1,"issue_type":"task","assignee":"worker-a","updated_at":"2026-10-10T11:00:00Z"}
+{"_type":"issue","id":"sx-asg1","title":"Assigned but not ready","status":"blocked","priority":2,"issue_type":"task","assignee":"worker-b","updated_at":"2026-10-02T09:00:00Z"}
+{"_type":"issue","id":"sx-closed1","title":"Done","status":"closed","priority":2,"issue_type":"task","updated_at":"2026-10-03T09:00:00Z","closed_at":"2026-10-03T09:00:00Z","close_reason":"done"}
+{"_type":"issue","id":"sx-gate1","title":"Gate awaiting apply","status":"open","priority":2,"issue_type":"gate","updated_at":"2026-10-02T09:00:00Z"}
+{"_type":"issue","id":"sx-gdep","title":"Waits on gate","status":"blocked","priority":2,"issue_type":"task","updated_at":"2026-10-02T09:00:00Z","dependencies":[{"issue_id":"sx-gdep","depends_on_id":"sx-gate1","type":"blocks"}]}
+{"_type":"issue","id":"sx-epic1","title":"An epic","status":"open","priority":2,"issue_type":"epic","updated_at":"2026-10-02T09:00:00Z"}
