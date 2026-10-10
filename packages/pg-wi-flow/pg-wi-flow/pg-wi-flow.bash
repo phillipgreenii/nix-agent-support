@@ -316,7 +316,7 @@ pgwf_next_claim_id() {
   echo none
 }
 
-# pgwf_cmd_next [--stage s]... [--id ID] -- reads the ready set, computes
+# pgwf_cmd_next [--stage s]... [--id ID] [--attended | --questions] -- reads the ready set, computes
 # the target (leaf or container descent), claims it, prints
 # "id stage workflow" or "none" [design: ## Configuration C-4; ## Components
 # write-verb table row for next]. With --id, scopes to exactly that one
@@ -326,7 +326,7 @@ pgwf_next_claim_id() {
 # design's "ignoring the other filters" rule for a fixed-id run.
 pgwf_cmd_next() {
   local -a stage_args=()
-  local target_id=""
+  local target_id="" attended=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
     --stage)
@@ -336,6 +336,14 @@ pgwf_cmd_next() {
     --id)
       target_id="$2"
       shift 2
+      ;;
+    --attended | --questions)
+      # tc-9ddu3.1.19 decision: reserve from the attended (attention) query:
+      # items labeled human, question items AND legacy human items. Both flags
+      # select the same query; it admits no stage work (stage items never carry
+      # the human label), so --questions does none.
+      attended=1
+      shift
       ;;
     *)
       echo "pg-wi-flow: next: unknown argument: $1" >&2
@@ -348,7 +356,9 @@ pgwf_cmd_next() {
   config_json="$(pgwf_config_effective)" || return 1
 
   local -a query_args
-  if [[ -n $target_id ]]; then
+  if [[ $attended -eq 1 ]]; then
+    mapfile -t query_args < <(pgwf_query_build "$config_json" attended)
+  elif [[ -n $target_id ]]; then
     mapfile -t query_args < <(pgwf_query_build "$config_json" default)
   elif [[ ${#stage_args[@]} -gt 0 ]]; then
     mapfile -t query_args < <(pgwf_query_build "$config_json" stage "${stage_args[@]}")

@@ -24,7 +24,9 @@ list)
     '--reserved-hours[--stale window, in hours]:hours:'
   ;;
 next)
-  _arguments '*--stage[Restrict to a stage]:stage:'
+  _arguments '*--stage[Restrict to a stage]:stage:' \
+    '--attended[Reserve from the attention query]' \
+    '--questions[Reserve only attention items]'
   ;;
 claim | release)
   _arguments '1:item id:'

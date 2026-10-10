@@ -142,14 +142,13 @@ show_fixture() {
   [ "${lines[1]}" = "needs-human" ]
 }
 
-@test "pgwf_query_build attended: question AND human labels" {
+@test "pgwf_query_build attended: the human label only, so legacy human items (no question label) are admitted" {
   config='{}'
   run pgwf_query_build "$config" attended
   [ "$status" -eq 0 ]
   [ "${lines[0]}" = "--label" ]
-  [ "${lines[1]}" = "question" ]
-  [ "${lines[2]}" = "--label" ]
-  [ "${lines[3]}" = "human" ]
+  [ "${lines[1]}" = "human" ]
+  [ "${#lines[@]}" -eq 2 ]
 }
 
 @test "pgwf_query_build stage: the entry stage excludes every other known stage label plus question" {

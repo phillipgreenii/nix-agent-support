@@ -191,3 +191,57 @@ status_of() {
   [ "$status" -eq 0 ]
   [ "$(assignee_of "$ITEM")" = "ab12cd34-bbb-worker-work" ]
 }
+
+# --- next --attended / --questions against real bd (tc-9ddu3.1.21) ---
+
+make_item() {
+  # make_item TITLE LABEL... -- prints the new id
+  local title="$1" label args=()
+  shift
+  for label in "$@"; do args+=(--labels "$label"); done
+  bd create "$title" -t task "${args[@]}" --json | jq -r '(if type=="object" and has("data") then .data else . end) | if type=="array" then .[0] else . end | .id'
+}
+
+@test "next --attended reserves a human-labeled question item; plain next never does" {
+  local q
+  q="$(make_item "a question" question human)"
+  # plain next: the only candidate besides $ITEM is excluded; it reserves $ITEM
+  PG_WI_FLOW_IDENT="$DISPATCHER_IDENT" run $SCRIPT next
+  [ "$status" -eq 0 ]
+  [[ ${lines[0]} == "$ITEM "* ]]
+  [ "$(status_of "$q")" = open ]
+
+  PG_WI_FLOW_IDENT="$DISPATCHER_IDENT" run $SCRIPT next --attended
+  [ "$status" -eq 0 ]
+  [[ ${lines[0]} == "$q "* ]]
+  [ "$(status_of "$q")" = in_progress ]
+}
+
+@test "next --questions never reserves stage work" {
+  # $ITEM is plain stage work and there is no attention item at all
+  PG_WI_FLOW_IDENT="$DISPATCHER_IDENT" run $SCRIPT next --questions
+  [ "$status" -eq 0 ]
+  [ "$output" = none ]
+  [ "$(status_of "$ITEM")" = open ]
+  [ -z "$(assignee_of "$ITEM")" ]
+}
+
+@test "list --attended surfaces legacy human items (no question label) and question items, not stage work" {
+  local legacy q
+  legacy="$(make_item "legacy human" human)"
+  q="$(make_item "a question" question human)"
+  run $SCRIPT list --attended
+  [ "$status" -eq 0 ]
+  ids="$(jq -r '(if type=="object" and has("data") then .data else . end) | map(.id) | sort | join(",")' <<<"$output")"
+  expected="$(printf '%s\n%s\n' "$legacy" "$q" | sort | paste -sd, -)"
+  [ "$ids" = "$expected" ]
+  [[ $ids != *"$ITEM"* ]]
+}
+
+@test "next --attended can reserve a legacy human item" {
+  local legacy
+  legacy="$(make_item "legacy human" human)"
+  PG_WI_FLOW_IDENT="$DISPATCHER_IDENT" run $SCRIPT next --attended
+  [ "$status" -eq 0 ]
+  [[ ${lines[0]} == "$legacy "* ]]
+}

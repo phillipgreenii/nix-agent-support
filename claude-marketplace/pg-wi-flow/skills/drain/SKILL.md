@@ -34,6 +34,10 @@ Raw filters are not accepted — no named-query wording, no "overnight" concept.
   not merely `n` dispatchers.
 - `--questions`: visit ONLY attention items (open questions labeled `human`, plus legacy
   `human` items) and do no new stage work. Implies `--attended`.
+  The loop passes the mode to the dispatcher, which passes it to `pg-wi-flow next`:
+  `--questions` reserves ONLY from the attention query (`next --questions`), and `--attended`
+  (without `--questions`) works stage work first and falls back to `next --attended` once
+  `next` reports `none`.
 
 Any token in `$ARGUMENTS` that matches none of the forms above (a typo'd flag, a raw filter, an
 unrecognized word) MUST NOT be silently dropped and MUST NOT be silently absorbed into a nearby
@@ -109,6 +113,9 @@ Apply the chosen `resolve` call unless `skip`, then continue the loop.
 
 Stop iterating when any of these is true:
 
+- Attended mode only: the dispatcher reports `<id> human` for an id the operator already
+  `skip`ped earlier in this run (the skipped question is still in the attention queue, so
+  `next` would hand it back forever). Treat the attention queue as exhausted: stop.
 - The dispatcher reports `none` (unattended), or — with `--concurrency n` — ALL `n` in-flight
   pairs have gone idle/reported `none`.
 - A fixed `<id>` run: the item finished (closed, parked, or errored — or, for a container, its

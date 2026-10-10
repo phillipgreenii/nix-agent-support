@@ -348,7 +348,7 @@ show_fixture() {
   run pgwf_cmd_query --attended
   [ "$status" -eq 0 ]
   [ "${lines[0]}" = "--label" ]
-  [ "${lines[1]}" = "question" ]
+  [ "${lines[1]}" = "human" ]
 }
 
 @test "cmd_list: prints the ready set as JSON" {
@@ -450,4 +450,38 @@ show_fixture() {
   run pgwf_cmd_list --unpooled
   [ "$status" -eq 0 ]
   [ "$(jq -r '.[0].id' <<<"$output")" = "tc-3" ]
+}
+
+# --- cmd_next --attended / --questions (tc-9ddu3.1.21, decision tc-9ddu3.1.19) ---
+
+@test "cmd_next --attended: reserves from the attended query (human label), not the default one" {
+  printf '[{"id":"tc-q"}]' >"$MOCK_BD_READY_DIR/default.json"
+  show_fixture tc-q '{"id":"tc-q","labels":["question","human"],"metadata":{}}'
+  run pgwf_cmd_next --attended
+  [ "$status" -eq 0 ]
+  [[ $output == "tc-q "* ]]
+  ready_line="$(grep '^ready' "$MOCK_BD_LOG" | head -1)"
+  [[ $ready_line == *"--label human"* ]]
+  [[ $ready_line != *"--exclude-label human"* ]]
+  grep -q '^update tc-q .*--claim' "$MOCK_BD_LOG"
+}
+
+@test "cmd_next --questions: same attended query, never the stage queue; --stage is not consulted" {
+  printf '[]' >"$MOCK_BD_READY_DIR/default.json"
+  run pgwf_cmd_next --questions --stage groom
+  [ "$status" -eq 0 ]
+  [ "$output" = "none" ]
+  ready_line="$(grep '^ready' "$MOCK_BD_LOG" | head -1)"
+  [[ $ready_line == *"--label human"* ]]
+  [[ $ready_line != *"stage:"* ]]
+  run grep '^update ' "$MOCK_BD_LOG"
+  [ "$status" -ne 0 ]
+}
+
+@test "cmd_next without --attended: still excludes human items" {
+  printf '[]' >"$MOCK_BD_READY_DIR/default.json"
+  run pgwf_cmd_next
+  [ "$output" = "none" ]
+  ready_line="$(grep '^ready' "$MOCK_BD_LOG" | head -1)"
+  [[ $ready_line == *"--exclude-label human"* ]]
 }

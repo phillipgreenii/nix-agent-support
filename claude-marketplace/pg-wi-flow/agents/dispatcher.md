@@ -30,6 +30,13 @@ or, for a fixed-id `/drain <id>` run:
 pg-wi-flow next --id <id>
 ```
 
+Mode passthrough: `--questions` → `pg-wi-flow next --questions` (attention items only; no stage
+work is ever reserved). `--attended` (without `--questions` and without `--id`) → run plain
+`pg-wi-flow next [--stage s]...` first; if that prints `none`, run `pg-wi-flow next --attended`
+once (omit `--stage` on this fallback). With `--id <id>` plus `--attended`/`--questions`, run
+`pg-wi-flow next --id <id> --attended` so a `human`-labeled item can be reserved by id.
+Unattended runs pass neither flag.
+
 (pass through every `--stage` flag you were given, in order, when no `--id` was given; omit
 the flag entirely if you were given none. If you were given `--id <id>`, pass ONLY that —
 `next --id` ignores `--stage` itself, matching `<id>`'s "ignoring every other filter"
@@ -47,6 +54,10 @@ a bare container id.
 
 Classify the reserved `<id>` by running `pg-wi-flow explain <id>` and reading `WI_CLASS`:
 
+- Attended (`--attended` or `--questions`) and the item carries the `human` label (a `question`
+  item reserved via `next --attended`; a legacy `human` item is handled below): `pg-wi-flow
+release <id>`, report `<id> human` and stop, so the loop's interview step runs. Do NOT
+  dispatch a resolver for it.
 - `WI_CLASS=question` → this is a **question** item. Go to step 2, dispatching a **resolver**.
 - `WI_CLASS=legacy-human` → this is a legacy **`human`-labeled** item (carries the `human`
   label but not the `question` label). `pg-wi-flow release <id>`, then:

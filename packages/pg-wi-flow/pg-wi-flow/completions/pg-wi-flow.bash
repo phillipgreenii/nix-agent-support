@@ -30,7 +30,7 @@ _pg_wi_flow() {
     mapfile -t COMPREPLY < <(compgen -W "--stage --attended --questions --unpooled --stale --days --reserved-hours" -- "$cur")
     ;;
   next)
-    mapfile -t COMPREPLY < <(compgen -W "--stage" -- "$cur")
+    mapfile -t COMPREPLY < <(compgen -W "--stage --id --attended --questions" -- "$cur")
     ;;
   claim | release)
     # positional ID -- nothing sensible to offer without a live tracker.

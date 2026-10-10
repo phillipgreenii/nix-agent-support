@@ -106,8 +106,9 @@ pgwf_workflow_for() {
 # this packet]. MODE is one of:
 #   default  -- admits every stage plus escalated questions; excludes only
 #               the `human` label (plus exclude_labels, always).
-#   attended -- question items labeled human (C-4): `--label <question>
-#               --label <human>`.
+#   attended -- attention items (C-4): everything labeled human, i.e. question
+#               items (escalate labels them human) AND legacy human items,
+#               which carry no question label (tc-9ddu3.1.19): `--label <human>`.
 #   stage    -- one or more --stage values (repeatable). The workflow's
 #               entry stage carries no stage label at all (C-1), so it is
 #               selected by EXCLUDING every other stage label rather than
@@ -132,7 +133,7 @@ pgwf_query_build() {
 
   case "$mode" in
   attended)
-    printf -- '--label\n%s\n--label\n%s\n' "$question_label" "$human_label"
+    printf -- '--label\n%s\n' "$human_label"
     ;;
   stage)
     local stages_json entry_stage s has_entry=0

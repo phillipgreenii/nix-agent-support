@@ -33,12 +33,15 @@ Commands:
       Print (as a JSON array) the items the query would admit, or one of
       the special --unpooled/--stale views.
 
-  next [--stage S]... | next --id ID
+  next [--stage S]... [--attended | --questions] | next --id ID
       Reserve the next claimable item (leaf, or a container's descent per
       the state model), printing "ID STAGE WORKFLOW" or "none". With --id,
       scopes to exactly that one bead instead of the general ready set
       (--stage is accepted but ignored in that mode); never claims any
       other bead.
+      With --attended (or --questions, the same query), reserves from the
+      attention query instead: items labeled human (questions and legacy
+      human items); no stage work is ever reserved.
 
   claim ID
       Transfer a reservation to the caller's identity, printing
