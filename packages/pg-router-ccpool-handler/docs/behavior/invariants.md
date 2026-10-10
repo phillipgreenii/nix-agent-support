@@ -437,7 +437,12 @@ review`. The claim is still released (status open, assignee cleared) — the lab
     "a human edited it". Reasons: `skipped-bead-closed`, `skipped-pr-merged`,
     `skipped-pending-review`. Every PR read goes through the connector's read-only verbs; a PR
     merged-state read MAY be served from the connector's cache, which is safe because a cached
-    "open" only means the dispatch proceeds.
+    "open" only means the dispatch proceeds. Where the connector's backend keeps its own store
+    and daemon (ADR 0090), the pending-review read (c) is unchanged in kind and is served from
+    that backend's pending group, which has a two-minute freshness window. An `unavailable`
+    answer, which the connector classes as retryable, is one more connector failure of the kind
+    the fail-open rule above covers: the check declines nothing and the dispatch proceeds exactly
+    as without this invariant.
   - **`ready`** (a role that works a bead it claims itself, such as a drain worker). The check
     reads only the bead as just re-read at dispatch (its status, assignee, labels, deferral date
     and dependencies; no further bead call) and declines when ANY of these holds, in this order:

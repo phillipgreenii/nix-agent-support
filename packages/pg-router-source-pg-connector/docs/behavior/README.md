@@ -5,7 +5,8 @@
 pg-connector without a shell/jq pipeline. It knows exactly two contracts — pg-connector's
 `changes`/`list` wire envelopes, and pg-router's command-query rawItem array shape — and holds
 NO state of its own: every fact it reports lives in pg-connector's own delta ledger (a sibling
-component in this docket), never in a file this binary writes itself.
+component in this docket) or, for a backend that owns its changes (ADR 0090), in that backend's own
+change feed, never in a file this binary writes itself.
 
 This document is a plain statement of this adapter's own behavior, not a full application of the
 repo's `behavior-docs` method (no separate actors/journeys/interfaces registers): the adapter has
@@ -53,12 +54,19 @@ flowchart LR
     that event until `expiresAt` (INV-EVT-4) and dedupes the same id for as long as it is retained
     (INV-EVT-3).
 
+  For a backend that owns its changes (ADR 0090), each reported change also carries a sequence
+  number `seq`, the change `kinds` and the changed `fields`, and the adapter decodes all three. The
+  event id stays stable because each row carries its own `version` and `head_sha`: a row that is
+  redelivered keeps its id even after a newer change to the same entity, and two rows for one
+  entity in one poll get two ids.
+
   The suffix exists only on `changes` items. Every other query, and every consumer that uses
   `Item.ID` as a bead or entity id (the escalation and triager roles, `RefreshItem`, the ccpool
   handler), keeps bare ids; a handler that needs the real entity id behind a suffixed event reads
   `metadata.entity_id`. A negative window is a usage error.
 
-  Known trade-offs of the digest, accepted with the retry window (bead `pg2-1ldvy`):
+  Known trade-offs of the digest, accepted with the retry window (bead `pg2-1ldvy`); they hold for
+  backends that do not own their changes:
   - **A -> B -> A flip.** If a PR's head goes A, then B, then back to A inside one window, the third
     report hashes to the first report's id and is deduped while that event is still retained: a
     rare lost update, caught by the next sweep. The emit time is deliberately NOT part of the
@@ -80,7 +88,9 @@ flowchart LR
   parsing of its own), and when omitted the whole matched set is listed. A narrowed sweep only
   re-surfaces entities whose own last-updated time moved, so it does not re-surface a change that
   leaves that time alone (for a PR, a mergeability or CI change); a deployment that narrows its
-  periodic sweep SHOULD keep a second, unnarrowed sweep on a longer period. The sweep unions the matched ids by reading each response's top-level `present_ids` array
+  periodic sweep SHOULD keep a second, unnarrowed sweep on a longer period. For a backend that owns
+  its changes (ADR 0090) the narrowed periodic sweep is retired, since that backend catches such
+  changes itself, and the unnarrowed sweep stays as the longer-period backstop. The sweep unions the matched ids by reading each response's top-level `present_ids` array
   (never `entities`, which is always empty for `--ids-only`), and prints one rawItem per unioned
   id with `title` equal to the id and `metadata` exactly `{"change": "sweep"}`. It never runs a
   second, full fetch to backfill title/other fields — its purpose is a cheap reconciliation
@@ -121,6 +131,18 @@ log instead of a bare "exit status N"); on a purely local usage error (e.g. `swe
 query names, or a malformed JSON response this adapter could not decode), it writes its own
 one-line diagnostic to stderr instead. On success it writes nothing to stderr at all — the printed
 rawItem array on stdout is the only output.
+
+## Realization gaps
+
+This set's **realization-gap register** (the method's realization-gap rule): intended behavior this adapter has not
+built yet, one row per gap. This README states behavior in sections rather than in id-bearing
+elements, so the first column names the section the gap is against.
+
+| Element                                    | Intended                                                                                                                                                                                      | Where the implementation stands                                                                                                            | Tracked by                 |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------- |
+| `changes` (What it does)                   | for a backend that owns its changes the adapter decodes `seq`, `kinds` and `fields` from each change, and the event id stays stable because each row carries its own `version` and `head_sha` | the adapter decodes only `change`, `source` and `entity`; no backend yet reports `seq`, `kinds`, `fields` or a per-row `version`           | `pg2-z5fax` (later phases) |
+| `changes` (known trade-offs of the digest) | the trade-offs paragraph holds for backends that do not own their changes, and a later change replaces it with a note covering a backend that does                                            | the paragraph is unscoped in the build and no replacement note exists; the replacement is planned for Phase 3c of program epic `pg2-z5fax` | `pg2-z5fax` (later phases) |
+| `sweep`                                    | for a backend that owns its changes the narrowed periodic sweep is retired and the unnarrowed sweep stays as the longer-period backstop                                                       | no backend owns its changes yet, so both sweeps are still configured                                                                       | `pg2-z5fax` (later phases) |
 
 ## Out of scope
 
