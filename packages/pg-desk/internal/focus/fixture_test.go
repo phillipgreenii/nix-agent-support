@@ -102,6 +102,10 @@ type issueSpec struct {
 	issueType string
 	metadata  map[string]string
 	inactive  bool
+	parent    string
+	deps      []map[string]string
+	dueDate   string
+	priority  string
 }
 
 func (f *fixture) issue(id string, s issueSpec) Key {
@@ -125,6 +129,18 @@ func (f *fixture) issue(id string, s issueSpec) Key {
 	}
 	if len(s.metadata) > 0 {
 		show["metadata"] = s.metadata
+	}
+	if s.parent != "" {
+		show["parent"] = s.parent
+	}
+	if len(s.deps) > 0 {
+		show["deps"] = s.deps
+	}
+	if s.dueDate != "" {
+		show["due_date"] = s.dueDate
+	}
+	if s.priority != "" {
+		show["priority"] = s.priority
 	}
 	f.writeEntity(k, mustJSON(f.t, map[string]any{"issue_show": show}), !s.inactive)
 	return k

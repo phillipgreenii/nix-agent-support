@@ -153,6 +153,13 @@ type view struct {
 	reviewRequests []string
 	labelled       bool
 
+	// issue-only facts the slot rule and the correlation groups read
+	parent    string
+	issueType string
+	deps      []issueDep
+	dueDate   string
+	priority  string
+
 	reasons   []string // the exclusions that apply, in the documented order
 	eligible  bool     // no exclusion applies
 	seed      bool     // satisfies a seed rule and is eligible
@@ -367,15 +374,28 @@ func decodeFacts(facts string, v *view) {
 	case entityTypeIssue:
 		var f struct {
 			IssueShow struct {
-				State    string                     `json:"state"`
-				Labels   []string                   `json:"labels"`
-				Metadata map[string]json.RawMessage `json:"metadata"`
-				Assignee string                     `json:"assignee"`
+				State     string                     `json:"state"`
+				Labels    []string                   `json:"labels"`
+				Metadata  map[string]json.RawMessage `json:"metadata"`
+				Assignee  string                     `json:"assignee"`
+				Parent    string                     `json:"parent"`
+				IssueType string                     `json:"issue_type"`
+				Deps      []issueDep                 `json:"deps"`
+				DueDate   string                     `json:"due_date"`
+				Priority  string                     `json:"priority"`
 			} `json:"issue_show"`
 		}
 		if json.Unmarshal([]byte(facts), &f) != nil {
 			return
 		}
 		v.state, v.labels, v.metadata, v.assignee = f.IssueShow.State, f.IssueShow.Labels, f.IssueShow.Metadata, f.IssueShow.Assignee
+		v.parent, v.issueType, v.deps = f.IssueShow.Parent, f.IssueShow.IssueType, f.IssueShow.Deps
+		v.dueDate, v.priority = f.IssueShow.DueDate, f.IssueShow.Priority
 	}
+}
+
+// issueDep is one dependency edge of a stored issue_show.deps.
+type issueDep struct {
+	ID   string `json:"id"`
+	Type string `json:"type"`
 }
