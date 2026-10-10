@@ -242,6 +242,32 @@ func TestChanges_NoBeadsDirFlag_LeavesPgConnectorIssueBeadsDirUnset(t *testing.T
 	}
 }
 
+// bead pg2-otfq2: --backend is an optional pass-through. Omitted, the argv
+// carries no --backend (fan-out over every backend, as before); given, it is
+// forwarded verbatim.
+func TestChanges_BackendFlag_IsPassedThroughOnlyWhenGiven(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string // the --backend value in the child's argv; "" means absent
+	}{
+		{"omitted", []string{"changes", "issue", "q", "--consumer", "c1"}, ""},
+		{"given", []string{"changes", "issue", "q", "--consumer", "c1", "--backend", "pg-connector-issue-beads-zr"}, "pg-connector-issue-beads-zr"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recordFile := filepath.Join(t.TempDir(), "recorded-args")
+			withFactory(t, "changes_ok_empty", "GO_HELPER_ARGS_RECORD_FILE="+recordFile)
+			if _, stderr, code := runCLI(t, tc.args...); code != 0 {
+				t.Fatalf("exit code = %d, want 0 (stderr=%q)", code, stderr)
+			}
+			got := strings.Fields(readFile(t, recordFile))
+			if v := flagValue(got, "--backend"); v != tc.want {
+				t.Fatalf("child argv %v: --backend = %q, want %q", got, v, tc.want)
+			}
+		})
+	}
+}
+
 // --- bead pg2-1ldvy: metadata.entity_id, --retry-window ----------------------
 
 // entity_id is ALWAYS emitted on a changes item, with or without the

@@ -79,6 +79,9 @@ type runOptions struct {
 	// dedupQuery is the named pg-connector query the dedup check lists
 	// existing beads through; see connector.go's defaultDedupQuery.
 	dedupQuery string
+	// connectorBackend is the pg-connector backend instance name every
+	// pg-connector call passes as --backend (connector.go).
+	connectorBackend string
 	// registryDir overrides the ccpool pool-registry directory pools.go
 	// reads; "" = resolve it the way ccpool does.
 	registryDir string
@@ -133,6 +136,7 @@ func newRunCmd() *cobra.Command {
 		pgConnectorTimeout: 30 * time.Second,
 		snapshotPath:       defaultSnapshotPath(),
 		dedupQuery:         defaultDedupQuery,
+		connectorBackend:   defaultPgConnectorBackend,
 	}
 	cmd := &cobra.Command{
 		Use:   "run",
@@ -144,11 +148,16 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().DurationVar(&opts.pgConnectorTimeout, "pg-connector-timeout", opts.pgConnectorTimeout, "explicit timeout for each pg-connector subprocess call (list/create/update/comment)")
 	cmd.Flags().StringVar(&opts.registryDir, "registry-dir", opts.registryDir, "ccpool pool-registry directory listing every pool to scan (default: CCPOOL_REGISTRY_DIR, else $XDG_STATE_HOME/ccpool/pools.d)")
 	cmd.Flags().StringVar(&opts.dedupQuery, "dedup-query", opts.dedupQuery, "named pg-connector query listing every non-closed escalated bead (open, in_progress, blocked, deferred, human-labeled) for the dedup check; MUST NOT be the ready-only triager dispatch query")
+	cmd.Flags().StringVar(&opts.connectorBackend, "connector-backend", opts.connectorBackend, "pg-connector backend instance name passed as --backend on every pg-connector call (a suffixed registration of the beads backend, e.g. pg-connector-issue-beads-zr, once the unsuffixed one is dropped)")
 	cmd.Flags().StringVar(&opts.snapshotPath, "snapshot-path", opts.snapshotPath, "path to this probe's own persisted last-run snapshot")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		if opts.degradedThreshold < 1 {
 			return usageErrorf("run: --degraded-threshold must be at least 1")
 		}
+		if opts.connectorBackend == "" {
+			return usageErrorf("run: --connector-backend must not be empty")
+		}
+		pgConnectorBackend = opts.connectorBackend
 		return runProbe(cmd, opts, defaultRunDeps())
 	}
 	return cmd

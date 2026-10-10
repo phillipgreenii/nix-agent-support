@@ -17,6 +17,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 )
 
@@ -79,8 +80,20 @@ func recordAmbientEnvIfRequested() {
 	_ = os.WriteFile(file, []byte(val), 0o600)
 }
 
+// recordArgsIfRequested writes the child's argv (space-joined) to the path
+// named by GO_HELPER_ARGS_RECORD_FILE, when set, so a test can assert on the
+// exact pg-connector argv this adapter built.
+func recordArgsIfRequested(childArgs []string) {
+	file := os.Getenv("GO_HELPER_ARGS_RECORD_FILE")
+	if file == "" {
+		return
+	}
+	_ = os.WriteFile(file, []byte(strings.Join(childArgs, " ")), 0o600)
+}
+
 func helperMain() {
 	recordAmbientEnvIfRequested()
+	recordArgsIfRequested(findChildArgs())
 
 	childArgs := findChildArgs()
 	behavior := os.Getenv("GO_HELPER_BEHAVIOR")

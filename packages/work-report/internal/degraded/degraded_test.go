@@ -47,7 +47,7 @@ func okRow(source string) pull.OutcomeRow {
 
 func reconcile(t *testing.T, rows ...pull.OutcomeRow) ([]degraded.Item, error) {
 	t.Helper()
-	return degraded.Reconcile(context.Background(), pgconn.NewExec(), rows, rng, now, repull)
+	return degraded.Reconcile(context.Background(), pgconn.NewExec(), degraded.DefaultBackend, rows, rng, now, repull)
 }
 
 // verbs returns "<noun> <verb>" for each recorded call.
@@ -342,5 +342,45 @@ func TestAbsentConnectorIsAnError(t *testing.T) {
 	items, err := reconcile(t, degradedRow("backend-a"))
 	if err == nil || len(items) != 0 {
 		t.Errorf("items=%+v err=%v", items, err)
+	}
+}
+
+func TestResolveBackend(t *testing.T) {
+	if got := degraded.ResolveBackend(""); got != "pg-connector-issue-beads" {
+		t.Errorf("default backend = %q", got)
+	}
+	if got := degraded.ResolveBackend("pg-connector-issue-beads-pg2"); got != "pg-connector-issue-beads-pg2" {
+		t.Errorf("override backend = %q", got)
+	}
+}
+
+func TestOverriddenBackendIsPassedOnEveryCall(t *testing.T) {
+	const override = "pg-connector-issue-beads-zr"
+	rec := fake.Install(
+		t,
+		fake.IssueListRoute(fake.IssueEntity{ID: "bd-1", Title: "work-report: backend-a degraded"}, fake.IssueEntity{ID: "bd-2", Title: "work-report: backend-c degraded"}),
+		fake.ConfigValidateRoute(),
+		fake.IssueCreateRoute("bd-3"),
+		fake.IssueCommentRoute(),
+		fake.IssueCloseRoute(),
+	)
+	_, err := degraded.Reconcile(context.Background(), pgconn.NewExec(), override,
+		[]pull.OutcomeRow{degradedRow("backend-a"), degradedRow("backend-b"), okRow("backend-c")}, rng, now, repull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seen []string
+	for _, c := range rec.Calls() {
+		if c[0] != "issue" {
+			continue
+		}
+		seen = append(seen, c[1])
+		if got := flagValue(c, "--backend"); got != override {
+			t.Errorf("issue %s used --backend %q; want %q", c[1], got, override)
+		}
+	}
+	sort.Strings(seen)
+	if !reflect.DeepEqual(seen, []string{"close", "comment", "create", "list"}) {
+		t.Errorf("issue verbs exercised = %v; want list, comment, create and close", seen)
 	}
 }

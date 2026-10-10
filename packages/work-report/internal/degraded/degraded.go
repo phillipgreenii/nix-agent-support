@@ -33,8 +33,13 @@ import (
 )
 
 const (
-	// Backend is the one issue backend every call pins to.
-	Backend = "pg-connector-issue-beads"
+	// DefaultBackend is the issue backend instance every call pins to unless
+	// EnvBackend names another.
+	DefaultBackend = "pg-connector-issue-beads"
+	// EnvBackend names the pg-connector backend instance (a suffixed
+	// registration of the beads backend, pg2-91y12) that every call passes as
+	// --backend. Unset or empty means DefaultBackend.
+	EnvBackend = "WORK_REPORT_ISSUE_BACKEND"
 	// DedupQuery lists every non-closed escalated bead (open, in_progress,
 	// blocked, deferred, human-labeled).
 	DedupQuery = "escalated-all"
@@ -55,6 +60,14 @@ type Item struct {
 	Metadata  pull.OutcomeRow `json:"metadata"`
 }
 
+// ResolveBackend returns override, or DefaultBackend when override is empty.
+func ResolveBackend(override string) string {
+	if override == "" {
+		return DefaultBackend
+	}
+	return override
+}
+
 // Title is the title key of a source's degraded bead.
 func Title(source string) string { return "work-report: " + source + " degraded" }
 
@@ -62,17 +75,19 @@ func Title(source string) string { return "work-report: " + source + " degraded"
 // pull and returns one Item per degraded row whose bead could be ensured. now
 // MUST be expressed in the configured zone: an Item expires at the end of the
 // local day of now.Location() plus six hours. repull is the exact
-// "work-report pull ..." command line printed in a created bead's body.
+// "work-report pull ..." command line printed in a created bead's body. backend
+// is the pg-connector issue backend instance every call passes as --backend
+// (see ResolveBackend).
 //
 // A failure to reach the tracker never aborts the whole reconcile: the items
 // that could be built are returned together with a non-nil (joined) error.
-func Reconcile(ctx context.Context, conn pgconn.Runner, rows []pull.OutcomeRow, rng rangespec.Range, now time.Time, repull string) ([]Item, error) {
+func Reconcile(ctx context.Context, conn pgconn.Runner, backend string, rows []pull.OutcomeRow, rng rangespec.Range, now time.Time, repull string) ([]Item, error) {
 	items := []Item{}
 	if !needsTracker(rows) {
 		return items, nil
 	}
 
-	open, err := listOpen(ctx, conn)
+	open, err := listOpen(ctx, conn, backend)
 	if err != nil {
 		return items, fmt.Errorf("look up open degraded-source beads: %w", err)
 	}
@@ -86,12 +101,12 @@ func Reconcile(ctx context.Context, conn pgconn.Runner, rows []pull.OutcomeRow, 
 		case pull.StatusDegraded:
 			id := existing.ID
 			if found {
-				if err := comment(ctx, conn, id, commentBody(row, rng, now)); err != nil {
+				if err := comment(ctx, conn, backend, id, commentBody(row, rng, now)); err != nil {
 					errs = append(errs, fmt.Errorf("%s: append to %s: %w", row.Source, id, err))
 					continue
 				}
 			} else {
-				created, err := create(ctx, conn, title, createBody(ctx, conn, &validate, row, rng, now, repull))
+				created, err := create(ctx, conn, backend, title, createBody(ctx, conn, &validate, row, rng, now, repull))
 				if err != nil {
 					errs = append(errs, fmt.Errorf("%s: create bead: %w", row.Source, err))
 					continue
@@ -108,7 +123,7 @@ func Reconcile(ctx context.Context, conn pgconn.Runner, rows []pull.OutcomeRow, 
 			if !found {
 				continue
 			}
-			if err := closeBead(ctx, conn, existing.ID, closeReason(row, now)); err != nil {
+			if err := closeBead(ctx, conn, backend, existing.ID, closeReason(row, now)); err != nil {
 				errs = append(errs, fmt.Errorf("%s: close %s: %w", row.Source, existing.ID, err))
 				continue
 			}
@@ -278,8 +293,8 @@ type entity struct {
 
 // listOpen runs the dedup query and indexes the open beads by title. The first
 // bead with a given title wins.
-func listOpen(ctx context.Context, conn pgconn.Runner) (map[string]entity, error) {
-	out, err := call(ctx, conn, okFanOut, "issue", "list", "--query", DedupQuery, "--backend", Backend, "--output", "json")
+func listOpen(ctx context.Context, conn pgconn.Runner, backend string) (map[string]entity, error) {
+	out, err := call(ctx, conn, okFanOut, "issue", "list", "--query", DedupQuery, "--backend", backend, "--output", "json")
 	if err != nil {
 		return nil, err
 	}
@@ -298,13 +313,13 @@ func listOpen(ctx context.Context, conn pgconn.Runner) (map[string]entity, error
 	return open, nil
 }
 
-func create(ctx context.Context, conn pgconn.Runner, title, body string) (string, error) {
+func create(ctx context.Context, conn pgconn.Runner, backend, title, body string) (string, error) {
 	out, err := call(ctx, conn, okTargeted, "issue", "create",
 		"--title", title,
 		"--description", body,
 		"--labels", labelEscalated,
 		"--labels", labelWorkRep,
-		"--backend", Backend,
+		"--backend", backend,
 		"--output", "json")
 	if err != nil {
 		return "", err
@@ -323,12 +338,12 @@ func create(ctx context.Context, conn pgconn.Runner, title, body string) (string
 	return env.Result.ID, nil
 }
 
-func comment(ctx context.Context, conn pgconn.Runner, id, body string) error {
-	_, err := call(ctx, conn, okTargeted, "issue", "comment", id, "--body", body, "--backend", Backend, "--output", "json")
+func comment(ctx context.Context, conn pgconn.Runner, backend, id, body string) error {
+	_, err := call(ctx, conn, okTargeted, "issue", "comment", id, "--body", body, "--backend", backend, "--output", "json")
 	return err
 }
 
-func closeBead(ctx context.Context, conn pgconn.Runner, id, reason string) error {
-	_, err := call(ctx, conn, okTargeted, "issue", "close", id, "--reason", reason, "--backend", Backend, "--output", "json")
+func closeBead(ctx context.Context, conn pgconn.Runner, backend, id, reason string) error {
+	_, err := call(ctx, conn, okTargeted, "issue", "close", id, "--reason", reason, "--backend", backend, "--output", "json")
 	return err
 }

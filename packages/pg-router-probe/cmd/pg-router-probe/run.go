@@ -151,6 +151,10 @@ type runOptions struct {
 	// existing beads through; see connector.go's defaultDedupQuery.
 	dedupQuery string
 
+	// connectorBackend is the pg-connector backend instance name every
+	// pg-connector call passes as --backend (connector.go).
+	connectorBackend string
+
 	// closedDedupQuery names a pg-connector query listing recently CLOSED
 	// escalated beads (connector.go); "" disables the lookup. A bead
 	// created with only a closed match references the newest one.
@@ -223,6 +227,7 @@ func newRunCmd() *cobra.Command {
 		pgRouterPath:       "pg-router",
 		statusTimeout:      10 * time.Second,
 		dedupQuery:         defaultDedupQuery,
+		connectorBackend:   defaultPgConnectorBackend,
 
 		stillFiringInterval: 6 * time.Hour,
 	}
@@ -255,6 +260,7 @@ never closes beads; close one once its alert clears after remediation.`,
 	cmd.Flags().StringVar(&opts.dedupQuery, "dedup-query", opts.dedupQuery, "named pg-connector query listing every non-closed escalated bead (open, in_progress, blocked, deferred, human-labeled) for the dedup check; MUST NOT be the ready-only triager dispatch query")
 	cmd.Flags().StringVar(&opts.closedDedupQuery, "closed-dedup-query", opts.closedDedupQuery, "named pg-connector query listing recently CLOSED escalated beads; a new bead for a re-firing alert whose only match is closed references the newest one. Unset disables the lookup; a failing query degrades the run (exit 4) but the bead is still filed")
 	cmd.Flags().DurationVar(&opts.stillFiringInterval, "still-firing-interval", opts.stillFiringInterval, "minimum time between still-firing comments on an open bead for an alert that has not changed episode")
+	cmd.Flags().StringVar(&opts.connectorBackend, "connector-backend", opts.connectorBackend, "pg-connector backend instance name passed as --backend on every pg-connector call (a suffixed registration of the beads backend, e.g. pg-connector-issue-beads-zr, once the unsuffixed one is dropped)")
 	cmd.Flags().StringVar(&opts.snapshotPath, "snapshot-path", opts.snapshotPath, "path to this probe's own persisted last-run snapshot")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		if opts.degradedThreshold < 1 {
@@ -263,6 +269,10 @@ never closes beads; close one once its alert clears after remediation.`,
 		if opts.stillFiringInterval < 0 {
 			return usageErrorf("run: --still-firing-interval must not be negative")
 		}
+		if opts.connectorBackend == "" {
+			return usageErrorf("run: --connector-backend must not be empty")
+		}
+		pgConnectorBackend = opts.connectorBackend
 		opts.haveQueueDepth = cmd.Flags().Changed("queue-depth")
 		opts.haveBacklog = cmd.Flags().Changed("backlog")
 		return runProbe(cmd, opts, defaultRunDeps())

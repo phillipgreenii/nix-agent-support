@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"strings"
@@ -195,5 +196,76 @@ func TestMetadataArgsRepeatsFlag(t *testing.T) {
 	args := metadataArgs(map[string]string{"a": "1"})
 	if len(args) != 2 || args[0] != "--metadata" || args[1] != "a=1" {
 		t.Fatalf("got %v", args)
+	}
+}
+
+// TestConnectorBackendDefaultsToUnsuffixedBeadsBackend pins the default so a
+// deployment that omits --connector-backend keeps pg-connector-issue-beads
+// (pg2-otfq2).
+func TestConnectorBackendDefaultsToUnsuffixedBeadsBackend(t *testing.T) {
+	if defaultPgConnectorBackend != "pg-connector-issue-beads" {
+		t.Fatalf("defaultPgConnectorBackend = %q", defaultPgConnectorBackend)
+	}
+	if pgConnectorBackend != defaultPgConnectorBackend {
+		t.Fatalf("pgConnectorBackend = %q, want the default %q", pgConnectorBackend, defaultPgConnectorBackend)
+	}
+	f := newRunCmd().Flags().Lookup("connector-backend")
+	if f == nil {
+		t.Fatalf("--connector-backend flag missing")
+	}
+	if f.DefValue != defaultPgConnectorBackend {
+		t.Fatalf("--connector-backend default = %q, want %q", f.DefValue, defaultPgConnectorBackend)
+	}
+}
+
+// TestEveryPgConnectorCallUsesTheOverriddenBackend proves each call kind
+// passes the overridden instance name and not the default (pg2-otfq2).
+func TestEveryPgConnectorCallUsesTheOverriddenBackend(t *testing.T) {
+	const override = "pg-connector-issue-beads-zr"
+	old := pgConnectorBackend
+	pgConnectorBackend = override
+	t.Cleanup(func() { pgConnectorBackend = old })
+
+	check := func(name, got string) {
+		t.Helper()
+		if !strings.Contains(got, "--backend "+override) {
+			t.Fatalf("%s: expected --backend %s in argv, got %s", name, override, got)
+		}
+		if strings.Contains(got, "--backend pg-connector-issue-beads ") || strings.HasSuffix(got, "--backend pg-connector-issue-beads") {
+			t.Fatalf("%s: default backend leaked into argv: %s", name, got)
+		}
+	}
+
+	withFactory(t, "list_ok_with_match")
+	check("list", recordedArgs(t, func() { _, _ = listEscalated(context.Background(), defaultDedupQuery, noopWarn) }))
+	withFactory(t, "create_ok")
+	check("create", recordedArgs(t, func() {
+		_, _ = createIssue(context.Background(), "t", []string{"escalated"}, map[string]string{"k": "v"}, "body", noopWarn)
+	}))
+	withFactory(t, "update_ok")
+	check("update", recordedArgs(t, func() {
+		_ = updateIssueMetadata(context.Background(), "zr-1", map[string]string{"k": "v"}, noopWarn)
+	}))
+	withFactory(t, "comment_ok")
+	check("comment", recordedArgs(t, func() { _ = commentIssue(context.Background(), "zr-1", "note", noopWarn) }))
+}
+
+// TestRunCmdConnectorBackendFlagSetsBackend drives the flag end to end
+// through cobra: the value reaches pgConnectorBackend (pg2-otfq2).
+func TestRunCmdConnectorBackendFlagSetsBackend(t *testing.T) {
+	old := pgConnectorBackend
+	t.Cleanup(func() { pgConnectorBackend = old })
+	t.Setenv("PATH", "")
+	var out, errOut bytes.Buffer
+	_ = run([]string{"run", "--connector-backend", "pg-connector-issue-beads-pg2", "--snapshot-path", t.TempDir() + "/snapshot.json"}, &out, &errOut)
+	if pgConnectorBackend != "pg-connector-issue-beads-pg2" {
+		t.Fatalf("pgConnectorBackend = %q after --connector-backend, stderr=%q", pgConnectorBackend, errOut.String())
+	}
+}
+
+func TestRunCmdConnectorBackendEmptyIsUsageError(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if code := run([]string{"run", "--connector-backend", ""}, &out, &errOut); code != 2 {
+		t.Fatalf("expected exit 2, got %d (stderr=%q)", code, errOut.String())
 	}
 }

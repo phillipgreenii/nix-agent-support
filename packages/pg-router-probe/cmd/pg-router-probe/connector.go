@@ -31,9 +31,17 @@ import (
 // compile-time import of packages/pg-connector.
 const pgConnectorBinary = "pg-connector"
 
-// pgConnectorBackend is the one, fixed backend every call below pins to
-// [design: Contract's "pg-connector's issue capability" bullet].
-const pgConnectorBackend = "pg-connector-issue-beads"
+// defaultPgConnectorBackend is the backend instance name every call below
+// pins to unless --connector-backend overrides it [design: Contract's
+// "pg-connector's issue capability" bullet]. pg-connector can register one
+// backend binary under several suffixed instance names (pg2-91y12), so a
+// deployment that drops the unsuffixed registration names one of them.
+const defaultPgConnectorBackend = "pg-connector-issue-beads"
+
+// pgConnectorBackend is the backend instance name every call below passes
+// as --backend. It starts at defaultPgConnectorBackend; the run verb sets
+// it from --connector-backend (run.go) before any call is made.
+var pgConnectorBackend = defaultPgConnectorBackend
 
 // execCmdFactory constructs the *exec.Cmd used to invoke pg-connector.
 // Production code uses exec.CommandContext; tests swap this to spawn a

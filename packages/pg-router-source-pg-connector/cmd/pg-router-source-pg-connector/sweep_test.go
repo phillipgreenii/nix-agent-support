@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 func TestSweep_UnionsPresentIdsAcrossQueries_ReadingPresentIdsNeverEntities(t *testing.T) {
 	// The wire double's --ids-only response carries an EMPTY entities
@@ -106,5 +110,29 @@ func TestSweep_SingleQuery_PropagatesTotalFailure(t *testing.T) {
 	}
 	if stderr == "" {
 		t.Fatalf("stderr empty, want pg-connector's own stderr copied through")
+	}
+}
+
+// bead pg2-otfq2: --backend is forwarded to every list call only when given.
+func TestSweep_BackendFlag_IsPassedThroughToEveryListCallOnlyWhenGiven(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"omitted", []string{"sweep", "issue", "q1"}, ""},
+		{"given", []string{"sweep", "issue", "--backend", "pg-connector-issue-beads-pg2", "q1"}, "pg-connector-issue-beads-pg2"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recordFile := filepath.Join(t.TempDir(), "recorded-args")
+			withFactory(t, "sweep_ids_by_query", "GO_HELPER_ARGS_RECORD_FILE="+recordFile)
+			if _, stderr, code := runCLI(t, tc.args...); code != 0 {
+				t.Fatalf("exit code = %d, want 0 (stderr=%q)", code, stderr)
+			}
+			got := strings.Fields(readFile(t, recordFile))
+			if v := flagValue(got, "--backend"); v != tc.want {
+				t.Fatalf("child argv %v: --backend = %q, want %q", got, v, tc.want)
+			}
+		})
 	}
 }

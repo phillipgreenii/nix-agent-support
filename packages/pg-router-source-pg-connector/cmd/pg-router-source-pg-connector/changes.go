@@ -121,7 +121,7 @@ func changeDigest(c changesEntry, id entityIdentity) (string, error) {
 }
 
 func newChangesCmd() *cobra.Command {
-	var consumer, beadsDir string
+	var consumer, beadsDir, backend string
 	var retryWindow time.Duration
 	cmd := &cobra.Command{
 		Use:   "changes <type> <query>",
@@ -130,6 +130,7 @@ func newChangesCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&consumer, "consumer", "", "consumer id whose cursor pg-connector's own ledger reads and advances (required)")
 	cmd.Flags().StringVar(&beadsDir, "beads-dir", "", "sets PG_CONNECTOR_ISSUE_BEADS_DIR in the pg-connector child's environment")
+	cmd.Flags().StringVar(&backend, "backend", "", "pin the fan-out to exactly this registered backend instance (passed through as pg-connector's own --backend); omitted means every registered backend of the type")
 	cmd.Flags().DurationVar(&retryWindow, "retry-window", 0,
 		"when > 0, give each item a per-change id <entity id>@<12 hex> plus at (emit time) and expiresAt (at + window), so pg-router retries a failed dispatch inside the window; 0 (default) keeps bare entity ids")
 	_ = cmd.MarkFlagRequired("consumer")
@@ -139,9 +140,12 @@ func newChangesCmd() *cobra.Command {
 			fmt.Fprintln(cmd.ErrOrStderr(), "pg-router-source-pg-connector changes: --retry-window must not be negative")
 			return errFailed
 		}
-		out, err := invokeOrFail(cmd.Context(), cmd.ErrOrStderr(),
-			[]string{entityType, "changes", "--query", query, "--consumer", consumer, "--output", "json"},
-			beadsDirEnv(beadsDir))
+		changesArgs := []string{entityType, "changes", "--query", query, "--consumer", consumer}
+		if backend != "" {
+			changesArgs = append(changesArgs, "--backend", backend)
+		}
+		changesArgs = append(changesArgs, "--output", "json")
+		out, err := invokeOrFail(cmd.Context(), cmd.ErrOrStderr(), changesArgs, beadsDirEnv(beadsDir))
 		if err != nil {
 			return err
 		}

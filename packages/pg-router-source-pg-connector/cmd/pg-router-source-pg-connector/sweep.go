@@ -22,7 +22,7 @@ type idsOnlyWire struct {
 }
 
 func newSweepCmd() *cobra.Command {
-	var beadsDir, since string
+	var beadsDir, since, backend string
 	cmd := &cobra.Command{
 		Use:   "sweep <type> <query>...",
 		Short: "Union matched ids across one or more named queries, as pg-router rawItems",
@@ -34,6 +34,7 @@ func newSweepCmd() *cobra.Command {
 		Args: cobra.MinimumNArgs(1),
 	}
 	cmd.Flags().StringVar(&beadsDir, "beads-dir", "", "sets PG_CONNECTOR_ISSUE_BEADS_DIR in the pg-connector child's environment")
+	cmd.Flags().StringVar(&backend, "backend", "", "pin each list call to exactly this registered backend instance (passed through as pg-connector's own --backend); omitted means every registered backend of the type")
 	cmd.Flags().StringVar(&since, "since", "", "only sweep entities updated within this bound; passed through unchanged as pg-connector's own --since (an RFC3339 timestamp, a Go duration such as 40m, or whole days such as 7d); omitted means the whole matched set")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		entityType := args[0]
@@ -50,6 +51,9 @@ func newSweepCmd() *cobra.Command {
 			listArgs := []string{entityType, "list", "--query", query, "--ids-only"}
 			if since != "" {
 				listArgs = append(listArgs, "--since", since)
+			}
+			if backend != "" {
+				listArgs = append(listArgs, "--backend", backend)
 			}
 			listArgs = append(listArgs, "--output", "json")
 			out, err := invokeOrFail(cmd.Context(), cmd.ErrOrStderr(), listArgs, env)

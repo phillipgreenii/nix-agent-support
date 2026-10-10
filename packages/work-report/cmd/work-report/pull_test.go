@@ -14,6 +14,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/work-report/internal/degraded"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/work-report/internal/pgconn/fake"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/work-report/internal/store"
 )
@@ -492,6 +493,41 @@ func TestPullReconcilesInEveryOutputMode(t *testing.T) {
 			}
 			if !strings.Contains(strings.Join(creates[0], "\x00"), "work-report pull --range last-48h --source backend-slow") {
 				t.Errorf("create argv lacks the exact re-pull command: %q", creates[0])
+			}
+		})
+	}
+}
+
+func TestPullPassesTheEnvBackendToEveryIssueCall(t *testing.T) {
+	for name, tc := range map[string]struct{ env, want string }{
+		"default":  {"", "pg-connector-issue-beads"},
+		"override": {"pg-connector-issue-beads-pg2", "pg-connector-issue-beads-pg2"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			isolate(t)
+			fixedNow(t)
+			t.Setenv(degraded.EnvBackend, tc.env)
+			rec := fake.Install(
+				t,
+				fake.Route{Match: []string{"activity", "list"}, Stdout: degradedDoc},
+				fake.IssueListRoute(), fake.ConfigValidateRoute(), fake.IssueCreateRoute("bd-7"),
+			)
+			_, _ = runCLI(t, "--store", filepath.Join(t.TempDir(), "s.db"), "--output", "json",
+				"pull", "--range", "last-48h", "--source", "backend-slow")
+			issue := 0
+			for _, c := range rec.Calls() {
+				if c[0] != "issue" {
+					continue
+				}
+				issue++
+				for i, a := range c {
+					if a == "--backend" && c[i+1] != tc.want {
+						t.Errorf("issue %s used --backend %q; want %q", c[1], c[i+1], tc.want)
+					}
+				}
+			}
+			if issue == 0 {
+				t.Fatal("no issue calls were made")
 			}
 		})
 	}
