@@ -143,3 +143,40 @@ links` call.
   decision extends with one standalone backend that lives outside pg-connector.
 - Tracked under epic `pg2-5l0x4` (Direction 1: pg-desk attention evaluator and menu bar plugin);
   docs-first bead `pg2-5l0x4.1`.
+
+## Amendment 2026-10-09: the beads backend answers label-driven attention again
+
+**Deciders**: phillipg. Tracked by bead `pg2-wyeq4` (ruling made in the `pg2-1l558` session).
+
+Decision 6 and decision D3 of the design (`pg2-m482k`, 2026-10-05: delete the pr-github,
+issue-jira and issue-beads `list_attention` code once the pg-desk plugin lands) are REVERSED FOR THE
+BEADS BACKEND ONLY. The operator chose "option B": "reintroduce list_attention in the beads backend,
+driven by a configurable attention_labels list; accept reversing D3 for beads". The beads
+`list_attention` that was deleted (`pg2-w2oe5.1`, deadline-based) is not restored: this is a NEW op
+with different semantics, a to-do list of beads carrying any of a configured set of labels
+(initially `attention` and `human-focus`; the operator wants the set flexible). The backend also
+gains `search`, wrapping `bd search`, and both ops are registered for both tracker instances
+(`pg2-91y12`) under `attention.sources` and `search.sources` by the ZR rewire (`pg2-96q0t`).
+
+What does not change: the pg-desk read-time evaluator (decision 1) still owns PR and Jira
+attention, the PR and Jira backends still answer `unknown_op`, and `INV-ATTN-CI-1` stays removed.
+Where a bead is also raised by pg-desk, the feed's `{type, id}` dedup (`INV-ATTN-1`) keeps one item.
+
+Details the bead left to the implementer, chosen and recorded here (the rule itself is
+`INV-ATTN-BEADS-1` in the connector behavior docs):
+
+| Open detail               | Choice                                                                                                                                                                                                                                             |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Label default             | None built in. `attention_labels` is per instance, from `attention.perBackend.<name>.attentionLabels`; empty or missing answers `unavailable` naming the key, never an unscoped result. The ZR rewire sets the initial `attention`, `human-focus`. |
+| open / in_progress        | Reported.                                                                                                                                                                                                                                          |
+| blocked                   | Reported: a label is an explicit request for attention, so bd's own `blocked` status does not hide it.                                                                                                                                             |
+| deferred                  | Not reported: the operator deferred it on purpose. closed, pinned and hooked are not reported either.                                                                                                                                              |
+| Severity mapping          | bd priority: P0 `critical`, P1 `high`, P2 `medium`, P3 and P4 `low`. Order: priority ascending, then id.                                                                                                                                           |
+| Wire item                 | The existing `AttentionItem` (schema version unchanged): `type` `issue`, `id`, `severity`, `summary` `<title> [P<n>; <matched labels>]`, no `url`. No new field, so no schema bump.                                                                |
+| Tracker on the item       | Not carried. Ids are prefix-unique per tracker (`pg2-*`, `zr-*`), so two instances never clash, and `via` names the instance.                                                                                                                      |
+| Search time bound         | `--since`/`--before` bound the hit's `updated_at`; bd search has no portable updated-window flag.                                                                                                                                                  |
+| Search limit and statuses | At most 100 hits per call; every status including closed, as bd search does by default.                                                                                                                                                            |
+
+The cost is the exception to "entity attention lives in pg-desk": one entity backend again decides
+what needs the operator, but only by an explicit operator-applied label, which carries no
+domain-rule logic and no per-entity origin call (one local `bd list` per call).

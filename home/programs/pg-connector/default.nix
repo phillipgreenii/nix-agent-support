@@ -104,17 +104,23 @@ let
   # the wire's own opaque per-backend config vocabulary, omitting the key when
   # it is unset (null) rather than rendering a literal `null` on the wire --
   # mirrors renderedAttention/renderedSearch's identical "omit rather than
-  # render null" convention above. Only the alerts backend still reads a
-  # per-backend attention key (`attention_query`); the deadline keys
+  # render null" convention above. Two backends read a per-backend attention
+  # key: the alerts backend (`attention_query`) and the beads backend
+  # (`attention_labels`, bead pg2-wyeq4). The deadline keys
   # (`attention_threshold`/`attention_exclude`) were retired with the PR, Jira
-  # and beads backends' own `list_attention` code, since `pg-desk` evaluates
-  # entity attention.
+  # and beads backends' former deadline-based `list_attention` code, since
+  # `pg-desk` evaluates entity attention; the beads label-driven op is new.
   attentionBackendExtra =
     entry:
     lib.filterAttrs (_: v: v != null) {
       # attention_query (bead pg2-9tql6): names the alerts backend's own
       # `queries` entry that `list_attention` runs.
       attention_query = entry.attentionQuery;
+      # attention_labels (bead pg2-wyeq4): the labels that mark a bead for the
+      # beads backend's `list_attention`. A null (unset) value omits the key;
+      # an explicit empty list renders `[ ]`, which the backend answers as
+      # unavailable naming the key.
+      attention_labels = entry.attentionLabels;
     };
 
   # alertBackendExtra (bead pg2-9tql6) renders one alertBackends.<name>
@@ -152,6 +158,7 @@ let
           // attentionBackendExtra (
             cfg.attention.perBackend.${name} or {
               attentionQuery = null;
+              attentionLabels = null;
             }
           );
       })
@@ -315,10 +322,12 @@ in
           # rendered onto each named backend's own opaque backends.<name>
           # config block (see attentionBackendExtra/renderedBackends
           # above) rather than requiring a host to hand-write raw
-          # backends.<name>.attention_query attrs itself. Only the alerts
-          # backend reads one: the deadline `threshold`/`exclude` options
-          # were removed with the PR, Jira and beads backends' own
-          # `list_attention` code (`pg-desk` evaluates entity attention).
+          # backends.<name>.attention_query attrs itself. The alerts backend
+          # reads `attentionQuery` and the beads backend reads
+          # `attentionLabels` (bead pg2-wyeq4); the deadline
+          # `threshold`/`exclude` options were removed with the PR, Jira and
+          # beads backends' former deadline-based `list_attention` code
+          # (`pg-desk` evaluates entity attention).
           perBackend = lib.mkOption {
             type = lib.types.attrsOf (
               lib.types.submodule {
@@ -338,13 +347,38 @@ in
                       an alerts backend (e.g. `pg-connector-alert-grafana`).
                     '';
                   };
+                  # attentionLabels (bead pg2-wyeq4): the beads backend's
+                  # `list_attention` is a label-driven to-do list.
+                  attentionLabels = lib.mkOption {
+                    type = lib.types.nullOr (lib.types.listOf lib.types.str);
+                    default = null;
+                    example = [
+                      "attention"
+                      "human-focus"
+                    ];
+                    description = ''
+                      The bead labels that put a bead on this instance's
+                      attention list; rendered as `attention_labels`. A bead
+                      carrying ANY of them, in status open, in_progress or
+                      blocked, is reported by `list_attention`. There is no
+                      built-in default: `null` omits the key, and an empty list
+                      or a missing key makes the backend answer `unavailable`
+                      naming `attention_labels` rather than return an unscoped
+                      result. Set per beads instance (the name given in
+                      `attention.sources`), so the two trackers can use
+                      different labels. Only consulted by the beads backend
+                      (`pg-connector-issue-beads`).
+                    '';
+                  };
                 };
               }
             );
             default = { };
             description = ''
-              Per-backend attention semantics (today, only the alerts
-              backend's named query), keyed by backend binary name.
+              Per-backend attention semantics (the alerts backend's named
+              query, the beads backend's label set), keyed by backend name
+              (the binary name, or the instance `name` for a `{ name,
+              command }` registration).
               Independent of `attention.sources` -- a backend configured
               here has no effect on `pg-connector attention list` unless
               it is ALSO registered under `attention.sources`.

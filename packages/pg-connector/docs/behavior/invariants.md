@@ -432,7 +432,37 @@ list`'s merge layer, which passes it through unread. A dedup group's `group` is 
   > `docs/behavior/pg-desk/attention.md`), and the PR, Jira and beads backends no longer report entity
   > attention: each answers `list_attention` with `unknown_op`, which `attention list` treats as "not
   > applicable" for that source rather than a failure. `INV-ATTN-1` and `INV-ATTN-URL-1` continue to
-  > govern every item that does reach the feed.
+  > govern every item that does reach the feed. One exception, for the beads backend only
+  > (`INV-ATTN-BEADS-1`): it answers a label-driven `list_attention` again, by operator ruling.
+- **`INV-ATTN-BEADS-1`** <!-- uuid: 20764bea-8ef7-4101-96d0-27a137652204 --> — The beads backend (`pg-connector-issue-beads`)
+  MUST answer `list_attention` as a label-driven to-do list, and MUST NOT evaluate any other
+  attention rule (no due-date, deadline or review rule: those stay `pg-desk`'s). It reports the
+  beads of the tracker instance it serves that carry ANY label of the `attention_labels` list in
+  its own `backends.<name>` config block, set per instance; there is no built-in default label set.
+  When `attention_labels` is empty or missing it MUST answer `unavailable` naming
+  `attention_labels`, before any `bd` call, and MUST NOT return an unscoped or empty-as-success
+  result. A bead qualifies in stored status `open`, `in_progress` or `blocked` (a label is an
+  explicit request for attention, so `blocked` still counts); `deferred` (the operator's own "not
+  until later"), `closed`, `pinned` and `hooked` MUST NOT be reported. Each item is an
+  `AttentionItem` with `type` `issue`, `id` the bead id, no `url` (`INV-ATTN-URL-1`: bd has no
+  page), `severity` mapped from bd priority (P0 `critical`, P1 `high`, P2 `medium`, P3 and P4
+  `low`), and a `summary` of the form `<title> [P<n>; <matched labels>]`. The tracker is not a
+  field of the item: bead ids are unique per tracker prefix, and `via` names the instance. Items
+  are ordered by bd priority ascending, then id. This reverses decision D3 of `pg2-m482k` for the
+  beads backend only (operator ruling, Phillip, 2026-10-09, bead `pg2-wyeq4`, option B:
+  "reintroduce list_attention in the beads backend, driven by a configurable attention_labels list;
+  accept reversing D3 for beads"); the PR and Jira backends still answer `unknown_op`, and the
+  retired `INV-ATTN-CI-1` stays removed (see ADR 0081, Amendment 2026-10-09).
+- **`INV-SEARCH-BEADS-1`** <!-- uuid: 8e459d29-474d-4e8a-b19e-be1d944c9c2a --> — The beads backend MUST answer `search` by
+  wrapping `bd search` over the tracker instance it serves: the query is matched by bd (bead titles
+  and ids, every status including `closed`, so a filed-or-fixed check cannot silently answer no)
+  and each hit becomes a `SearchResult` of `type` `issue` with no `url`. The query text MUST reach
+  bd as the value of `--query`, never as a flag. An empty query is `invalid_argument`. The backend
+  declares the attribute names it fills under `capabilities.vocabulary.search_attributes`
+  (`status`, `priority`, `labels`, `issue_type`, `assignee`, `owner`, `tracker`) so the umbrella's
+  `--fields` check recognizes them, fills only the requested ones, and silently ignores any other
+  requested name. The umbrella's `--since`/`--before` bound a hit's `updated_at` (since inclusive,
+  before exclusive); a hit without a parseable `updated_at` is dropped from a bounded search.
 - **`INV-SEARCH-1`** <!-- uuid: a9fdaa89-5b51-4d5f-8a2b-3d72a36a0326 --> — `search`'s aggregation
   MUST NOT merge or dedup across sources at all — unlike `attention list`'s `INV-ATTN-1`, each
   queried source's own results stay grouped under that source, in that source's own returned

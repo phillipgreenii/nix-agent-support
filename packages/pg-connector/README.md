@@ -87,6 +87,12 @@ backends:
   pg-connector-issue-beads-zr: { activity_actors: [Example Person] }
 ```
 
+`pg-connector-issue-beads` also answers `search` (a wrapped `bd search`) and a label-driven
+`list_attention`. Register each instance under `search.sources` and `attention.sources`, and name
+the labels per instance with `attention.perBackend.<name>.attentionLabels` in the home-manager
+module (rendered as `backends.<name>.attention_labels`); with no labels it answers `unavailable`
+naming `attention_labels`.
+
 `pg-connector-issue-beads` takes its tracker from `--beads-dir DIR`, then
 `$PG_CONNECTOR_ISSUE_BEADS_DIR`, then `$BEADS_DIR`; with none of the three it refuses to run.
 

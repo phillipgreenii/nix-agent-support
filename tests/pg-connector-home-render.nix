@@ -139,6 +139,31 @@ let
     };
   };
 
+  # Beads attention (bead pg2-wyeq4): both tracker instances registered under
+  # attention.sources and search.sources, each with its OWN attentionLabels
+  # (rendered as backends.<instance>.attention_labels), plus the alerts
+  # backend's attentionQuery alongside to prove the two keys coexist. EXAMPLE
+  # values only.
+  beadsAttentionExample = {
+    attention = {
+      sources = [
+        (instanceBeads "pg2")
+        (instanceBeads "zr")
+      ];
+      perBackend = {
+        "pg-connector-issue-beads-pg2".attentionLabels = [
+          "attention"
+          "human-focus"
+        ];
+        "pg-connector-issue-beads-zr".attentionLabels = [ "attention" ];
+      };
+    };
+    search.sources = [
+      (instanceBeads "pg2")
+      (instanceBeads "zr")
+    ];
+  };
+
   # scm as a single {name, command} instance (connector.scm is single-valued).
   scmInstanceExample = {
     connector.scm = {
@@ -157,6 +182,15 @@ in
 {
   # Instances in every registration, alongside plain strings.
   instances = render instancesExample;
+  # Beads attention_labels render per instance next to the registrations.
+  beadsAttention = render beadsAttentionExample;
+  # An unset attentionLabels renders no key at all, never a null.
+  beadsAttentionUnset = render {
+    attention = {
+      inherit (beadsAttentionExample.attention) sources;
+      perBackend."pg-connector-issue-beads-pg2" = { };
+    };
+  };
   # A single-valued scm accepts one {name, command} too.
   scmInstance = render scmInstanceExample;
   # Entries missing command or with an empty command are rejected at eval.

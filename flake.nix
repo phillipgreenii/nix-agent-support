@@ -9786,6 +9786,11 @@
                   # malformed instance fails evaluation
                   same ${fixtures + "/instances.yaml"} ${rendered.instances}
                   same ${fixtures + "/scm-instance.yaml"} ${rendered.scmInstance}
+                  # beads attention (bead pg2-wyeq4): attentionLabels renders as
+                  # backends.<instance>.attention_labels per instance, and an
+                  # unset one renders no key
+                  same ${fixtures + "/beads-attention.yaml"} ${rendered.beadsAttention}
+                  same ${fixtures + "/beads-attention-unset.yaml"} ${rendered.beadsAttentionUnset}
                   # the SAME golden is the Go registry's parse fixture, so the
                   # Nix-rendered output, the golden and the Go parser are tied
                   # together byte for byte

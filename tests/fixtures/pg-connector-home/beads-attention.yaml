@@ -1,0 +1,32 @@
+attention:
+  sources:
+    - command:
+        - pg-connector-issue-beads
+        - --beads-dir
+        - /example/pg2
+      name: pg-connector-issue-beads-pg2
+    - command:
+        - pg-connector-issue-beads
+        - --beads-dir
+        - /example/zr
+      name: pg-connector-issue-beads-zr
+backends:
+  pg-connector-issue-beads-pg2:
+    attention_labels:
+      - attention
+      - human-focus
+  pg-connector-issue-beads-zr:
+    attention_labels:
+      - attention
+search:
+  sources:
+    - command:
+        - pg-connector-issue-beads
+        - --beads-dir
+        - /example/pg2
+      name: pg-connector-issue-beads-pg2
+    - command:
+        - pg-connector-issue-beads
+        - --beads-dir
+        - /example/zr
+      name: pg-connector-issue-beads-zr

@@ -17,8 +17,10 @@ mkGoApp {
   # is go.mod/go.sum/gomod2nix.toml, pkg/schema, pkg/scriptout's top-level package
   # (not its schemas/ or conformance/ subpackages — those are pulled in only by
   # pg-connector's own Tier-1 conformance suite and pkg/scriptout's own tests, not
-  # by this binary), pkg/provider's root iface.go plus its own pkg/provider/issue
-  # capability subpackage, pkg/eventlog (the shared event-log writer, bead
+  # by this binary), pkg/provider's root iface.go plus its own pkg/provider/issue,
+  # pkg/provider/activity, pkg/provider/search AND pkg/provider/attention
+  # capability subpackages (search and attention added by bead pg2-wyeq4),
+  # pkg/eventlog (the shared event-log writer, bead
   # pg2-5dyz2), and its own cmd/pg-connector-issue-beads/
   # tree (main.go, internal/**). None of the other 3 backends' cmd/pg-connector-*/
   # trees are reachable from here (verified: no cross-backend import, no filesystem
@@ -46,6 +48,8 @@ mkGoApp {
       ./pkg/provider/iface.go
       ./pkg/provider/issue
       ./pkg/provider/activity
+      ./pkg/provider/search
+      ./pkg/provider/attention
       ./cmd/pg-connector-issue-beads
     ];
   };

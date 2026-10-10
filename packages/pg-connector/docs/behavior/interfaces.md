@@ -594,13 +594,24 @@ compiled-in knowledge of it.
   (an alert backend from the alert's URL) and omitted by one that does not (the agent-session
   backend); the umbrella passes it through unread and never defaults it (`INV-ATTN-URL-1`). Each item MAY also carry a `group` — `{key, label}`, its work-context group (attention schema version 3), filled only by a source that clusters its items and omitted by every other; the umbrella passes it through unread, never defaults it, and a dedup group keeps the winning contributor's own (`INV-ATTN-GROUP-1`); `attention list`'s human rendering ignores it. The attention capability's
   schema version is 3 (additive over 2, which was additive over 1). A backend that does not answer
-  the op — the PR, Jira and beads entity backends, whose entity attention is evaluated by `pg-desk`
+  the op — the PR and Jira entity backends, whose entity attention is evaluated by `pg-desk`
   instead — answers `unknown_op`, which the fan-out reports as "not applicable" for that source
   rather than a failure, so a stale registration of one degrades quietly. A new item type is a new
   value of the source-defined `type` string and does not change the schema version.
+- **The beads backend's `list_attention`** is the one entity-backend exception (`INV-ATTN-BEADS-1`,
+  bead `pg2-wyeq4`): a label-driven to-do list over the tracker instance it serves. Its per-instance
+  config key is `attention_labels` (a JSON list of strings in `backends.<name>`, rendered from
+  `attention.perBackend.<name>.attentionLabels`); empty or missing answers `unavailable` naming the
+  key. Beads in status `open`, `in_progress` or `blocked` carrying any listed label are reported
+  with severity from bd priority; `deferred` and `closed` are not. It advertises `list_attention`
+  in `capabilities.ops` and `attention` in `capabilities.schemaVersions`.
 - **`search`** — aggregated by `search` via per-source grouping, never merged across sources
   (`INV-SEARCH-1`); an optional `--fields` list requests specific result attributes, and an
   unrecognized one produces a `warnings[]` entry, never an error.
+  The beads backend answers `search` by wrapping `bd search` (`INV-SEARCH-BEADS-1`, bead
+  `pg2-wyeq4`): `type` `issue`, every status, attributes `status`, `priority`, `labels`,
+  `issue_type`, `assignee`, `owner` and `tracker` declared under
+  `capabilities.vocabulary.search_attributes` so a requested one is not warned about.
 
 ### `activity` — the third cross-cutting, fan-out-only capability
 

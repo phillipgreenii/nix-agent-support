@@ -30,7 +30,9 @@ import (
 	internal "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-beads/internal"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-beads/internal/eventlog"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/activity"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/attention"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/issue"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/search"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
@@ -94,7 +96,9 @@ func instrument(table scriptout.DispatchTable, getenv func(string) string) scrip
 // newDispatchTable builds the issue capability's table (show/create/
 // comment/transition) via the sibling "generic issue entity/capability"
 // packet's NewDispatchTable, then merges in the activity capability's
-// table (list_activity), then adds this backend's own
+// table (list_activity), the search capability's table (search, a wrapped
+// `bd search`) and the attention capability's table (list_attention, the
+// label-driven to-do list; bead pg2-wyeq4), then adds this backend's own
 // capabilities entry via scriptout.AddCapabilities — the concrete backing
 // for that sibling packet's vocabulary.state check, which cites this
 // backend's capabilities response but does not itself populate it
@@ -110,6 +114,19 @@ func newDispatchTable(backend *internal.Backend) scriptout.DispatchTable {
 	// host-configured activity_actors list. Backend is not a
 	// provider.AuthChecker, so the activity table adds no auth_status entry.
 	for op, handler := range activity.NewDispatchTable(backend) {
+		table[op] = handler
+	}
+	// search (search) built by pkg/provider/search.NewDispatchTable: this
+	// backend's own Search over `bd search`, bead pg2-wyeq4.
+	for op, handler := range search.NewDispatchTable(backend) {
+		table[op] = handler
+	}
+	// attention (list_attention) built by pkg/provider/attention.NewDispatchTable:
+	// the beads in this tracker carrying any host-configured attention_labels
+	// label, bead pg2-wyeq4. This reverses D3 of pg2-m482k for the beads
+	// backend only (ADR 0081, Amendment 2026-10-09). Neither capability adds an
+	// auth_status entry: Backend is not a provider.AuthChecker.
+	for op, handler := range attention.NewDispatchTable(backend) {
 		table[op] = handler
 	}
 	return scriptout.AddCapabilities(table, schema.IssueSchemaVersion, capabilitiesBase(backend))
@@ -139,14 +156,23 @@ func capabilitiesBase(backend *internal.Backend) scriptout.CapabilitiesResponse 
 		// The activity kinds this backend emits; capabilities.ops stays
 		// derived from the table, never a hand-typed list.
 		"activity_kinds": internal.ActivityKinds,
+		// The attribute names Search fills on request: the umbrella's
+		// --fields probe reads this key, so declaring them keeps a requested
+		// one from drawing a warning.
+		"search_attributes": internal.SearchAttributes,
 	}
 	if dir, err := backend.Workspace(); err == nil && dir != "" {
 		vocabulary["workspace_dir"] = dir
 	}
 	return scriptout.CapabilitiesResponse{
 		ProtocolVersion: scriptout.ProtocolVersion,
-		SchemaVersions:  map[string]int{"issue": schema.IssueSchemaVersion, "activity": schema.ActivitySchemaVersion},
-		Vocabulary:      vocabulary,
-		Version:         Version,
+		SchemaVersions: map[string]int{
+			"issue":     schema.IssueSchemaVersion,
+			"activity":  schema.ActivitySchemaVersion,
+			"search":    schema.SearchSchemaVersion,
+			"attention": schema.AttentionSchemaVersion,
+		},
+		Vocabulary: vocabulary,
+		Version:    Version,
 	}
 }
