@@ -14,7 +14,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/phillipgreenii/pb/internal/run"
-	"github.com/phillipgreenii/pb/internal/unstick"
 )
 
 type Gate struct {
@@ -286,19 +285,15 @@ func (c Client) Export(ctx context.Context, dir, outPath string) error {
 	return nil
 }
 
-// Ready returns ALL ready beads in the DB at dir (-n 0 is load-bearing, as in
-// ReadyIDs) decoded for the sweep, plus bd's raw stdout so the caller can
-// persist it as ready.json. The decode tolerates a bare array in place of the
-// {data, schema_version} envelope.
-func (c Client) Ready(ctx context.Context, dir string) ([]unstick.ReadyRow, []byte, error) {
+// Ready returns bd's raw `ready -n 0 --json` stdout for ALL ready beads in the DB at
+// dir (-n 0 is load-bearing, as in ReadyIDs). Decoding is the caller's job
+// (unstick.ParseReady) so this adapter stays free of domain-package imports,
+// matching the repo's direction: domain packages import bd, never the reverse.
+func (c Client) Ready(ctx context.Context, dir string) ([]byte, error) {
 	res, err := c.R.Run(ctx, "bd", []string{"-C", dir, "ready", "-n", "0", "--json"},
 		run.Options{Env: bdEnv(), Timeout: ReadyTimeout})
 	if err != nil {
-		return nil, nil, wrapErr(fmt.Sprintf("bd ready in %q", dir), res, err)
+		return nil, wrapErr(fmt.Sprintf("bd ready in %q", dir), res, err)
 	}
-	rows, err := unstick.ParseReady([]byte(res.Stdout))
-	if err != nil {
-		return nil, nil, err
-	}
-	return rows, []byte(res.Stdout), nil
+	return []byte(res.Stdout), nil
 }
