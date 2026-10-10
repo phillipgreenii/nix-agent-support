@@ -174,9 +174,25 @@ func FreeTextFields(s *Schema, def string) []string {
 
 // StringFields lists, in the same notation as FreeTextFields, the path of
 // every property of the definition whose value is a string, free text or not.
-// A test pins the set so a new string property is a deliberate choice.
+// A property that is a string or null counts. A test pins the set so a new string property is a deliberate choice.
 func StringFields(s *Schema, def string) []string {
-	return s.fields(def, func(prop map[string]any) bool { return prop["type"] == "string" })
+	return s.fields(def, isStringType)
+}
+
+// isStringType reports whether a property's type is "string", alone or beside
+// "null" in a type list.
+func isStringType(prop map[string]any) bool {
+	switch t := prop["type"].(type) {
+	case string:
+		return t == "string"
+	case []any:
+		for _, e := range t {
+			if e == "string" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (s *Schema) fields(def string, pick func(map[string]any) bool) []string {

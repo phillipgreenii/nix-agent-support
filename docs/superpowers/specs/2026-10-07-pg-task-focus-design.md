@@ -430,8 +430,10 @@ cycles:
    MUST match `[a-z0-9_-]+` (`400 invalid_request`). The key `cycle_type` is reserved for the
    connector: it MUST be rejected as API input (`400 reserved_key`) and as a config `keys` entry.
 5. **Alert settings** (`sound`, `reminder_sound`, `repeat_minutes`) resolve per cycle type, then
-   `defaults.alert`. `sound` plays once at expiry; `reminder_sound` (default: the same as `sound`)
-   plays on every repeat. Both MUST be short: sounds SHOULD be under two seconds long, and a cycle
+   `defaults.alert`. `sound` plays once at expiry; `reminder_sound` plays on every repeat, and
+   defaults to the type's `sound`, then to `defaults.alert`'s `reminder_sound`, then to its `sound`.
+   Either MAY be `null` for no sound (operator, 2026-10-10: the notification is still sent and the
+   reminders still repeat); `null` is a setting, not an absent key. Both MUST be short: sounds SHOULD be under two seconds long, and a cycle
    type that routinely runs long SHOULD raise its `repeat_minutes`.
 6. **Group order.** Tasks sort within a period by `group_order` (a group not listed sorts last),
    then by due time.

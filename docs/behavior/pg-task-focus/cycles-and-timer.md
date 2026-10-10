@@ -57,7 +57,8 @@ cycle has been paused since 14:00:00Z (10:00 America/New_York)").
   `INV-CYCLE-5`, `INV-CYCLE-6`, `INV-CYCLE-7`.)_
 - **`STORY-CYCLE-OVERTIME`** <!-- uuid: ffe4a16e-6cdc-4ee6-9390-aab4dc38cfe7 --> — As the operator, I want a short sound when my cycle
   runs out and a short reminder every few minutes of running time until I stop it, with no way to
-  silence it short of stopping, so I cannot drift past the end without noticing.
+  silence it short of stopping, so I cannot drift past the end without noticing; for a cycle type I
+  choose, in the configuration, which sound plays at each point, or none (the notification still comes).
   _(→ `JOURNEY-CYCLE-OVERTIME`; `INV-CYCLE-16`, `INV-CYCLE-17`, `INV-CYCLE-18`, `INV-CYCLE-19`,
   `INV-CYCLE-20`, `INV-CYCLE-21`, `INV-CYCLE-22`.)_
 - **`STORY-CYCLE-SAFE`** <!-- uuid: 4525e8ad-c36f-476a-bb60-1ecc45bc3301 --> — As a client or an operator repeating an action, I want a
@@ -127,7 +128,8 @@ Extensions:
 - 5a. A back-filled break removes running time from an overtime cycle. Reminders neither stop nor
   double (`INV-CYCLE-20`).
 - 6a. The operator wants to silence the sound without stopping. There is no acknowledge, mute, snooze
-  or cap (`INV-CYCLE-16`).
+  or cap at run time (`INV-CYCLE-16`). A cycle type configured with "no sound" is silent from the
+  start, and its notifications still repeat (`INV-CONF-7`).
 - 6b. The sound cannot be played. The failure is logged and counted and the cycle is unaffected
   (`INV-CYCLE-22`).
 
@@ -263,9 +265,13 @@ notification belong to the client that owns the audio session.
 - **`INV-CYCLE-16`** <!-- uuid: 25922fb2-19b8-455f-a4a4-20b72fbcc90f --> — When a running cycle's time is up, the product MUST play one
   short `sound` and send one notification, then a short `reminder_sound` and a notification each time
   the cycle has run a further `repeat_minutes` of running time in overtime, until the operator stops
-  the cycle. There is NO acknowledge, mute, snooze or repeat cap. Only overtime notifies: due and
-  overdue tasks are conveyed through the state and the attention feed, never by notification.
-  _(Operator ruling, 2026-10-07.)_
+  the cycle. There is NO acknowledge, mute, snooze or repeat cap at run time. A cycle type MAY be
+  configured with "no sound" for either `sound` or `reminder_sound` (`INV-CONF-7`): the alert is then
+  silent but its notification is still sent, and the reminders still repeat every `repeat_minutes`,
+  with the notification only; they do not stop. Only overtime notifies: due and overdue tasks are
+  conveyed through the state and the attention feed, never by notification.
+  _(Operator rulings, 2026-10-07: no quieting of the overtime sound. 2026-10-10: a configured "no
+  sound" is permitted; "Repeat silently": reminders repeat with the notification only.)_
 - **`INV-CYCLE-17`** <!-- uuid: d00925b6-054d-4a37-9787-8d8c7b933a14 --> — Reminders MUST count the cycle's RUNNING time, not
   wall-clock time. A paused cycle accrues no running time, so it plays no sound and sends no
   notification; resuming it continues the count where it stopped (a cycle that had run 3 of 5 minutes

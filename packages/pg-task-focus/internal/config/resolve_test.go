@@ -61,7 +61,7 @@ func TestAlertFallsBackForARemovedCycleType(t *testing.T) {
 		at(c, "profiles", "normal")["cycles"] = []any{"review"}
 		delete(at(c, "profiles", "on-call"), "cycles")
 	}))
-	if got, want := c.Alert("deep-work"), (config.Alert{Sound: "Glass", ReminderSound: "Tink", RepeatMinutes: 5}); got != want {
+	if got, want := c.Alert("deep-work"), (config.Alert{Sound: config.Named("Glass"), ReminderSound: config.Named("Tink"), RepeatMinutes: 5}); got != want {
 		t.Errorf("Alert(removed type) = %+v, want %+v", got, want)
 	}
 	if got := c.CycleMinutes("deep-work", nil); got != 25 {
@@ -69,23 +69,54 @@ func TestAlertFallsBackForARemovedCycleType(t *testing.T) {
 	}
 }
 
-// TestAlertResolvesFieldByField pins INV-CONF-7: each of sound, reminder_sound
-// and repeat_minutes resolves per cycle type and then defaults.alert, and the
-// reminder falls back to the resolved sound only when neither level sets one.
-func TestAlertResolvesFieldByField(t *testing.T) {
+// absent marks a defaults.alert reminder_sound that is left out of the document.
+var absent = struct{}{}
+
+// TestAlertResolution pins INV-CONF-7. The sound is the type's, then the
+// default's. The reminder sound is the first set of the type's reminder_sound,
+// the type's sound, the default's reminder_sound, the default's sound. An
+// explicit null is a setting (no sound), not an absent key. repeat_minutes is
+// the type's, then the default's.
+func TestAlertResolution(t *testing.T) {
+	// sd is defaults.alert: nil is JSON null (no sound), absent leaves the key out.
+	sd := func(sound, reminder any) map[string]any {
+		m := map[string]any{"sound": sound, "repeat_minutes": 5}
+		if reminder != absent {
+			m["reminder_sound"] = reminder
+		}
+		return m
+	}
+	al := func(sound, reminder config.Sound, repeat int) config.Alert {
+		return config.Alert{Sound: sound, ReminderSound: reminder, RepeatMinutes: repeat}
+	}
+	A, B, C, D := config.Named("A"), config.Named("B"), config.Named("C"), config.Named("D")
+	none := config.NoSound
 	tests := []struct {
 		name     string
 		defaults map[string]any
 		cycle    map[string]any // the alert of cycle type "t"; nil for none
 		want     config.Alert
 	}{
-		{"a type with no alert takes the defaults", map[string]any{"sound": "A", "reminder_sound": "B", "repeat_minutes": 5}, nil, config.Alert{Sound: "A", ReminderSound: "B", RepeatMinutes: 5}},
-		{"the type's sound over the default's, reminder from the defaults", map[string]any{"sound": "A", "reminder_sound": "B", "repeat_minutes": 5}, map[string]any{"sound": "C"}, config.Alert{Sound: "C", ReminderSound: "B", RepeatMinutes: 5}},
-		{"the type's reminder over the default's", map[string]any{"sound": "A", "reminder_sound": "B", "repeat_minutes": 5}, map[string]any{"reminder_sound": "D"}, config.Alert{Sound: "A", ReminderSound: "D", RepeatMinutes: 5}},
-		{"the type's repeat over the default's", map[string]any{"sound": "A", "reminder_sound": "B", "repeat_minutes": 5}, map[string]any{"repeat_minutes": 9}, config.Alert{Sound: "A", ReminderSound: "B", RepeatMinutes: 9}},
-		{"no reminder anywhere: the default sound", map[string]any{"sound": "A", "repeat_minutes": 5}, nil, config.Alert{Sound: "A", ReminderSound: "A", RepeatMinutes: 5}},
-		{"no reminder anywhere: the type's sound", map[string]any{"sound": "A", "repeat_minutes": 5}, map[string]any{"sound": "C"}, config.Alert{Sound: "C", ReminderSound: "C", RepeatMinutes: 5}},
-		{"the default's reminder survives a type's sound", map[string]any{"sound": "A", "reminder_sound": "B", "repeat_minutes": 5}, map[string]any{"sound": "C", "repeat_minutes": 7}, config.Alert{Sound: "C", ReminderSound: "B", RepeatMinutes: 7}},
+		{"a type with no alert takes the defaults", sd("A", "B"), nil, al(A, B, 5)},
+		{"the type's sound brings its own reminder, not the default's", sd("A", "B"), map[string]any{"sound": "C"}, al(C, C, 5)},
+		{"the type's reminder over the default's", sd("A", "B"), map[string]any{"reminder_sound": "D"}, al(A, D, 5)},
+		{"the type's reminder over its own sound", sd("A", "B"), map[string]any{"sound": "C", "reminder_sound": "D"}, al(C, D, 5)},
+		{"the type's repeat over the default's", sd("A", "B"), map[string]any{"repeat_minutes": 9}, al(A, B, 9)},
+		{"a type's repeat leaves the sounds alone", sd("A", "B"), map[string]any{"sound": "C", "repeat_minutes": 7}, al(C, C, 7)},
+		{"no reminder anywhere: the default sound", sd("A", absent), nil, al(A, A, 5)},
+		{"no reminder anywhere: the type's sound", sd("A", absent), map[string]any{"sound": "C"}, al(C, C, 5)},
+
+		// An explicit no sound (null) is a setting, distinct from an absent key.
+		{"the default's sound is none, the reminder follows it", sd(nil, absent), nil, al(none, none, 5)},
+		{"the default's reminder is none, the sound plays", sd("A", nil), nil, al(A, none, 5)},
+		{"the default's sound is none, its reminder plays", sd(nil, "B"), nil, al(none, B, 5)},
+		{"the type's sound is none, silent reminders too", sd("A", "B"), map[string]any{"sound": nil}, al(none, none, 5)},
+		{"the type's sound is none, its own reminder plays", sd("A", "B"), map[string]any{"sound": nil, "reminder_sound": "D"}, al(none, D, 5)},
+		{"the type's reminder is none, its sound plays", sd("A", "B"), map[string]any{"reminder_sound": nil}, al(A, none, 5)},
+		{"the type's sound plays and its reminder is none", sd("A", "B"), map[string]any{"sound": "C", "reminder_sound": nil}, al(C, none, 5)},
+		{"a type turns sound back on over a none default", sd(nil, nil), map[string]any{"sound": "C"}, al(C, C, 5)},
+		{"a type turns only the reminder on over a none default", sd(nil, nil), map[string]any{"reminder_sound": "D"}, al(none, D, 5)},
+		{"an absent key does not inherit none from the type's sibling", sd("A", nil), map[string]any{"repeat_minutes": 8}, al(A, none, 8)},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

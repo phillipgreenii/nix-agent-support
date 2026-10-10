@@ -20,6 +20,7 @@ package config
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -60,11 +61,39 @@ func (e *ValidationError) Error() string {
 	return sb.String()
 }
 
+// Sound is one alert sound once resolved: a sound name, or no sound at all
+// (INV-CONF-7). The zero value is no sound. A configured name is never empty.
+// It encodes in JSON as the name, or null for no sound, so a client can tell
+// "no sound" from a name.
+type Sound struct{ name string }
+
+// NoSound is the explicit choice of no sound.
+var NoSound = Sound{}
+
+// Named returns the sound called name. An empty name is no sound.
+func Named(name string) Sound { return Sound{name: name} }
+
+// Name returns the sound's name, empty for no sound.
+func (s Sound) Name() string { return s.name }
+
+// None reports whether this is no sound.
+func (s Sound) None() bool { return s.name == "" }
+
+// MarshalJSON encodes the name, or null for no sound.
+func (s Sound) MarshalJSON() ([]byte, error) {
+	if s.None() {
+		return []byte("null"), nil
+	}
+	return json.Marshal(s.name)
+}
+
 // Alert is the sound and repeat settings of one cycle type once resolved.
+// Each of the two sounds is a name or an explicit no sound; neither is ever
+// unset.
 type Alert struct {
-	Sound         string // played once when the cycle's time is up
-	ReminderSound string // played on every repeat; Sound when none is configured
-	RepeatMinutes int    // running minutes between reminders, until the cycle stops
+	Sound         Sound // played once when the cycle's time is up
+	ReminderSound Sound // played on every repeat; the notification repeats either way
+	RepeatMinutes int   // running minutes between reminders, until the cycle stops
 }
 
 // Attention holds the thresholds the attention feed and the clients use.
@@ -104,11 +133,13 @@ type TaskDef struct {
 	Due     due.Rule
 }
 
-// AlertOverride is the alert settings a cycle type sets for itself. A zero
-// field is not set and falls back to defaults.alert.
+// AlertOverride is the alert settings a cycle type sets for itself, as
+// written. A nil sound is absent and falls back (INV-CONF-7); a non-nil
+// sound that is NoSound is the explicit choice of no sound, not absent. A zero
+// RepeatMinutes is not set and falls back to defaults.alert.
 type AlertOverride struct {
-	Sound         string
-	ReminderSound string
+	Sound         *Sound
+	ReminderSound *Sound
 	RepeatMinutes int
 }
 
@@ -124,7 +155,7 @@ type CycleDef struct {
 // Config is a parsed, validated, immutable configuration.
 type Config struct {
 	defaults   Defaults
-	alert      AlertOverride // defaults.alert as written: ReminderSound empty when none
+	alert      AlertOverride // defaults.alert as written: ReminderSound nil when none
 	listenPort int
 	publicURL  string
 	groupRank  map[string]int
@@ -143,8 +174,7 @@ type Config struct {
 func (c *Config) Digest() string { return c.digest }
 
 // Defaults returns the defaults section with every optional field filled in.
-// defaults.alert is returned resolved (ReminderSound is Sound when none is
-// configured).
+// defaults.alert is returned resolved (INV-CONF-7).
 func (c *Config) Defaults() Defaults {
 	d := c.defaults
 	d.BoostMinutes = append([]int(nil), d.BoostMinutes...)

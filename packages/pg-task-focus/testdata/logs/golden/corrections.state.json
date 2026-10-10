@@ -198,7 +198,7 @@
       "NotInProfile": false,
       "Alert": {
         "Sound": "Hero",
-        "ReminderSound": "Tink",
+        "ReminderSound": "Hero",
         "RepeatMinutes": 10
       }
     },

@@ -25,6 +25,16 @@ var (
 
 func idGen() *rapid.Generator[string] { return rapid.StringMatching(`[a-z][a-z0-9-]{0,6}`) }
 
+// soundGen draws a sound name or null (no sound).
+func soundGen(label string) *rapid.Generator[any] {
+	return rapid.Custom(func(t *rapid.T) any {
+		if rapid.Bool().Draw(t, label+" is none") {
+			return nil
+		}
+		return rapid.SampledFrom(soundNames).Draw(t, label)
+	})
+}
+
 func minutesGen() *rapid.Generator[int] { return rapid.IntRange(1, 525600) }
 
 // subset draws a distinct subset of ids, in a drawn order.
@@ -82,8 +92,8 @@ func validConfigGen() *rapid.Generator[map[string]any] {
 			optional(t, "has keys", func() { cy["keys"] = subset(t, "keys", keyNames) })
 			optional(t, "has alert", func() {
 				alert := map[string]any{}
-				optional(t, "alert sound", func() { alert["sound"] = rapid.SampledFrom(soundNames).Draw(t, "sound") })
-				optional(t, "alert reminder", func() { alert["reminder_sound"] = rapid.SampledFrom(soundNames).Draw(t, "reminder") })
+				optional(t, "alert sound", func() { alert["sound"] = soundGen("sound").Draw(t, "sound") })
+				optional(t, "alert reminder", func() { alert["reminder_sound"] = soundGen("reminder").Draw(t, "reminder") })
 				optional(t, "alert repeat", func() { alert["repeat_minutes"] = minutesGen().Draw(t, "repeat") })
 				cy["alert"] = alert
 			})
@@ -106,8 +116,8 @@ func validConfigGen() *rapid.Generator[map[string]any] {
 			profiles[name] = p
 		}
 
-		alert := map[string]any{"sound": rapid.SampledFrom(soundNames).Draw(t, "default sound"), "repeat_minutes": minutesGen().Draw(t, "default repeat")}
-		optional(t, "default reminder", func() { alert["reminder_sound"] = rapid.SampledFrom(soundNames).Draw(t, "default reminder") })
+		alert := map[string]any{"sound": soundGen("default sound").Draw(t, "default sound"), "repeat_minutes": minutesGen().Draw(t, "default repeat")}
+		optional(t, "default reminder", func() { alert["reminder_sound"] = soundGen("default reminder").Draw(t, "default reminder") })
 		defaults := map[string]any{
 			"cycle_minutes": minutesGen().Draw(t, "cycle minutes"),
 			"profile":       rapid.SampledFrom(profileNames).Draw(t, "default profile"),
@@ -202,12 +212,45 @@ func checkRoundTrip(t *rapid.T, raw []byte, c *config.Config) {
 	}
 }
 
+// checkAlertOracle compares the resolved alert of every cycle type with a
+// second statement of INV-CONF-7 read straight off the document: the sound is
+// the type's, else the default's; the reminder is the first present of the
+// type's reminder_sound, the type's sound, the default's reminder_sound, the
+// default's sound; null is a value (no sound), an absent key is not.
+func checkAlertOracle(t *rapid.T, doc map[string]any, c *config.Config) {
+	soundOf := func(v any) config.Sound {
+		if name, ok := v.(string); ok {
+			return config.Named(name)
+		}
+		return config.NoSound
+	}
+	defAlert := doc["defaults"].(map[string]any)["alert"].(map[string]any)
+	first := func(alerts []map[string]any, keys ...string) config.Sound {
+		for i, a := range alerts {
+			if v, ok := a[keys[i]]; ok {
+				return soundOf(v)
+			}
+		}
+		panic("defaults.alert.sound is required")
+	}
+	for id, raw := range doc["cycles"].(map[string]any) {
+		typ, _ := raw.(map[string]any)["alert"].(map[string]any)
+		wantSound := first([]map[string]any{typ, defAlert}, "sound", "sound")
+		wantReminder := first([]map[string]any{typ, typ, defAlert, defAlert}, "reminder_sound", "sound", "reminder_sound", "sound")
+		got := c.Alert(id)
+		if got.Sound != wantSound || got.ReminderSound != wantReminder {
+			t.Fatalf("Alert(%q) = %+v, want sound %+v reminder %+v\n%v", id, got, wantSound, wantReminder, doc)
+		}
+	}
+}
+
 // TestPropertyAcceptedConfigRoundTrips: a configuration that satisfies every
 // rule is accepted, and what Parse accepts, re-marshalled, is accepted again
 // with an equal Digest.
 func TestPropertyAcceptedConfigRoundTrips(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		raw, err := json.Marshal(validConfigGen().Draw(t, "config"))
+		doc := validConfigGen().Draw(t, "config")
+		raw, err := json.Marshal(doc)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -216,6 +259,7 @@ func TestPropertyAcceptedConfigRoundTrips(t *testing.T) {
 			t.Fatalf("a configuration that satisfies every rule was rejected: %v\n%s", err, raw)
 		}
 		checkRoundTrip(t, raw, c)
+		checkAlertOracle(t, doc, c)
 
 		// The parsed values agree with the document: the profile the document
 		// names is defined, and resolution never returns a zero.
@@ -223,7 +267,7 @@ func TestPropertyAcceptedConfigRoundTrips(t *testing.T) {
 		if _, ok := c.Profile(d.Profile); !ok {
 			t.Fatalf("Defaults().Profile %q is not defined", d.Profile)
 		}
-		if a := c.Alert("any-type"); a.Sound == "" || a.ReminderSound == "" || a.RepeatMinutes < 1 {
+		if a := c.Alert("any-type"); a.RepeatMinutes < 1 {
 			t.Fatalf("Alert = %+v", a)
 		}
 		if c.CycleMinutes("any-type", nil) < 1 {

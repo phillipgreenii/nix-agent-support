@@ -112,27 +112,28 @@ it where there is one:
 
 ### Operator rulings and where they are stated
 
-| Ruling (operator)                                                                              | Date       | Stated in                                                            |
-| ---------------------------------------------------------------------------------------------- | ---------- | -------------------------------------------------------------------- |
-| No acknowledge, mute, snooze or repeat cap on the overtime sound                               | 2026-10-07 | `INV-CYCLE-16`, `INV-CONF-8`                                         |
-| No carry-over: a task open at rollover is missed or skipped, never carried                     | 2026-10-07 | `INV-PERIOD-11`, `INV-CONF-8`                                        |
-| Reminders count running time; pause silences, resume continues the count                       | 2026-10-08 | `INV-CYCLE-17`, `INV-CYCLE-18`, `INV-CYCLE-19`                       |
-| Interrupted cycles stay visible and dimmed, with Switch, and can be stopped while dimmed       | 2026-10-08 | `INV-CYCLE-3`, `INV-CYCLE-4`, `INV-CYCLE-5`, `INV-CYCLE-6`           |
-| A complete final line that does not parse is a torn tail, recovered to a sidecar               | 2026-10-08 | `INV-LOG-9`, `INV-LOG-10`                                            |
-| A period change may be backdated without a lower bound                                         | 2026-10-08 | `INV-PERIOD-13`, `INV-PERIOD-14`                                     |
-| `event.retracted` names `target` or `target_batch`; `batch` is membership only                 | 2026-10-08 | `INV-CORR-9`, `INV-CORR-10`, `INV-LOG-7`                             |
-| Statuses keep their meaning; a pause, resume, stop or switch already in effect is a no-op      | 2026-10-08 | `INV-LOG-16`, `INV-CYCLE-8`, `INV-CYCLE-9`                           |
-| A cycle's type is correctable in the editor; the envelope type never                           | 2026-10-08 | `INV-CORR-4`, `INV-CORR-5`                                           |
-| Read-only mode is obvious in every client and cleared only by a restart                        | 2026-10-08 | `INV-LOG-21`, `INV-LOG-22`, `INV-LOG-23`, `INV-LOG-24`, `INV-LOG-25` |
-| A zone name is what the Go standard library resolves; `EST` and `MST` are fixed offsets        | 2026-10-08 | `INV-TIME-3`, `INV-TIME-4`, `INV-TIME-5`                             |
-| A period change is refused while any cycle is running or paused now                            | 2026-10-08 | `INV-PERIOD-17`, `INV-PERIOD-18`, `INV-PERIOD-19`                    |
-| No "last cycle" shortcut: an ambiguous cycle must be named                                     | 2026-10-08 | `INV-CYCLE-11`                                                       |
-| A skip or override reason is non-blank                                                         | 2026-10-08 | `INV-LOG-27`, `INV-PERIOD-9`                                         |
-| A switch is a pause plus a resume in one batch, at the instant of the request                  | 2026-10-08 | `INV-CYCLE-4`                                                        |
-| Errors are expressive: one specific code per condition, no generic code                        | 2026-10-08 | `INV-LOG-13`, `INV-LOG-14`, `INV-LOG-15`                             |
-| Minutes and intervals are integers from 1 to 525600; events are bounded; unknown keys rejected | 2026-10-08 | `INV-CONF-11`, `INV-LOG-27`, `INV-CONF-8`                            |
-| The recovery sidecar is named `events.jsonl.recovered-<UTC stamp>-<n>`                         | 2026-10-08 | `INV-LOG-10`                                                         |
-| Task ids use the prefixes `day`, `week` and `sprint`                                           | 2026-10-08 | `INV-LOG-8`                                                          |
+| Ruling (operator)                                                                                     | Date       | Stated in                                                            |
+| ----------------------------------------------------------------------------------------------------- | ---------- | -------------------------------------------------------------------- |
+| No acknowledge, mute, snooze or repeat cap on the overtime sound at run time                          | 2026-10-07 | `INV-CYCLE-16`, `INV-CONF-8`                                         |
+| A configured "no sound" per cycle type is permitted; reminders then repeat with the notification only | 2026-10-10 | `INV-CONF-7`, `INV-CONF-8`, `INV-CYCLE-16`                           |
+| No carry-over: a task open at rollover is missed or skipped, never carried                            | 2026-10-07 | `INV-PERIOD-11`, `INV-CONF-8`                                        |
+| Reminders count running time; pause silences, resume continues the count                              | 2026-10-08 | `INV-CYCLE-17`, `INV-CYCLE-18`, `INV-CYCLE-19`                       |
+| Interrupted cycles stay visible and dimmed, with Switch, and can be stopped while dimmed              | 2026-10-08 | `INV-CYCLE-3`, `INV-CYCLE-4`, `INV-CYCLE-5`, `INV-CYCLE-6`           |
+| A complete final line that does not parse is a torn tail, recovered to a sidecar                      | 2026-10-08 | `INV-LOG-9`, `INV-LOG-10`                                            |
+| A period change may be backdated without a lower bound                                                | 2026-10-08 | `INV-PERIOD-13`, `INV-PERIOD-14`                                     |
+| `event.retracted` names `target` or `target_batch`; `batch` is membership only                        | 2026-10-08 | `INV-CORR-9`, `INV-CORR-10`, `INV-LOG-7`                             |
+| Statuses keep their meaning; a pause, resume, stop or switch already in effect is a no-op             | 2026-10-08 | `INV-LOG-16`, `INV-CYCLE-8`, `INV-CYCLE-9`                           |
+| A cycle's type is correctable in the editor; the envelope type never                                  | 2026-10-08 | `INV-CORR-4`, `INV-CORR-5`                                           |
+| Read-only mode is obvious in every client and cleared only by a restart                               | 2026-10-08 | `INV-LOG-21`, `INV-LOG-22`, `INV-LOG-23`, `INV-LOG-24`, `INV-LOG-25` |
+| A zone name is what the Go standard library resolves; `EST` and `MST` are fixed offsets               | 2026-10-08 | `INV-TIME-3`, `INV-TIME-4`, `INV-TIME-5`                             |
+| A period change is refused while any cycle is running or paused now                                   | 2026-10-08 | `INV-PERIOD-17`, `INV-PERIOD-18`, `INV-PERIOD-19`                    |
+| No "last cycle" shortcut: an ambiguous cycle must be named                                            | 2026-10-08 | `INV-CYCLE-11`                                                       |
+| A skip or override reason is non-blank                                                                | 2026-10-08 | `INV-LOG-27`, `INV-PERIOD-9`                                         |
+| A switch is a pause plus a resume in one batch, at the instant of the request                         | 2026-10-08 | `INV-CYCLE-4`                                                        |
+| Errors are expressive: one specific code per condition, no generic code                               | 2026-10-08 | `INV-LOG-13`, `INV-LOG-14`, `INV-LOG-15`                             |
+| Minutes and intervals are integers from 1 to 525600; events are bounded; unknown keys rejected        | 2026-10-08 | `INV-CONF-11`, `INV-LOG-27`, `INV-CONF-8`                            |
+| The recovery sidecar is named `events.jsonl.recovered-<UTC stamp>-<n>`                                | 2026-10-08 | `INV-LOG-10`                                                         |
+| Task ids use the prefixes `day`, `week` and `sprint`                                                  | 2026-10-08 | `INV-LOG-8`                                                          |
 
 ## Scope
 

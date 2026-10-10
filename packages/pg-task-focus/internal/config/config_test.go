@@ -125,11 +125,11 @@ func TestParseValidExample(t *testing.T) {
 		}
 	}
 
-	// INV-CONF-7: per cycle type, then defaults.alert; reminder_sound of the
-	// defaults still applies to a type that overrides only the sound.
+	// INV-CONF-7: per cycle type, then defaults.alert; a type that overrides
+	// only the sound reminds with it, not with the defaults' reminder_sound.
 	for typ, want := range map[string]config.Alert{
-		"deep-work": {Sound: "Hero", ReminderSound: "Tink", RepeatMinutes: 10},
-		"review":    {Sound: "Glass", ReminderSound: "Tink", RepeatMinutes: 5},
+		"deep-work": {Sound: config.Named("Hero"), ReminderSound: config.Named("Hero"), RepeatMinutes: 10},
+		"review":    {Sound: config.Named("Glass"), ReminderSound: config.Named("Tink"), RepeatMinutes: 5},
 	} {
 		if got := c.Alert(typ); got != want {
 			t.Errorf("Alert(%q) = %+v, want %+v", typ, got, want)
@@ -170,16 +170,86 @@ func TestParseWithNoReminderSoundAnywhere(t *testing.T) {
 		delete(at(c, "defaults", "alert"), "reminder_sound")
 	}))
 	for typ, want := range map[string]config.Alert{
-		"review":    {Sound: "Glass", ReminderSound: "Glass", RepeatMinutes: 5},
-		"deep-work": {Sound: "Hero", ReminderSound: "Hero", RepeatMinutes: 10},
+		"review":    {Sound: config.Named("Glass"), ReminderSound: config.Named("Glass"), RepeatMinutes: 5},
+		"deep-work": {Sound: config.Named("Hero"), ReminderSound: config.Named("Hero"), RepeatMinutes: 10},
 	} {
 		if got := c.Alert(typ); got != want {
 			t.Errorf("Alert(%q) = %+v, want %+v", typ, got, want)
 		}
 	}
-	if got := c.Defaults().Alert; got != (config.Alert{Sound: "Glass", ReminderSound: "Glass", RepeatMinutes: 5}) {
+	if got := c.Defaults().Alert; got != (config.Alert{Sound: config.Named("Glass"), ReminderSound: config.Named("Glass"), RepeatMinutes: 5}) {
 		t.Errorf("Defaults().Alert = %+v, want the reminder to equal the sound", got)
 	}
+}
+
+// TestParseNoSound pins INV-CONF-7: null is the explicit "no sound", a setting
+// distinct from an absent key, in the defaults and in a cycle type. A document
+// that spells null differs from one that leaves the key out.
+func TestParseNoSound(t *testing.T) {
+	c := mustParse(t, edited(t, func(c map[string]any) {
+		at(c, "defaults", "alert")["reminder_sound"] = nil
+		at(c, "cycles", "deep-work", "alert")["sound"] = nil
+	}))
+	for typ, want := range map[string]config.Alert{
+		"review":        {Sound: config.Named("Glass"), ReminderSound: config.NoSound, RepeatMinutes: 5},
+		"deep-work":     {Sound: config.NoSound, ReminderSound: config.NoSound, RepeatMinutes: 10},
+		"not-a-type-id": {Sound: config.Named("Glass"), ReminderSound: config.NoSound, RepeatMinutes: 5},
+	} {
+		if got := c.Alert(typ); got != want {
+			t.Errorf("Alert(%q) = %+v, want %+v", typ, got, want)
+		}
+	}
+	if got, want := c.Defaults().Alert, (config.Alert{Sound: config.Named("Glass"), ReminderSound: config.NoSound, RepeatMinutes: 5}); got != want {
+		t.Errorf("Defaults().Alert = %+v, want %+v", got, want)
+	}
+	cy, ok := c.CycleType("deep-work")
+	if !ok || cy.Alert.Sound == nil || !cy.Alert.Sound.None() || cy.Alert.ReminderSound != nil {
+		t.Errorf("CycleType(deep-work).Alert = %+v, want an explicit no sound and an absent reminder_sound", cy.Alert)
+	}
+
+	// defaults.alert.sound can be null too (the key stays required); the
+	// default reminder_sound of the fixture still plays.
+	d := mustParse(t, edited(t, func(c map[string]any) { at(c, "defaults", "alert")["sound"] = nil }))
+	if got, want := d.Alert("review"), (config.Alert{Sound: config.NoSound, ReminderSound: config.Named("Tink"), RepeatMinutes: 5}); got != want {
+		t.Errorf("Alert(review) with defaults.alert.sound null = %+v, want %+v", got, want)
+	}
+}
+
+// TestSoundEncodesAsNameOrNull pins that a client reading the state can tell
+// no sound (null) from a name.
+func TestSoundEncodesAsNameOrNull(t *testing.T) {
+	out, err := json.Marshal(config.Alert{Sound: config.Named("Glass"), ReminderSound: config.NoSound, RepeatMinutes: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `{"Sound":"Glass","ReminderSound":null,"RepeatMinutes":5}`; string(out) != want {
+		t.Errorf("Marshal = %s, want %s", out, want)
+	}
+	if config.Named("").None() != true || config.Named("x").None() || config.Named("x").Name() != "x" || config.NoSound.Name() != "" {
+		t.Error("Named/None/Name disagree")
+	}
+}
+
+// TestSoundIsRequiredAndNeverEmpty pins that no sound is spelled null, never
+// an empty string or a missing key in defaults.alert.
+func TestSoundIsRequiredAndNeverEmpty(t *testing.T) {
+	for name, edit := range map[string]func(c map[string]any){
+		"an empty default sound":      func(c map[string]any) { at(c, "defaults", "alert")["sound"] = "" },
+		"an empty cycle sound":        func(c map[string]any) { at(c, "cycles", "deep-work", "alert")["sound"] = "" },
+		"an empty cycle reminder":     func(c map[string]any) { at(c, "cycles", "deep-work", "alert")["reminder_sound"] = "" },
+		"a numeric reminder":          func(c map[string]any) { at(c, "defaults", "alert")["reminder_sound"] = 3 },
+		"a boolean cycle sound":       func(c map[string]any) { at(c, "cycles", "deep-work", "alert")["sound"] = false },
+		"a list as the default sound": func(c map[string]any) { at(c, "defaults", "alert")["sound"] = []any{"A"} },
+	} {
+		if _, err := config.Parse(edited(t, edit)); err == nil {
+			t.Errorf("%s: Parse accepted it", name)
+		}
+	}
+}
+
+func soundPtr(name string) *config.Sound {
+	s := config.Named(name)
+	return &s
 }
 
 // TestTaskAndCycleTypeAccessors pins the definitions a Config hands out.
@@ -213,7 +283,7 @@ func TestTaskAndCycleTypeAccessors(t *testing.T) {
 	}
 	wantCycle := config.CycleDef{
 		ID: "deep-work", Title: "Deep work cycle", Minutes: 50, Keys: []string{"ticket", "pr"},
-		Alert: config.AlertOverride{Sound: "Hero", RepeatMinutes: 10},
+		Alert: config.AlertOverride{Sound: soundPtr("Hero"), RepeatMinutes: 10},
 	}
 	if !reflect.DeepEqual(cy, wantCycle) {
 		t.Errorf("CycleType(deep-work) = %+v, want %+v", cy, wantCycle)
@@ -281,7 +351,7 @@ func TestDefaultsOfOptionalFields(t *testing.T) {
 		BoostMinutes:         []int{5, 10, 25},
 		Profile:              "p",
 		MaxFutureSkewSeconds: 60,
-		Alert:                config.Alert{Sound: "Glass", ReminderSound: "Glass", RepeatMinutes: 5},
+		Alert:                config.Alert{Sound: config.Named("Glass"), ReminderSound: config.Named("Glass"), RepeatMinutes: 5},
 		Attention:            config.Attention{DueSoonMinutes: 30, OvertimeHighMinutes: 15, StalePauseMinutes: 45},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -422,6 +492,8 @@ func TestDigestStable(t *testing.T) {
 		"public_url":            func(c map[string]any) { c["public_url"] = "https://other.example.test" },
 		"public_url removed":    func(c map[string]any) { delete(c, "public_url") },
 		"default sound":         func(c map[string]any) { at(c, "defaults", "alert")["sound"] = "Ping" },
+		"default sound to none": func(c map[string]any) { at(c, "defaults", "alert")["sound"] = nil },
+		"a cycle reminder none": func(c map[string]any) { at(c, "cycles", "deep-work", "alert")["reminder_sound"] = nil },
 		"a task title":          func(c map[string]any) { at(c, "tasks", "plan-day")["title"] = "Plan the day well" },
 		"a due time":            func(c map[string]any) { at(c, "tasks", "plan-day", "due")["at"] = "09:01" },
 		"a due zone":            func(c map[string]any) { at(c, "tasks", "plan-day", "due")["tz"] = "UTC" },

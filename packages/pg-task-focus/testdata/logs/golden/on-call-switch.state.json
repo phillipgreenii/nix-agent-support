@@ -207,7 +207,7 @@
         "NotInProfile": true,
         "Alert": {
           "Sound": "Hero",
-          "ReminderSound": "Tink",
+          "ReminderSound": "Hero",
           "RepeatMinutes": 10
         },
         "CanSwitch": true
@@ -240,7 +240,7 @@
         "NotInProfile": true,
         "Alert": {
           "Sound": "Hero",
-          "ReminderSound": "Tink",
+          "ReminderSound": "Hero",
           "RepeatMinutes": 10
         }
       }

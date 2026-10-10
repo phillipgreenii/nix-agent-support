@@ -493,6 +493,28 @@ func TestConfigSchemaAcceptsTheMinimalConfig(t *testing.T) {
 	}
 }
 
+// TestConfigSchemaAcceptsNoSound pins INV-CONF-7: null is the explicit "no
+// sound" for each of the four sound settings.
+func TestConfigSchemaAcceptsNoSound(t *testing.T) {
+	s := configSchema(t)
+	for _, place := range []struct {
+		name string
+		path []string
+		key  string
+	}{
+		{"defaults sound", []string{"defaults", "alert"}, "sound"},
+		{"defaults reminder_sound", []string{"defaults", "alert"}, "reminder_sound"},
+		{"cycle sound", []string{"cycles", "deep-work", "alert"}, "sound"},
+		{"cycle reminder_sound", []string{"cycles", "deep-work", "alert"}, "reminder_sound"},
+	} {
+		t.Run(place.name, func(t *testing.T) {
+			if err := s.Validate(mutated(t, func(c map[string]any) { obj(c, place.path...)[place.key] = nil })); err != nil {
+				t.Fatalf("Validate rejected null at %s: %v", place.name, err)
+			}
+		})
+	}
+}
+
 // TestConfigSchemaRejectsOperatorRuledOptions holds the two rulings at the
 // schema level: no option can acknowledge, mute, snooze or cap the overtime
 // sound, and none can carry an unfinished task over. Each key is tried in
@@ -564,6 +586,10 @@ func TestConfigSchemaRejects(t *testing.T) {
 		{"a default cycle_minutes of 0", func(c map[string]any) { obj(c, "defaults")["cycle_minutes"] = 0 }, "/defaults/cycle_minutes", "minimum"},
 		{"a boost of 0", func(c map[string]any) { obj(c, "defaults")["boost_minutes"] = []any{5, 0} }, "/defaults/boost_minutes/1", "minimum"},
 		{"a boost of 525601", func(c map[string]any) { obj(c, "defaults")["boost_minutes"] = []any{525601} }, "/defaults/boost_minutes/0", "maximum"},
+		{"an empty sound", func(c map[string]any) { obj(c, "defaults", "alert")["sound"] = "" }, "/defaults/alert/sound", "minLength"},
+		{"an empty cycle reminder_sound", func(c map[string]any) { obj(c, "cycles", "deep-work", "alert")["reminder_sound"] = "" }, "/cycles/deep-work/alert/reminder_sound", "minLength"},
+		{"a sound that is a number", func(c map[string]any) { obj(c, "defaults", "alert")["sound"] = 3 }, "/defaults/alert/sound", "want"},
+		{"a sound of false", func(c map[string]any) { obj(c, "cycles", "deep-work", "alert")["sound"] = false }, "/cycles/deep-work/alert/sound", "want"},
 		{"a repeat_minutes of -1", func(c map[string]any) { obj(c, "defaults", "alert")["repeat_minutes"] = -1 }, "/defaults/alert/repeat_minutes", "minimum"},
 		{"a cycle repeat_minutes of 0", func(c map[string]any) { obj(c, "cycles", "deep-work", "alert")["repeat_minutes"] = 0 }, "/cycles/deep-work/alert/repeat_minutes", "minimum"},
 		{"an attention threshold of 0", func(c map[string]any) { obj(c, "defaults", "attention")["due_soon_minutes"] = 0 }, "/defaults/attention/due_soon_minutes", "minimum"},

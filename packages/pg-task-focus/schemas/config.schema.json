@@ -39,10 +39,10 @@
           "additionalProperties": false,
           "properties": {
             "sound": {
-              "$ref": "#/$defs/text"
+              "$ref": "#/$defs/sound"
             },
             "reminder_sound": {
-              "$ref": "#/$defs/text"
+              "$ref": "#/$defs/sound"
             },
             "repeat_minutes": {
               "$ref": "#/$defs/minutes"
@@ -186,6 +186,11 @@
       "minLength": 1,
       "description": "A title, group, link, sound or zone name; not free text."
     },
+    "sound": {
+      "type": ["string", "null"],
+      "minLength": 1,
+      "description": "A sound name, or null for no sound at all (distinct from leaving the key out, which falls back). null is a setting made on purpose; it is not a way to mute a sound that is playing."
+    },
     "key_name": {
       "type": "string",
       "pattern": "^[a-z0-9_-]+$",
@@ -196,16 +201,16 @@
       "additionalProperties": false,
       "properties": {
         "sound": {
-          "$ref": "#/$defs/text"
+          "$ref": "#/$defs/sound"
         },
         "reminder_sound": {
-          "$ref": "#/$defs/text"
+          "$ref": "#/$defs/sound"
         },
         "repeat_minutes": {
           "$ref": "#/$defs/minutes"
         }
       },
-      "description": "Alert settings of one cycle type; a field left out falls back to defaults.alert. No option exists to mute, acknowledge, snooze or cap the sound."
+      "description": "Alert settings of one cycle type; a field left out falls back to defaults.alert; null is no sound. No option exists to mute, acknowledge, snooze or cap a sound that is playing."
     },
     "due": {
       "type": "object",

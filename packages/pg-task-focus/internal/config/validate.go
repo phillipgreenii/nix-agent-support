@@ -227,7 +227,7 @@ func (p *parser) fromSchema(verr *schemacheck.ValidationError) {
 
 // optionsByDesign are keys an operator might expect that the product
 // deliberately does not have: the overtime sound cannot be muted, snoozed,
-// acknowledged or capped, no task carries over, and there is no day start
+// acknowledged or capped at run time (a configured no sound is not one), no task carries over, and there is no day start
 // (INV-CONF-8, the operator's rulings of 2026-10-07).
 var optionsByDesign = []string{"snooze", "mute", "acknowledge", "max_repeat", "carry_over", "carryover"}
 
@@ -685,10 +685,24 @@ func (p *parser) build() *Config {
 	return c
 }
 
+// soundOf reads one sound setting: nil when the key is absent, NoSound when it
+// is null, the named sound otherwise. The schema has already checked the type.
+func soundOf(m map[string]any, key string) *Sound {
+	v, present := m[key]
+	if !present {
+		return nil
+	}
+	s := NoSound
+	if name, ok := asString(v); ok {
+		s = Named(name)
+	}
+	return &s
+}
+
 func alertOverride(m map[string]any) AlertOverride {
 	var a AlertOverride
-	a.Sound, _ = asString(m["sound"])
-	a.ReminderSound, _ = asString(m["reminder_sound"])
+	a.Sound = soundOf(m, "sound")
+	a.ReminderSound = soundOf(m, "reminder_sound")
 	a.RepeatMinutes, _ = asInt(m["repeat_minutes"])
 	return a
 }

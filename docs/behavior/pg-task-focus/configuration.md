@@ -159,13 +159,25 @@ cycles:
   (`invalid_request`). The key `cycle_type` is reserved for the connector and MUST be rejected as
   request input (`reserved_key`) and as a configured `keys` entry.
 - **`INV-CONF-7`** <!-- uuid: 604b4820-ab3f-457f-a320-738fb8dbc71d --> — Alert settings (`sound`, `reminder_sound`, `repeat_minutes`)
-  MUST resolve per cycle type, then `defaults.alert`. `reminder_sound` defaults to `sound`. Both sounds
-  SHOULD be under two seconds long, and a cycle type that routinely runs long SHOULD raise its
-  `repeat_minutes`.
+  MUST resolve per cycle type, then `defaults.alert`. `sound` is the one played when the cycle's time is
+  up and `reminder_sound` the one played on each overtime repeat; each MUST be settable, per cycle type
+  and in `defaults.alert`, to a sound name or to an explicit "no sound" (`null`). A `null` is a setting
+  like a name, distinct from leaving the key out: a key that is left out falls back, a `null` does not.
+  `sound` is the type's, else `defaults.alert`'s. `reminder_sound` is the first one set of the type's
+  `reminder_sound`, the type's `sound`, `defaults.alert`'s `reminder_sound`, `defaults.alert`'s `sound`;
+  so a type that sets only its `sound` reminds with it, not with the default reminder. A sound that is
+  "no sound" plays nothing and its notification is still sent (`INV-CYCLE-16`). `defaults.alert.sound`
+  is required and MAY be `null`; an empty string is not a sound and MUST be rejected. Both sounds SHOULD
+  be under two seconds long, and a cycle type that routinely runs long SHOULD raise its
+  `repeat_minutes`. _(Operator rulings, 2026-10-10: a static "no sound" per cycle type is permitted; the
+  reminders keep repeating, with the notification only, when `reminder_sound` is "no sound".)_
 - **`INV-CONF-8`** <!-- uuid: e02c9b46-b6a4-4c24-8bfa-56077b3ff37d --> — An unknown configuration key MUST be rejected. In particular
-  no option can exist to acknowledge, mute, snooze or cap the overtime sound, or to carry an
-  unfinished task over into the next period: a typo such as `snooze_minutes` is an error, not an
-  ignored setting. _(Operator rulings, 2026-10-07: no mute, acknowledge or snooze; no carry-over.)_
+  no option can exist to acknowledge, mute, snooze or cap the overtime sound while it is playing or
+  repeating, or to carry an unfinished task over into the next period: a typo such as `snooze_minutes`
+  is an error, not an ignored setting. A configured "no sound" (`INV-CONF-7`) is a standing choice made
+  per cycle type before the cycle runs, not a way to quiet a sound at run time, and is permitted.
+  _(Operator rulings, 2026-10-07: no mute, acknowledge or snooze; no carry-over. 2026-10-10: a static
+  per-cycle-type "no sound" is compatible with that ruling.)_
 - **`INV-CONF-9`** <!-- uuid: 3097195e-6261-4f05-a407-0900dba65427 --> — Tasks MUST sort within a period by `group_order` (a group not
   listed, and a task with no group, sort last and equal to each other), then by due time.
 - **`INV-CONF-10`** <!-- uuid: 5fd56650-a4ee-4d13-adb3-6c0c54ed017d --> — A configuration MUST be rejected as a whole, with every

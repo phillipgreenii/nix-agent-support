@@ -34,28 +34,37 @@ func (c *Config) CycleMinutes(cycleType string, override *int) int {
 	return c.defaults.CycleMinutes
 }
 
-// Alert returns the alert settings of a cycle type: each of sound,
-// reminder_sound and repeat_minutes comes from the type when it sets it, then
-// from defaults.alert (INV-CONF-7). The reminder sound is the resolved sound
-// when neither level sets one. A type the configuration does not define takes
+// Alert returns the alert settings of a cycle type, resolved per setting
+// (INV-CONF-7). The sound is the type's, else defaults.alert's. The reminder
+// sound is the first that is set of: the type's reminder_sound, the type's
+// sound, defaults.alert's reminder_sound, defaults.alert's sound. So a type
+// that sets only its sound reminds with it, and a type that sets neither
+// reminds as the defaults do. "No sound" is a setting like any other: it ends
+// the search at the level that wrote it. repeat_minutes is the type's, else
+// defaults.alert's. A type the configuration does not define takes
 // defaults.alert whole (INV-CONF-16).
 func (c *Config) Alert(cycleType string) Alert {
-	out := c.alert
+	d := c.alert
+	out := Alert{RepeatMinutes: d.RepeatMinutes}
+	// defaults.alert.sound is required, so it is always set.
+	out.Sound = *d.Sound
+	out.ReminderSound = out.Sound
+	if d.ReminderSound != nil {
+		out.ReminderSound = *d.ReminderSound
+	}
 	if t, ok := c.cycles[cycleType]; ok {
-		if t.Alert.Sound != "" {
-			out.Sound = t.Alert.Sound
+		if t.Alert.Sound != nil {
+			out.Sound = *t.Alert.Sound
+			out.ReminderSound = *t.Alert.Sound
 		}
-		if t.Alert.ReminderSound != "" {
-			out.ReminderSound = t.Alert.ReminderSound
+		if t.Alert.ReminderSound != nil {
+			out.ReminderSound = *t.Alert.ReminderSound
 		}
 		if t.Alert.RepeatMinutes != 0 {
 			out.RepeatMinutes = t.Alert.RepeatMinutes
 		}
 	}
-	if out.ReminderSound == "" {
-		out.ReminderSound = out.Sound
-	}
-	return Alert(out)
+	return out
 }
 
 // GroupRank returns the sort rank of a task group (INV-CONF-9): the position of

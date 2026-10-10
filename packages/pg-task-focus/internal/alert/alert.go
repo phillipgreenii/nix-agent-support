@@ -30,8 +30,9 @@ const (
 )
 
 // Alert is one sound to play and one notification to send, for the cycle
-// CycleID. Sound is the sound the configuration gives the cycle's type at the
-// read instant. A client reads the cycle's title and timer from the model by
+// CycleID. Sound is the name of the sound the configuration gives the cycle's
+// type at the read instant, empty when it gives no sound (INV-CONF-7): the
+// notification is still sent. A client reads the cycle's title and timer from the model by
 // CycleID.
 type Alert struct {
 	Kind    Kind
@@ -218,5 +219,5 @@ func alertOf(c projection.Cycle, settings config.Alert, kind Kind) *Alert {
 	if kind == Reminder {
 		sound = settings.ReminderSound
 	}
-	return &Alert{Kind: kind, CycleID: c.ID, Sound: sound}
+	return &Alert{Kind: kind, CycleID: c.ID, Sound: sound.Name()}
 }

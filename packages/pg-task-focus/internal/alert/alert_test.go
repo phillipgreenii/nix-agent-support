@@ -23,7 +23,8 @@ import (
 // the read instant is always a plain time.Time: nothing sleeps.
 //
 // In the fixture configuration, deep-work cycles are 50 minutes and remind
-// every 10 with the sound "Hero" and the default reminder sound "Tink";
+// every 10 with the sound "Hero", which is also its reminder sound (a type that
+// sets only its sound reminds with it, INV-CONF-7);
 // notifications cycles are 25 minutes and take defaults.alert whole: "Glass",
 // then "Tink" every 5 minutes.
 
@@ -330,8 +331,8 @@ func TestRemindersEveryRepeatMinutesOfRunningTime(t *testing.T) {
 			name: "deep work, every 10 minutes", log: deepWorkLog, until: hm(10, 19),
 			want: []want{
 				{hm(9, 50), alert.Expiry, "Hero", 0},
-				{hm(10, 0), alert.Reminder, "Tink", 10 * time.Minute},
-				{hm(10, 10), alert.Reminder, "Tink", 20 * time.Minute},
+				{hm(10, 0), alert.Reminder, "Hero", 10 * time.Minute},
+				{hm(10, 10), alert.Reminder, "Hero", 20 * time.Minute},
 			},
 		},
 	}
@@ -671,7 +672,7 @@ func TestPerTypeAlertOverridesAndFallbackToDefaults(t *testing.T) {
 		expiry, remind string
 		repeat         time.Duration
 	}{
-		{"a type with its own sound and repeat takes the default reminder sound", nil, "deep-work", 50, "Hero", "Tink", 10 * time.Minute},
+		{"a type with its own sound and repeat reminds with its own sound", nil, "deep-work", 50, "Hero", "Hero", 10 * time.Minute},
 		{"a type with no alert takes defaults.alert", nil, "notifications", 25, "Glass", "Tink", 5 * time.Minute},
 		{
 			"a type with its own reminder sound", func(c map[string]any) {
@@ -683,6 +684,31 @@ func TestPerTypeAlertOverridesAndFallbackToDefaults(t *testing.T) {
 			"no reminder sound anywhere reminds with the resolved sound", func(c map[string]any) {
 				delete(c["defaults"].(map[string]any)["alert"].(map[string]any), "reminder_sound")
 			}, "deep-work", 50, "Hero", "Hero", 10 * time.Minute,
+		},
+
+		// "No sound" (INV-CONF-7, INV-CYCLE-16): the alert is still reported at
+		// the same instants, with an empty sound, so the notification goes out
+		// and the reminders never stop.
+		{
+			"a type with no sound is silent at the expiry and at every reminder", func(c map[string]any) {
+				c["cycles"].(map[string]any)["deep-work"].(map[string]any)["alert"].(map[string]any)["sound"] = nil
+			}, "deep-work", 50, "", "", 10 * time.Minute,
+		},
+		{
+			"a type with no reminder sound plays the expiry and repeats silently", func(c map[string]any) {
+				c["cycles"].(map[string]any)["deep-work"].(map[string]any)["alert"].(map[string]any)["reminder_sound"] = nil
+			}, "deep-work", 50, "Hero", "", 10 * time.Minute,
+		},
+		{
+			"a type with no sound but its own reminder sound only reminds aloud", func(c map[string]any) {
+				a := c["cycles"].(map[string]any)["deep-work"].(map[string]any)["alert"].(map[string]any)
+				a["sound"], a["reminder_sound"] = nil, "Ping"
+			}, "deep-work", 50, "", "Ping", 10 * time.Minute,
+		},
+		{
+			"defaults with no reminder sound repeat silently for a type with no alert", func(c map[string]any) {
+				c["defaults"].(map[string]any)["alert"].(map[string]any)["reminder_sound"] = nil
+			}, "notifications", 25, "Glass", "", 5 * time.Minute,
 		},
 	}
 	for _, tt := range tests {

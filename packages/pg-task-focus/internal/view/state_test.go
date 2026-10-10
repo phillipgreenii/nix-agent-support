@@ -1,6 +1,7 @@
 package view_test
 
 import (
+	"encoding/json"
 	"reflect"
 	"slices"
 	"testing"
@@ -341,6 +342,35 @@ func TestCycleTypeRemovedFromConfigStillRenders(t *testing.T) {
 			t.Errorf("Alert = %+v, want defaults.alert %+v", focusOf(st).Alert, cfg.Defaults().Alert)
 		}
 	})
+}
+
+// TestCycleAlertShowsNoSound pins INV-CONF-7 in the state: a type configured
+// with no sound reaches the client as an explicit no sound (null in JSON), not
+// as a name, and the other type keeps its name.
+func TestCycleAlertShowsNoSound(t *testing.T) {
+	b := bootstrapped(t)
+	b.add(at(0), event.CycleStarted{CycleID: cycleA, Type: "notifications", Title: "N", PlannedMinutes: 25})
+	b.add(at(5), event.CycleStarted{CycleID: cycleB, Type: "deep-work", Title: "Deep work cycle", PlannedMinutes: 50, Interrupts: cycleA})
+	cfg := testutil.LoadConfig(t, func(c map[string]any) {
+		alert := c["cycles"].(map[string]any)["deep-work"].(map[string]any)["alert"].(map[string]any)
+		alert["sound"], alert["reminder_sound"] = nil, nil
+	})
+	st := view.Build(b.model(), cfg, at(10))
+
+	focus := focusOf(st).Alert
+	if !focus.Sound.None() || !focus.ReminderSound.None() || focus.RepeatMinutes != 10 {
+		t.Errorf("focus Alert = %+v, want no sound for both and the type's 10 minutes", focus)
+	}
+	if got := st.Dimmed[0].Alert; got.Sound.Name() != "Glass" || got.ReminderSound.Name() != "Tink" {
+		t.Errorf("dimmed Alert = %+v, want the defaults' Glass and Tink", got)
+	}
+	out, err := json.Marshal(focus)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `{"Sound":null,"ReminderSound":null,"RepeatMinutes":10}`; string(out) != want {
+		t.Errorf("focus Alert JSON = %s, want %s", out, want)
+	}
 }
 
 func TestStoreIsLeftZero(t *testing.T) {
