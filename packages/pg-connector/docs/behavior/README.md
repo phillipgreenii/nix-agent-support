@@ -9,7 +9,10 @@ Start here, then the [glossary](glossary.md); the rules are in [invariants](inva
 boundaries in [interfaces](interfaces.md), the actors in [actors](actors.md), the stories,
 use cases, journey, and open questions in [journeys](journeys.md), and the `pg-pr`
 verb→destination map plus its per-table SQLite dispositions in
-[pg-pr retirement](pg-pr-retirement.md).
+[pg-pr retirement](pg-pr-retirement.md). The one backend that is stateful and runs a daemon,
+`pg-connector-github`, has its own behavior-docs set in [github/README.md](github/README.md): it
+owns its cache, its refresh policy and its change decisions, which this set only forwards to
+(`INV-CACHE-9`).
 
 ## The model
 
@@ -41,7 +44,8 @@ which capability it's asking about.
 
 pg-connector knows an operation was **dispatched to a backend and answered** — a `result` or a
 taxonomy-coded `error`. It knows **nothing** about how a backend arrives at that answer: not its
-credentials, not its own local store, not which external system (if any) it talks to. What is
+credentials, not its own local store (a backend MAY be stateful and MAY run a daemon, ADR 0090),
+not which external system (if any) it talks to. What is
 left is the whole of what pg-connector itself does: **resolve a capability's registered
 backend(s), invoke the wire protocol, and report the outcome** — coarsely at the wire layer (a
 plain success/failure), richly in its own CLI exit code and `sources[]` reporting (`INV-EXIT-1`,
@@ -65,7 +69,8 @@ becoming pg-connector's own caller, which the boundary above does not authorize.
   capabilities they back (`list_attention`/`search`/`list_activity`, each capability's own aggregation rule, and
   the `pg-connector attention list`/`pg-connector search`/`pg-connector activity list` CLI verbs); the wire protocol (envelope,
   `protocolVersion`/`schemaVersion` negotiation, the closed seven-value error taxonomy, the
-  `capabilities`/`auth_status` meta-ops, the optional `config` member and its statelessness rule,
+  `capabilities`/`auth_status` meta-ops, the optional `config` member and its statelessness rule for a backend that is not daemon-backed
+  (ADR 0090),
   the optional `AuthChecker` sub-interface); the operator CLI surface for the landed
   entity-type capabilities (`pr`, `issue`, `ci`, `scm`, and `alert` with its `list`/`show`/`history`
   verbs, firing-only contract, and direct attention implementation), plus `mail` (its Tier-1 interface, wire schema and op catalog, with no delete operation) plus `auth status`, `config validate`, and
@@ -86,7 +91,10 @@ becoming pg-connector's own caller, which the boundary above does not authorize.
   (Jira) and whatever concrete backend or standalone plugin eventually implements `attention`/
   `search` — only the multi-instance targeted-op resolution POLICY those registrations exercise is
   in scope, documented in [invariants](invariants.md)'s `INV-REG-2`, never a named backend as
-  anything but an illustrative example (this set's own Floor). Tier-3 consumer tooling built on
+  anything but an illustrative example (this set's own Floor). The one backend that is daemon-backed
+  keeps its own set ([github](github/README.md)) for its freshness, change-delivery and budget
+  behavior; this set holds only the umbrella's half of that seam (`INV-CACHE-9`,
+  `INV-LEDGER-FRESH-5`). Tier-3 consumer tooling built on
   top of these verbs — `pg-desk`, a TUI, a pg-router role — is out categorically regardless of
   whether it has landed (see the [glossary](glossary.md)'s Tiers and roles):
   `phillipg-nix-ziprecruiter`'s `df-attention`/`df-search` (pure clients of `attention list`/
