@@ -1,9 +1,11 @@
 package daemon_test
 
 import (
+	"errors"
 	"slices"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -11,7 +13,6 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/contract"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/event"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/store"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/store/storefault"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/wire"
 )
 
@@ -157,15 +158,33 @@ func TestAPanicInAnObserverDoesNotSkipTheCommitNotifications(t *testing.T) {
 	e.waitSounds(1)
 }
 
+// probeGate is a store.FS whose writability probe (the temporary file the
+// store creates in its data directory) fails for as long as the gate is
+// closed. Every other call passes through.
+type probeGate struct {
+	store.FS
+	open atomic.Bool
+}
+
+var errProbeGateClosed = errors.New("probeGate: the writability probe is held failing")
+
+func (g *probeGate) CreateTemp(dir, pattern string) (store.File, string, error) {
+	if strings.HasPrefix(pattern, ".probe-") && !g.open.Load() {
+		return nil, "", errProbeGateClosed
+	}
+	return g.FS.CreateTemp(dir, pattern)
+}
+
 // The first writability check gates readiness: until it passes /readyz and
 // every /api/v1 endpoint answer 503 not_ready, while /healthz and /metrics
 // answer.
 func TestNotReadyUntilTheFirstStoreCheckPasses(t *testing.T) {
-	fs := storefault.New(nil)
-	fs.Inject(storefault.Rule{Op: storefault.OpCreateTemp}) // the first probe fails
-	// The probe interval is how long the daemon stays not ready: long enough that a loaded host
-	// (the nix sandbox, a busy CI box) still makes the assertions below before the next probe passes.
-	e := newEnv(t, options{fs: fs, probeEvery: 500 * time.Millisecond})
+	// The not-ready window is held open by the gate, not by the probe interval: every probe fails
+	// until the test opens the gate, so a test process starved of CPU for any length of time still
+	// sees 503. (A one-shot fault rule plus a long interval left a wall-clock race, pg2-nmidq.) The
+	// short interval only makes the daemon notice the open gate quickly.
+	gate := &probeGate{FS: store.OS()}
+	e := newEnv(t, options{fs: gate, probeEvery: 20 * time.Millisecond})
 	if r := e.raw("GET", "/readyz", nil, nil); r.Status != 503 || r.Reason() != "not_ready" || !strings.Contains(string(r.Body), "store_writable") {
 		t.Fatalf("/readyz before the first check: %d %s", r.Status, r.Body)
 	}
@@ -185,6 +204,7 @@ func TestNotReadyUntilTheFirstStoreCheckPasses(t *testing.T) {
 	if v, _ := sampleValue(e.scrape()["pg_task_focus_ready"], nil); v != 0 {
 		t.Errorf("ready = %v before the first check", v)
 	}
+	gate.open.Store(true)
 	eventually(t, "the next probe to pass", func() bool { return e.raw("GET", "/readyz", nil, nil).Status == 200 })
 	if r := e.get("/api/v1/state"); r.Status != 200 {
 		t.Errorf("/state once ready: %d", r.Status)
