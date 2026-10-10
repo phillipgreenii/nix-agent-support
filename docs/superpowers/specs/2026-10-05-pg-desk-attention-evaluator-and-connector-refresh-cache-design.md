@@ -47,7 +47,7 @@ flowchart LR
 | Rule model         | A read-time, side-effect-free evaluator inside pg-desk. Go rule kinds in a registry, tuned by config parameters, with `suppress.*` annotations as per-entity overrides (section 4).   |
 | Grouping and links | Group key is the Jira issue, else the PR stack, else the bead. Links come from the existing `pg-desk links` resolver. One evaluator feeds menu bar and dashboard (sections 4.5, 4.6). |
 | Freshness          | Per-source age of the last successful origin fetch, shown only past a staleness threshold. This spec recommends 15 minutes (section 5).                                               |
-| Direction 2        | Connector membership plus refresh cache, then Jira and Slack (section 6).                                                                                                             |
+| Direction 2        | SUPERSEDED 2026-10-10 by pg2-z5fax (see section 6). Connector membership plus refresh cache, then Jira and Slack (section 6).                                                         |
 | Retirement         | Delete the `list_attention` code of the PR, Jira and beads backends after the desk plugin lands, and amend three docs (section 9).                                                    |
 | Prerequisite       | A PR-to-PR dependency source, filed as its own bead (section 8).                                                                                                                      |
 
@@ -672,6 +672,12 @@ one word.
 
 ## 6. Direction 2: connector membership and refresh cache
 
+> **SUPERSEDED 2026-10-10** by program epic `pg2-z5fax` and the operator-approved spec
+> `2026-10-09-pg-connector-github-daemon-design.md` (revision 7), whose "Work this makes obsolete"
+> section retires Direction 2 and the open question "Where the refresh cache lives" (item 8 of
+> section 13). This section is kept as history; the text below is not deleted and no longer
+> directs work.
+
 The operator's 2026-10-02 ruling, in short: a simple query returns the PR ids matching a criterion
 (mine, team) and that list decides what is tracked locally and what is removed; a separate query
 pulls the latest information only for the tracked PRs; and the connector returns local data when it
@@ -1134,7 +1140,10 @@ These are undecided. Each has a recommendation but none is a decision.
    time needs a rule. Which, if any, does the operator want?
 7. **Group-key edge cases.** Smallest Jira key when an entity links to several (spec author's
    choice), and how a stack that also shares a Jira issue is labelled.
-8. **Where the refresh cache lives.** Recommended: the umbrella, reusing `cache.go` and the
+8. **Where the refresh cache lives.** _SUPERSEDED 2026-10-10 by `pg2-z5fax` and the spec
+   `2026-10-09-pg-connector-github-daemon-design.md` (revision 7): the cache lives in the
+   stateful `pg-connector-github` daemon, not the umbrella (ruling 1 of that spec). Text kept as
+   history._ Recommended: the umbrella, reusing `cache.go` and the
    ledger (backends stay stateless; Jira and Slack adopt it by configuration). The operator's
    wording named `pg-connector-pr-github`. Also confirm `read_ttl` and `refresh_after` (section 7).
 9. **Order against the `pg2-ii38x` design.** That design (closed; its ADR 0077 amendment, proposed

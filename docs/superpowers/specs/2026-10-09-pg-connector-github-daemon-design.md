@@ -10,7 +10,8 @@
 - **Bead**: origin `pg2-zhuiu` (handoff: live vs shadow change detection and what shadow-compare phase A
   measured). A design bead is to be filed once the operator approves the direction.
 - **Deciders**: Phillip (operator).
-- **Supersedes, once approved**: Direction 2 and the open question "Where the refresh cache lives" of
+- **Supersedes (in force since 2026-10-10, approved by the operator under program epic `pg2-z5fax`)**:
+  Direction 2 and the open question "Where the refresh cache lives" of
   `2026-10-05-pg-desk-attention-evaluator-and-connector-refresh-cache-design.md`; for the `pr` and `ci`
   types, the pg-desk-owned change flow of ADR 0077 (rows S29 to S31) and the Phase 10 cutover plan
   (`pg2-2j5ac.52.22`). See "Lifted rulings" and "Work this makes obsolete".
