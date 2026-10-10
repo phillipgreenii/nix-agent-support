@@ -55,7 +55,11 @@ Options:
   the known sizes and counts the unknown ones. The per-item size ceiling
   is PGDR_SIZE_TIMEOUT_SECONDS (default 60). A sizeCommand prints a bare
   KiB integer; only the first whitespace-delimited field of its FIRST
-  output line is read.
+  output line is read. On macOS a size command (or the du default) that
+  exits non-zero with "Operation not permitted" (a TCC denial: the terminal
+  lacks Full Disk Access, e.g. for ~/.Trash) is reported as
+  "size: unknown (no Full Disk Access)", never as the misleading 0 du
+  prints; `list` likewise shows "size unavailable (no Full Disk Access)".
 
 Size contract (what a printed size means):
   A size says what the number means. Each registry item MAY declare,

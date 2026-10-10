@@ -23,7 +23,7 @@
 
 `pg-disk-reclaimer reclaim --aggressiveness {{2}}`
 
-- Dry-run output shows each item's reclaimable size (or `size: unknown (timed out after 60s)`) and a trailing total of the known sizes. An item's own `displayTimeoutSeconds` also raises its size ceiling. Raise the ceiling for every item with:
+- Dry-run output shows each item's reclaimable size (or `size: unknown (timed out after 60s)`, or `size: unknown (no Full Disk Access)` when macOS TCC denies reading the path, as for `~/.Trash`; `list` shows `size unavailable (no Full Disk Access)` for the same case) and a trailing total of the known sizes. An item's own `displayTimeoutSeconds` also raises its size ceiling. Raise the ceiling for every item with:
 
 `PGDR_SIZE_TIMEOUT_SECONDS={{300}} pg-disk-reclaimer reclaim --aggressiveness {{3}}`
 

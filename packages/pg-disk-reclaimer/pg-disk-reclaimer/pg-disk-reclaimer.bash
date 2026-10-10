@@ -392,6 +392,20 @@ pgdr_path_exists() {
 # is worth waiting on; items without the field keep this global ceiling.
 : "${PGDR_DISPLAY_TIMEOUT_SECONDS:=10}"
 
+# pgdr_tcc_denied: returns 0 when TEXT (a failed command's captured output)
+# shows a macOS TCC denial -- "Operation not permitted" (EPERM), which is what
+# `du`/`ls` print for a TCC-protected directory (e.g. ~/.Trash) when the
+# invoking terminal lacks Full Disk Access (bead pg2-qqyq5). Plain
+# "Permission denied" (EACCES) is deliberately NOT matched: that is an
+# ordinary unreadable subdirectory, whose partial total is still meaningful.
+# TCC is different because `du` then prints a total of 0 for the whole
+# protected directory, which reads as "empty" when the real answer is
+# "unknown". Callers MUST only consult this for a NON-ZERO exit, so a command
+# that merely prints those words successfully is never misread.
+pgdr_tcc_denied() {
+  [[ ${1:-} == *"Operation not permitted"* ]]
+}
+
 # pgdr_display_output: runs displayCommand under a timeout ceiling -- the
 # optional second argument (the item's displayTimeoutSeconds), else
 # PGDR_DISPLAY_TIMEOUT_SECONDS -- and ALWAYS prints something usable to stdout, returning 0
@@ -438,6 +452,10 @@ pgdr_display_output() {
 
   if [[ $status -eq 124 ]]; then
     printf '(display command timed out after %ss)\n' "$timeout_seconds"
+  elif [[ $status -ne 0 ]] && pgdr_tcc_denied "$out"; then
+    # macOS TCC denial: the command's partial output (a bare "0" from du) is
+    # misleading, so it is dropped in favor of an explicit reason.
+    printf '(size unavailable (no Full Disk Access))\n'
   elif [[ $status -ne 0 ]]; then
     printf '(display command exited %s)\n' "$status"
     [[ -n $out ]] && printf '%s\n' "$out"
@@ -848,7 +866,9 @@ pgdr_format_kb() {
 # is numeric (du prints a real total alongside its permission warnings).
 #
 # On success prints the integer KiB to stdout and returns 0. On failure
-# prints a short human reason to stdout (e.g. "timed out after 60s") and
+# prints a short human reason to stdout (e.g. "timed out after 60s", or
+# "no Full Disk Access" when a nonzero exit printed macOS's TCC
+# "Operation not permitted" -- see pgdr_tcc_denied) and
 # returns 1 -- never silent, so the caller can print an explicit unknown
 # marker. Always safe under `set -e` (statuses are captured in `if`).
 pgdr_size_kb() {
@@ -861,14 +881,27 @@ pgdr_size_kb() {
     cmd="du -sk $path"
   fi
 
-  if out=$(timeout "$timeout_seconds" bash -c "$cmd" 2>/dev/null); then
+  # stderr goes to a scratch file (never mixed into $out, whose first line is
+  # the number) so a macOS TCC denial can still be recognised below.
+  local err_file err=""
+  err_file=$(mktemp)
+  if out=$(timeout "$timeout_seconds" bash -c "$cmd" 2>"$err_file"); then
     status=0
   else
     status=$?
   fi
+  err=$(<"$err_file")
+  rm -f "$err_file"
 
   if [[ $status -eq 124 ]]; then
     printf 'timed out after %ss\n' "$timeout_seconds"
+    return 1
+  fi
+
+  # A TCC denial (bead pg2-qqyq5) makes du print a total of 0 for the whole
+  # protected directory -- a number that parses fine but means "unknown".
+  if [[ $status -ne 0 ]] && pgdr_tcc_denied "$err"; then
+    printf 'no Full Disk Access\n'
     return 1
   fi
 

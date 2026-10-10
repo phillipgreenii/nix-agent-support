@@ -555,6 +555,32 @@ JSON
   [[ "$output" =~ "AFTER" ]]
 }
 
+# macOS TCC denial (bead pg2-qqyq5): `du -sh ~/.Trash` without Full Disk Access
+# prints "du: cannot read directory ...: Operation not permitted" PLUS a
+# misleading "0" total, and exits 1. That 0 must never be shown as a size.
+@test "pgdr_display_output reports a TCC denial as size unavailable (no Full Disk Access), not the misleading partial 0" {
+  run pgdr_display_output "echo \"du: cannot read directory '/x/.Trash': Operation not permitted\" >&2; printf '0\\t/x/.Trash\\n'; exit 1"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"size unavailable (no Full Disk Access)"* ]]
+  [[ "$output" != *"(display command exited"* ]]
+  [[ "$output" != *$'0\t/x/.Trash'* ]]
+}
+
+@test "pgdr_display_output still shows a non-TCC failure with its exit code and partial output" {
+  run pgdr_display_output "echo 'du: x: Permission denied' >&2; echo 5M; exit 1"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"(display command exited 1)"* ]]
+  [[ "$output" == *"5M"* ]]
+  [[ "$output" != *"no Full Disk Access"* ]]
+}
+
+@test "pgdr_display_output does not treat 'Operation not permitted' text in a SUCCESSFUL command's output as a TCC denial" {
+  run pgdr_display_output "echo 'Operation not permitted is just text here'"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Operation not permitted is just text here"* ]]
+  [[ "$output" != *"no Full Disk Access"* ]]
+}
+
 @test "cmd_list continues to later items after an earlier item's displayCommand fails, and shows the failure inline" {
   install_list_resilience_registry
   run cmd_list --aggressiveness 1
@@ -1121,6 +1147,24 @@ size_item() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"junk: size: unknown (size command gave no number)"* ]]
   [[ "$output" == *"(0 sized, 1 unknown)"* ]]
+}
+
+@test "cmd_reclaim reports a TCC-denied size as unknown (no Full Disk Access) instead of the misleading partial 0" {
+  mkdir -p "$TEST_DIR/tcc"
+  install_size_registry "$(size_item tcc "$TEST_DIR/tcc" "echo \"du: cannot read directory '/x': Operation not permitted\" >&2; echo 0; exit 1" 'echo dry-tcc')"
+  run cmd_reclaim --aggressiveness 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"tcc: size: unknown (no Full Disk Access)"* ]]
+  [[ "$output" != *"tcc: size: 0K"* ]]
+  [[ "$output" == *"(0 sized, 1 unknown)"* ]]
+}
+
+@test "cmd_reclaim still accepts a partial total from a non-TCC nonzero exit (plain permission-denied warnings)" {
+  mkdir -p "$TEST_DIR/partial"
+  install_size_registry "$(size_item partial "$TEST_DIR/partial" "echo 'du: x: Permission denied' >&2; echo 2048; exit 1" 'echo dry-partial')"
+  run cmd_reclaim --aggressiveness 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"partial: size: 2.0M"* ]]
 }
 
 @test "cmd_reclaim total sums only the known sizes and counts the unknown ones" {
