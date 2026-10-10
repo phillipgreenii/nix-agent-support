@@ -203,6 +203,11 @@ func Start(ctx context.Context, p Params) (*Daemon, error) {
 
 	if err := d.open(); err != nil {
 		_ = d.http.Close()
+		// Close shuts only the listeners the Serve goroutine has already
+		// registered, so while that goroutine has not run the port is still bound.
+		// Close the listener here, after Close so that a late Serve returns
+		// ErrServerClosed, and the port is free when Start returns.
+		_ = ln.Close()
 		var se *StartupError
 		errors.As(err, &se)
 		stage := "store"

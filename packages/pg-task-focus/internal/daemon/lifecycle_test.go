@@ -3,8 +3,11 @@ package daemon_test
 import (
 	"context"
 	"errors"
+	"net"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -162,6 +165,35 @@ func TestStartupRefusals(t *testing.T) {
 			t.Fatalf("bad config: %v", err)
 		}
 	})
+}
+
+// A Start that fails while opening the store gives its port back before it
+// returns, so a caller that starts again on the same port at once can bind it.
+// Start serves HTTP from a goroutine before it opens the store, and
+// http.Server.Close closes only the listeners that goroutine has already
+// registered: a failure that came back before the goroutine ran left the port
+// bound until it did. One P keeps that goroutine off the CPU until Start
+// blocks, the interleaving this test is about (the P count is restored with
+// the test). A second daemon on a held data directory is the quickest open() to
+// fail, and every failure of open() leaves Start by the same branch.
+func TestStartReleasesItsPortWhenOpeningTheStoreFails(t *testing.T) {
+	held := newEnv(t, options{}) // holds the data-directory lock
+	second := newEnv2(t, options{dir: held.dir})
+	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(second.port))
+
+	prev := runtime.GOMAXPROCS(1)
+	t.Cleanup(func() { runtime.GOMAXPROCS(prev) })
+	for attempt := 1; attempt <= 10; attempt++ {
+		var se *daemon.StartupError
+		if err := startErr(t, second); !errors.As(err, &se) || se.Stage != "lock" {
+			t.Fatalf("attempt %d: a second daemon on a held data directory: %v", attempt, err)
+		}
+		ln, err := net.Listen("tcp", addr)
+		if err != nil {
+			t.Fatalf("attempt %d: the port is still bound after the failed Start returned: %v", attempt, err)
+		}
+		_ = ln.Close()
+	}
 }
 
 // Item 1 of the hand-over, decided by the daemon: a log whose active profile
