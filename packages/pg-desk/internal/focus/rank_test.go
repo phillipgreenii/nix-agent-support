@@ -1061,7 +1061,21 @@ func TestMemReaderReadsTheInputs(t *testing.T) {
 			{FromType: b.Type, FromID: b.ID, ToType: c.Type, ToID: c.ID, Relation: "work"},
 		},
 	}
+	// The same id under two entity types must not be mixed up.
+	in.Links = append(
+		in.Links,
+		store.XrefLink{FromType: "issue", FromID: "same", ToType: "issue", ToID: "other", Relation: "work"},
+		store.XrefLink{FromType: "pr", FromID: "same", ToType: "pr", ToID: "other", Relation: "work"},
+	)
 	m := memReader{in: in}
+	for _, typ := range []string{"pr", "issue"} {
+		if got, _ := m.ListXrefLinksFrom("", typ, "same"); len(got) != 1 || got[0].FromType != typ {
+			t.Errorf("links from (%s, same) = %+v, want only the %s one", typ, got, typ)
+		}
+		if got, _ := m.ListXrefLinksTo("", typ, "other"); len(got) != 1 || got[0].ToType != typ {
+			t.Errorf("links to (%s, other) = %+v, want only the %s one", typ, got, typ)
+		}
+	}
 	if err := m.RequireNewSchema(); err != nil {
 		t.Fatal(err)
 	}

@@ -34,6 +34,9 @@ func TestPriorityResolve(t *testing.T) {
 		{"pP", priorityUnmapped, true, true},
 		{"0", priorityUnmapped, true, true}, // no letter
 		{"1P", priorityUnmapped, true, true},
+		{"q1", priorityUnmapped, true, true}, // letters on both sides of P and p
+		{"A1", priorityUnmapped, true, true},
+		{"a1", priorityUnmapped, true, true},
 		{" P2 ", 2, true, false},
 	}
 	for _, c := range cases {
