@@ -15,18 +15,18 @@ sync — MUST carry the beads backend's workspace variable (`PG_CONNECTOR_ISSUE_
 falling back to `BEADS_DIR`) for the PR's own repository, because that backend refuses to run
 without one.
 
-**`INV-GATHER-1`.** A gather's `pr` reads MUST NOT pass `--fresh`. The daemon-backed GitHub backend owns the PR cache
-and its changes (ADR 0090), so a gather that runs because that backend delivered a change reads
-entity state the backend already keeps current, and it is the backend that decides how current each
-read is (`INV-CACHE-8` in `packages/pg-connector/docs/behavior/invariants.md`: a consumer that just
-detected a change passes `--fresh` only where the backend does not own its freshness). The same
-calls therefore cost no extra reads from the origin. The `issue` reads keep `--fresh`: the
-triggering entity pipeline's `issue show` MUST pass it, because `issue` is served by another
-backend that does not own its freshness, and a read without it could hand the hydration the very
-entity state the change was detected against. The `head_check` (`pr head-check`, see
-[`operator-commands.md`](operator-commands.md)) keeps `--fresh` too: it is the precondition of a
-write, and a precondition MUST read its own writes. The secondary `issue show` lookups of linked
-tickets are display data and MAY be served from the cache.
+- **INV-GATHER-1.** A gather's `pr` reads MUST NOT pass `--fresh`. The daemon-backed GitHub backend owns the PR cache
+  and its changes (ADR 0090), so a gather that runs because that backend delivered a change reads
+  entity state the backend already keeps current, and it is the backend that decides how current each
+  read is (`INV-CACHE-8` in `packages/pg-connector/docs/behavior/invariants.md`: a consumer that just
+  detected a change passes `--fresh` only where the backend does not own its freshness). The same
+  calls therefore cost no extra reads from the origin. The `issue` reads keep `--fresh`: the
+  triggering entity pipeline's `issue show` MUST pass it, because `issue` is served by another
+  backend that does not own its freshness, and a read without it could hand the hydration the very
+  entity state the change was detected against. The `head_check` (`pr head-check`, see
+  [`operator-commands.md`](operator-commands.md)) keeps `--fresh` too: it is the precondition of a
+  write, and a precondition MUST read its own writes. The secondary `issue show` lookups of linked
+  tickets are display data and MAY be served from the cache.
 
 The `ci list` payload is stored verbatim with the PR's facts, so any per-job results it carries
 travel with it (no separate store field or migration). Job results are optional: pg-connector
