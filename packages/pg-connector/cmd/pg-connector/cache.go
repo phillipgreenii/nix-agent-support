@@ -466,7 +466,8 @@ const (
 // CapabilitiesResponse directly rather than wrapping it in Response{}.
 // Every existing caller of the capabilities op in this module
 // (config_validate.go, search.go) already calls
-// scriptout.InvokeCapabilities(ctx, binary) for exactly this reason, so
+// Registry.InvokeCapabilities(ctx, name) -- which runs the registered
+// argv, never the bare binary -- for exactly this reason, so
 // this function reuses that same, already-correct helper instead of the
 // named-but-nonfunctional invokeOne route. AddCapabilities (capabilities.go)
 // builds each backend's CapabilitiesResponse once, at dispatch-table

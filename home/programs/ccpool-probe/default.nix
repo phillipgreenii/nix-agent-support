@@ -25,8 +25,9 @@ in
       config.yaml-style settings of its own, since every `run` invocation
       is fully parameterized by its own CLI flags (--ccpool-timeout,
       --pg-connector-timeout, --snapshot-path, ...). Wiring THIS role's
-      own scheduling (the pg-router [[query]]/[[role]] TOML and the
-      PG_CONNECTOR_ISSUE_BEADS_DIR env wrap) is a separate,
+      own scheduling (the pg-router [[query]]/[[role]] TOML and, in the run
+      flags, --connector-backend naming the registered pg-connector instance
+      that serves the target tracker) is a separate,
       phillipg-nix-ziprecruiter-repo sibling packet's job, not this
       module's.
 

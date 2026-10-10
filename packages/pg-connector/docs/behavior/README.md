@@ -17,7 +17,7 @@ verb→destination map plus its per-table SQLite dispositions in
 flowchart LR
     OP["operator (human or automation)"] -->|"INTF-CLI: pr/issue/ci/scm/auth/config verbs"| UMB
     subgraph UMB["pg-connector — the umbrella (Facade)"]
-      REG["registry: connector.&lt;type&gt; -> backend binary name(s)"]
+      REG["registry: connector.&lt;type&gt; -> backend name(s) and command(s)"]
       DISP["dispatch + outcome reporting"]
       REG --> DISP
     end

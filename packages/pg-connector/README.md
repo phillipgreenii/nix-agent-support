@@ -29,7 +29,7 @@ contract.
 flowchart LR
     OP["you (human or automation)"] -->|"pg-connector pr/issue/ci/scm/auth/config ..."| UMB
     subgraph UMB["pg-connector (Tier 1 umbrella)"]
-      REG["registry: connector.&lt;type&gt; -> backend binary name(s)"]
+      REG["registry: connector.&lt;type&gt; -> backend name(s) and command(s)"]
       DISP["dispatch + outcome reporting"]
       REG --> DISP
     end
@@ -119,6 +119,11 @@ naming `attention_labels`.
 
 `pg-connector pr open <PR#>` from `pg-pr` has no equivalent here yet — `pg-pr` itself has not been
 retired (see the ADR's "Negative" consequences and the design's own Appendix A/B).
+
+`config show` and `config validate` validate the **whole** registry up front, including the
+`attention.sources`, `search.sources` and `activity.sources` entries: a malformed entry there (a
+bad `{name, command}` mapping, a name the registry rejects, a YAML alias) fails those two verbs
+with the registry error, even though no connector fan-out exercises those keys.
 
 Wanting a PR checked out for review composes two calls rather than one command doing both:
 `pg-connector pr show <id>` to resolve the branch, then `pg-connector scm worktree add <branch>` —

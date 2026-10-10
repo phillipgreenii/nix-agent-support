@@ -41,8 +41,9 @@ flowchart LR
 
 Every op, on every capability, shares this shape (`INV-WIRE-1`):
 
-- **One request, one response, one process.** The umbrella execs the backend binary, writes
-  `{"op": "<name>", "args": {...}}` to its stdin, closes stdin, and reads exactly one JSON object
+- **One request, one response, one process.** The umbrella execs the backend's registered
+  command (`command[0]` plus its registered arguments; for a plain-string registration, just the
+  bare binary name), writes `{"op": "<name>", "args": {...}}` to its stdin, closes stdin, and reads exactly one JSON object
   from its stdout.
 - **Two independent version numbers.** Every response carries `protocolVersion` (one global
   integer for the envelope shape itself) and `schemaVersion` (one integer for whichever

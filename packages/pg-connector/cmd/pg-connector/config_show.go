@@ -139,7 +139,9 @@ func newConfigShowCmd() *cobra.Command {
 		Short: "Print the resolved config file path and its registered connector.<type> backends",
 		Long: "Print the resolved config file path (registry.go's $PG_PR_CONFIG -> $XDG_CONFIG_HOME -> ~/.config\n" +
 			"resolution order) and, for each connector.<type> entity type, the backend(s) it registers there —\n" +
-			"without invoking any backend. Use \"config validate\" to check whether what's registered is healthy.\n" +
+			"without invoking any backend. It validates the whole registry first, so a malformed entry under\n" +
+			"attention.sources, search.sources or activity.sources fails this verb too.\n" +
+			"Use \"config validate\" to check whether what's registered is healthy.\n" +
 			"--queries additionally prints, per pr/issue backend, the query names its own backends.<name>.queries\n" +
 			"config block defines, without resolving or invoking any of them.",
 	}

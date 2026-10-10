@@ -15,8 +15,10 @@
 // The existing-bead lookup MUST use the dedicated non-ready dedup query
 // "escalated-all", never the ready-only "escalated-work" (which hides a bead
 // once it is claimed, human-labeled or deferred, and so duplicates it). The
-// tracker is pinned by PG_CONNECTOR_ISSUE_BEADS_DIR, which this package never
-// sets: it is inherited from the environment.
+// tracker is selected by the registered pg-connector backend instance every
+// call passes as --backend (DefaultBackend or WORK_REPORT_ISSUE_BACKEND); this
+// package never sets PG_CONNECTOR_ISSUE_BEADS_DIR (an instance without its own
+// --beads-dir falls back to the inherited environment).
 package degraded
 
 import (

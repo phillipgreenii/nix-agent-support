@@ -22,8 +22,9 @@ in
       is fully parameterized by its own CLI flags (--grafana-url,
       --queue-depth/--backlog, --binary-path, --snapshot-path, ...).
       Wiring THIS role's own scheduling (the pg-router [[query]]/[[role]]
-      TOML, the concrete flag values, and the
-      PG_CONNECTOR_ISSUE_BEADS_DIR env wrap) is a separate,
+      TOML and the concrete flag values, including --connector-backend naming
+      the registered pg-connector instance that serves the target tracker) is
+      a separate,
       phillipg-nix-ziprecruiter-repo sibling packet's job, not this
       module's.
 

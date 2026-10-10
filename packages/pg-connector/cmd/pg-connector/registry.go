@@ -306,8 +306,9 @@ func nodeKindName(k yaml.Kind) string {
 }
 
 // List returns the names registered under connector.<entityType>, which
-// must decode as a YAML list (pr/issue/ci today) of bare binary names and/or
-// {name, command} instances. An entityType with no entry returns (nil, nil).
+// must decode as a YAML list (pr/issue/ci today) of registered backend names:
+// bare binary names and/or {name, command} instances (it returns the names,
+// not the commands; see Command). An entityType with no entry returns (nil, nil).
 func (r *Registry) List(entityType string) ([]string, error) {
 	refs, err := r.listRefs(entityType)
 	if err != nil {
@@ -448,7 +449,8 @@ func (r *Registry) StateValue(key string) (string, bool) {
 	return v, true
 }
 
-// AttentionSources returns the bare binary names registered under the
+// AttentionSources returns the backend names (bare binary names or
+// {name, command} instance names) registered under the
 // top-level attention.sources key, decoded as a YAML list, independent of
 // connector.<type>. It applies the same validation List already applies to
 // connector.<type> entries (non-empty bare names, no path separator, no
@@ -477,7 +479,8 @@ func (r *Registry) SearchSources() ([]string, error) {
 }
 
 // ActivitySources is AttentionSources's counterpart for the top-level
-// activity.sources key: the bare binary names invoked by the activity list
+// activity.sources key: the backend names (bare binary names or
+// {name, command} instance names) invoked by the activity list
 // verb and by nothing else (they are not part of AllBackends). Absent
 // activity key (or nested sources: key) returns (nil, nil); an explicit
 // sources: [] is rejected. A capability-only backend (any binary named
