@@ -1543,6 +1543,39 @@
                     touch $out
                   '';
 
+              # J-1 envelope guard for the pb plugin's skills and commands (pg2-dyztr): a lint
+              # that no runnable jq filter indexes `.data` without the shape-agnostic prelude,
+              # plus the documented bd commands, extracted from the markdown and run against the
+              # REAL bd (embedded Dolt, `env -i`, throwaway workspace; no shared server) in both
+              # the bare-array and the {"data":[..]} envelope shapes.
+              test-pb-jq-envelope =
+                let
+                  pbJqSrc = lib.fileset.toSource {
+                    root = ./claude-marketplace/pb;
+                    fileset = ./claude-marketplace/pb;
+                  };
+                in
+                pkgs.runCommand "test-pb-jq-envelope"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.bats
+                      pkgs.jq
+                      pkgs.ripgrep
+                      pkgs.git
+                      pkgs.gawk
+                      pkgs.gnugrep
+                      pkgs.gnused
+                      pkgs.coreutils
+                      (pkgs.llm-agentsPkgs.beads or llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.beads)
+                    ];
+                  }
+                  ''
+                    export PBJQ_PB_DIR="${pbJqSrc}"
+                    export HOME="$TMPDIR"
+                    bats --verbose-run ${./tests/pb-jq-envelope.bats}
+                    touch $out
+                  '';
+
               # Structural gate for the "never invoked" bug (pg2-o3eyk): the bats
               # suite cannot test CC auto-discovery, and mkClaudeMarketplace only
               # cp's hooks.json (never parses it). Assert the BUILT marketplace

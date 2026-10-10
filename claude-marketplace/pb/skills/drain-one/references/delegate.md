@@ -5,7 +5,7 @@ Read in full when step 4 of `SKILL.md` applies. Moved verbatim from /drain-beads
 4. **DELEGATE THE WORK** to a subagent (REQUIRED — this preserves your context).
 
    **Curated-packet check (first action of this step):**
-   `bd show <id> --json | jq -c '.data[0].metadata.pd_curated_rev'`. A non-null result means
+   `bd show <id> --json | jq -c '(if type=="object" and has("data") then .data else . end)[0].metadata.pd_curated_rev'`. A non-null result means
    this bead is a `plan-decompose` work packet — take the CURATED PATH just below. `null` (the
    common case today) means take the UNCURATED PATH — the ad-hoc brief, exactly as before this
    check existed.
@@ -45,7 +45,7 @@ Read in full when step 4 of `SKILL.md` applies. Moved verbatim from /drain-beads
 
    **STAMP REFUSAL (curated packets only).** A stamp refusal is either the implementer's report
    saying its stamp check refused the packet, or — before any UNCURATED fallback — your own two
-   metadata reads (`bd show <id> --json | jq -c '.data[0] | {parent, metadata}'`, then the same
+   metadata reads (`bd show <id> --json | jq -c '(if type=="object" and has("data") then .data else . end)[0] | {parent, metadata}'`, then the same
    `.metadata` read on that parent, the docket; never a design read) finding `pd_curated_rev` ≠
    the docket's `pd_rev` (compare as numbers), `pd_stale` set, or a malformed stamp. On a stamp
    refusal you MUST NOT implement the packet by ANY path this pass — not via the UNCURATED

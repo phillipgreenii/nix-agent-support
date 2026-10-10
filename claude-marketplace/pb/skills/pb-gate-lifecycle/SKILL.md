@@ -60,15 +60,15 @@ concurrent agent draining `bd ready` can grab it in the gap.
    ```bash
    # -n 0: bd ready caps at 100 rows by default, so a capped query proves nothing.
    # NO --exclude-label human: absence would then prove the LABEL, not the defer.
-   # Positive control = a NON-EMPTY .data: it proves bd ready ran and is not vacuously
+   # Positive control = a NON-EMPTY result (the J-1 prelude unwraps `.data` or the bare array): it proves bd ready ran and is not vacuously
    # empty, so the absence half carries weight. Both halves read ONE snapshot, so the
    # control cannot pass against a different query than the absence check.
    # NOT --include-deferred: that flag re-admits only status:open beads with a future
    # defer_until, never status:deferred ones -- so it can never see the bead you just
    # created, and as a control it would invert the verdict (bead tc-8x45).
    READY="$(bd ready --json -n 0)"
-   jq -e '(.data // []) | length > 0' <<<"$READY" >/dev/null &&
-     jq -e --arg id "<BEAD>" 'all(.data[]?; .id != $id)' <<<"$READY" >/dev/null &&
+   jq -e '(if type=="object" and has("data") then .data else . end) | length > 0' <<<"$READY" >/dev/null &&
+     jq -e --arg id "<BEAD>" 'all((if type=="object" and has("data") then .data else . end)[]?; .id != $id)' <<<"$READY" >/dev/null &&
      echo "OK: <BEAD> is not workable" || echo "FAIL: <BEAD> is workable, or bd ready is broken -- do NOT gate"
    ```
 

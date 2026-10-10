@@ -90,7 +90,7 @@ treating the claimed bead as workable:
 
     (the same query shape `plan-decompose-beads` uses for its own children
     listing; `--status all` is load-bearing — a closed decompose-plan child
-    still proves this bead was decomposed). A NON-EMPTY `.data` means this
+    still proves this bead was decomposed). A NON-EMPTY result array (`.data` or the bare `[]`, J-1) means this
     bead already has children, regardless of what `notes` says, so it is a
     container-shaped non-issue exactly like check 1.
 

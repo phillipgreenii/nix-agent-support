@@ -78,7 +78,7 @@ Main loop step 1) is NEVER the bare atomic form — it is always this two-step s
    bd ready --label human --exclude-label refactor-campaign,human-focus-required --exclude-type handoff --json
    ```
 
-2. **Filter client-side**: walk `.data[]` in the returned (priority) order and skip any entry
+2. **Filter client-side**: walk the result array (`.data[]` under the `{"data":[…]}` envelope, the bare top-level `[]` when `BD_JSON_ENVELOPE` is unset — J-1) in the returned (priority) order and skip any entry
    whose `is_template` field is `true`. A template's OWN labels can omit `template` while its
    parent molecule carries it (`merge-request.pr` carries only `["human","merge-request"]`; its
    parent `merge-request` carries `["template"]`) — `is_template` is the only reliable signal;
@@ -258,7 +258,7 @@ and it STOPs unconditionally regardless of this flag.
    invocation supplied `$ARGUMENTS`, apply them as additional NARROWING filters on this list
    query (see "Optional scope arguments").
 
-   Filter `.data[]` client-side, in the returned (priority) order, skipping any entry whose
+   Filter the result array (`.data[]` under the `{"data":[…]}` envelope, the bare top-level `[]` when `BD_JSON_ENVELOPE` is unset — J-1) client-side, in the returned (priority) order, skipping any entry whose
    `is_template` is `true`. Then claim the first surviving candidate:
 
    ```bash
@@ -289,7 +289,7 @@ and it STOPs unconditionally regardless of this flag.
       `[container note`)? This marker is a convention SHARED with `/drain-beads` and `pb:drain-one` —
       either command may write or read it.
    2. **Children-existence probe** — run ONLY when check 1 did NOT match:
-      `bd list --parent <id> --status all -n 0 --json`. A NON-EMPTY `.data` is necessary but
+      `bd list --parent <id> --status all -n 0 --json`. A NON-EMPTY result array (`.data` or the bare `[]`, J-1) is necessary but
       NOT sufficient — a bead can have children and still need its own independent human
       decision, so confirm against **D-9** (`beads-lifecycle` skill) that nothing on THIS
       bead's own text asks a question distinct from its children's (every live child either
@@ -800,13 +800,13 @@ that did not exist at park time now does.
 
 ```bash
 # (a) a decision recorded on the bead — comments are NOT in `bd show --json`, so read them directly
-bd comments <id> --json | jq -r '.data[]?.text'
+bd comments <id> --json | jq -r '(if type=="object" and has("data") then .data else . end)[]?.text'
 
 # (b) a decision recorded in ANOTHER bead's body. `bd search` matches title/ID only, excludes
 #     closed issues, and caps at 50 rows, so it CANNOT answer this — use --desc-contains, and
 #     `--status all` (measured: without it, `closed` rows are absent from the result):
 bd list --desc-contains "<SEARCH TERM>" --status all -n 0 --json \
-  | jq -r '.data[]? | "\(.id) \(.status) \(.title)"'
+  | jq -r '(if type=="object" and has("data") then .data else . end)[]? | "\(.id) \(.status) \(.title)"'
 
 # (c) a landed design doc / ADR / behavior-doc section, in the repo the bead names
 git -C <repo> log --oneline --since=<marker date> -- docs/adr docs/behavior docs/guides
@@ -876,7 +876,7 @@ longer reflects urgency. Invoke the `beads-lifecycle` skill and follow its
 - **Read the promotion record BEFORE the terminal action** (W-3) — you need `<prior>`:
 
   ```bash
-  bd show <id> --json | jq -r '.data[0].notes // ""' | rg -o 'Promoted P[0-9]->P[0-9]' | tail -1
+  bd show <id> --json | jq -r '(if type=="object" and has("data") then .data else . end)[0].notes // ""' | rg -o 'Promoted P[0-9]->P[0-9]' | tail -1
   ```
 
 - **The exit condition is a RECORDED VERDICT** (W-4) — which of keep / fix-forward / discard /

@@ -87,7 +87,7 @@ live blocker is a LIVE EXTERNAL EVENT that no person or bead can force leaves vi
      decision, an input, an approval, or an out-of-band action? Or must ANOTHER BEAD
      finish first? Step 2's `sibling-open?` probe already answers the second half for
      every bead this one names — REUSE those readings rather than inventing a parallel
-     check: `bd show <sib> --json | jq -r '.data[0].status'`. `open` / `in_progress` /
+     check: `bd show <sib> --json | jq -r '(if type=="object" and has("data") then .data else . end)[0].status'`. `open` / `in_progress` /
      `blocked` ⇒ a live blocker. `closed` ⇒ NOT a blocker at all, so it MUST NOT get an
      edge; if every named bead reads `closed`, the reason you were stuck has already
      died — go back to step 2 and re-read the premise.
@@ -134,11 +134,14 @@ live blocker is a LIVE EXTERNAL EVENT that no person or bead can force leaves vi
    on the same precondition:
 
    ```bash
-   bd show <id> --json | jq -r '(.data[0].comments // [])[].text' | rg -o 'PRECONDITION-KEY: .*'
+   bd show <id> --json --include-comments | jq -r '(if type=="object" and has("data") then .data else . end)[0] | (.comments // [])[].text' | rg -o 'PRECONDITION-KEY: .*'
    ```
 
-   (`comments` is `null` on a bead with none, hence the `// []`; empty output — `rg`
-   exit 1 — means no prior key, NOT a failure.)
+   (`--include-comments` is load-bearing: plain `bd show --json` omits the comments and
+   reports only `comment_count`, so the probe would never find a prior key. The prelude is the
+   **J-1** unwrap, valid under the `{"data":[…]}` envelope and for the bare array alike.
+   `comments` is `null` on a bead with none, hence the `// []`; empty output — `rg` exit 1 —
+   means no prior key, NOT a failure.)
    - The key you are about to write is ABSENT → ordinary park (step 6a).
    - The key is ALREADY PRESENT — this would be the SECOND park on the same unmet
      precondition → the precondition itself is the suspect, not the world: escalate

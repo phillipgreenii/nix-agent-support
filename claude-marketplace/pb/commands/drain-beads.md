@@ -58,7 +58,7 @@ always a two-step preview-then-claim:
 
 1. **List candidates** with the SAME filters the claim call would have used, but WITHOUT
    `--claim`, and WITH `--json` so `is_template` is visible.
-2. **Filter client-side**: walk `.data[]` in the returned (priority) order and skip any entry
+2. **Filter client-side**: walk the result array (`.data[]` under the `{"data":[…]}` envelope, the bare top-level `[]` when `BD_JSON_ENVELOPE` is unset — J-1) in the returned (priority) order and skip any entry
    whose `is_template` field is `true`.
 3. **Claim the first surviving candidate**: `bd update <id> --claim --actor "ID" --json`.
 
@@ -256,7 +256,7 @@ proceeding on currently loaded text (direct interactive invocation).`)
    `--exclude-label human,human-focus-required` (nor its campaign counterpart above), the
    `--exclude-type epic` exclusion, or the deferred exclusion.
 
-   Filter `.data[]` client-side, in the returned (priority) order, skipping any entry whose
+   Filter the result array (`.data[]` under the `{"data":[…]}` envelope, the bare top-level `[]` when `BD_JSON_ENVELOPE` is unset — J-1) client-side, in the returned (priority) order, skipping any entry whose
    `is_template` is `true`. Then claim the first surviving candidate:
 
    ```bash
@@ -358,12 +358,12 @@ proceeding on currently loaded text (direct interactive invocation).`)
    1. Run the children-existence probe (the query `pb:drain-one`'s container probe
       also uses; this command keeps its own copy of it) to see
       whether this epic has ever been decomposed at all:
-      `bd list --parent <id> --status all -n 0 --json`. An EMPTY `.data` means
+      `bd list --parent <id> --status all -n 0 --json`. An EMPTY result array (`.data` or the bare `[]`, J-1) means
       this epic was never decomposed — it is the rare, deliberately-reached
       exception the id-targeted safe path exists for (see
       "`--exclude-type epic` is load-bearing" above), not a container instance
       — apply `pb:drain-one` (step 2) to it directly, with the container
-      probe settled, exactly like any other claimed bead. A NON-EMPTY `.data` means it genuinely is a container with
+      probe settled, exactly like any other claimed bead. A NON-EMPTY result array (`.data` or the bare `[]`, J-1) means it genuinely is a container with
       decomposed children: continue to step 2.
    2. Find the first claimable descendant via the SAME preview-then-claim sequence as the
       top-level CLAIM step ("Template/formula exclusion" above) — this reuses `bd ready`'s own
@@ -381,7 +381,7 @@ proceeding on currently loaded text (direct interactive invocation).`)
       Apply the SAME label filters this session's own top-level CLAIM step above uses (drain's
       `--exclude-label human,human-focus-required,refactor-campaign`; a sibling command
       sourcing work the same way, e.g. `/unblock-human-beads`, substitutes its own mirrored
-      filters here instead — see the bead's DESIRED BEHAVIOR for the mapping). Filter `.data[]`
+      filters here instead — see the bead's DESIRED BEHAVIOR for the mapping). Filter the result array (`.data[]` under the `{"data":[…]}` envelope, the bare top-level `[]` when `BD_JSON_ENVELOPE` is unset — J-1)
       client-side, skipping any `is_template=true` entry, then claim the first surviving
       candidate:
 
