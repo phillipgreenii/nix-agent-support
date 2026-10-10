@@ -679,6 +679,14 @@ cmd_validate() {
   return 0
 }
 
+# PGDR_CONFIRM_GATE_LEVEL: the aggressiveness level at and above which
+# cmd_reclaim --apply requires an interactive pgdr_confirm before a variant's
+# removeCommand runs. Authoritative definition of the whole 0-5 scale:
+# docs/aggressiveness-scale.md (next to this file); a bats drift test
+# (tests/test-pg-disk-reclaimer-scale-docs.bats) asserts that document's
+# confirm-gate marker equals this value, so change both together.
+PGDR_CONFIRM_GATE_LEVEL=4
+
 # pgdr_confirm: prompts PROMPT and reads a y/N confirmation directly from
 # the controlling terminal (/dev/tty), returning 0 for an explicit y/yes
 # answer and 1 for anything else -- including no controlling terminal at
@@ -1044,7 +1052,7 @@ cmd_reclaim() {
 
     printf '%s: size: %s\n' "$id" "$size_label"
 
-    if [[ $aggressiveness -ge 4 ]]; then
+    if [[ $aggressiveness -ge $PGDR_CONFIRM_GATE_LEVEL ]]; then
       if ! pgdr_confirm "pg-disk-reclaimer: reclaim '$id' at aggressiveness $aggressiveness -- run its removeCommand? [y/N] "; then
         echo "pg-disk-reclaimer: skipping '$id' (not confirmed)" >&2
         continue

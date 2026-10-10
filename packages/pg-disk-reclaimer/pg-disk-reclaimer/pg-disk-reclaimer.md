@@ -27,6 +27,10 @@
 
 `PGDR_SIZE_TIMEOUT_SECONDS={{300}} pg-disk-reclaimer reclaim --aggressiveness {{3}}`
 
+- Aggressiveness is a ceiling on a 0-5 scale (0 tidy cruft, 1 tidy, 2 caches, 3 deep, 4 costly or irreversible, 5 hardest to recover); under `--apply`, levels 4 and above ask for interactive confirmation. Full definitions: `packages/pg-disk-reclaimer/pg-disk-reclaimer/docs/aggressiveness-scale.md` in the phillipgreenii-nix-agent-support repo:
+
+`pg-disk-reclaimer reclaim --aggressiveness {{3}}`
+
 - Actually remove (rather than dry-run):
 
 `pg-disk-reclaimer reclaim --aggressiveness {{2}} --apply`

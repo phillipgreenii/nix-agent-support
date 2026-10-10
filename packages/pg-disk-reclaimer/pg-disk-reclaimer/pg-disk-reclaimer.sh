@@ -55,6 +55,23 @@ Options:
   the known sizes and counts the unknown ones. The per-item size ceiling
   is PGDR_SIZE_TIMEOUT_SECONDS (default 60).
 
+Aggressiveness scale:
+  --aggressiveness N is a CEILING: every item with a variant at level <= N
+  is selected, and an item with several qualifying variants runs the one
+  with the highest level <= N.
+    0  tidy cruft              clutter whose removal costs nothing
+    1  tidy                    finished work (merged/stale worktrees)
+    2  caches                  cheap caches that refill in seconds
+    3  deep                    local-only refill that is expensive
+    4  costly or irreversible  network refill, lost rollback/history,
+                               or live shared state
+    5  hardest to recover      slow, manual rebuild of user-visible state
+  Under --apply, a selected variant at level >= 4 asks for interactive
+  confirmation (read from the terminal; there is no bypass). A dry run
+  never prompts. The authoritative definition is
+  packages/pg-disk-reclaimer/pg-disk-reclaimer/docs/aggressiveness-scale.md
+  in the phillipgreenii-nix-agent-support repository.
+
 Notes:
   'validate' checks the registry's JSON schema, then does a best-effort
   check that each command string's leading command/function exists. It
