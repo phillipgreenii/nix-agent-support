@@ -120,8 +120,9 @@ func TestContentTypeBodyAndMethodRules(t *testing.T) {
 	}
 }
 
-// The placeholder page of the web UI is served at the root, static, through the same defences.
-func TestPlaceholderPage(t *testing.T) {
+// The page of the web UI is served at the root, static, through the same defences
+// (the assets it loads are in webui_test.go).
+func TestWebUIPage(t *testing.T) {
 	e := newEnv(t, options{})
 	r := e.get("/")
 	if r.Status != 200 || !strings.HasPrefix(r.Header.Get("Content-Type"), "text/html") || !strings.Contains(string(r.Body), "pg-task-focus") {
@@ -135,6 +136,9 @@ func TestPlaceholderPage(t *testing.T) {
 	}
 	if r := e.raw("GET", "/anything-else", nil, nil); r.Status != 404 {
 		t.Errorf("only the root is the page: %d", r.Status)
+	}
+	if r := e.raw("GET", "/index.html", nil, nil); r.Status != 404 {
+		t.Errorf("the page has one address, the root: %d", r.Status)
 	}
 	if v, _ := sampleValue(e.scrape()["pg_task_focus_http_requests_total"], map[string]string{"route": "/", "status": "200"}); v < 1 {
 		t.Errorf("the page's route label is /: %v", v)

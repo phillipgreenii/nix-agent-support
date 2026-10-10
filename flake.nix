@@ -4290,15 +4290,27 @@
               # `go test ./...` hands every flag to every test binary, and the
               # packages whose tests do not import rapid reject `-rapid.seed`
               # as an undefined flag.
+              #
+              # The web UI (bead pg2-t7me1.3, ADR 0092) is dependency-free ES modules
+              # embedded in the daemon, and its logic is tested with node's built-in
+              # test runner from inside this Go gate (web/web_test.go, and the daemon
+              # package's webui_e2e_test.go, which runs the page's own store against
+              # the real daemon). So `nodejs` is a test dependency here, and
+              # PG_TASK_FOCUS_REQUIRE_NODE=1 turns "node is not on PATH" from a skip
+              # (a developer host without node) into a failure: a green check
+              # means the client logic ran, never that it was skipped. There is no
+              # npm, no lock file and no network in the build.
               pg-task-focus-go-tests =
                 (pkgs._agentSupportGoBuilders.mkGoTest {
                   pname = "pg-task-focus-go-tests";
                   src = lib.cleanSource ./packages/pg-task-focus;
                   gomod2nixToml = ./packages/pg-task-focus/gomod2nix.toml;
+                  testDeps = [ pkgs.nodejs ];
                 }).overrideAttrs
                   (_: {
                     RAPID_SEED = "1";
                     RAPID_NOFAILFILE = "true";
+                    PG_TASK_FOCUS_REQUIRE_NODE = "1";
                     __darwinAllowLocalNetworking = true;
                   });
 

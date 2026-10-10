@@ -213,6 +213,7 @@ func (s *Server) routes() []route {
 	}
 	return []route{
 		{Method: "GET", Path: "/{$}", handler: s.getIndex, ops: true},
+		{Method: "GET", Path: "/assets/{name}", handler: s.getAsset, ops: true},
 		api("GET", "/state", s.getState),
 		{Method: "GET", Path: APIPrefix + "/stream", handler: s.getStream, stream: true},
 		api("POST", "/periods/change", s.postPeriodsChange),
@@ -507,14 +508,61 @@ func (s *Server) notFound(w http.ResponseWriter, r *http.Request) {
 	s.refuse(w, r, wire.ReasonNotFound, "No such path.")
 }
 
-// getIndex serves the placeholder page of the web UI: static, with no script,
-// and a content security policy that would refuse one.
-func (s *Server) getIndex(w http.ResponseWriter, _ *http.Request) {
+// pagePolicy is the content security policy of the web UI: its own scripts,
+// styles and connections only, and no inline script or style, frame, form post
+// or base element, so a page that loads or sends anything elsewhere is refused
+// by the browser even if a defect asked for it. (img-src allows the empty data
+// URL of the page's icon.)
+const pagePolicy = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; " +
+	"img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+
+// getIndex serves the web UI's page: static, and what loads from it is
+// served by getAsset under the same policy and the same defences.
+func (s *Server) getIndex(w http.ResponseWriter, r *http.Request) {
+	s.serveAsset(w, r, web.Index())
+}
+
+// getAsset serves one embedded asset of the web UI by name. A name that is not
+// embedded is the same not_found problem as any unknown path, so the route
+// cannot be used to probe the file system (there is no file system behind it).
+func (s *Server) getAsset(w http.ResponseWriter, r *http.Request) {
+	a, ok := web.Lookup(r.PathValue("name"))
+	if !ok {
+		s.notFound(w, r)
+		return
+	}
+	s.serveAsset(w, r, a)
+}
+
+// serveAsset writes an asset with its own content type, a strong validator
+// and no-cache (a conditional request each load, so a new binary's page is
+// seen at once), the page policy and no sniffing. The asset's name is never
+// logged; the access line carries the route template.
+func (s *Server) serveAsset(w http.ResponseWriter, r *http.Request, a web.Asset) {
 	h := w.Header()
-	h.Set("Content-Type", "text/html; charset=utf-8")
-	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")
+	h.Set("Content-Type", a.ContentType)
+	h.Set("Content-Security-Policy", pagePolicy)
 	h.Set("X-Content-Type-Options", "nosniff")
-	_, _ = w.Write(web.Index())
+	h.Set("Referrer-Policy", "no-referrer")
+	h.Set("Cache-Control", "no-cache")
+	h.Set("ETag", a.ETag)
+	if m := r.Header.Get("If-None-Match"); m != "" && etagMatches(m, a.ETag) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	_, _ = w.Write(a.Body)
+}
+
+// etagMatches reports whether an If-None-Match header names the validator (or
+// is the wildcard).
+func etagMatches(header, etag string) bool {
+	for _, part := range strings.Split(header, ",") {
+		part = strings.TrimSpace(part)
+		if part == "*" || strings.TrimPrefix(part, "W/") == etag {
+			return true
+		}
+	}
+	return false
 }
 
 // getMetrics serves the Prometheus text exposition.

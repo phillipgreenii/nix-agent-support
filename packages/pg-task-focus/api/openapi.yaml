@@ -58,12 +58,42 @@ paths:
     get:
       tags: [ops]
       operationId: getIndex
-      summary: The placeholder page of the web UI (static, no script)
+      summary: The page of the web UI (static HTML; it loads its modules and stylesheet from /assets/)
       responses:
         "200":
           {
             description: An HTML page,
             content: { text/html: { schema: { type: string } } },
+          }
+        default: { $ref: "#/components/responses/Problem" }
+  /assets/{name}:
+    get:
+      tags: [ops]
+      operationId: getAsset
+      summary: One asset of the web UI, a script module or the stylesheet, embedded in the binary
+      description: |
+        The names are a fixed list built into the binary; any other name is a
+        `not_found` problem. An asset is sent with its own content type, a strong
+        `ETag` and `Cache-Control: no-cache`, so a new binary's page is seen on
+        the next load and a cached one costs a conditional request (`304`). The
+        page and its assets are sent under a content security policy that allows
+        the page's own origin only and no inline script or style.
+      parameters:
+        - {
+            name: name,
+            in: path,
+            required: true,
+            schema: { type: string, minLength: 1 },
+          }
+      responses:
+        "200":
+          description: The asset.
+          content:
+            text/javascript: { schema: { type: string } }
+            text/css: { schema: { type: string } }
+        "304":
+          {
+            description: The asset is unchanged since the `If-None-Match` validator.,
           }
         default: { $ref: "#/components/responses/Problem" }
   /api/v1/state:

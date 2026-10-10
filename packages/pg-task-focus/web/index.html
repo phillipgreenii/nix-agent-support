@@ -3,23 +3,19 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="referrer" content="no-referrer" />
     <title>pg-task-focus</title>
-    <style>
-      body { font: 16px/1.5 system-ui, sans-serif; max-width: 40rem; margin: 3rem auto; padding: 0 1rem; }
-      code { background: #eee; padding: 0.1rem 0.3rem; border-radius: 3px; }
-      @media (prefers-color-scheme: dark) {
-        body { background: #111; color: #eee; }
-        code { background: #333; }
-      }
-    </style>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/assets/style.css" />
+    <script type="module" src="/assets/app.mjs"></script>
   </head>
   <body>
-    <h1>pg-task-focus</h1>
-    <p>The daemon is running. The web UI is not built yet: this page is a placeholder for it.</p>
-    <p>
-      Use the command line (<code>pg-task-focus status</code>) in the meantime. The API is
-      documented by its OpenAPI contract; its state is at <a href="/api/v1/state">/api/v1/state</a>
-      and its health at <a href="/healthz">/healthz</a>.
-    </p>
+    <div id="app"></div>
+    <noscript>
+      <p class="noscript">
+        pg-task-focus needs JavaScript. The command line (<code>pg-task-focus status</code>) works without a browser.
+      </p>
+    </noscript>
   </body>
 </html>
