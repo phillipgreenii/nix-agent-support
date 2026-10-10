@@ -110,6 +110,15 @@ func helperMain() {
 			Result:          result,
 		})
 		os.Exit(0)
+	case "echo_request":
+		// Echoes the raw stdin request back as the result, so a test can
+		// assert the wire request is byte-for-byte what the umbrella
+		// sends (bead pg2-91y12: argv changes must not touch stdin).
+		_ = json.NewEncoder(os.Stdout).Encode(Response{
+			ProtocolVersion: ProtocolVersion,
+			Result:          json.RawMessage(stdin),
+		})
+		os.Exit(0)
 	case "stderr_only":
 		fmt.Fprintln(os.Stderr, "boom")
 		os.Exit(2)

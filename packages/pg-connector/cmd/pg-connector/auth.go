@@ -24,10 +24,10 @@ import (
 // marshals its sources[] field as [] rather than null [bug A15] — a
 // nil slice would make `jq '.sources[]'` exit 5 on exactly the host
 // that's misconfigured.
-func FanOutAuthStatus(ctx context.Context, backends []string) FanOutOutcome {
+func FanOutAuthStatus(ctx context.Context, reg *Registry, backends []string) FanOutOutcome {
 	out := FanOutOutcome{Sources: make([]SourceResult, 0, len(backends))}
 	for _, b := range backends {
-		out.Sources = append(out.Sources, authStatusOne(ctx, b))
+		out.Sources = append(out.Sources, authStatusOne(ctx, reg, b))
 	}
 	return out
 }
@@ -38,8 +38,8 @@ func FanOutAuthStatus(ctx context.Context, backends []string) FanOutOutcome {
 // into pr/issue/ci/scm's own Tier-1 verbs only; see dispatch.go's
 // invokeOne/ci.go's fanOutCIList), and no backend's auth_status handler
 // has any use for it today.
-func authStatusOne(ctx context.Context, backend string) SourceResult {
-	resp, err := scriptout.Invoke(ctx, backend, scriptout.OpAuthStatus, nil, nil)
+func authStatusOne(ctx context.Context, reg *Registry, backend string) SourceResult {
+	resp, err := reg.Invoke(ctx, backend, scriptout.OpAuthStatus, nil, nil)
 	if err != nil {
 		if errors.Is(err, scriptout.ErrUnknownOp) {
 			return SourceResult{Source: backend, Status: SourceDisabled, Count: 0, Reason: "not applicable"}
@@ -83,7 +83,7 @@ func newAuthStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			outcome := FanOutAuthStatus(cmd.Context(), backends)
+			outcome := FanOutAuthStatus(cmd.Context(), reg, backends)
 			return writeFanOutResult(cmd, outcome, outcome.ExitCode(), func() string {
 				return "auth status:\n" + formatSourcesTable(outcome.Sources)
 			})

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
@@ -483,7 +485,7 @@ func TestConfigValidate_ActivityKinds_InvalidActivitySourcesKeySkipsUnion(t *tes
 	// An explicitly-empty list is rejected by the registry; whatever the
 	// command does with that (it may fail to load at all), the union print
 	// itself must never panic or emit a kinds array.
-	reg := &Registry{activitySources: []string{}}
+	reg := &Registry{activitySources: []yaml.Node{}}
 	if got := activityKindsUnion(context.Background(), reg); got != nil {
 		t.Fatalf("activityKindsUnion = %v, want nil on an ActivitySources error", got)
 	}

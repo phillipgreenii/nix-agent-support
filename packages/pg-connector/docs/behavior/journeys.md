@@ -163,9 +163,10 @@ Extensions:
 **Preconditions:** the backend has been implemented (`USECASE-CREATE-BACKEND`).
 **Intent:** put an implemented backend's binary name into the `connector.<type>` registry so the
 umbrella can dispatch to it.
-_Requires:_ `INV-REG-1`, `INV-REG-2`.
+_Requires:_ `INV-REG-1`, `INV-REG-2`, `INV-REG-4`.
 
-**Flow.** The operator adds the backend's bare binary name under its capability's
+**Flow.** The operator adds the backend's bare binary name, or an instance `{name, command}` when
+the same binary must run more than once with different arguments, under its capability's
 `connector.<type>` entry — appending to the list for `pr`/`issue`/`ci`, or setting the single
 value for `scm`. No `exec:` prefix or other built-in/external marker is written, because nothing
 is compiled into the umbrella (`INV-REG-1`). Registering a second backend for a capability that
@@ -181,6 +182,10 @@ Extensions:
 - The capability is `scm`: the registry entry is a single scalar value, not a list; registering a
   second backend under it is a configuration error the registry itself rejects, never a silent
   overwrite.
+- The same binary must serve two data sources (two bead trackers): the operator registers two
+  instances with distinct names and per-instance arguments (`INV-REG-4`); each is a separate
+  backend for fan-out, pinning, config and cache purposes, and an id-keyed op tries them in
+  registration order like any other pair.
 
 ### `USECASE-TARGETED-CALL` — invoke a targeted op and read its outcome <!-- uuid: e799d106-9348-4dcc-be8c-cc36111f8823 -->
 

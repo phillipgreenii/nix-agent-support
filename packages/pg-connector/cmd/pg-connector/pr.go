@@ -229,7 +229,7 @@ func fanOutPRList(ctx context.Context, reg *Registry, backends []string, query s
 			out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDegraded, Reason: err.Error()})
 			continue
 		}
-		resp, err := scriptout.Invoke(ctx, b, "list", map[string]any{"query": query, "cursor": nil, "ids_only": idsOnly}, config)
+		resp, err := reg.Invoke(ctx, b, "list", map[string]any{"query": query, "cursor": nil, "ids_only": idsOnly}, config)
 		if err != nil {
 			// A bounded call never serves the cache fallback: the cache
 			// holds every live entry for the backend regardless of age, so

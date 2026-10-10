@@ -1,0 +1,57 @@
+activity:
+  sources:
+    - command:
+        - pg-connector-issue-beads
+        - --beads-dir
+        - /example/pg2
+      name: pg-connector-issue-beads-pg2
+    - command:
+        - pg-connector-issue-beads
+        - --beads-dir
+        - /example/zr
+      name: pg-connector-issue-beads-zr
+attention:
+  sources:
+    - command:
+        - pg-connector-issue-beads
+        - --beads-dir
+        - /example/pg2
+      name: pg-connector-issue-beads-pg2
+    - command:
+        - pg-connector-issue-beads
+        - --beads-dir
+        - /example/zr
+      name: pg-connector-issue-beads-zr
+backends:
+  pg-connector-issue-beads-pg2:
+    activity_actors:
+      - Example Person
+  pg-connector-issue-beads-zr:
+    activity_actors:
+      - Example Person
+connector:
+  issue:
+    - pg-connector-issue-jira
+    - command:
+        - pg-connector-issue-beads
+        - --beads-dir
+        - /example/pg2
+      name: pg-connector-issue-beads-pg2
+    - command:
+        - pg-connector-issue-beads
+        - --beads-dir
+        - /example/zr
+      name: pg-connector-issue-beads-zr
+  scm: pg-connector-scm-git
+search:
+  sources:
+    - command:
+        - pg-connector-issue-beads
+        - --beads-dir
+        - /example/pg2
+      name: pg-connector-issue-beads-pg2
+    - command:
+        - pg-connector-issue-beads
+        - --beads-dir
+        - /example/zr
+      name: pg-connector-issue-beads-zr

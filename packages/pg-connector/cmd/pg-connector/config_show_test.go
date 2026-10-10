@@ -223,3 +223,92 @@ func TestConfigShow_Queries_HumanMode(t *testing.T) {
 		t.Fatalf("stdout = %q, want it to mention both registered query names", stdout)
 	}
 }
+
+// writeInstancesShowConfig writes a registry with {name, command} instances
+// under connector.issue and every sources key, and points $PG_PR_CONFIG at it.
+func writeInstancesShowConfig(t *testing.T) {
+	t.Helper()
+	writeInstancesConfig(t, "connector:\n  issue:\n"+
+		"    - pg-connector-issue-jira\n"+
+		"    - {name: inst-pg2, command: [bin, --beads-dir, /example/pg2]}\n"+
+		"    - {name: inst-zr, command: [bin, --beads-dir, /example/zr]}\n"+
+		"activity:\n  sources:\n    - {name: inst-pg2, command: [bin, --beads-dir, /example/pg2]}\n"+
+		"    - {name: inst-zr, command: [bin, --beads-dir, /example/zr]}\n"+
+		"attention:\n  sources:\n    - {name: inst-pg2, command: [bin, --beads-dir, /example/pg2]}\n"+
+		"    - {name: inst-zr, command: [bin, --beads-dir, /example/zr]}\n")
+}
+
+func TestConfigShow_Instances_JSONListsNamesSourcesAndCommands(t *testing.T) {
+	writeInstancesShowConfig(t)
+	stdout, _, code := executePr(t, []string{"config", "show"})
+	if code != 0 {
+		t.Fatalf("exit = %d; stdout=%s", code, stdout)
+	}
+	var result ConfigShowResult
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("decode: %v (%s)", err, stdout)
+	}
+	if strings.Join(result.Issue, ",") != "pg-connector-issue-jira,inst-pg2,inst-zr" {
+		t.Errorf("issue = %v", result.Issue)
+	}
+	if strings.Join(result.Activity, ",") != "inst-pg2,inst-zr" || strings.Join(result.Attention, ",") != "inst-pg2,inst-zr" {
+		t.Errorf("activity = %v attention = %v", result.Activity, result.Attention)
+	}
+	if got := strings.Join(result.Commands["inst-zr"], " "); got != "bin --beads-dir /example/zr" || len(result.Commands) != 2 {
+		t.Errorf("commands = %v (plain strings must not appear)", result.Commands)
+	}
+}
+
+func TestConfigShow_Instances_Human(t *testing.T) {
+	writeInstancesShowConfig(t)
+	stdout, _, code := executePr(t, []string{"config", "show", "--output", "human"})
+	if code != 0 {
+		t.Fatalf("exit = %d; stdout=%s", code, stdout)
+	}
+	for _, want := range []string{"activity: inst-pg2 inst-zr", "attention: inst-pg2 inst-zr", "commands:", "    inst-pg2: bin --beads-dir /example/pg2"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("stdout = %q, missing %q", stdout, want)
+		}
+	}
+}
+
+// TestConfigShow_PlainStringsOutputUnchanged pins that a config with only
+// plain strings and no sources renders with none of the new keys.
+func TestConfigShow_PlainStringsOutputUnchanged(t *testing.T) {
+	writeMultiEntityConfigFor(t)
+	stdout, _, code := executePr(t, []string{"config", "show"})
+	if code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	for _, key := range []string{`"attention"`, `"search"`, `"activity"`, `"commands"`} {
+		if strings.Contains(stdout, key) {
+			t.Errorf("legacy output gained %s: %s", key, stdout)
+		}
+	}
+	human, _, _ := executePr(t, []string{"config", "show", "--output", "human"})
+	for _, key := range []string{"attention:", "search:", "activity:", "commands:"} {
+		if strings.Contains(human, key) {
+			t.Errorf("legacy human output gained %s: %s", key, human)
+		}
+	}
+}
+
+func TestConfigShowAndValidate_RejectMalformedEntries(t *testing.T) {
+	for _, tc := range []struct{ name, body, want string }{
+		{"empty command under activity", "connector:\n  pr: [x]\nactivity:\n  sources:\n    - {name: a, command: []}\n", "command must not be an empty list"},
+		{"duplicate name", "connector:\n  pr: [x]\nattention:\n  sources: [a, a]\n", `duplicate backend name "a"`},
+		{"slash in first word", "connector:\n  pr: [x]\nsearch:\n  sources:\n    - {name: a, command: [/bin/x]}\n", "command[0]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			writeInstancesConfig(t, tc.body)
+			if _, err := buildConfigShowResult(false); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("config show err = %v, want substring %q", err, tc.want)
+			}
+			for _, verb := range [][]string{{"config", "show"}, {"config", "validate"}} {
+				if stdout, _, code := executePr(t, verb); code == 0 {
+					t.Fatalf("%v: exit = 0, want failure; stdout=%s", verb, stdout)
+				}
+			}
+		})
+	}
+}

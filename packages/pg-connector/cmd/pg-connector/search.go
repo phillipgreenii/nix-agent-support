@@ -91,7 +91,7 @@ func fanOutSearch(ctx context.Context, reg *Registry, backends []string, query s
 			out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDegraded, Reason: cfgErr.Error()})
 			continue
 		}
-		resp, err := scriptout.Invoke(ctx, b, "search", searchOpArgs{Query: query, Fields: fields}, config)
+		resp, err := reg.Invoke(ctx, b, "search", searchOpArgs{Query: query, Fields: fields}, config)
 		if err != nil {
 			if errors.Is(err, scriptout.ErrUnknownOp) {
 				out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDisabled, Reason: "not applicable"})
@@ -175,13 +175,13 @@ var coreSearchFieldNames = map[string]bool{
 // nothing extra to the union — capabilities lookup failures are never
 // reported as their own warning or error here; they only affect which
 // fields validateSearchFields recognizes.
-func knownSearchFields(ctx context.Context, backends []string) map[string]bool {
+func knownSearchFields(ctx context.Context, reg *Registry, backends []string) map[string]bool {
 	known := make(map[string]bool, len(coreSearchFieldNames))
 	for f := range coreSearchFieldNames {
 		known[f] = true
 	}
 	for _, b := range backends {
-		resp, err := scriptout.InvokeCapabilities(ctx, b)
+		resp, err := reg.InvokeCapabilities(ctx, b)
 		if err != nil || resp == nil {
 			continue
 		}
@@ -227,11 +227,11 @@ func addVocabularyFieldNames(known map[string]bool, raw any) {
 // design does not distinguish "skip validation" from "treat as core set
 // only" for an empty request, and no backend exists yet to observe the
 // difference — this packet's implementer's choice).
-func validateSearchFields(ctx context.Context, backends []string, fields []string) []string {
+func validateSearchFields(ctx context.Context, reg *Registry, backends []string, fields []string) []string {
 	if len(fields) == 0 {
 		return nil
 	}
-	known := knownSearchFields(ctx, backends)
+	known := knownSearchFields(ctx, reg, backends)
 	var warnings []string
 	for _, f := range fields {
 		if !known[f] {
@@ -272,7 +272,7 @@ func newSearchCmd() *cobra.Command {
 			outcome := SearchOutcome{
 				FanOutOutcome: fanOut,
 				Groups:        groupSearchResults(perSource, backends),
-				Warnings:      validateSearchFields(cmd.Context(), backends, fields),
+				Warnings:      validateSearchFields(cmd.Context(), reg, backends, fields),
 			}
 			return writeFanOutResult(cmd, outcome, outcome.ExitCode(), func() string {
 				return humanizeSearch(outcome)

@@ -41,7 +41,6 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
-	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
 // CacheKey identifies one persisted cache file: one per (type, backend) —
@@ -487,7 +486,7 @@ func cacheEnabled(ctx context.Context, reg *Registry, entityType, backend string
 		return false, nil
 	}
 
-	resp, err := scriptout.InvokeCapabilities(ctx, backend)
+	resp, err := reg.InvokeCapabilities(ctx, backend)
 	if err != nil {
 		// FAIL OPEN: an inability to ask a backend whether it opts out
 		// MUST NOT itself disable fallback for that backend -- the

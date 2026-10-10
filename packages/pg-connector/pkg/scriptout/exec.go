@@ -49,10 +49,11 @@ var execCmdFactory = exec.CommandContext
 // Folded stderr is capped via TruncateForFold, so a runaway or unexpectedly
 // verbose backend binary cannot inflate the returned error without bound
 // [bead #26].
-func runInvoke(ctx context.Context, binary string, req Request) ([]byte, error) {
-	if binary == "" {
+func runInvoke(ctx context.Context, t Target, req Request) ([]byte, error) {
+	if len(t.Command) == 0 || t.Command[0] == "" {
 		return nil, errors.New("scriptout: empty backend binary name")
 	}
+	binary := t.Name
 	payload, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("scriptout: marshal request: %w", err)
@@ -61,7 +62,7 @@ func runInvoke(ctx context.Context, binary string, req Request) ([]byte, error) 
 	ctx, cancel := context.WithTimeout(ctx, execTimeoutFor(req.Op))
 	defer cancel()
 
-	cmd := execCmdFactory(ctx, binary)
+	cmd := execCmdFactory(ctx, t.Command[0], t.Command[1:]...)
 	cmd.WaitDelay = DefaultWaitDelay
 	cmd.Stdin = bytes.NewReader(payload)
 	var stdout, stderr bytes.Buffer
@@ -123,6 +124,24 @@ func callDetail(ctx context.Context, req Request, elapsed time.Duration) string 
 // site was updated to pass its own resolved config; none silently changed
 // meaning by omission).
 func Invoke(ctx context.Context, binary, op string, args any, config json.RawMessage) (*Response, error) {
+	return InvokeTarget(ctx, Target{Name: binary, Command: []string{binary}}, op, args, config)
+}
+
+// Target identifies one backend process. Name is the registry identity (it
+// labels errors and is what the umbrella keys sources, config, cache and
+// ledger on); Command is the argv: Command[0] the binary, Command[1:] its
+// arguments. A plain-string registration is Target{Name: n, Command: {n}}
+// (bead pg2-91y12, ADR 0062 amendment).
+type Target struct {
+	Name    string
+	Command []string
+}
+
+// InvokeTarget is Invoke for a registered instance: it execs t.Command[0]
+// with t.Command[1:] as arguments (nothing appended; the JSON request still
+// goes on stdin) and labels every error with t.Name.
+func InvokeTarget(ctx context.Context, t Target, op string, args any, config json.RawMessage) (*Response, error) {
+	binary := t.Name
 	var rawArgs json.RawMessage
 	if args != nil {
 		b, err := json.Marshal(args)
@@ -132,7 +151,7 @@ func Invoke(ctx context.Context, binary, op string, args any, config json.RawMes
 		rawArgs = b
 	}
 
-	out, err := runInvoke(ctx, binary, Request{Op: op, Args: rawArgs, Config: config})
+	out, err := runInvoke(ctx, t, Request{Op: op, Args: rawArgs, Config: config})
 	if err != nil {
 		return nil, err
 	}
@@ -199,7 +218,15 @@ type capabilitiesWireShape struct {
 // failed capabilities call surfaces as an error instead of a zero-value
 // success [bug A6].
 func InvokeCapabilities(ctx context.Context, binary string) (*CapabilitiesResponse, error) {
-	out, err := runInvoke(ctx, binary, Request{Op: OpCapabilities})
+	return InvokeCapabilitiesTarget(ctx, Target{Name: binary, Command: []string{binary}})
+}
+
+// InvokeCapabilitiesTarget is InvokeCapabilities for a registered instance
+// (see Target): the capability probe runs the same argv as every other op,
+// so an instance whose flag selects its data source answers for that source.
+func InvokeCapabilitiesTarget(ctx context.Context, t Target) (*CapabilitiesResponse, error) {
+	binary := t.Name
+	out, err := runInvoke(ctx, t, Request{Op: OpCapabilities})
 	if err != nil {
 		return nil, err
 	}

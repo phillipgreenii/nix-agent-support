@@ -53,7 +53,7 @@ func invokeOne(ctx context.Context, reg *Registry, binary, op string, args any) 
 	if err != nil {
 		return nil, err
 	}
-	return scriptout.Invoke(ctx, binary, op, args, config)
+	return reg.Invoke(ctx, binary, op, args, config)
 }
 
 // Dispatch calls op on the one backend registered for entityType, generic

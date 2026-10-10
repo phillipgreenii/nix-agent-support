@@ -9748,6 +9748,19 @@
                   # activity.sources omits the whole activity: mapping
                   same ${fixtures + "/activity.yaml"} ${rendered.activity}
                   same ${fixtures + "/legacy.yaml"} ${rendered.legacyEmptyActivity}
+                  # registry instances (bead pg2-91y12, INV-REG-4): string and
+                  # {name, command} entries render in every registration, and a
+                  # malformed instance fails evaluation
+                  same ${fixtures + "/instances.yaml"} ${rendered.instances}
+                  same ${fixtures + "/scm-instance.yaml"} ${rendered.scmInstance}
+                  # the SAME golden is the Go registry's parse fixture, so the
+                  # Nix-rendered output, the golden and the Go parser are tied
+                  # together byte for byte
+                  cmp ${fixtures + "/instances.yaml"} ${./packages/pg-connector/cmd/pg-connector/testdata/registry-instances.yaml}
+                  ${lib.optionalString (!rendered.malformedInstancesRejected) ''
+                    echo "a malformed pg-connector instance still evaluates" >&2
+                    exit 1
+                  ''}
                   # the retired attention.perBackend deadline options (threshold,
                   # exclude) are rejected at evaluation, not silently ignored
                   ${lib.optionalString (!rendered.retiredDeadlineOptionsRejected) ''

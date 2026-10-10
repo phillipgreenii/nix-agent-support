@@ -28,26 +28,33 @@ import (
 var ErrNoConfig = errors.New("registry: no config file found")
 
 // Registry is the parsed connector.<type> registry: for each entity-type
-// key, either a list of backend binary names (issue/ci/pr today) or a
-// single backend binary name (scm today). Every registry value is a bare
-// binary name — there is no exec:-prefix distinction anywhere in this
-// registry, since nothing is compiled in.
+// key, either a list of backend registrations (issue/ci/pr today) or a
+// single one (scm today). A registration is a bare binary name on PATH or an
+// instance {name, command} (INV-REG-4, registry_backend.go): command is an
+// argv list whose first word is a bare binary name, so one binary can be
+// registered more than once under different names. There is no exec:-prefix
+// distinction anywhere in this registry, since nothing is compiled in.
+// Accessors return NAMES (the instance identity); Command/Target resolve a
+// name to the argv the umbrella execs.
 //
-// attentionSources/searchSources hold the top-level attention.sources /
-// search.sources registrations — always list-valued, and independent of
-// connector.<type> (never read from raw).
-// nil means the key (or its nested sources: sub-key) was absent; a non-nil
-// slice — including a non-nil empty one from an explicit sources: [] —
-// came from an actual sources: entry. That absent-vs-empty distinction is
-// exactly what AttentionSources/SearchSources need and is preserved
+// attentionSources/searchSources/activitySources hold the top-level
+// attention.sources / search.sources / activity.sources registrations —
+// always list-valued, and independent of connector.<type> (never read from
+// raw). nil means the key (or its nested sources: sub-key) was absent; a
+// non-nil slice — including a non-nil empty one from an explicit
+// sources: [] — came from an actual sources: entry. That absent-vs-empty
+// distinction is exactly what the source accessors need and is preserved
 // unchanged from how parseRegistry decodes it.
 type Registry struct {
 	raw              map[string]yaml.Node
-	attentionSources []string
-	searchSources    []string
-	activitySources  []string
+	attentionSources []yaml.Node
+	searchSources    []yaml.Node
+	activitySources  []yaml.Node
 	backends         map[string]yaml.Node
 	state            map[string]yaml.Node
+	// commands maps a registered name to its argv, filled at parse time by
+	// a best-effort pass over every registration that decodes cleanly.
+	commands map[string][]string
 }
 
 type registryDoc struct {
@@ -76,7 +83,7 @@ type registryDoc struct {
 // mapping with a single nested sources: list key, siblings of connector:
 // rather than members of it.
 type sourcesDoc struct {
-	Sources []string `yaml:"sources"`
+	Sources []yaml.Node `yaml:"sources"`
 }
 
 // envSource is the minimal interface LoadRegistry needs to look up env +
@@ -199,6 +206,15 @@ func parseRegistry(data []byte, path string) (*Registry, error) {
 	if doc.Activity != nil {
 		reg.activitySources = doc.Activity.Sources
 	}
+	// One best-effort pass over every registration that decodes cleanly: it
+	// fills the name -> argv map and rejects a name registered with two
+	// different commands. Entries that fail to decode are skipped here; the
+	// accessors report them.
+	commands, err := buildCommands(reg.registrations())
+	if err != nil {
+		return nil, fmt.Errorf("registry: parse %s: %w", path, err)
+	}
+	reg.commands = commands
 	return reg, nil
 }
 
@@ -229,12 +245,12 @@ func validateConnectorKeys(connector map[string]yaml.Node) error {
 // connector.<type>. Such a binary belongs only under activity.sources.
 const capabilityOnlyBackendPrefix = "pg-connector-activity-"
 
-// validateNoCapabilityOnlyBackends rejects any binary whose name starts with
-// capabilityOnlyBackendPrefix (including pg-connector-activity-git) found
-// under a connector.<type> key, list-valued or single-valued alike. The error
-// names the offending key and binary. Values that do not decode as a list of
-// names or a single name are skipped here: List/Single report those shape
-// errors themselves when an accessor runs.
+// validateNoCapabilityOnlyBackends rejects any registration whose name OR
+// command[0] starts with capabilityOnlyBackendPrefix (including
+// pg-connector-activity-git) found under a connector.<type> key, list-valued
+// or single-valued alike. The error names the offending key and backend.
+// Entries that do not decode are skipped here: List/Single report those
+// shape errors themselves when an accessor runs.
 func validateNoCapabilityOnlyBackends(connector map[string]yaml.Node) error {
 	keys := make([]string, 0, len(connector))
 	for k := range connector {
@@ -243,24 +259,9 @@ func validateNoCapabilityOnlyBackends(connector map[string]yaml.Node) error {
 	sort.Strings(keys)
 	for _, k := range keys {
 		node := connector[k]
-		var names []string
-		switch node.Kind {
-		case yaml.SequenceNode:
-			if err := node.Decode(&names); err != nil {
-				continue
-			}
-		case yaml.ScalarNode:
-			var single string
-			if err := node.Decode(&single); err != nil {
-				continue
-			}
-			names = []string{single}
-		default:
-			continue
-		}
-		for _, name := range names {
-			if strings.HasPrefix(name, capabilityOnlyBackendPrefix) {
-				return fmt.Errorf("connector.%s: backend %q is a capability-only backend and must be registered only under activity.sources, not under connector.<type>", k, name)
+		for _, ref := range lenientRefs("connector."+k, connectorEntries(&node)) {
+			if strings.HasPrefix(ref.Name, capabilityOnlyBackendPrefix) || strings.HasPrefix(ref.Command[0], capabilityOnlyBackendPrefix) {
+				return fmt.Errorf("connector.%s: backend %q is a capability-only backend and must be registered only under activity.sources, not under connector.<type>", k, ref.Name)
 			}
 		}
 	}
@@ -289,29 +290,6 @@ func validateBackendName(key, name string) error {
 	return nil
 }
 
-// validateBackendList applies the shared list-valued registration rules —
-// reject an explicitly-empty list, reject an invalid bare name, reject a
-// duplicate name within the same list — shared by both connector.<type>
-// (List) and the always-list-valued attention.sources/search.sources. key
-// names the specific registry key the list came from (e.g. "connector.pr",
-// "attention.sources"), used verbatim in error messages.
-func validateBackendList(key string, out []string) error {
-	if len(out) == 0 {
-		return fmt.Errorf("registry: %s is an empty list; omit the key entirely if no backend should be registered for %s", key, key)
-	}
-	seen := make(map[string]bool, len(out))
-	for _, name := range out {
-		if err := validateBackendName(key, name); err != nil {
-			return err
-		}
-		if seen[name] {
-			return fmt.Errorf("registry: %s: duplicate backend name %q", key, name)
-		}
-		seen[name] = true
-	}
-	return nil
-}
-
 func nodeKindName(k yaml.Kind) string {
 	switch k {
 	case yaml.SequenceNode:
@@ -325,10 +303,21 @@ func nodeKindName(k yaml.Kind) string {
 	}
 }
 
-// List returns the bare binary names registered under
-// connector.<entityType>, which must decode as a YAML list (pr/issue/ci
-// today). An entityType with no entry returns (nil, nil).
+// List returns the names registered under connector.<entityType>, which
+// must decode as a YAML list (pr/issue/ci today) of bare binary names and/or
+// {name, command} instances. An entityType with no entry returns (nil, nil).
 func (r *Registry) List(entityType string) ([]string, error) {
+	refs, err := r.listRefs(entityType)
+	if err != nil {
+		return nil, err
+	}
+	if refs == nil {
+		return nil, nil
+	}
+	return refNames(refs), nil
+}
+
+func (r *Registry) listRefs(entityType string) ([]backendRef, error) {
 	if r == nil {
 		return nil, nil
 	}
@@ -339,38 +328,36 @@ func (r *Registry) List(entityType string) ([]string, error) {
 	if node.Kind != yaml.SequenceNode {
 		return nil, fmt.Errorf("registry: connector.%s must be a list of backend binary names, got %s", entityType, nodeKindName(node.Kind))
 	}
-	var out []string
-	if err := node.Decode(&out); err != nil {
-		return nil, fmt.Errorf("registry: connector.%s: %w", entityType, err)
-	}
-	if err := validateBackendList("connector."+entityType, out); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return decodeBackendRefs("connector."+entityType, node.Content)
 }
 
-// Single returns the one bare binary name registered under
-// connector.<entityType>, which must decode as a YAML scalar (scm today).
-// An entityType with no entry returns ("", nil).
+// Single returns the one name registered under connector.<entityType>,
+// which must decode as a YAML scalar or one {name, command} mapping (scm
+// today). An entityType with no entry returns ("", nil).
 func (r *Registry) Single(entityType string) (string, error) {
+	ref, ok, err := r.singleRef(entityType)
+	if err != nil || !ok {
+		return "", err
+	}
+	return ref.Name, nil
+}
+
+func (r *Registry) singleRef(entityType string) (backendRef, bool, error) {
 	if r == nil {
-		return "", nil
+		return backendRef{}, false, nil
 	}
 	node, ok := r.raw[entityType]
 	if !ok {
-		return "", nil
+		return backendRef{}, false, nil
 	}
-	if node.Kind != yaml.ScalarNode {
-		return "", fmt.Errorf("registry: connector.%s must be a single backend binary name, got %s", entityType, nodeKindName(node.Kind))
+	if node.Kind != yaml.ScalarNode && node.Kind != yaml.MappingNode {
+		return backendRef{}, false, fmt.Errorf("registry: connector.%s must be a single backend binary name, got %s", entityType, nodeKindName(node.Kind))
 	}
-	var out string
-	if err := node.Decode(&out); err != nil {
-		return "", fmt.Errorf("registry: connector.%s: %w", entityType, err)
+	ref, err := decodeBackendRef("connector."+entityType, -1, &node)
+	if err != nil {
+		return backendRef{}, false, err
 	}
-	if err := validateBackendName("connector."+entityType, out); err != nil {
-		return "", err
-	}
-	return out, nil
+	return ref, true, nil
 }
 
 // BackendConfig returns the opaque config block registered under the
@@ -507,16 +494,17 @@ func (r *Registry) ActivitySources() ([]string, error) {
 // SearchSources and ActivitySources. sources == nil means the key (or its nested sources:
 // sub-key) was absent, returning (nil, nil) unvalidated; a non-nil slice —
 // including a non-nil empty one from an explicit sources: [] — is
-// validated with validateBackendList, so an explicitly-present but empty
+// decoded with decodeBackendRefs, so an explicitly-present but empty
 // list is rejected rather than silently treated the same as absent.
-func sourcesList(key string, sources []string) ([]string, error) {
+func sourcesList(key string, sources []yaml.Node) ([]string, error) {
 	if sources == nil {
 		return nil, nil
 	}
-	if err := validateBackendList(key, sources); err != nil {
+	refs, err := decodeBackendRefs(key, nodePtrs(sources))
+	if err != nil {
 		return nil, err
 	}
-	return sources, nil
+	return refNames(refs), nil
 }
 
 // entityTypes enumerates every connector.<type> key this docket's design
@@ -537,47 +525,52 @@ func sourcesList(key string, sources []string) ([]string, error) {
 // single-valued like scm.
 var entityTypes = []string{"pr", "issue", "ci", "scm", "thread", "calendar", "agentsession", "alert", "mail"}
 
-// AllBackends returns every backend binary name registered under any
+// AllBackends returns every backend name registered under any
 // connector.<type> entry, across both list-valued and single-valued types.
-// A binary registered under more than one type — a multi-capability
+// A name registered under more than one type — a multi-capability
 // backend, mandatory per INV-REG-1 — is deduplicated to exactly one
 // entry, in first-occurrence order (entityTypes' fixed pr/issue/ci/scm
 // order), rather than producing one sources[] row per type it appears
-// under [bug A27].
+// under [bug A27]. Two instances of one binary are two entries.
 func (r *Registry) AllBackends() ([]string, error) {
 	var out []string
 	seen := make(map[string]bool)
 	for _, t := range entityTypes {
-		node, ok := r.raw[t]
-		if !ok {
-			continue
+		refs, err := r.entityRefs(t)
+		if err != nil {
+			return nil, err
 		}
-		var names []string
-		switch node.Kind {
-		case yaml.SequenceNode:
-			list, err := r.List(t)
-			if err != nil {
-				return nil, err
-			}
-			names = list
-		case yaml.ScalarNode:
-			single, err := r.Single(t)
-			if err != nil {
-				return nil, err
-			}
-			if single != "" {
-				names = []string{single}
-			}
-		default:
-			return nil, fmt.Errorf("registry: connector.%s must be a list or a single backend binary name, got %s", t, nodeKindName(node.Kind))
-		}
-		for _, name := range names {
-			if seen[name] {
+		for _, ref := range refs {
+			if seen[ref.Name] {
 				continue
 			}
-			seen[name] = true
-			out = append(out, name)
+			seen[ref.Name] = true
+			out = append(out, ref.Name)
 		}
 	}
 	return out, nil
+}
+
+// entityRefs decodes whatever connector.<t> holds (list, scalar or one
+// mapping) into its registrations; an absent type returns nil.
+func (r *Registry) entityRefs(t string) ([]backendRef, error) {
+	if r == nil {
+		return nil, nil
+	}
+	node, ok := r.raw[t]
+	if !ok {
+		return nil, nil
+	}
+	switch node.Kind {
+	case yaml.SequenceNode:
+		return r.listRefs(t)
+	case yaml.ScalarNode, yaml.MappingNode:
+		ref, ok, err := r.singleRef(t)
+		if err != nil || !ok {
+			return nil, err
+		}
+		return []backendRef{ref}, nil
+	default:
+		return nil, fmt.Errorf("registry: connector.%s must be a list or a single backend binary name, got %s", t, nodeKindName(node.Kind))
+	}
 }

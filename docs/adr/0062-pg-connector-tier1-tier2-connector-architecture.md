@@ -87,9 +87,12 @@ PR/issue/CI/SCM systems, the Tier-1 umbrella + Tier-2 backend model:
    local-git `scm` backend, which has no remote credential concept at all) simply does not implement
    it, and is reported as a well-formed "disabled: not applicable" rather than a forced or
    meaningless answer. pg-connector ships no shared credential-resolution library of its own.
-7. **Adding a backend is a registry-config change, never an umbrella code change.** The umbrella's
-   `connector.<type>` registry entries are bare binary names, with no `exec:`-prefix or other
-   built-in/external distinction, because nothing is compiled into the umbrella itself.
+7. **Adding a backend is a registry-config change, never an umbrella code change.** A registry
+   entry is either a bare binary name on `PATH` or an instance, `{name, command}`, where `command`
+   is an argv list whose first word is a bare binary name (no path separator, no whitespace) and
+   whose remaining words are arguments passed to that binary. There is no `exec:`-prefix or other
+   built-in/external distinction, because nothing is compiled into the umbrella itself. See
+   item 11.
 8. **A new entity-type capability (`calendar`) was added under this same model, without changing
    the model itself.** `calendar` follows every rule above identically: one capability-scoped
    `calendar.Provider` Go interface (`packages/pg-connector/pkg/provider/calendar`), its own
@@ -229,6 +232,29 @@ Rejected: the three backends already landed resolve credentials three different,
 Cloudflare Access JWT for Captain's Log-style tooling); forcing one shape onto all three would fit
 none of them well, and a future backend is free to pick whatever chain fits its own token model.
 
+11. **A registry entry names an instance: a `name` plus an argv `command`; one backend binary MAY be
+    registered more than once.** (Amendment, bead `pg2-91y12`, operator rulings of Phillip,
+    2026-10-09.) A registered backend's command was never meant to be a single word: it is a
+    command, binary plus arguments, that only has to behave correctly when pg-connector invokes it
+    with the usual wire request on stdin. Every registration (each `connector.<type>` entry,
+    `attention.sources`, `search.sources`, `activity.sources`) therefore accepts either a plain
+    string, which means name = binary and command = `[name]` exactly as before, or a mapping
+    `{name, command}` with `command` an argv LIST (never a shell string). The name is the
+    instance's identity everywhere the umbrella uses one: `sources[].source`, the `--backend` pin,
+    the `backends.<name>` config key, and the cache and ledger key; it therefore MUST NOT contain a
+    path separator or the two-character cache/ledger key separator (`__`), and a name that appears
+    in more than one registration MUST carry the same command in each. The umbrella execs
+    `command[0]` with `command[1:]` as arguments, adds nothing after them, and still sends the JSON
+    request on stdin; the wire protocol, its schemas and `protocolVersion` are unchanged and a
+    backend never learns its registered name. `pg-connector-activity-*` capability-only backends
+    remain rejected under `connector.<type>`, now checked against both the name and `command[0]`.
+    The motivating case is the beads backend, which serves one tracker per process: it is
+    registered twice, as `pg-connector-issue-beads-pg2` and `pg-connector-issue-beads-zr`, each
+    running the same binary with `--beads-dir <tracker>` (flag over
+    `PG_CONNECTOR_ISSUE_BEADS_DIR` over `BEADS_DIR`; no tracker at all remains a refusal), with
+    neither instance primary and no unsuffixed instance. The registry behavior is recorded as
+    invariant `INV-REG-4` in `packages/pg-connector/docs/behavior/invariants.md`.
+
 ## Related Decisions
 
 - Realizes the Tier-1/Tier-2 split first proposed in
@@ -245,3 +271,6 @@ none of them well, and a future backend is free to pick whatever chain fits its 
   `calendar` entity-type capability (Decision item 8, above) under this same Tier-1/Tier-2 model.
 - Extended again by bead `pg2-no8ic`'s design (decomposed as docket `pg2-qc5uc`), which added the
   `mail` entity-type capability (Decision item 10, above) under this same Tier-1/Tier-2 model.
+- Amended by bead `pg2-91y12` (operator rulings 2026-10-09), which generalized registry entries
+  from bare binary names to `{name, command}` instances (Decision item 11, above) so one backend
+  binary can be registered more than once.

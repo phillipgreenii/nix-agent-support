@@ -265,9 +265,10 @@ distinction come from the behavior-docs method
 - **`INV-REG-1`** <!-- uuid: 0b8b254c-3fcf-46ce-bbe7-1c9b1c03be0d --> — The `connector.<type>`
   registry MUST be flat and type-keyed at the top level. `issue`, `ci`, `pr`, `calendar`, and `mail` MUST
   be list-valued (zero or more simultaneously-registered backends); `scm` MUST be single-valued
-  (exactly zero or one). Every registry value MUST be a bare backend binary name — there MUST be
-  no `exec:`-prefix or other built-in/external distinction, because nothing is compiled into the
-  umbrella itself (`GOAL-MIN-1`). (`thread` is also list-valued in practice but, as of this
+  (exactly zero or one). Every registry entry MUST be either a bare backend binary name or an
+  instance `{name, command}` as stated in `INV-REG-4` — there MUST be no `exec:`-prefix or other
+  built-in/external distinction, because nothing is compiled into the umbrella itself
+  (`GOAL-MIN-1`). (`thread` is also list-valued in practice but, as of this
   writing, is missing from this enumeration — a pre-existing gap this rule's own text has not yet
   been updated to close.)
 - **`INV-REG-2`** <!-- uuid: 6ea815c2-293c-40ca-93d7-2d8cc1b73b93 --> — A **targeted** op MUST
@@ -318,6 +319,19 @@ create`), `--backend` is how an operator resolves an otherwise-ambiguous N > 1 r
   backend registered ONLY under `attention.sources`/`search.sources`/`activity.sources` reports its own health
   solely through `attention list`'s/`search`'s/`activity list`'s own `sources[]` rows, never through `auth
 status`/`config validate`.
+- **`INV-REG-4`** <!-- uuid: a9092e28-e3ad-4c3a-8d7c-9def36d2d111 --> — A registry entry, under any `connector.<type>` key or
+  under `attention.sources`, `search.sources` or `activity.sources`, MUST be either a plain string
+  (name and binary are the same word, command is `[name]`) or a mapping with exactly the keys `name`
+  and `command`. `command` MUST be a non-empty list of strings whose first word is a bare binary
+  name (non-empty, no path separator, no whitespace); it MUST NOT be a shell string. A name MUST be
+  non-empty, MUST NOT contain a path separator, and MUST NOT contain `__`. Within one list a name
+  MUST appear at most once. A name registered under more than one key MUST have the same command
+  under each. The umbrella MUST exec `command[0]` with `command[1:]` as its arguments and nothing
+  after them, and MUST NOT interpret, expand or reorder them; the wire request on stdin is
+  unchanged. The name is the identity used for `sources[]` rows, the `--backend` pin,
+  `backends.<name>` and the cache and ledger keys. A `pg-connector-activity-*` capability-only
+  backend MUST NOT appear under `connector.<type>` whether the prefix is on the name or on
+  `command[0]`.
 
 ## CLI outcome reporting and exit codes
 

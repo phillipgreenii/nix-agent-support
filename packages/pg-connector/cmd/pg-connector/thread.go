@@ -126,7 +126,7 @@ func fanOutThreadList(ctx context.Context, reg *Registry, backends []string, que
 			out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDegraded, Reason: err.Error()})
 			continue
 		}
-		resp, err := scriptout.Invoke(ctx, b, "list", map[string]any{"query": query, "ids_only": idsOnly}, config)
+		resp, err := reg.Invoke(ctx, b, "list", map[string]any{"query": query, "ids_only": idsOnly}, config)
 		if err != nil {
 			out.Sources = append(out.Sources, classifyListSource(b, err))
 			continue

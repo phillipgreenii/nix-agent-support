@@ -435,3 +435,29 @@ func TestCLIRunner_withActor_ExplicitActorKept(t *testing.T) {
 		t.Fatalf("got %v, %v", got, err)
 	}
 }
+
+// TestCLIRunner_FlagDirBeatsBothEnvVars is the --beads-dir precedence proof
+// (bead pg2-91y12): the flag lands in CLIRunner.Dir, which must win over
+// $PG_CONNECTOR_ISSUE_BEADS_DIR, which wins over $BEADS_DIR.
+func TestCLIRunner_FlagDirBeatsBothEnvVars(t *testing.T) {
+	env := fakeEnv(map[string]string{EnvWorkspaceDir: "/env/pg-connector", envBeadsDir: "/env/bd"})
+	flagRunner := &CLIRunner{Dir: "/flag/dir", Getenv: env}
+	if dir, err := flagRunner.Workspace(); err != nil || dir != "/flag/dir" {
+		t.Fatalf("flag runner Workspace = %q, %v; want /flag/dir", dir, err)
+	}
+	envRunner := &CLIRunner{Getenv: env}
+	if dir, err := envRunner.Workspace(); err != nil || dir != "/env/pg-connector" {
+		t.Fatalf("env runner Workspace = %q, %v; want /env/pg-connector", dir, err)
+	}
+}
+
+// TestErrWorkspaceNotConfigured_MentionsFlagKeepsOldText keeps the existing
+// substring consumers match (pg-rescue) while advertising the flag.
+func TestErrWorkspaceNotConfigured_MentionsFlagKeepsOldText(t *testing.T) {
+	msg := ErrWorkspaceNotConfigured.Error()
+	for _, want := range []string{"bd workspace not configured", EnvWorkspaceDir, "--beads-dir"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("message %q missing %q", msg, want)
+		}
+	}
+}

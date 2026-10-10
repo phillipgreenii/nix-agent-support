@@ -99,8 +99,78 @@ let
     connector.pr = [ "pg-connector-pr-github" ];
     activity.sources = [ "pg-connector-pr-github" ];
   };
+
+  # Instances (bead pg2-91y12, INV-REG-4): one beads binary registered twice
+  # under suffixed names with a per-instance argv, in every registration
+  # (connector.issue next to a plain string, attention/search/activity
+  # sources), plus a plain-string scm. EXAMPLE paths only.
+  instanceBeads = suffix: {
+    name = "pg-connector-issue-beads-${suffix}";
+    command = [
+      "pg-connector-issue-beads"
+      "--beads-dir"
+      "/example/${suffix}"
+    ];
+  };
+  instancesExample = {
+    connector = {
+      issue = [
+        "pg-connector-issue-jira"
+        (instanceBeads "pg2")
+        (instanceBeads "zr")
+      ];
+      scm = "pg-connector-scm-git";
+    };
+    attention.sources = [
+      (instanceBeads "pg2")
+      (instanceBeads "zr")
+    ];
+    search.sources = [
+      (instanceBeads "pg2")
+      (instanceBeads "zr")
+    ];
+    activity.sources = [
+      (instanceBeads "pg2")
+      (instanceBeads "zr")
+    ];
+    backends = {
+      "pg-connector-issue-beads-pg2".activity_actors = [ "Example Person" ];
+      "pg-connector-issue-beads-zr".activity_actors = [ "Example Person" ];
+    };
+  };
+
+  # scm as a single {name, command} instance (connector.scm is single-valued).
+  scmInstanceExample = {
+    connector.scm = {
+      name = "pg-connector-scm-git-example";
+      command = [
+        "pg-connector-scm-git"
+        "--example"
+      ];
+    };
+  };
+
+  # A malformed instance (missing command, or an empty one) must FAIL
+  # evaluation, never render a half-entry the registry would reject later.
+  renders = cfg: (builtins.tryEval (builtins.deepSeq (render cfg).drvPath true)).success;
 in
 {
+  # Instances in every registration, alongside plain strings.
+  instances = render instancesExample;
+  # A single-valued scm accepts one {name, command} too.
+  scmInstance = render scmInstanceExample;
+  # Entries missing command or with an empty command are rejected at eval.
+  malformedInstancesRejected =
+    !(renders { connector.issue = [ { name = "pg-connector-issue-beads-pg2"; } ]; })
+    && !(renders {
+      connector.issue = [
+        {
+          name = "pg-connector-issue-beads-pg2";
+          command = [ ];
+        }
+      ];
+    })
+    && !(renders { connector.issue = [ { command = [ "pg-connector-issue-beads" ]; } ]; });
   # Pre-alert configuration: MUST stay byte-for-byte unchanged.
   legacy = render legacy;
   # An explicit empty connector.alert is omitted exactly like thread/calendar.

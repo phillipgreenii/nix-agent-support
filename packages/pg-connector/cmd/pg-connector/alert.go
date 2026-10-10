@@ -62,7 +62,7 @@ func fanOutAlertList(ctx context.Context, reg *Registry, backends []string, quer
 			out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDegraded, Reason: err.Error()})
 			continue
 		}
-		resp, err := scriptout.Invoke(ctx, b, "list", map[string]any{"query": query, "ids_only": idsOnly}, config)
+		resp, err := reg.Invoke(ctx, b, "list", map[string]any{"query": query, "ids_only": idsOnly}, config)
 		if err != nil {
 			out.Sources = append(out.Sources, classifyListSource(b, err))
 			continue
@@ -153,7 +153,7 @@ func fanOutAlertHistory(ctx context.Context, reg *Registry, backends []string, s
 			out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDegraded, Reason: err.Error()})
 			continue
 		}
-		resp, err := scriptout.Invoke(ctx, b, "list_history", args, config)
+		resp, err := reg.Invoke(ctx, b, "list_history", args, config)
 		if err != nil {
 			if errors.Is(err, scriptout.ErrUnknownOp) {
 				out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDisabled, Reason: "not applicable"})

@@ -113,7 +113,7 @@ func fanOutCIList(ctx context.Context, reg *Registry, backends []string, prID st
 			out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDegraded, Reason: err.Error()})
 			continue
 		}
-		resp, err := scriptout.Invoke(ctx, b, "list_runs", map[string]string{"pr_id": prID}, config)
+		resp, err := reg.Invoke(ctx, b, "list_runs", map[string]string{"pr_id": prID}, config)
 		if err != nil {
 			if errors.Is(err, scriptout.ErrUnknownOp) {
 				out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDisabled, Reason: "not applicable"})

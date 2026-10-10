@@ -144,7 +144,7 @@ func TestFanOutSearch_CountIsRawResultLengthNeverZeroPlaceholder(t *testing.T) {
 // own Validation section. ---
 
 func TestValidateSearchFields_CoreFieldNoWarning(t *testing.T) {
-	got := validateSearchFields(context.Background(), nil, []string{"title"})
+	got := validateSearchFields(context.Background(), nil, nil, []string{"title"})
 	if len(got) != 0 {
 		t.Fatalf("warnings = %v, want none for a core-set field", got)
 	}
@@ -155,7 +155,7 @@ func TestValidateSearchFields_BackendVocabularyFieldNoWarning(t *testing.T) {
 		"capabilities": `{"protocolVersion":1,"schemaVersions":{"search":1},"ops":["search","capabilities"],"vocabulary":{"search_attributes":["custom_attr"]}}`,
 	}, `{"protocolVersion":1,"error":{"code":"unknown_op","message":"unknown op"}}`)
 
-	got := validateSearchFields(context.Background(), []string{"backend-a"}, []string{"custom_attr"})
+	got := validateSearchFields(context.Background(), nil, []string{"backend-a"}, []string{"custom_attr"})
 	if len(got) != 0 {
 		t.Fatalf("warnings = %v, want none for a field declared in a queried backend's own vocabulary", got)
 	}
@@ -166,7 +166,7 @@ func TestValidateSearchFields_UnrecognizedFieldProducesExactlyOneWarning(t *test
 		"capabilities": `{"protocolVersion":1,"schemaVersions":{"search":1},"ops":["search","capabilities"],"vocabulary":{"search_attributes":["custom_attr"]}}`,
 	}, `{"protocolVersion":1,"error":{"code":"unknown_op","message":"unknown op"}}`)
 
-	got := validateSearchFields(context.Background(), []string{"backend-a"}, []string{"title", "custom_attr", "totally_unknown"})
+	got := validateSearchFields(context.Background(), nil, []string{"backend-a"}, []string{"title", "custom_attr", "totally_unknown"})
 	if len(got) != 1 {
 		t.Fatalf("warnings = %v, want exactly one (only totally_unknown is unrecognized)", got)
 	}
@@ -176,7 +176,7 @@ func TestValidateSearchFields_UnrecognizedFieldProducesExactlyOneWarning(t *test
 }
 
 func TestValidateSearchFields_EmptyFieldsSkipsValidation(t *testing.T) {
-	got := validateSearchFields(context.Background(), nil, nil)
+	got := validateSearchFields(context.Background(), nil, nil, nil)
 	if got != nil {
 		t.Fatalf("warnings = %v, want nil (an empty --fields skips validation entirely)", got)
 	}

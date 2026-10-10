@@ -67,9 +67,11 @@ type Runner interface {
 // EnvWorkspaceDir is the env var this backend checks first when resolving
 // bd's workspace directory — a dedicated, backend-scoped override in the
 // same env-var-driven-config style as pg-connector's own $PG_PR_CONFIG
-// (cmd/pg-connector/registry.go), rather than a new per-backend registry
-// field (the shared connector.<type> registry carries only bare binary
-// names today; widening its shape is out of this bead's scope).
+// (cmd/pg-connector/registry.go). It is the second source: the binary's
+// --beads-dir DIR flag (cmd/pg-connector-issue-beads/args.go) beats it, so
+// one binary registered twice as {name, command} instances serves one
+// tracker each (bead pg2-91y12, ADR 0062 amendment); this var stays the
+// fallback for a single plain-string registration.
 const EnvWorkspaceDir = "PG_CONNECTOR_ISSUE_BEADS_DIR"
 
 // EnvActor is the env var naming this backend's own bd actor identity (bead
@@ -135,7 +137,7 @@ func withBDJSONEnvelope(base []string) []string {
 // not a wrong-bead mutation with no sign anything went wrong.
 var ErrWorkspaceNotConfigured = errors.New(
 	"issue-beads: bd workspace not configured; set $" + EnvWorkspaceDir +
-		" (or bd's own $" + envBeadsDir + ") to an absolute path so this backend's effective tracker does not depend on the caller's cwd",
+		" (or bd's own $" + envBeadsDir + ") to an absolute path so this backend's effective tracker does not depend on the caller's cwd (or pass --beads-dir)",
 )
 
 // ResolveWorkspaceDir resolves the directory every bd invocation is pinned

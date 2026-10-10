@@ -19,7 +19,12 @@
 package main
 
 import (
+	"errors"
+	"flag"
+	"fmt"
+	"io"
 	"os"
+	"strings"
 	"time"
 
 	internal "github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-issue-beads/internal"
@@ -36,15 +41,44 @@ import (
 var Version = "dev"
 
 func main() {
-	os.Exit(run())
+	os.Exit(run(os.Args[1:], os.Stderr))
 }
 
 // run builds this backend's Provider (a bd-CLI-backed Backend) and its
 // op-dispatch table, then hands the table to the Tier-1 core's generic
-// serve loop.
-func run() int {
-	backend := internal.New(internal.NewCLIRunner())
+// serve loop. args are the registry command's own arguments (the umbrella
+// puts them before the stdin request); a bad argument is reported on stderr
+// with exit code 2 before the serve loop ever starts, so stdout stays empty
+// and the umbrella folds stderr into the unavailable reason.
+func run(args []string, stderr io.Writer) int {
+	runner, code := newRunner(args, stderr)
+	if runner == nil {
+		return code
+	}
+	backend := internal.New(runner)
 	return scriptout.ServeLoop(instrument(newDispatchTable(backend), os.Getenv))
+}
+
+// newRunner builds the bd runner for args: --beads-dir DIR pins the tracker
+// outright (internal.CLIRunner.Dir beats both env vars, so the precedence is
+// flag > $PG_CONNECTOR_ISSUE_BEADS_DIR > $BEADS_DIR with no change to
+// ResolveWorkspaceDir); without the flag the runner resolves from env exactly
+// as before, and with no tracker at all it keeps refusing with
+// internal.ErrWorkspaceNotConfigured. A nil runner means run should exit with
+// the returned code (0 for -h, 2 for a bad argument).
+func newRunner(args []string, stderr io.Writer) (*internal.CLIRunner, int) {
+	dir, err := parseArgs(args, stderr)
+	switch {
+	case errors.Is(err, flag.ErrHelp):
+		return nil, 0
+	case err != nil:
+		_, _ = fmt.Fprintln(stderr, strings.TrimPrefix(err.Error(), errUsage.Error()+": "))
+		return nil, 2
+	}
+	if dir != "" {
+		return &internal.CLIRunner{Dir: dir}, 0
+	}
+	return internal.NewCLIRunner(), 0
 }
 
 // instrument wraps table so every call writes a start row, heartbeats while

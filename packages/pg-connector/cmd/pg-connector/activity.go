@@ -110,7 +110,7 @@ func fanOutActivityList(ctx context.Context, reg *Registry, backends []string, a
 			out.Sources = append(out.Sources, activitySourceRow{Source: b, Status: SourceDegraded, Reason: err.Error()})
 			continue
 		}
-		resp, err := scriptout.Invoke(ctx, b, "list_activity", args, config)
+		resp, err := reg.Invoke(ctx, b, "list_activity", args, config)
 		if err != nil {
 			if errors.Is(err, scriptout.ErrUnknownOp) {
 				out.Sources = append(out.Sources, activitySourceRow{Source: b, Status: SourceDisabled, Reason: "not applicable"})

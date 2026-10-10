@@ -1,0 +1,6 @@
+connector:
+  scm:
+    command:
+      - pg-connector-scm-git
+      - --example
+    name: pg-connector-scm-git-example

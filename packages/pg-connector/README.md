@@ -62,8 +62,33 @@ connector:
   scm: pg-connector-scm-git # single-valued (scm has no multi-backend future)
 ```
 
-Every value is a bare binary name on `PATH` — there is no `exec:`-prefix or other built-in/
-external distinction, since nothing is compiled into the umbrella itself.
+Every value is either a bare binary name on `PATH` or an instance `{name, command}`: `command` is
+an argv list whose first word is a bare binary name and whose other words are arguments to it (for
+example `{name: pg-connector-issue-beads-zr, command: [pg-connector-issue-beads, --beads-dir,
+/path/to/tracker]}`). `name` labels the instance everywhere (`sources[]`, `--backend`,
+`backends.<name>`), and a name used in several registrations carries the same command each time.
+There is no `exec:`-prefix or other built-in/external distinction, since nothing is compiled into
+the umbrella itself. The same shape works under `attention.sources`, `search.sources` and
+`activity.sources`.
+
+One binary registered twice, a plain-string list next to an instance list:
+
+```yaml
+connector:
+  pr: [pg-connector-pr-github] # plain string: name = binary
+  issue:
+    - pg-connector-issue-jira
+    - name: pg-connector-issue-beads-pg2 # instance: one beads tracker per process
+      command: [pg-connector-issue-beads, --beads-dir, /path/to/pg2-tracker]
+    - name: pg-connector-issue-beads-zr
+      command: [pg-connector-issue-beads, --beads-dir, /path/to/zr-tracker]
+backends:
+  pg-connector-issue-beads-pg2: { activity_actors: [Example Person] } # keyed by NAME
+  pg-connector-issue-beads-zr: { activity_actors: [Example Person] }
+```
+
+`pg-connector-issue-beads` takes its tracker from `--beads-dir DIR`, then
+`$PG_CONNECTOR_ISSUE_BEADS_DIR`, then `$BEADS_DIR`; with none of the three it refuses to run.
 
 ## Subcommands
 

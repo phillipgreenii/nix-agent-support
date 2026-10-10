@@ -7,6 +7,33 @@
 let
   cfg = config.phillipgreenii.programs.pg-connector;
 
+  # A registration (bead pg2-91y12, ADR 0062 amendment, INV-REG-4): either a
+  # plain string (a bare binary name on PATH, name = binary, exactly as
+  # before) or an instance `{ name, command }`. `name` is the instance's
+  # identity everywhere pg-connector uses one (sources[] label, --backend
+  # pin, backends.<name> key, cache and ledger key); `command` is an argv
+  # LIST whose first word is a bare binary name on PATH and whose remaining
+  # words are its arguments (never a shell string), so one backend binary
+  # can be registered more than once, e.g. the beads backend once per
+  # tracker: { name = "pg-connector-issue-beads-pg2"; command = [
+  # "pg-connector-issue-beads" "--beads-dir" "/path/to/tracker" ]; }. The
+  # rendering below passes values through untouched: a string renders as a
+  # string and the submodule as exactly { name, command }.
+  backendEntry = lib.types.either lib.types.str (
+    lib.types.submodule {
+      options = {
+        name = lib.mkOption {
+          type = lib.types.str;
+          description = "Instance name: the sources[] label, the `--backend` pin, the `backends.<name>` key, and the cache/ledger key. MUST NOT contain a path separator or `__`.";
+        };
+        command = lib.mkOption {
+          type = lib.types.nonEmptyListOf lib.types.str;
+          description = "argv run for this instance: the first word is a bare binary name resolved on PATH, the rest are its arguments. The JSON request still arrives on stdin.";
+        };
+      };
+    }
+  );
+
   # connector.<type> as pg-connector's own registry.go actually requires it:
   # pr/issue/ci MUST be either a non-empty list or ABSENT entirely
   # (validateBackendList rejects an explicit connector.<type>: [] with
@@ -172,24 +199,24 @@ in
       type = lib.types.submodule {
         options = {
           pr = lib.mkOption {
-            type = lib.types.listOf lib.types.str;
+            type = lib.types.listOf backendEntry;
             default = [ ];
-            description = "Registered `pr` capability backends (bare binary names, resolved on PATH), in fan-out order.";
+            description = "Registered `pr` capability backends (bare binary names resolved on PATH, or `{ name, command }` instances), in fan-out order.";
           };
           issue = lib.mkOption {
-            type = lib.types.listOf lib.types.str;
+            type = lib.types.listOf backendEntry;
             default = [ ];
-            description = "Registered `issue` capability backends (bare binary names, resolved on PATH), in fan-out order.";
+            description = "Registered `issue` capability backends (bare binary names resolved on PATH, or `{ name, command }` instances), in fan-out order.";
           };
           ci = lib.mkOption {
-            type = lib.types.listOf lib.types.str;
+            type = lib.types.listOf backendEntry;
             default = [ ];
-            description = "Registered `ci` capability backends (bare binary names, resolved on PATH), in fan-out order.";
+            description = "Registered `ci` capability backends (bare binary names resolved on PATH, or `{ name, command }` instances), in fan-out order.";
           };
           scm = lib.mkOption {
-            type = lib.types.nullOr lib.types.str;
+            type = lib.types.nullOr backendEntry;
             default = null;
-            description = "Registered `scm` capability backend (bare binary name; single-valued -- no analogous second-backend future today).";
+            description = "Registered `scm` capability backend (bare binary name or one `{ name, command }` instance; single-valued -- no analogous second-backend future today).";
           };
           # thread (bead pg2-2j5ac.40.3, Phase 13): a WHOLLY NEW capability
           # with no existing field to reuse -- list-of-str, default [ ],
@@ -198,9 +225,9 @@ in
           # `connector.thread = [ "pg-connector-thread-slack" ]` is a hard
           # Nix eval error ("option does not exist").
           thread = lib.mkOption {
-            type = lib.types.listOf lib.types.str;
+            type = lib.types.listOf backendEntry;
             default = [ ];
-            description = "Registered `thread` capability backends (bare binary names, resolved on PATH), in fan-out order.";
+            description = "Registered `thread` capability backends (bare binary names resolved on PATH, or `{ name, command }` instances), in fan-out order.";
           };
           # calendar (docket pg2-o2dmu): a WHOLLY NEW capability, mirroring
           # thread's exact shape (list-of-str, default [ ]) rather than
@@ -211,9 +238,9 @@ in
           # registration plus real calendars/important_people values live
           # in the consuming machine flake (phillipg-nix-ziprecruiter).
           calendar = lib.mkOption {
-            type = lib.types.listOf lib.types.str;
+            type = lib.types.listOf backendEntry;
             default = [ ];
-            description = "Registered `calendar` capability backends (bare binary names, resolved on PATH), in fan-out order.";
+            description = "Registered `calendar` capability backends (bare binary names resolved on PATH, or `{ name, command }` instances), in fan-out order.";
           };
           # agentsession (docket pg2-eezd1): a WHOLLY NEW capability,
           # mirroring thread's exact shape (list-of-str, default [ ])
@@ -224,9 +251,9 @@ in
           # stays [ ] here (this repo is a public flake) -- the real
           # registration lives in the consuming machine flake(s).
           agentsession = lib.mkOption {
-            type = lib.types.listOf lib.types.str;
+            type = lib.types.listOf backendEntry;
             default = [ ];
-            description = "Registered `agentsession` capability backends (bare binary names, resolved on PATH), in fan-out order.";
+            description = "Registered `agentsession` capability backends (bare binary names resolved on PATH, or `{ name, command }` instances), in fan-out order.";
           };
           # alert (bead pg2-9tql6): a WHOLLY NEW capability, mirroring
           # thread's exact shape (list-of-str, default [ ]). Without this
@@ -237,9 +264,9 @@ in
           # registration plus real base_url/queries values live in the
           # consuming machine flake.
           alert = lib.mkOption {
-            type = lib.types.listOf lib.types.str;
+            type = lib.types.listOf backendEntry;
             default = [ ];
-            description = "Registered `alert` capability backends (bare binary names, resolved on PATH), in fan-out order.";
+            description = "Registered `alert` capability backends (bare binary names resolved on PATH, or `{ name, command }` instances), in fan-out order.";
           };
           # mail (docket pg2-qc5uc): a WHOLLY NEW capability, mirroring
           # thread's exact shape (list-of-str, default [ ]). Without this
@@ -251,9 +278,9 @@ in
           # consuming machine flake (rendered via the free-form `backends`
           # option, so no new option is needed for them).
           mail = lib.mkOption {
-            type = lib.types.listOf lib.types.str;
+            type = lib.types.listOf backendEntry;
             default = [ ];
-            description = "Registered `mail` capability backends (bare binary names, resolved on PATH), in fan-out order.";
+            description = "Registered `mail` capability backends (bare binary names resolved on PATH, or `{ name, command }` instances), in fan-out order.";
           };
         };
       };
@@ -277,9 +304,9 @@ in
       type = lib.types.submodule {
         options = {
           sources = lib.mkOption {
-            type = lib.types.listOf lib.types.str;
+            type = lib.types.listOf backendEntry;
             default = [ ];
-            description = "Registered `attention.sources` backends (bare binary names, resolved on PATH), fanned out to by `pg-connector attention list`, in config order.";
+            description = "Registered `attention.sources` backends (bare binary names resolved on PATH, or `{ name, command }` instances), fanned out to by `pg-connector attention list`, in config order.";
           };
 
           # perBackend (bead pg2-7wqkr): attention.sources (above) only
@@ -339,9 +366,9 @@ in
       type = lib.types.submodule {
         options = {
           sources = lib.mkOption {
-            type = lib.types.listOf lib.types.str;
+            type = lib.types.listOf backendEntry;
             default = [ ];
-            description = "Registered `search.sources` backends (bare binary names, resolved on PATH), fanned out to by `pg-connector search <query>`, in config order.";
+            description = "Registered `search.sources` backends (bare binary names resolved on PATH, or `{ name, command }` instances), fanned out to by `pg-connector search <query>`, in config order.";
           };
         };
       };
@@ -364,9 +391,9 @@ in
       type = lib.types.submodule {
         options = {
           sources = lib.mkOption {
-            type = lib.types.listOf lib.types.str;
+            type = lib.types.listOf backendEntry;
             default = [ ];
-            description = "Registered `activity.sources` backends (bare binary names, resolved on PATH) serving the `activity` capability's `list_activity`, in config order.";
+            description = "Registered `activity.sources` backends (bare binary names resolved on PATH, or `{ name, command }` instances) serving the `activity` capability's `list_activity`, in config order.";
           };
         };
       };
@@ -407,8 +434,9 @@ in
       );
       default = { };
       description = ''
-        Per-alerts-backend config blocks, keyed by backend binary name (e.g.
-        `pg-connector-alert-grafana`), rendered under `backends.<name>:` in
+        Per-alerts-backend config blocks, keyed by registered backend NAME (the
+        binary name for a plain string, the instance name for a
+        `{ name, command }` instance; e.g. `pg-connector-alert-grafana`), rendered under `backends.<name>:` in
         the shared config file. Declare `queries` here and any backend-native
         keys (e.g. `base_url`) as plain attributes; name the query
         `list_attention` runs via `attention.perBackend.<name>.attentionQuery`.
@@ -421,8 +449,9 @@ in
       type = lib.types.attrsOf (lib.types.attrsOf lib.types.anything);
       default = { };
       description = ''
-        Per-backend opaque config blocks, keyed by backend binary name (e.g.
-        `pg-connector-pr-github`). Each value is rendered verbatim under
+        Per-backend opaque config blocks, keyed by registered backend NAME (the
+        binary name for a plain string, the instance name for a
+        `{ name, command }` instance; e.g. `pg-connector-pr-github`). Each value is rendered verbatim under
         `backends.<name>:` in the shared config file; pg-connector copies it
         into every wire request sent to that backend without interpreting
         it, treating it as fully opaque (mirrors the umbrella's own

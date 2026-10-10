@@ -129,14 +129,14 @@ func FanOutConfigValidate(ctx context.Context, reg *Registry, backends []string)
 func configValidateOne(ctx context.Context, reg *Registry, backend string) SourceResult {
 	var reasons []string
 
-	authResult := authStatusOne(ctx, backend)
+	authResult := authStatusOne(ctx, reg, backend)
 	authOK := authResult.Status == SourceSucceeded || authResult.Status == SourceDisabled
 	if !authOK {
 		reasons = append(reasons, "auth_status: "+authResult.Reason)
 	}
 
 	capsOK := true
-	capsResp, err := scriptout.InvokeCapabilities(ctx, backend)
+	capsResp, err := reg.InvokeCapabilities(ctx, backend)
 	if err == nil {
 		// InvokeCapabilities already checked protocolVersion (see its own
 		// doc comment); schemaVersion is per-capability, so it is checked
@@ -252,7 +252,7 @@ func activityKindsUnion(ctx context.Context, reg *Registry) []string {
 	}
 	known := map[string]bool{}
 	for _, b := range sources {
-		resp, err := scriptout.InvokeCapabilities(ctx, b)
+		resp, err := reg.InvokeCapabilities(ctx, b)
 		if err != nil || resp == nil {
 			continue
 		}
@@ -286,6 +286,9 @@ func newConfigValidateCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			reg, err := LoadRegistry()
 			if err != nil {
+				return err
+			}
+			if err := reg.Validate(); err != nil {
 				return err
 			}
 			backends, err := reg.AllBackends()

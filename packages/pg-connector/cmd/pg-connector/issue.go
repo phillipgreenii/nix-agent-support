@@ -384,7 +384,7 @@ func fanOutIssueList(ctx context.Context, reg *Registry, backends []string, quer
 			out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDegraded, Reason: err.Error()})
 			continue
 		}
-		resp, err := scriptout.Invoke(ctx, b, "list", map[string]any{"query": query, "cursor": nil, "ids_only": idsOnly}, config)
+		resp, err := reg.Invoke(ctx, b, "list", map[string]any{"query": query, "cursor": nil, "ids_only": idsOnly}, config)
 		if err != nil {
 			// A bounded call never serves the cache fallback (see
 			// fanOutPRList): cached entries are not window-filtered.

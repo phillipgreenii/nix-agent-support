@@ -32,12 +32,21 @@ import (
 // default "config show" output. Never invokes a backend, matching this
 // command's own existing "never invokes a backend" convention.
 type ConfigShowResult struct {
-	ConfigPath string              `json:"config_path"`
-	PR         []string            `json:"pr,omitempty"`
-	Issue      []string            `json:"issue,omitempty"`
-	CI         []string            `json:"ci,omitempty"`
-	Scm        string              `json:"scm,omitempty"`
-	Queries    map[string][]string `json:"queries,omitempty"`
+	ConfigPath string   `json:"config_path"`
+	PR         []string `json:"pr,omitempty"`
+	Issue      []string `json:"issue,omitempty"`
+	CI         []string `json:"ci,omitempty"`
+	Scm        string   `json:"scm,omitempty"`
+	// Attention/Search/Activity are the registered names under the
+	// top-level attention.sources/search.sources/activity.sources keys, and
+	// Commands maps each {name, command} instance's name to its argv
+	// (bead pg2-91y12, INV-REG-4). All four are omitempty, so a config with
+	// only plain strings and no sources renders exactly as it did before.
+	Attention []string            `json:"attention,omitempty"`
+	Search    []string            `json:"search,omitempty"`
+	Activity  []string            `json:"activity,omitempty"`
+	Commands  map[string][]string `json:"commands,omitempty"`
+	Queries   map[string][]string `json:"queries,omitempty"`
 }
 
 // buildConfigShowResult resolves and parses the registry exactly as
@@ -52,6 +61,12 @@ func buildConfigShowResult(withQueries bool) (*ConfigShowResult, error) {
 	}
 	reg, err := loadRegistryFile(path)
 	if err != nil {
+		return nil, err
+	}
+	// Surface a malformed entry anywhere (including attention/search/
+	// activity sources, which no connector fan-out exercises) instead of
+	// letting it pass silently.
+	if err := reg.Validate(); err != nil {
 		return nil, err
 	}
 	pr, err := reg.List("pr")
@@ -71,6 +86,18 @@ func buildConfigShowResult(withQueries bool) (*ConfigShowResult, error) {
 		return nil, err
 	}
 	result := &ConfigShowResult{ConfigPath: path, PR: pr, Issue: issue, CI: ci, Scm: scm}
+	if result.Attention, err = reg.AttentionSources(); err != nil {
+		return nil, err
+	}
+	if result.Search, err = reg.SearchSources(); err != nil {
+		return nil, err
+	}
+	if result.Activity, err = reg.ActivitySources(); err != nil {
+		return nil, err
+	}
+	if commands := reg.Explicit(); len(commands) > 0 {
+		result.Commands = commands
+	}
 	if withQueries {
 		result.Queries = map[string][]string{}
 		for _, entityType := range entityTypesWithList {
@@ -173,6 +200,20 @@ func formatConfigShow(r *ConfigShowResult) string {
 	}
 	out := fmt.Sprintf("config show:\n  config_path: %s\n%s\n%s\n%s\n%s",
 		r.ConfigPath, line("pr", r.PR), line("issue", r.Issue), line("ci", r.CI), scmLine)
+	for _, src := range []struct {
+		label string
+		names []string
+	}{{"attention", r.Attention}, {"search", r.Search}, {"activity", r.Activity}} {
+		if len(src.names) > 0 {
+			out += "\n" + line(src.label, src.names)
+		}
+	}
+	if len(r.Commands) > 0 {
+		out += "\n  commands:"
+		for _, name := range sortedKeys(r.Commands) {
+			out += fmt.Sprintf("\n    %s: %s", name, strings.Join(r.Commands[name], " "))
+		}
+	}
 	if r.Queries != nil {
 		out += "\n  queries:"
 		if len(r.Queries) == 0 {

@@ -108,7 +108,7 @@ func fanOutMail(ctx context.Context, reg *Registry, backends []string, op string
 			out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDegraded, Reason: err.Error()})
 			continue
 		}
-		resp, err := scriptout.Invoke(ctx, b, op, args, config)
+		resp, err := reg.Invoke(ctx, b, op, args, config)
 		if err != nil {
 			if errors.Is(err, scriptout.ErrUnknownOp) {
 				out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDisabled, Reason: "not applicable"})

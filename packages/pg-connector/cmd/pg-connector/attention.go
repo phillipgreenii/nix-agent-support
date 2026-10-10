@@ -84,7 +84,7 @@ func fanOutAttentionList(ctx context.Context, reg *Registry, backends []string) 
 			out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDegraded, Reason: err.Error()})
 			continue
 		}
-		resp, err := scriptout.Invoke(ctx, b, "list_attention", nil, config)
+		resp, err := reg.Invoke(ctx, b, "list_attention", nil, config)
 		if err != nil {
 			if errors.Is(err, scriptout.ErrUnknownOp) {
 				out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceDisabled, Reason: "not applicable"})
