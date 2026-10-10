@@ -51,21 +51,45 @@ type Entity struct {
 	// store). Populated by reads; UpsertEntity and WriteEntityWithLog ignore
 	// it. WriteEntityStateWithLogFP sets it.
 	ListFP string
+
+	// FirstSeenAt is when pg-desk first inserted the row (RFC3339; "" means
+	// NULL). New schema only; always "" when read from an old-schema store.
+	// It is stamped ONCE, by the insert of the row (the write's own time:
+	// the `at` of the WriteEntity* writers, AsOf for UpsertEntity), and no
+	// update rewrites it; the cutover backfills existing rows from as_of.
+	// It is the rank's age fallback (the change log is pruned and cannot
+	// supply it). Populated by reads; every writer ignores this field.
+	FirstSeenAt string
 }
 
 // UpsertEntity inserts or replaces the entity row keyed by
 // (Repo, EntityType, EntityID).
+//
+// On a version-2 store a first insert also stamps first_seen_at with e.AsOf;
+// the conflict (update) branch never names first_seen_at, so it is never
+// rewritten.
 func (s *Store) UpsertEntity(e Entity) error {
-	_, err := s.sql.Exec(
-		`INSERT INTO entity (repo, entity_type, entity_id, facts, as_of, stale, content_hash, head_sha)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	isNew, err := s.isNewSchema()
+	if err != nil {
+		return err
+	}
+	insertCols, placeholders := `repo, entity_type, entity_id, facts, as_of, stale, content_hash, head_sha`, `?, ?, ?, ?, ?, ?, ?, ?`
+	args := []any{e.Repo, e.EntityType, e.EntityID, e.Facts, e.AsOf, e.Stale, e.ContentHash, nullableString(e.HeadSHA)}
+	if isNew {
+		insertCols += `, first_seen_at`
+		placeholders += `, ?`
+		args = append(args, nullableString(e.AsOf))
+	}
+	_, err = s.sql.Exec(
+		`INSERT INTO entity (`+insertCols+`)
+		 VALUES (`+placeholders+`)
 		 ON CONFLICT (repo, entity_type, entity_id) DO UPDATE SET
 		   facts = excluded.facts,
 		   as_of = excluded.as_of,
 		   stale = excluded.stale,
 		   content_hash = excluded.content_hash,
 		   head_sha = excluded.head_sha`,
-		e.Repo, e.EntityType, e.EntityID, e.Facts, e.AsOf, e.Stale, e.ContentHash, nullableString(e.HeadSHA),
+		args...,
 	)
 	if err != nil {
 		return fmt.Errorf("store: upsert entity (%s,%s,%s): %w", e.Repo, e.EntityType, e.EntityID, err)
@@ -80,7 +104,7 @@ func (s *Store) GetEntity(repo, entityType, entityID string) (entity Entity, fou
 	if err != nil {
 		return Entity{}, false, err
 	}
-	var headSHA, hydratedAt, listFP sql.NullString
+	var headSHA, hydratedAt, listFP, firstSeenAt sql.NullString
 	var active int
 	row := s.sql.QueryRow(
 		`SELECT repo, entity_type, entity_id, facts, as_of, stale, content_hash, head_sha, `+cols+`
@@ -88,7 +112,7 @@ func (s *Store) GetEntity(repo, entityType, entityID string) (entity Entity, fou
 		repo, entityType, entityID,
 	)
 	if err := row.Scan(&entity.Repo, &entity.EntityType, &entity.EntityID, &entity.Facts,
-		&entity.AsOf, &entity.Stale, &entity.ContentHash, &headSHA, &entity.Version, &hydratedAt, &active, &listFP); err != nil {
+		&entity.AsOf, &entity.Stale, &entity.ContentHash, &headSHA, &entity.Version, &hydratedAt, &active, &listFP, &firstSeenAt); err != nil {
 		if err == sql.ErrNoRows {
 			return Entity{}, false, nil
 		}
@@ -98,6 +122,7 @@ func (s *Store) GetEntity(repo, entityType, entityID string) (entity Entity, fou
 	entity.HydratedAt = hydratedAt.String
 	entity.Inactive = active == 0
 	entity.ListFP = listFP.String
+	entity.FirstSeenAt = firstSeenAt.String
 	return entity, true, nil
 }
 
@@ -138,15 +163,16 @@ func (s *Store) ListEntities() ([]Entity, error) {
 	var out []Entity
 	for rows.Next() {
 		var e Entity
-		var headSHA, hydratedAt, listFP sql.NullString
+		var headSHA, hydratedAt, listFP, firstSeenAt sql.NullString
 		var active int
-		if err := rows.Scan(&e.Repo, &e.EntityType, &e.EntityID, &e.Facts, &e.AsOf, &e.Stale, &e.ContentHash, &headSHA, &e.Version, &hydratedAt, &active, &listFP); err != nil {
+		if err := rows.Scan(&e.Repo, &e.EntityType, &e.EntityID, &e.Facts, &e.AsOf, &e.Stale, &e.ContentHash, &headSHA, &e.Version, &hydratedAt, &active, &listFP, &firstSeenAt); err != nil {
 			return nil, fmt.Errorf("store: scan entity row: %w", err)
 		}
 		e.HeadSHA = headSHA.String
 		e.HydratedAt = hydratedAt.String
 		e.Inactive = active == 0
 		e.ListFP = listFP.String
+		e.FirstSeenAt = firstSeenAt.String
 		out = append(out, e)
 	}
 	if err := rows.Err(); err != nil {
@@ -156,8 +182,8 @@ func (s *Store) ListEntities() ([]Entity, error) {
 }
 
 // entityNewColumns returns the SELECT expressions for the new-schema entity
-// columns, in the order version, hydrated_at, active, list_fp: the real
-// columns on the new schema, the constants 0, NULL, 1, NULL on the old one
+// columns, in the order version, hydrated_at, active, list_fp, first_seen_at:
+// the real columns on the new schema, the constants 0, NULL, 1, NULL, NULL on the old one
 // (which has none of them). Called before the query is issued, never while a result set is open.
 func (s *Store) entityNewColumns() (string, error) {
 	isNew, err := s.isNewSchema()
@@ -165,9 +191,9 @@ func (s *Store) entityNewColumns() (string, error) {
 		return "", err
 	}
 	if isNew {
-		return "version, hydrated_at, active, list_fp", nil
+		return "version, hydrated_at, active, list_fp, first_seen_at", nil
 	}
-	return "0, NULL, 1, NULL", nil
+	return "0, NULL, 1, NULL, NULL", nil
 }
 
 // nullableString maps an empty Go string to a SQL NULL, so optional

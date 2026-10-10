@@ -944,22 +944,30 @@ func TestEntityAndInterpretationAccessWorkOnBothSchemas(t *testing.T) {
 			if err := s.UpsertEntity(e); err != nil {
 				t.Fatalf("UpsertEntity: %v", err)
 			}
-			got, found, err := s.GetEntity(e.Repo, e.EntityType, e.EntityID)
-			if err != nil || !found || got != e {
-				t.Fatalf("GetEntity = %+v, found=%v, err=%v; want %+v", got, found, err, e)
+			// first_seen_at is a version-2 column: stamped from as_of on the
+			// first insert, and empty on a version-1 store.
+			want := e
+			if tc.v2 {
+				want.FirstSeenAt = e.AsOf
 			}
-			e.Facts, e.Stale = `{"title":"y"}`, true
+			got, found, err := s.GetEntity(e.Repo, e.EntityType, e.EntityID)
+			if err != nil || !found || got != want {
+				t.Fatalf("GetEntity = %+v, found=%v, err=%v; want %+v", got, found, err, want)
+			}
+			// An update (here with a later as_of) never rewrites first_seen_at.
+			e.Facts, e.Stale, e.AsOf = `{"title":"y"}`, true, "2026-09-17T00:00:00Z"
+			want.Facts, want.Stale, want.AsOf = e.Facts, e.Stale, e.AsOf
 			if err := s.UpsertEntity(e); err != nil {
 				t.Fatalf("UpsertEntity (update): %v", err)
 			}
-			if got, _, _ := s.GetEntity(e.Repo, e.EntityType, e.EntityID); got != e {
-				t.Fatalf("GetEntity after update = %+v, want %+v", got, e)
+			if got, _, _ := s.GetEntity(e.Repo, e.EntityType, e.EntityID); got != want {
+				t.Fatalf("GetEntity after update = %+v, want %+v", got, want)
 			}
 			if n, err := s.CountEntities(); err != nil || n != 1 {
 				t.Fatalf("CountEntities = %d, %v; want 1", n, err)
 			}
-			if list, err := s.ListEntities(); err != nil || len(list) != 1 || list[0] != e {
-				t.Fatalf("ListEntities = %+v, %v; want [%+v]", list, err, e)
+			if list, err := s.ListEntities(); err != nil || len(list) != 1 || list[0] != want {
+				t.Fatalf("ListEntities = %+v, %v; want [%+v]", list, err, want)
 			}
 			if tc.v2 {
 				// The new-schema columns are untouched by the old writer.

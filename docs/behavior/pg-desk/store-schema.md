@@ -114,6 +114,11 @@ The cutover makes these changes, and no others:
   with no `list_fp` (NULL, which reads back as the empty string: a migrated row, or a row created
   by `--reset`) has no baseline and is therefore treated as changed once. The store only stores the
   value; it never computes or recomputes a fingerprint.
+  It also gains `first_seen_at` (nullable text): when pg-desk first inserted the row, stamped
+  exactly ONCE by the insert (the write's own time; `as_of` for the plain upsert) and never
+  rewritten by any update. The cutover backfills every existing row with its `as_of`. It is the
+  daily-focus rank's age fallback (the change log is pruned and cannot supply it). It reads back as
+  the empty string when NULL and on a version-1 store.
 - **`interpretation`** loses `sync_error`. On version 2 a write that carries a sync error is an
   error, not a silent drop.
 - **`change_log`** is new and append-only: `seq` (integer, autoincrementing primary key), `repo`,
@@ -139,10 +144,37 @@ The cutover makes these changes, and no others:
   `relation` `references` (the legacy marker), and the old cross-reference accessors read and write
   exactly those rows on a version-2 store.
 - **`ledger`** is dropped. Its sync state is not carried over.
+- **The four focus tables** are new, created empty, and join the same one-transaction cutover (not a
+  later version step, because the cutover has not shipped). They use an internal surrogate key with
+  the natural key as a `UNIQUE` constraint, a deliberate divergence from the other tables. The
+  foreign keys are enforced (every store connection turns them on):
+  - **`focus_period`** is one row per focus period: `id` (autoincrementing key), `period_type` (`day`,
+    `week` or `sprint`; only `day` is used so far), `period_key` (the period's canonical text, for
+    example `2026-09-23`), `cap` (the cap in force for the period, NULL until a run sets one),
+    `closed_at` and `close_note`. `(period_type, period_key)` is unique.
+  - **`focus_selection`** is the CURRENT plan and nothing else (no history): `id`, `focus_period_id`
+    (a foreign key to `focus_period`), `repo`, `entity_type` (`pr` or `issue`), `entity_id`,
+    `selected_at`, `rank_position` (the row's place in the frozen plan), and `tier` (`overdue`,
+    `started` or `not_started`, NULL for a hand-add). `(focus_period_id, repo, entity_type,
+entity_id)` is unique, and `(repo, entity_type, entity_id)` is a foreign key to `entity`, so a
+    selection can never name an entity pg-desk never gathered.
+  - **`focus_draft`** holds the ONE stored draft: the single row `id = 1` (a check rejects any other
+    id), with `period_type`, `period_key`, `cap`, `made_at` and `body_json`. The period need not
+    have a `focus_period` row, so it is not a foreign key.
+  - **`focus_run`** is one row per non-dry-run focus verb run: `id`, `run_id` (unique), `verb`
+    (`select`, `pull`, `close` or `repair`), `focus_period_id` (an optional foreign key to
+    `focus_period`), `started_at`, `actor`, `exit_code` (NULL until the run is finalised) and
+    `counts_json`. It is run telemetry, not plan history.
+
+  The focus tables are SQLite rows: they emit nothing over OpenTelemetry or Prometheus and write no
+  logs of their own. They are part of the irreversible half of the cutover, so rolling back to a
+  pre-cutover binary does not remove them. The code that reads and writes them belongs to the
+  `focus` command group, not to the cutover.
+
 - **`meta`** is unchanged in shape; `schema_version` becomes `2`.
 
-The cutover does not append to `change_log`, register any consumer, or write any key other than
-the reserved keys above; those belong to the work that uses these tables.
+The cutover does not append to `change_log`, register any consumer, write any row of the focus
+tables, or write any key other than the reserved keys above; those belong to the work that uses these tables.
 
 ## Entity versions and the change log (schema version 2)
 

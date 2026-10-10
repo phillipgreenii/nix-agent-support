@@ -31,6 +31,11 @@ import (
 //   - xref is rebuilt with origin, relation, actor, acted_at and reason and
 //     a primary key widened to include relation and origin; existing rows
 //     become origin 'derived:legacy', relation 'references';
+//   - entity gains first_seen_at (nullable TEXT), backfilled from as_of for
+//     the rows that exist at the cutover and stamped once by every later
+//     insert (the focus rank's age fallback);
+//   - the four focus tables are created empty: focus_period,
+//     focus_selection, focus_draft and focus_run (docket pg2-2j5ac.44);
 //   - meta.schema_version and PRAGMA user_version are set to 2.
 //
 // Nothing here appends to change_log or reads consumer: those tables are
@@ -50,6 +55,12 @@ var cutoverStatements = []string{
 	// hydration. NULL (read back as "") means no baseline: such a row is
 	// treated as changed once.
 	`ALTER TABLE entity ADD COLUMN list_fp TEXT`,
+	// first_seen_at: when pg-desk first inserted the row. Set once by the
+	// insert paths (store.Entity.FirstSeenAt) and backfilled below from
+	// as_of for the rows that exist at the cutover. It is the focus rank's
+	// age fallback; the change log is pruned and cannot supply it.
+	`ALTER TABLE entity ADD COLUMN first_seen_at TEXT`,
+	`UPDATE entity SET first_seen_at = as_of WHERE first_seen_at IS NULL`,
 
 	// interpretation: sync_error was written only by the old sync stage.
 	`ALTER TABLE interpretation DROP COLUMN sync_error`,
@@ -141,6 +152,89 @@ SELECT repo, from_type, from_id, to_type, to_id, 'derived:legacy', 'references',
 FROM xref`,
 	`DROP TABLE xref`,
 	`ALTER TABLE xref_v2 RENAME TO xref`,
+
+	// The focus tables (docket pg2-2j5ac.44, spec section 5): the daily-focus
+	// plan, the one stored draft and the run record. They join this block
+	// (one transaction, one operator window) rather than a version-3 ladder
+	// step because the cutover has not shipped. They reference entity, so
+	// they come after every entity ALTER, and they are created empty. The
+	// surrogate keys are deliberate (D-F6). Telemetry: SQLite rows only, no
+	// OpenTelemetry.
+	`CREATE TABLE focus_period (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    period_type   TEXT NOT NULL,      -- 'day' this phase; schema allows 'week'/'sprint' later
+    period_key    TEXT NOT NULL,      -- e.g. '2026-09-23' for period_type='day'; parsed and
+                                       -- re-formatted on write, so '2026-9-3' cannot make a
+                                       -- second period
+    cap           INTEGER,            -- the cap in force for the period (a re-run without
+                                       -- ` + "`cap=`" + ` reuses it); NULL until a run sets one
+    closed_at     TEXT,
+    close_note    TEXT,
+    UNIQUE (period_type, period_key),
+    CHECK (period_type IN ('day', 'week', 'sprint'))
+)`,
+
+	// The current plan, and nothing else (RV-B): every row is selected, none
+	// is ever kept after it leaves the plan, and there is no history table.
+	`CREATE TABLE focus_selection (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    focus_period_id INTEGER NOT NULL,
+    repo            TEXT NOT NULL,    -- same repo constant pg-desk already uses for every
+                                       -- entity it gathers (section 8's "single configured repo" in
+                                       -- the parent design), not a per-issue attribute
+    entity_type     TEXT NOT NULL,    -- 'pr' | 'issue' (Jira or bd; told apart by the bead-id
+                                       -- pattern, section 8.1)
+    entity_id       TEXT NOT NULL,
+    selected_at     TEXT NOT NULL,
+    rank_position   INTEGER NOT NULL, -- the row's place in the frozen plan: a per-period lock
+                                       -- sequence (section 7.2 step 5), the draft position
+                                       -- only for the first lock (D-F22)
+    tier            TEXT,             -- 'overdue' | 'started' | 'not_started' as of that draft;
+                                       -- NULL for a hand-add
+    UNIQUE (focus_period_id, repo, entity_type, entity_id),
+    CHECK (tier IS NULL OR tier IN ('overdue', 'started', 'not_started')),
+    FOREIGN KEY (focus_period_id) REFERENCES focus_period (id),
+    FOREIGN KEY (repo, entity_type, entity_id) REFERENCES entity (repo, entity_type, entity_id)
+)`,
+
+	// The ONE stored draft (RV-A, D-F22): at most one row, managed by
+	// pg-desk, never held by the caller. It ends at lock (select --apply
+	// deletes it in the same transaction as the plan write), and replan
+	// replaces it. The period need not have a focus_period row yet, so it is
+	// not a foreign key.
+	`CREATE TABLE focus_draft (
+    id          INTEGER PRIMARY KEY CHECK (id = 1),
+    period_type TEXT NOT NULL,
+    period_key  TEXT NOT NULL,        -- the period the draft was made for; it applies only to a command that addresses it (section 7)
+    cap         INTEGER NOT NULL,     -- the cap line the draft was made with
+    made_at     TEXT NOT NULL,
+    body_json   TEXT NOT NULL,        -- a ` + "`contract`" + ` member (pg-desk.focus.draft/v1; missing or unknown = corrupt), the ordered candidate rows (key, tier, deciding key, the
+                                       -- '+' proposal flags, the finished and new marks, via), the
+                                       -- trailing epics block, and the coverage state the draft was
+                                       -- computed under; NO plan rows and NO facts (both read live)
+    CHECK (period_type IN ('day', 'week', 'sprint'))
+)`,
+
+	// One row per non-dry-run verb run (select, pull, close, select
+	// --repair), the durable copy of the structured stderr line of section
+	// 8.2. It is run telemetry, not plan history. A total failure that
+	// commits nothing else still leaves this row when the store is writable.
+	`CREATE TABLE focus_run (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id      TEXT NOT NULL UNIQUE,   -- a ULID, printed by the verb and carried in --json
+    verb        TEXT NOT NULL,          -- 'select' | 'pull' | 'close' | 'repair'
+    focus_period_id INTEGER,
+    started_at  TEXT NOT NULL,
+    actor       TEXT NOT NULL,
+    exit_code   INTEGER,                -- NULL until the run is finalised (section 7.2 step 5); a
+                                         -- NULL left by a crash counts as outcome ` + "`total`" + `
+    counts_json TEXT NOT NULL,          -- ranked, selected, removed by cause (operator, cap,
+                                         -- dropped, new_period), forced, handadded, absorbed,
+                                         -- hydrated, per-entity annotation outcome with its
+                                         -- change_log seq, the draft's age and drift rows, fresh_order,
+                                         -- and the rank_inputs counts of section 8.2
+    FOREIGN KEY (focus_period_id) REFERENCES focus_period (id)
+)`,
 
 	// Version stamps, last.
 	`INSERT INTO meta (key, value) VALUES ('schema_version', '2')

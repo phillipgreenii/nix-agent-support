@@ -114,6 +114,10 @@ func (s *Store) writeEntity(e Entity, expectedVersion int64, state *entityState,
 	updateArgs := []any{e.Facts, e.AsOf, e.Stale, e.ContentHash, nullableString(e.HeadSHA), newVersion}
 	insertCols := `repo, entity_type, entity_id, facts, as_of, stale, content_hash, head_sha, version`
 	insertArgs := []any{e.Repo, e.EntityType, e.EntityID, e.Facts, e.AsOf, e.Stale, e.ContentHash, nullableString(e.HeadSHA), newVersion}
+	// first_seen_at is stamped by the INSERT only (the write's own time) and
+	// is deliberately absent from updateSQL, so an update never rewrites it.
+	insertCols += `, first_seen_at`
+	insertArgs = append(insertArgs, nullableString(at))
 	if state != nil {
 		activeInt := 0
 		if state.active {
