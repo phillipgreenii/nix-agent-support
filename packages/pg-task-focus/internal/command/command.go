@@ -131,8 +131,10 @@ func (b *builder) invalid(format string, args ...any) *Rejection {
 
 // stamped gives an invalid_request that names no instant the instants ts of
 // the new events the request would add, once they are known, as every later
-// refusal of the same request names them. Any other error is returned as it
-// is.
+// refusal of the same request names them. Every command stamps its own
+// invalid_request refusals with its effective instant (a break with the
+// instants of its pause and resume), whatever the target. Any other error is
+// returned as it is.
 func stamped(err error, ts ...time.Time) error {
 	var r *Rejection
 	if errors.As(err, &r) && r.Reason == ReasonInvalidRequest && len(r.Instants) == 0 && len(ts) > 0 {

@@ -47,15 +47,15 @@ func (c ChangeProfile) ReqHash() (string, error) {
 // (invalid_request), the profile (unknown_profile), the expected version
 // (stale_preview), then the candidate replay of the batch.
 func (c ChangeProfile) plan(b *builder) (Plan, error) {
+	eff := b.effective(nil)
 	if c.Profile == "" {
-		return Plan{}, b.invalid("A profile change needs the profile to make active.")
+		return Plan{}, stamped(b.invalid("A profile change needs the profile to make active."), eff)
 	}
 	if err := b.validText(c.Profile); err != nil {
-		return Plan{}, err
+		return Plan{}, stamped(err, eff)
 	}
-	eff := b.effective(nil)
 	if err := b.encodable(eff, event.ProfileChanged{Profile: c.Profile, Batch: placeholderID}); err != nil {
-		return Plan{}, err
+		return Plan{}, stamped(err, eff)
 	}
 	profile, err := b.profile(c.Profile, true, eff)
 	if err != nil {

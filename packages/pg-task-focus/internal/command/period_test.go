@@ -812,6 +812,34 @@ func TestSkipAllReasonIsSizedWithTheTasksItSkips(t *testing.T) {
 	}
 }
 
+// TestPeriodChangedSizeUsesTheZoneItNames checks the step-1 size check of a
+// period change against the zone the request names when it loads, not a
+// placeholder: a label that fits beside "UTC" but not beside a longer zone is
+// refused as too long, before the profile is judged.
+func TestPeriodChangedSizeUsesTheZoneItNames(t *testing.T) {
+	const longZone = "America/Argentina/ComodRivadavia"
+	base, err := event.Encode(event.Event{
+		Envelope: event.Envelope{V: event.SchemaVersion, ID: idOf('N', 1), At: event.At(at(24 * 60)), EffectiveAt: event.At(at(24 * 60)), Type: event.TypePeriodChanged},
+		Payload:  event.PeriodChanged{Kind: "day", Start: day2, TZ: "UTC", Label: "x", Batch: idOf('N', 2)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The event fits with "UTC" and is longer than allowed with the long zone.
+	label := strings.Repeat("l", event.MaxEventBytes-len(base)+1)
+	env := envOf(t, bootstrapped(t), at(24*60))
+	change := func(tz string) command.ChangePeriods {
+		c := dayTo(day2)
+		c.TZ, c.Label = tz, label
+		return command.ChangePeriods{Changes: []command.PeriodChange{c}, Profile: "no-such-profile"}
+	}
+	mustReject(t, env, change("UTC"), command.ReasonUnknownProfile)
+	r := mustReject(t, env, change(longZone), command.ReasonInvalidRequest)
+	if !strings.Contains(r.Message, "longer than") {
+		t.Errorf("message %q, want the size refusal", r.Message)
+	}
+}
+
 func TestBootstrapNamingAnotherProfileWritesTwoProfileChanges(t *testing.T) {
 	env := emptyEnv(t, withLight(t), at(-60))
 	p := mustPlan(t, env, command.ChangePeriods{Changes: []command.PeriodChange{dayTo(day1), weekFrom(week1), sprintFrom(sprint1)}, Profile: "light"})

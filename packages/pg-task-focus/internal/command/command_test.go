@@ -3,6 +3,7 @@ package command_test
 import (
 	"encoding/json"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -284,6 +285,46 @@ func TestFutureEffectiveAtRejected(t *testing.T) {
 
 func completeAt(eff *time.Time) command.Command {
 	return command.CompleteTask{TaskID: postPlan, EffectiveAt: eff}
+}
+
+// TestEveryRefusalBeforeTheTargetCarriesTheEffectiveInstant checks that an
+// invalid_request, an invalid text and a reserved key name the new event's
+// effective_at (the supplied one, else the clock) though the request is
+// refused before its target is looked up.
+func TestEveryRefusalBeforeTheTargetCarriesTheEffectiveInstant(t *testing.T) {
+	now, given := at(10), at(5)
+	bad := "bad\xffutf8"
+	tooLong := strings.Repeat("x", event.MaxEventBytes)
+	tests := []struct {
+		name   string
+		cmd    command.Command
+		reason command.Reason
+		want   time.Time
+	}{
+		{"a completion with no task_id", command.CompleteTask{EffectiveAt: &given}, command.ReasonInvalidRequest, given},
+		{"a completion with a bad task_id", command.CompleteTask{TaskID: event.TaskID(bad)}, command.ReasonInvalidRequest, now},
+		{"a skip with a blank reason", command.SkipTask{TaskID: postPlan, Reason: " ", EffectiveAt: &given}, command.ReasonInvalidRequest, given},
+		{"a skip with a reason too long", command.SkipTask{TaskID: postPlan, Reason: tooLong}, command.ReasonInvalidRequest, now},
+		{"a start with no type", command.StartCycle{EffectiveAt: &given}, command.ReasonInvalidRequest, given},
+		{"a start with minutes out of range", command.StartCycle{Type: review, Minutes: intPtr(0)}, command.ReasonInvalidRequest, now},
+		{"a boost with minutes out of range", command.BoostCycle{CycleID: cycleA, Minutes: 0, EffectiveAt: &given}, command.ReasonInvalidRequest, given},
+		{"a pause with a bad cycle_id", command.PauseCycle{CycleID: event.CycleID(bad), EffectiveAt: &given}, command.ReasonInvalidRequest, given},
+		{"a switch with no target", command.SwitchCycle{EffectiveAt: &given}, command.ReasonInvalidRequest, given},
+		{"an annotation with a bad key", command.AnnotateCycle{CycleID: cycleA, KV: []event.KV{{Key: "Bad Key", Value: "v"}}}, command.ReasonInvalidRequest, now},
+		{"an annotation with the reserved key", command.AnnotateCycle{CycleID: cycleA, KV: []event.KV{{Key: "cycle_type", Value: "v"}}}, command.ReasonReservedKey, now},
+		{"a profile change with no profile", command.ChangeProfile{}, command.ReasonInvalidRequest, now},
+		{"a period change with no change", command.ChangePeriods{EffectiveAt: &given}, command.ReasonInvalidRequest, given},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			b := bootstrapped(t)
+			b.add(0, startOf(cycleA, deepWork))
+			r := mustReject(t, envOf(t, b, now), tc.cmd, tc.reason)
+			if !slices.EqualFunc(r.Instants, []time.Time{tc.want}, time.Time.Equal) {
+				t.Errorf("Instants = %v, want [%v]", r.Instants, tc.want)
+			}
+		})
+	}
 }
 
 func TestMinutesBounds(t *testing.T) {

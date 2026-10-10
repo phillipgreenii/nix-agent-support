@@ -107,7 +107,9 @@ func cadenceOf(k projection.Kind) due.Cadence {
 }
 
 // placeholderZone stands in for a change's zone when the size of its event is
-// checked, before the zone itself is judged.
+// checked and the zone is not one that loads: the codec refuses an unknown zone,
+// which the zone check judges later as invalid_zone. A zone that loads is sized
+// as it is.
 const placeholderZone = "UTC"
 
 // plan judges a period change in this order, the first answer stopping it:
@@ -121,13 +123,13 @@ const placeholderZone = "UTC"
 // except for a dry run, which lists them); (8) the candidate replay of the
 // batch.
 func (c ChangePeriods) plan(b *builder) (Plan, error) {
+	eff := b.effective(c.EffectiveAt)
 	overrides, skipAll, err := c.validate(b)
 	if err != nil {
-		return Plan{}, err
+		return Plan{}, stamped(err, eff)
 	}
-	eff := b.effective(c.EffectiveAt)
 	if err := b.encodable(eff, c.sizedPayloads(b, overrides, skipAll)...); err != nil {
-		return Plan{}, err
+		return Plan{}, stamped(err, eff)
 	}
 	if err := b.notFuture(eff, c.EffectiveAt); err != nil {
 		return Plan{}, err
@@ -283,8 +285,8 @@ func (c ChangePeriods) validate(b *builder) (map[event.TaskID]string, string, er
 }
 
 // sizedPayloads are the events of the request whose size depends on what the
-// client wrote, for the size check: each period change (with a placeholder
-// zone, judged later), the profile change, a skip with each override reason,
+// client wrote, for the size check: each period change (with its zone when it
+// loads, else a placeholder: an unknown zone is judged later), the profile change, a skip with each override reason,
 // and a skip with the shared reason of each open task it may skip (the open
 // tasks of the cadences that change), each with its real id, so the check
 // cannot pass a skip the real id would make too long. With no such task the
@@ -292,7 +294,11 @@ func (c ChangePeriods) validate(b *builder) (map[event.TaskID]string, string, er
 func (c ChangePeriods) sizedPayloads(b *builder, overrides map[event.TaskID]string, skipAll string) []event.Payload {
 	var out []event.Payload
 	for _, ch := range c.Changes {
-		out = append(out, event.PeriodChanged{Kind: string(ch.Kind), Start: ch.Start, End: ch.End, TZ: placeholderZone, Label: ch.Label, Batch: placeholderID})
+		tz := placeholderZone
+		if _, err := zone.Load(ch.TZ); err == nil {
+			tz = ch.TZ
+		}
+		out = append(out, event.PeriodChanged{Kind: string(ch.Kind), Start: ch.Start, End: ch.End, TZ: tz, Label: ch.Label, Batch: placeholderID})
 	}
 	if c.Profile != "" {
 		out = append(out, event.ProfileChanged{Profile: c.Profile, Batch: placeholderID})

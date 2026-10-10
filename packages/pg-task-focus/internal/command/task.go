@@ -76,7 +76,7 @@ func (c SkipTask) ReqHash() (string, error) {
 func (c SkipTask) plan(b *builder) (Plan, error) {
 	reason, err := b.reason("A skip", c.Reason)
 	if err != nil {
-		return Plan{}, err
+		return Plan{}, stamped(err, b.effective(c.EffectiveAt))
 	}
 	return b.resolveTask(c.TaskID, c.EffectiveAt, "skip", event.TaskSkipped{TaskID: c.TaskID, Reason: reason})
 }
@@ -98,15 +98,15 @@ func (b *builder) reason(what, s string) (string, error) {
 // resolveTask plans the completion or skip p of task id. Completing or
 // skipping a missed task is allowed: a missed marker is not a resolution.
 func (b *builder) resolveTask(id event.TaskID, supplied *time.Time, action string, p event.Payload) (Plan, error) {
+	eff := b.effective(supplied)
 	if id == "" {
-		return Plan{}, b.invalid("A task_id is required to %s a task.", action)
+		return Plan{}, stamped(b.invalid("A task_id is required to %s a task.", action), eff)
 	}
 	if err := b.validText(string(id)); err != nil {
-		return Plan{}, err
+		return Plan{}, stamped(err, eff)
 	}
-	eff := b.effective(supplied)
 	if err := b.encodable(eff, p); err != nil {
-		return Plan{}, err
+		return Plan{}, stamped(err, eff)
 	}
 	if err := b.notFuture(eff, supplied); err != nil {
 		return Plan{}, err

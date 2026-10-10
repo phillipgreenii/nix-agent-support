@@ -209,18 +209,18 @@ func (c AnnotateCycle) ReqHash() (string, error) {
 }
 
 func (c StartCycle) plan(b *builder) (Plan, error) {
+	eff := b.effective(c.EffectiveAt)
 	if c.Type == "" {
-		return Plan{}, b.invalid("A cycle start needs the cycle type.")
+		return Plan{}, stamped(b.invalid("A cycle start needs the cycle type."), eff)
 	}
 	if err := b.validText(c.Type); err != nil {
-		return Plan{}, err
+		return Plan{}, stamped(err, eff)
 	}
 	if c.Minutes != nil {
 		if err := b.minutes("minutes", *c.Minutes); err != nil {
-			return Plan{}, err
+			return Plan{}, stamped(err, eff)
 		}
 	}
-	eff := b.effective(c.EffectiveAt)
 	def, known := b.env.Config.CycleType(c.Type)
 	p := event.CycleStarted{
 		CycleID: placeholderCycle, Type: c.Type, Title: def.Title,
@@ -234,7 +234,7 @@ func (c StartCycle) plan(b *builder) (Plan, error) {
 		p.Interrupts = running.ID
 	}
 	if err := b.encodable(eff, p); err != nil {
-		return Plan{}, err
+		return Plan{}, stamped(err, eff)
 	}
 	if err := b.notFuture(eff, c.EffectiveAt); err != nil {
 		return Plan{}, err
@@ -279,7 +279,7 @@ func (c ResumeCycle) plan(b *builder) (Plan, error) {
 
 func (c BoostCycle) plan(b *builder) (Plan, error) {
 	if err := b.minutes("a boost's minutes", c.Minutes); err != nil {
-		return Plan{}, err
+		return Plan{}, stamped(err, b.effective(c.EffectiveAt))
 	}
 	return b.cycleVerb(c.CycleID, c.EffectiveAt, verb{
 		name: "boost", runningFirst: true,
@@ -312,27 +312,28 @@ func (c AnnotateCycle) plan(b *builder) (Plan, error) {
 	for _, kv := range c.KV {
 		strs = append(strs, kv.Key, kv.Value)
 	}
+	eff := b.effective(nil)
 	if err := b.validText(strs...); err != nil {
-		return Plan{}, err
+		return Plan{}, stamped(err, eff)
 	}
 	for i, kv := range c.KV {
 		if !keyPattern.MatchString(kv.Key) {
-			return Plan{}, b.invalid("The key %q of kv[%d] does not match [a-z0-9_-]+ (lower-case letters, digits, underscore and hyphen).", kv.Key, i)
+			return Plan{}, stamped(b.invalid("The key %q of kv[%d] does not match [a-z0-9_-]+ (lower-case letters, digits, underscore and hyphen).", kv.Key, i), eff)
 		}
 	}
 	p := event.CycleAnnotated{CycleID: c.CycleID, Note: c.Note, KV: c.KV}
 	if p.CycleID == "" {
 		p.CycleID = placeholderCycle
 	}
-	eff := b.effective(nil)
 	if err := b.encodable(eff, p); err != nil {
-		return Plan{}, err
+		return Plan{}, stamped(err, eff)
 	}
 	for i, kv := range c.KV {
 		if kv.Key == reservedKey {
 			return Plan{}, &Rejection{
-				Reason:  ReasonReservedKey,
-				Message: fmt.Sprintf("The key %s of kv[%d] is reserved for the connector and cannot be supplied.", reservedKey, i),
+				Reason:   ReasonReservedKey,
+				Instants: []time.Time{eff},
+				Message:  fmt.Sprintf("The key %s of kv[%d] is reserved for the connector and cannot be supplied.", reservedKey, i),
 			}
 		}
 	}
@@ -345,13 +346,13 @@ func (c AnnotateCycle) plan(b *builder) (Plan, error) {
 }
 
 func (c SwitchCycle) plan(b *builder) (Plan, error) {
+	eff := b.effective(c.EffectiveAt)
 	if c.To == "" {
-		return Plan{}, b.invalid("A switch needs to, the paused cycle that becomes the focus.")
+		return Plan{}, stamped(b.invalid("A switch needs to, the paused cycle that becomes the focus."), eff)
 	}
 	if err := b.validText(string(c.To)); err != nil {
-		return Plan{}, err
+		return Plan{}, stamped(err, eff)
 	}
-	eff := b.effective(c.EffectiveAt)
 	pause := func(id event.CycleID, batch event.ID) event.Payload {
 		return event.CyclePaused{CycleID: id, Batch: batch}
 	}
@@ -359,7 +360,7 @@ func (c SwitchCycle) plan(b *builder) (Plan, error) {
 		return event.CycleResumed{CycleID: id, Batch: batch}
 	}
 	if err := b.encodable(eff, pause(placeholderCycle, placeholderID), resume(c.To, placeholderID), event.BatchCommitted{Batch: placeholderID}); err != nil {
-		return Plan{}, err
+		return Plan{}, stamped(err, eff)
 	}
 	if err := b.notFuture(eff, c.EffectiveAt); err != nil {
 		return Plan{}, err
@@ -414,14 +415,14 @@ func (b *builder) cycleVerb(id event.CycleID, supplied *time.Time, v verb) (Plan
 	eff := b.effective(supplied)
 	if !v.checked {
 		if err := b.validText(string(id)); err != nil {
-			return Plan{}, err
+			return Plan{}, stamped(err, eff)
 		}
 		provisional := id
 		if provisional == "" {
 			provisional = placeholderCycle
 		}
 		if err := b.encodable(eff, v.payload(provisional)); err != nil {
-			return Plan{}, err
+			return Plan{}, stamped(err, eff)
 		}
 	}
 	if err := b.notFuture(eff, supplied); err != nil {
