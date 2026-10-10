@@ -42,9 +42,6 @@ func (d calendarDay) format() string {
 // caller counts the unparseable ones and never treats one as an error.
 func parseDueDay(raw string, loc *time.Location) (day calendarDay, ok bool) {
 	s := strings.TrimSpace(raw)
-	if s == "" {
-		return 0, false
-	}
 	if t, err := time.Parse(time.DateOnly, s); err == nil {
 		return dayOfTime(t), true
 	}

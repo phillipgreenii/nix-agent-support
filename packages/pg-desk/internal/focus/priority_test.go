@@ -25,6 +25,16 @@ func TestPriorityResolve(t *testing.T) {
 		{"P10", priorityUnmapped, true, true},
 		{"Urgent", priorityUnmapped, true, true},
 		{"Odd", priorityUnmapped, true, true}, // a map value outside P0..P4 is skipped
+		{"Q1", priorityUnmapped, true, true},  // the letter must be P
+		{"P/", priorityUnmapped, true, true},  // the digit before 0
+		{"P:", priorityUnmapped, true, true},  // the digit after 9
+		{"P+1", priorityUnmapped, true, true}, // a signed number is not a priority
+		{"P-0", priorityUnmapped, true, true},
+		{"Pa", priorityUnmapped, true, true},
+		{"pP", priorityUnmapped, true, true},
+		{"0", priorityUnmapped, true, true}, // no letter
+		{"1P", priorityUnmapped, true, true},
+		{" P2 ", 2, true, false},
 	}
 	for _, c := range cases {
 		rank, present, unmapped := table.resolve(c.raw)

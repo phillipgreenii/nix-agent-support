@@ -9,6 +9,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/interpret"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
 // rankDay is the addressed day of most rank tests.
@@ -924,5 +925,173 @@ func TestRankDoesNotMutateItsInputs(t *testing.T) {
 	Rank(in, set, rankOpts())
 	if fmt.Sprintf("%v", in) != before || fmt.Sprintf("%v", set) != setBefore {
 		t.Error("Rank changed its inputs")
+	}
+}
+
+func TestRankOfNothingNeedsNoConfig(t *testing.T) {
+	r := Rank(Inputs{}, CandidateSet{}, RankOptions{})
+	if len(r.Rows) != 0 || r.Cap != DefaultCap {
+		t.Errorf("ranking = %+v", r)
+	}
+}
+
+func TestNegativeCapMeansTheDefault(t *testing.T) {
+	f := rankFixture(t)
+	f.bead("bd-1", issueSpec{})
+	opts := rankOpts()
+	opts.Cap = -3
+	if got := f.rank(opts); got.Cap != DefaultCap || !got.Rows[0].InPlan {
+		t.Errorf("Cap = %d, first row in plan %v, want the default cap", got.Cap, got.Rows[0].InPlan)
+	}
+}
+
+func TestAbsorbingItselfCoversNothing(t *testing.T) {
+	f := rankFixture(t)
+	k := f.bead("bd-1", issueSpec{})
+	in := f.inputs()
+	in.Absorbed = map[Key]Key{k: k}
+	if r := Rank(in, Candidates(in), rankOpts()); len(r.Covered) != 0 {
+		t.Errorf("Covered = %v, want none for a key absorbed into itself", r.Covered)
+	}
+}
+
+// A candidate the Inputs do not hold (a draft row whose entity is gone) is
+// ranked from its zero facts instead of failing.
+func TestCandidateMissingFromInputsStillRanks(t *testing.T) {
+	f := rankFixture(t)
+	real := f.bead("bd-1", issueSpec{})
+	ghost := Key{entityTypeIssue, "bd-ghost"}
+	in := f.inputs()
+	set := Candidates(in)
+	set.Candidates = append(set.Candidates, Candidate{Key: ghost, Kind: KindBead})
+	r := Rank(in, set, rankOpts())
+	if r.row(t, ghost).Tier != TierNotStarted || r.row(t, ghost).Finished || r.row(t, real).Position != 1 {
+		t.Errorf("rows = %+v", r.Rows)
+	}
+}
+
+// Finished follows the merged flag and the source state; started never
+// applies to a finished Jira issue's category or an unknown kind.
+func TestFinishedAndStartedOfHandBuiltCandidates(t *testing.T) {
+	f := rankFixture(t)
+	mergedFlag := f.pr("o/r#1", prSpec{state: "open", merged: true})
+	closedState := f.pr("o/r#2", prSpec{state: "closed"})
+	openPR := f.pr("o/r#3", prSpec{ownership: "mine"})
+	doneJira := f.issue("PROJ-1", issueSpec{state: "Complete", category: "done", assignee: "Pat Example"})
+	unknownKind := f.bead("bd-1", issueSpec{state: "in_progress"})
+	in := f.inputs()
+	set := Candidates(in)
+	for _, k := range []Key{mergedFlag, closedState} {
+		set.Candidates = append(set.Candidates, Candidate{Key: k, Kind: KindPR, Seed: true})
+	}
+	set.Candidates = append(set.Candidates, Candidate{Key: doneJira, Kind: KindJira, Seed: true})
+	for i := range set.Candidates {
+		if set.Candidates[i].Key == unknownKind {
+			set.Candidates[i].Kind = Kind("other")
+		}
+	}
+	r := Rank(in, set, rankOpts())
+	for k, want := range map[Key]bool{mergedFlag: true, closedState: true, doneJira: true, openPR: false, unknownKind: false} {
+		if got := r.row(t, k).Finished; got != want {
+			t.Errorf("%v Finished = %v, want %v", k, got, want)
+		}
+	}
+	if got := r.row(t, doneJira).Tier; got != TierNotStarted {
+		t.Errorf("a done-category Jira issue tier = %q, want not_started", got)
+	}
+	if got := r.row(t, unknownKind).Tier; got != TierNotStarted {
+		t.Errorf("a candidate of an unknown kind tier = %q, want not_started", got)
+	}
+}
+
+// The group takes the earliest due day whichever member holds it, including
+// when the earlier date belongs to the first member in candidate order.
+func TestGroupDueIsTheEarliestWhicheverMemberHoldsIt(t *testing.T) {
+	for _, swap := range []bool{false, true} {
+		f := rankFixture(t)
+		pr := f.pr("o/r#1", prSpec{ownership: "mine"})
+		early, late := "2026-10-12", "2026-10-15"
+		if swap {
+			early, late = late, early
+		}
+		b1 := f.bead("bd-1", issueSpec{dueDate: early, priority: "P3"})
+		b2 := f.bead("bd-2", issueSpec{dueDate: late, priority: "P1"})
+		b3 := f.bead("bd-3", issueSpec{priority: "P2"})
+		for _, b := range []Key{b1, b2, b3} {
+			f.link(b, pr, relationWork)
+		}
+		r := f.rank(rankOpts())
+		if got := r.row(t, pr).Due; got != "2026-10-12" {
+			t.Errorf("swap=%v: group due = %q, want 2026-10-12", swap, got)
+		}
+		if got := r.row(t, pr).Priority; got != "P1" {
+			t.Errorf("swap=%v: group priority = %q, want P1", swap, got)
+		}
+	}
+}
+
+// A priority inherited from an unmapped sibling is not shown as the PR's own.
+func TestInheritedUnmappedPriorityShowsNoRawValue(t *testing.T) {
+	f := rankFixture(t)
+	pr := f.pr("o/r#1", prSpec{ownership: "mine"})
+	b := f.issue("bd-1", issueSpec{state: "open", labels: []string{PlanableLabel}, priority: "weird"})
+	f.link(b, pr, relationWork)
+	r := f.rank(rankOpts())
+	if got := r.row(t, pr).Priority; got != "" {
+		t.Errorf("PR priority = %q, want empty", got)
+	}
+	if r.Inputs.UnmappedPriority != 1 {
+		t.Errorf("UnmappedPriority = %d, want 1 (the bead's own value, counted once)", r.Inputs.UnmappedPriority)
+	}
+}
+
+func TestMemReaderReadsTheInputs(t *testing.T) {
+	a := Key{entityTypePR, "o/r#1"}
+	b := Key{entityTypePR, "o/r#2"}
+	c := Key{entityTypeIssue, "bd-1"}
+	in := Inputs{
+		Repo: "acme/widgets",
+		Entities: map[Key]store.Entity{
+			a: {Repo: "elsewhere", Facts: "{}"},
+			b: {Facts: "{}"},
+		},
+		Links: []store.XrefLink{
+			{FromType: a.Type, FromID: a.ID, ToType: b.Type, ToID: b.ID, Relation: "depends_on"},
+			{FromType: c.Type, FromID: c.ID, ToType: b.Type, ToID: b.ID, Relation: "work"},
+			{FromType: b.Type, FromID: b.ID, ToType: c.Type, ToID: c.ID, Relation: "work"},
+		},
+	}
+	m := memReader{in: in}
+	if err := m.RequireNewSchema(); err != nil {
+		t.Fatal(err)
+	}
+	ents, _ := m.ListEntities()
+	byID := map[string]store.Entity{}
+	for _, e := range ents {
+		byID[e.EntityID] = e
+	}
+	if len(ents) != 2 || byID["o/r#1"].Repo != "elsewhere" || byID["o/r#2"].Repo != "acme/widgets" ||
+		byID["o/r#1"].EntityType != "pr" {
+		t.Errorf("entities = %+v: type and id come from the key, an empty repo from the inputs", ents)
+	}
+	from, _ := m.ListXrefLinksFrom("", b.Type, b.ID)
+	if len(from) != 1 || from[0].ToID != c.ID {
+		t.Errorf("links from %v = %+v, want only the one leaving it", b, from)
+	}
+	if got, _ := m.ListXrefLinksFrom("", b.Type, "o/r#9"); len(got) != 0 {
+		t.Errorf("links from an unknown id = %+v", got)
+	}
+	if got, _ := m.ListXrefLinksFrom("", c.Type, b.ID); len(got) != 0 {
+		t.Errorf("links from a matching id of another type = %+v", got)
+	}
+	to, _ := m.ListXrefLinksTo("", b.Type, b.ID)
+	if len(to) != 2 {
+		t.Errorf("links to %v = %+v, want the two arriving", b, to)
+	}
+	if got, _ := m.ListXrefLinksTo("", b.Type, "o/r#9"); len(got) != 0 {
+		t.Errorf("links to an unknown id = %+v", got)
+	}
+	if got, _ := m.ListXrefLinksTo("", c.Type, b.ID); len(got) != 0 {
+		t.Errorf("links to a matching id of another type = %+v", got)
 	}
 }

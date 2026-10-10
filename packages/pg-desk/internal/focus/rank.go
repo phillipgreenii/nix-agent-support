@@ -1,6 +1,7 @@
 package focus
 
 import (
+	"cmp"
 	"encoding/json"
 	"sort"
 	"strings"
@@ -186,6 +187,10 @@ func Rank(in Inputs, set CandidateSet, opts RankOptions) Ranking {
 		reader:  memReader{in: in},
 		covered: map[Key]Key{},
 	}
+	r.resolver = dependency.NewResolver(r.reader, in.Repo)
+	r.issueDeps, _ = dependency.NewIssueDependents(r.reader, func(e store.Entity) bool {
+		return classify.SourceTerminal(e.EntityType, json.RawMessage(e.Facts), in.Now, 0)
+	})
 	items := r.build(set.Candidates)
 	r.inherit(items, Groups(in, set))
 	sort.Slice(items, func(i, j int) bool { return less(items[i], items[j]) })
@@ -273,6 +278,7 @@ type item struct {
 	prio      int  // effective rank, 0..5
 	prioKnown bool // false: no priority anywhere (sorts after P4 like unmapped)
 	ownPrio   int
+	rawPrio   string // the item's own stored value, trimmed
 	ownKnown  bool
 	prioText  string
 
@@ -310,9 +316,8 @@ type ranker struct {
 	covered map[Key]Key
 	groupOf map[Key]int
 
-	resolver   *dependency.Resolver
-	issueDeps  *dependency.IssueDependents
-	issueDepsE bool
+	resolver  *dependency.Resolver
+	issueDeps *dependency.IssueDependents // nil when the index could not be built
 }
 
 func lowerSet(in []string) map[string]bool {
@@ -348,6 +353,7 @@ func (r *ranker) build(cands []Candidate) []*item {
 
 		rank, present, unmapped := r.prio.resolve(v.priority)
 		it.ownPrio, it.ownKnown = rank, present
+		it.rawPrio = strings.TrimSpace(v.priority)
 		if unmapped {
 			r.counts.UnmappedPriority++
 		}
@@ -395,9 +401,6 @@ func (r *ranker) age(it *item, v *view, e store.Entity) {
 func (r *ranker) unblocksOf(it *item, v *view) {
 	switch it.cand.Key.Type {
 	case entityTypePR:
-		if r.resolver == nil {
-			r.resolver = dependency.NewResolver(r.reader, r.in.Repo)
-		}
 		edges, err := r.resolver.DependentsOf(dependency.TypePR, it.cand.Key.ID)
 		if err != nil {
 			return
@@ -408,12 +411,6 @@ func (r *ranker) unblocksOf(it *item, v *view) {
 			}
 		}
 	case entityTypeIssue:
-		if !r.issueDepsE {
-			r.issueDepsE = true
-			r.issueDeps, _ = dependency.NewIssueDependents(r.reader, func(e store.Entity) bool {
-				return classify.SourceTerminal(e.EntityType, json.RawMessage(e.Facts), r.in.Now, 0)
-			})
-		}
 		if r.issueDeps == nil || !r.issueDeps.Available(it.cand.Key.ID) {
 			r.counts.UnblocksUnavailable++
 			return
@@ -439,9 +436,6 @@ func (r *ranker) inherit(items []*item, groups []Group) {
 		for _, k := range g.Members {
 			r.groupOf[k] = gi
 			m := byKey[k]
-			if m == nil {
-				continue
-			}
 			if m.hasOwnDue && (!hasDue || m.ownDue < earliest) {
 				earliest, hasDue = m.ownDue, true
 			}
@@ -451,9 +445,6 @@ func (r *ranker) inherit(items []*item, groups []Group) {
 		}
 		for _, k := range g.Members {
 			m := byKey[k]
-			if m == nil {
-				continue
-			}
 			m.due, m.hasDue = earliest, hasDue
 			m.prio, m.prioKnown = best, bestKnown
 		}
@@ -477,21 +468,18 @@ func (r *ranker) inherit(items []*item, groups []Group) {
 		default:
 			it.tier = notStartedIndex
 		}
-		it.prioText = r.priorityText(it)
+		it.prioText = priorityText(it)
 	}
 }
 
 // priorityText renders the effective priority: P0..P4 for a ranked value,
 // the raw value for an unmapped one, empty for none.
-func (r *ranker) priorityText(it *item) string {
-	if !it.prioKnown || it.prio == priorityUnmapped && !it.ownKnown {
+func priorityText(it *item) string {
+	if !it.prioKnown {
 		return ""
 	}
 	if it.prio == priorityUnmapped {
-		if v := r.a.views[it.cand.Key]; v != nil {
-			return strings.TrimSpace(v.priority)
-		}
-		return ""
+		return it.rawPrio // "" when the value was inherited, not the item's own
 	}
 	return priorityLabel(it.prio, true)
 }
@@ -513,15 +501,7 @@ func cmpBool(a, b bool) int { // true first
 	return 1
 }
 
-func cmpInt(a, b int) int { // smaller first
-	switch {
-	case a < b:
-		return -1
-	case a > b:
-		return 1
-	}
-	return 0
-}
+func cmpInt(a, b int) int { return cmp.Compare(a, b) } // smaller first
 
 func cmpDesc(a, b int) int { return cmpInt(b, a) } // larger first
 
@@ -581,12 +561,8 @@ var (
 	}
 )
 
-func stepsFor(tier int) []step {
-	if tier == overdueIndex {
-		return overdueSteps
-	}
-	return openSteps
-}
+// tierSteps are the comparator steps of each tier, by tier index.
+var tierSteps = [...][]step{overdueIndex: overdueSteps, startedIndex: openSteps, notStartedIndex: openSteps}
 
 // compare is the rank comparator: it returns the sign of a versus b and the
 // name of the key that decided it ("" when a and b are the same candidate).
@@ -594,7 +570,7 @@ func compare(a, b *item) (int, string) {
 	if c := cmpInt(a.tier, b.tier); c != 0 {
 		return c, KeyTier
 	}
-	for _, s := range stepsFor(a.tier) {
+	for _, s := range tierSteps[a.tier] {
 		if c := s.cmp(a, b); c != 0 {
 			return c, s.name
 		}

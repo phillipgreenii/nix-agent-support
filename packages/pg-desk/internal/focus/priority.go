@@ -1,9 +1,6 @@
 package focus
 
-import (
-	"strconv"
-	"strings"
-)
+import "strings"
 
 // Priority ranks. A smaller number is a higher priority. P0..P4 are 0..4;
 // a tracker value that maps to none of them sorts after P4.
@@ -32,14 +29,10 @@ func newPriorityTable(m map[string]string) priorityTable {
 // directPriority reads "P0".."P4" (any case) as 0..4.
 func directPriority(raw string) (int, bool) {
 	s := strings.TrimSpace(raw)
-	if len(s) != 2 || (s[0] != 'P' && s[0] != 'p') {
+	if len(s) != 2 || (s[0] != 'P' && s[0] != 'p') || s[1] < '0' || s[1] > '4' {
 		return 0, false
 	}
-	n, err := strconv.Atoi(s[1:])
-	if err != nil || n < 0 || n > 4 {
-		return 0, false
-	}
-	return n, true
+	return int(s[1] - '0'), true
 }
 
 // resolve reads one stored priority value. present is false for an empty
@@ -66,5 +59,5 @@ func priorityLabel(rank int, known bool) string {
 	if !known || rank < 0 || rank > 4 {
 		return ""
 	}
-	return "P" + strconv.Itoa(rank)
+	return "P" + string(rune('0'+rank))
 }

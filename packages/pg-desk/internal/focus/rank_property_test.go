@@ -95,8 +95,14 @@ func TestRankTiesResolveByKindAndKey(t *testing.T) {
 	if !reflect.DeepEqual(items, want) {
 		t.Errorf("order = %v, want pr o/r#10, pr o/r#2, jira, bead", keysOfItems(items))
 	}
-	if _, key := compare(prA, prB); key != KeyTiebreak {
-		t.Errorf("deciding key = %q, want tiebreak", key)
+	if c, key := compare(prA, prB); c != -1 || key != KeyTiebreak {
+		t.Errorf("compare(prA, prB) = %d %q, want -1 tiebreak", c, key)
+	}
+	if c, key := compare(prB, prA); c != 1 || key != KeyTiebreak {
+		t.Errorf("compare(prB, prA) = %d %q, want 1 tiebreak", c, key)
+	}
+	if c, key := compare(prA, prA); c != 0 || key != "" {
+		t.Errorf("compare(prA, prA) = %d %q, want 0 and no key", c, key)
 	}
 }
 
@@ -129,7 +135,8 @@ func TestAgeUnknownSortsLast(t *testing.T) {
 			t.Errorf("compare(%v, %v) = %d %q, want %d %q", tc.x.cand.Key, tc.y.cand.Key, got, key, tc.want, tc.key)
 		}
 	}
-	d := mk("bd-d", false, 1)
+	// Whatever stale value an undated item carries, it is not compared.
+	d := mk("bd-d", false, 3)
 	if got, key := compare(b, d); got != -1 || key != KeyTiebreak {
 		t.Errorf("two undated items: %d %q, want the tiebreak", got, key)
 	}
