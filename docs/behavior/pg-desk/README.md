@@ -80,6 +80,7 @@ back here — not the full list.
 | [`shadow-compare.md`](shadow-compare.md)                     | `pg-desk-shadow` — the side-by-side comparison of the fingerprint change detection against the live change flow (phase A)          |
 | [`attention.md`](attention.md)                               | `pg-desk attention list`/`explain` and the `pg-desk-attention` plugin — the read-time attention evaluator, its rules, grouping     |
 | [`freshness.md`](freshness.md)                               | `pg-desk freshness`, the dashboard `sources[]` and `pg_desk_source_age_seconds` — per-source data age, the staleness threshold     |
+| [`focus.md`](focus.md)                                       | `pg-desk focus` — the daily-focus command group: shared flags, exit codes, period addressing, `--json` contract, run record        |
 | [`operator-commands.md`](operator-commands.md)               | `show`, `status`, `sweep`, `doctor`, `heartbeat`, `heartbeat-item`                                                                 |
 | [`import-pg-pr-annotations.md`](import-pg-pr-annotations.md) | The one-shot pg-pr cutover tool                                                                                                    |
 
@@ -100,6 +101,10 @@ before Phase 12 deletes the Ops board. The short version, detailed per doc above
   per-source data age, see [`freshness.md`](freshness.md), plus the `pg_desk_reconcile_*` gauges for
   the last `reconcile` run), replacing the earlier minimal
   scrape-keeps-green stub — see [`serve.md`](serve.md)'s "Telemetry and logs".
+- **Focus verbs:** the `pg-desk focus` group emits nothing over OpenTelemetry and writes no Prometheus
+  series of its own; every non-dry-run `select`, `pull`, `close` and `select --repair` leaves one run
+  record row in the store and prints the same record as one `pg-desk.focus-select/v1` JSON line on
+  stderr — see [`focus.md`](focus.md)'s "Telemetry and logs".
 - **Logs:** `run` logs structured JSON to stderr (pg-router captures it) and adds a three-stage
   timeline under `--verbose`, folding sync's own outcome (whether it ran, and any `sync_error`)
   into that same line rather than a separate stream (see [`sync.md`](sync.md)); `run issue`'s and
