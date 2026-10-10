@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,6 +37,9 @@ type ClientConfig struct {
 	Timeout time.Duration
 	// Runner executes the child process.
 	Runner Runner
+	// Log receives a warning each time a timed-out call is retried. Nil
+	// discards it.
+	Log *slog.Logger
 }
 
 // Client is the Adapter implementation over a Runner. It is bound to exactly
@@ -87,12 +91,40 @@ func CheckStale(beadsDir string) error {
 	}
 }
 
+// timeoutAttempts is how many times one bd call is tried when it times out.
+// Every call the exporter makes is read-only, so a second try is safe. A host
+// stall (a wake from sleep, a CPU-saturation burst) expires the per-call
+// deadline while the call is merely starved, and the next try, started after
+// the stall, completes in about a second. A bd that really hangs times out on
+// both tries, so the call still fails with reason timeout after
+// timeoutAttempts x Timeout and beads_exporter_up still goes to 0.
+const timeoutAttempts = 2
+
 // invoke runs one bd subcommand and returns its stdout. The stale guard runs
-// first: when it fails, bd is not invoked at all.
+// first: when it fails, bd is not invoked at all. A call that times out is
+// tried once more (see timeoutAttempts); every other failure is final.
 func (c *Client) invoke(ctx context.Context, op string, argv []string) ([]byte, error) {
 	if err := CheckStale(c.cfg.BeadsDir); err != nil {
 		return nil, err
 	}
+	var (
+		out []byte
+		err error
+	)
+	for attempt := 1; attempt <= timeoutAttempts; attempt++ {
+		out, err = c.invokeOnce(ctx, op, argv)
+		if failure.ReasonOf(err) != failure.Timeout || ctx.Err() != nil {
+			return out, err
+		}
+		if attempt < timeoutAttempts && c.cfg.Log != nil {
+			c.cfg.Log.Warn("bd call timed out; retrying", "op", op, "attempt", attempt, "timeout", c.cfg.Timeout.String())
+		}
+	}
+	return out, err
+}
+
+// invokeOnce runs one bd subcommand under the per-call timeout.
+func (c *Client) invokeOnce(ctx context.Context, op string, argv []string) ([]byte, error) {
 	callCtx := ctx
 	if c.cfg.Timeout > 0 {
 		var cancel context.CancelFunc

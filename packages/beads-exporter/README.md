@@ -35,6 +35,15 @@ flowchart LR
   takes well under a second, so the bound only has to tell a hang from a call slowed by host CPU
   saturation); on expiry the whole process group is killed, so a forked grandchild cannot outlive
   the timeout.
+- A call that times out is tried once more with a fresh timeout (every call is read-only, so this
+  is safe), and a `bd call timed out; retrying` warning is logged. A host stall (a wake from
+  sleep, a CPU-saturation burst) expires the deadline while bd is merely starved, and the second
+  try, started after the stall, completes in about a second. A bd that really hangs times out on
+  both tries, so the pass still fails with reason `timeout` after two timeouts, the pass's
+  series are dropped and `beads_exporter_up` goes to 0. Only `timeout` is retried: `bd_error`,
+  `schema_skew`, `parse_error` and `stale_issues_jsonl` fail on the first try. The error counter
+  counts failed passes, not absorbed first tries, so a rise in the `retrying` warnings (not the
+  counter) is the sign of a host under stall.
 
 ## Running
 
@@ -69,7 +78,7 @@ the module that renders it and the machine wiring that validates the rendered fi
 | `pollIntervalSeconds`     | positive integer       | Period of the main pass.                                                                                                                                   |
 | `strandedIntervalSeconds` | positive integer       | Period of the throughput pass (and of the stranded-claim pass).                                                                                            |
 | `staleClaimHours`         | positive integer       | Accepted and validated here; used only by the stranded-claim pass.                                                                                         |
-| `commandTimeoutSeconds`   | positive integer       | Bound on each bd call.                                                                                                                                     |
+| `commandTimeoutSeconds`   | positive integer       | Bound on each bd try. A timed-out call is tried once more, so one failed call takes up to twice this.                                                      |
 | `labelCap`                | positive integer       | How many bead labels get their own series (see `beads_not_closed_by_bead_label`).                                                                          |
 | `queues`                  | array of queue objects | Each is exactly `{ "name": <string>, "args": [<string>...] }`: the tokenised flags that follow `bd ready`. Names are unique and match `^[a-z][a-z0-9-]*$`. |
 

@@ -103,6 +103,7 @@ func serve(parent context.Context, cfg *config.Config, log *slog.Logger) error {
 				Home:      home,
 				ChildPath: cfg.ChildPath,
 				Timeout:   cfg.CommandTimeout(),
+				Log:       log,
 			}),
 		})
 	}

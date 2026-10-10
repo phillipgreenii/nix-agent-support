@@ -1,8 +1,10 @@
 package bd
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -329,6 +331,110 @@ func TestTimeoutReason(t *testing.T) {
 	_, err := c.List(context.Background(), ListOpts{})
 	if got := failure.ReasonOf(err); got != failure.Timeout {
 		t.Fatalf("reason = %q (%v), want timeout", got, err)
+	}
+}
+
+// blockUntilDeadline simulates a bd call starved by the host: it returns only
+// when the per-call deadline expires.
+func blockUntilDeadline(ctx context.Context) (Result, error) {
+	<-ctx.Done()
+	return Result{}, ctx.Err()
+}
+
+func TestTimedOutCallIsRetriedOnceAndRecovers(t *testing.T) {
+	var (
+		mu        sync.Mutex
+		attempts  int
+		deadlines []bool
+	)
+	r := runnerFunc(func(ctx context.Context, c Cmd) (Result, error) {
+		mu.Lock()
+		attempts++
+		n := attempts
+		_, has := ctx.Deadline()
+		deadlines = append(deadlines, has)
+		mu.Unlock()
+		if n == 1 {
+			return blockUntilDeadline(ctx)
+		}
+		return Result{Stdout: []byte(okEnvJSON)}, nil
+	})
+	var logs bytes.Buffer
+	c := NewClient(ClientConfig{
+		BDPath: testBD, BeadsDir: t.TempDir(), Home: testHome, ChildPath: testPath,
+		Timeout: 30 * time.Millisecond, Runner: r,
+		Log: slog.New(slog.NewTextHandler(&logs, nil)),
+	})
+	if _, err := c.List(context.Background(), ListOpts{}); err != nil {
+		t.Fatalf("a call that times out once must recover on the retry: %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts)
+	}
+	if !deadlines[0] || !deadlines[1] {
+		t.Fatalf("every attempt needs its own deadline: %v", deadlines)
+	}
+	if !strings.Contains(logs.String(), "bd call timed out; retrying") {
+		t.Fatalf("the retry must be logged, got %q", logs.String())
+	}
+}
+
+// A bd that really hangs must still surface as reason=timeout (so
+// beads_exporter_up goes to 0 and the alert path is intact), after exactly two
+// attempts and no more.
+func TestPersistentTimeoutStillFailsAsTimeoutAfterTwoAttempts(t *testing.T) {
+	var attempts int
+	r := runnerFunc(func(ctx context.Context, c Cmd) (Result, error) {
+		attempts++
+		return blockUntilDeadline(ctx)
+	})
+	c := NewClient(ClientConfig{BDPath: testBD, BeadsDir: t.TempDir(), Home: testHome, ChildPath: testPath, Timeout: 20 * time.Millisecond, Runner: r})
+	_, err := c.List(context.Background(), ListOpts{})
+	if got := failure.ReasonOf(err); got != failure.Timeout {
+		t.Fatalf("reason = %q (%v), want timeout", got, err)
+	}
+	if attempts != timeoutAttempts || timeoutAttempts != 2 {
+		t.Fatalf("attempts = %d (timeoutAttempts %d), want exactly 2", attempts, timeoutAttempts)
+	}
+}
+
+// Only a timeout is retried: a real bd failure is final on the first attempt.
+func TestNonTimeoutFailuresAreNotRetried(t *testing.T) {
+	cases := map[string]func(Cmd) (Result, error){
+		"exit code":   func(Cmd) (Result, error) { return Result{ExitCode: 1, Stderr: []byte("boom")}, nil },
+		"spawn error": func(Cmd) (Result, error) { return Result{}, errors.New("exec: no such file") },
+		"schema skew": func(Cmd) (Result, error) { return Result{Stdout: []byte(`[]`)}, nil },
+	}
+	for name, reply := range cases {
+		t.Run(name, func(t *testing.T) {
+			g := &guardRunner{reply: reply}
+			c := newTestClient(t, t.TempDir(), g)
+			if _, err := c.List(context.Background(), ListOpts{}); err == nil {
+				t.Fatal("want an error")
+			}
+			if g.count() != 1 {
+				t.Fatalf("spawns = %d, want 1 (no retry)", g.count())
+			}
+		})
+	}
+}
+
+// A cancelled parent (shutdown) is neither a timeout nor retried.
+func TestParentCancellationDuringACallIsNotRetried(t *testing.T) {
+	var attempts int
+	ctx, cancel := context.WithCancel(context.Background())
+	r := runnerFunc(func(rc context.Context, c Cmd) (Result, error) {
+		attempts++
+		cancel()
+		return blockUntilDeadline(rc)
+	})
+	c := NewClient(ClientConfig{BDPath: testBD, BeadsDir: t.TempDir(), Home: testHome, ChildPath: testPath, Timeout: time.Minute, Runner: r})
+	_, err := c.List(ctx, ListOpts{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1", attempts)
 	}
 }
 

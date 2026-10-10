@@ -146,7 +146,9 @@ in
       description = ''
         Bound on each bd call. A healthy call takes well under a second, so
         the bound only has to tell a hang from a call slowed by host CPU
-        saturation, which has stretched a whole pass past 70 s.
+        saturation, which has stretched a whole pass past 70 s. This bounds each
+        try: a call that times out is tried once more, so one failed call takes
+        up to twice this before the pass fails.
       '';
     };
 
