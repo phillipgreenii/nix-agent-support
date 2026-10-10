@@ -38,9 +38,33 @@ obeys are in [`periods-and-rollover.md`](periods-and-rollover.md), [`cycles-and-
   `JOURNEY-WEB-DEEP-LINK`; `INV-WEB-19`.)_
 - **`STORY-WEB-PRIVATE-AND-ACCESSIBLE`** <!-- uuid: f5a01269-15de-49c8-827e-de7da9cbfd87 --> — As the operator, I want a page I can use with the keyboard and a
   screen reader, that never tells me about the clock every second, and that sends what I type nowhere but to
-  the service. _(→ `JOURNEY-WEB-READ-ONLY`; `INV-WEB-20`, `INV-WEB-21`, `INV-WEB-22`.)_
+  the service. _(→ `JOURNEY-WEB-KEYBOARD`, `JOURNEY-WEB-READ-ONLY`; `INV-WEB-20`, `INV-WEB-21`, `INV-WEB-22`.)_
+- **`STORY-WEB-COMES-WITH-THE-SERVICE`** <!-- uuid: 5da28062-2985-4698-ac1c-08ed52db7896 --> — As the operator, I want the page to come with the service itself, with
+  nothing to install and no network beyond my own machine, and to be refused to any page that is not mine,
+  so opening it is as safe as running the service. _(→ `JOURNEY-WEB-OPEN`; `INV-WEB-1`, `INV-WEB-2`.)_
 
 ## Journeys
+
+### `JOURNEY-WEB-OPEN` — opening the page <!-- uuid: 0b664696-93ab-45f0-b487-5b69e648eec5 -->
+
+**Primary actor:** `ACTOR-OPERATOR`. **Other actors:** `ACTOR-CLIENT`. _Requires:_ `INV-WEB-1`, `INV-WEB-2`, `INV-WEB-3`.
+_Includes:_ none.
+
+1. The operator opens the service's address in a browser. The service answers with the page and, one by
+   one, the scripts and the stylesheet it names, each from the binary, with no reverse proxy needed
+   (`INV-WEB-1`).
+2. The page reads the state and the configuration, opens the stream and draws; from then on it makes only
+   requests of the service's interface, each naming the page as the client and each change carrying an id
+   (`INV-WEB-2`).
+
+Extensions:
+
+- 1a. The page is requested under a host or from an origin the service does not list. The service refuses
+  it as it refuses every other route (`INV-WEB-1`).
+- 1b. A name that is not one of the page's files is requested. The service answers that there is no such
+  path (`INV-WEB-1`).
+- 2a. The service is still replaying the log. The page says it could not read the state yet and tries
+  again (`INV-WEB-3`).
 
 ### `JOURNEY-WEB-TASK-DONE` — completing and skipping a task <!-- uuid: dccfca8d-167e-4844-84f5-b4b8d715db89 -->
 
@@ -56,7 +80,8 @@ obeys are in [`periods-and-rollover.md`](periods-and-rollover.md), [`cycles-and-
 Extensions:
 
 - 2a. The task was done earlier. The operator opens "Done at", which shows a time that defaults to now,
-  in a named zone, and confirms a chosen time (`INV-WEB-10`).
+  in a named zone, and confirms a chosen time; a time that the zone's clocks skipped or repeated is read
+  as the rules of time and zones say (`INV-WEB-10`, `INV-WEB-21`).
 - 3a. The reason is blank. The skip cannot be confirmed (`INV-WEB-10`).
 - 3b. The operator has skipped for the same reason before. The recent reasons are offered (`INV-WEB-10`).
 - 2b. The operator presses Undo. The event just appended is retracted; if the service refuses, its sentence
@@ -81,6 +106,8 @@ Extensions:
   shows it too; a screen reader is told once (`INV-WEB-12`, `INV-WEB-20`).
 - 4a. The service says several cycles could be meant. The page lists them and the operator chooses one;
   it never picks (`INV-WEB-14`).
+- 2b. The operator writes a note and a ticket number for the cycle; the form came with the keys of the
+  cycle's type, saving sends the whole form, and stopping never asked for it (`INV-WEB-15`).
 
 ### `JOURNEY-WEB-LIVE` — a change made elsewhere <!-- uuid: ffd8ed36-c947-4739-9ca5-74d54e571735 -->
 
@@ -123,7 +150,7 @@ Extensions:
 - 1a. The service cannot be reached while a change is in flight. The page says the outcome is unknown and
   offers a retry that repeats the same request (`INV-WEB-4`).
 - 1b. The service answers that the store is unavailable and the outcome is unknown. The same retry is
-  offered (`INV-WEB-4`).
+  offered, and it carries the request's own id so it takes effect at most once (`INV-WEB-2`, `INV-WEB-4`).
 
 ### `JOURNEY-WEB-ROLLOVER` — a new day while a cycle is paused <!-- uuid: 2d52c028-e42b-41b7-b7bc-91f613784579 -->
 
@@ -182,6 +209,23 @@ Extensions:
 - 1a. The task belongs to an earlier period, or the cycle is stopped. The page shows what the log says
   about it (`INV-WEB-19`).
 - 2a. The id is unknown. The page says so, in words, and shows the rest of the page (`INV-WEB-19`).
+
+### `JOURNEY-WEB-KEYBOARD` — a day with the keyboard and a screen reader <!-- uuid: 90afbe9f-285a-4786-a3e9-2e3211ed5c6c -->
+
+**Primary actor:** `ACTOR-OPERATOR`. **Other actors:** `ACTOR-CLIENT`. _Requires:_ `INV-WEB-20`, `INV-WEB-21`,
+`INV-WEB-22`. _Includes:_ none.
+
+1. The operator reaches every control with the keyboard, each with a visible focus and a name that says
+   which task or cycle it acts on (`INV-WEB-20`).
+2. A cycle runs out of time. Assistive technology is told once, and the timer is not read out every
+   second; the tab's title carries the overtime (`INV-WEB-20`).
+3. The operator skips a task with a typed reason. The reason leaves the page only as the body of the
+   request to the service, and appears in no address, log or metric (`INV-WEB-22`).
+4. A dialog opens: focus moves into it, Escape closes it and focus returns (`INV-WEB-20`).
+
+Extensions:
+
+- 3a. The operator types a time. The page names the zone it reads it in beside the input (`INV-WEB-21`).
 
 ## The page's interface
 

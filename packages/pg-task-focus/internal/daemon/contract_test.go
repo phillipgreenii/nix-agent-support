@@ -163,7 +163,9 @@ func TestAPanicInAnObserverDoesNotSkipTheCommitNotifications(t *testing.T) {
 func TestNotReadyUntilTheFirstStoreCheckPasses(t *testing.T) {
 	fs := storefault.New(nil)
 	fs.Inject(storefault.Rule{Op: storefault.OpCreateTemp}) // the first probe fails
-	e := newEnv(t, options{fs: fs, probeEvery: 50 * time.Millisecond})
+	// The probe interval is how long the daemon stays not ready: long enough that a loaded host
+	// (the nix sandbox, a busy CI box) still makes the assertions below before the next probe passes.
+	e := newEnv(t, options{fs: fs, probeEvery: 500 * time.Millisecond})
 	if r := e.raw("GET", "/readyz", nil, nil); r.Status != 503 || r.Reason() != "not_ready" || !strings.Contains(string(r.Body), "store_writable") {
 		t.Fatalf("/readyz before the first check: %d %s", r.Status, r.Body)
 	}
