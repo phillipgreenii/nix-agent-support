@@ -231,7 +231,8 @@ Extensions:
   visible without scrolling, the banner `READ-ONLY: <reason>. Restart pg-task-focus to recover`, MUST
   announce it to assistive technology when it appears, and MUST disable or hide every control that would
   change something (the timer controls, task done and skip, the period and profile changes, undo and every
-  action of the editor). Reading, navigating and the original view MUST keep working. The banner MUST
+  action of the editor). A dialog that is open MUST carry the sentence too, because the page behind it
+  cannot be reached. Reading, navigating and the original view MUST keep working. The banner MUST
   appear as soon as the stream says the mode began. _(Operator ruling, 2026-10-08, decision log row 38.)_
 
 ### Header, periods and profile

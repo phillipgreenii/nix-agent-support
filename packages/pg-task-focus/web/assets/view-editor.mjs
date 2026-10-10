@@ -8,7 +8,7 @@ import { batchOf, batchSize, editableFields, effectiveMs, isCorrectable, isRetra
 import { durationWords } from "./format.mjs";
 import { cycleTypes, displayZone } from "./select.mjs";
 import { h } from "./vdom.mjs";
-import { button, errorBox, field } from "./view-common.mjs";
+import { button, control, errorBox, field } from "./view-common.mjs";
 import { clockInZone, dateInZone, dateTimeInZone } from "./zone.mjs";
 
 const TYPE_CHOICES = [
@@ -66,8 +66,8 @@ function filters(model, dispatch, ed) {
       "fieldset",
       { class: "view-toggle" },
       h("legend", {}, "View"),
-      h("label", {}, h("input", { type: "radio", name: "view", value: "corrected", checked: ed.view === "corrected", onchange: () => dispatch("editor.setView", "corrected") }), " Corrected"),
-      h("label", {}, h("input", { type: "radio", name: "view", value: "original", checked: ed.view === "original", onchange: () => dispatch("editor.setView", "original") }), " As first logged"),
+      h("label", {}, control(model, "input", { mutates: false, type: "radio", name: "view", value: "corrected", checked: ed.view === "corrected", onchange: () => dispatch("editor.setView", "corrected") }), " Corrected"),
+      h("label", {}, control(model, "input", { mutates: false, type: "radio", name: "view", value: "original", checked: ed.view === "original", onchange: () => dispatch("editor.setView", "original") }), " As first logged"),
     ),
     field(model, { id: "ed-from", label: "From (date)", type: "date", value: ed.from, mutates: false, onchange: (e) => dispatch("editor.filter", "from", e.target.value) }),
     field(model, { id: "ed-to", label: "To (date)", type: "date", value: ed.to, mutates: false, onchange: (e) => dispatch("editor.filter", "to", e.target.value) }),

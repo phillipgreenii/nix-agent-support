@@ -400,3 +400,18 @@ test("the whole page renders into a DOM and re-renders without moving what did n
   assert.equal(root.byTag("dialog").length, 2, "both dialogs are in the page, closed");
   assert.ok(root.byTag("dialog").every((d) => d.open === false));
 });
+
+test("read-only mode inside the period modal: its checkboxes and fields are disabled, and the dialog says it too", () => {
+  const m = model({ state: state({ store: readOnlyStore, periods: [period("day", { ended: true, banner: "New day: roll over" }), period("week"), period("sprint")] }) });
+  m.ui.modal = "period";
+  m.ui.period = {
+    form: { tz: "America/New_York", profile: "", backdate: "", kinds: { day: { on: true, start: "2026-10-08", end: "", label: "" }, week: { on: false, start: "2026-10-08", end: "", label: "" }, sprint: { on: false, start: "2026-10-08", end: "", label: "" } } },
+    preview: null, previewing: false, problems: [], error: null, stale: false, rollover: { mode: "missed", skipAllReason: "", perTask: {} }, endAt: {}, endAtProblem: {},
+  };
+  const { p } = draw(m);
+  assert.equal(p.byAttr("data-banner", "read-only-dialog").length, 1, "the page behind a modal is unreachable, so the dialog carries the sentence");
+  const boxes = p.where((n) => n.tag === "input" && n.props.type === "checkbox");
+  assert.equal(boxes.length, 3);
+  for (const n of p.mutators()) assert.equal(n.props.disabled, true, n.props.id ?? n.props["aria-label"]);
+  assert.equal(p.button("Close").props.disabled, false, "the dialog can still be closed");
+});

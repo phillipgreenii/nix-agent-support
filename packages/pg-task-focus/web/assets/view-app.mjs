@@ -21,7 +21,7 @@ import { banners, header, nav } from "./view-top.mjs";
 export function viewApp(model, dispatch) {
   const editor = model.route.name === "events";
   return [
-    h("button", { class: "skip", type: "button", onclick: () => dispatch("focus.main") }, "Skip to the content"),
+    button(model, { mutates: false, class: "skip", onclick: () => dispatch("focus.main") }, "Skip to the content"),
     banners(model, dispatch),
     header(model, dispatch),
     nav(model),

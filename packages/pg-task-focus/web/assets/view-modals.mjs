@@ -4,9 +4,9 @@
 
 import { blockingCycles, periodState, previewIsCurrent, profileState, rolloverProblems } from "./feature-periods.mjs";
 import { isBlank, plural } from "./format.mjs";
-import { KINDS, KIND_TITLES, displayZone, isReadOnly } from "./select.mjs";
+import { KINDS, KIND_TITLES, displayZone, isReadOnly, readOnlySentence } from "./select.mjs";
 import { h } from "./vdom.mjs";
-import { button, errorBox, field } from "./view-common.mjs";
+import { button, control, errorBox, field } from "./view-common.mjs";
 import { knownZones } from "./zone.mjs";
 
 const UNDO_LIMIT = "Undo is refused once later events depend on the new periods or their tasks; the refusal names those events.";
@@ -17,15 +17,21 @@ export function dialogs(model, dispatch) {
   return [
     h(
       "dialog",
-      { key: "period", id: "period-dialog", class: "modal", modal: !!p, "aria-labelledby": "period-h", onclose: () => model.ui.modal === "period" && dispatch("period.close") },
+      { key: "period", id: "period-dialog", class: "modal", modal: !!p, "aria-labelledby": p ? "period-h" : undefined, onclose: () => model.ui.modal === "period" && dispatch("period.close") },
       p ? periodModal(model, dispatch, p) : null,
     ),
     h(
       "dialog",
-      { key: "profile", id: "profile-dialog", class: "modal", modal: !!pr, "aria-labelledby": "profile-h", onclose: () => model.ui.modal === "profile" && dispatch("profile.close") },
+      { key: "profile", id: "profile-dialog", class: "modal", modal: !!pr, "aria-labelledby": pr ? "profile-h" : undefined, onclose: () => model.ui.modal === "profile" && dispatch("profile.close") },
       pr ? profileModal(model, dispatch, pr) : null,
     ),
   ];
+}
+
+/** The READ-ONLY sentence inside a dialog: the banner behind a modal dialog is not reachable, so the dialog says it too. */
+function readOnlyNote(model) {
+  const s = readOnlySentence(model.state?.store);
+  return s ? h("p", { class: "banner banner-readonly", role: "alert", "data-banner": "read-only-dialog" }, s) : null;
 }
 
 function taskList(list, empty) {
@@ -54,6 +60,7 @@ function periodModal(model, dispatch, p) {
       },
     },
     h("h2", { id: "period-h" }, model.state.initialized ? "Change periods" : "Set your day, week and sprint"),
+    readOnlyNote(model),
     h("p", { class: "hint" }, "Choose the periods to begin. The preview shows what becomes of every open task before anything is written."),
     KINDS.map((k) => kindFields(model, dispatch, p, k)),
     h(
@@ -106,7 +113,7 @@ function kindFields(model, dispatch, p, kind) {
     h(
       "label",
       { class: "check" },
-      h("input", { type: "checkbox", id: `kind-${kind}-on`, checked: f.on, disabled: isReadOnly(model), "data-mutates": "true", onchange: (e) => dispatch("period.field", `kinds.${kind}.on`, e.target.checked) }),
+      control(model, "input", { mutates: true, type: "checkbox", id: `kind-${kind}-on`, checked: f.on, onchange: (e) => dispatch("period.field", `kinds.${kind}.on`, e.target.checked) }),
       ` Begin a new ${kind}`,
       cur?.ended ? h("span", { class: "sub" }, ` (${cur.banner})`) : null,
     ),
@@ -192,8 +199,8 @@ function previewView(model, dispatch, p, result, rollProblems) {
                 t.overdue ? h("span", { class: "overdue" }, [" ", h("span", { "aria-hidden": "true" }, "⚠ "), "overdue"]) : null,
                 h("span", { class: "fate" }, ` → ${skipping ? "will be skipped" : "will be marked missed"}`),
                 r.mode === "missed"
-                  ? h("label", { class: "check" }, h("input", { type: "checkbox", id: `skip-${t.id}`, checked: per.skip, disabled: isReadOnly(model), "data-mutates": "true", onchange: (e) => dispatch("rollover.task", t.id, e.target.checked, undefined) }), " Skip instead")
-                  : h("label", { class: "check" }, h("input", { type: "checkbox", id: `own-${t.id}`, checked: per.skip, disabled: isReadOnly(model), "data-mutates": "true", onchange: (e) => dispatch("rollover.task", t.id, e.target.checked, undefined) }), " Use its own reason"),
+                  ? h("label", { class: "check" }, control(model, "input", { mutates: true, type: "checkbox", id: `skip-${t.id}`, checked: per.skip, onchange: (e) => dispatch("rollover.task", t.id, e.target.checked, undefined) }), " Skip instead")
+                  : h("label", { class: "check" }, control(model, "input", { mutates: true, type: "checkbox", id: `own-${t.id}`, checked: per.skip, onchange: (e) => dispatch("rollover.task", t.id, e.target.checked, undefined) }), " Use its own reason"),
                 per.skip
                   ? field(model, { id: `reason-${t.id}`, label: `Reason for skipping ${t.title}`, type: "text", value: per.reason, mutates: true, autocomplete: "off", oninput: (e) => dispatch("rollover.task", t.id, undefined, e.target.value) })
                   : null,
@@ -237,6 +244,7 @@ function profileModal(model, dispatch, p) {
       },
     },
     h("h2", { id: "profile-h" }, "Change profile"),
+    readOnlyNote(model),
     h("p", { class: "hint" }, "A profile change leaves tasks that are done, skipped or missed alone. It adds, withdraws and reinstates tasks in the periods that stay."),
     field(
       model,
