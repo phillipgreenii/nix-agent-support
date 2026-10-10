@@ -248,7 +248,7 @@ distinction come from the behavior-docs method
 
   A capability's own schema version moves only with that capability's own wire shape: for example
   the `issue` capability's additive `status_category` field moved `issue` from schema version 7 to
-  8 (bead `pg2-mj0jv`) and left every other capability's version, and `protocolVersion`, untouched.
+  8 (bead `pg2-mj0jv`) and left every other capability's version, and `protocolVersion`, untouched. The `created_at` field then moved it from 9 to 10 (bead `pg2-2j5ac.44.2`).
 
   ```mermaid
   flowchart TD

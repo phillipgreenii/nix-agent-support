@@ -167,6 +167,17 @@ field is ordinary entity content, adding it changes every Jira issue's `list --f
 once, so the first listing after a Jira backend starts carrying it reports every Jira issue as
 changed.
 
+**`issue` creation time** (`schema.Issue.CreatedAt`, `IssueSchemaVersion` 9 → 10, bead
+`pg2-2j5ac.44.2`) — `show`, `list` and `create` answers gain an additive, optional `created_at`, the
+tracker's own creation time of the issue, passed through exactly as the backend received it and never
+parsed by the connector: the beads backend carries bd's `created_at` (RFC3339 text) and the Jira
+backend carries `pjira`'s `created` (Jira's raw timestamp text, e.g. `2026-01-01T00:00:00.000+0000`,
+an offset with no colon, which is NOT strict RFC3339), so a consumer MUST parse it itself. Unlike
+`updated_at` it does not move when the issue is touched, which is what makes it a stable age key (the
+focus rank's age key). An absent field means the backend has none. Because the field is ordinary
+entity content, adding it changes every issue's `list --fingerprints` value once, so the first poll
+after the connector change is a BURST re-hydration bounded by `hydration.max_per_poll`.
+
 ### `review_submit` — saving at an earlier head
 
 A review is written against the commit its author read. When the PR has since moved on, the

@@ -189,9 +189,10 @@ type pjiraIssue struct {
 	Updated string `json:"updated,omitempty"`
 	// Created, Reporter, Changelog and Comments mirror pjira's model.go
 	// Issue fields of the same JSON keys (Changelog and Comments are
-	// populated only by `pjira search --expand changelog,comments`). They
-	// are decode-only: no existing op maps them onto schema.Issue, so
-	// Show/List/Search output is unchanged. Every timestamp (Created,
+	// populated only by `pjira search --expand changelog,comments`). Created
+	// is mapped onto schema.Issue.CreatedAt (bead pg2-2j5ac.44.2); the
+	// others are decode-only: no existing op maps them onto schema.Issue, so
+	// their Show/List/Search output is unchanged. Every timestamp (Created,
 	// pjiraChangelogEntry.At, pjiraComment.Created) is Jira's raw text,
 	// forwarded unchanged by pjira (e.g. "2026-01-03T00:00:00.000+0000", an
 	// offset with no colon, which is NOT strict RFC3339); it is kept as a
@@ -294,6 +295,8 @@ func decodePJIRAIssue(raw string) (*pjiraIssue, error) {
 // Parent is carried straight through from pjiraIssue.Parent (bead
 // pg2-upb9j), so a Jira child shows its Epic (or a sub-task its parent) the
 // way a bd child shows its dot-suffixed parent; no parent leaves it empty.
+// CreatedAt is carried straight through, unparsed, from pjiraIssue.Created
+// (bead pg2-2j5ac.44.2).
 // UpdatedAt/Metadata/ExternalRefs still stay empty: pjiraIssue carries
 // none of those today (verified against pjira's own `issue`/`search` JSON
 // shapes) — a future pjira addition of any of them is this backend's own
@@ -323,6 +326,7 @@ func toSchemaIssue(iss *pjiraIssue, asOf time.Time) *schema.Issue {
 		Assignee:       assignee,
 		AsOf:           asOf.Format(time.RFC3339),
 		Stale:          false,
+		CreatedAt:      iss.Created,
 		DueDate:        dueDate,
 		Parent:         iss.Parent,
 	}

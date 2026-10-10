@@ -1401,3 +1401,28 @@ func TestBackend_Children_IDLooksLikeBDFlag(t *testing.T) {
 		t.Fatalf("list argv = %v, want the id only inside --parent=--all", list)
 	}
 }
+
+// TestBackend_Show_CreatedAt locks in bead pg2-2j5ac.44.2: bd's created_at
+// is carried onto schema.Issue.CreatedAt unparsed, and an issue without one
+// leaves it empty.
+func TestBackend_Show_CreatedAt(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, want string
+	}{
+		{"present", `"created_at":"2026-01-01T00:00:00Z",`, "2026-01-01T00:00:00Z"},
+		{"absent", ``, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fr := &fakeRunner{handle: func(args []string) (string, error) {
+				return `{"data":[{"id":"tp-1","title":"t",` + tc.body + `"status":"open","priority":1}],"schema_version":1}`, nil
+			}}
+			got, err := New(fr).Show(context.Background(), "tp-1")
+			if err != nil {
+				t.Fatalf("Show: %v", err)
+			}
+			if got.CreatedAt != tc.want {
+				t.Fatalf("CreatedAt = %q, want %q", got.CreatedAt, tc.want)
+			}
+		})
+	}
+}

@@ -165,8 +165,8 @@ func formatPriority(p int) string {
 // asOf is this call's own completion time (bead pg2-2j5ac.28.3, mirroring
 // pkg/schema/pr.go's toSchemaPR/asOf precedent exactly): every call site
 // below execs `bd` fresh with no local cache of bd's own facts, so Stale
-// is always false. UpdatedAt/DueDate/ExternalRefs/Metadata are carried
-// straight through from bdIssue's own updated_at/due_at/external_ref/
+// is always false. CreatedAt/UpdatedAt/DueDate/ExternalRefs/Metadata are carried
+// straight through from bdIssue's own created_at/updated_at/due_at/external_ref/
 // metadata fields (the last coerced to string-to-string via
 // bdMetadataToStrings — see its own doc comment).
 func toSchemaIssue(iss *bdIssue, tracker string, asOf time.Time) *schema.Issue {
@@ -193,6 +193,7 @@ func toSchemaIssue(iss *bdIssue, tracker string, asOf time.Time) *schema.Issue {
 		Deps:         deps,
 		AsOf:         asOf.Format(time.RFC3339),
 		Stale:        false,
+		CreatedAt:    iss.CreatedAt,
 		UpdatedAt:    iss.UpdatedAt,
 		DueDate:      iss.DueAt,
 		Metadata:     bdMetadataToStrings(iss.Metadata),

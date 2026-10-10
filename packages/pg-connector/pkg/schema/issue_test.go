@@ -159,13 +159,13 @@ func TestIssueDepsResult_IDsPopulatedRegardlessOfFull_EntitiesOmittedWhenEmpty(t
 	}
 }
 
-// TestIssueSchemaVersion_PinnedAtNineAndRegistered pins the issue
-// capability's schema version at 9 (bead pg2-nd60k bumped 8 -> 9 for the
-// children op; pg2-mj0jv's earlier 7 -> 8 added the StatusCategory field) and that CurrentSchemaVersions derives from the
+// TestIssueSchemaVersion_PinnedAtTenAndRegistered pins the issue
+// capability's schema version at 10 (bead pg2-2j5ac.44.2 bumped 9 -> 10 for
+// the CreatedAt field; pg2-nd60k's earlier 8 -> 9 added the children op) and that CurrentSchemaVersions derives from the
 // constant rather than carrying its own copy.
-func TestIssueSchemaVersion_PinnedAtNineAndRegistered(t *testing.T) {
-	if IssueSchemaVersion != 9 {
-		t.Fatalf("IssueSchemaVersion = %d, want 9 (8 -> 9 by bead pg2-nd60k)", IssueSchemaVersion)
+func TestIssueSchemaVersion_PinnedAtTenAndRegistered(t *testing.T) {
+	if IssueSchemaVersion != 10 {
+		t.Fatalf("IssueSchemaVersion = %d, want 10 (9 -> 10 by bead pg2-2j5ac.44.2)", IssueSchemaVersion)
 	}
 	if got := CurrentSchemaVersions["issue"]; got != IssueSchemaVersion {
 		t.Fatalf(`CurrentSchemaVersions["issue"] = %d, want %d`, got, IssueSchemaVersion)
@@ -222,5 +222,34 @@ func TestIssueChildrenResult_JSONShape(t *testing.T) {
 	}
 	if string(empty) != `{"children":[]}` {
 		t.Fatalf("empty result = %s, want {\"children\":[]}", empty)
+	}
+}
+
+// TestIssue_CreatedAt_RoundTripAndOmitWhenEmpty: created_at (bead
+// pg2-2j5ac.44.2) is omitted when empty and round-trips verbatim, unparsed
+// (a Jira-style offset with no colon is not RFC3339 and must survive as is).
+func TestIssue_CreatedAt_RoundTripAndOmitWhenEmpty(t *testing.T) {
+	empty, err := json.Marshal(Issue{ID: "issue-1"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(empty), `"created_at"`) {
+		t.Fatalf("expected created_at omitted when empty, got %s", empty)
+	}
+	for _, created := range []string{"2026-01-01T00:00:00Z", "2026-01-01T00:00:00.000+0000"} {
+		raw, err := json.Marshal(Issue{ID: "issue-1", CreatedAt: created})
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		if !strings.Contains(string(raw), `"created_at":"`+created+`"`) {
+			t.Fatalf("created_at missing from %s", raw)
+		}
+		var out Issue
+		if err := json.Unmarshal(raw, &out); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if out.CreatedAt != created {
+			t.Fatalf("CreatedAt = %q, want %q", out.CreatedAt, created)
+		}
 	}
 }

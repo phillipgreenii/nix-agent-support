@@ -1292,7 +1292,8 @@ func TestDecodePJIRASearchResult_WithoutActivityFields(t *testing.T) {
 
 // TestBackend_Show_ActivityFieldsDoNotChangeOutput proves the extra decode
 // fields are invisible to the schema.Issue Show returns: the same issue with
-// and without them maps to an identical result.
+// and without them maps to an identical result, apart from CreatedAt, which
+// bead pg2-2j5ac.44.2 maps from pjira's created (cleared before comparing).
 func TestBackend_Show_ActivityFieldsDoNotChangeOutput(t *testing.T) {
 	base := `{"key":"PROJ-7","summary":"s","status":"Done","issuetype":"Task","labels":[],` +
 		`"url":"https://example.atlassian.net/browse/PROJ-7"}`
@@ -1307,6 +1308,7 @@ func TestBackend_Show_ActivityFieldsDoNotChangeOutput(t *testing.T) {
 	with, without := show(pjiraActivityIssueJSON), show(base)
 	// AsOf is stamped per call; compare with it cleared.
 	with.AsOf, without.AsOf = "", ""
+	with.CreatedAt, without.CreatedAt = "", ""
 	jw, _ := json.Marshal(with)
 	jo, _ := json.Marshal(without)
 	if string(jw) != string(jo) {
@@ -1554,5 +1556,31 @@ func TestJiraChildrenFailsClosed(t *testing.T) {
 	}}
 	if _, err := New(down).Children(context.Background(), "PROJ-1"); !errors.Is(err, scriptout.ErrUnavailable) {
 		t.Fatalf("search failure: err = %v, want ErrUnavailable", err)
+	}
+}
+
+// TestBackend_Show_CreatedAt locks in bead pg2-2j5ac.44.2: pjira's created
+// is Jira's raw timestamp text (an offset with no colon, NOT RFC3339) and is
+// carried onto schema.Issue.CreatedAt unparsed; an issue without one leaves
+// it empty.
+func TestBackend_Show_CreatedAt(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, want string
+	}{
+		{"present", `"created":"2026-01-01T00:00:00.000+0000",`, "2026-01-01T00:00:00.000+0000"},
+		{"absent", ``, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fr := &fakeRunner{handle: func(args []string) (string, error) {
+				return `{"key":"PROJ-1",` + tc.body + `"summary":"probe","status":"To Do","issuetype":"Bug"}`, nil
+			}}
+			got, err := New(fr).Show(context.Background(), "PROJ-1")
+			if err != nil {
+				t.Fatalf("Show: %v", err)
+			}
+			if got.CreatedAt != tc.want {
+				t.Fatalf("CreatedAt = %q, want %q", got.CreatedAt, tc.want)
+			}
+		})
 	}
 }

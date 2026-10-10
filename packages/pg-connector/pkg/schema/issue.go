@@ -80,7 +80,13 @@ import "encoding/json"
 // open children" hold read) — same "a capability gaining a whole new op's
 // wire shape bumps its one schemaVersion integer" precedent as the 3 -> 4
 // bump for the list op.
-const IssueSchemaVersion = 9
+//
+// Bumped 9 -> 10 by bead pg2-2j5ac.44.2 (daily-focus store-first design,
+// spec section 6 "Age"), which added the CreatedAt field below (the
+// tracker's own creation time, so the focus rank's age key is stable across
+// edits) — same "any field-shape change bumps the version" precedent as
+// every earlier bump on this constant.
+const IssueSchemaVersion = 10
 
 // Issue is the issue capability's shared JSON wire shape, returned by the
 // issue capability's "show" and "create" ops and carried by
@@ -204,6 +210,14 @@ type Issue struct {
 	// schema.PR.Stale's own doc comment, which noted this was true of
 	// every ci/issue/scm backend as of bead pg2-681xo.
 	Stale bool `json:"stale"`
+
+	// CreatedAt is the issue's creation time as its own tracker reports it,
+	// passed through UNPARSED (bd's created_at is RFC3339; Jira's is the raw
+	// text pjira returns, e.g. 2026-01-01T00:00:00.000+0000), so a consumer
+	// MUST parse it itself. Unlike UpdatedAt it never moves when the issue is
+	// touched, which is what makes it a stable age key. Empty when the
+	// backend does not supply one — added by bead pg2-2j5ac.44.2.
+	CreatedAt string `json:"created_at,omitempty"`
 
 	// UpdatedAt is the issue's own last-modified time, in whatever
 	// timestamp form its tracker returns (bd's own `updated_at` is
