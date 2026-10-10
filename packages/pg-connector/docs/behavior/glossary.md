@@ -9,7 +9,8 @@ system (GitHub, beads, local git, …) defines its own terms, out of this set's 
   shared entity-type schemas and the wire protocol, and the registry that resolves a capability to
   its backend(s). A **Facade** over N pluggable backends.
 - **Tier 2 — backend** — one thin binary per (entity type, external system) pair, speaking only the
-  wire protocol, with no independent CLI identity a human types directly. An **Adapter**
+  wire protocol, with no independent CLI identity a human types directly (a daemon-backed
+  backend MAY offer `status`; `ACTOR-BACKEND`). An **Adapter**
   translating one external system into a capability's generic wire contract, realized as a
   **process-boundary adapter** (a separate OS process, not an in-language object).
 - **Tier 3 — consumer layer** — tooling built on top of pg-connector's own verbs (a TUI, a pg-router
@@ -35,7 +36,7 @@ system (GitHub, beads, local git, …) defines its own terms, out of this set's 
   two capabilities that are not entity types.
 - **`pr`** — a pull/merge request: identity and review/feedback state. Carries no
   category/disposition write fields of its own — bead pg2-2j5ac.28.7 retired the `categorize`/
-  `feedback_set` ops (statelessness, `D3`); category/disposition are re-derived by `pg-desk`'s
+  `feedback_set` ops (no backend keeps category state, `D3`); category/disposition are re-derived by `pg-desk`'s
   interpreter rather than persisted by any backend.
 - **`issue`** — a tracked issue (Jira/beads/GitHub Issues, …): identity, state, and read+write ops
   (show, create, comment, transition).
@@ -191,14 +192,39 @@ list`/`search` accept no such flag — see "Cross-cutting capabilities" above) t
 - **`config` block** — the opaque `backends.<binary>` registry entry (`INV-WIRE-3`) the umbrella
   copies verbatim into every wire request sent to that binary; never validated by the umbrella,
   interpreted only by the backend (or a value shared across capabilities, like `queries`).
-- **Statelessness** — a backend MUST resolve per-call policy (named queries, a rate-limit reserve,
-  …) from the request's own `config` member alone, never from a local file/env it reads itself
-  for that purpose (`INV-STATE-1`).
+- **Statelessness** — the default property of a backend that is not daemon-backed: it MUST resolve
+  per-call policy (named queries, a rate-limit reserve, …) from the request's own `config` member
+  alone, never from a local file/env it reads itself for that purpose (`INV-STATE-1`), and it keeps
+  no store of its own. It is NOT a property of every Tier-2 backend: a connector MAY be stateful
+  and MAY run a daemon, and none is required to (ADR 0090, which lifted that restriction).
+- **Daemon** — a long-running process that a backend MAY run, one per upstream rate-limit domain,
+  with its own clock for its upstream reads and its own persistent store; a supervisor starts it and
+  restarts it. It is the store's only writer. The backend's per-call process (client mode) forwards
+  each request to it and answers `unavailable` when it cannot be reached (ADR 0090). pg-router
+  remains the scheduler of consumer polls; the daemon's clock is for upstream reads only.
+- **Daemon-backed backend** — a Tier-2 backend served by a daemon. It MAY read its per-call policy
+  from its own rendered config file (`INV-STATE-1`), MAY own its cache and its change decisions
+  (`owns_changes`, `cache_opt_out`), and MAY offer `status` (`ACTOR-BACKEND`). A backend that is not
+  daemon-backed is unchanged.
+- **`owns_changes`** — a `capabilities` declaration by which a backend says it decides what changed
+  for its types and owns its consumers' cursors: the umbrella forwards `changes` and `changes_ack`
+  to it, and never falls back to a ledger diff for it (`INV-CACHE-9`).
+- **`cache_opt_out`** — a `capabilities` declaration by which a backend says it owns its cache: the
+  umbrella passes its cache annotations through and writes no cache entry or tombstone for it
+  (`INV-CACHE-9`). Distinct from the per-backend `vocabulary` opt-out of `INV-CACHE-1`, which makes
+  the umbrella stop caching a backend that does not own its cache.
+- **`sources_freshness[]`** — the per-query report a backend that owns its changes returns on each
+  forwarded `changes` answer: the time of its last whole-query origin answer and its last error. The
+  umbrella stamps the ledger from it (`INV-LEDGER-FRESH-5`).
+- **`last_seen`** — the time a consumer last called `changes` through the umbrella, stamped on the
+  ledger on every forwarded call for a backend that owns its changes (`INV-LEDGER-FRESH-5`).
 
 ## Entity cache policy
 
-- **Entity cache** — the umbrella-owned, on-disk copy of what a stateless backend already returned,
-  one file per `(type, backend)` (`INV-CACHE-1`). Each entry records a level.
+- **Entity cache** — the umbrella-owned, on-disk copy of what a backend that does not own its
+  cache already returned, one file per `(type, backend)` (`INV-CACHE-1`). Each entry records a
+  level. A backend that owns its cache (`cache_opt_out`) keeps its own entity cache instead, and
+  the umbrella holds none for it (`INV-CACHE-9`).
 - **Level (`summary` / `detail`)** — what an entity cache entry holds: `summary` is what `list`
   returns, `detail` is what `show` returns. Only `detail` satisfies a `show` (`INV-CACHE-2`).
 - **`read_ttl`** — the age within which `pr show` and `issue show` are served from a `detail`

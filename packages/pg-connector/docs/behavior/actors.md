@@ -26,6 +26,13 @@ actors (method `INV-13`).
   pair; opaque to the umbrella beyond that contract. Which concrete system a backend talks to (or
   whether it talks to a remote system at all — `scm`'s backend manages only local git state) is a
   downstream, backend-owned concern, out of this set's scope (`## Scope`). Interface: `INTF-WIRE`.
+  A backend has no human-facing CLI identity of its own, with one exception: a **daemon-backed
+  backend** (see the [glossary](glossary.md)) MAY offer a `status` an operator or a script can read
+  to see whether its daemon is healthy (ADR 0090). That `status` is the backend's own diagnostic,
+  not a second route to its entities; every entity read and write still goes through the umbrella.
+  A backend MAY be stateful and MAY run a daemon; none is required to, and a backend that does
+  neither stays what this set has always described. When a backend owns its cache and its change
+  decisions, the umbrella forwards to it instead of deciding (`INV-CACHE-9`).
   A registered binary MAY answer more than one capability at once (a multi-capability backend,
   `INV-REG-1`) — including the two cross-cutting capabilities `attention`/`search`, which a
   capability's own backend MAY implement alongside its normal ops, or which a dedicated

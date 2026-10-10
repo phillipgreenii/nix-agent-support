@@ -43,48 +43,73 @@ distinction come from the behavior-docs method
   umbrella MUST NOT validate `config`'s contents — it is opaque at the wire-envelope layer, since
   `INTF-WIRE` is capability-agnostic by design; only a capability's own dispatch table (or a value
   common to more than one capability, like the `list` op's own `queries` key) ever interprets it.
-  `config` MUST NOT be logged with a secret exposed — see `INV-STATE-1`.
+  `config` MUST NOT be logged with a secret exposed — see `INV-STATE-1`. The umbrella copying
+  `config` into every request does not oblige a backend to read policy from it: a daemon-backed
+  backend (see the [glossary](glossary.md)) MAY take its policy from its own rendered config file
+  instead (`INV-STATE-1`, ADR 0090), and for such a backend the copied `config` is not the source
+  of its policy.
 
-## Statelessness
+## Statelessness and daemon-backed backends
 
-- **`INV-STATE-1`** <!-- uuid: 4d8b2e91-7a3c-4f6d-9e1b-8c5a2d7f3b64 --> — A Tier-2 backend MUST
-  resolve any per-call, per-backend policy it needs (e.g. the `list` op's own named-query
-  definitions, or `pg-connector-pr-github`'s own GraphQL rate-limit reserve) from the REQUEST's own
-  opaque `config` member (`INV-WIRE-3`) alone — NEVER from a file, environment variable, or other
-  local state it reads or resolves itself for that purpose. The umbrella is the sole place a
-  backend's own config is authored and read from disk; a backend that instead resolved its own
-  config file would make the SAME backend binary behave differently depending on which host/process
-  invoked it, defeating the umbrella's own single point of configuration. This does not forbid a
-  backend from resolving its OWN credentials or connection details independently (e.g.
-  `pg-connector-pr-github`'s `gh`-mediated token, `pg-connector-issue-jira`'s `pjira` config file) —
-  `INV-STATE-1` is scoped to PER-CALL POLICY the umbrella itself can vary per backend via `config`,
-  not to a backend's own ambient identity/connection resolution.
+> ADR 0090 lifts the earlier ruling that every Tier-2 backend is stateless and that the umbrella
+> alone owns the cache, the change decision and the cursors. It lifts a RESTRICTION: a backend
+> MAY be stateful and MAY run a daemon, and none is required to. Every backend that is not
+> daemon-backed stays exactly as the rules below describe.
+
+- **`INV-STATE-1`** <!-- uuid: 4d8b2e91-7a3c-4f6d-9e1b-8c5a2d7f3b64 --> — A Tier-2 backend that is
+  not daemon-backed MUST resolve any per-call, per-backend policy it needs (e.g. the `list` op's
+  own named-query definitions, or `pg-connector-pr-github`'s own GraphQL rate-limit reserve) from
+  the REQUEST's own opaque `config` member (`INV-WIRE-3`) alone — NEVER from a file, environment
+  variable, or other local state it reads or resolves itself for that purpose. The umbrella is the
+  sole place such a backend's own config is authored and read from disk; a backend that instead
+  resolved its own config file would make the SAME backend binary behave differently depending on
+  which host/process invoked it, defeating the umbrella's own single point of configuration. A
+  **daemon-backed backend** MAY read its per-call policy from its own rendered config file instead
+  (ADR 0090): the daemon and its client both start from one config file, rendered from the same
+  option that authors the registry entry, so the binary still behaves identically whichever
+  host or process invokes it. Such a backend MUST take everything it needs (the origin's host, the
+  paths of its tools, its state directory, its socket path, its queries and its settings) from
+  that rendered config file and MUST NOT take any of them from the environment; environment
+  overrides exist only for tests and a shadow-comparison harness, so a daemon started by hand,
+  with an empty environment and the root as working directory, behaves exactly as it does under
+  its supervisor. This does not forbid a backend from resolving its OWN credentials or connection
+  details independently (e.g. `pg-connector-pr-github`'s `gh`-mediated token,
+  `pg-connector-issue-jira`'s `pjira` config file) — `INV-STATE-1` is scoped to PER-CALL POLICY the
+  umbrella itself can vary per backend via `config`, not to a backend's own ambient
+  identity/connection resolution. The umbrella's own ledger (`INV-LEDGER-FRESH-1`) is its own
+  state, not a backend's, and is unaffected by this rule.
 - A backend's own `config.queries` block (the `list` op's own named-query convention) MUST NOT
   define any built-in query name of its own; every name a caller can legitimately supply comes
   from that backend's own registered config, resolved centrally by that capability's dispatch
-  table before ever reaching the backend's own `List` implementation (`INV-ERR-3`).
+  table before ever reaching the backend's own `List` implementation (`INV-ERR-3`). This holds for
+  a daemon-backed backend too: its queries come from its rendered config, not from a built-in.
 
 ## Caching
 
-- **`INV-CACHE-1`** <!-- uuid: 892af663-9a46-4229-93d3-ac43d73f73c6 --> — The umbrella-owned
-  entity cache (`cmd/pg-connector/cache.go`, phase 14) is default-on per type, with an explicit
-  opt-out per type (a `state:` key) and per backend (a `capabilities` `vocabulary` flag); an
-  opted-out `(type, backend)` pair still keeps its ledger (`INV-STATE-1`'s ledger is unaffected by
-  a cache opt-out). The cache MUST NOT hold any content a backend did not already report to this
-  umbrella through an ordinary op response — it is a copy of what was already returned, not an
-  independent source of entity data. Caching this umbrella's own copy of what a stateless backend
-  already returned does NOT weaken `D3` (statelessness, `INV-STATE-1`): the backend itself gains
-  no store; only the umbrella does. A capabilities-call failure while checking a backend's own
-  per-backend opt-out MUST fail OPEN (caching stays enabled for that backend) rather than closed —
-  an already-unavailable backend must not be made doubly unavailable by a second failed call.
+- **`INV-CACHE-1`** <!-- uuid: 892af663-9a46-4229-93d3-ac43d73f73c6 --> — For a backend that does
+  not own its cache and changes, the umbrella-owned entity cache (`cmd/pg-connector/cache.go`,
+  phase 14) is default-on per type, with an explicit opt-out per type (a `state:` key) and per
+  backend (a `capabilities` `vocabulary` flag); an opted-out `(type, backend)` pair still keeps its
+  ledger (the ledger of `INV-LEDGER-FRESH-1` is unaffected by a cache opt-out). The cache MUST NOT
+  hold any content a backend did not already report to this umbrella through an ordinary op
+  response — it is a copy of what was already returned, not an independent source of entity data.
+  Caching this umbrella's own copy of what a backend already returned does NOT weaken `D3`
+  (statelessness, `INV-STATE-1`): that backend itself gains no store; only the umbrella does. A
+  capabilities-call failure while checking a backend's own per-backend opt-out MUST fail OPEN
+  (caching stays enabled for that backend) rather than closed — an already-unavailable backend must
+  not be made doubly unavailable by a second failed call. A backend that owns its cache and changes
+  (a **daemon-backed backend** that declares `cache_opt_out` and `owns_changes`, ADR 0090) is
+  outside this rule: `INV-CACHE-9` states what the umbrella does for it.
 
 ## Cache policy: detail level, read-through, refresher
 
 > Written by bead `pg2-cw6b3.2` (spec
 > `docs/superpowers/specs/2026-10-05-pg-desk-attention-evaluator-and-connector-refresh-cache-design.md`,
 > section 6, "Direction 2: connector membership and refresh cache"). These rules extend
-> `INV-CACHE-1`; they apply to the `pr` and `issue` types only. The umbrella owns the policy, so a
-> backend stays stateless (`INV-STATE-1`) and a type adopts the policy by configuration.
+> `INV-CACHE-1`; they apply to the `pr` and `issue` types only, and only to backends that do not own
+> their cache and changes (ADR 0090; `INV-CACHE-9` covers the others). The umbrella owns the policy,
+> so such a backend stays free of any store of its own (`INV-STATE-1`) and a type adopts the policy
+> by configuration.
 
 - **`INV-CACHE-2`** <!-- uuid: 07a8d39c-758b-4fd7-a74b-051f9dc9868e --> — Every cache entry MUST
   record a level, `summary` (what `list` returns) or `detail` (what `show` returns). A `show`
@@ -139,7 +164,22 @@ distinction come from the behavior-docs method
   MUST NOT change the `capabilities`-flag and `state:` opt-outs, the fail-open rule, the
   `unavailable` stale fallback, or the existing `0`/`2`/`3`/`4` exit codes of `show`, `list` and
   `changes`. A consumer that has just detected a change and needs the current entity MUST pass
-  `--fresh` to `show`, because a `detail` entry younger than `read_ttl` is otherwise served.
+  `--fresh` to `show`, because a `detail` entry younger than `read_ttl` is otherwise served. This
+  rule is scoped like the cache policy it constrains: it binds the umbrella-owned cache, so it
+  applies to backends that do not own their cache and changes (`INV-CACHE-9`). For a backend that
+  does, `--fresh` is forwarded to the backend as `fresh: true` and it is the backend that decides
+  how current its answer is.
+- **`INV-CACHE-9`** <!-- uuid: c9435bbd-8d45-4613-961d-84e719d85ccc --> — Toward a backend that
+  owns its cache and changes (ADR 0090), the umbrella MUST NOT keep a cache or a change decision of
+  its own, because the backend holds both. For a backend that declares `owns_changes`, the umbrella
+  MUST forward `changes` and `changes_ack` to the backend, MUST acknowledge only what it has already
+  flushed to its caller, and MUST fail closed (an `unavailable` answer) when the backend cannot
+  answer, never falling back to a ledger diff of repeated `list` calls. For a backend that declares
+  `cache_opt_out`, the umbrella MUST pass the backend's own annotations (`served_from`, `stale`,
+  `age_seconds` and the field-group freshness) through unchanged, and MUST NOT write cache entries
+  or cache tombstones for it. It MUST still stamp the ledger for such a backend
+  (`INV-LEDGER-FRESH-5`). A backend that declares neither keeps every rule of this section
+  (`INV-CACHE-1`).
 
 ## Ledger freshness
 
@@ -148,11 +188,15 @@ distinction come from the behavior-docs method
 > section 5, the `INV-FRESH-*` freshness contract this set's half realizes). Freshness is the time
 > of the last SUCCESSFUL origin fetch; the delta ledger is where the umbrella records it, per
 > `(type, backend, query)` key, so a consumer can read data age locally without a network call.
+> For a backend that owns its cache and changes the backend, not the umbrella, observes the origin
+> fetch, so the same ledger is stamped from what the backend reports (`INV-LEDGER-FRESH-5`, ADR 0090).
 
 - **`INV-LEDGER-FRESH-1`** <!-- uuid: d6ace83f-a679-4ea8-9cf6-05d637d209f7 --> — After each
   completed origin fetch for a ledger key, the umbrella MUST record that fetch's outcome on that
   key: on a whole-query answer it MUST record `refreshed_at`, the time of that fetch. A key with no
-  recorded success has no `refreshed_at` (unknown, never a default time).
+  recorded success has no `refreshed_at` (unknown, never a default time). For a backend that owns
+  its changes the origin fetch is the backend's, and `INV-LEDGER-FRESH-5` says where the umbrella
+  takes the outcome from.
 - **`INV-LEDGER-FRESH-2`** <!-- uuid: 872fc219-5a0a-4d44-9fd3-03466805a948 --> — An answer served
   from the ledger or the entity cache without asking the origin (a `--cached` read, a cache
   fallback) MUST NOT record `refreshed_at`, and MUST NOT record a failure. Otherwise a cache would
@@ -167,10 +211,22 @@ distinction come from the behavior-docs method
   MUST NOT change the entity index, version counter, cursor, or any consumer position, and MUST NOT
   persist a `--reset` made for that call. `last_error` is retained after a later success, so a
   reader tells "failing since" from "recovered" by comparing `last_error.at` with `refreshed_at`.
+  For a backend that owns its changes, "the origin answered for the whole query" is the backend's
+  own report of a whole-query answer (`INV-LEDGER-FRESH-5`).
 - **`INV-LEDGER-FRESH-4`** <!-- uuid: 5c1c53f6-58f1-41cb-b4eb-2c92da23a8b1 --> — `ledger show`
   MUST report `refreshed_at` and `last_error` for every matching key, as JSON `null` when absent
   (never omitted), so a consumer can distinguish "no success recorded" from a missing field. A
   ledger written before these fields existed reads as no recorded success.
+- **`INV-LEDGER-FRESH-5`** <!-- uuid: 9d4453e8-0447-48ef-b017-5cdfb10fc0d5 --> — For a backend that
+  owns its changes (ADR 0090), the ledger keeps its `(type, backend, query)` keys, so no row of a
+  consumer's freshness view becomes a ghost. The umbrella MUST stamp `refreshed_at` and `last_error`
+  on each key from the `sources_freshness[]` the backend returns on every forwarded `changes`
+  answer, one entry per configured query: the time of the backend's last WHOLE-query origin answer
+  and its last error. The umbrella MUST also stamp the consumer's `last_seen` on every forwarded
+  call for that consumer, since the consumer's abandoned-row rule reads it. A cache answer still
+  MUST NOT advance `refreshed_at` (`INV-LEDGER-FRESH-2`): the stamp reflects when the backend last
+  heard from the origin, never when the umbrella last answered a caller. The backend's own `status`
+  exposes the same values.
 
 ## Versioning
 
