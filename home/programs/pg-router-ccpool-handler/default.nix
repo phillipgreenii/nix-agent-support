@@ -191,11 +191,19 @@ let
   # classifies every direct child of the worktree dir as a candidate (clean, no
   # lock file: the ones the dry run selects) or held (not a linked worktree,
   # git operation in progress, or uncommitted changes), using the SAME checks in
-  # the SAME order as mkWorktreeSweepScript. Leaves `wtdir`, the `cands` array
-  # and the `held` count set for the caller to size.
+  # the SAME order as mkWorktreeSweepScript. Leaves `wtdir`, the `cands` array,
+  # the `held` count and the `held_paths` array set for the caller to size.
+  #
+  # `held` counts every skipped child (not a linked worktree, git operation in
+  # progress, uncommitted changes). `held_paths` (bead pg2-0tj7h, the size
+  # contract's "held, not removable") lists only the children that are
+  # removable but for a safety guard -- locked or dirty worktrees. A child that
+  # is not a linked worktree at all is counted in `held` but is NOT in
+  # `held_paths`: the guard is not what stops its removal.
   mkCandidateScan = ''
     wtdir=${lib.escapeShellArg cfg.launchConfig.worktreeDir}
     cands=()
+    held_paths=()
     held=0
     while IFS= read -r wt; do
       gitdir=$(git -C "$wt" rev-parse --git-dir 2>/dev/null) || {
@@ -208,10 +216,12 @@ let
       esac
       if [ -f "$gitdir/index.lock" ] || [ -f "$gitdir/HEAD.lock" ]; then
         held=$((held + 1))
+        held_paths+=("$wt")
         continue
       fi
       if [ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ]; then
         held=$((held + 1))
+        held_paths+=("$wt")
         continue
       fi
       cands+=("$wt")
@@ -264,6 +274,20 @@ let
       ${mkCandidateScan}
       if [ "''${#cands[@]}" -gt 0 ]; then
         du -sk "''${cands[@]}" 2>/dev/null | awk '{s += $1} END {print s + 0}'
+      else
+        echo 0
+      fi
+    '';
+    # Size contract (bead pg2-0tj7h): sizeCommand is exact (`du` over exactly
+    # the candidates the sweep removes), so sizeKind stays at its default. The
+    # dirty and locked worktrees the sweep skips are the removable-but-guarded
+    # data: heldSizeCommand sizes them (KiB, first line) so a "0K" reclaim next
+    # to 4.6G held is visible rather than silent.
+    heldSizeCommand = ''
+      :
+      ${mkCandidateScan}
+      if [ "''${#held_paths[@]}" -gt 0 ]; then
+        du -sk "''${held_paths[@]}" 2>/dev/null | awk '{s += $1} END {print s + 0}'
       else
         echo 0
       fi

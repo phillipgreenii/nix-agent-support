@@ -1256,3 +1256,243 @@ install_long_line_registry() {
   [[ "$output" == *"sizeCommand"* ]]
   [[ "$output" == *"pg-disk-reclaimer-test-nonexistent-cmd-xyz"* ]]
 }
+
+# Size contract (bead pg2-0tj7h): sizeKind / sizeMethod / sizeBasis /
+# heldSizeCommand. The kind is static registry metadata; sizeCommand keeps
+# printing a bare KiB integer.
+
+# with_size_fields <item-json> <jq-object-literal>: merges extra fields into
+# one size_item and prints it compactly (one line, for install_size_registry).
+with_size_fields() {
+  jq -c --argjson extra "$2" '. + $extra' <<<"$1"
+}
+
+@test "cmd_reclaim labels an estimate with its prefix, kind and method" {
+  mkdir -p "$TEST_DIR/est"
+  install_size_registry "$(with_size_fields "$(size_item est "$TEST_DIR/est" 'echo 996200' 'echo dry-est')" \
+    '{"sizeKind":"estimate","sizeMethod":"sqlite-closure","sizeBasis":"closure of dead paths"}')"
+  run cmd_reclaim --aggressiveness 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"est: size: ~972.8M (estimate: sqlite-closure)"* ]]
+  [[ "$output" == *"total reclaimable: ~972.8M estimate (1 estimated)"* ]]
+  # sizeBasis is documentation only: never printed
+  [[ ! "$output" == *"closure of dead paths"* ]]
+}
+
+@test "cmd_reclaim labels upper_bound with <= and lower_bound with >=, and a missing sizeMethod defaults to du" {
+  mkdir -p "$TEST_DIR/ub" "$TEST_DIR/lb"
+  install_size_registry \
+    "$(with_size_fields "$(size_item ub "$TEST_DIR/ub" 'echo 1024' 'echo dry-ub')" '{"sizeKind":"upper_bound","sizeBasis":"b"}')" \
+    "$(with_size_fields "$(size_item lb "$TEST_DIR/lb" 'echo 2048' 'echo dry-lb')" '{"sizeKind":"lower_bound","sizeMethod":"fetchless","sizeBasis":"b"}')"
+  run cmd_reclaim --aggressiveness 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ub: size: <=1.0M (upper_bound: du)"* ]]
+  [[ "$output" == *"lb: size: >=2.0M (lower_bound: fetchless)"* ]]
+  [[ "$output" == *"total reclaimable: <=1.0M upper_bound + >=2.0M lower_bound (1 upper_bound, 1 lower_bound)"* ]]
+}
+
+@test "cmd_reclaim gives an explicitly exact item no suffix even when it declares a sizeMethod" {
+  mkdir -p "$TEST_DIR/ex"
+  install_size_registry "$(with_size_fields "$(size_item ex "$TEST_DIR/ex" 'echo 1024' 'echo dry-ex')" '{"sizeKind":"exact","sizeMethod":"git-scan"}')"
+  run cmd_reclaim --aggressiveness 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ex: size: 1.0M"* ]]
+  [[ ! "$output" == *"(exact"* ]]
+  [[ "$output" == *"total reclaimable: 1.0M (1 sized, 0 unknown)"* ]]
+}
+
+@test "cmd_reclaim mixed total keeps one bucket per kind, never merges them, and omits empty buckets" {
+  mkdir -p "$TEST_DIR/m1" "$TEST_DIR/m2" "$TEST_DIR/m3"
+  install_size_registry \
+    "$(size_item m1 "$TEST_DIR/m1" 'echo 68500000' 'echo dry-m1')" \
+    "$(with_size_fields "$(size_item m2 "$TEST_DIR/m2" 'echo 996200' 'echo dry-m2')" '{"sizeKind":"estimate","sizeMethod":"sqlite-closure","sizeBasis":"b"}')" \
+    "$(size_item m3 "$TEST_DIR/m3" 'echo nope' 'echo dry-m3')"
+  run cmd_reclaim --aggressiveness 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"m1: size: 65.3G"* ]]
+  [[ "$output" == *"total reclaimable: 65.3G exact + ~972.8M estimate (1 exact, 1 estimated, 1 unknown)"* ]]
+  # the buckets are not summed into one figure (65.3G + 972.8M = 66.3G)
+  [[ ! "$output" == *"66.3G"* ]]
+  [[ ! "$output" == *"upper_bound"* ]]
+}
+
+@test "cmd_reclaim all-exact run (even with an item-level sizeBasis present) keeps the legacy total byte-for-byte" {
+  mkdir -p "$TEST_DIR/l1" "$TEST_DIR/l2"
+  install_size_registry \
+    "$(size_item l1 "$TEST_DIR/l1" 'echo 1024' 'echo dry-l1')" \
+    "$(with_size_fields "$(size_item l2 "$TEST_DIR/l2" 'echo 3072' 'echo dry-l2')" '{"sizeBasis":"documented anyway"}')"
+  run cmd_reclaim --aggressiveness 1
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf 'l1: size: 1.0M\ndry-l1\nl2: size: 3.0M\ndry-l2\ntotal reclaimable: 4.0M (2 sized, 0 unknown)')" ]
+}
+
+@test "cmd_reclaim prints a held line and a separate held total, never adding held into the reclaimable total" {
+  mkdir -p "$TEST_DIR/h1"
+  install_size_registry "$(with_size_fields "$(size_item h1 "$TEST_DIR/h1" 'echo 0' 'echo dry-h1')" '{"heldSizeCommand":"echo 4830000 extra-ignored"}')"
+  run cmd_reclaim --aggressiveness 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"h1: size: 0K"* ]]
+  [[ "$output" == *"h1: held, not removable: 4.6G"* ]]
+  [[ "$output" == *"total reclaimable: 0K (1 sized, 0 unknown); held, not removable: 4.6G"* ]]
+}
+
+@test "cmd_reclaim held line is omitted when held is 0, and held is shown under --apply too" {
+  mkdir -p "$TEST_DIR/h0" "$TEST_DIR/h2"
+  install_size_registry \
+    "$(with_size_fields "$(size_item h0 "$TEST_DIR/h0" 'echo 1024' 'echo dry-h0')" '{"heldSizeCommand":"echo 0"}')" \
+    "$(with_size_fields "$(size_item h2 "$TEST_DIR/h2" 'echo 1024' 'echo dry-h2')" '{"heldSizeCommand":"echo 2048"}')"
+  run cmd_reclaim --aggressiveness 1
+  [ "$status" -eq 0 ]
+  [[ ! "$output" == *"h0: held"* ]]
+  [[ "$output" == *"h2: held, not removable: 2.0M"* ]]
+  run cmd_reclaim --aggressiveness 1 --apply
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"h2: held, not removable: 2.0M"* ]]
+  [[ "$output" == *"total reclaimed: 2.0M (2 sized, 0 unknown); held, not removable: 2.0M"* ]]
+}
+
+@test "cmd_reclaim held size is combined with a non-exact kind in the same total line" {
+  mkdir -p "$TEST_DIR/hk"
+  install_size_registry "$(with_size_fields "$(size_item hk "$TEST_DIR/hk" 'echo 1024' 'echo dry-hk')" \
+    '{"sizeKind":"lower_bound","sizeBasis":"b","heldSizeCommand":"echo 1024"}')"
+  run cmd_reclaim --aggressiveness 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"total reclaimable: >=1.0M lower_bound (1 lower_bound); held, not removable: 1.0M"* ]]
+}
+
+@test "cmd_reclaim held timeout is non-fatal, marks held unknown, and never voids the main size" {
+  mkdir -p "$TEST_DIR/ht"
+  install_size_registry "$(with_size_fields "$(size_item ht "$TEST_DIR/ht" 'echo 1024' 'echo dry-ht')" '{"heldSizeCommand":"sleep 5"}')"
+  PGDR_SIZE_TIMEOUT_SECONDS=1 run cmd_reclaim --aggressiveness 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ht: size: 1.0M"* ]]
+  [[ "$output" == *"ht: held, not removable: unknown (timed out after 1s)"* ]]
+  [[ "$output" == *"total reclaimable: 1.0M (1 sized, 0 unknown)"* ]]
+}
+
+@test "cmd_reclaim held failure (no number) is non-fatal and the dry run still runs" {
+  mkdir -p "$TEST_DIR/hf"
+  install_size_registry "$(with_size_fields "$(size_item hf "$TEST_DIR/hf" 'echo 1024' 'echo dry-hf')" '{"heldSizeCommand":"echo broken; exit 7"}')"
+  run cmd_reclaim --aggressiveness 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"hf: held, not removable: unknown (size command gave no number)"* ]]
+  [[ "$output" == *"dry-hf"* ]]
+  [[ "$output" == *"total reclaimable: 1.0M (1 sized, 0 unknown)"* ]]
+}
+
+@test "cmd_reclaim does not run heldSizeCommand when the main size failed" {
+  mkdir -p "$TEST_DIR/hn"
+  local marker="$TEST_DIR/held-ran"
+  install_size_registry "$(with_size_fields "$(size_item hn "$TEST_DIR/hn" 'echo nope' 'echo dry-hn')" "{\"heldSizeCommand\":\"touch $marker; echo 5\"}")"
+  run cmd_reclaim --aggressiveness 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"hn: size: unknown (size command gave no number)"* ]]
+  [[ ! "$output" == *"held"* ]]
+  [ ! -e "$marker" ]
+}
+
+@test "cmd_reclaim held reporting never triggers errexit in a caller running under 'set -euo pipefail' (held timeout, failure, success)" {
+  mkdir -p "$TEST_DIR/e1" "$TEST_DIR/e2" "$TEST_DIR/e3"
+  install_size_registry \
+    "$(with_size_fields "$(size_item e1 "$TEST_DIR/e1" 'echo 1' 'echo dry-e1')" '{"heldSizeCommand":"sleep 5"}')" \
+    "$(with_size_fields "$(size_item e2 "$TEST_DIR/e2" 'echo 1' 'echo dry-e2')" '{"heldSizeCommand":"false"}')" \
+    "$(with_size_fields "$(size_item e3 "$TEST_DIR/e3" 'echo 1' 'echo dry-e3')" '{"heldSizeCommand":"echo 9","sizeKind":"estimate","sizeBasis":"b"}')"
+  PGDR_SIZE_TIMEOUT_SECONDS=1 run bash -c '
+    set -euo pipefail
+    source "$1/pg-disk-reclaimer.bash"
+    cmd_reclaim --aggressiveness 1
+    echo "AFTER"
+  ' -- "$SCRIPTS_DIR"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"e1: held, not removable: unknown (timed out after 1s)"* ]]
+  [[ "$output" == *"e2: held, not removable: unknown (size command gave no number)"* ]]
+  [[ "$output" == *"e3: held, not removable: 9K"* ]]
+  [[ "$output" == *"AFTER"* ]]
+}
+
+@test "pgdr_select_variants carries sizeKind, sizeMethod and heldSizeCommand (both selection modes) but not sizeBasis" {
+  local reg="$TEST_DIR/sel-size.json"
+  {
+    with_size_fields "$(size_item full "$TEST_DIR/full" 'echo 1' 'true')" \
+      '{"sizeKind":"estimate","sizeMethod":"m","sizeBasis":"why","heldSizeCommand":"echo 2"}'
+    size_item bare "$TEST_DIR/bare" '' 'true'
+  } | jq -s '.' >"$reg"
+  local mode
+  for mode in all id; do
+    if [[ $mode == all ]]; then
+      run pgdr_select_variants "$reg" 1
+    else
+      run pgdr_select_variants "$reg" 1 full bare
+    fi
+    [ "$status" -eq 0 ]
+    [ "$(jq -r '.[] | select(.id == "full") | .sizeKind' <<<"$output")" = "estimate" ]
+    [ "$(jq -r '.[] | select(.id == "full") | .sizeMethod' <<<"$output")" = "m" ]
+    [ "$(jq -r '.[] | select(.id == "full") | .heldSizeCommand' <<<"$output")" = "echo 2" ]
+    [ "$(jq -r '.[] | select(.id == "full") | has("sizeBasis")' <<<"$output")" = "false" ]
+    [ "$(jq -r '.[] | select(.id == "bare") | has("sizeKind") or has("sizeMethod") or has("heldSizeCommand")' <<<"$output")" = "false" ]
+  done
+}
+
+# validate_with_fields <extra-json>: writes a one-item registry with the extra
+# fields merged in and runs pgdr_validate_registry over it.
+validate_with_fields() {
+  local reg="$TEST_DIR/size-contract.json"
+  with_size_fields "$(size_item x /tmp/x 'echo 1' 'true')" "$1" | jq -s '.' >"$reg"
+  pgdr_validate_registry "$reg"
+}
+
+@test "pgdr_validate_registry rejects an unknown sizeKind" {
+  run validate_with_fields '{"sizeKind":"approximately","sizeBasis":"b"}'
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"index 0"* ]]
+  [[ "$output" == *"sizeKind"* ]]
+  run validate_with_fields '{"sizeKind":5,"sizeBasis":"b"}'
+  [ "$status" -ne 0 ]
+}
+
+@test "pgdr_validate_registry rejects an empty or non-string sizeMethod, sizeBasis and heldSizeCommand" {
+  local field
+  for field in sizeMethod sizeBasis heldSizeCommand; do
+    run validate_with_fields "{\"$field\":\"\"}"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"$field"* ]]
+    run validate_with_fields "{\"$field\":7}"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"$field"* ]]
+  done
+}
+
+@test "pgdr_validate_registry requires a sizeBasis whenever sizeKind is not exact" {
+  local kind
+  for kind in estimate upper_bound lower_bound; do
+    run validate_with_fields "{\"sizeKind\":\"$kind\"}"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"sizeBasis"* ]]
+    run validate_with_fields "{\"sizeKind\":\"$kind\",\"sizeBasis\":\"documented\"}"
+    [ "$status" -eq 0 ]
+  done
+}
+
+@test "pgdr_validate_registry accepts exact (explicit or default) without a sizeBasis" {
+  run validate_with_fields '{"sizeKind":"exact"}'
+  [ "$status" -eq 0 ]
+  run validate_with_fields '{"sizeMethod":"git-scan","heldSizeCommand":"echo 0"}'
+  [ "$status" -eq 0 ]
+}
+
+@test "cmd_validate flags a heldSizeCommand whose leading command does not exist" {
+  local reg="$TEST_DIR/held-missing.json"
+  with_size_fields "$(size_item x /tmp/x 'echo 1' 'true')" '{"heldSizeCommand":"pg-disk-reclaimer-test-nonexistent-cmd-xyz 1"}' | jq -s '.' >"$reg"
+  run cmd_validate "$reg"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"heldSizeCommand"* ]]
+  [[ "$output" == *"pg-disk-reclaimer-test-nonexistent-cmd-xyz"* ]]
+}
+
+@test "the valid.json fixture carries the size-contract fields and validates" {
+  [ "$(jq -r '.[0].sizeKind' "$FIXTURES_DIR/valid.json")" = "upper_bound" ]
+  [ "$(jq -r '.[0] | has("sizeBasis") and has("heldSizeCommand") and has("sizeMethod")' "$FIXTURES_DIR/valid.json")" = "true" ]
+  # schema check only: cmd_validate would also need npm on PATH (a sandbox has none)
+  run pgdr_validate_registry "$FIXTURES_DIR/valid.json"
+  [ "$status" -eq 0 ]
+}

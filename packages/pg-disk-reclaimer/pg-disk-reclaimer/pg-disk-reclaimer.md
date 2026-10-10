@@ -27,6 +27,10 @@
 
 `PGDR_SIZE_TIMEOUT_SECONDS={{300}} pg-disk-reclaimer reclaim --aggressiveness {{3}}`
 
+- Sizes say what they mean. An exact size is bare (`size: 65.3G`); an approximation is labeled with its kind and method (`size: ~972.8M (estimate: sqlite-closure)`, `<=` for an upper bound, `>=` for a lower bound). The total never merges kinds into one number (`total reclaimable: 65.3G exact + ~972.8M estimate (1 exact, 1 estimated, 1 unknown)`), and data that is removable but for a safety guard (a dirty worktree) is reported on its own line and total as `held, not removable: 4.6G`, never added in. Registry items declare this with `sizeKind`, `sizeMethod`, `sizeBasis` (required when not exact) and `heldSizeCommand`; a `sizeCommand` prints a bare KiB integer and only its first output line is read. See `pg-disk-reclaimer --help`:
+
+`pg-disk-reclaimer --help`
+
 - Aggressiveness is a ceiling on a 0-5 scale (0 tidy cruft, 1 tidy, 2 caches, 3 deep, 4 costly or irreversible, 5 hardest to recover); under `--apply`, levels 4 and above ask for interactive confirmation. Full definitions: `packages/pg-disk-reclaimer/pg-disk-reclaimer/docs/aggressiveness-scale.md` in the phillipgreenii-nix-agent-support repo:
 
 `pg-disk-reclaimer reclaim --aggressiveness {{3}}`

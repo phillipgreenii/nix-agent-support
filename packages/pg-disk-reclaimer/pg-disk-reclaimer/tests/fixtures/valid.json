@@ -4,6 +4,11 @@
     "description": "npm package cache",
     "path": "~/.npm",
     "displayCommand": "du -sh ~/.npm",
+    "sizeCommand": "du -sk ~/.npm",
+    "sizeKind": "upper_bound",
+    "sizeMethod": "du",
+    "sizeBasis": "du over the whole cache directory; the level-0 variant only verifies and frees part of it, so this is the ceiling, not the exact reclaim",
+    "heldSizeCommand": "echo 0",
     "variants": [
       {
         "aggressiveness": 0,

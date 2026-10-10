@@ -53,7 +53,37 @@ Options:
   "size: unknown (<reason>, e.g. timed out after 60s)" when the size could
   not be computed in time, and the run ends with a total that sums only
   the known sizes and counts the unknown ones. The per-item size ceiling
-  is PGDR_SIZE_TIMEOUT_SECONDS (default 60).
+  is PGDR_SIZE_TIMEOUT_SECONDS (default 60). A sizeCommand prints a bare
+  KiB integer; only the first whitespace-delimited field of its FIRST
+  output line is read.
+
+Size contract (what a printed size means):
+  A size says what the number means. Each registry item MAY declare,
+  as static metadata (all optional, item level):
+    sizeKind         exact (default) | estimate | upper_bound | lower_bound
+    sizeMethod       short tag for how the size is derived (default du)
+    sizeBasis        documentation only, never printed; REQUIRED whenever
+                     sizeKind is not exact (what the number measures, why
+                     the approximation is acceptable, what to revisit)
+    heldSizeCommand  bare KiB like sizeCommand, for data that is removable
+                     but for a safety guard (e.g. a dirty or locked
+                     worktree); run only after the main size succeeded,
+                     under its own timeout
+  Rendering ("exact" gets no suffix, so an all-exact run reads as it
+  always did):
+    size: 65.3G                                   exact
+    size: ~972.8M (estimate: sqlite-closure)      estimate
+    size: <=3.0G (upper_bound: du)                upper bound
+    size: >=1.0G (lower_bound: git-scan)          lower bound
+    <id>: held, not removable: 4.6G               held (omitted when 0)
+  The total never merges kinds into one number: one bucket per kind,
+  empty buckets omitted, held reported separately and never added in:
+    total reclaimable: 65.3G exact + ~972.8M estimate (1 exact, 1 estimated, 1 unknown); held, not removable: 4.6G
+  When every sized item is exact the plain "(N sized, M unknown)" total is
+  printed. A held timeout or failure prints "held, not removable: unknown
+  (<reason>)" and never voids the item's main size. `validate` rejects an
+  unknown sizeKind, an empty sizeMethod/sizeBasis/heldSizeCommand, and a
+  non-exact sizeKind without a sizeBasis.
 
 Aggressiveness scale:
   --aggressiveness N is a CEILING: every item with a variant at level <= N

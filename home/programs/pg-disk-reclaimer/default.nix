@@ -8,8 +8,9 @@
 let
   cfg = config.phillipgreenii.programs.pg-disk-reclaimer;
 
-  # The CLI's schema validator rejects a present-but-null displayTimeoutSeconds
-  # or sizeCommand (absent means "use the default"), so an unset optional
+  # The CLI's schema validator rejects a present-but-null displayTimeoutSeconds,
+  # sizeCommand, sizeKind, sizeMethod, sizeBasis or heldSizeCommand (absent
+  # means "use the default"), so an unset optional
   # (null) field must be DROPPED from the rendered entry, never written as
   # `null`. Applies to the item level only: variants carry no optional fields.
   dropNullFields = lib.filterAttrs (_name: value: value != null);
@@ -77,9 +78,66 @@ in
                 `du -sk <path>` -- for an item where `du` over `path` is not what
                 a reclaim frees, or is too slow. Its first output line MUST start
                 with the reclaimable size as an integer count of KiB (the first
-                whitespace-delimited field is read). `null` (the default) leaves
-                the key out of the registry JSON, so the CLI sizes the item with
-                `du -sk <path>`.
+                whitespace-delimited field of the FIRST line is read; later lines
+                are ignored). `null` (the default) leaves the key out of the
+                registry JSON, so the CLI sizes the item with `du -sk <path>`.
+              '';
+            };
+            sizeKind = lib.mkOption {
+              type = lib.types.nullOr (
+                lib.types.enum [
+                  "exact"
+                  "estimate"
+                  "upper_bound"
+                  "lower_bound"
+                ]
+              );
+              default = null;
+              description = ''
+                What the number printed by `reclaim` means for this item (the size
+                contract): `exact` (the CLI's default when unset), `estimate`,
+                `upper_bound` (a reclaim frees at most this much) or `lower_bound`
+                (at least this much). A non-exact kind is rendered with a prefix
+                and its method, e.g. `~972.8M (estimate: sqlite-closure)`, and the
+                total keeps one bucket per kind rather than merging them. A
+                non-exact kind REQUIRES `sizeBasis`; the CLI's `validate`
+                rejects it otherwise. For an item with several variants use the
+                weakest case any variant needs. `null` (the default) leaves the
+                key out of the registry JSON.
+              '';
+            };
+            sizeMethod = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              description = ''
+                Short tag naming how the size is derived (the CLI prints it for a
+                non-exact kind, e.g. `sqlite-closure`). `null` (the default)
+                leaves the key out, and the CLI assumes `du`.
+              '';
+            };
+            sizeBasis = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              description = ''
+                Documentation only, never printed by `reclaim`: what the size
+                measures, why the approximation is acceptable, and what to
+                revisit. REQUIRED (non-null) whenever `sizeKind` is not `exact`.
+                `null` (the default) leaves the key out of the registry JSON.
+              '';
+            };
+            heldSizeCommand = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              description = ''
+                Shell command `reclaim` runs to size data that is removable but
+                for a safety guard -- e.g. worktrees skipped because they are
+                dirty or locked ("not stale" and "protected" data is NOT held).
+                Same contract as `sizeCommand`: a bare integer count of KiB on
+                the first line. It runs only after the main size succeeded, under
+                its own timeout, so a held failure never voids the main size.
+                Reported as `<id>: held, not removable: <size>` and as a separate
+                held total, never added into the reclaimable total. `null` (the
+                default) leaves the key out of the registry JSON.
               '';
             };
             variants = lib.mkOption {

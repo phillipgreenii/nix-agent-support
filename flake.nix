@@ -5350,6 +5350,22 @@
                                         type = lib.types.nullOr lib.types.str;
                                         default = null;
                                       };
+                                      sizeKind = lib.mkOption {
+                                        type = lib.types.nullOr lib.types.str;
+                                        default = null;
+                                      };
+                                      sizeMethod = lib.mkOption {
+                                        type = lib.types.nullOr lib.types.str;
+                                        default = null;
+                                      };
+                                      sizeBasis = lib.mkOption {
+                                        type = lib.types.nullOr lib.types.str;
+                                        default = null;
+                                      };
+                                      heldSizeCommand = lib.mkOption {
+                                        type = lib.types.nullOr lib.types.str;
+                                        default = null;
+                                      };
                                       variants = lib.mkOption {
                                         type = lib.types.listOf (
                                           lib.types.submodule {
@@ -6118,6 +6134,13 @@
                 assert worktreeReclaimEntry.sizeCommand != null;
                 assert lib.hasInfix "/tmp/pg2-qsred-repo/.worktrees" worktreeReclaimEntry.sizeCommand;
                 assert lib.hasInfix "du -sk" worktreeReclaimEntry.sizeCommand;
+                # pg2-0tj7h: the dirty/locked worktrees the sweep skips are sized
+                # by heldSizeCommand (from the scan's held_paths array); the
+                # candidate sizing is exact, so no sizeKind is set.
+                assert worktreeReclaimEntry.heldSizeCommand != null;
+                assert lib.hasInfix "held_paths" worktreeReclaimEntry.heldSizeCommand;
+                assert lib.hasInfix "du -sk" worktreeReclaimEntry.heldSizeCommand;
+                assert worktreeReclaimEntry.sizeKind == null;
                 assert lib.length worktreeReclaimEntry.variants == 1;
                 assert worktreeReclaimVariant.aggressiveness == 1;
                 # decision item 5's own guard: neither script ever passes
@@ -6156,7 +6179,7 @@
                 renderCheck;
 
               # test-pg-disk-reclaimer-hm-registry (bead pg2-tfckf): the HM module's
-              # optional per-item `displayTimeoutSeconds` / `sizeCommand` render into
+              # optional per-item `displayTimeoutSeconds` / `sizeCommand` / size-contract fields render into
               # registry.json when set, and are DROPPED (never written as `null`) when
               # unset -- the CLI's schema validator rejects a present-but-null value for
               # either. The generated file is also run through the real
@@ -6207,6 +6230,10 @@
                                 displayCommand = "echo shown";
                                 displayTimeoutSeconds = 120;
                                 sizeCommand = "echo 42";
+                                sizeKind = "estimate";
+                                sizeMethod = "fixture-method";
+                                sizeBasis = "fixture basis text";
+                                heldSizeCommand = "echo 7";
                                 variants = [
                                   {
                                     aggressiveness = 1;
@@ -6244,6 +6271,12 @@
                     [ "$(jq -r '.[0].sizeCommand' "$registryFile")" = "echo 42" ]
                     [ "$(jq -r '.[1] | has("displayTimeoutSeconds")' "$registryFile")" = false ]
                     [ "$(jq -r '.[1] | has("sizeCommand")' "$registryFile")" = false ]
+                    # size contract (pg2-0tj7h): rendered when set, dropped when unset
+                    [ "$(jq -r '.[0].sizeKind' "$registryFile")" = estimate ]
+                    [ "$(jq -r '.[0].sizeMethod' "$registryFile")" = fixture-method ]
+                    [ "$(jq -r '.[0].sizeBasis' "$registryFile")" = "fixture basis text" ]
+                    [ "$(jq -r '.[0].heldSizeCommand' "$registryFile")" = "echo 7" ]
+                    [ "$(jq -r '.[1] | has("sizeKind") or has("sizeMethod") or has("sizeBasis") or has("heldSizeCommand")' "$registryFile")" = false ]
                     # no null anywhere in the rendered registry
                     [ "$(jq '[.. | nulls] | length' "$registryFile")" = 0 ]
                     pg-disk-reclaimer validate "$registryFile"

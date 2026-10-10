@@ -36,7 +36,11 @@ pgdr_default_registry_path() {
 #          id is unique across the whole registry, and the OPTIONAL
 #          displayTimeoutSeconds (per-item override of the list display
 #          ceiling, see PGDR_DISPLAY_TIMEOUT_SECONDS) is, when present, a
-#          positive integer
+#          positive integer, and the OPTIONAL size-contract fields
+#          (sizeCommand, sizeKind, sizeMethod, sizeBasis, heldSizeCommand;
+#          bead pg2-0tj7h) are well-formed: sizeKind one of exact/estimate/
+#          upper_bound/lower_bound, the others non-empty strings, and a
+#          non-exact sizeKind REQUIRES a sizeBasis
 #       c. every item's variants[] (which MAY legitimately be empty -- that
 #          means "informational-only, never reclaimable") has unique,
 #          non-negative aggressiveness values within that item, and each
@@ -103,6 +107,49 @@ pgdr_validate_registry() {
   ' "$path")
   if [[ -n $bad_size_command ]]; then
     echo "pg-disk-reclaimer: registry '$path' item at index $bad_size_command has an invalid sizeCommand (must be a non-empty string when present)" >&2
+    return 1
+  fi
+
+  # (b) size-contract fields (bead pg2-0tj7h), all optional and item level:
+  #   sizeKind        exact (default) | estimate | upper_bound | lower_bound
+  #   sizeMethod      non-empty string, a short tag for how the size is derived
+  #   sizeBasis       non-empty string, documentation only (never printed by
+  #                   reclaim); REQUIRED whenever sizeKind is not exact
+  #   heldSizeCommand non-empty string, same contract as sizeCommand
+  local bad_size_field
+  bad_size_field=$(jq -r '
+    to_entries
+    | map(select(
+        .value as $v
+        | (($v | has("sizeKind")) and (["exact", "estimate", "upper_bound", "lower_bound"] | index($v.sizeKind) == null))
+      ))
+    | .[0].key // ""
+  ' "$path")
+  if [[ -n $bad_size_field ]]; then
+    echo "pg-disk-reclaimer: registry '$path' item at index $bad_size_field has an invalid sizeKind (must be one of exact, estimate, upper_bound, lower_bound)" >&2
+    return 1
+  fi
+
+  local field
+  for field in sizeMethod sizeBasis heldSizeCommand; do
+    bad_size_field=$(jq -r --arg f "$field" '
+      to_entries
+      | map(select(.value | has($f) and (((.[$f] | type) != "string") or .[$f] == "")))
+      | .[0].key // ""
+    ' "$path")
+    if [[ -n $bad_size_field ]]; then
+      echo "pg-disk-reclaimer: registry '$path' item at index $bad_size_field has an invalid $field (must be a non-empty string when present)" >&2
+      return 1
+    fi
+  done
+
+  bad_size_field=$(jq -r '
+    to_entries
+    | map(select((.value.sizeKind // "exact") != "exact" and (.value | has("sizeBasis") | not)))
+    | .[0].key // ""
+  ' "$path")
+  if [[ -n $bad_size_field ]]; then
+    echo "pg-disk-reclaimer: registry '$path' item at index $bad_size_field has a non-exact sizeKind but no sizeBasis (a sizeBasis documenting what the number measures is required)" >&2
     return 1
   fi
 
@@ -221,7 +268,13 @@ pgdr_read_registry() {
 # array to stdout: one flattened object per selected item -- the item's own
 # id/description/path plus the CHOSEN variant's
 # aggressiveness/variantDescription/dryRunCommand/removeCommand merged in
-# directly (no nested variants[], no displayCommand). Returns 0.
+# directly (no nested variants[], no displayCommand). The item's optional
+# RUNTIME size-contract fields (sizeCommand, sizeKind, sizeMethod,
+# heldSizeCommand; bead pg2-0tj7h) are carried through when present. EVERY
+# new item-level field cmd_reclaim reads MUST be added to BOTH jq blocks
+# below, which copy only NAMED fields -- an omitted one is silently dropped.
+# sizeBasis is documentation only and deliberately NOT carried.
+# Returns 0.
 pgdr_select_variants() {
   local path="$1"
   local max_aggressiveness="$2"
@@ -241,6 +294,9 @@ pgdr_select_variants() {
         | ($qualifying | max_by(.aggressiveness)) as $chosen
         | ($item | {id, description, path})
           + (if $item.sizeCommand then {sizeCommand: $item.sizeCommand} else {} end)
+          + (if $item.sizeKind then {sizeKind: $item.sizeKind} else {} end)
+          + (if $item.sizeMethod then {sizeMethod: $item.sizeMethod} else {} end)
+          + (if $item.heldSizeCommand then {heldSizeCommand: $item.heldSizeCommand} else {} end)
           + (if $item.displayTimeoutSeconds then {displayTimeoutSeconds: $item.displayTimeoutSeconds} else {} end)
           + ($chosen | {aggressiveness, variantDescription, dryRunCommand, removeCommand})
       ]
@@ -300,6 +356,9 @@ pgdr_select_variants() {
       | ($qualifying | max_by(.aggressiveness)) as $chosen
       | ($item | {id, description, path})
         + (if $item.sizeCommand then {sizeCommand: $item.sizeCommand} else {} end)
+        + (if $item.sizeKind then {sizeKind: $item.sizeKind} else {} end)
+        + (if $item.sizeMethod then {sizeMethod: $item.sizeMethod} else {} end)
+        + (if $item.heldSizeCommand then {heldSizeCommand: $item.heldSizeCommand} else {} end)
         + (if $item.displayTimeoutSeconds then {displayTimeoutSeconds: $item.displayTimeoutSeconds} else {} end)
         + ($chosen | {aggressiveness, variantDescription, dryRunCommand, removeCommand})
     ]
@@ -622,6 +681,7 @@ pgdr_validate_commands_exist() {
     | (
         [{id: $id, field: "displayCommand", cmd: $item.displayCommand}]
         + (if $item.sizeCommand then [{id: $id, field: "sizeCommand", cmd: $item.sizeCommand}] else [] end)
+        + (if $item.heldSizeCommand then [{id: $id, field: "heldSizeCommand", cmd: $item.heldSizeCommand}] else [] end)
         + (($item.variants // []) | to_entries | map({
             id: $id,
             field: ("variants[" + (.key | tostring) + "].dryRunCommand"),
@@ -827,6 +887,81 @@ pgdr_size_kb() {
   return 1
 }
 
+# pgdr_kind_index: echoes the bucket index (0-3) of a size KIND, in the fixed
+# order exact, estimate, upper_bound, lower_bound; an unrecognised kind is
+# treated as the weakest case it could be mistaken for, never as exact -- but
+# pgdr_validate_registry already rejects those, so this is belt-and-suspenders.
+pgdr_kind_index() {
+  case "$1" in
+  exact) echo 0 ;;
+  estimate) echo 1 ;;
+  upper_bound) echo 2 ;;
+  lower_bound) echo 3 ;;
+  *) echo 1 ;;
+  esac
+}
+
+# pgdr_kind_prefix: the number prefix that tells a reader which way a non-
+# exact size can be wrong: "~" for an estimate, "<=" for an upper bound, ">="
+# for a lower bound, nothing for an exact size.
+pgdr_kind_prefix() {
+  case "$1" in
+  estimate) printf '~\n' ;;
+  upper_bound) printf '<=\n' ;;
+  lower_bound) printf '>=\n' ;;
+  *) printf '\n' ;;
+  esac
+}
+
+# pgdr_size_label: renders one known size (KB, in KiB) for its KIND and
+# METHOD (bead pg2-0tj7h). An exact size is the bare number (no suffix, so an
+# all-exact run reads exactly as it did before the size contract existed); any
+# other kind carries its prefix and a "(<kind>: <method>)" suffix, e.g.
+# "~972.8M (estimate: sqlite-closure)".
+pgdr_size_label() {
+  local kind="$1" method="$2" kb="$3"
+  if [[ $kind == exact ]]; then
+    pgdr_format_kb "$kb"
+  else
+    printf '%s%s (%s: %s)\n' "$(pgdr_kind_prefix "$kind")" "$(pgdr_format_kb "$kb")" "$kind" "$method"
+  fi
+}
+
+# pgdr_total_line: renders the closing total from per-kind buckets (bead
+# pg2-0tj7h). Usage: pgdr_total_line <word> <held-kb> <unknown> then the
+# four (kb, count) pairs for exact, estimate, upper_bound, lower_bound.
+# Kinds are NEVER merged into one number. When every sized item is exact
+# (including "nothing was sized") the legacy
+# "total <word>: X (N sized, M unknown)" line is printed unchanged; otherwise
+# each non-empty bucket is shown as "<prefix><size> <kind>", joined by " + ",
+# with a count breakdown that omits empty buckets. A non-zero HELD total is
+# appended as "; held, not removable: X" and is never added into any bucket.
+pgdr_total_line() {
+  local word="$1" held_kb="$2" unknown="$3"
+  shift 3
+  local -a kb=("$1" "$3" "$5" "$7") n=("$2" "$4" "$6" "$8")
+  local -a kinds=(exact estimate upper_bound lower_bound)
+  local -a count_words=(exact estimated upper_bound lower_bound)
+  local line parts="" counts="" i
+
+  if ((n[1] + n[2] + n[3] == 0)); then
+    line=$(printf 'total %s: %s (%s sized, %s unknown)' "$word" "$(pgdr_format_kb "${kb[0]}")" "${n[0]}" "$unknown")
+  else
+    for i in 0 1 2 3; do
+      ((n[i] > 0)) || continue
+      parts+="${parts:+ + }$(pgdr_kind_prefix "${kinds[i]}")$(pgdr_format_kb "${kb[i]}") ${kinds[i]}"
+      counts+="${counts:+, }${n[i]} ${count_words[i]}"
+    done
+    ((unknown > 0)) && counts+="${counts:+, }$unknown unknown"
+    line=$(printf 'total %s: %s (%s)' "$word" "$parts" "$counts")
+  fi
+
+  if ((held_kb > 0)); then
+    line+="; held, not removable: $(pgdr_format_kb "$held_kb")"
+  fi
+  printf '%s\n' "$line"
+}
+
 # pgdr_print_dry_run_output: prints a dry-run command's captured output
 # (OUT, $3), collapsing any line longer than PGDR_LONG_LINE_CHARS unless
 # VERBOSE ($2) is 1. A long `rm ...` line becomes
@@ -871,7 +1006,32 @@ pgdr_print_dry_run_output() {
 # path) under pgdr_item_size_timeout, and the run ends with a
 # "total reclaimable|reclaimed: <size> (N sized, M unknown)" line that sums
 # ONLY the known sizes. Skipped items (missing path, declined confirm gate)
-# and items whose command failed get no total contribution. A dry run's
+# and items whose command failed get no total contribution.
+#
+# Size contract (bead pg2-0tj7h): a size MUST say what the number means.
+# Each item MAY declare, in the registry, sizeKind (exact | estimate |
+# upper_bound | lower_bound; default exact), sizeMethod (short tag, default
+# du), sizeBasis (documentation only, NEVER printed; required whenever
+# sizeKind is not exact) and heldSizeCommand. The kind is static registry
+# metadata, not runtime output: sizeCommand keeps printing a bare KiB
+# integer, and ONLY ITS FIRST OUTPUT LINE is read (first whitespace-
+# delimited field). Rendering:
+#   exact                no suffix:   "size: 65.3G"
+#   estimate             "~" prefix:  "size: ~972.8M (estimate: sqlite-closure)"
+#   upper_bound          "<=" prefix: "size: <=3.0G (upper_bound: <method>)"
+#   lower_bound          ">=" prefix: "size: >=1.0G (lower_bound: <method>)"
+# The closing total NEVER merges kinds into one number: one bucket per kind,
+# empty buckets omitted, e.g.
+#   total reclaimable: 65.3G exact + ~972.8M estimate (1 exact, 1 estimated, 1 unknown)
+# and when every sized item is exact the legacy
+# "(N sized, M unknown)" line is printed byte-for-byte unchanged.
+# HELD data is removable-but-for-a-safety-guard (a dirty or locked worktree;
+# "not stale" and "protected" are NOT held). An item with a heldSizeCommand
+# (bare KiB, same contract as sizeCommand) gets an extra
+# "<id>: held, not removable: <size>" line (omitted when 0) and the total
+# gains "; held, not removable: <size>". Held is sized only after the main
+# size succeeded, under its own timeout, and a held failure is never fatal and
+# never voids the main size; held is never added into any bucket. A dry run's
 # captured output goes through pgdr_print_dry_run_output (long-line
 # collapse, raw under -v).
 #
@@ -997,17 +1157,25 @@ cmd_reclaim() {
     overall_status=1
   fi
 
-  local total_kb=0 sized_count=0 unknown_count=0
+  # Per-kind total buckets (exact, estimate, upper_bound, lower_bound; see
+  # pgdr_kind_index) plus the separate held total -- kinds are never merged.
+  local -a bucket_kb=(0 0 0 0) bucket_n=(0 0 0 0)
+  local held_total_kb=0 unknown_count=0
   local item
   while IFS= read -r item; do
     local id aggressiveness dry_run_command remove_command path size_command
     local size_kb size_result size_label dry_out
+    local size_kind size_method held_command held_kb held_result held_label kind_idx
     id=$(jq -r '.id' <<<"$item")
     aggressiveness=$(jq -r '.aggressiveness' <<<"$item")
     dry_run_command=$(jq -r '.dryRunCommand' <<<"$item")
     remove_command=$(jq -r '.removeCommand' <<<"$item")
     path=$(jq -r '.path' <<<"$item")
     size_command=$(jq -r '.sizeCommand // ""' <<<"$item")
+    size_kind=$(jq -r '.sizeKind // "exact"' <<<"$item")
+    size_method=$(jq -r '.sizeMethod // "du"' <<<"$item")
+    held_command=$(jq -r '.heldSizeCommand // ""' <<<"$item")
+    kind_idx=$(pgdr_kind_index "$size_kind")
 
     if ! pgdr_path_exists "$path"; then
       if [[ $verbose -eq 1 ]]; then
@@ -1021,15 +1189,32 @@ cmd_reclaim() {
     # size computation must be an explicit "unknown" marker, never fatal
     # under the nix wrapper's `set -euo pipefail`.
     size_kb=""
+    held_kb=""
+    held_label=""
     if size_result=$(pgdr_size_kb "$path" "$size_command" "$(pgdr_item_size_timeout "$item")"); then
       size_kb="$size_result"
-      size_label=$(pgdr_format_kb "$size_kb")
+      size_label=$(pgdr_size_label "$size_kind" "$size_method" "$size_kb")
+      # Held size (removable but for a safety guard, e.g. a dirty worktree):
+      # sized only after the main size succeeded, under its OWN timeout, so a
+      # held failure/timeout is an explicit marker here and can never void the
+      # main size. Same `if x=$(...)` capture as the main size (errexit-safe).
+      if [[ -n $held_command ]]; then
+        if held_result=$(pgdr_size_kb "$path" "$held_command" "$(pgdr_item_size_timeout "$item")"); then
+          if ((held_result > 0)); then
+            held_kb="$held_result"
+            held_label=$(pgdr_format_kb "$held_kb")
+          fi
+        else
+          held_label="unknown ($held_result)"
+        fi
+      fi
     else
       size_label="unknown ($size_result)"
     fi
 
     if [[ $apply -eq 0 ]]; then
       printf '%s: size: %s\n' "$id" "$size_label"
+      [[ -n $held_label ]] && printf '%s: held, not removable: %s\n' "$id" "$held_label"
 
       # stdout+stderr captured together so a long single-line dry run (go
       # clean -n prints its `rm -rf` line on a stream we should not guess)
@@ -1037,8 +1222,9 @@ cmd_reclaim() {
       if dry_out=$(eval "$dry_run_command" 2>&1); then
         pgdr_print_dry_run_output "$path" "$verbose" "$dry_out"
         if [[ -n $size_kb ]]; then
-          total_kb=$((total_kb + size_kb))
-          sized_count=$((sized_count + 1))
+          bucket_kb[kind_idx]=$((bucket_kb[kind_idx] + size_kb))
+          bucket_n[kind_idx]=$((bucket_n[kind_idx] + 1))
+          held_total_kb=$((held_total_kb + ${held_kb:-0}))
         else
           unknown_count=$((unknown_count + 1))
         fi
@@ -1051,6 +1237,7 @@ cmd_reclaim() {
     fi
 
     printf '%s: size: %s\n' "$id" "$size_label"
+    [[ -n $held_label ]] && printf '%s: held, not removable: %s\n' "$id" "$held_label"
 
     if [[ $aggressiveness -ge $PGDR_CONFIRM_GATE_LEVEL ]]; then
       if ! pgdr_confirm "pg-disk-reclaimer: reclaim '$id' at aggressiveness $aggressiveness -- run its removeCommand? [y/N] "; then
@@ -1061,8 +1248,9 @@ cmd_reclaim() {
 
     if eval "$remove_command"; then
       if [[ -n $size_kb ]]; then
-        total_kb=$((total_kb + size_kb))
-        sized_count=$((sized_count + 1))
+        bucket_kb[kind_idx]=$((bucket_kb[kind_idx] + size_kb))
+        bucket_n[kind_idx]=$((bucket_n[kind_idx] + 1))
+        held_total_kb=$((held_total_kb + ${held_kb:-0}))
       else
         unknown_count=$((unknown_count + 1))
       fi
@@ -1074,11 +1262,12 @@ cmd_reclaim() {
 
   # No total when nothing ran (a run where every item was skipped stays
   # silent, matching the quiet-by-default missing-path contract).
-  if ((sized_count + unknown_count > 0)); then
+  if ((bucket_n[0] + bucket_n[1] + bucket_n[2] + bucket_n[3] + unknown_count > 0)); then
     local total_word="reclaimable"
     [[ $apply -eq 1 ]] && total_word="reclaimed"
-    printf 'total %s: %s (%s sized, %s unknown)\n' \
-      "$total_word" "$(pgdr_format_kb "$total_kb")" "$sized_count" "$unknown_count"
+    pgdr_total_line "$total_word" "$held_total_kb" "$unknown_count" \
+      "${bucket_kb[0]}" "${bucket_n[0]}" "${bucket_kb[1]}" "${bucket_n[1]}" \
+      "${bucket_kb[2]}" "${bucket_n[2]}" "${bucket_kb[3]}" "${bucket_n[3]}"
   fi
 
   return "$overall_status"
