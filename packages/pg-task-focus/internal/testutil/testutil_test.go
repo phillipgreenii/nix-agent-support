@@ -87,8 +87,11 @@ func TestLoadConfigAppliesTheEdit(t *testing.T) {
 func TestPtr(t *testing.T) {
 	v := 3
 	p := testutil.Ptr(v)
-	v = 4
 	if *p != 3 {
-		t.Errorf("*Ptr(3) = %d after the original changed, want a copy", *p)
+		t.Fatalf("*Ptr(3) = %d, want 3", *p)
+	}
+	*p = 4
+	if v != 3 {
+		t.Errorf("the original is %d after writing through Ptr's result, want 3: Ptr must return a pointer to a copy", v)
 	}
 }
