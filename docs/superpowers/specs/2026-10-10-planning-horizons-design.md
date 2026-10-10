@@ -204,7 +204,7 @@ flowchart TB
         Q --> QW["week containing the date"]
         Q --> QS["sprint containing the date, or none"]
     end
-    NOTE["week and sprint ranges are independent;\nno week-to-sprint relation exists"] -.- QW
+    NOTE["week and sprint ranges are independent, no week-to-sprint relation exists"] -.- QW
     NOTE -.- QS
 ```
 
