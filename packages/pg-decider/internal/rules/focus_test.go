@@ -383,6 +383,36 @@ var focusStateRows = []struct {
 		sel:    focusSkipRow("status-not-open"),
 	},
 	{
+		name:   "blocked marker struck",
+		bead:   &focusBead{state: "blocked", marker: "struck"},
+		strike: focusSkipRow("status-not-open"),
+		sel:    focusSkipRow("status-not-open"),
+	},
+	{
+		name:   "pinned marker struck",
+		bead:   &focusBead{state: "pinned", marker: "struck"},
+		strike: focusSkipRow("status-not-open"),
+		sel:    focusSkipRow("status-not-open"),
+	},
+	{
+		name:   "hooked marker struck",
+		bead:   &focusBead{state: "hooked", marker: "struck"},
+		strike: focusSkipRow("status-not-open"),
+		sel:    focusSkipRow("status-not-open"),
+	},
+	{
+		name:   "open unknown marker",
+		bead:   &focusBead{state: "open", marker: "zzz"},
+		strike: focusWant{transition: "hold", fields: focusHold},
+		sel:    focusSkipRow("in-play"),
+	},
+	{
+		name:   "deferred unknown marker",
+		bead:   &focusBead{state: "deferred", marker: "zzz"},
+		strike: focusSkipRow("deferred-by-someone-else"),
+		sel:    focusSkipRow("deferred-by-someone-else"),
+	},
+	{
 		name:   "closed",
 		bead:   &focusBead{state: "closed"},
 		strike: focusSkipRow("closed"),
@@ -516,6 +546,11 @@ func TestFocusCheckViewAcceptsPresentNullAndOtherTypes(t *testing.T) {
 	absent := focusPatch(t, "pr_selected", func(m map[string]any) { delete(suiteAnnotations(m), "focus_selected") })
 	if err := CheckFocusView(absent, "thread"); err != nil {
 		t.Errorf("a type focus.item is not registered for must pass, got %v", err)
+	}
+	for _, typ := range []string{"aaa", "zzz", "thread", ""} {
+		if err := CheckFocusView(absent, typ); err != nil {
+			t.Errorf("type %q has no focus rule: %v", typ, err)
+		}
 	}
 	if err := CheckFocusView(nil, "pr"); err != nil {
 		t.Errorf("a nil view must pass, got %v", err)
@@ -984,12 +1019,32 @@ func TestFocusMintShapeForAPR(t *testing.T) {
 	if got := withURL.act.Fields.Description; got != "Focus item for pr acme/widgets#42 (https://code.example/acme/widgets/pull/42)" {
 		t.Errorf("description = %q", got)
 	}
-	// A PR with no repo or number is referred to by its id.
-	noRef := focusSetup{fixture: "pr_selected", annotation: focusPeriod, source: func(s map[string]any) {
-		delete(s, "repo")
-		delete(s, "number")
+	// A PR missing its repo or its number is referred to by its id.
+	for name, mutate := range map[string]func(s map[string]any){
+		"no repo":   func(s map[string]any) { delete(s, "repo") },
+		"no number": func(s map[string]any) { delete(s, "number") },
+		"zero":      func(s map[string]any) { s["number"] = 0 },
+		"neither":   func(s map[string]any) { delete(s, "repo"); delete(s, "number") },
+	} {
+		noRef := focusSetup{fixture: "pr_selected", annotation: focusPeriod, source: mutate}.decide(t)
+		if got := noRef.act.Fields.Title; got != "Focus acme/widgets#42 - Add retry to client" {
+			t.Errorf("%s: title = %q", name, got)
+		}
+	}
+	// A different repo and number name the PR in the title.
+	other := focusSetup{fixture: "pr_selected", annotation: focusPeriod, source: func(s map[string]any) {
+		s["repo"], s["number"] = "acme/other", 7
 	}}.decide(t)
-	if got := noRef.act.Fields.Title; got != "Focus acme/widgets#42 - Add retry to client" {
+	if got := other.act.Fields.Title; got != "Focus acme/other#7 - Add retry to client" {
+		t.Errorf("title = %q", got)
+	}
+	// An issue snapshot with its own id names the issue by it; without, by the view id.
+	snapID := focusSetup{fixture: "issue_selected", annotation: focusPeriod, source: func(s map[string]any) { s["id"] = "ACME-70" }}.decide(t)
+	if got := snapID.act.Fields.Title; got != "Focus ACME-70 - Crash on startup" {
+		t.Errorf("title = %q", got)
+	}
+	noSnapID := focusSetup{fixture: "issue_selected", annotation: focusPeriod, source: func(s map[string]any) { delete(s, "id") }}.decide(t)
+	if got := noSnapID.act.Fields.Title; got != "Focus ACME-7 - Crash on startup" {
 		t.Errorf("title = %q", got)
 	}
 }
