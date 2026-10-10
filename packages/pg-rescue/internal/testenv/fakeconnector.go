@@ -13,6 +13,13 @@ import (
 // resp.VERB / err.VERB / exit.VERB, where VERB is the word after "issue". A
 // "block.VERB" file makes the call write its parent pid to "started" and
 // hang, so a test can kill the caller while a child is in flight.
+//
+// A blocked call is ready to be killed the moment "started" exists: it forks
+// its sleeping grandchild FIRST, then publishes "started.child" and finally
+// "started", each by atomic rename. A test that waits for "started" therefore
+// never races the fork (a SIGKILL of the process group landing mid-fork can
+// leave the grandchild alive holding the output pipes, so the caller never
+// returns) and never reads a half-written file.
 const fakeConnectorScript = `#!/bin/bash
 d="$FAKE_CONNECTOR_DIR"
 n=1
@@ -24,9 +31,11 @@ printf '%s\0' "$@" > "$d/call.$n.args"
 } > "$d/call.$n.env"
 verb="$2"
 if [ -e "$d/block.$verb" ]; then
-  echo "$PPID" > "$d/started"
-  echo "$$" > "$d/started.child"
-  sleep 60
+  sleep 60 &
+  sleeper=$!
+  echo "$$" > "$d/started.child.tmp" && mv "$d/started.child.tmp" "$d/started.child"
+  echo "$PPID" > "$d/started.tmp" && mv "$d/started.tmp" "$d/started"
+  wait "$sleeper"
 fi
 [ -e "$d/resp.$verb" ] && cat "$d/resp.$verb"
 [ -e "$d/err.$verb" ] && cat "$d/err.$verb" >&2

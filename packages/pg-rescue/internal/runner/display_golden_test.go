@@ -220,7 +220,16 @@ func runScenario(t *testing.T, sc scenarioSpec, flagText string) (code int, stdo
 	var started string
 	if sc.interrupt {
 		started = filepath.Join(t.TempDir(), "started")
-		hang := `echo started > ` + started + "\n" + `echo 'fix-large: working' >&2` + "\nsleep 30"
+		// The stderr line is written BEFORE started is published, so it is
+		// already in the pipe when the SIGINT arrives (otherwise the display
+		// would sometimes lack it). started is published by atomic rename.
+		// `exec` makes the fake the process that gets signalled: a shell
+		// parked in a foreground `sleep` prints "Terminated: 15 sleep 30" to
+		// stderr when the sleep is killed, but only if it outlives the sleep,
+		// which varies run to run and made display.log differ between levels.
+		hang := `echo 'fix-large: working' >&2` + "\n" +
+			`echo started > ` + started + ".tmp && mv " + started + ".tmp " + started + "\n" +
+			"exec sleep 30"
 		scripts = []script{gitScript, flakeDeclines, claudeScript(smallDeclines, hang), p1Unused, notifyBad}
 	}
 	installScripts(t, scripts...)

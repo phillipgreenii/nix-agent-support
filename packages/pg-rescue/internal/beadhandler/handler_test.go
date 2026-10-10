@@ -875,6 +875,12 @@ func TestCSVPairKeepsCommasIntact(t *testing.T) {
 	}
 }
 
+// orphanDeadline bounds how long the orphan tests wait for an event (a killed
+// child reaped, Main returning). It is only ever waited out when a test is
+// about to fail, so it is generous: a host under heavy load can starve a
+// SIGKILLed process group of CPU for several seconds before it is reaped.
+const orphanDeadline = 60 * time.Second
+
 func TestOrphanWatcherKillsTheRunningChild(t *testing.T) {
 	s := newScene(t, "first-attempt")
 	s.fake.Block("create")
@@ -897,7 +903,7 @@ func TestOrphanWatcherKillsTheRunningChild(t *testing.T) {
 		if code != 1 {
 			t.Errorf("exit %d after the child was killed, want 1", code)
 		}
-	case <-time.After(10 * time.Second):
+	case <-time.After(orphanDeadline):
 		t.Fatal("Main did not return after the orphan cleanup killed its child")
 	}
 	if !stopped.Load() {
@@ -925,7 +931,7 @@ func TestOrphanCleanupBeforeTheChildStartsKillsItOnArrival(t *testing.T) {
 		if err == nil {
 			t.Error("child exited cleanly; want it killed")
 		}
-	case <-time.After(10 * time.Second):
+	case <-time.After(orphanDeadline):
 		_ = cmd.Process.Kill()
 		t.Fatal("a child registered after kill() was not killed")
 	}
@@ -933,7 +939,7 @@ func TestOrphanCleanupBeforeTheChildStartsKillsItOnArrival(t *testing.T) {
 
 func waitFor(t *testing.T, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(orphanDeadline)
 	for time.Now().Before(deadline) {
 		if cond() {
 			return
