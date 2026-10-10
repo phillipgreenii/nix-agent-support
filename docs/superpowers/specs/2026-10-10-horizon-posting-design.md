@@ -187,8 +187,8 @@ one) MUST be recorded (section 8) because A-3 needs it.
   or through a link from a PR, commit or session entry to its tracker issue (the `jira` link relation
   of pg-desk's links). work-report decides this (PO-1).
 - **Lacks one** is the test "has no comment by the operator dated inside the day range". This is the
-  literal reading of "lacks one". The stale-In-Progress attention rule counts a status transition and a
-  field edit as an update as well (`docs/behavior/pg-desk/attention.md`, rule `issue.stale-in-progress`);
+  literal reading of "lacks one". The stale-In-Progress attention rule counts the operator's comment or status transition as an
+  update (a field edit is a recorded gap there) (`docs/behavior/pg-desk/attention.md`, rule `issue.stale-in-progress`);
   whether the day close should use that wider definition is OQ-P3.
 - **Work with no tracker issue.** A PR or commit with no resolvable issue yields no item comment. It
   appears in the A-3 summary only (OQ-P4 asks whether the Presenter should offer to create an issue).
@@ -361,7 +361,7 @@ Writing this table is a store write, not a tracker write, so it does not touch G
 | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
 | OQ-P1  | SH-2 says posting goes through `claude -p` against a working MCP "unless that doesn't work". The Jira backend already writes comments through its own CLI with no MCP. Does SH-2 intend the MCP for tracker comments too? | Use the existing `issue comment` op (a working path, and the one the Phase 15 day close already assumes, D-F10). |
 | OQ-P2  | Does the chat MCP's send tool return the message identity (a timestamp, a permalink) the end-of-day reply needs? Unverified.                                                                                              | None. If not, A-3 needs another way to find the thread (a search after posting) or cannot be a reply.            |
-| OQ-P3  | "Lacks one": only a comment by the operator dated in the day, or any update (transition, field edit) as the stale rule counts?                                                                                            | Comment only (the literal reading).                                                                              |
+| OQ-P3  | "Lacks one": only a comment by the operator dated in the day, or any update (a comment or a status transition) as the stale rule counts?                                                                                  | Comment only (the literal reading).                                                                              |
 | OQ-P4  | Work with no tracker issue: leave it to the summary, or offer to create an issue (the handbook says anything over about an hour gets one before it starts)?                                                               | Summary only; no issue creation by a Presenter.                                                                  |
 | OQ-P5  | No recorded morning post: new message, or stop and ask?                                                                                                                                                                   | Stop and ask.                                                                                                    |
 | OQ-P6  | A week or sprint scope member with no tracker issue: summary only, or an offer to link it to an issue?                                                                                                                    | Summary only.                                                                                                    |
