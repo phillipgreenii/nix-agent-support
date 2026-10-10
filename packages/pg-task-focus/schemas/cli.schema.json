@@ -1,0 +1,982 @@
+{
+  "$defs": {
+    "AlertSettings": {
+      "additionalProperties": false,
+      "description": "The sounds and repeat interval the cycle's type has now; a sound is a name or null for no sound.",
+      "properties": {
+        "reminder_sound": {
+          "type": ["string", "null"]
+        },
+        "repeat_minutes": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "sound": {
+          "type": ["string", "null"]
+        }
+      },
+      "required": ["sound", "reminder_sound", "repeat_minutes"],
+      "type": "object"
+    },
+    "CheckOutput": {
+      "additionalProperties": false,
+      "description": "The output of check: whether a daemon would start on the log, what the next start would recover, and why not.",
+      "properties": {
+        "batches": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "invalid": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "events": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": ["code", "message", "events"],
+          "type": "object"
+        },
+        "line": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "lines": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "path": {
+          "type": "string"
+        },
+        "problem": {
+          "type": "string"
+        },
+        "recovery": {
+          "additionalProperties": false,
+          "properties": {
+            "torn_tail": {
+              "type": "boolean"
+            },
+            "truncated_bytes": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "uncommitted_batches": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": ["torn_tail", "uncommitted_batches", "truncated_bytes"],
+          "type": "object"
+        },
+        "size_bytes": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": ["ok", "path", "size_bytes", "lines", "batches", "recovery"],
+      "type": "object"
+    },
+    "ConfigCheckOutput": {
+      "additionalProperties": false,
+      "description": "The output of config check: every problem with the JSON pointer of the value at fault.",
+      "properties": {
+        "digest": {
+          "type": "string"
+        },
+        "problems": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": ["path", "message"],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "valid": {
+          "type": "boolean"
+        }
+      },
+      "required": ["valid", "problems"],
+      "type": "object"
+    },
+    "Cycle": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/CycleBase"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "CycleBase": {
+      "description": "The members every cycle has; Cycle and DimmedCycle close the object over them.",
+      "properties": {
+        "alert": {
+          "$ref": "#/$defs/AlertSettings"
+        },
+        "boost_minutes": {
+          "type": "integer"
+        },
+        "elapsed_seconds": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "ends_at": {
+          "$ref": "#/$defs/Instant"
+        },
+        "id": {
+          "type": "string"
+        },
+        "interrupted_by": {
+          "type": "string"
+        },
+        "kv": {
+          "items": {
+            "$ref": "#/$defs/KV"
+          },
+          "type": "array"
+        },
+        "not_in_profile": {
+          "type": "boolean"
+        },
+        "note": {
+          "type": "string",
+          "x-free-text": true
+        },
+        "overtime": {
+          "type": "boolean"
+        },
+        "planned_minutes": {
+          "type": "integer"
+        },
+        "remaining_seconds": {
+          "description": "Negative in overtime.",
+          "type": "integer"
+        },
+        "running_since": {
+          "$ref": "#/$defs/Instant",
+          "description": "The start of the open running segment (the last start or resume); the running cycle only."
+        },
+        "started_at": {
+          "$ref": "#/$defs/Instant"
+        },
+        "status": {
+          "enum": ["running", "paused", "stopped"]
+        },
+        "stopped_at": {
+          "$ref": "#/$defs/Instant"
+        },
+        "title": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "title",
+        "planned_minutes",
+        "boost_minutes",
+        "status",
+        "elapsed_seconds",
+        "remaining_seconds",
+        "overtime",
+        "not_in_profile",
+        "kv",
+        "alert"
+      ],
+      "type": "object"
+    },
+    "CycleRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "started_at": {
+          "$ref": "#/$defs/Instant"
+        },
+        "status": {
+          "enum": ["running", "paused", "stopped", "not_started"]
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": ["id", "title"],
+      "type": "object"
+    },
+    "Date": {
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+      "type": "string"
+    },
+    "DimmedCycle": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/CycleBase"
+        },
+        {
+          "properties": {
+            "can_switch": {
+              "type": "boolean"
+            }
+          },
+          "required": ["can_switch"],
+          "type": "object"
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "DryRunResult": {
+      "additionalProperties": false,
+      "description": "What the real request would affect at `state_version`; nothing was appended. Carry `state_version` back as `expected_version`.",
+      "properties": {
+        "dry_run": {
+          "const": true
+        },
+        "note": {
+          "type": "string"
+        },
+        "preview": {
+          "$ref": "#/$defs/Preview"
+        },
+        "state_version": {
+          "$ref": "#/$defs/Version"
+        }
+      },
+      "required": ["dry_run", "preview", "state_version"],
+      "type": "object"
+    },
+    "EventView": {
+      "additionalProperties": false,
+      "properties": {
+        "corrected_by": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "event": {
+          "description": "One event line, as event.schema.json defines it.",
+          "type": "object"
+        },
+        "id": {
+          "type": "string"
+        },
+        "original": {
+          "description": "One event line, as event.schema.json defines it.",
+          "type": "object"
+        },
+        "retracted": {
+          "type": "boolean"
+        },
+        "retracted_by": {
+          "type": "string"
+        }
+      },
+      "required": ["id", "event", "corrected_by", "retracted"],
+      "type": "object"
+    },
+    "Events": {
+      "additionalProperties": false,
+      "properties": {
+        "events": {
+          "items": {
+            "$ref": "#/$defs/EventView"
+          },
+          "type": "array"
+        },
+        "view": {
+          "enum": ["corrected", "original"]
+        }
+      },
+      "required": ["view", "events"],
+      "type": "object"
+    },
+    "Health": {
+      "additionalProperties": false,
+      "properties": {
+        "alerts": {
+          "additionalProperties": false,
+          "properties": {
+            "next_reminder": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/Instant"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "running_cycle": {
+              "type": "string"
+            }
+          },
+          "required": ["next_reminder"],
+          "type": "object"
+        },
+        "config": {
+          "additionalProperties": false,
+          "description": "`reload_error` names the problems by path only and never echoes a configured value.",
+          "properties": {
+            "digest": {
+              "type": "string"
+            },
+            "loaded_at": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/Instant"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "reload_error": {
+              "type": "string"
+            },
+            "restart_required": {
+              "items": {
+                "enum": ["listen_port", "public_url"]
+              },
+              "type": "array"
+            },
+            "valid": {
+              "type": "boolean"
+            }
+          },
+          "required": ["valid", "digest", "loaded_at", "restart_required"],
+          "type": "object"
+        },
+        "failing_check": {
+          "type": "string"
+        },
+        "last_append": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Instant"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ready": {
+          "type": "boolean"
+        },
+        "recovery": {
+          "additionalProperties": false,
+          "properties": {
+            "torn_tail": {
+              "type": "boolean"
+            },
+            "uncommitted_batches": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": ["torn_tail", "uncommitted_batches"],
+          "type": "object"
+        },
+        "replay": {
+          "additionalProperties": false,
+          "properties": {
+            "duration_seconds": {
+              "type": "number"
+            },
+            "events": {
+              "type": "integer"
+            }
+          },
+          "required": ["events", "duration_seconds"],
+          "type": "object"
+        },
+        "schema_version": {
+          "type": "integer"
+        },
+        "status": {
+          "enum": ["starting", "ok", "degraded"]
+        },
+        "store": {
+          "additionalProperties": false,
+          "properties": {
+            "reason": {
+              "type": "string"
+            },
+            "since": {
+              "$ref": "#/$defs/Instant"
+            },
+            "size_bytes": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "state": {
+              "enum": ["ok", "read_only"]
+            },
+            "writable": {
+              "type": "boolean"
+            }
+          },
+          "required": ["state", "writable", "size_bytes"],
+          "type": "object"
+        },
+        "uptime_seconds": {
+          "minimum": 0,
+          "type": "number"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "ready",
+        "version",
+        "schema_version",
+        "uptime_seconds",
+        "replay",
+        "last_append",
+        "store",
+        "config",
+        "recovery",
+        "alerts"
+      ],
+      "type": "object"
+    },
+    "Instant": {
+      "description": "An RFC 3339 instant in UTC with at least millisecond precision.",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3,9}Z$",
+      "type": "string"
+    },
+    "KV": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "pattern": "^[a-z0-9_-]+$",
+          "type": "string"
+        },
+        "value": {
+          "type": "string",
+          "x-free-text": true
+        }
+      },
+      "required": ["key", "value"],
+      "type": "object"
+    },
+    "NotMaterialized": {
+      "additionalProperties": false,
+      "properties": {
+        "definition": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": ["definition", "reason"],
+      "type": "object"
+    },
+    "Period": {
+      "additionalProperties": false,
+      "properties": {
+        "banner": {
+          "description": "Exactly 'New day: roll over', 'New week: roll over' or 'New sprint: roll over' once the period has ended.",
+          "type": "string"
+        },
+        "end": {
+          "$ref": "#/$defs/Date"
+        },
+        "ended": {
+          "type": "boolean"
+        },
+        "kind": {
+          "enum": ["day", "week", "sprint"]
+        },
+        "label": {
+          "type": "string",
+          "x-free-text": true
+        },
+        "start": {
+          "$ref": "#/$defs/Date"
+        },
+        "today": {
+          "$ref": "#/$defs/Date"
+        },
+        "zone": {
+          "type": "string"
+        }
+      },
+      "required": ["kind", "start", "end", "zone", "today", "ended"],
+      "type": "object"
+    },
+    "Preview": {
+      "additionalProperties": false,
+      "properties": {
+        "blocking_cycles": {
+          "items": {
+            "$ref": "#/$defs/CycleRef"
+          },
+          "type": "array"
+        },
+        "leaving": {
+          "items": {
+            "$ref": "#/$defs/TaskRef"
+          },
+          "type": "array"
+        },
+        "materialize": {
+          "items": {
+            "$ref": "#/$defs/TaskRef"
+          },
+          "type": "array"
+        },
+        "not_materialized": {
+          "items": {
+            "$ref": "#/$defs/NotMaterialized"
+          },
+          "type": "array"
+        },
+        "profile_add": {
+          "items": {
+            "$ref": "#/$defs/TaskRef"
+          },
+          "type": "array"
+        },
+        "profile_reinstate": {
+          "items": {
+            "$ref": "#/$defs/TaskRef"
+          },
+          "type": "array"
+        },
+        "profile_withdraw": {
+          "items": {
+            "$ref": "#/$defs/TaskRef"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "leaving",
+        "materialize",
+        "profile_add",
+        "profile_withdraw",
+        "profile_reinstate",
+        "not_materialized",
+        "blocking_cycles"
+      ],
+      "type": "object"
+    },
+    "Problem": {
+      "additionalProperties": false,
+      "description": "An RFC 9457 problem. `detail` is a plain sentence naming the entity, the\ninstants and the event ids involved; `details` holds the same facts in\nstructured form. Every instant in a message is UTC followed, in\nparentheses, by the same instant in the active day period's zone. A\n`store_unavailable` carries `store`: its `state` is `read_only` when the\nstore is read-only (restart is the only recovery) and `ok` when the\nappend was rolled back (the outcome is unknown; retry with the same `id`).\n",
+      "properties": {
+        "detail": {
+          "type": "string"
+        },
+        "details": {
+          "$ref": "#/$defs/ProblemDetails"
+        },
+        "health": {
+          "$ref": "#/$defs/Health"
+        },
+        "instance": {
+          "type": "string"
+        },
+        "reason": {
+          "$ref": "#/$defs/Reason"
+        },
+        "status": {
+          "enum": [400, 403, 404, 405, 409, 415, 422, 500, 503],
+          "type": "integer"
+        },
+        "store": {
+          "$ref": "#/$defs/Store"
+        },
+        "title": {
+          "type": "string"
+        },
+        "trace_id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": ["type", "title", "status", "detail", "reason", "trace_id"],
+      "type": "object"
+    },
+    "ProblemDetails": {
+      "additionalProperties": false,
+      "properties": {
+        "cycles": {
+          "items": {
+            "$ref": "#/$defs/CycleRef"
+          },
+          "type": "array"
+        },
+        "entity": {
+          "type": "string"
+        },
+        "events": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "instants": {
+          "items": {
+            "$ref": "#/$defs/Instant"
+          },
+          "type": "array"
+        },
+        "store": {
+          "$ref": "#/$defs/Store"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "Reason": {
+      "description": "The closed set of reasons, each with its own status. Every code names its own problem; there is none for a generic \"invalid timeline\".",
+      "enum": [
+        "invalid_request",
+        "invalid_zone",
+        "unknown_profile",
+        "unknown_cycle_type",
+        "reserved_key",
+        "cycle_ambiguous",
+        "unknown_task",
+        "unknown_cycle",
+        "unknown_event",
+        "no_running_cycle",
+        "cycle_stopped",
+        "another_cycle_running",
+        "interrupted_cycle_not_running",
+        "cycle_active",
+        "cycle_segments_overlap",
+        "break_ends_at_stop",
+        "clock_behind_log",
+        "task_already_resolved",
+        "task_withdrawn",
+        "task_not_withdrawn",
+        "task_materialized_twice",
+        "task_without_period",
+        "task_before_profile",
+        "period_unchanged",
+        "id_conflict",
+        "stale_preview",
+        "batch_has_dependents",
+        "cycle_has_dependents",
+        "invalid_correction",
+        "future_effective_at",
+        "stop_not_after_start",
+        "empty_running_segment",
+        "cycle_event_before_start",
+        "resolution_before_materialization",
+        "period_out_of_order",
+        "store_unavailable",
+        "not_ready",
+        "forbidden_host",
+        "forbidden_origin",
+        "unsupported_media_type",
+        "not_found",
+        "method_not_allowed",
+        "internal_error"
+      ],
+      "type": "string"
+    },
+    "Result": {
+      "additionalProperties": false,
+      "properties": {
+        "batch_id": {
+          "type": "string"
+        },
+        "changed": {
+          "type": "boolean"
+        },
+        "event_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "note": {
+          "type": "string"
+        },
+        "replayed": {
+          "type": "boolean"
+        },
+        "version": {
+          "$ref": "#/$defs/Version"
+        }
+      },
+      "required": ["changed", "event_ids", "version"],
+      "type": "object"
+    },
+    "ResumeOffer": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "enum": ["resume", "switch"]
+        },
+        "cycle": {
+          "$ref": "#/$defs/Cycle"
+        }
+      },
+      "required": ["cycle", "action"],
+      "type": "object"
+    },
+    "State": {
+      "additionalProperties": false,
+      "properties": {
+        "dimmed": {
+          "description": "Every paused cycle that is not stopped",
+          "items": {
+            "$ref": "#/$defs/DimmedCycle"
+          },
+          "most recently paused first.": null,
+          "type": "array"
+        },
+        "focus": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Cycle"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "initialized": {
+          "type": "boolean"
+        },
+        "interrupt_stack": {
+          "items": {
+            "$ref": "#/$defs/Cycle"
+          },
+          "type": "array"
+        },
+        "next": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Task"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "periods": {
+          "items": {
+            "$ref": "#/$defs/Period"
+          },
+          "type": "array"
+        },
+        "profile": {
+          "type": "string"
+        },
+        "read_at": {
+          "$ref": "#/$defs/Instant"
+        },
+        "resume_offer": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ResumeOffer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "store": {
+          "$ref": "#/$defs/Store"
+        },
+        "tasks": {
+          "items": {
+            "$ref": "#/$defs/Task"
+          },
+          "type": "array"
+        },
+        "version": {
+          "$ref": "#/$defs/Version"
+        }
+      },
+      "required": [
+        "read_at",
+        "initialized",
+        "version",
+        "store",
+        "periods",
+        "tasks",
+        "next",
+        "focus",
+        "dimmed",
+        "interrupt_stack",
+        "resume_offer"
+      ],
+      "type": "object"
+    },
+    "Store": {
+      "additionalProperties": false,
+      "description": "The event store's health. `reason` and `since` are present only while read-only; `reason` is one of a closed set of plain sentences, never free text.",
+      "properties": {
+        "reason": {
+          "type": "string"
+        },
+        "since": {
+          "$ref": "#/$defs/Instant"
+        },
+        "state": {
+          "enum": ["ok", "read_only"]
+        }
+      },
+      "required": ["state"],
+      "type": "object"
+    },
+    "Task": {
+      "additionalProperties": false,
+      "properties": {
+        "cadence": {
+          "enum": ["daily", "weekly", "sprint"]
+        },
+        "definition": {
+          "type": "string"
+        },
+        "due": {
+          "$ref": "#/$defs/Instant"
+        },
+        "due_zone": {
+          "type": "string"
+        },
+        "group": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": ["day", "week", "sprint"]
+        },
+        "link": {
+          "type": "string"
+        },
+        "overdue": {
+          "type": "boolean"
+        },
+        "period_start": {
+          "$ref": "#/$defs/Date"
+        },
+        "reason": {
+          "type": "string",
+          "x-free-text": true
+        },
+        "resolved_at": {
+          "$ref": "#/$defs/Instant"
+        },
+        "status": {
+          "enum": ["open", "completed", "skipped", "missed", "withdrawn"]
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "definition",
+        "cadence",
+        "period_start",
+        "title",
+        "due",
+        "due_zone",
+        "status",
+        "overdue"
+      ],
+      "type": "object"
+    },
+    "TaskRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "overdue": {
+          "type": "boolean"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": ["id", "title", "overdue"],
+      "type": "object"
+    },
+    "ULID": {
+      "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+      "type": "string"
+    },
+    "Version": {
+      "additionalProperties": false,
+      "description": "The state version, the pair (log_lines, config_generation); clients compare it only for inequality.",
+      "properties": {
+        "config_generation": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "log_lines": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": ["log_lines", "config_generation"],
+      "type": "object"
+    }
+  },
+  "$id": "https://pg-task-focus.invalid/schemas/cli.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "anyOf": [
+    {
+      "$ref": "#/$defs/State"
+    },
+    {
+      "$ref": "#/$defs/Result"
+    },
+    {
+      "$ref": "#/$defs/DryRunResult"
+    },
+    {
+      "$ref": "#/$defs/Events"
+    },
+    {
+      "$ref": "#/$defs/Problem"
+    },
+    {
+      "$ref": "#/$defs/CheckOutput"
+    },
+    {
+      "$ref": "#/$defs/ConfigCheckOutput"
+    }
+  ],
+  "description": "Every document a client verb prints with --json: the daemon's own JSON (State for status and each line of status --watch, Result or DryRunResult for a mutation, Events for events list, Problem for a refusal) and the two the command line makes itself (CheckOutput, ConfigCheckOutput). Derived from api/openapi.yaml by a test; do not edit the shared definitions here.",
+  "title": "pg-task-focus command-line output"
+}

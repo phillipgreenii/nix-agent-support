@@ -53,6 +53,9 @@ type Params struct {
 	// ProbeInterval is how often the store's writability is probed; zero
 	// means 30 seconds. HeartbeatInterval is the /stream heartbeat.
 	ProbeInterval, HeartbeatInterval time.Duration
+	// WriteTimeout is the http server's write timeout; zero means 30 seconds.
+	// /stream clears it per connection; a test shortens it to prove that.
+	WriteTimeout time.Duration
 	// NewID overrides event id generation, for tests.
 	NewID func() event.ID
 	// FS is the file system the log goes through; nil means the operating
@@ -176,9 +179,13 @@ func Start(ctx context.Context, p Params) (*Daemon, error) {
 		Alerts: d.alertsReading,
 	})
 	d.srv.SetConfigState(server.ConfigState{Valid: true, Digest: cfg.Digest(), LoadedAt: started})
+	writeTimeout := p.WriteTimeout
+	if writeTimeout <= 0 {
+		writeTimeout = 30 * time.Second
+	}
 	d.http = &http.Server{
 		Handler: d.srv.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second,
-		WriteTimeout: 30 * time.Second, IdleTimeout: 120 * time.Second, MaxHeaderBytes: 64 << 10,
+		WriteTimeout: writeTimeout, IdleTimeout: 120 * time.Second, MaxHeaderBytes: 64 << 10,
 	}
 	go func() {
 		if err := d.http.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {

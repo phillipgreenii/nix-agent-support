@@ -21,6 +21,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/clock"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/contract"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/daemon"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/engine"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/event"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/notify"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/store"
@@ -44,20 +45,23 @@ var newYork = func() *time.Location {
 func local(h, m int) time.Time { return time.Date(2026, time.October, 7, h, m, 0, 0, newYork).UTC() }
 
 type env struct {
-	t       *testing.T
-	d       *daemon.Daemon
-	clock   *clock.Fake
-	player  *notify.Fake
-	dir     string
-	cfgDir  string
-	cfg     string
-	port    int
-	log     *lockedBuf
-	spec    *contract.Spec
-	client  *http.Client
-	ids     uint32
-	otlp    slog.Handler
-	tracing trace.TracerProvider
+	t            *testing.T
+	d            *daemon.Daemon
+	clock        *clock.Fake
+	player       *notify.Fake
+	dir          string
+	cfgDir       string
+	cfg          string
+	port         int
+	log          *lockedBuf
+	spec         *contract.Spec
+	client       *http.Client
+	ids          uint32
+	otlp         slog.Handler
+	tracing      trace.TracerProvider
+	writeTimeout time.Duration
+	probeEvery   time.Duration
+	observer     engine.Observer
 }
 
 type lockedBuf struct {
@@ -89,12 +93,15 @@ func freePort(t *testing.T) int {
 
 // options tweaks a test daemon.
 type options struct {
-	editConfig func(map[string]any)
-	fs         store.FS
-	at         time.Time
-	dir        string
-	otlp       slog.Handler
-	tracing    trace.TracerProvider
+	editConfig   func(map[string]any)
+	fs           store.FS
+	at           time.Time
+	dir          string
+	otlp         slog.Handler
+	tracing      trace.TracerProvider
+	writeTimeout time.Duration
+	probeEvery   time.Duration
+	observer     engine.Observer
 }
 
 // newEnv starts a daemon and waits for it to be ready.
@@ -114,9 +121,26 @@ func newEnv(t *testing.T, o options) *env {
 	e.cfg = filepath.Join(e.cfgDir, "config.json")
 	e.port = freePort(t)
 	e.writeConfig(o.editConfig)
-	e.otlp, e.tracing = o.otlp, o.tracing
+	e.otlp, e.tracing, e.writeTimeout, e.probeEvery, e.observer = o.otlp, o.tracing, o.writeTimeout, o.probeEvery, o.observer
 	e.start(o.fs)
 	t.Cleanup(func() { e.d.Stop() })
+	return e
+}
+
+// newEnv2 is newEnv without starting the daemon, for tests of a start that fails.
+func newEnv2(t *testing.T, o options) *env {
+	t.Helper()
+	e := &env{t: t, log: &lockedBuf{}, spec: contract.Load(t), client: &http.Client{Timeout: 10 * time.Second}}
+	e.clock = clock.NewFake(local(8, 50))
+	e.player = &notify.Fake{}
+	e.dir = o.dir
+	if e.dir == "" {
+		e.dir = filepath.Join(t.TempDir(), "data")
+	}
+	e.cfgDir = t.TempDir()
+	e.cfg = filepath.Join(e.cfgDir, "config.json")
+	e.port = freePort(t)
+	e.writeConfig(o.editConfig)
 	return e
 }
 
@@ -148,8 +172,8 @@ func (e *env) start(fs store.FS) {
 	e.t.Helper()
 	d, err := daemon.Start(context.Background(), daemon.Params{
 		ConfigPath: e.cfg, DataDir: e.dir, Version: "test", Log: e.log, Clock: e.clock,
-		Player: e.player, Notifier: e.player, FS: fs, OTLPLogs: e.otlp, Tracing: e.tracing, HeartbeatInterval: 50 * time.Millisecond,
-		ProbeInterval: time.Hour,
+		Player: e.player, Notifier: e.player, FS: fs, OTLPLogs: e.otlp, Tracing: e.tracing, WriteTimeout: e.writeTimeout, HeartbeatInterval: 50 * time.Millisecond,
+		ProbeInterval: e.probeInterval(), ExtraObserver: e.observer,
 	})
 	if err != nil {
 		e.t.Fatalf("Start: %v\nlog:\n%s", err, e.log.String())
@@ -329,3 +353,10 @@ func eventually(t *testing.T, what string, cond func() bool) {
 }
 
 var _ = event.ID("")
+
+func (e *env) probeInterval() time.Duration {
+	if e.probeEvery > 0 {
+		return e.probeEvery
+	}
+	return time.Hour
+}

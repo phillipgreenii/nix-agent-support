@@ -1,6 +1,6 @@
 # pg-task-focus keeps an append-only event log, derives its state by replay, and has one writer
 
-**Status**: Accepted (operator rulings, 2026-10-07 and 2026-10-08; resolves `pg2-t7me1.1`)
+**Status**: Accepted (operator rulings, 2026-10-07 and 2026-10-08; resolves `pg2-t7me1.1`; amended by ADR 0091 for the daemon)
 **Date**: 2026-10-08
 **Deciders**: phillipg
 
@@ -16,8 +16,8 @@ repository's citation conventions, is not a citation target; everything a later 
 and in the behavior set.
 
 The loopback-only, no-authentication posture of the daemon is a decision that belongs to the daemon,
-not the library. It is left to the amendment that sub-project 2 (the daemon and its API) makes to this
-ADR.
+not the library. It is made by the amendment that sub-project 2 (the daemon and its API) makes to this
+ADR: ADR 0091.
 
 ## Context
 
@@ -128,8 +128,8 @@ R", a cycle ran for 187 minutes, a day rolled over with these tasks missed. Four
   tests, in test code only. The validator and `rapid` are operator-accepted dependency choices of
   2026-10-08.
 - The daemon, the CLI, the web UI, the connector backend and the menu-bar plugin consume the library
-  in later sub-projects; the daemon's loopback and no-authentication decision is restated by
-  sub-project 2's amendment to this ADR.
+  in later sub-projects; the daemon's loopback and no-authentication decision is made by sub-project 2's
+  amendment to this ADR, ADR 0091.
 
 See also: `phillipgreenii-nix-agent-support` ADR 0062 (pg-connector's Tier-1 and Tier-2 split, the
 process-boundary adapter the connector backend follows).

@@ -79,6 +79,7 @@ type fakeObserver struct {
 	appendFailed []string
 	rejected     map[command.Reason]int
 	corrected    []string
+	stats        []store.AppendStats
 }
 
 func newObserver() *fakeObserver { return &fakeObserver{rejected: map[command.Reason]int{}} }
@@ -95,10 +96,11 @@ func (o *fakeObserver) Recovered(r store.Recovery) {
 	o.recovered = append(o.recovered, r)
 }
 
-func (o *fakeObserver) Appended(t event.Type, _ store.AppendStats) {
+func (o *fakeObserver) Appended(t event.Type, s store.AppendStats) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.appended = append(o.appended, t)
+	o.stats = append(o.stats, s)
 }
 
 func (o *fakeObserver) AppendFailed(stage string) {

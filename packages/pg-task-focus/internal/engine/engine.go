@@ -428,7 +428,7 @@ func (e *Engine) observeAppend(events []event.Event, stats store.AppendStats) {
 			share.Bytes = int64(len(line)) + 1
 		}
 		if i == 0 {
-			share.Duration = stats.Duration
+			share.Duration, share.SyncDuration = stats.Duration, stats.SyncDuration
 		}
 		e.obs.Appended(ev.Payload.EventType(), share)
 	}

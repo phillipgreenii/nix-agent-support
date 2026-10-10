@@ -30,6 +30,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/obs"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/view"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/wire"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/web"
 )
 
 // APIPrefix is the path prefix of every endpoint except the ops routes.
@@ -211,6 +212,7 @@ func (s *Server) routes() []route {
 		return route{Method: method, Path: APIPrefix + p, handler: h}
 	}
 	return []route{
+		{Method: "GET", Path: "/{$}", handler: s.getIndex, ops: true},
 		api("GET", "/state", s.getState),
 		{Method: "GET", Path: APIPrefix + "/stream", handler: s.getStream, stream: true},
 		api("POST", "/periods/change", s.postPeriodsChange),
@@ -243,7 +245,8 @@ func (s *Server) routes() []route {
 func (s *Server) Routes() []string {
 	var out []string
 	for _, r := range s.routes() {
-		out = append(out, r.Pattern())
+		// "/{$}" is the mux's spelling of exactly "/".
+		out = append(out, strings.Replace(r.Pattern(), "/{$}", "/", 1))
 	}
 	return out
 }
@@ -411,8 +414,11 @@ func routeKey(r *http.Request) string {
 // no route matches, so a probe cannot make labels.
 func routeLabel(r *http.Request) string {
 	p := routeKey(r)
-	if p == "" || p == "/" {
+	switch p {
+	case "", "/":
 		return "other"
+	case "/{$}":
+		return "/"
 	}
 	return p
 }
@@ -499,6 +505,16 @@ func (s *Server) methodNotAllowed(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) notFound(w http.ResponseWriter, r *http.Request) {
 	s.refuse(w, r, wire.ReasonNotFound, "No such path.")
+}
+
+// getIndex serves the placeholder page of the web UI: static, with no script,
+// and a content security policy that would refuse one.
+func (s *Server) getIndex(w http.ResponseWriter, _ *http.Request) {
+	h := w.Header()
+	h.Set("Content-Type", "text/html; charset=utf-8")
+	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")
+	h.Set("X-Content-Type-Options", "nosniff")
+	_, _ = w.Write(web.Index())
 }
 
 // getMetrics serves the Prometheus text exposition.

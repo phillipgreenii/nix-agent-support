@@ -93,6 +93,17 @@ MUST also stub `home.file` (an undeclared option errors even under `mkIf false`)
 `test-pa-monitor-swiftbar-hm-render` do. Installing SwiftBar and setting its PluginDirectory is the
 consuming flake's job. Design: `docs/superpowers/specs/2026-10-07-pa-monitor-swiftbar-design.md`.
 
+### pg-task-focus daemon (`phillipgreenii.programs.pg-task-focus`)
+
+The second HM-scoped launchd agent (bead `pg2-t7me1.2`, ADR 0091): `home/programs/pg-task-focus`
+renders the daemon's configuration (validated at build time by `pg-task-focus config check`) and
+registers the agent through `phillipgreenii.programs.launchdServices.userAgents`, exactly as
+pa-monitor does, so the same stubbing rules apply (`test-pg-task-focus-hm-launchd`). The four
+observability registrations (`metricsTargets`, `logSources`, `alertRuleFiles`, `dashboardProviders`)
+are system-scope options, so they live in `darwin/modules/pg-task-focus`, which follows the HM flag
+across `home-manager.users` (`test-pg-task-focus-darwin-module`). The public URL's reverse-proxy
+registration belongs to the consuming flake (see `packages/pg-task-focus/README.md`).
+
 ## Status Line (`home/programs/claude-status-line`)
 
 Full contract (part-script protocol, ordering convention, glyph/width/locale mechanics) moved to

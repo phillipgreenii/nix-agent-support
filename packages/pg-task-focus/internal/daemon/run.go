@@ -28,6 +28,10 @@ func (d *Daemon) tracerProvider() trace.TracerProvider {
 // Addr is the address the API listens on.
 func (d *Daemon) Addr() string { return d.ln.Addr().String() }
 
+// Routes lists "METHOD /path" of every endpoint the daemon serves, for the
+// contract test.
+func (d *Daemon) Routes() []string { return d.srv.Routes() }
+
 // Engine is the open engine, for tests.
 func (d *Daemon) Engine() *engine.Engine { return d.eng }
 

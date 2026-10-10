@@ -54,6 +54,18 @@ tags:
   - name: connector
   - name: ops
 paths:
+  /:
+    get:
+      tags: [ops]
+      operationId: getIndex
+      summary: The placeholder page of the web UI (static, no script)
+      responses:
+        "200":
+          {
+            description: An HTML page,
+            content: { text/html: { schema: { type: string } } },
+          }
+        default: { $ref: "#/components/responses/Problem" }
   /api/v1/state:
     get:
       tags: [state]

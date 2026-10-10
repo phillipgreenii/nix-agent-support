@@ -13,7 +13,6 @@ package obs
 import (
 	"runtime"
 	"strconv"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -86,7 +85,6 @@ type Metrics struct {
 	StateVersion    prometheus.Gauge
 
 	lastAppendUnix atomic.Int64
-	once           sync.Once
 }
 
 // httpBuckets run from 1 ms to 10 s.
@@ -154,6 +152,17 @@ func New(version string, schemaVersion int, started time.Time) *Metrics {
 		m.AppendFailures.WithLabelValues(s).Add(0)
 	}
 	m.AlertFailures.Add(0)
+	// The closed-set counters are present from the first scrape too, so a
+	// dashboard panel or an increase() over them has a series to read.
+	for _, r := range ReloadResults {
+		m.ConfigReloads.WithLabelValues(r).Add(0)
+	}
+	for _, k := range []string{"expiry", "reminder"} {
+		m.AlertsPlayed.WithLabelValues(k).Add(0)
+	}
+	for _, k := range []string{"correct", "retract"} {
+		m.Corrections.WithLabelValues(k).Add(0)
+	}
 	for _, k := range []string{"torn_tail", "uncommitted_batch"} {
 		m.StartupRecovery.WithLabelValues(k).Set(0)
 	}

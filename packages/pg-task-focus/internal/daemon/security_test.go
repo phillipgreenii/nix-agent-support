@@ -119,3 +119,24 @@ func TestContentTypeBodyAndMethodRules(t *testing.T) {
 		t.Errorf("a problem carries no traceresponse header")
 	}
 }
+
+// The placeholder page of the web UI is served at the root, static, through the same defences.
+func TestPlaceholderPage(t *testing.T) {
+	e := newEnv(t, options{})
+	r := e.get("/")
+	if r.Status != 200 || !strings.HasPrefix(r.Header.Get("Content-Type"), "text/html") || !strings.Contains(string(r.Body), "pg-task-focus") {
+		t.Fatalf("/: %d %s", r.Status, r.Header.Get("Content-Type"))
+	}
+	if csp := r.Header.Get("Content-Security-Policy"); !strings.Contains(csp, "default-src 'none'") {
+		t.Errorf("CSP = %q", csp)
+	}
+	if r := e.raw("GET", "/", nil, map[string]string{"Host": "evil.example"}); r.Status != 403 {
+		t.Errorf("the page is behind the Host allowlist: %d", r.Status)
+	}
+	if r := e.raw("GET", "/anything-else", nil, nil); r.Status != 404 {
+		t.Errorf("only the root is the page: %d", r.Status)
+	}
+	if v, _ := sampleValue(e.scrape()["pg_task_focus_http_requests_total"], map[string]string{"route": "/", "status": "200"}); v < 1 {
+		t.Errorf("the page's route label is /: %v", v)
+	}
+}

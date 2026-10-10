@@ -1870,6 +1870,424 @@
                   touch $out
                 '';
 
+              # pg-task-focus HM module (bead pg2-t7me1.2): the daemon's LaunchAgent is
+              # registered from home/programs/pg-task-focus via
+              # phillipgreenii.programs.launchdServices.userAgents (personal ADR 0055,
+              # the pa-monitor pattern), gated on daemon.enable, with the OTel
+              # environment resolved null-safely from osConfig. This flake has NO input
+              # on personal, so the option is stubbed with the same field names/types as
+              # personal's lib/launchd-service-submodule.nix (see test-pa-monitor-hm-
+              # launchd). The rendered configuration is also BUILT: the module validates
+              # it with `pg-task-focus config check` at build time, so this check proves
+              # a valid routine renders and passes the real binary, and that an invalid
+              # one fails the build (negative control).
+              test-pg-task-focus-hm-launchd =
+                let
+                  userAgentSubmodule = lib.types.submodule {
+                    options = {
+                      enable = lib.mkOption {
+                        type = lib.types.bool;
+                        default = true;
+                      };
+                      label = lib.mkOption {
+                        type = lib.types.str;
+                        default = "org.nixos.stub";
+                      };
+                      script = lib.mkOption {
+                        type = lib.types.nullOr lib.types.lines;
+                        default = null;
+                      };
+                      keepAlive = lib.mkOption {
+                        type = lib.types.either lib.types.bool (lib.types.attrsOf lib.types.bool);
+                        default = true;
+                      };
+                      runAtLoad = lib.mkOption {
+                        type = lib.types.bool;
+                        default = true;
+                      };
+                      serviceConfig = lib.mkOption {
+                        type = lib.types.attrs;
+                        default = { };
+                      };
+                      logCollection = lib.mkOption {
+                        type = lib.types.submodule {
+                          options.enable = lib.mkOption {
+                            type = lib.types.bool;
+                            default = true;
+                          };
+                        };
+                        default = { };
+                      };
+                    };
+                  };
+                  stubOptions =
+                    { lib, ... }:
+                    {
+                      options = {
+                        home = {
+                          packages = lib.mkOption {
+                            type = lib.types.listOf lib.types.anything;
+                            default = [ ];
+                          };
+                          sessionVariables = lib.mkOption {
+                            type = lib.types.attrsOf lib.types.str;
+                            default = { };
+                          };
+                          homeDirectory = lib.mkOption {
+                            type = lib.types.str;
+                            default = "/Users/tester";
+                          };
+                        };
+                        xdg.stateHome = lib.mkOption {
+                          type = lib.types.str;
+                          default = "/Users/tester/.local/state";
+                        };
+                        assertions = lib.mkOption {
+                          type = lib.types.listOf lib.types.anything;
+                          default = [ ];
+                        };
+                      };
+                    };
+                  launchdOption =
+                    { lib, ... }:
+                    {
+                      options.phillipgreenii.programs.launchdServices.userAgents = lib.mkOption {
+                        type = lib.types.attrsOf userAgentSubmodule;
+                        default = { };
+                      };
+                    };
+                  obsOsConfig = enable: {
+                    phillipgreenii.observability = {
+                      inherit enable;
+                      mkEmitterEnv =
+                        _:
+                        lib.optionalAttrs enable {
+                          OTEL_EXPORTER_OTLP_ENDPOINT = "http://127.0.0.1:4317";
+                          OTEL_SERVICE_NAME = "pg-task-focus";
+                        };
+                    };
+                  };
+                  darwinPkgs = pkgs // {
+                    stdenv = {
+                      hostPlatform.isDarwin = true;
+                    };
+                  };
+                  evalWith =
+                    {
+                      pkgs' ? darwinPkgs,
+                      declareLaunchd ? true,
+                      osConfig ? null,
+                      cfg,
+                    }:
+                    (lib.evalModules {
+                      specialArgs = {
+                        pkgs = pkgs';
+                        inherit lib osConfig;
+                      };
+                      modules = [
+                        ./home/programs/pg-task-focus/default.nix
+                        stubOptions
+                        cfg
+                      ]
+                      ++ lib.optional declareLaunchd launchdOption;
+                    }).config;
+
+                  # The routine under test: the package's own valid example, minus the two
+                  # keys the module renders from its options.
+                  routine =
+                    removeAttrs
+                      (builtins.fromJSON (builtins.readFile ./packages/pg-task-focus/testdata/config/valid.json))
+                      [
+                        "listen_port"
+                        "public_url"
+                      ];
+                  daemonOn = {
+                    phillipgreenii.programs.pg-task-focus = {
+                      enable = true;
+                      daemon.enable = true;
+                      listenPort = 49310;
+                      publicUrl = "https://focus.example.test";
+                      settings = routine;
+                    };
+                  };
+                  entries = c: c.phillipgreenii.programs.launchdServices.userAgents;
+                  enabled = evalWith {
+                    cfg = daemonOn;
+                    osConfig = obsOsConfig true;
+                  };
+                  programOnly = evalWith {
+                    cfg.phillipgreenii.programs.pg-task-focus = {
+                      enable = true;
+                      settings = routine;
+                    };
+                  };
+                  disabled = evalWith { cfg = { }; };
+                  noObs = evalWith { cfg = daemonOn; };
+                  badSettings = evalWith {
+                    cfg.phillipgreenii.programs.pg-task-focus = {
+                      enable = true;
+                      settings = routine // {
+                        listen_port = 1;
+                      };
+                    };
+                  };
+                  darwinNoRegistry = evalWith {
+                    declareLaunchd = false;
+                    cfg = daemonOn;
+                  };
+                  linux = evalWith {
+                    pkgs' = pkgs // {
+                      stdenv = {
+                        hostPlatform.isDarwin = false;
+                      };
+                    };
+                    declareLaunchd = false;
+                    cfg = daemonOn;
+                  };
+                  e = (entries enabled).pg-task-focus;
+                  cfgFile = enabled.phillipgreenii.programs.pg-task-focus.internal.configFile;
+                  failedAssertions = c: lib.filter (a: !a.assertion) c.assertions;
+                  # A routine the real binary must reject: a due time that is not HH:MM.
+                  invalidJson = (pkgs.formats.json { }).generate "pg-task-focus-invalid.json" (
+                    routine
+                    // {
+                      listen_port = 49310;
+                      tasks = routine.tasks // {
+                        plan-day = routine.tasks.plan-day // {
+                          due = {
+                            at = "9am";
+                            tz = "America/New_York";
+                          };
+                        };
+                      };
+                    }
+                  );
+                in
+                # the entry exists iff daemon.enable, on darwin only
+                assert !((entries disabled) ? pg-task-focus);
+                assert !((entries programOnly) ? pg-task-focus);
+                assert (builtins.attrNames (entries enabled)) == [ "pg-task-focus" ];
+                assert !(linux ? phillipgreenii.programs.launchdServices);
+                assert failedAssertions linux == [ ];
+                assert builtins.length (failedAssertions darwinNoRegistry) == 1;
+                # label, command and the configuration by store path
+                assert e.label == "com.phillipg.pg-task-focus";
+                assert e.script == "exec ${pkgs.pg-task-focus}/bin/pg-task-focus serve --config ${cfgFile}\n";
+                assert e.runAtLoad && e.keepAlive == true;
+                # the daemon logs JSON lines on stdout: the *.jsonl name matches the log source's glob
+                assert
+                  e.serviceConfig.StandardOutPath == "/Users/tester/.local/state/pg-task-focus/pg-task-focus.jsonl";
+                assert
+                  e.serviceConfig.StandardErrorPath == "/Users/tester/.local/state/pg-task-focus/launchd-stderr.log";
+                # OTel from the system stack, null-safe without it
+                assert e.serviceConfig.EnvironmentVariables.OTEL_EXPORTER_OTLP_ENDPOINT == "http://127.0.0.1:4317";
+                assert e.serviceConfig.EnvironmentVariables.OTEL_SERVICE_NAME == "pg-task-focus";
+                assert
+                  !((entries noObs).pg-task-focus.serviceConfig.EnvironmentVariables ? OTEL_EXPORTER_OTLP_ENDPOINT);
+                # the CLI finds the daemon and the configuration
+                assert enabled.home.sessionVariables.PG_TASK_FOCUS_ADDR == "127.0.0.1:49310";
+                assert enabled.home.sessionVariables.PG_TASK_FOCUS_CONFIG == toString cfgFile;
+                assert enabled.home.packages == [ pkgs.pg-task-focus ];
+                assert disabled.home.packages == [ ];
+                # listen_port and public_url come from the options only
+                assert failedAssertions enabled == [ ];
+                assert builtins.length (failedAssertions badSettings) == 1;
+                pkgs.runCommand "test-pg-task-focus-hm-launchd-ok"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.jq
+                      pkgs.pg-task-focus
+                    ];
+                  }
+                  ''
+                    # The rendered file is valid JSON carrying the rendered top-level keys
+                    # (and building it already ran `pg-task-focus config check` on it)...
+                    jq -e '.listen_port == 49310 and .public_url == "https://focus.example.test" and (.tasks | has("plan-day"))' ${cfgFile} >/dev/null
+                    pg-task-focus config check ${cfgFile} >/dev/null
+
+                    # ...and the same check rejects a routine with a bad due time, with its path:
+                    # the negative control, without which the validation above could be vacuous.
+                    if problems="$(pg-task-focus config check ${invalidJson} 2>&1)"; then
+                      echo "FAIL: an invalid routine passed config check" >&2
+                      exit 1
+                    fi
+                    case "$problems" in
+                      */tasks/plan-day/due*) ;;
+                      *) echo "FAIL: the problem does not name the path: $problems" >&2; exit 1 ;;
+                    esac
+                    touch $out
+                  '';
+
+              # darwin/modules/pg-task-focus (bead pg2-t7me1.2): the four observability
+              # registrations the design requires (metricsTargets, logSources,
+              # alertRuleFiles, dashboardProviders), at system scope, following the HM
+              # flag across home-manager.users. Same stub technique as
+              # test-pg-rescue-darwin-module: a stub of the observability surface that
+              # mirrors the REAL submodules' relevant fields.
+              test-pg-task-focus-darwin-module =
+                let
+                  logSourceSubmodule =
+                    { name, ... }:
+                    {
+                      options = {
+                        path = lib.mkOption {
+                          type = lib.types.str;
+                          default = "\${env:XDG_STATE_HOME}/${name}/*.jsonl";
+                        };
+                        format = lib.mkOption {
+                          type = lib.types.enum [
+                            "jsonl"
+                            "raw"
+                          ];
+                          default = "jsonl";
+                        };
+                        errorAlert = {
+                          threshold = lib.mkOption {
+                            type = lib.types.ints.positive;
+                            default = 10;
+                          };
+                        };
+                      };
+                    };
+                  metricsTargetSubmodule =
+                    { name, ... }:
+                    {
+                      options = {
+                        port = lib.mkOption { type = lib.types.port; };
+                        jobName = lib.mkOption {
+                          type = lib.types.str;
+                          default = name;
+                        };
+                        scrapeInterval = lib.mkOption {
+                          type = lib.types.str;
+                          default = "15s";
+                        };
+                      };
+                    };
+                  evalDarwin =
+                    {
+                      obsEnable,
+                      users,
+                    }:
+                    (lib.evalModules {
+                      specialArgs = { inherit pkgs lib; };
+                      modules = [
+                        ./darwin/modules/pg-task-focus/default.nix
+                        {
+                          options = {
+                            assertions = lib.mkOption {
+                              type = lib.types.listOf lib.types.anything;
+                              default = [ ];
+                            };
+                            home-manager.users = lib.mkOption {
+                              type = lib.types.attrsOf lib.types.anything;
+                              default = { };
+                            };
+                            phillipgreenii.observability = {
+                              enable = lib.mkOption {
+                                type = lib.types.bool;
+                                default = false;
+                              };
+                              metricsTargets = lib.mkOption {
+                                type = lib.types.attrsOf (lib.types.submodule metricsTargetSubmodule);
+                                default = { };
+                              };
+                              logSources = lib.mkOption {
+                                type = lib.types.attrsOf (lib.types.submodule logSourceSubmodule);
+                                default = { };
+                              };
+                              dashboardProviders = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
+                              alertRuleFiles = lib.mkOption {
+                                type = lib.types.listOf lib.types.path;
+                                default = [ ];
+                              };
+                            };
+                          };
+                          config = {
+                            phillipgreenii.observability.enable = obsEnable;
+                            home-manager.users = users;
+                          };
+                        }
+                      ];
+                    }).config;
+                  userWith = port: {
+                    phillipgreenii.programs.pg-task-focus = {
+                      daemon.enable = true;
+                      listenPort = port;
+                    };
+                  };
+                  enabled = evalDarwin {
+                    obsEnable = true;
+                    users.alice = userWith 49310;
+                  };
+                  obsOff = evalDarwin {
+                    obsEnable = false;
+                    users.alice = userWith 49310;
+                  };
+                  noUser = evalDarwin {
+                    obsEnable = true;
+                    users.alice.phillipgreenii.programs.pg-task-focus.daemon.enable = false;
+                  };
+                  twoUsers = evalDarwin {
+                    obsEnable = true;
+                    users = {
+                      alice = userWith 49310;
+                      bob = userWith 49311;
+                    };
+                  };
+                  o = enabled.phillipgreenii.observability;
+                  failed = c: lib.filter (a: !a.assertion) c.assertions;
+                in
+                assert obsOff.phillipgreenii.observability.metricsTargets == { };
+                assert noUser.phillipgreenii.observability.logSources == { };
+                # the four registrations
+                assert o.metricsTargets.pg-task-focus.port == 49310;
+                assert o.metricsTargets.pg-task-focus.jobName == "pg-task-focus";
+                assert o.logSources.pg-task-focus.format == "jsonl";
+                assert o.logSources.pg-task-focus.path == "\${env:XDG_STATE_HOME}/pg-task-focus/*.jsonl";
+                assert o.logSources.pg-task-focus.errorAlert.threshold == 1;
+                assert o.dashboardProviders.pg-task-focus.folder == "Focus";
+                assert
+                  o.dashboardProviders.pg-task-focus.dashboards
+                  == [ ./packages/pg-task-focus/grafana/pg-task-focus.json ];
+                assert o.alertRuleFiles == [ ./packages/pg-task-focus/grafana/alerting/alerts.yaml ];
+                assert failed enabled == [ ];
+                # one registration per machine: two users running the daemon is an error
+                assert builtins.length (failed twoUsers) == 1;
+                pkgs.runCommand "test-pg-task-focus-darwin-module-ok"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.jq
+                      pkgs.yq-go
+                    ];
+                    glob = o.logSources.pg-task-focus.path;
+                  }
+                  ''
+                    # The default glob selects the launchd stdout file and not its rotated
+                    # archive or the stderr file.
+                    state="$TMPDIR/state/pg-task-focus"
+                    mkdir -p "$state"
+                    touch "$state/pg-task-focus.jsonl" "$state/pg-task-focus.jsonl.1" "$state/launchd-stderr.log"
+                    pattern="''${glob/\$\{env:XDG_STATE_HOME\}/$TMPDIR/state}"
+                    # shellcheck disable=SC2086 # the glob must expand
+                    matched="$(ls -d $pattern 2>/dev/null || true)"
+                    [ "$matched" = "$state/pg-task-focus.jsonl" ] || { echo "FAIL: glob '$glob' matched: $matched" >&2; exit 1; }
+
+                    # The alert file and the dashboard are well-formed, share the folder title,
+                    # and every rule's refId A/C stages exist.
+                    f=${./packages/pg-task-focus/grafana/alerting/alerts.yaml}
+                    yq -o=json '.' "$f" > alerts.json
+                    jq -e '.apiVersion == 1' alerts.json >/dev/null
+                    jq -e '[.groups[].folder] | unique == ["Focus"]' alerts.json >/dev/null || { echo "FAIL: the alert folder is not Focus" >&2; exit 1; }
+                    jq -e '[.groups[].rules[]] | length == 11' alerts.json >/dev/null || { echo "FAIL: expected 11 rules" >&2; exit 1; }
+                    jq -e '[.. | objects | select(has("folderUid"))] | length == 0' alerts.json >/dev/null || { echo "FAIL: a folderUid is pinned" >&2; exit 1; }
+                    jq -e '.uid == "pg-task-focus" and ([.panels[].targets[]?] | length) > 20' ${./packages/pg-task-focus/grafana/pg-task-focus.json} >/dev/null
+                    touch $out
+                  '';
+
               # darwin/modules/pg-connector-pr-github (bead pg2-ph0o4): registers the
               # backend's own event log as a Loki log source and its LogQL alert
               # rules, from its own nix module rather than through pg-connector's

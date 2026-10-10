@@ -112,12 +112,16 @@ func (s *state) watch(ctx context.Context, every time.Duration) error {
 			}
 		}
 	}()
-	return cl.Stream(ctx, func(ev clientEvent) error {
+	err := cl.Stream(ctx, func(ev clientEvent) error {
 		if ev.Name == "state" || ev.Name == "store" {
 			return emit()
 		}
 		return nil
 	})
+	if ctx.Err() != nil {
+		return nil // interrupted: a clean end of the watch
+	}
+	return err
 }
 
 func (s *state) periodCmd() *cobra.Command {
