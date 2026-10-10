@@ -619,12 +619,13 @@ func TestRunProbeSnapshotSaveFailureIsPartialButStillFiles(t *testing.T) {
 
 // degradedRun drives one runProbe where the needs-input sub-check fails
 // with err and everything else is clean, against the snapshot at
-// opts.snapshotPath. It returns runProbe's error and stderr.
-func degradedRun(t *testing.T, opts runOptions, err error) (error, string) {
+// opts.snapshotPath. It returns stderr and runProbe's error.
+func degradedRun(t *testing.T, opts runOptions, err error) (string, error) {
 	t.Helper()
 	cmd, stderr := testCmd()
 	spy := &spyDeps{needsInputErr: err}
-	return runProbe(cmd, opts, spy.toRunDeps(time.Now())), stderr.String()
+	err = runProbe(cmd, opts, spy.toRunDeps(time.Now()))
+	return stderr.String(), err
 }
 
 // TestRunProbeSingleDegradedRunIsLoggedNotReported is the pg2-zzf54 core
@@ -636,7 +637,7 @@ func TestRunProbeSingleDegradedRunIsLoggedNotReported(t *testing.T) {
 	key := needsInputKey(poolRef{Label: ambientPoolLabel})
 
 	for run := 1; run < defaultDegradedThreshold; run++ {
-		err, stderr := degradedRun(t, opts, errCcpoolFailed)
+		stderr, err := degradedRun(t, opts, errCcpoolFailed)
 		if err != nil {
 			t.Fatalf("run %d: a sub-check degraded %d time(s) in a row must exit 0, got %v", run, run, err)
 		}
@@ -649,7 +650,7 @@ func TestRunProbeSingleDegradedRunIsLoggedNotReported(t *testing.T) {
 		}
 	}
 
-	err, _ := degradedRun(t, opts, errCcpoolFailed)
+	_, err := degradedRun(t, opts, errCcpoolFailed)
 	if exitCodeOf(t, err) != 4 {
 		t.Fatalf("threshold-th consecutive failure must exit 4, got %v", err)
 	}
@@ -662,19 +663,19 @@ func TestRunProbeSuccessResetsDegradedStreak(t *testing.T) {
 	opts := baseOpts(t)
 	key := needsInputKey(poolRef{Label: ambientPoolLabel})
 	for range defaultDegradedThreshold - 1 {
-		if err, _ := degradedRun(t, opts, errCcpoolFailed); err != nil {
+		if _, err := degradedRun(t, opts, errCcpoolFailed); err != nil {
 			t.Fatalf("expected exit 0 below the threshold, got %v", err)
 		}
 	}
 	// A clean run clears the counter...
-	if err, _ := degradedRun(t, opts, nil); err != nil {
+	if _, err := degradedRun(t, opts, nil); err != nil {
 		t.Fatalf("clean run: expected exit 0, got %v", err)
 	}
 	if snap, _ := loadSnapshot(opts.snapshotPath); len(snap.Degraded) != 0 {
 		t.Fatalf("a successful run must clear Degraded, got %v", snap.Degraded)
 	}
 	// ...so the next failure starts a fresh streak instead of crossing the threshold.
-	if err, _ := degradedRun(t, opts, errCcpoolFailed); err != nil {
+	if _, err := degradedRun(t, opts, errCcpoolFailed); err != nil {
 		t.Fatalf("failure after a reset must exit 0, got %v", err)
 	}
 	if snap, _ := loadSnapshot(opts.snapshotPath); snap.Degraded[key] != 1 {
@@ -685,7 +686,7 @@ func TestRunProbeSuccessResetsDegradedStreak(t *testing.T) {
 func TestRunProbeDegradedThresholdOneReportsImmediately(t *testing.T) {
 	opts := baseOpts(t)
 	opts.degradedThreshold = 1
-	err, _ := degradedRun(t, opts, errCcpoolFailed)
+	_, err := degradedRun(t, opts, errCcpoolFailed)
 	if exitCodeOf(t, err) != 4 {
 		t.Fatalf("--degraded-threshold 1 must keep the old immediate exit 4, got %v", err)
 	}
