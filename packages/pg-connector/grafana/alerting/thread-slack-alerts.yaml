@@ -107,33 +107,54 @@ groups:
 
       # (b) Availability: calls keep failing as `unavailable` (claude not on
       # PATH or hanging past its timeout, an is_error result, the model
-      # declining in prose, a malformed reply). Sustained = at least one such
-      # failure in every trailing 5m window for 10m running. Failures that read
-      # as authentication problems are `unavailable` too but are rule (a)'s
-      # business, so they are excluded via failure_class (an event with no
-      # failure_class passes the != filter).
+      # declining in prose, a malformed reply, a spend-limit refusal).
+      # Fires on 3 OR MORE such failures within the trailing 90 minutes.
+      #
+      # Why a count over a poll-sized window and not "sustained for 10m"
+      # (bead pg2-3l5l9): the thread-me source polls this backend about every
+      # 30 minutes, one `claude -p` call per poll, so a failing outage writes
+      # ONE log line per ~30m. The earlier shape -- at least one failure in
+      # every trailing 5m window, held for 10m -- could never be true for 10
+      # continuous minutes, because a single line only keeps a 5m window
+      # non-empty for 5m; the rule never left Pending and never fired however
+      # long the outage lasted. The alternative, a [35m] window with
+      # `for: 10m`, would page on ONE failure (a lone line keeps a 35m window
+      # non-empty for 35m, longer than the 10m `for`), which is the blip this
+      # rule must tolerate. Counting failures in a window of three poll
+      # intervals instead: 3 consecutive failing polls (0m, 30m, 60m) reach
+      # the threshold at the third failure, polls less than 45m apart still do, a
+      # lone failure or a pair never does (count 1 or 2 is not > 2, so no
+      # Pending state either), and once polls recover the count drops below 3
+      # and the alert clears within one window (90m) of the last failure.
+      # `for: 1m` is only the evaluation tick: the 90m window is the
+      # "sustained". If the poll cadence changes, resize the window with it
+      # (the Go test thread_slack_alert_rule_test.go in cmd/pg-connector
+      # replays the cadence arithmetic against these numbers).
+      # Failures that read as authentication problems are `unavailable` too
+      # but are rule (a)'s business, so they are excluded via failure_class (an
+      # event with no failure_class passes the != filter).
       - uid: pg-conn-thread-slack-unavailable
         title: pg-connector-thread-slack unavailable
         condition: C
-        for: 10m
+        for: 1m
         noDataState: OK
         execErrState: Error
         labels:
           severity: warning
         annotations:
-          summary: "pg-connector-thread-slack has been failing as unavailable for over 10 minutes"
-          description: 'pg-connector-thread-slack has answered unavailable (not counting authentication failures) in every 5 minute window for over 10 minutes -- claude is missing or failing, the Slack MCP is not configured or not answering, or the model is not returning the requested JSON. Inspect the events with {service_name="pg-connector-thread-slack"} | json | error_code="unavailable" and read failure_stage and error.'
+          summary: "pg-connector-thread-slack failed as unavailable 3 or more times within the last 90 minutes"
+          description: 'pg-connector-thread-slack answered unavailable (not counting authentication failures) 3 or more times within the last 90 minutes. It is polled about every 30 minutes, so that is roughly three failing polls in a row -- claude is missing or failing, the Slack MCP is not configured or not answering, a spend limit was hit, or the model is not returning the requested JSON. A single failed poll does not alert; the alert clears within 90 minutes of the last failure. Inspect the events with {service_name="pg-connector-thread-slack"} | json | error_code="unavailable" and read failure_stage and error.'
         data:
           - refId: A
             relativeTimeRange:
-              from: 300
+              from: 5400
               to: 0
             datasourceUid: loki
             model:
               refId: A
               editorMode: code
               queryType: instant
-              expr: 'sum(count_over_time({service_name="pg-connector-thread-slack"} | json | error_code="unavailable" | failure_class!="auth" [5m]))'
+              expr: 'sum(count_over_time({service_name="pg-connector-thread-slack"} | json | error_code="unavailable" | failure_class!="auth" [90m]))'
           - refId: B
             datasourceUid: __expr__
             model:
@@ -150,4 +171,4 @@ groups:
               conditions:
                 - evaluator:
                     type: gt
-                    params: [0]
+                    params: [2]
