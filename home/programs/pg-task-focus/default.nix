@@ -64,6 +64,13 @@ let
       '';
 
   stateDir = "${config.xdg.stateHome}/pg-task-focus";
+
+  # SwiftBar menu bar plugin (packages/pg-task-focus-swiftbar). The wrapper is a
+  # function of this module's config (it bakes in cfg.package, the daemon
+  # address, the web URL and the settings below), so it is built here rather
+  # than being a fixed overlay attr, as pa-monitor does.
+  swiftbarPlugin = import ../../../packages/pg-task-focus-swiftbar/plugin.nix { inherit lib pkgs; };
+  addr = "127.0.0.1:${toString cfg.listenPort}";
 in
 {
   options.phillipgreenii.programs.pg-task-focus = {
@@ -166,6 +173,53 @@ in
       '';
     };
 
+    swiftbar = {
+      enable = lib.mkEnableOption ''
+        the pg-task-focus SwiftBar menu bar plugin: the running cycle and its
+        timer, overtime, paused cycles with a switch or resume action, the next
+        due task and a READ-ONLY marker when the daemon cannot write. It is a
+        streaming plugin driven by `pg-task-focus status --watch`. Darwin only.
+        Requires `enable`: the plugin wrapper bakes in
+        `''${package}/bin/pg-task-focus`. This module only installs the plugin
+        file; installing SwiftBar and pointing its PluginDirectory at the same
+        directory as `pluginDir` is the composing flake's job
+      '';
+
+      package = lib.mkPackageOption pkgs "pg-task-focus-swiftbar" { };
+
+      pluginDir = lib.mkOption {
+        type = lib.types.str;
+        default = "Library/Application Support/SwiftBar/Plugins";
+        description = ''
+          SwiftBar's plugin directory, relative to the home directory. The
+          composing flake MUST set SwiftBar's PluginDirectory from this same
+          string so the two cannot drift.
+        '';
+      };
+
+      dueSoonMinutes = lib.mkOption {
+        type = lib.types.ints.positive;
+        default = lib.attrByPath [ "defaults" "attention" "due_soon_minutes" ] 30 cfg.settings;
+        defaultText = lib.literalExpression "settings.defaults.attention.due_soon_minutes or 30";
+        description = ''
+          How soon before its due time the next task is added to the menu bar
+          title while a cycle runs or is paused. Defaults to the routine's own
+          `defaults.attention.due_soon_minutes`, else 30 (the daemon's default).
+        '';
+      };
+
+      boostMinutes = lib.mkOption {
+        type = lib.types.listOf lib.types.ints.positive;
+        default = lib.attrByPath [ "defaults" "boost_minutes" ] [ 5 10 25 ] cfg.settings;
+        defaultText = lib.literalExpression "settings.defaults.boost_minutes or [ 5 10 25 ]";
+        description = ''
+          The boost sizes the dropdown offers for the running cycle. Defaults to
+          the routine's own `defaults.boost_minutes`, else 5, 10 and 25 (the
+          daemon's default).
+        '';
+      };
+    };
+
     internal.configFile = lib.mkOption {
       type = lib.types.path;
       internal = true;
@@ -195,6 +249,32 @@ in
           message = "phillipgreenii.programs.pg-task-focus.settings MUST NOT set listen_port or public_url: use the listenPort and publicUrl options.";
         }
       ];
+    })
+
+    # SwiftBar menu bar plugin. The ENTRY is darwin-only (mkIf: home.file is a
+    # real HM option on every platform, unlike the launchd registry below); the
+    # assertion requires `enable` because the wrapper bakes in
+    # `${cfg.package}/bin/pg-task-focus`. The web URL is the public URL when the
+    # operator fronts the UI with a proxy, else the loopback listener.
+    {
+      assertions = [
+        {
+          assertion = !cfg.swiftbar.enable || cfg.enable;
+          message = "phillipgreenii.programs.pg-task-focus.swiftbar.enable requires phillipgreenii.programs.pg-task-focus.enable: the plugin wrapper bakes in the pg-task-focus package.";
+        }
+      ];
+    }
+    (lib.mkIf (cfg.swiftbar.enable && isDarwin) {
+      home.file."${cfg.swiftbar.pluginDir}/${swiftbarPlugin.pluginFileName}".source =
+        swiftbarPlugin.mkPluginWrapper
+          {
+            script = cfg.swiftbar.package;
+            pgTaskFocus = cfg.package;
+            inherit addr;
+            webUrl = if cfg.publicUrl != null then cfg.publicUrl else "http://${addr}";
+            dueSoonMinutes = cfg.swiftbar.dueSoonMinutes;
+            boostMinutes = cfg.swiftbar.boostMinutes;
+          };
     })
 
     # The daemon without the program: the agent runs the package by store path.

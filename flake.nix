@@ -635,6 +635,17 @@
               pkgs = final;
               inherit bashBuilders;
             }).pa-monitor-swiftbar.script;
+          # pg-task-focus-swiftbar: the internal (public = false) streaming renderer
+          # behind the pg-task-focus SwiftBar plugin (bead pg2-t7me1.5). Same shape
+          # and rationale as pa-monitor-swiftbar above: a single mkBashScript tool,
+          # so it takes `.pg-task-focus-swiftbar.script`; the plugin WRAPPER is a
+          # function (packages/pg-task-focus-swiftbar/plugin.nix) the Home-Manager
+          # module calls with its own config.
+          pg-task-focus-swiftbar =
+            (import ./packages/pg-task-focus-swiftbar {
+              pkgs = final;
+              inherit bashBuilders;
+            }).pg-task-focus-swiftbar.script;
           # pg-rescue-flake-lock-conflict (bead pg2-3ybxg): the deterministic
           # flake.lock-only rebase-conflict handler for pg-rescue. Single
           # mkBashScript tool, so -- same rationale as wtdone above -- it takes
@@ -1950,6 +1961,11 @@
                           homeDirectory = lib.mkOption {
                             type = lib.types.str;
                             default = "/Users/tester";
+                          };
+                          # the SwiftBar plugin entry writes home.file
+                          file = lib.mkOption {
+                            type = lib.types.attrsOf lib.types.anything;
+                            default = { };
                           };
                         };
                         xdg.stateHome = lib.mkOption {
@@ -10556,6 +10572,176 @@
                 assert builtins.length (failedAssertions withoutEnable) == 1;
                 pkgs.runCommand "pa-monitor-swiftbar-hm-render-ok" { } "touch $out";
 
+              # Wrapper check for the pg-task-focus SwiftBar plugin (bead pg2-t7me1.5).
+              # Builds the SAME mkPluginWrapper function the Home-Manager module calls,
+              # with defaults, and asserts shebang, every metadata tag (including
+              # swiftbar.type = streamable, the marker SwiftBar needs to keep the process
+              # running), every baked environment variable exported before exec, an
+              # executable exec target, and the executable bit on the store file itself.
+              test-pg-task-focus-swiftbar-plugin =
+                (import ./packages/pg-task-focus-swiftbar/plugin.nix { inherit lib pkgs; }).mkWrapperCheck
+                  {
+                    script = pkgs.pg-task-focus-swiftbar;
+                    pgTaskFocus = pkgs.pg-task-focus;
+                  };
+
+              # Home-Manager render guard for `swiftbar.*` on home/programs/pg-task-focus:
+              # enabled on darwin -> the wrapper lands at the plugin path with the baked
+              # client, the address from listenPort, the public URL (else the loopback URL),
+              # and the due-soon window and boost sizes from the routine (else the daemon's
+              # defaults); disabled or non-darwin -> absent; enabled without `enable` -> the
+              # assertion fails. Pure module eval (the wrapper's source text is read from its
+              # passthru, never built).
+              test-pg-task-focus-swiftbar-hm-render =
+                let
+                  stubOptions =
+                    { lib, ... }:
+                    {
+                      options = {
+                        home = {
+                          packages = lib.mkOption {
+                            type = lib.types.listOf lib.types.anything;
+                            default = [ ];
+                          };
+                          sessionVariables = lib.mkOption {
+                            type = lib.types.attrsOf lib.types.str;
+                            default = { };
+                          };
+                          homeDirectory = lib.mkOption {
+                            type = lib.types.str;
+                            default = "/Users/tester";
+                          };
+                          file = lib.mkOption {
+                            type = lib.types.attrsOf lib.types.anything;
+                            default = { };
+                          };
+                        };
+                        xdg.stateHome = lib.mkOption {
+                          type = lib.types.str;
+                          default = "/Users/tester/.local/state";
+                        };
+                        assertions = lib.mkOption {
+                          type = lib.types.listOf lib.types.anything;
+                          default = [ ];
+                        };
+                      };
+                    };
+                  evalWith =
+                    {
+                      pkgs' ? pkgs // {
+                        stdenv = {
+                          hostPlatform.isDarwin = true;
+                        };
+                      },
+                      cfg,
+                    }:
+                    (lib.evalModules {
+                      specialArgs = {
+                        pkgs = pkgs';
+                        inherit lib;
+                        osConfig = null;
+                      };
+                      modules = [
+                        ./home/programs/pg-task-focus/default.nix
+                        stubOptions
+                        cfg
+                      ];
+                    }).config;
+
+                  routine =
+                    removeAttrs
+                      (builtins.fromJSON (builtins.readFile ./packages/pg-task-focus/testdata/config/valid.json))
+                      [
+                        "listen_port"
+                        "public_url"
+                      ];
+                  pluginPath = "Library/Application Support/SwiftBar/Plugins/pg-task-focus.sh";
+                  failedAssertions = c: lib.filter (a: !a.assertion) c.assertions;
+                  on = {
+                    phillipgreenii.programs.pg-task-focus = {
+                      enable = true;
+                      settings = routine;
+                      swiftbar.enable = true;
+                    };
+                  };
+
+                  enabled = evalWith { cfg = on; };
+                  customised = evalWith {
+                    cfg = lib.recursiveUpdate on {
+                      phillipgreenii.programs.pg-task-focus = {
+                        listenPort = 49310;
+                        publicUrl = "https://focus.example.test";
+                        swiftbar = {
+                          pluginDir = "plugins-elsewhere";
+                          dueSoonMinutes = 45;
+                          boostMinutes = [ 15 ];
+                        };
+                      };
+                    };
+                  };
+                  disabled = evalWith {
+                    cfg.phillipgreenii.programs.pg-task-focus = {
+                      enable = true;
+                      settings = routine;
+                    };
+                  };
+                  linux = evalWith {
+                    pkgs' = pkgs // {
+                      stdenv = {
+                        hostPlatform.isDarwin = false;
+                      };
+                    };
+                    cfg = on;
+                  };
+                  withoutEnable = evalWith {
+                    cfg.phillipgreenii.programs.pg-task-focus.swiftbar.enable = true;
+                  };
+                  textOf = c: path: c.home.file.${path}.source.text;
+                  # needles embed store paths; hasInfix rejects string context in its pattern
+                  has = needle: lib.hasInfix (builtins.unsafeDiscardStringContext needle);
+                  fromRoutine = routine.defaults.attention.due_soon_minutes;
+                in
+                # enabled on darwin: exactly one entry, at the default plugin path, naming
+                # the packaged client and renderer, the default address and loopback URL
+                assert builtins.attrNames enabled.home.file == [ pluginPath ];
+                assert has "export PG_TASK_FOCUS_BIN=${pkgs.pg-task-focus}/bin/pg-task-focus\n" (
+                  textOf enabled pluginPath
+                );
+                assert has "export PG_TASK_FOCUS_ADDR=127.0.0.1:49210\n" (textOf enabled pluginPath);
+                assert has "export PG_TASK_FOCUS_SWIFTBAR_WEB_URL=http://127.0.0.1:49210\n" (
+                  textOf enabled pluginPath
+                );
+                assert has "exec ${pkgs.pg-task-focus-swiftbar}/bin/pg-task-focus-swiftbar" (
+                  textOf enabled pluginPath
+                );
+                assert has "# <swiftbar.type>streamable</swiftbar.type>\n" (textOf enabled pluginPath);
+                # the due-soon window and boost sizes follow the routine, else the daemon's defaults
+                assert has "export PG_TASK_FOCUS_SWIFTBAR_DUE_SOON_MIN=${toString fromRoutine}\n" (
+                  textOf enabled pluginPath
+                );
+                assert failedAssertions enabled == [ ];
+                # listenPort, publicUrl, pluginDir and the explicit settings are honoured
+                assert builtins.attrNames customised.home.file == [ "plugins-elsewhere/pg-task-focus.sh" ];
+                assert has "export PG_TASK_FOCUS_ADDR=127.0.0.1:49310\n" (
+                  textOf customised "plugins-elsewhere/pg-task-focus.sh"
+                );
+                assert has "export PG_TASK_FOCUS_SWIFTBAR_WEB_URL=https://focus.example.test\n" (
+                  textOf customised "plugins-elsewhere/pg-task-focus.sh"
+                );
+                assert has "export PG_TASK_FOCUS_SWIFTBAR_DUE_SOON_MIN=45\n" (
+                  textOf customised "plugins-elsewhere/pg-task-focus.sh"
+                );
+                assert has "export PG_TASK_FOCUS_SWIFTBAR_BOOST_MINUTES='15'\n" (
+                  textOf customised "plugins-elsewhere/pg-task-focus.sh"
+                );
+                # disabled, or non-darwin: no entry
+                assert disabled.home.file == { };
+                assert linux.home.file == { };
+                assert failedAssertions linux == [ ];
+                # swiftbar.enable without enable: the assertion fails
+                assert builtins.length (failedAssertions withoutEnable) == 1;
+                pkgs.runCommand "pg-task-focus-swiftbar-hm-render-ok" { } "touch $out";
+
               # Rendering guard for home/programs/pg-connector (bead pg2-9tql6):
               # evaluates the module (tests/pg-connector-home-render.nix) and
               # compares the generated shared config file against goldens in
@@ -11187,6 +11373,12 @@
               inherit pkgs;
               bashBuilders = pkgs._agentSupportBashBuilders;
             }).checks
+            # test-pg-task-focus-swiftbar (bats suite of the pg-task-focus SwiftBar
+            # renderer, bead pg2-t7me1.5). Same one-line idiom as pa-monitor-swiftbar.
+            // (import ./packages/pg-task-focus-swiftbar {
+              inherit pkgs;
+              bashBuilders = pkgs._agentSupportBashBuilders;
+            }).checks
             # test-pg-rescue-flake-lock-conflict (bead pg2-3ybxg). Same
             # one-line idiom as wtdone above: the overlay attr takes only the
             # script derivation, so without this the bats suite would run in
@@ -11353,6 +11545,8 @@
             # mkBashScript tool, public = false) -- re-exported so
             # `nix build .#pa-monitor-swiftbar` resolves via flake.packages.<system>.
             inherit (pkgs) pa-monitor-swiftbar;
+            # pg-task-focus-swiftbar: same overlay-only, public = false renderer.
+            inherit (pkgs) pg-task-focus-swiftbar;
             # pg-rescue-flake-lock-conflict is likewise an overlay-only attr
             # (single mkBashScript tool) -- re-exported so
             # `nix build .#pg-rescue-flake-lock-conflict` resolves via

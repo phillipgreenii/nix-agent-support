@@ -304,3 +304,26 @@ func TestCLICheckAndConfigCheck(t *testing.T) {
 	bj.want(t, cli.ExitCheckFailed, `"valid":false`)
 	bj.valid(t)
 }
+
+// The SwiftBar plugin runs this binary and names itself, so the daemon counts
+// its requests under client="swiftbar" and not "cli"; a name outside the
+// closed set is a usage error and reaches no daemon.
+func TestCLIClientName(t *testing.T) {
+	e := newEnv(t, options{})
+
+	e.cli("status").want(t, cli.ExitOK)
+	e.cli("--client", "swiftbar", "status").want(t, cli.ExitOK)
+	f := e.scrape()["pg_task_focus_http_requests_total"]
+	if f == nil {
+		t.Fatal("no pg_task_focus_http_requests_total")
+	}
+	seen := map[string]bool{}
+	for _, c := range labelValues(f, "client") {
+		seen[c] = true
+	}
+	if !seen["cli"] || !seen["swiftbar"] {
+		t.Errorf("clients counted = %v, want cli and swiftbar", seen)
+	}
+
+	e.cli("--client", "bogus", "status").want(t, cli.ExitUsage, "--client MUST be one of")
+}

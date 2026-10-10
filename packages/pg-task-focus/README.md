@@ -24,6 +24,9 @@ reasons for the main decisions are in `docs/adr/0088-pg-task-focus-event-log-and
 | `web/`                            | The web UI: `index.html`, native ES modules and a stylesheet under `assets/`, embedded in the binary; its tests under `test/` |
 | `grafana/`                        | The dashboard and the alert rules                                                                                             |
 
+The SwiftBar menu-bar plugin is a separate package, `packages/pg-task-focus-swiftbar`: a streaming
+renderer over `status --watch` and the CLI, with a nix-generated plugin wrapper.
+
 ## Running it
 
 The Nix modules run it as a launchd user agent (`home/programs/pg-task-focus`, with its
@@ -37,6 +40,11 @@ pg-task-focus status                                # the CLI finds the daemon a
 `PG_TASK_FOCUS_ADDR`, `PG_TASK_FOCUS_CONFIG` and `PG_TASK_FOCUS_DATA_DIR` set the address, the
 configuration file and the data directory. `SIGHUP` reloads the configuration. Check a log or a
 configuration without the daemon: `pg-task-focus check`, `pg-task-focus config check`.
+
+`--client NAME` (or `PG_TASK_FOCUS_CLIENT`) sets the `X-Client` the verb sends: `cli` (the default), `web`,
+`connector` or `swiftbar`, anything else is a usage error. The SwiftBar plugin
+(`packages/pg-task-focus-swiftbar`, installed by `phillipgreenii.programs.pg-task-focus.swiftbar`) runs
+this binary as `--client swiftbar`, so the daemon's per-client metrics show a silent plugin.
 
 The root path serves the web UI (see below). Logs are JSON lines on stdout. The API is loopback-only (`127.0.0.1`), requires a `Host` and
 `Origin` from the allowlist (the loopback names with the port, and the host of `public_url`), and uses

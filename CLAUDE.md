@@ -114,6 +114,18 @@ logic is tested with `node --test` from inside the Go gate (`web/web_test.go`,
 `internal/daemon/webui_e2e_test.go`), so `checks.<system>.pg-task-focus-go-tests` carries `nodejs` in
 `testDeps` and `PG_TASK_FOCUS_REQUIRE_NODE=1`; a host without `node` skips those tests with the reason.
 
+`swiftbar.enable` (bead `pg2-t7me1.5`) installs the pg-task-focus SwiftBar plugin the same way
+pa-monitor's does (darwin only, requires `enable`, wrapper is the FUNCTION
+`packages/pg-task-focus-swiftbar/plugin.nix` `mkPluginWrapper`, renderer is the internal
+`pg-task-focus-swiftbar` package), so `test-pg-task-focus-hm-launchd` stubs `home.file`
+too. Unlike pa-monitor it is a STREAMING plugin (`swiftbar.type` = `streamable`, no refresh
+interval in the filename): it keeps `pg-task-focus status --watch` open and ticks the timer locally.
+The frame-separator syntax is one seam (`STREAM_SEPARATOR` in the renderer), verified against the
+SwiftBar 2.0.1 README but not against the live GUI (see the renderer's header comment). Its actions
+run the CLI with `--client swiftbar` (the CLI's `--client` flag / `PG_TASK_FOCUS_CLIENT`), so the
+daemon's per-client metrics see the plugin. Tests: `test-pg-task-focus-swiftbar` (bats),
+`test-pg-task-focus-swiftbar-plugin` (wrapper) and `test-pg-task-focus-swiftbar-hm-render`.
+
 ## Status Line (`home/programs/claude-status-line`)
 
 Full contract (part-script protocol, ordering convention, glyph/width/locale mechanics) moved to

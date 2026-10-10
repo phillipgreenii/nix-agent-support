@@ -94,6 +94,37 @@ type state struct {
 	addr   string
 	json   bool
 	wait   time.Duration
+	// clientName is the --client flag; empty means $PG_TASK_FOCUS_CLIENT, else cli.
+	clientName string
+}
+
+// clientNames is the closed set of X-Client values a command line may send.
+// `unknown` is the daemon's own bucket for anything else, never a choice.
+var clientNames = []string{"cli", "web", "connector", "swiftbar"}
+
+// clientLabel is the X-Client value this invocation sends: --client, else
+// $PG_TASK_FOCUS_CLIENT, else cli. The SwiftBar plugin runs this same binary
+// and names itself, so the daemon's per-client metrics can tell a silent
+// plugin from a silent shell.
+func (s *state) clientLabel() string {
+	if s.clientName != "" {
+		return s.clientName
+	}
+	if v := s.app.Getenv("PG_TASK_FOCUS_CLIENT"); v != "" {
+		return v
+	}
+	return "cli"
+}
+
+// checkClient refuses a client name outside the closed set.
+func (s *state) checkClient() error {
+	name := s.clientLabel()
+	for _, c := range clientNames {
+		if name == c {
+			return nil
+		}
+	}
+	return usagef("--client MUST be one of %s, not %q", strings.Join(clientNames, ", "), name)
 }
 
 func (s *state) client() *client.Client {
@@ -104,7 +135,7 @@ func (s *state) client() *client.Client {
 	if addr == "" {
 		addr = client.DefaultAddr
 	}
-	return &client.Client{Addr: addr, Name: "cli", Timeout: s.wait}
+	return &client.Client{Addr: addr, Name: s.clientLabel(), Timeout: s.wait}
 }
 
 // Execute runs the command line and returns the exit code.

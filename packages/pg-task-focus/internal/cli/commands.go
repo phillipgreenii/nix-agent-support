@@ -28,9 +28,13 @@ not reachable; 4 the daemon refused the request; 5 the store did not take the ch
 (read-only mode, or an unknown outcome); 6 the daemon is starting and not ready; 7 serve
 could not start; 8 check found a problem.`,
 		Version: s.app.Version,
+		PersistentPreRunE: func(*cobra.Command, []string) error {
+			return s.checkClient()
+		},
 	}
 	root.PersistentFlags().StringVar(&s.addr, "addr", "", "daemon address, host:port (default $PG_TASK_FOCUS_ADDR, else 127.0.0.1:49210)")
 	root.PersistentFlags().BoolVar(&s.json, "json", false, "print the daemon's JSON document instead of text")
+	root.PersistentFlags().StringVar(&s.clientName, "client", "", "the X-Client name sent to the daemon: cli, web, connector or swiftbar (default $PG_TASK_FOCUS_CLIENT, else cli)")
 	root.PersistentFlags().DurationVar(&s.wait, "timeout", 15*time.Second, "how long to wait for the daemon to answer")
 	root.AddCommand(
 		s.serveCmd(), s.statusCmd(), s.periodCmd(), s.profileCmd(), s.taskCmd(), s.cycleCmd(), s.eventsCmd(),
