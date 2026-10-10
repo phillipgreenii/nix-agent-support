@@ -38,7 +38,6 @@ import (
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
-	logglobal "go.opentelemetry.io/otel/log/global"
 	lognoop "go.opentelemetry.io/otel/log/noop"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -77,7 +76,7 @@ func Init(ctx context.Context, serviceName, version string) (ShutdownFunc, error
 		// use otel.Tracer(...) and the global LoggerProvider without nil
 		// worries.
 		otel.SetTracerProvider(noop.NewTracerProvider())
-		logglobal.SetLoggerProvider(lognoop.NewLoggerProvider())
+		otel.SetLoggerProvider(lognoop.NewLoggerProvider())
 		return noopShutdown, nil
 	}
 
@@ -102,13 +101,13 @@ func Init(ctx context.Context, serviceName, version string) (ShutdownFunc, error
 	if logExp, err := newOTLPLogExporter(ctx); err != nil {
 		fmt.Fprintf(os.Stderr,
 			"pg-pr: OTel log exporter init failed (%v); logs will be no-op\n", err)
-		logglobal.SetLoggerProvider(lognoop.NewLoggerProvider())
+		otel.SetLoggerProvider(lognoop.NewLoggerProvider())
 	} else {
 		lp := sdklog.NewLoggerProvider(
 			sdklog.WithProcessor(sdklog.NewBatchProcessor(logExp)),
 			sdklog.WithResource(res),
 		)
-		logglobal.SetLoggerProvider(lp)
+		otel.SetLoggerProvider(lp)
 		shutdowns = append(shutdowns, lp.Shutdown)
 	}
 
