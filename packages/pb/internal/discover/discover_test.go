@@ -106,3 +106,32 @@ func TestDistinctDBs_skipsPathsWithoutBeads(t *testing.T) {
 		t.Fatalf("dbs = %+v, want one at %q", dbs, a)
 	}
 }
+
+func TestWorkspaceRoot(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "pn-workspace.toml"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	deep := filepath.Join(root, "a", "b")
+	if err := os.MkdirAll(deep, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	none := func(string) string { return "" }
+
+	got, err := WorkspaceRoot(none, deep)
+	if err != nil || got != root {
+		t.Fatalf("walk-up = %q, %v; want %q", got, err, root)
+	}
+	got, err = WorkspaceRoot(func(k string) string {
+		if k == WorkspaceRootEnv {
+			return "/pinned"
+		}
+		return ""
+	}, deep)
+	if err != nil || got != "/pinned" {
+		t.Fatalf("env wins = %q, %v", got, err)
+	}
+	if _, err := WorkspaceRoot(none, t.TempDir()); err == nil {
+		t.Fatal("want an error when no marker exists above cwd")
+	}
+}

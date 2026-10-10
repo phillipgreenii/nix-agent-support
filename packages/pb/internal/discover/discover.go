@@ -103,3 +103,32 @@ func DistinctDBs(paths []string, root string) ([]DB, error) {
 	}
 	return out, nil
 }
+
+// WorkspaceRootEnv names the environment variable that pins the workspace root.
+const WorkspaceRootEnv = "PN_WORKSPACE_ROOT"
+
+// workspaceMarker is the file that marks a pn workspace root.
+const workspaceMarker = "pn-workspace.toml"
+
+// WorkspaceRoot resolves the pn workspace root: $PN_WORKSPACE_ROOT when set,
+// else the nearest ancestor of cwd (cwd included) holding pn-workspace.toml.
+// getenv is injected for tests.
+func WorkspaceRoot(getenv func(string) string, cwd string) (string, error) {
+	if v := getenv(WorkspaceRootEnv); v != "" {
+		return v, nil
+	}
+	cur, err := filepath.Abs(cwd)
+	if err != nil {
+		return "", err
+	}
+	for {
+		if fi, err := os.Stat(filepath.Join(cur, workspaceMarker)); err == nil && !fi.IsDir() {
+			return cur, nil
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return "", fmt.Errorf("no %s found at or above %q and %s is unset; pass --root", workspaceMarker, cwd, WorkspaceRootEnv)
+		}
+		cur = parent
+	}
+}

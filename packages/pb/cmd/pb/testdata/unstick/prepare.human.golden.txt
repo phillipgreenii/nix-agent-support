@@ -1,0 +1,26 @@
+workdir:  <WORKDIR>
+start:    2026-10-10T12:00:00Z
+counts:   open 4, blocked 2, deferred 1, in_progress 1, ready 1, drainable 1
+triage:   targets 5 = live 1 + marker 1 + review 3
+batches:  1 B01(3)
+claim candidates: 2
+  a-7  in_progress  assignee=worker-1  updated=2026-10-10T11:00:00Z
+  a-9  open  assignee=worker-2  updated=2026-10-05T00:00:00Z
+malformed markers: 1 (a-6)
+gate check: ok
+written:
+  <WORKDIR>/batches/B01
+  <WORKDIR>/export.jsonl
+  <WORKDIR>/facts/B01.json
+  <WORKDIR>/followups.txt
+  <WORKDIR>/prepare.json
+  <WORKDIR>/probes/gate-check.json
+  <WORKDIR>/progress.txt
+  <WORKDIR>/ready.json
+  <WORKDIR>/triage-assigned_open.txt
+  <WORKDIR>/triage-drain.txt
+  <WORKDIR>/triage-inprog.txt
+  <WORKDIR>/triage-live.txt
+  <WORKDIR>/triage-marker.txt
+  <WORKDIR>/triage-review.txt
+  <WORKDIR>/triage-targets.txt

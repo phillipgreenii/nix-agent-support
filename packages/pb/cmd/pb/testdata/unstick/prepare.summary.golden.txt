@@ -1,0 +1,62 @@
+{
+  "workdir": "<WORKDIR>",
+  "start": "2026-10-10T12:00:00Z",
+  "counts": {
+    "open": 4,
+    "blocked": 2,
+    "deferred": 1,
+    "in_progress": 1,
+    "ready": 1,
+    "targets": 5,
+    "live_skip": 1,
+    "marker_skip": 1,
+    "review": 3,
+    "drainable": 1
+  },
+  "partition": "targets 5 = live 1 + marker 1 + review 3",
+  "batches": [
+    {
+      "name": "B01",
+      "size": 3
+    }
+  ],
+  "claim_candidates": [
+    {
+      "id": "a-7",
+      "status": "in_progress",
+      "assignee": "worker-1",
+      "updated_at": "2026-10-10T11:00:00Z"
+    },
+    {
+      "id": "a-9",
+      "status": "open",
+      "assignee": "worker-2",
+      "updated_at": "2026-10-05T00:00:00Z"
+    }
+  ],
+  "malformed_markers": {
+    "count": 1,
+    "ids": [
+      "a-6"
+    ]
+  },
+  "gate_check": "ok",
+  "warnings": [],
+  "written": [
+    "batches/B01",
+    "export.jsonl",
+    "facts/B01.json",
+    "followups.txt",
+    "prepare.json",
+    "probes/gate-check.json",
+    "progress.txt",
+    "ready.json",
+    "triage-assigned_open.txt",
+    "triage-drain.txt",
+    "triage-inprog.txt",
+    "triage-live.txt",
+    "triage-marker.txt",
+    "triage-review.txt",
+    "triage-targets.txt"
+  ]
+}
