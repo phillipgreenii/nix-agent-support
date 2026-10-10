@@ -22,6 +22,15 @@ The configuration is one JSON file whose path is named by the environment variab
   "beads_dir": "/path/to/beads",
   "actor": "pg-decider",
   "escalate_after": 3,
+  "bead_id_pattern": "^bd-[a-z0-9]+$",
+  "focus_beads_query": "focus-beads",
+  "focus_priority_map": {
+    "Highest": "P0",
+    "High": "P1",
+    "Medium": "P2",
+    "Low": "P3",
+    "Lowest": "P4"
+  },
   "area_labels": [
     {
       "pattern": "^[a-z]+\\(widgets/api\\)",
@@ -42,6 +51,25 @@ The configuration is one JSON file whose path is named by the environment variab
 | `escalate_after`        | integer | `3`          | K: the number of consecutive failing runs of a rule after which the failure is escalated to a person                             |
 
 `escalate_after` MUST be at least `1`; an explicit smaller value makes `apply` exit `1`.
+
+### Focus keys
+
+These keys serve the `focus-item` work kind (see [`work-items.md`](work-items.md), "The focus
+bead"). Each is optional.
+
+| Key                  | Type   | Default                                                     | Effect                                                                                                                                                                                                                              |
+| -------------------- | ------ | ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bead_id_pattern`    | string | empty                                                       | A regular expression (Go RE2, searched unanchored; supply an anchored pattern for an exact match) with the same name and meaning as pg-desk's key: an issue whose id matches is a bead, every other issue is not. Empty means unset |
+| `focus_beads_query`  | string | empty                                                       | The name of the pg-connector named query that lists focus beads in EVERY status, closed included. The focus rule's dedup lookup reads it; it MUST NOT be a feed name the work-bead feeds share                                      |
+| `focus_priority_map` | object | `Highest:P0`, `High:P1`, `Medium:P2`, `Low:P3`, `Lowest:P4` | Tracker priority name to `P0` to `P4`: the priority of a focus bead minted for that source. A configured map REPLACES the default whole. An unmapped name, and a PR source (which has no priority), map to `P2`                     |
+
+`bead_id_pattern` MUST compile and MUST NOT be blank when present, and every `focus_priority_map`
+value MUST be one of `P0`, `P1`, `P2`, `P3`, `P4`; otherwise `apply` exits `1` before any write
+(`INV-DECIDER-22`). The deployment supplies the pattern and the query name; the decider names no
+project or tracker of its own.
+
+The focus rule's condition has a durable home: the section "The `focus.item` rule" of
+[`work-items.md`](work-items.md), which [`README.md`](README.md) names. This doc owns only the keys.
 
 ### Area labels
 

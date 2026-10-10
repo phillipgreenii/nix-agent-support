@@ -29,6 +29,11 @@ func (i Item) HasLabel(l string) bool {
 	return false
 }
 
+// RelationSource is the link relation of a work item that names its source
+// entity in its own metadata (source_type, source_id): a focus bead is linked
+// to its source by it, never by the PR's own "work" relation.
+const RelationSource = "source"
+
 const fbsumPrefix = "fbsum:"
 
 // Digest is the digest in the item's fbsum:<digest> label, "" when absent.
@@ -98,6 +103,11 @@ func entityTitleRef(v *view.View) string {
 // node_id metadata equals the snapshot's), then exact title, then the anchor
 // "<repo>#<n>: " prefix. A malformed dedup_key counts as absent. BuildIndex
 // never fails: bad metadata is treated as empty.
+//
+// A focus bead (relation "source", dedup_key naming the focus-item kind) is a
+// keyed work item and is indexed like any other. A keyless link of relation
+// "source" is never adoptable, whatever its title looks like: a focus bead is
+// not the PR's own work, so it is never adopted as an anchor or a child.
 func BuildIndex(v *view.View) *Index {
 	ix := &Index{}
 	if v == nil {
@@ -116,6 +126,9 @@ func BuildIndex(v *view.View) *Index {
 		if _, _, k, _, ok := ParseKey(l.Metadata["dedup_key"]); ok {
 			it.DedupKey, it.Kind = l.Metadata["dedup_key"], k
 			ix.items = append(ix.items, it)
+			continue
+		}
+		if l.Relation == RelationSource {
 			continue
 		}
 		k, by, ok := adoptionMatch(it, ref, nodeID)

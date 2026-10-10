@@ -43,8 +43,8 @@ func (nodeIDAdoptionRule) Evaluate(in decide.Input) decide.Result {
 		}
 		old := l.Metadata["dedup_key"]
 		typ, ident, kind, suffix, ok := workitem.ParseKey(old)
-		if !ok || ident == nodeID {
-			continue
+		if !ok || ident == nodeID || kind == workitem.KindFocusItem {
+			continue // a focus bead's key is never rewritten by the PR rules
 		}
 		key := typ + ":" + nodeID + ":" + string(kind) + suffix
 		acts = append(acts, action.Action{

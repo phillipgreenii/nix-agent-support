@@ -45,10 +45,18 @@ var specTable = map[Kind]KindContract{
 		MetadataKeys:  []string{"repo", "pr_number", "branch", "head_sha", "base", "base_sha", "dedup_key"},
 		Parent:        "anchor",
 	},
+	KindFocusItem: {
+		IssueType:         "task",
+		TitleTemplate:     "Focus <source ref> - <source title>",
+		Labels:            []string{"focus-item"},
+		MetadataKeys:      []string{"source_type", "source_id", "focus_hold", "dedup_key"},
+		Parent:            "",
+		IssueTypeBySource: map[string]string{"Bug": "bug"},
+	},
 }
 
-func TestKindsAreTheFiveExactStrings(t *testing.T) {
-	want := []string{"anchor", "process-feedback", "review-pr", "fix-ci", "resolve-conflict"}
+func TestKindsAreTheSixExactStrings(t *testing.T) {
+	want := []string{"anchor", "process-feedback", "review-pr", "fix-ci", "resolve-conflict", "focus-item"}
 	var got []string
 	for _, k := range Kinds() {
 		got = append(got, string(k))
@@ -80,6 +88,43 @@ func TestContractForReturnsCopies(t *testing.T) {
 	c.MetadataKeys[0] = "mutated"
 	if got := ContractFor(KindFixCI); got.Labels[0] != "mine" || got.MetadataKeys[0] != "repo" {
 		t.Fatalf("contract table mutated through returned value: %#v", got)
+	}
+}
+
+func TestContractForReturnsCopiesOfTheIssueTypeMap(t *testing.T) {
+	c := ContractFor(KindFocusItem)
+	c.IssueTypeBySource["Bug"] = "mutated"
+	if got := ContractFor(KindFocusItem).IssueTypeFor("Bug"); got != "bug" {
+		t.Fatalf("contract table mutated through returned value: %q", got)
+	}
+}
+
+func TestFocusItemIssueTypeFollowsTheSource(t *testing.T) {
+	c := ContractFor(KindFocusItem)
+	cases := map[string]string{
+		"Bug":   "bug",
+		"bug":   "bug", // matched without regard to case
+		"Task":  "task",
+		"Epic":  "task",
+		"Story": "task",
+		"":      "task", // a PR source has no issue type
+	}
+	for src, want := range cases {
+		if got := c.IssueTypeFor(src); got != want {
+			t.Errorf("IssueTypeFor(%q) = %q, want %q", src, got, want)
+		}
+	}
+}
+
+func TestOtherKindsIgnoreTheSourceIssueType(t *testing.T) {
+	for _, k := range Kinds() {
+		if k == KindFocusItem {
+			continue
+		}
+		c := ContractFor(k)
+		if got := c.IssueTypeFor("Bug"); got != c.IssueType {
+			t.Errorf("%s: IssueTypeFor(Bug) = %q, want %q", k, got, c.IssueType)
+		}
 	}
 }
 

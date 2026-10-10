@@ -28,6 +28,15 @@
       "repo",
       "title"
     ],
+    "focus-item": [
+      "dedup_key",
+      "focus_hold",
+      "issue_type",
+      "labels",
+      "source_id",
+      "source_type",
+      "title"
+    ],
     "process-feedback": [
       "branch",
       "covered_comments",

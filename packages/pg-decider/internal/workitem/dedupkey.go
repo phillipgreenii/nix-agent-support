@@ -22,7 +22,8 @@ func EntityRefFrom(v *view.View) EntityRef {
 // ContextSuffix is the dedup-key suffix naming k's context where that context
 // is narrower than the PR (spec 9.8): ":<head_sha>" for fix-ci,
 // ":<branch>:<head_sha>:<base>:<base_sha>" for resolve-conflict, ":<digest>"
-// for process-feedback, and "" for review-pr, anchor and unknown kinds.
+// for process-feedback, and "" for review-pr, anchor, focus-item (one bead per
+// source entity, no per-day suffix) and unknown kinds.
 func ContextSuffix(k Kind, c Context) string {
 	switch k {
 	case KindFixCI:
@@ -31,6 +32,8 @@ func ContextSuffix(k Kind, c Context) string {
 		return ":" + strings.Join([]string{c.Branch, c.HeadSHA, c.Base, c.BaseSHA}, ":")
 	case KindProcessFeedback:
 		return ":" + c.Digest
+	case KindFocusItem:
+		return "" // D-F13: one bead per source entity, no context
 	}
 	return ""
 }

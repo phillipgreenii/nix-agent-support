@@ -86,6 +86,9 @@ func linkedWork(v *view.View) string {
 	ix := workitem.BuildIndex(v)
 	var parts []string
 	for _, k := range workitem.Kinds() {
+		if k == workitem.KindFocusItem {
+			continue // a focus bead is not the PR's own work
+		}
 		for _, it := range ix.ByKind(k) {
 			state := orDash(it.State)
 			switch k {

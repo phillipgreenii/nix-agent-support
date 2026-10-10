@@ -28,6 +28,9 @@ func (anchorAdoptionRule) Evaluate(in decide.Input) decide.Result {
 	var acts []action.Action
 	var unadoptable []string
 	for _, ad := range in.Items.Adoptable() {
+		if ad.Kind == workitem.KindFocusItem {
+			continue
+		}
 		ctx, ok := anchorAdoptionContext(ad.Item, ad.Kind)
 		if !ok {
 			unadoptable = append(unadoptable, ad.Item.ID)

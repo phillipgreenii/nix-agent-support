@@ -7,16 +7,17 @@ workers MUST rely only on the fields in the table below.
 
 ## Kinds
 
-There are five work-item kinds. A kind is named by its `kind` id, which is also the kind segment
+There are six work-item kinds. A kind is named by its `kind` id, which is also the kind segment
 of its dedup key.
 
-| Kind id            | Table row        | Meaning                                              |
-| ------------------ | ---------------- | ---------------------------------------------------- |
-| `anchor`           | anchor           | The parent of every other kind: one per PR           |
-| `process-feedback` | feedback cycle   | Address the unaddressed review feedback on a PR      |
-| `review-pr`        | review request   | Review a PR at its current head                      |
-| `fix-ci`           | fix-ci           | Fix the failing CI builds on a PR's current head     |
-| `resolve-conflict` | resolve-conflict | Resolve the merge conflict between a PR and its base |
+| Kind id            | Table row        | Meaning                                                                 |
+| ------------------ | ---------------- | ----------------------------------------------------------------------- |
+| `anchor`           | anchor           | The parent of every other kind: one per PR                              |
+| `process-feedback` | feedback cycle   | Address the unaddressed review feedback on a PR                         |
+| `review-pr`        | review request   | Review a PR at its current head                                         |
+| `fix-ci`           | fix-ci           | Fix the failing CI builds on a PR's current head                        |
+| `resolve-conflict` | resolve-conflict | Resolve the merge conflict between a PR and its base                    |
+| `focus-item`       | focus-item       | The bead that tracks one source entity chosen for focus: one per source |
 
 ## Bead shapes
 
@@ -30,6 +31,8 @@ read these shapes, in the same change:
 | review request   | `task`          | `review-pr: <repo>#<n>`        | none                                                 | `repo`, `pr_number`, `branch`, `head_sha`, `ownership`, `dedup_key`                                                                                                                                     | anchor |
 | fix-ci           | `task`          | `fix-ci: <repo>#<n>`           | `mine`, `worker-ready`                               | `repo`, `pr_number`, `branch`, `head_sha`, `failing_checks`, `failing_builds`, `dedup_key`; description is the failing checks, each with a link to its run                                              | anchor |
 | resolve-conflict | `task`          | `resolve-conflict: <repo>#<n>` | `mine`, `worker-ready`                               | `repo`, `pr_number`, `branch`, `head_sha`, `base`, `base_sha`, `dedup_key`; description is the base plus the conflicting files if the backend reports them, else an instruction to rebase onto the base | anchor |
+
+| focus-item | `bug` when the source issue's tracker type is `Bug`, else `task` | `Focus <source ref> - <source title>` | `focus-item` | `source_type`, `source_id`, `focus_hold`, `dedup_key`; description is one line naming the source entity | none |
 
 Notes on the table:
 
@@ -46,6 +49,42 @@ Notes on the table:
   item for a new head. `ownership` is the PR's relationship to the operator at that time.
 - `base_sha` and `branch`, with `base`, name the conflict context of a `resolve-conflict` item.
 - The labels cell of a review request is `none`: the decider writes no label on it.
+- A `focus-item` bead is not a PR's own work; see "The focus bead" below. Its `<source ref>` and
+  `<source title>` are the source entity's reference and title.
+
+### The focus bead
+
+A `focus-item` bead tracks one source entity (a PR, or a tracker issue) that an operator chose for
+focus. It differs from the other kinds in these ways:
+
+- **One per source entity.** Its dedup key has no context suffix and no per-day part, so a source
+  entity has at most one focus bead for all time.
+- **Shape.** The type is `bug` when the source is an issue whose tracker type is `Bug` and `task`
+  for every other source, a PR included (`KindContract.IssueTypeFor` in the contract data). The
+  title is `Focus <source ref> - <source title>`; it MUST NOT begin with `<ref>: `, which the
+  anchor-adoption match would read as a PR's own anchor. The only label is `focus-item`: no `human`
+  label and no worker-routing label, because whether a worker takes the bead is the router's
+  decision. It is created without an assignee and has no parent.
+- **Metadata.** `source_type` and `source_id` name the source entity with neutral field names (they
+  carry no focus vocabulary). `focus_hold` is the decider's hold marker: `struck` while the bead is
+  held and `released` after. Its values are strings on purpose, not booleans.
+- **Priority.** The source's tracker priority through the decider's `focus_priority_map` (see
+  [`config.md`](config.md)); an unmapped value, and a PR, which has none, map to `P2`.
+- **Link relation.** A view lists a focus bead under the relation `source`, never the PR's own
+  `work` relation. The index of a view's work items holds a keyed focus bead like any other keyed
+  work item, and `ParseKey` accepts the `focus-item` kind for both `pr` and `issue` entities.
+- **Ignored by the PR rules.** The PR rules, `all.closed`, `all.reopened`, `adoption`,
+  `adoption.node-id` and the plan's linked-work line MUST ignore a focus bead: a PR whose view links
+  a focus bead MUST get the same plan as the same PR without it. A keyless link of relation `source`
+  is never adopted, whatever its title looks like.
+- **Beads and other issues.** The decider tells a bead from any other issue by one configured
+  pattern, `bead_id_pattern` (the same name and meaning as pg-desk's key; see
+  [`config.md`](config.md)): an issue whose id matches is a bead and every other issue is not. The
+  tracker field of an issue is not that discriminator.
+
+The condition under which a focus bead is minted, held and released belongs to the `focus.item`
+rule. Its durable home is the section "The `focus.item` rule" below in this document, which resolves
+the single-home statement in [`README.md`](README.md).
 
 ### Metadata encodings
 
@@ -67,7 +106,8 @@ Every work item the decider creates carries a `dedup_key` in its metadata. The k
 work item itself, never only in some other store, so a crash between a create and anything else
 that follows it cannot mint a duplicate on the next run.
 
-The key is `<type>:<id>:<kind>` plus a context suffix, where `<type>` is the entity type (`pr`),
+The key is `<type>:<id>:<kind>` plus a context suffix, where `<type>` is the entity type (`pr`,
+or `issue` for a `focus-item` bead of a tracker issue),
 `<id>` is the entity id (for example `acme/widgets#42`) and `<kind>` is the kind id. The suffix
 names the kind's context where that context is narrower than the PR:
 
@@ -78,6 +118,7 @@ names the kind's context where that context is narrower than the PR:
 | `fix-ci`           | `:<head_sha>`                            | `pr:acme/widgets#42:fix-ci:9f3c1e2`                              |
 | `resolve-conflict` | `:<branch>:<head_sha>:<base>:<base_sha>` | `pr:acme/widgets#42:resolve-conflict:fix-x:9f3c1e2:main:77aa001` |
 | `process-feedback` | `:<digest>`                              | `pr:acme/widgets#42:process-feedback:ab12`                       |
+| `focus-item`       | none                                     | `issue:PROJ-1:focus-item`, `pr:acme/widgets#42:focus-item`       |
 
 `<digest>` is the `fbsum` digest the cycle was created with.
 
@@ -102,6 +143,7 @@ differs per kind:
 | `fix-ci`           | The head commit                                                | A new head gets a new item; a new failing build on the same head reopens and extends the existing one        |
 | `resolve-conflict` | The branch, head, base and base commit together                | Any of the four changes: a new item                                                                          |
 | `process-feedback` | The feedback itself: the comments no earlier cycle has covered | More feedback after a closed cycle: a new cycle; more feedback while a cycle is open: that cycle is extended |
+| `focus-item`       | The source entity                                              | Never: one bead per source entity; a closed focus bead is never recreated                                    |
 
 Further, for every kind:
 
@@ -132,6 +174,14 @@ flowchart TD
     R -->|"no"| X["leave it closed: already handled"]
     P{"Open item labeled human?"} -->|"yes"| X2["counts as existing: no create, no relabel"]
 ```
+
+## The `focus.item` rule
+
+The `focus.item` rule mints, holds and releases focus beads. The decider registers no rule for the
+`issue` entity type yet, so no `focus.item` condition is in force. The change that registers the
+rule MUST record its condition in THIS section; this section is the durable home of that condition,
+and [`README.md`](README.md) names it as the one place a rule's condition lives outside the PR rule
+table. Until then this doc specifies only the work-item contract above.
 
 ## Invariants
 

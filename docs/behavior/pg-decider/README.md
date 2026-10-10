@@ -48,7 +48,7 @@ A decider's write produces a change record that routes back to it. Because a dec
 
 | Doc                                      | Covers                                                                                                       |
 | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| [`work-items.md`](work-items.md)         | The work-item contract: the five kinds, the bead shapes, the dedup key and the same-context rule             |
+| [`work-items.md`](work-items.md)         | The work-item contract: the six kinds, the bead shapes, the dedup key and the same-context rule              |
 | [`plan-and-apply.md`](plan-and-apply.md) | `pg-decider plan` and `apply`, exit codes, precedence, skip reasons, audit, failure escalation, run counters |
 | [`config.md`](config.md)                 | The decider configuration file: location, format and keys                                                    |
 
@@ -66,6 +66,12 @@ uphold. The rule ids registered so far, in evaluation order:
 | `fixci.failing-on-head`   | `fix-ci`                  |
 
 A rule is added to this table in the change that registers it.
+
+The single-home statement above covers the PR rules. One rule lies outside the PR rule table: the
+condition of the `focus.item` rule (the rule of the `focus-item` kind, which mints, holds and
+releases focus beads) is specified in exactly one durable place, the section "The `focus.item`
+rule" of [`work-items.md`](work-items.md). The design document that first described that rule is
+not durable, so these docs MUST NOT point a reader there for the condition.
 
 ## Invariants
 

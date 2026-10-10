@@ -40,6 +40,7 @@ const (
 	KindReviewPR        = "review-pr"        // old: review-request
 	KindFixCI           = "fix-ci"
 	KindResolveConflict = "resolve-conflict"
+	KindFocusItem       = "focus-item"
 	kindAnnotationPref  = "annotation:"
 )
 
@@ -51,6 +52,7 @@ var oldKinds = map[string]string{
 
 var newKinds = map[string]bool{
 	KindAnchor: true, KindProcessFeedback: true, KindReviewPR: true, KindFixCI: true, KindResolveConflict: true,
+	KindFocusItem: true,
 }
 
 // NormalizeOld maps the old side to entries. Two sources feed it, and they are

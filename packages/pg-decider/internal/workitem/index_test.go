@@ -367,3 +367,44 @@ func TestPackageNeverReadsOrStoresACloser(t *testing.T) {
 		}
 	}
 }
+
+// A focus bead is a keyed work item and is indexed like any other; Find with
+// no context reaches it because its key has no suffix.
+func TestKeyedFocusBeadIsIndexed(t *testing.T) {
+	v := &view.View{Type: "pr", ID: "acme/widgets#3", Links: []view.Link{{
+		Type: "issue", ID: "bd-f1", Relation: RelationSource, State: "open",
+		Title: "Focus acme/widgets#3 - a title", Labels: []string{"focus-item"},
+		Metadata: map[string]string{"dedup_key": "pr:acme/widgets#3:focus-item", "source_type": "pr", "source_id": "acme/widgets#3"},
+	}}}
+	ix := BuildIndex(v)
+	it, ok := ix.Find(KindFocusItem, Context{})
+	if !ok || it.ID != "bd-f1" || it.Kind != KindFocusItem || it.DedupKey != "pr:acme/widgets#3:focus-item" {
+		t.Fatalf("Find(focus-item) = %+v, %v", it, ok)
+	}
+	if len(ix.Adoptable()) != 0 {
+		t.Fatalf("a keyed focus bead is not adoptable: %+v", ix.Adoptable())
+	}
+	if _, ok := ix.Anchor(); ok {
+		t.Fatal("a focus bead is not the anchor")
+	}
+}
+
+// A keyless source-relation link is never adopted, even when its title is
+// shaped like the PR's own anchor title or like a child's exact title.
+func TestKeylessSourceLinkIsNeverAdopted(t *testing.T) {
+	for _, title := range []string{"acme/widgets#3: looks like the anchor", "review-pr: acme/widgets#3", "fix-ci: acme/widgets#3"} {
+		v := &view.View{Type: "pr", ID: "acme/widgets#3", Links: []view.Link{{
+			Type: "issue", ID: "bd-f1", Relation: RelationSource, State: "open", Title: title,
+		}}}
+		ix := BuildIndex(v)
+		if len(ix.Adoptable()) != 0 || len(ix.ByKind(KindAnchor)) != 0 || len(ix.ByKind(KindReviewPR)) != 0 || len(ix.ByKind(KindFixCI)) != 0 {
+			t.Errorf("title %q: source link was classified: %+v", title, ix)
+		}
+		// the same link under the PR's own "work" relation IS adopted: the
+		// relation, not the title, is what keeps a focus bead out.
+		v.Links[0].Relation = "work"
+		if len(BuildIndex(v).Adoptable()) != 1 {
+			t.Errorf("title %q: control link under relation work was not adopted", title)
+		}
+	}
+}

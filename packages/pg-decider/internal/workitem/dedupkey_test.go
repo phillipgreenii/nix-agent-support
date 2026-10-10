@@ -15,6 +15,7 @@ func TestDedupKeyExactStrings(t *testing.T) {
 		{KindResolveConflict, "pr:acme/widgets#42:resolve-conflict:feature/retry:9f3c1e2:main:b45e000"},
 		{KindProcessFeedback, "pr:acme/widgets#42:process-feedback:d1"},
 		{KindAnchor, "pr:acme/widgets#42:anchor"},
+		{KindFocusItem, "pr:acme/widgets#42:focus-item"},
 	}
 	nodeForms := []struct {
 		k    Kind
@@ -25,6 +26,7 @@ func TestDedupKeyExactStrings(t *testing.T) {
 		{KindResolveConflict, "pr:PR_node_42:resolve-conflict:feature/retry:9f3c1e2:main:b45e000"},
 		{KindProcessFeedback, "pr:PR_node_42:process-feedback:d1"},
 		{KindAnchor, "pr:PR_node_42:anchor"},
+		{KindFocusItem, "pr:PR_node_42:focus-item"},
 	}
 	for _, tc := range idForms {
 		if got := DedupKey(e, tc.k, c); got != tc.want {
@@ -54,11 +56,37 @@ func TestContextSuffix(t *testing.T) {
 		KindFixCI:           ":h",
 		KindResolveConflict: ":b:h:m:s",
 		KindProcessFeedback: ":d",
+		KindFocusItem:       "",
 		Kind("bogus"):       "",
 	}
 	for k, want := range cases {
 		if got := ContextSuffix(k, c); got != want {
 			t.Errorf("ContextSuffix(%s) = %q, want %q", k, got, want)
+		}
+	}
+}
+
+// D-F13: one bead per source entity, so the key never varies with the day or
+// with any context value.
+func TestFocusItemDedupKeyIsStableAndHasNoSuffix(t *testing.T) {
+	e := EntityRef{Type: "issue", ID: "PROJ-1"}
+	const want = "issue:PROJ-1:focus-item"
+	for _, c := range []Context{{}, {HeadSHA: "a", Branch: "b", Base: "c", BaseSHA: "d", Digest: "e"}, {HeadSHA: "z"}} {
+		if got := DedupKey(e, KindFocusItem, c); got != want {
+			t.Errorf("DedupKey(%+v) = %q, want %q", c, got, want)
+		}
+	}
+}
+
+func TestParseKeyAcceptsFocusItemForIssueAndPR(t *testing.T) {
+	cases := []struct{ key, typ, ident string }{
+		{"issue:PROJ-1:focus-item", "issue", "PROJ-1"},
+		{"pr:OWNER/REPO#3:focus-item", "pr", "OWNER/REPO#3"},
+	}
+	for _, tc := range cases {
+		typ, ident, k, suffix, ok := ParseKey(tc.key)
+		if !ok || typ != tc.typ || ident != tc.ident || k != KindFocusItem || suffix != "" {
+			t.Errorf("ParseKey(%q) = %q %q %q %q %v", tc.key, typ, ident, k, suffix, ok)
 		}
 	}
 }

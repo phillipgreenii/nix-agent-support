@@ -124,8 +124,8 @@ func (anchorClosedRule) Evaluate(in decide.Input) decide.Result {
 
 	var acts []action.Action
 	for _, l := range v.Links {
-		if !anchorIsOpenChild(l, anchor.ID) {
-			continue
+		if !anchorIsOpenChild(l, anchor.ID) || kinds[l.ID] == workitem.KindFocusItem {
+			continue // a focus bead is not the anchor's child, whatever its parent field says
 		}
 		acts = append(acts, action.Action{
 			Op: action.OpClose, Kind: string(kinds[l.ID]), Target: anchorTarget(l.ID),

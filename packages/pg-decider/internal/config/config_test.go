@@ -161,3 +161,71 @@ func TestInvalidAreaLabelsFailLoudly(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadReadsTheFocusKeys(t *testing.T) {
+	writeCfg(t, `{"bead_id_pattern":"^pg2-[a-z0-9]+$","focus_beads_query":"focus-beads","focus_priority_map":{"Blocker":"P0","Minor":"P4"}}`)
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	re, err := c.BeadIDRegexp()
+	if err != nil || re == nil {
+		t.Fatalf("BeadIDRegexp = %v, %v", re, err)
+	}
+	if !re.MatchString("pg2-ab12") || re.MatchString("PROJ-12") {
+		t.Fatal("bead_id_pattern does not tell a bead id from another issue id")
+	}
+	if c.FocusBeadsQuery != "focus-beads" {
+		t.Fatalf("FocusBeadsQuery = %q", c.FocusBeadsQuery)
+	}
+	// A configured map replaces the default whole.
+	for name, want := range map[string]string{"Blocker": "P0", "Minor": "P4", "Highest": "P2", "": "P2"} {
+		if got := c.FocusPriority(name); got != want {
+			t.Errorf("FocusPriority(%q) = %q, want %q", name, got, want)
+		}
+	}
+}
+
+func TestFocusKeysAbsentByDefault(t *testing.T) {
+	t.Setenv(EnvVar, "")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	re, err := c.BeadIDRegexp()
+	if re != nil || err != nil || c.FocusBeadsQuery != "" {
+		t.Fatalf("unset keys: re=%v err=%v query=%q", re, err, c.FocusBeadsQuery)
+	}
+	var nilCfg *Config
+	if re, err := nilCfg.BeadIDRegexp(); re != nil || err != nil {
+		t.Fatalf("nil config: %v %v", re, err)
+	}
+}
+
+func TestFocusPriorityDefaultMap(t *testing.T) {
+	for _, c := range []*Config{nil, {}, {FocusPriorityMap: nil}} {
+		for name, want := range map[string]string{
+			"Highest": "P0", "High": "P1", "Medium": "P2", "Low": "P3", "Lowest": "P4",
+			"Unheard-of": "P2", "": "P2",
+		} {
+			if got := c.FocusPriority(name); got != want {
+				t.Errorf("FocusPriority(%q) = %q, want %q", name, got, want)
+			}
+		}
+	}
+}
+
+func TestInvalidFocusKeysFailLoudly(t *testing.T) {
+	for name, tc := range map[string]struct{ body, mention string }{
+		"uncompilable pattern":  {`{"bead_id_pattern":"(unclosed"}`, "bead_id_pattern"},
+		"blank pattern":         {`{"bead_id_pattern":"  "}`, "bead_id_pattern"},
+		"priority out of range": {`{"focus_priority_map":{"High":"P5"}}`, "focus_priority_map"},
+		"priority not a P-code": {`{"focus_priority_map":{"High":"urgent"}}`, "focus_priority_map"},
+		"blank priority name":   {`{"focus_priority_map":{" ":"P1"}}`, "focus_priority_map"},
+	} {
+		writeCfg(t, tc.body)
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), tc.mention) {
+			t.Errorf("%s: err = %v", name, err)
+		}
+	}
+}
