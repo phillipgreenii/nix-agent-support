@@ -1,11 +1,12 @@
 # pg-connector-github: a stateful, daemon-backed GitHub connector — design
 
-- **Date**: 2026-10-09 (revision 6: 2026-10-10)
+- **Date**: 2026-10-09 (revision 7: 2026-10-10)
 - **Status**: DRAFT for operator review. Nothing here is implemented; no implementation bead is filed.
   Revisions 2 and 3 fold in three independent reviews (correctness; completeness and test coverage; UX,
   observability and standards) and verification passes over revisions 2 and 3. Revision 5 folds in the
   operator's answers of 2026-10-10 (rulings 11 to 14); revision 6 folds in a correctness review and a UX,
-  observability, test-coverage and standards review of revision 5.
+  observability, test-coverage and standards review of revision 5; revision 7 records rulings 15 and 16
+  (registration confirmed, budget relaxed).
 - **Bead**: origin `pg2-zhuiu` (handoff: live vs shadow change detection and what shadow-compare phase A
   measured). A design bead is to be filed once the operator approves the direction.
 - **Deciders**: Phillip (operator).
@@ -38,7 +39,8 @@ changed. Callers keep their commands; the answers become local reads.
 | CI changes         | In scope (ruling 13). A CI change is a change of the PR: it reaches the PR feed as `ci_changed`, with the data already refreshed, and `ci changes` offers the same rows in CI shape.             |
 | Platforms          | The application is platform-neutral and does all the work (ruling 12). Supervision is a thin per-platform wrapper: launchd now; Linux supervision is deferred to `pg2-opk5g`.                    |
 | `--fresh`          | Kept. Polling paths SHOULD NOT use it; a caller reading back its own out-of-band write uses it or the `refresh` op (see "Out-of-band writes by callers").                                        |
-| Registration       | PROVISIONAL (operator has not yet confirmed; reversible): the registry's `{name, command}` form, keeping the old instance names (see "Registration").                                            |
+| Registration       | The registry's `{name, command}` argv form (ruling 15), keeping the old instance names (see "Registration").                                                                                     |
+| Budget             | A hard cap per bucket, split 0.9 to background work, since almost all spend moves there (ruling 16). The daemon's cap replaces the live flow's spend; it does not add to it.                     |
 
 ### Operator rulings recorded by this design
 
@@ -80,6 +82,15 @@ From the operator's answers to revision 4's open questions (Phillip, 2026-10-10,
     PR may not be considerered reviewable or not."
 14. Cutover criteria: "the specified cutover criteria is good to document, but i could overwrite it if i
     see that it is working even with some issues."
+
+From the operator's answers to revision 6 (Phillip, 2026-10-10, same origin bead):
+
+15. Registration: "there is some related work (check on it) where the "command" was never supposed to be
+    a single word, so if additional arguments are neeeded to be passed it, that is ok. a list of args are
+    fine". The related work is `pg2-91y12` (registry entries accept `{name, command}`) and `pg2-ik9ew`
+    (`previous_names`).
+16. Budget: "lets not be so focused on the background work token limits of before, with th new proposed
+    plan, almost all of the queries are shifting to background, so the limit woudl be relaxed some what."
 
 ### Choices made by this design, not by the operator
 
@@ -254,7 +265,10 @@ rendered registry into the argv form above from one place, so the lists cannot d
 governed by `phillipgreenii.programs.pg-connector.github.enable` and the supervisor rule of "Platforms".
 Cutover and rollback are a deployment-repo edit of `enable` plus an apply, not a runtime toggle.
 
-This choice is PROVISIONAL until the operator confirms it. The three options:
+Ruling 15 confirms the argv form: the registry's `command` was built as an argument list from the start
+(bead `pg2-91y12`, `INV-REG-4` in `packages/pg-connector/docs/behavior/invariants.md`), so extra
+arguments such as `--config <path>` are expected use. The home-manager module already accepts string or
+`{name, command}` in every registration option. The options that were weighed:
 
 | Option                                    | What changes                                                                                                                                              | Cost                                                                                                                                                       |
 | ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -262,7 +276,9 @@ This choice is PROVISIONAL until the operator confirms it. The three options:
 | B: argv form, new names                   | Every `--backend` pin, `backends.<name>` block, `sources[]` row, umbrella ledger key, pg-desk freshness row and deployment query naming the two old names | A rename across two repositories; freshness rows under the old names become ghosts until `INV-FRESH-6` drops them                                          |
 | C: an entity `type` on the wire `Request` | `pkg/scriptout/envelope.go` and every backend's dispatch                                                                                                  | An envelope change for all connectors to serve one, against ruling 1's "this change is not a requirement for all connector implementations"                |
 
-A can be followed by B later, as a pure rename, once the old binaries are gone.
+A is chosen. It can be followed by B later, as a pure rename, once the old binaries are gone: a
+`{name, command}` entry may declare `previous_names` (bead `pg2-ik9ew`), which adopts the old name's
+umbrella ledger so a rename does not re-emit every entity as `added`.
 
 ### Op coverage
 
@@ -807,29 +823,29 @@ settings from `backends.pg-connector-pr-github`, the `ci` settings from
 
 All values are configurable. Each default is a starting point, to be checked by the shadow run.
 
-| Setting                                         | Default                        | Reason                                                                               |
-| ----------------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------ |
-| `query_ttl` for `mine` / `team`                 | 60 s / 120 s                   | The live flow's cadences                                                             |
-| `adhoc_query_ttl`                               | 120 s                          |                                                                                      |
-| `summary_ttl`                                   | 60 s                           | One batched call per minute per 74 kept-alive PRs                                    |
-| `detail_ttl` / `detail_max_age`                 | 10 min / 30 min                | Extended by revalidation                                                             |
-| `conversation_ttl` / `conversation_max_age`     | 10 min / 30 min                | Today's sweep cadence; the `updatedAt` spike MAY relax the maximum                   |
-| `pending_ttl`                                   | 2 min                          | The ccpool precheck acts on it; a review deleted in the browser is seen within 2 min |
-| `ci_active_ttl` / `ci_max_age`                  | 60 s / 30 min                  |                                                                                      |
-| `ci_failed_ttl`                                 | 5 min                          | Bounds detection of job-level changes that decide reviewability (see "CI changes")   |
-| `terminal_ttl`                                  | 24 h                           | Merged and closed PRs are effectively frozen                                         |
-| `settle_timeout`                                | 30 s                           | Bounds the delay the settle rule adds to detection                                   |
-| `keepalive_window`                              | 24 h                           |                                                                                      |
-| `expiry`                                        | 7 d                            | Matches today's tombstone retention (`cmd/pg-connector/cache_dispatch.go`)           |
-| `fill_horizon`                                  | one `summary_ttl`              | Fill with what would be due within one more cycle                                    |
-| `change_log_retention` / `consumer_stale_after` | 14 d / 7 d                     | pg-desk's current defaults (`internal/store/cursor.go`)                              |
-| `change_body_cap`                               | 4 KiB                          | Bounds the change log for comment-heavy PRs                                          |
-| `batch_size` / `workers`                        | 74 / 4                         | 74 is the measured 1-point boundary                                                  |
-| `rate_reserve_points`                           | 1000                           | The existing reserve (`cmd/pg-connector-pr-github/internal/provider.go`)             |
-| `graphql_points_per_hour`                       | 1500 in shadow; set at cutover | The phase A kill criterion; the cutover value depends on the live spend (unmeasured) |
-| `background_share`                              | 0.8                            | Keeps a fifth of the cap for interactive reads and writes                            |
-| `rest_requests_per_hour`                        | 2000                           | Inside GitHub's documented 5,000 per token                                           |
-| `rest_search_per_minute`                        | 20                             | Inside GitHub's documented 30 per minute                                             |
+| Setting                                         | Default                              | Reason                                                                                                                                                                          |
+| ----------------------------------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `query_ttl` for `mine` / `team`                 | 60 s / 120 s                         | The live flow's cadences                                                                                                                                                        |
+| `adhoc_query_ttl`                               | 120 s                                |                                                                                                                                                                                 |
+| `summary_ttl`                                   | 60 s                                 | One batched call per minute per 74 kept-alive PRs                                                                                                                               |
+| `detail_ttl` / `detail_max_age`                 | 10 min / 30 min                      | Extended by revalidation                                                                                                                                                        |
+| `conversation_ttl` / `conversation_max_age`     | 10 min / 30 min                      | Today's sweep cadence; the `updatedAt` spike MAY relax the maximum                                                                                                              |
+| `pending_ttl`                                   | 2 min                                | The ccpool precheck acts on it; a review deleted in the browser is seen within 2 min                                                                                            |
+| `ci_active_ttl` / `ci_max_age`                  | 60 s / 30 min                        |                                                                                                                                                                                 |
+| `ci_failed_ttl`                                 | 5 min                                | Bounds detection of job-level changes that decide reviewability (see "CI changes")                                                                                              |
+| `terminal_ttl`                                  | 24 h                                 | Merged and closed PRs are effectively frozen                                                                                                                                    |
+| `settle_timeout`                                | 30 s                                 | Bounds the delay the settle rule adds to detection                                                                                                                              |
+| `keepalive_window`                              | 24 h                                 |                                                                                                                                                                                 |
+| `expiry`                                        | 7 d                                  | Matches today's tombstone retention (`cmd/pg-connector/cache_dispatch.go`)                                                                                                      |
+| `fill_horizon`                                  | one `summary_ttl`                    | Fill with what would be due within one more cycle                                                                                                                               |
+| `change_log_retention` / `consumer_stale_after` | 14 d / 7 d                           | pg-desk's current defaults (`internal/store/cursor.go`)                                                                                                                         |
+| `change_body_cap`                               | 4 KiB                                | Bounds the change log for comment-heavy PRs                                                                                                                                     |
+| `batch_size` / `workers`                        | 74 / 4                               | 74 is the measured 1-point boundary                                                                                                                                             |
+| `rate_reserve_points`                           | 1000                                 | The existing reserve (`cmd/pg-connector-pr-github/internal/provider.go`)                                                                                                        |
+| `graphql_points_per_hour`                       | 1,500 in shadow; 4,000 after cutover | Phase A's kill criterion while running beside the live flow; after cutover, the ADR 0077 row S35 ceiling, since the daemon replaces the live flow's spend (see "Expected cost") |
+| `background_share`                              | 0.9                                  | Almost all spend is background (ruling 16); a tenth stays for misses, writes and pass-through ops                                                                               |
+| `rest_requests_per_hour`                        | 3,000                                | Inside GitHub's documented 5,000 per token, leaving 2,000 for other `gh` users of the token                                                                                     |
+| `rest_search_per_minute`                        | 20                                   | Inside GitHub's documented 30 per minute                                                                                                                                        |
 
 ### Expected cost
 
@@ -848,15 +864,29 @@ reconciliation note). Membership-only query: 1 point per string per call (`pg2-c
   is 320 x 2 = 640 points, and at 3 points 320 x 3 = 960.
 
 Floor at N = 80 without the hard-age re-pulls: 60 + 300 + 120 = 480 points. With them: 480 + 640 = 1,120
-points at 2 points per fetch, and 480 + 960 = 1,440 at 3 points. Against the shadow cap of 1,500 with a
-`background_share` of 0.8 (1,500 x 0.8 = 1,200 points for background work), the 2-point case fits with
-1,200 - 1,120 = 80 points to spare and the 3-point case does NOT fit (1,440 is over 1,200), so background
-refresh would be throttled and data would age past its settings. Not yet counted: `pending` reads (read
+points at 2 points per fetch, and 480 + 960 = 1,440 at 3 points. Not yet counted: `pending` reads (read
 through on demand only), PRs kept alive by ad-hoc reads for `keepalive_window`, and interactive spend.
 
-The phase 1 spike MUST therefore measure the per-group cost and the `updatedAt` behavior BEFORE the
-defaults are fixed. Relaxing both `*_max_age` to 2 h cuts the re-pulls to N x 2 groups x 0.5 per hour =
-N fetches (80 at N = 80, so 160 points at 2 points per fetch and 240 at 3), which fits either case.
+**Where the spend sits** (ruling 16). With this design almost every origin call is background work: the
+callers' reads become local hits, so the interactive classes spend only on misses, `--fresh`, `refresh`,
+writes and the pass-through ops. The budget is therefore split in favour of background work
+(`background_share` 0.9), and the cap is a guardrail against runaway spend, not a target the floor has to
+squeeze under:
+
+- **After cutover** the daemon REPLACES the live flow's listing polls, sweeps and per-PR hydrations on the
+  same token, so its cap is not on top of today's spend. Default `graphql_points_per_hour` 4,000, the
+  existing design ceiling for PR change detection (ADR 0077, row S35), of which 4,000 x 0.9 = 3,600 is
+  for background work. Both floors fit with room: 3,600 - 1,120 = 2,480 points spare at 2 points per
+  fetch, 3,600 - 1,440 = 2,160 at 3.
+- **During the shadow run** the daemon runs ALONGSIDE the live flow, so its spend is extra. Its default
+  cap stays phase A's 1,500 points per hour, which the operator MAY raise. At 0.9 that leaves
+  1,500 x 0.9 = 1,350 for background work: the 2-point floor fits (1,350 - 1,120 = 230 spare); the
+  3-point floor is 1,440 - 1,350 = 90 over. In that case the shadow run either raises its cap to 1,600
+  (1,600 x 0.9 = 1,440) or relaxes both `*_max_age` to 2 h, which cuts the re-pulls to N x 2 groups x 0.5
+  per hour = N fetches (80 at N = 80, so 160 points at 2 points per fetch and 240 at 3).
+
+The phase 1 spike measures the per-group cost and the `updatedAt` behavior, and the defaults are set from
+it; nothing in the design depends on which case it finds.
 
 **Per detected change**: unknown until the spike. **CI** spends REST, not points: one `run list`
 request per `runs` refresh, plus one job fetch per NEWLY completed non-passing attempt (job results are
@@ -871,12 +901,12 @@ current head and nothing running, and the rest idle:
   requests.
 - Job fetches, an illustrative 20 newly failed attempts in the hour: 20 requests.
 - Total: 600 + 120 + 120 + 20 = 860 requests per hour, against the background share of the
-  `rest_requests_per_hour` cap, 2,000 x 0.8 = 1,600.
+  `rest_requests_per_hour` cap, 3,000 x 0.9 = 2,700.
 
-Worst case, every kept-alive PR active at once (a mass rebase): 80 x 60 = 4,800 requests per hour, three
-times the background share. The governor then holds REST background work at 1,600 per hour, so each PR's
-`runs` refreshes about 1,600 / 80 = 20 times per hour (every 3 min) instead of every 60 s, until the
-burst drains. `background_share` applies to each bucket's cap, REST as well as GraphQL.
+Worst case, every kept-alive PR active at once (a mass rebase): 80 x 60 = 4,800 requests per hour. The
+governor then holds REST background work at 2,700 per hour, so each PR's `runs` refreshes about
+2,700 / 80 = 33.75 times per hour (every 60 / 33.75 = 1.8 min) instead of every 60 s, until the burst
+drains. `background_share` applies to each bucket's cap, REST as well as GraphQL.
 
 ## Error handling
 
@@ -1157,8 +1187,8 @@ flowchart LR
    daemon's classifier, the change feed with acknowledgement and baselines, the write path on the existing
    sidecar, the pass-through ops.
 4. **Shadow run.** pg-desk-shadow starts the daemon as its own child, with its own socket, state directory
-   and config (`PG_CONNECTOR_GITHUB_*`) and the existing read-only `gh` shim, capped at 1,500 points per
-   hour. The collector reads the daemon's change feed by calling the client directly (the umbrella
+   and config (`PG_CONNECTOR_GITHUB_*`) and the existing read-only `gh` shim, capped by default at 1,500
+   points per hour, which the operator MAY raise (see "Expected cost"). The collector reads the daemon's change feed by calling the client directly (the umbrella
    pass-through is not live yet) and compares it with the live events: feed misses, detection delay,
    sweep-caught events, shadow-only detections, cost, and CI-driven categorization changes (a PR moving
    between blocked and reviewable) seen by each side. The DEFAULT cutover criteria are: zero unexplained
@@ -1167,7 +1197,8 @@ flowchart LR
    ruling 14 the operator MAY cut over with criteria unmet when the run shows the daemon working; the
    cutover bead MUST then record the operator's decision and every unmet criterion, and each unmet
    criterion MUST get its own follow-up bead.
-5. **Cutover.** Install the daemon; switch the registry to the argv instances; turn on the umbrella
+5. **Cutover.** Install the daemon with its post-cutover budget (default 4,000 points per hour, adjusted
+   from what the shadow run measured, see "Expected cost"); switch the registry to the argv instances; turn on the umbrella
    pass-through, acknowledgement and opt-out; clear the two instances' umbrella cache and ledger files;
    retire `pr-sweep`; remove `--fresh` from pg-desk gather's `pr` reads (the `issue` reads and
    `head_check` keep it); exercise the pg-router sources live once (repo
@@ -1337,9 +1368,5 @@ To re-scope or close AFTER this spec is approved, not before:
 
 ## Open questions
 
-Revision 4's questions on Linux, the cutover criteria, the pg-pr plugin docs and `ci changes` are
-answered by rulings 11 to 14. Still open:
-
-1. **Registration** (see "Registration"): confirm option A, argv instances with the old names.
-2. **Cutover budget**: the `graphql_points_per_hour` value after cutover, which depends on the live flow's
-   own spend (not yet measured).
+None. Rulings 11 to 16 answer every question raised by revisions 4 and 6. The budget defaults are
+starting points, set from the phase 1 spike and the shadow run (see "Expected cost").
