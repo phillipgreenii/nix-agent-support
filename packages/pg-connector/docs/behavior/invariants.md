@@ -321,8 +321,7 @@ create`), `--backend` is how an operator resolves an otherwise-ambiguous N > 1 r
 status`/`config validate`.
 - **`INV-REG-4`** <!-- uuid: a9092e28-e3ad-4c3a-8d7c-9def36d2d111 --> — A registry entry, under any `connector.<type>` key or
   under `attention.sources`, `search.sources` or `activity.sources`, MUST be either a plain string
-  (name and binary are the same word, command is `[name]`) or a mapping with exactly the keys `name`
-  and `command`. `command` MUST be a non-empty list of strings whose first word is a bare binary
+  (name and binary are the same word, command is `[name]`) or a mapping with the keys `name` and `command` and optionally `previous_names`. `command` MUST be a non-empty list of strings whose first word is a bare binary
   name (non-empty, no path separator, no whitespace); it MUST NOT be a shell string. A name MUST be
   non-empty, MUST NOT contain a path separator, and MUST NOT contain `__`. Within one list a name
   MUST appear at most once. A name registered under more than one key MUST have the same command
@@ -332,6 +331,15 @@ status`/`config validate`.
   `backends.<name>` and the cache and ledger keys. A `pg-connector-activity-*` capability-only
   backend MUST NOT appear under `connector.<type>` whether the prefix is on the name or on
   `command[0]`.
+  `previous_names`, when present, MUST be a list of names that obey the name rules above, none equal
+  to the entry's own name, none repeated, and none a currently registered backend; a name registered
+  under more than one key MUST carry the same `previous_names` under each. Because the name is part
+  of the ledger key, renaming a backend orphans the ledger filed under its old name (and re-emits
+  every live entry as `added` on the first `changes` run) unless the old name is declared in
+  `previous_names`: when an entry's own ledger file is absent, the umbrella MUST adopt, for the first
+  previous name that has one, the ledger of the same type, query and instance discriminator by
+  copying it under the ledger lock, MUST NOT overwrite an existing ledger, and MUST leave the old
+  file in place. The cache is not adopted; it re-warms.
 
 ## CLI outcome reporting and exit codes
 

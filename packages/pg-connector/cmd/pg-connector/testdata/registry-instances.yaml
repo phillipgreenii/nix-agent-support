@@ -5,11 +5,15 @@ activity:
         - --beads-dir
         - /example/pg2
       name: pg-connector-issue-beads-pg2
+      previous_names:
+        - pg-connector-issue-beads
     - command:
         - pg-connector-issue-beads
         - --beads-dir
         - /example/zr
       name: pg-connector-issue-beads-zr
+      previous_names:
+        - pg-connector-issue-beads
 attention:
   sources:
     - command:
@@ -17,11 +21,15 @@ attention:
         - --beads-dir
         - /example/pg2
       name: pg-connector-issue-beads-pg2
+      previous_names:
+        - pg-connector-issue-beads
     - command:
         - pg-connector-issue-beads
         - --beads-dir
         - /example/zr
       name: pg-connector-issue-beads-zr
+      previous_names:
+        - pg-connector-issue-beads
 backends:
   pg-connector-issue-beads-pg2:
     activity_actors:
@@ -37,11 +45,15 @@ connector:
         - --beads-dir
         - /example/pg2
       name: pg-connector-issue-beads-pg2
+      previous_names:
+        - pg-connector-issue-beads
     - command:
         - pg-connector-issue-beads
         - --beads-dir
         - /example/zr
       name: pg-connector-issue-beads-zr
+      previous_names:
+        - pg-connector-issue-beads
   scm: pg-connector-scm-git
 search:
   sources:
@@ -50,8 +62,12 @@ search:
         - --beads-dir
         - /example/pg2
       name: pg-connector-issue-beads-pg2
+      previous_names:
+        - pg-connector-issue-beads
     - command:
         - pg-connector-issue-beads
         - --beads-dir
         - /example/zr
       name: pg-connector-issue-beads-zr
+      previous_names:
+        - pg-connector-issue-beads

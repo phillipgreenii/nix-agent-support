@@ -36,6 +36,11 @@ type backendRef struct {
 	// Explicit is true when written as {name, command}; config show lists
 	// only these under "commands".
 	Explicit bool
+	// PreviousNames are the instance's former backend names (bead
+	// pg2-ik9ew), declared with previous_names on a {name, command} entry:
+	// loadLedgerAdopting adopts the ledger a previous name left behind, so a
+	// rename does not orphan it. Always empty for a plain string.
+	PreviousNames []string
 }
 
 // cacheKeySeparator is the two-character separator cache.go and ledger.go
@@ -101,7 +106,7 @@ func decodeBackendRef(key string, idx int, n *yaml.Node) (backendRef, error) {
 }
 
 func decodeInstanceMapping(key, where string, n *yaml.Node) (backendRef, error) {
-	var nameNode, commandNode *yaml.Node
+	var nameNode, commandNode, previousNode *yaml.Node
 	for i := 0; i+1 < len(n.Content); i += 2 {
 		k, v := n.Content[i], n.Content[i+1]
 		switch {
@@ -109,8 +114,10 @@ func decodeInstanceMapping(key, where string, n *yaml.Node) (backendRef, error) 
 			nameNode = v
 		case k.Kind == yaml.ScalarNode && k.Value == "command" && commandNode == nil:
 			commandNode = v
+		case k.Kind == yaml.ScalarNode && k.Value == "previous_names" && previousNode == nil:
+			previousNode = v
 		default:
-			return backendRef{}, fmt.Errorf("registry: %s: unknown or duplicate key %q in a backend entry; a {name, command} entry has exactly those two keys", where, k.Value)
+			return backendRef{}, fmt.Errorf("registry: %s: unknown or duplicate key %q in a backend entry; a {name, command} entry has the keys name, command and optionally previous_names", where, k.Value)
 		}
 	}
 	if nameNode == nil {
@@ -145,7 +152,42 @@ func decodeInstanceMapping(key, where string, n *yaml.Node) (backendRef, error) 
 	if err := validateCommandWord(key, name, command[0]); err != nil {
 		return backendRef{}, err
 	}
-	return backendRef{Name: name, Command: command, Explicit: true}, nil
+	var previous []string
+	if previousNode != nil {
+		var err error
+		if previous, err = decodePreviousNames(key, name, previousNode); err != nil {
+			return backendRef{}, err
+		}
+	}
+	return backendRef{Name: name, Command: command, Explicit: true, PreviousNames: previous}, nil
+}
+
+// decodePreviousNames decodes the previous_names list of the instance name:
+// a list of strings, each a valid backend name (the same rules as name:),
+// none equal to name itself and none repeated. An empty list means none.
+func decodePreviousNames(key, name string, n *yaml.Node) ([]string, error) {
+	if n.Kind != yaml.SequenceNode {
+		return nil, fmt.Errorf("registry: %s: backend %q: previous_names must be a list of strings, not %s", key, name, nodeKindName(n.Kind))
+	}
+	var out []string
+	seen := make(map[string]bool, len(n.Content))
+	for j, w := range n.Content {
+		if w.Kind != yaml.ScalarNode || w.Tag == "!!null" {
+			return nil, fmt.Errorf("registry: %s: backend %q: previous_names[%d] must be a string", key, name, j)
+		}
+		if err := validateRefName(key, w.Value); err != nil {
+			return nil, err
+		}
+		if w.Value == name {
+			return nil, fmt.Errorf("registry: %s: backend %q: previous name %q must not equal the backend's own name", key, name, w.Value)
+		}
+		if seen[w.Value] {
+			return nil, fmt.Errorf("registry: %s: backend %q: duplicate previous name %q", key, name, w.Value)
+		}
+		seen[w.Value] = true
+		out = append(out, w.Value)
+	}
+	return out, nil
 }
 
 // decodeBackendRefs decodes a registration list: an explicitly empty list is
@@ -274,6 +316,42 @@ func buildCommands(regs []registration) (map[string][]string, error) {
 	return commands, nil
 }
 
+// buildPreviousNames records name -> previous names over every registration
+// (bead pg2-ik9ew) and rejects a name whose registrations disagree about them
+// (compared like commands: a plain string counts as having none, so forgetting
+// previous_names on one list is caught loudly) and a previous name that is
+// itself a registered backend (adopting a LIVE instance's ledger would be a
+// config mistake). The result holds only names that have previous names.
+func buildPreviousNames(regs []registration, registered map[string][]string) (map[string][]string, error) {
+	previous := make(map[string][]string)
+	seen := make(map[string]bool)
+	firstKey := make(map[string]string)
+	for _, reg := range regs {
+		for _, ref := range reg.refs {
+			if !seen[ref.Name] {
+				seen[ref.Name] = true
+				firstKey[ref.Name] = reg.key
+				if len(ref.PreviousNames) > 0 {
+					previous[ref.Name] = ref.PreviousNames
+				}
+				continue
+			}
+			if !sameCommand(previous[ref.Name], ref.PreviousNames) {
+				return nil, fmt.Errorf("registry: backend %q is registered with different previous_names (%s: %q vs %s: %q); a name registered more than once must carry the same previous_names each time",
+					ref.Name, firstKey[ref.Name], previous[ref.Name], reg.key, ref.PreviousNames)
+			}
+		}
+	}
+	for _, name := range sortedKeys(previous) {
+		for _, p := range previous[name] {
+			if _, live := registered[p]; live {
+				return nil, fmt.Errorf("registry: previous name %q of backend %q is also a registered backend; a previous name must be one that is no longer registered", p, name)
+			}
+		}
+	}
+	return previous, nil
+}
+
 func sameCommand(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
@@ -296,6 +374,16 @@ func (r *Registry) Command(name string) []string {
 		}
 	}
 	return []string{name}
+}
+
+// PreviousNames returns the former backend names declared with previous_names
+// on the instance name (bead pg2-ik9ew), in declaration order; nil when none
+// (a plain string, an unknown name, or a nil registry).
+func (r *Registry) PreviousNames(name string) []string {
+	if r == nil {
+		return nil
+	}
+	return r.previousNames[name]
 }
 
 // Target is the scriptout.Target for the registered name.
@@ -361,7 +449,12 @@ func (r *Registry) Validate() error {
 	if _, err := r.ActivitySources(); err != nil {
 		return err
 	}
-	_, err := buildCommands(r.registrations())
+	regs := r.registrations()
+	commands, err := buildCommands(regs)
+	if err != nil {
+		return err
+	}
+	_, err = buildPreviousNames(regs, commands)
 	return err
 }
 

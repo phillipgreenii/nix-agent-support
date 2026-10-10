@@ -71,6 +71,23 @@ There is no `exec:`-prefix or other built-in/external distinction, since nothing
 the umbrella itself. The same shape works under `attention.sources`, `search.sources` and
 `activity.sources`.
 
+**Renaming a backend orphans its change ledger** (and cache): both are filed under the name, so a
+renamed backend starts empty and its first `changes` run re-emits every live entry as `added`, a
+burst of change events. Declare the old name on the new entry and the ledger is adopted on first
+use:
+
+```yaml
+- name: pg-connector-issue-beads-zr
+  command: [pg-connector-issue-beads, --beads-dir, /path/to/zr-tracker]
+  previous_names: [pg-connector-issue-beads]
+```
+
+When the new name has no ledger yet, the ledger of the same type, query and instance discriminator
+(the `PG_CONNECTOR_ISSUE_BEADS_DIR` tracker, for the beads backend) under the first previous name
+that has one is copied under the ledger lock; an existing ledger is never overwritten and the old
+file stays in place. Only ledgers are adopted, not the cache (it re-warms). The home-manager module
+exposes the key as `previousNames` on an instance.
+
 One binary registered twice, a plain-string list next to an instance list:
 
 ```yaml

@@ -110,7 +110,8 @@ entity_id, occurred_at, summary, as_of, stale}` plus an optional `approximate` m
   umbrella into the backend instance(s) registered for each capability (`INV-REG-1`).
 - **Instance** — a registry entry `{name, command}`; its name is the backend's identity, its
   command the argv the umbrella runs (`INV-REG-4`). A plain string is the instance whose name and
-  sole command word are that string.
+  sole command word are that string. An instance MAY list
+  `previous_names` so its ledger survives a rename (`INV-REG-4`).
 - **List-valued entry** — a capability whose registry entry names zero or more backends (`pr`,
   `issue`, `ci` today); a **fan-out** op queries every one of them.
 - **Single-valued entry** — a capability whose registry entry names exactly one backend (`scm`

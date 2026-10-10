@@ -376,7 +376,7 @@ func fanOutChangesOne(ctx context.Context, reg *Registry, entityType, b, query, 
 	key := LedgerKey{Type: entityType, Backend: b, Query: query, Instance: instance}
 	res := changesBackendResult{backend: b, key: key}
 
-	l, err := loadLedger(key)
+	l, err := loadLedgerAdopting(key, reg.PreviousNames(b))
 	if err != nil {
 		res.status = SourceDegraded
 		res.reason = err.Error()

@@ -55,6 +55,9 @@ type Registry struct {
 	// commands maps a registered name to its argv, filled at parse time by
 	// a best-effort pass over every registration that decodes cleanly.
 	commands map[string][]string
+	// previousNames maps an instance name to its declared previous_names
+	// (bead pg2-ik9ew); only names that declare some appear.
+	previousNames map[string][]string
 }
 
 type registryDoc struct {
@@ -210,11 +213,15 @@ func parseRegistry(data []byte, path string) (*Registry, error) {
 	// fills the name -> argv map and rejects a name registered with two
 	// different commands. Entries that fail to decode are skipped here; the
 	// accessors report them.
-	commands, err := buildCommands(reg.registrations())
+	regs := reg.registrations()
+	commands, err := buildCommands(regs)
 	if err != nil {
 		return nil, fmt.Errorf("registry: parse %s: %w", path, err)
 	}
 	reg.commands = commands
+	if reg.previousNames, err = buildPreviousNames(regs, commands); err != nil {
+		return nil, fmt.Errorf("registry: parse %s: %w", path, err)
+	}
 	return reg, nil
 }
 

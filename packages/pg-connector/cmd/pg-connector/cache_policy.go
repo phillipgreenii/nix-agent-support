@@ -101,11 +101,11 @@ func resolveCacheRefreshAfter(reg *Registry) time.Duration {
 // queryMembers returns the live (non-tombstoned) member ids of one query's
 // ledger index (INV-CACHE-3). ok is false when the ledger cannot be read or
 // holds no live member, which a caller treats as "nothing to scope to".
-func queryMembers(entityType, backend, query string) (map[string]bool, bool) {
+func queryMembers(reg *Registry, entityType, backend, query string) (map[string]bool, bool) {
 	if err := ensureLedgerDirExists(); err != nil {
 		return nil, false
 	}
-	l, err := loadLedger(LedgerKey{Type: entityType, Backend: backend, Query: query, Instance: ledgerInstanceDiscriminator(entityType)})
+	l, err := loadLedgerAdopting(LedgerKey{Type: entityType, Backend: backend, Query: query, Instance: ledgerInstanceDiscriminator(entityType)}, reg.PreviousNames(backend))
 	if err != nil {
 		return nil, false
 	}

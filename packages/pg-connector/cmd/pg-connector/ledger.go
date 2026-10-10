@@ -267,6 +267,22 @@ func newEmptyLedger() *Ledger {
 // loadLedger reads key's ledger file, returning a zero-value *Ledger
 // (Entries/Consumers non-nil, empty) if the file does not exist yet.
 func loadLedger(key LedgerKey) (*Ledger, error) {
+	return loadLedgerAdopting(key, nil)
+}
+
+// loadLedgerAdopting is loadLedger plus legacy-name adoption (bead pg2-ik9ew):
+// renaming a backend changes the ledger filename, and a fresh ledger re-emits
+// every live entry as added (an issue.changed burst), so an instance declares
+// its former names with previous_names. When key's own file is absent, the
+// first previous name (in order) whose file exists for the SAME type, query
+// and instance discriminator is adopted: its bytes are copied to key's path
+// (temp-file-and-rename, under key's flock, so concurrent first loads copy
+// once and a later save is never overwritten) and decoded. The legacy file is
+// left in place. An existing file for key always wins, so adoption happens at
+// most once per key. A legacy file that does not decode is skipped, never an
+// error: it must not wedge the renamed backend. With no previous names this is
+// exactly loadLedger.
+func loadLedgerAdopting(key LedgerKey, previousNames []string) (*Ledger, error) {
 	path, err := ledgerPath(key)
 	if err != nil {
 		return nil, err
@@ -280,7 +296,7 @@ func loadLedger(key LedgerKey) (*Ledger, error) {
 
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return newEmptyLedger(), nil
+		return adoptLegacyLedger(key, path, previousNames)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("ledger: read %s: %w", path, err)
@@ -297,6 +313,70 @@ func loadLedger(key LedgerKey) (*Ledger, error) {
 		l.Consumers = map[string]ConsumerState{}
 	}
 	return &l, nil
+}
+
+// adoptLegacyLedger is loadLedgerAdopting's absent-file path; the caller
+// holds key's flock. It returns the adopted ledger, or an empty one when no
+// previous name has a usable file.
+func adoptLegacyLedger(key LedgerKey, path string, previousNames []string) (*Ledger, error) {
+	for _, previous := range previousNames {
+		legacyKey := key
+		legacyKey.Backend = previous
+		legacyPath, err := ledgerPath(legacyKey)
+		if err != nil {
+			return nil, err
+		}
+		data, err := os.ReadFile(legacyPath)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("ledger: read legacy %s: %w", legacyPath, err)
+		}
+		var l Ledger
+		if json.Unmarshal(data, &l) != nil {
+			continue
+		}
+		if err := writeFileAtomic(path, data); err != nil {
+			return nil, fmt.Errorf("ledger: adopt %s as %s: %w", legacyPath, path, err)
+		}
+		if l.Entries == nil {
+			l.Entries = map[string]LedgerEntry{}
+		}
+		if l.Consumers == nil {
+			l.Consumers = map[string]ConsumerState{}
+		}
+		return &l, nil
+	}
+	return newEmptyLedger(), nil
+}
+
+// writeFileAtomic writes data to path via a temp file in the same directory
+// and a rename, creating the directory if needed. The caller holds the flock.
+func writeFileAtomic(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".ledger-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	return nil
 }
 
 // saveLedger writes l for key via flock-on-sibling-lock-file plus
@@ -322,23 +402,8 @@ func saveLedger(key LedgerKey, l *Ledger) error {
 		return fmt.Errorf("ledger: encode %s: %w", path, err)
 	}
 
-	tmp, err := os.CreateTemp(dir, ".ledger-*.tmp")
-	if err != nil {
-		return fmt.Errorf("ledger: create temp file in %s: %w", dir, err)
-	}
-	tmpPath := tmp.Name()
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("ledger: write temp file for %s: %w", path, err)
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("ledger: close temp file for %s: %w", path, err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("ledger: rename temp file onto %s: %w", path, err)
+	if err := writeFileAtomic(path, data); err != nil {
+		return fmt.Errorf("ledger: write %s: %w", path, err)
 	}
 	return nil
 }

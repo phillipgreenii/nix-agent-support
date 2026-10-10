@@ -193,7 +193,7 @@ func cacheFallbackEntities(ctx context.Context, reg *Registry, entityType, backe
 	if err := ensureCacheDirExists(); err != nil {
 		return nil, nil, false
 	}
-	members, ok := queryMembers(entityType, backend, query)
+	members, ok := queryMembers(reg, entityType, backend, query)
 	if !ok {
 		return nil, nil, false
 	}

@@ -112,26 +112,30 @@ let
       "/example/${suffix}"
     ];
   };
+  # The same instance after a rename (bead pg2-ik9ew): previousNames renders as
+  # previous_names; an empty list renders no key at all.
+  instanceBeadsRenamed =
+    suffix: instanceBeads suffix // { previousNames = [ "pg-connector-issue-beads" ]; };
   instancesExample = {
     connector = {
       issue = [
         "pg-connector-issue-jira"
-        (instanceBeads "pg2")
-        (instanceBeads "zr")
+        (instanceBeadsRenamed "pg2")
+        (instanceBeadsRenamed "zr")
       ];
       scm = "pg-connector-scm-git";
     };
     attention.sources = [
-      (instanceBeads "pg2")
-      (instanceBeads "zr")
+      (instanceBeadsRenamed "pg2")
+      (instanceBeadsRenamed "zr")
     ];
     search.sources = [
-      (instanceBeads "pg2")
-      (instanceBeads "zr")
+      (instanceBeadsRenamed "pg2")
+      (instanceBeadsRenamed "zr")
     ];
     activity.sources = [
-      (instanceBeads "pg2")
-      (instanceBeads "zr")
+      (instanceBeadsRenamed "pg2")
+      (instanceBeadsRenamed "zr")
     ];
     backends = {
       "pg-connector-issue-beads-pg2".activity_actors = [ "Example Person" ];
@@ -204,7 +208,13 @@ in
         }
       ];
     })
-    && !(renders { connector.issue = [ { command = [ "pg-connector-issue-beads" ]; } ]; });
+    && !(renders { connector.issue = [ { command = [ "pg-connector-issue-beads" ]; } ]; })
+    # previousNames must be a list of strings
+    && !(renders {
+      connector.issue = [
+        (instanceBeads "pg2" // { previousNames = "pg-connector-issue-beads"; })
+      ];
+    });
   # Pre-alert configuration: MUST stay byte-for-byte unchanged.
   legacy = render legacy;
   # An explicit empty connector.alert is omitted exactly like thread/calendar.

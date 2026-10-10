@@ -46,6 +46,16 @@ func TestRegistryInstancesGolden(t *testing.T) {
 	if got := reg.Command("pg-connector-issue-jira"); !reflect.DeepEqual(got, []string{"pg-connector-issue-jira"}) {
 		t.Errorf("plain command = %v", got)
 	}
+	// previous_names (bead pg2-ik9ew) rides on each beads instance, so a
+	// backend rename adopts the legacy-name ledger; a plain string has none.
+	for _, name := range wantInstances {
+		if got := reg.PreviousNames(name); !reflect.DeepEqual(got, []string{"pg-connector-issue-beads"}) {
+			t.Errorf("PreviousNames(%s) = %v", name, got)
+		}
+	}
+	if got := reg.PreviousNames("pg-connector-issue-jira"); got != nil {
+		t.Errorf("plain PreviousNames = %v", got)
+	}
 	all, err := reg.AllBackends()
 	if err != nil || len(all) != 4 { // jira, two beads instances, scm
 		t.Errorf("AllBackends = %v, %v; want two instances of one binary as two entries", all, err)

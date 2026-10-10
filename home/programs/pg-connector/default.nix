@@ -30,9 +30,36 @@ let
           type = lib.types.nonEmptyListOf lib.types.str;
           description = "argv run for this instance: the first word is a bare binary name resolved on PATH, the rest are its arguments. The JSON request still arrives on stdin.";
         };
+        previousNames = lib.mkOption {
+          type = lib.types.listOf lib.types.str;
+          default = [ ];
+          example = [ "pg-connector-issue-beads" ];
+          description = "Former names of this instance (bead pg2-ik9ew), rendered as `previous_names`. On first use under the new name, pg-connector adopts the change ledger a previous name left behind (same type, query and instance discriminator), so a rename does not orphan it and re-emit every live entry as `added`. Renaming a backend WITHOUT declaring its old name here orphans the old ledger. Empty (the default) renders no key.";
+        };
       };
     }
   );
+
+  # An instance renders as { name, command } plus previous_names only when it
+  # declares some (an empty list renders no key, so a rename-free config is
+  # byte-for-byte what it was before); a plain string renders untouched.
+  renderEntry =
+    entry:
+    if builtins.isString entry then
+      entry
+    else
+      {
+        inherit (entry) name command;
+      }
+      // lib.optionalAttrs (entry.previousNames != [ ]) { previous_names = entry.previousNames; };
+  renderEntries =
+    v:
+    if builtins.isList v then
+      map renderEntry v
+    else if v == null then
+      null
+    else
+      renderEntry v;
 
   # connector.<type> as pg-connector's own registry.go actually requires it:
   # pr/issue/ci MUST be either a non-empty list or ABSENT entirely
@@ -43,40 +70,42 @@ let
   # connector: mapping rather than rendered as `[]`/`null` — this matters
   # for any host that only registers some capabilities, not just one that
   # registers all four the way ZR's machine config does.
-  renderedConnector = lib.filterAttrs (_: v: v != null) {
-    pr = if cfg.connector.pr == [ ] then null else cfg.connector.pr;
-    issue = if cfg.connector.issue == [ ] then null else cfg.connector.issue;
-    ci = if cfg.connector.ci == [ ] then null else cfg.connector.ci;
-    scm = cfg.connector.scm;
-    # thread (bead pg2-2j5ac.40.3): mirrors pr/issue/ci's identical
-    # empty-list-omission pattern above -- registry.go's
-    # validateBackendList rejects an explicit `connector.thread: []`.
-    thread = if cfg.connector.thread == [ ] then null else cfg.connector.thread;
-    # calendar (docket pg2-o2dmu): mirrors thread's identical
-    # empty-list-omission pattern -- registry.go's validateBackendList
-    # rejects an explicit `connector.calendar: []` the same way. Default
-    # stays [ ] in THIS repo's module (public flake, no ZR-specific
-    # calendar names hardcoded here) -- the real registration lives in the
-    # consuming machine flake (phillipg-nix-ziprecruiter).
-    calendar = if cfg.connector.calendar == [ ] then null else cfg.connector.calendar;
-    # agentsession (docket pg2-eezd1): mirrors thread/calendar's identical
-    # empty-list-omission pattern above -- registry.go's
-    # validateBackendList rejects an explicit `connector.agentsession: []`
-    # the same way.
-    agentsession = if cfg.connector.agentsession == [ ] then null else cfg.connector.agentsession;
-    # alert (bead pg2-9tql6): mirrors thread/calendar/agentsession's
-    # identical empty-list-omission pattern above -- registry.go's
-    # validateBackendList rejects an explicit `connector.alert: []` the
-    # same way.
-    alert = if cfg.connector.alert == [ ] then null else cfg.connector.alert;
-    # mail (docket pg2-qc5uc): mirrors thread/calendar's identical
-    # empty-list-omission pattern -- registry.go's validateBackendList
-    # rejects an explicit `connector.mail: []` the same way. Default stays
-    # [ ] in THIS repo's module (public flake, no machine-specific mailbox
-    # or person values hardcoded here) -- the real registration lives in
-    # the consuming machine flake (phillipg-nix-ziprecruiter).
-    mail = if cfg.connector.mail == [ ] then null else cfg.connector.mail;
-  };
+  renderedConnector = lib.mapAttrs (_: renderEntries) (
+    lib.filterAttrs (_: v: v != null) {
+      pr = if cfg.connector.pr == [ ] then null else cfg.connector.pr;
+      issue = if cfg.connector.issue == [ ] then null else cfg.connector.issue;
+      ci = if cfg.connector.ci == [ ] then null else cfg.connector.ci;
+      scm = cfg.connector.scm;
+      # thread (bead pg2-2j5ac.40.3): mirrors pr/issue/ci's identical
+      # empty-list-omission pattern above -- registry.go's
+      # validateBackendList rejects an explicit `connector.thread: []`.
+      thread = if cfg.connector.thread == [ ] then null else cfg.connector.thread;
+      # calendar (docket pg2-o2dmu): mirrors thread's identical
+      # empty-list-omission pattern -- registry.go's validateBackendList
+      # rejects an explicit `connector.calendar: []` the same way. Default
+      # stays [ ] in THIS repo's module (public flake, no ZR-specific
+      # calendar names hardcoded here) -- the real registration lives in the
+      # consuming machine flake (phillipg-nix-ziprecruiter).
+      calendar = if cfg.connector.calendar == [ ] then null else cfg.connector.calendar;
+      # agentsession (docket pg2-eezd1): mirrors thread/calendar's identical
+      # empty-list-omission pattern above -- registry.go's
+      # validateBackendList rejects an explicit `connector.agentsession: []`
+      # the same way.
+      agentsession = if cfg.connector.agentsession == [ ] then null else cfg.connector.agentsession;
+      # alert (bead pg2-9tql6): mirrors thread/calendar/agentsession's
+      # identical empty-list-omission pattern above -- registry.go's
+      # validateBackendList rejects an explicit `connector.alert: []` the
+      # same way.
+      alert = if cfg.connector.alert == [ ] then null else cfg.connector.alert;
+      # mail (docket pg2-qc5uc): mirrors thread/calendar's identical
+      # empty-list-omission pattern -- registry.go's validateBackendList
+      # rejects an explicit `connector.mail: []` the same way. Default stays
+      # [ ] in THIS repo's module (public flake, no machine-specific mailbox
+      # or person values hardcoded here) -- the real registration lives in
+      # the consuming machine flake (phillipg-nix-ziprecruiter).
+      mail = if cfg.connector.mail == [ ] then null else cfg.connector.mail;
+    }
+  );
 
   # attention.sources/search.sources (bead pg2-8hcnx) are top-level,
   # always-list-valued registrations, independent of connector.<type> --
@@ -87,17 +116,17 @@ let
   # here means the whole attention:/search: mapping is omitted entirely
   # rather than rendered with an empty sources: [].
   renderedAttention = lib.optionalAttrs (cfg.attention.sources != [ ]) {
-    inherit (cfg.attention) sources;
+    sources = renderEntries cfg.attention.sources;
   };
   renderedSearch = lib.optionalAttrs (cfg.search.sources != [ ]) {
-    inherit (cfg.search) sources;
+    sources = renderEntries cfg.search.sources;
   };
   # activity.sources (docket pg2-vfmp7.1): same top-level, always-list-valued
   # shape and the same empty-list omission as attention/search -- the registry
   # rejects an explicit `activity: {sources: []}`, so an empty list omits the
   # whole activity: mapping.
   renderedActivity = lib.optionalAttrs (cfg.activity.sources != [ ]) {
-    inherit (cfg.activity) sources;
+    sources = renderEntries cfg.activity.sources;
   };
 
   # attentionBackendExtra renders one attention.perBackend.<name> entry onto
