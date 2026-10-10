@@ -315,3 +315,91 @@ func TestValidateTitle(t *testing.T) {
 		t.Error("501 runes: want error")
 	}
 }
+
+func TestExport_argsAndTimeout(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("bd", []string{"-C", "/db", "export", "-o", "/w/export.jsonl"}, run.Result{}, nil)
+	if err := (Client{R: f}).Export(context.Background(), "/db", "/w/export.jsonl"); err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	call := f.Calls()[0]
+	if call.Opts.Timeout != ExportTimeout {
+		t.Errorf("Timeout = %v, want %v", call.Opts.Timeout, ExportTimeout)
+	}
+	if !envHas(call.Opts.Env, "BD_JSON_ENVELOPE=1") {
+		t.Errorf("BD_JSON_ENVELOPE=1 not set")
+	}
+}
+
+func TestExport_errorWrapsDetail(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("bd", []string{"-C", "/db", "export", "-o", "/w/e"},
+		run.Result{Stderr: "boom", ExitCode: 1}, errors.New("exit 1"))
+	err := (Client{R: f}).Export(context.Background(), "/db", "/w/e")
+	if err == nil || !strings.Contains(err.Error(), "bd export") || !strings.Contains(err.Error(), "boom") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestExport_timeoutErrorPreserved(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("bd", []string{"-C", "/db", "export", "-o", "/w/e"}, run.Result{}, run.ErrTimeout)
+	err := (Client{R: f}).Export(context.Background(), "/db", "/w/e")
+	if !errors.Is(err, run.ErrTimeout) {
+		t.Errorf("err = %v, want ErrTimeout", err)
+	}
+}
+
+func TestReady_table(t *testing.T) {
+	tests := []struct {
+		name    string
+		stdout  string
+		wantIDs []string
+		wantErr string
+	}{
+		{"envelope", `{"data":[{"id":"x-1","labels":["human"]},{"id":"x-2","is_template":true}],"schema_version":1}`, []string{"x-1", "x-2"}, ""},
+		{"bare array", `[{"id":"x-1"}]`, []string{"x-1"}, ""},
+		{"empty envelope", `{"data":[],"schema_version":1}`, nil, ""},
+		{"null data", `{"data":null}`, nil, "positive control"},
+		{"garbage", `nope`, nil, "parse bd ready json"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := run.NewFakeRunner()
+			f.AddResponse("bd", []string{"-C", "/db", "ready", "-n", "0", "--json"}, run.Result{Stdout: tt.stdout}, nil)
+			rows, raw, err := Client{R: f}.Ready(context.Background(), "/db")
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Ready: %v", err)
+			}
+			var ids []string
+			for _, r := range rows {
+				ids = append(ids, r.ID)
+			}
+			if !slices.Equal(ids, tt.wantIDs) {
+				t.Errorf("ids = %v, want %v", ids, tt.wantIDs)
+			}
+			if string(raw) != tt.stdout {
+				t.Errorf("raw not preserved: %q", raw)
+			}
+			if got := f.Calls()[0].Opts.Timeout; got != ReadyTimeout {
+				t.Errorf("Timeout = %v, want %v", got, ReadyTimeout)
+			}
+		})
+	}
+}
+
+func TestReady_bdFailureWrapped(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("bd", []string{"-C", "/db", "ready", "-n", "0", "--json"},
+		run.Result{Stderr: "dolt down", ExitCode: 1}, errors.New("exit 1"))
+	_, _, err := Client{R: f}.Ready(context.Background(), "/db")
+	if err == nil || !strings.Contains(err.Error(), "dolt down") {
+		t.Errorf("err = %v", err)
+	}
+}

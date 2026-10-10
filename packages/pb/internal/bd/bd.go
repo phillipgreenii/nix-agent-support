@@ -10,9 +10,11 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/phillipgreenii/pb/internal/run"
+	"github.com/phillipgreenii/pb/internal/unstick"
 )
 
 type Gate struct {
@@ -263,4 +265,40 @@ func (c Client) Comment(ctx context.Context, dir, id, text, actor string) error 
 		return wrapErr("bd comment", res, err)
 	}
 	return nil
+}
+
+// Timeouts for the whole-workspace reads used by `pb unstick` (L-1: a hung bd
+// must not hang the sweep). Export dumps every bead, hence the larger bound.
+const (
+	ExportTimeout = 5 * time.Minute
+	ReadyTimeout  = 2 * time.Minute
+)
+
+// Export writes every bead in the DB at dir to outPath as JSONL via
+// `bd -C dir export -o outPath`. -o is always used (never stdout capture), so
+// a large workspace is not held in memory twice.
+func (c Client) Export(ctx context.Context, dir, outPath string) error {
+	res, err := c.R.Run(ctx, "bd", []string{"-C", dir, "export", "-o", outPath},
+		run.Options{Env: bdEnv(), Timeout: ExportTimeout})
+	if err != nil {
+		return wrapErr(fmt.Sprintf("bd export in %q", dir), res, err)
+	}
+	return nil
+}
+
+// Ready returns ALL ready beads in the DB at dir (-n 0 is load-bearing, as in
+// ReadyIDs) decoded for the sweep, plus bd's raw stdout so the caller can
+// persist it as ready.json. The decode tolerates a bare array in place of the
+// {data, schema_version} envelope.
+func (c Client) Ready(ctx context.Context, dir string) ([]unstick.ReadyRow, []byte, error) {
+	res, err := c.R.Run(ctx, "bd", []string{"-C", dir, "ready", "-n", "0", "--json"},
+		run.Options{Env: bdEnv(), Timeout: ReadyTimeout})
+	if err != nil {
+		return nil, nil, wrapErr(fmt.Sprintf("bd ready in %q", dir), res, err)
+	}
+	rows, err := unstick.ParseReady([]byte(res.Stdout))
+	if err != nil {
+		return nil, nil, err
+	}
+	return rows, []byte(res.Stdout), nil
 }
