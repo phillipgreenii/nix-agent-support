@@ -1417,6 +1417,51 @@ with_size_fields() {
   [[ "$output" == *"total reclaimable: 0K (1 sized, 0 unknown); held, not removable: 4.6G"* ]]
 }
 
+# Bead pg2-c8weu: an item whose dry run (or remove) command exits non-zero
+# still prints its per-item size/held lines, but is NOT summed into the total
+# (the run's command did not complete, so the total is not a promise about it).
+# The total must say so instead of silently disagreeing with the per-item
+# lines: "; N item(s) failed, excluded from total".
+@test "cmd_reclaim total is marked incomplete when an item dry run fails, and excludes that item's size, held and lower_bound bucket" {
+  mkdir -p "$TEST_DIR/ok" "$TEST_DIR/bad"
+  install_size_registry \
+    "$(with_size_fields "$(size_item ok "$TEST_DIR/ok" 'echo 1024' 'echo dry-ok')" '{"heldSizeCommand":"echo 1024"}')" \
+    "$(with_size_fields "$(size_item bad "$TEST_DIR/bad" 'echo 2048' 'echo dry-bad; exit 1')" \
+      '{"sizeKind":"lower_bound","sizeBasis":"b","heldSizeCommand":"echo 3072"}')"
+  run --separate-stderr cmd_reclaim --aggressiveness 1
+  [ "$status" -ne 0 ]
+  # per-item lines still show the failed item's figures
+  [[ "$output" == *"bad: size: >=2.0M (lower_bound: du)"* ]]
+  [[ "$output" == *"bad: held, not removable: 3.0M"* ]]
+  # the total covers only the item that succeeded and says it is incomplete
+  [[ "$output" == *"total reclaimable: 1.0M (1 sized, 0 unknown); held, not removable: 1.0M; 1 item(s) failed, excluded from total"* ]]
+  [[ "$output" != *"lower_bound (1"* ]]
+  [[ "$output" != *"4.0M"* ]]
+  [[ "$stderr" == *"dry-run command for 'bad' exited non-zero"* ]]
+}
+
+@test "cmd_reclaim prints an incomplete total even when every item's dry run fails" {
+  mkdir -p "$TEST_DIR/f1" "$TEST_DIR/f2"
+  install_size_registry \
+    "$(with_size_fields "$(size_item f1 "$TEST_DIR/f1" 'echo 1024' 'exit 1')" '{"heldSizeCommand":"echo 1024"}')" \
+    "$(size_item f2 "$TEST_DIR/f2" 'echo 1024' 'exit 2')"
+  run --separate-stderr cmd_reclaim --aggressiveness 1
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"total reclaimable: 0K (0 sized, 0 unknown); 2 item(s) failed, excluded from total"* ]]
+  [[ "$output" != *"held, not removable: 1.0M; "* ]]
+}
+
+@test "cmd_reclaim --apply marks the total incomplete when an item's remove command fails" {
+  mkdir -p "$TEST_DIR/rok" "$TEST_DIR/rbad"
+  install_size_registry \
+    "$(size_item rok "$TEST_DIR/rok" 'echo 1024' 'echo dry-rok')" \
+    "$(with_size_fields "$(size_item rbad "$TEST_DIR/rbad" 'echo 2048' 'echo dry-rbad')" '{"heldSizeCommand":"echo 1024"}' | jq -c '.variants[0].removeCommand = "false"')"
+  run --separate-stderr cmd_reclaim --aggressiveness 1 --apply
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"total reclaimed: 1.0M (1 sized, 0 unknown); 1 item(s) failed, excluded from total"* ]]
+  [[ "$stderr" == *"remove command for 'rbad' exited non-zero"* ]]
+}
+
 @test "cmd_reclaim held line is omitted when held is 0, and held is shown under --apply too" {
   mkdir -p "$TEST_DIR/h0" "$TEST_DIR/h2"
   install_size_registry \

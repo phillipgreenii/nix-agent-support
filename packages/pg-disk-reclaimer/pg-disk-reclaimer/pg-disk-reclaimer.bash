@@ -962,16 +962,23 @@ pgdr_size_label() {
 
 # pgdr_total_line: renders the closing total from per-kind buckets (bead
 # pg2-0tj7h). Usage: pgdr_total_line <word> <held-kb> <unknown> then the
-# four (kb, count) pairs for exact, estimate, upper_bound, lower_bound.
+# four (kb, count) pairs for exact, estimate, upper_bound, lower_bound, then
+# an optional failed-item count (bead pg2-c8weu; default 0).
 # Kinds are NEVER merged into one number. When every sized item is exact
 # (including "nothing was sized") the legacy
 # "total <word>: X (N sized, M unknown)" line is printed unchanged; otherwise
 # each non-empty bucket is shown as "<prefix><size> <kind>", joined by " + ",
 # with a count breakdown that omits empty buckets. A non-zero HELD total is
 # appended as "; held, not removable: X" and is never added into any bucket.
+# A non-zero FAILED count (items whose dry-run or remove command exited
+# non-zero) is appended last as "; N item(s) failed, excluded from total":
+# the total (sizes, buckets AND held) sums only items whose command
+# succeeded, and this marker says so rather than letting the total silently
+# disagree with the per-item lines (bead pg2-c8weu).
 pgdr_total_line() {
   local word="$1" held_kb="$2" unknown="$3"
   shift 3
+  local failed="${9:-0}"
   local -a kb=("$1" "$3" "$5" "$7") n=("$2" "$4" "$6" "$8")
   local -a kinds=(exact estimate upper_bound lower_bound)
   local -a count_words=(exact estimated upper_bound lower_bound)
@@ -991,6 +998,9 @@ pgdr_total_line() {
 
   if ((held_kb > 0)); then
     line+="; held, not removable: $(pgdr_format_kb "$held_kb")"
+  fi
+  if ((failed > 0)); then
+    line+="; $failed item(s) failed, excluded from total"
   fi
   printf '%s\n' "$line"
 }
@@ -1064,7 +1074,17 @@ pgdr_print_dry_run_output() {
 # "<id>: held, not removable: <size>" line (omitted when 0) and the total
 # gains "; held, not removable: <size>". Held is sized only after the main
 # size succeeded, under its own timeout, and a held failure is never fatal and
-# never voids the main size; held is never added into any bucket. A dry run's
+# never voids the main size; held is never added into any bucket.
+# FAILED ITEMS (bead pg2-c8weu; decision: mark the total incomplete rather
+# than count them): an item whose dry-run (or, under --apply, remove) command
+# exits non-zero still prints its own size and held lines, but its size,
+# bucket and held are NOT summed into the total -- the command did not
+# complete, so the total makes no claim about it (counting it would present
+# unconfirmed space as reclaimable, and as "reclaimed" under --apply, which
+# is false). The total instead gains "; N item(s) failed, excluded from
+# total", so per-item and total held figures can differ only when the total
+# says why. A run where every item failed still prints that marked total. A
+# dry run's
 # captured output goes through pgdr_print_dry_run_output (long-line
 # collapse, raw under -v).
 #
@@ -1193,7 +1213,7 @@ cmd_reclaim() {
   # Per-kind total buckets (exact, estimate, upper_bound, lower_bound; see
   # pgdr_kind_index) plus the separate held total -- kinds are never merged.
   local -a bucket_kb=(0 0 0 0) bucket_n=(0 0 0 0)
-  local held_total_kb=0 unknown_count=0
+  local held_total_kb=0 unknown_count=0 failed_count=0
   local item
   while IFS= read -r item; do
     local id aggressiveness dry_run_command remove_command path size_command
@@ -1273,6 +1293,7 @@ cmd_reclaim() {
         fi
         echo "pg-disk-reclaimer: dry-run command for '$id' exited non-zero" >&2
         overall_status=1
+        failed_count=$((failed_count + 1))
       fi
       continue
     fi
@@ -1298,17 +1319,20 @@ cmd_reclaim() {
     else
       echo "pg-disk-reclaimer: remove command for '$id' exited non-zero" >&2
       overall_status=1
+      failed_count=$((failed_count + 1))
     fi
   done < <(jq -c '.[]' <<<"$selected")
 
   # No total when nothing ran (a run where every item was skipped stays
-  # silent, matching the quiet-by-default missing-path contract).
-  if ((bucket_n[0] + bucket_n[1] + bucket_n[2] + bucket_n[3] + unknown_count > 0)); then
+  # silent, matching the quiet-by-default missing-path contract). A failed
+  # item DID run, so a total is still printed (marked incomplete).
+  if ((bucket_n[0] + bucket_n[1] + bucket_n[2] + bucket_n[3] + unknown_count + failed_count > 0)); then
     local total_word="reclaimable"
     [[ $apply -eq 1 ]] && total_word="reclaimed"
     pgdr_total_line "$total_word" "$held_total_kb" "$unknown_count" \
       "${bucket_kb[0]}" "${bucket_n[0]}" "${bucket_kb[1]}" "${bucket_n[1]}" \
-      "${bucket_kb[2]}" "${bucket_n[2]}" "${bucket_kb[3]}" "${bucket_n[3]}"
+      "${bucket_kb[2]}" "${bucket_n[2]}" "${bucket_kb[3]}" "${bucket_n[3]}" \
+      "$failed_count"
   fi
 
   return "$overall_status"

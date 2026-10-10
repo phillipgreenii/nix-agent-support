@@ -91,6 +91,13 @@ Size contract (what a printed size means):
   (<reason>)" and never voids the item's main size. `validate` rejects an
   unknown sizeKind, an empty sizeMethod/sizeBasis/heldSizeCommand, and a
   non-exact sizeKind without a sizeBasis.
+  When an item's dry-run (or, with --apply, remove) command exits non-zero,
+  the item still prints its own size and held lines but is NOT summed into
+  the total (its sizes, kind bucket and held): the command did not complete,
+  so the total makes no claim about it. The total says so instead of
+  silently disagreeing with the per-item lines:
+    total reclaimable: 1.0M (1 sized, 0 unknown); held, not removable: 1.0M; 1 item(s) failed, excluded from total
+  A run where every item failed still prints that marked total.
 
 Aggressiveness scale:
   --aggressiveness N is a CEILING: every item with a variant at level <= N
