@@ -10,7 +10,11 @@ exactly as it does for `pg-pr` and `pr-pool` today.
 browser. It MUST NOT exec `gh`, `bd`, `pjira`, or any other system client, directly or
 transitively. A chokepoint test enforces this (carried by this docket's second packet). The beads
 backend it targets is always a config key, never a literal, so the same genericity extends to
-which agent tracker `pg-desk` signals through.
+which agent tracker `pg-desk` signals through. The G5 guard `TestNoDecisionLogicInPgDesk`
+(`packages/pg-desk/internal/guards`) pins the boundary in code: pg-desk production code MUST NOT
+contain the `focus-item` or `dedup_key` literals, exec `bd`, or pass a tracker write verb
+(`issue create|update|comment|close`) to the connector, with one allowlist of the retiring
+pre-cutover write path (`internal/sync/connector.go`) that the change-flow cutover release deletes.
 
 This set describes intended behavior only — no implementation code, no data-structure or
 call-site detail below that floor. It is this docket's (Phase 9 of the pg-desk and connector
