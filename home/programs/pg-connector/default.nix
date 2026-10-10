@@ -562,7 +562,7 @@ in
     # packages/pg-connector/pkg/scriptout/exec.go's runInvoke resolves the
     # binary named in the connector.<type> registry
     # (packages/pg-connector/cmd/pg-connector/registry.go) with no compiled-in
-    # linkage between the binaries. All seven backends therefore MUST ship
+    # linkage between the binaries. All the backends therefore MUST ship
     # alongside cfg.package whenever this module is enabled, or dispatch to
     # that capability fails at runtime with "executable file not found in
     # $PATH". None of the seven has an independent CLI identity of its own
@@ -588,6 +588,9 @@ in
     # pg-connector-mail-osx-bridge joins last (docket pg2-qc5uc): also
     # always-installed, independent of whether connector.mail is itself
     # populated -- it answers the attention and search capabilities too.
+    # pg-connector-calendar-task-focus joins (bead pg2-t7me1.4): also
+    # always-installed, independent of whether connector.calendar or
+    # attention.sources name it -- it answers the attention capability too.
     home.packages = [
       cfg.package
       pkgs.pg-connector-pr-github
@@ -598,6 +601,7 @@ in
       pkgs.pg-connector-activity-git
       pkgs.pg-connector-thread-slack
       pkgs.pg-connector-calendar-osx-bridge
+      pkgs.pg-connector-calendar-task-focus
       pkgs.pg-connector-agentsession-pa-monitor
       pkgs.pg-connector-alert-grafana
       pkgs.pg-connector-mail-osx-bridge

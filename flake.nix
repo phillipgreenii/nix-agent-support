@@ -283,6 +283,20 @@
               {
                 inherit (goBuilders) mkGoApp;
               };
+          # pg-connector-calendar-task-focus: the calendar AND attention
+          # capabilities' Tier-2 backend for the pg-task-focus daemon (bead
+          # pg2-t7me1.4) — another mkGoApp call over the SAME
+          # packages/pg-connector module (shared src + gomod2nixToml) as every
+          # sibling backend entry above, building the standalone scriptout-only
+          # binary from packages/pg-connector/pg-connector-calendar-task-focus.nix.
+          # Its Tier-2 implementation talks only to the daemon's loopback HTTP
+          # API (GET /api/v1/calendar and /api/v1/attention), never its Go
+          # packages or its event log.
+          pg-connector-calendar-task-focus =
+            final.callPackage ./packages/pg-connector/pg-connector-calendar-task-focus.nix
+              {
+                inherit (goBuilders) mkGoApp;
+              };
           # pg-connector-agentsession-pa-monitor: the agentsession
           # capability's Tier-2 pa-monitor backend (docket pg2-eezd1) —
           # another mkGoApp call over the SAME packages/pg-connector module
@@ -2118,6 +2132,138 @@
                     touch $out
                   '';
 
+              # home/programs/pg-task-focus connector registration (bead pg2-t7me1.4):
+              # with `connector.enable` the module registers the pg-task-focus
+              # calendar and attention backend with the pg-connector HM module
+              # (declared alongside it, as in the real composition): a
+              # connector.calendar backend, an attention.sources entry and a
+              # `backends` block whose base_url follows listenPort, with the named
+              # calendar query `calendar list` needs. Off by default, and a no-op
+              # (not an eval error) when pg-connector's module is not imported.
+              # The rendered shared config file is read back with yq, so the check
+              # proves the registration reaches the file the umbrella reads.
+              test-pg-task-focus-hm-connector =
+                let
+                  stubOptions =
+                    { lib, ... }:
+                    {
+                      options = {
+                        home = {
+                          packages = lib.mkOption {
+                            type = lib.types.listOf lib.types.anything;
+                            default = [ ];
+                          };
+                          sessionVariables = lib.mkOption {
+                            type = lib.types.attrsOf lib.types.str;
+                            default = { };
+                          };
+                          homeDirectory = lib.mkOption {
+                            type = lib.types.str;
+                            default = "/Users/tester";
+                          };
+                        };
+                        xdg = {
+                          stateHome = lib.mkOption {
+                            type = lib.types.str;
+                            default = "/Users/tester/.local/state";
+                          };
+                          configFile = lib.mkOption {
+                            type = lib.types.attrsOf lib.types.anything;
+                            default = { };
+                          };
+                        };
+                        assertions = lib.mkOption {
+                          type = lib.types.listOf lib.types.anything;
+                          default = [ ];
+                        };
+                      };
+                    };
+                  routine =
+                    removeAttrs
+                      (builtins.fromJSON (builtins.readFile ./packages/pg-task-focus/testdata/config/valid.json))
+                      [
+                        "listen_port"
+                        "public_url"
+                      ];
+                  evalWith =
+                    {
+                      withConnectorModule ? true,
+                      connectorEnable,
+                      extra ? { },
+                    }:
+                    (lib.evalModules {
+                      specialArgs = {
+                        inherit pkgs lib;
+                        osConfig = null;
+                      };
+                      modules = [
+                        ./home/programs/pg-task-focus/default.nix
+                        stubOptions
+                        {
+                          phillipgreenii.programs.pg-task-focus = {
+                            enable = true;
+                            listenPort = 49310;
+                            settings = routine;
+                            connector.enable = connectorEnable;
+                          };
+                        }
+                      ]
+                      ++ lib.optional withConnectorModule ./home/programs/pg-connector/default.nix
+                      ++ lib.optional withConnectorModule {
+                        phillipgreenii.programs.pg-connector = {
+                          enable = true;
+                        }
+                        // extra;
+                      };
+                    }).config;
+                  on = evalWith { connectorEnable = true; };
+                  off = evalWith { connectorEnable = false; };
+                  # A consuming flake's own registrations are kept next to ours.
+                  merged = evalWith {
+                    connectorEnable = true;
+                    extra = {
+                      connector.calendar = [ "pg-connector-calendar-osx-bridge" ];
+                      attention.sources = [ "pg-connector-issue-beads" ];
+                    };
+                  };
+                  # pg-connector's module not imported: the option is undeclared, so the
+                  # registration is skipped instead of failing evaluation.
+                  noConnectorModule = evalWith {
+                    withConnectorModule = false;
+                    connectorEnable = true;
+                  };
+                  pc = c: c.phillipgreenii.programs.pg-connector;
+                  backend = "pg-connector-calendar-task-focus";
+                in
+                assert (pc on).connector.calendar == [ backend ];
+                assert (pc on).attention.sources == [ backend ];
+                assert (pc on).backends.${backend}.base_url == "http://127.0.0.1:49310";
+                assert (pc on).backends.${backend}.queries.running == [ "1h" ];
+                assert (pc off).connector.calendar == [ ];
+                assert (pc off).attention.sources == [ ];
+                assert !((pc off).backends ? ${backend});
+                # (lists concatenate; their order follows module order and is not asserted)
+                assert
+                  lib.sort lib.lessThan (pc merged).connector.calendar == [
+                    "pg-connector-calendar-osx-bridge"
+                    backend
+                  ];
+                assert
+                  lib.sort lib.lessThan (pc merged).attention.sources == [
+                    backend
+                    "pg-connector-issue-beads"
+                  ];
+                assert !(noConnectorModule.phillipgreenii.programs ? pg-connector);
+                pkgs.runCommand "test-pg-task-focus-hm-connector-ok" { nativeBuildInputs = [ pkgs.yq-go ]; } ''
+                  fail() { echo "FAIL: $*" >&2; exit 1; }
+                  cfg=${on.xdg.configFile."pg-pr/config.yaml".source}
+                  [ "$(yq -r '.connector.calendar[0]' "$cfg")" = ${backend} ] || fail "connector.calendar not rendered"
+                  [ "$(yq -r '.attention.sources[0]' "$cfg")" = ${backend} ] || fail "attention.sources not rendered"
+                  [ "$(yq -r '.backends["${backend}"].base_url' "$cfg")" = http://127.0.0.1:49310 ] || fail "base_url not rendered"
+                  [ "$(yq -r '.backends["${backend}"].queries.running[0]' "$cfg")" = 1h ] || fail "named calendar query not rendered"
+                  touch $out
+                '';
+
               # darwin/modules/pg-task-focus (bead pg2-t7me1.2): the four observability
               # registrations the design requires (metricsTargets, logSources,
               # alertRuleFiles, dashboardProviders), at system scope, following the HM
@@ -2851,6 +2997,110 @@
                     [ "$matched" = "$state/events.jsonl" ] || fail "glob '$glob' matched: $matched"
 
                     for field in bd_calls bd_slowest_ms bd_slowest_argv; do
+                      grep -q "json:\"$field[,\"]" "$eventlogSrc" || fail "eventlog.Event has no json tag $field"
+                    done
+                    for field in phase elapsed_ms args; do
+                      grep -q "json:\"$field[,\"]" "$sharedEventlogSrc" || fail "evlog.ProgressEvent has no json tag $field"
+                    done
+                    touch $out
+                  '';
+
+              # darwin/modules/pg-connector-calendar-task-focus (bead pg2-t7me1.4): the
+              # pg-task-focus sibling of test-pg-connector-issue-beads-darwin-module above --
+              # registers the backend's own event log as a Loki log source from
+              # its own nix module rather than through pg-connector's config. Same
+              # stub technique (a stub of the observability surface mirroring the
+              # REAL logSources submodule's defaults), so the assertions prove the
+              # module leaves `path`/`serviceName` at their defaults -- which the
+              # Go side (eventlog.Path) depends on -- switches the generic
+              # error-rate alert off, and registers NO alert rule file. The
+              # runCommand then checks that the default glob selects events.jsonl
+              # and not the rotated copy or the rotation lock, and that the event
+              # fields the log exists for (daemon_requests,
+              # daemon_status, failure_stage, and the shared in-flight phase/elapsed_ms) are
+              # still json tags on the writer.
+              test-pg-connector-calendar-task-focus-darwin-module =
+                let
+                  logSourceSubmodule =
+                    { name, config, ... }:
+                    {
+                      options = {
+                        path = lib.mkOption {
+                          type = lib.types.str;
+                          default = "\${env:XDG_STATE_HOME}/${name}/*.jsonl";
+                        };
+                        serviceName = lib.mkOption {
+                          type = lib.types.str;
+                          default = name;
+                        };
+                        format = lib.mkOption {
+                          type = lib.types.enum [
+                            "jsonl"
+                            "raw"
+                          ];
+                          default = "jsonl";
+                        };
+                        errorAlert.enable = lib.mkOption { type = lib.types.bool; };
+                      };
+                      config.errorAlert.enable = lib.mkDefault (config.format == "jsonl");
+                    };
+                  evalDarwin =
+                    obsEnable:
+                    (lib.evalModules {
+                      specialArgs = { inherit pkgs lib; };
+                      modules = [
+                        ./darwin/modules/pg-connector-calendar-task-focus/default.nix
+                        {
+                          options.phillipgreenii.observability = {
+                            enable = lib.mkOption {
+                              type = lib.types.bool;
+                              default = false;
+                            };
+                            logSources = lib.mkOption {
+                              type = lib.types.attrsOf (lib.types.submodule logSourceSubmodule);
+                              default = { };
+                            };
+                            alertRuleFiles = lib.mkOption {
+                              type = lib.types.listOf lib.types.path;
+                              default = [ ];
+                            };
+                          };
+                          config.phillipgreenii.observability.enable = obsEnable;
+                        }
+                      ];
+                    }).config.phillipgreenii.observability;
+                  enabled = evalDarwin true;
+                  disabled = evalDarwin false;
+                  src = enabled.logSources.pg-connector-calendar-task-focus;
+                in
+                assert disabled.logSources == { };
+                assert enabled.alertRuleFiles == [ ];
+                assert src.path == "\${env:XDG_STATE_HOME}/pg-connector-calendar-task-focus/*.jsonl";
+                assert src.serviceName == "pg-connector-calendar-task-focus";
+                assert src.format == "jsonl";
+                assert src.errorAlert.enable == false;
+                pkgs.runCommand "test-pg-connector-calendar-task-focus-darwin-module-ok"
+                  {
+                    nativeBuildInputs = [ pkgs.gnugrep ];
+                    glob = src.path;
+                    eventlogSrc = ./packages/pg-connector/cmd/pg-connector-calendar-task-focus/internal/eventlog/eventlog.go;
+                    sharedEventlogSrc = ./packages/pg-connector/pkg/eventlog/eventlog.go;
+                  }
+                  ''
+                    export HOME="$TMPDIR"
+                    fail() { echo "FAIL: $*" >&2; exit 1; }
+
+                    # The default glob selects events.jsonl and not the rotated
+                    # copy or the rotation lock.
+                    state="$TMPDIR/state/pg-connector-calendar-task-focus"
+                    mkdir -p "$state"
+                    touch "$state/events.jsonl" "$state/events.jsonl.1" "$state/events.jsonl.lock"
+                    pattern="''${glob/\$\{env:XDG_STATE_HOME\}/$TMPDIR/state}"
+                    # shellcheck disable=SC2086 # the glob must expand
+                    matched="$(ls -d $pattern 2>/dev/null || true)"
+                    [ "$matched" = "$state/events.jsonl" ] || fail "glob '$glob' matched: $matched"
+
+                    for field in daemon_requests daemon_status failure_stage; do
                       grep -q "json:\"$field[,\"]" "$eventlogSrc" || fail "eventlog.Event has no json tag $field"
                     done
                     for field in phase elapsed_ms args; do
@@ -4900,6 +5150,60 @@
                       echo "FAIL: pg-connector-issue-beads capabilities response malformed: $resp" >&2
                       exit 1
                     }
+                    touch $out
+                  '';
+
+              # pg-connector-calendar-task-focus (bead pg2-t7me1.4): the packaged
+              # binary advertises BOTH capabilities it merges into one table, its
+              # three ops, and no auth_status (nothing to authenticate).
+              test-pg-connector-calendar-task-focus-capabilities =
+                pkgs.runCommand "pg-connector-calendar-task-focus-capabilities" { nativeBuildInputs = [ pkgs.jq ]; }
+                  ''
+                    resp=$(echo '{"op":"capabilities"}' | ${pkgs.pg-connector-calendar-task-focus}/bin/pg-connector-calendar-task-focus)
+                    echo "$resp" | jq -e '
+                      .protocolVersion == 1
+                      and (.schemaVersions.calendar | type) == "number"
+                      and (.schemaVersions.attention | type) == "number"
+                      and (.ops | sort) == ["capabilities", "list", "list_attention", "list_events"]
+                    ' >/dev/null || {
+                      echo "FAIL: pg-connector-calendar-task-focus capabilities response malformed: $resp" >&2
+                      exit 1
+                    }
+                    touch $out
+                  '';
+
+              # The backend depends on the daemon's OpenAPI contract, never on its Go
+              # packages (a separate module), so a rename in the contract would
+              # otherwise surface only at runtime. This check holds the two
+              # together: the two paths the backend requests MUST exist in
+              # api/openapi.yaml, and every property of the connector schemas the
+              # daemon sends (Segment, Calendar, AttentionGroup, AttentionItem,
+              # Attention) MUST appear as a json tag in the backend's client, which
+              # decodes by struct tag. The daemon's own contract tests validate its
+              # responses against the same document, so the chain is closed.
+              test-pg-connector-calendar-task-focus-contract =
+                pkgs.runCommand "pg-connector-calendar-task-focus-contract"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.yq-go
+                      pkgs.gnugrep
+                    ];
+                    openapi = ./packages/pg-task-focus/api/openapi.yaml;
+                    client = ./packages/pg-connector/cmd/pg-connector-calendar-task-focus/internal/client.go;
+                  }
+                  ''
+                    fail() { echo "FAIL: $*" >&2; exit 1; }
+                    for path in /api/v1/calendar /api/v1/attention; do
+                      [ "$(yq -r ".paths[\"$path\"].get.operationId" "$openapi")" != null ] || fail "the contract has no GET $path"
+                      grep -q "\"$path\"" "$client" || fail "the backend's client never requests $path"
+                    done
+                    for schema in Segment Calendar AttentionGroup AttentionItem Attention; do
+                      props="$(yq -r ".components.schemas.$schema.properties | keys | .[]" "$openapi")"
+                      [ -n "$props" ] || fail "the contract has no schema $schema"
+                      for prop in $props; do
+                        grep -q "json:\"$prop\"" "$client" || fail "schema $schema property $prop is not decoded by the backend's client"
+                      done
+                    done
                     touch $out
                   '';
 
@@ -10969,6 +11273,7 @@
               pg-connector-activity-git
               pg-connector-thread-slack
               pg-connector-calendar-osx-bridge
+              pg-connector-calendar-task-focus
               pg-connector-mail-osx-bridge
               pg-connector-agentsession-pa-monitor
               pg-connector-alert-grafana

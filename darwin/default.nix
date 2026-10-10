@@ -11,6 +11,7 @@
     ./modules/pg-connector-thread-slack
     ./modules/pg-connector-issue-jira
     ./modules/pg-connector-issue-beads
+    ./modules/pg-connector-calendar-task-focus
     ./modules/pg-rescue
     ./modules/pg-desk-serve
     ./modules/pg-task-focus

@@ -33,6 +33,11 @@ let
   # never from `config`/`pkgs` (using those to choose attribute NAMES is
   # infinite recursion); see home/programs/pa-monitor for the full reasoning.
   hasLaunchdRegistry = options.phillipgreenii.programs ? launchdServices;
+  # Likewise for the pg-connector HM module, which this module registers the
+  # connector backend with when `connector.enable` is set (same reasoning: a
+  # definition of an undeclared option errors even under mkIf false).
+  hasPgConnector = options.phillipgreenii.programs ? pg-connector;
+  connectorBackend = "pg-connector-calendar-task-focus";
   isDarwin = pkgs.stdenv.hostPlatform.isDarwin;
 
   # The rendered configuration: the top-level keys the daemon reads itself
@@ -95,6 +100,18 @@ in
         check it.
       '';
     };
+
+    connector.enable = lib.mkEnableOption ''
+      the pg-connector calendar and attention backend for this daemon
+      (`pg-connector-calendar-task-focus`). Registers it under
+      `phillipgreenii.programs.pg-connector` as a `connector.calendar` backend
+      and an `attention.sources` entry, with its `backends` config block: the
+      daemon's address, derived from `listenPort` so the two cannot drift, and
+      the named calendar query `running`, because `pg-connector calendar list`
+      resolves named queries from the backend's config. Needs
+      `phillipgreenii.programs.pg-connector` to be declared (this flake's home
+      module declares it) and enabled by the consuming flake
+    '';
 
     publicUrl = lib.mkOption {
       type = lib.types.nullOr (lib.types.strMatching "^https?://[^[:space:]/?#]+[^[:space:]]*$");
@@ -188,6 +205,24 @@ in
           message = "phillipgreenii.programs.pg-task-focus.daemon.enable on darwin needs phillipgreenii.programs.launchdServices, which phillipgreenii-nix-personal's home module declares (personal ADR 0055); import it alongside this module.";
         }
       ];
+    })
+
+    # Registration of the connector backend with pg-connector (bead
+    # pg2-t7me1.4): gated on the option's declaration at attribute level
+    # (optionalAttrs) and on connector.enable at value level (mkIf). The lists
+    # concatenate with whatever the consuming flake registers itself.
+    (lib.optionalAttrs hasPgConnector {
+      phillipgreenii.programs.pg-connector = lib.mkIf (cfg.enable && cfg.connector.enable) {
+        connector.calendar = [ connectorBackend ];
+        attention.sources = [ connectorBackend ];
+        backends.${connectorBackend} = {
+          base_url = "http://127.0.0.1:${toString cfg.listenPort}";
+          # `calendar list` needs at least one named query. Each element is a
+          # look-ahead duration; nothing exists in the future, so any window
+          # answers with the open segment of the running cycle (if any).
+          queries.running = [ "1h" ];
+        };
+      };
     })
 
     # LaunchAgent registration via the HM-scoped launchdServices registry
