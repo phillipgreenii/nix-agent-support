@@ -86,6 +86,27 @@ group, never a dependency: three PRs on one issue are siblings. This is the data
 evaluator's dependency suppression and stack grouping read (see [`attention.md`](attention.md));
 that behavior is separate and is described there.
 
+## Derived `source` links
+
+Besides the relations the verb answers above, `pg-desk` derives one more cross-reference relation
+when it hydrates a bead (an `issue` entity): **`source`**. A bead whose own metadata carries a
+non-empty `source_type` and `source_id` gets exactly one derived link from the bead to the entity
+those two fields name, relation `source`, origin `derived:source-entity`. `source_type` MUST be one
+of the registered entity types (`pr`, `issue`, `thread`); any other value, or a missing
+`source_type` or `source_id`, derives nothing and is not an error.
+
+- The link is rebuilt on every re-hydrate of the bead and drops when the metadata is removed or the
+  bead is removed.
+- The rule is generic and carries no knowledge of what the bead is for. It MUST NOT read the
+  `repo` and `pr_number` metadata fields: those derive a `work` link, which makes the bead that
+  PR's own work item, and a `source` link never does. A PR's own links, its work items and its
+  plan are therefore the same with or without a bead whose source is that PR, whatever the bead's
+  title looks like.
+- `source` is not a relation that joins entities into one correlation group (only `work` does).
+- The `links` verb does not list `source` links: it answers only the relations named above.
+  The stored link is visible in the `show` view of both entities.
+- The extractor emits no OpenTelemetry or Prometheus data and logs nothing.
+
 ## Invariants
 
 - **INV-LINKS-1.** The verb MUST be read-only and offline: it MUST NOT hydrate, MUST NOT call the

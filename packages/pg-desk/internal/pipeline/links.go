@@ -31,7 +31,7 @@ type ExtractorRegistry map[string][]LinkExtractor
 func NewExtractorRegistry(cfg *config.Config, st *store.Store, repo string) ExtractorRegistry {
 	return ExtractorRegistry{
 		"pr":     {jiraKeyExtractor{patterns: cfg.TicketPatterns}},
-		"issue":  {workItemExtractor{}},
+		"issue":  {workItemExtractor{}, sourceEntityExtractor{}},
 		"thread": {threadExtractor{patterns: cfg.TicketPatterns, st: st, repo: repo}},
 	}
 }
@@ -109,6 +109,49 @@ func (workItemExtractor) Extract(_, _ string, payload json.RawMessage) ([]store.
 		out = append(out, store.XrefLink{ToType: "issue", ToID: show.Parent, Relation: "parent", Evidence: "parent"})
 	}
 	return out, nil
+}
+
+// sourceEntityExtractor links an issue (a bead) to the entity its own
+// metadata names as its source, via the generic metadata fields source_type
+// and source_id (relation "source", direction: bead -> source entity). It is
+// deliberately separate from workItemExtractor and MUST NOT read repo or
+// pr_number: those fields make a "work" link that the PR decider treats as
+// that PR's own work item. A source_type that is not a registered entity type
+// (pr, issue, thread), or a missing source_type or source_id, yields no link
+// and no error. The relation "source" is not a correlation-group relation.
+//
+// Telemetry (D24): this extractor emits no OpenTelemetry or Prometheus data
+// and logs nothing; its links are stored with origin derived:source-entity and
+// rebuilt on every hydration of the bead.
+type sourceEntityExtractor struct{}
+
+// sourceEntityTypes is the set of entity types a source link may name: the
+// entity types registered in NewExtractorRegistry.
+var sourceEntityTypes = map[string]bool{"pr": true, "issue": true, "thread": true}
+
+func (sourceEntityExtractor) Name() string { return "source-entity" }
+
+func (sourceEntityExtractor) Extract(_, _ string, payload json.RawMessage) ([]store.XrefLink, error) {
+	var f struct {
+		IssueShow json.RawMessage `json:"issue_show"`
+	}
+	if err := json.Unmarshal(payload, &f); err != nil {
+		return nil, fmt.Errorf("decode issue payload: %w", err)
+	}
+	if len(f.IssueShow) == 0 {
+		return nil, nil
+	}
+	var show struct {
+		Metadata map[string]string `json:"metadata"`
+	}
+	if err := json.Unmarshal(f.IssueShow, &show); err != nil {
+		return nil, fmt.Errorf("decode issue show: %w", err)
+	}
+	t, id := show.Metadata["source_type"], show.Metadata["source_id"]
+	if t == "" || id == "" || !sourceEntityTypes[t] {
+		return nil, nil
+	}
+	return []store.XrefLink{{ToType: t, ToID: id, Relation: "source", Evidence: "metadata"}}, nil
 }
 
 // jiraKeyExtractor links a PR to every Jira key in its branch, title or body
