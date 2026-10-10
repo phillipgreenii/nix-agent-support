@@ -27,17 +27,18 @@ func (v EventView) clone() EventView {
 	return v
 }
 
-// The two views of an EventQuery.
+// The two views of an EventQuery: the instants as corrected, which is the
+// default, and the raw instants as first logged.
 const (
-	viewCorrected = "corrected"
-	viewOriginal  = "original"
+	ViewCorrected = "corrected"
+	ViewOriginal  = "original"
 )
 
 // EventQuery selects events by the effective instant they have in the chosen
 // view: From is inclusive, To is exclusive, and a nil bound is open. Types
-// keeps only the listed event types (all when empty). View is "original" for
+// keeps only the listed event types (all when empty). View is ViewOriginal for
 // the raw instants; any other value, including the empty one, is the corrected
-// view.
+// view (ViewCorrected).
 type EventQuery struct {
 	From, To *time.Time
 	Types    []event.Type
@@ -46,7 +47,7 @@ type EventQuery struct {
 
 func (q EventQuery) matches(v EventView) bool {
 	e := v.Corrected
-	if q.View == viewOriginal {
+	if q.View == ViewOriginal {
 		e = v.Original
 	}
 	t := e.EffectiveAt.Time()

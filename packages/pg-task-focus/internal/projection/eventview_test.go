@@ -40,7 +40,7 @@ func TestEventsQueryCorrectedAndOriginalViews(t *testing.T) {
 	}
 	m := mustModel(t, log)
 
-	corrected := m.Events(EventQuery{View: "corrected"})
+	corrected := m.Events(EventQuery{View: ViewCorrected})
 	if got, want := viewIDs(corrected), []event.ID{eid(1), eid(2), eid(3), eid(4)}; !equalIDs(got, want) {
 		t.Fatalf("corrected view ids = %v, want every event of the log in log order %v", got, want)
 	}
@@ -66,7 +66,7 @@ func TestEventsQueryCorrectedAndOriginalViews(t *testing.T) {
 	}
 
 	// The original view flags retraction too and keeps the raw event in both fields' reach.
-	original := m.Events(EventQuery{View: "original"})
+	original := m.Events(EventQuery{View: ViewOriginal})
 	if got := viewIDs(original); !equalIDs(got, viewIDs(corrected)) {
 		t.Errorf("original view ids = %v, want the same events as the corrected view %v", got, viewIDs(corrected))
 	}
@@ -98,10 +98,10 @@ func TestEventsQueryFilters(t *testing.T) {
 		{"to alone", EventQuery{To: &from}, []event.ID{}},
 		{"a type", EventQuery{Types: []event.Type{event.TypeTaskCompleted}}, []event.ID{eid(2)}},
 		{"two types", EventQuery{Types: []event.Type{event.TypeTaskCompleted, event.TypeEventCorrected}}, []event.ID{eid(2), eid(4)}},
-		{"the corrected view filters on the corrected instant", EventQuery{View: "corrected", From: &to, To: ptr(at(50))}, []event.ID{eid(1), eid(3), eid(4)}},
-		{"the original view filters on the raw instant", EventQuery{View: "original", From: &from, To: &to}, []event.ID{eid(2)}},
-		{"the original view keeps a moved event where it was", EventQuery{View: "original", To: &from}, []event.ID{eid(1)}},
-		{"the corrected view moves it", EventQuery{View: "corrected", To: &from}, []event.ID{}},
+		{"the corrected view filters on the corrected instant", EventQuery{View: ViewCorrected, From: &to, To: ptr(at(50))}, []event.ID{eid(1), eid(3), eid(4)}},
+		{"the original view filters on the raw instant", EventQuery{View: ViewOriginal, From: &from, To: &to}, []event.ID{eid(2)}},
+		{"the original view keeps a moved event where it was", EventQuery{View: ViewOriginal, To: &from}, []event.ID{eid(1)}},
+		{"the corrected view moves it", EventQuery{View: ViewCorrected, To: &from}, []event.ID{}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
