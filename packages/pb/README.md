@@ -208,6 +208,161 @@ pb drain isolate --bead <id> --repo <abs-path> [--json] [--git-timeout <duration
 pb drain isolate --bead pg2-1qcro.7 --repo /Users/phillipg/phillipg_mbp/phillipg-nix-repo-base
 ```
 
+## `pb unstick`
+
+The deterministic stages of the `/pb:unstick-beads` sweep (inventory, triage, clustering,
+follow-up batches, marker authoring, the closing report). Per-bead judgement (undefer,
+de-label, fix dependencies, close as stale) stays with the `pb:unstick-batch-worker`
+subagents; the services pause/resume and the "needs you" prose stay with the orchestrator.
+The same inputs plus the same `--now` always produce byte-identical files.
+
+```bash
+pb unstick prepare [--root R] [--workdir W] [--full] [--label L] [--id-prefix P] [--json]
+pb unstick batch   --workdir W --name FOLLOWUPS --ids a,b,c
+pb unstick marker  --outcome O --reason R --recheck-when X      # prints one marker line
+pb unstick marker  --check [--export FILE]                      # lines on stdin
+pb unstick report  --workdir W [--root R] [--json]
+```
+
+`--root` defaults to `$PN_WORKSPACE_ROOT`, else the nearest `pn-workspace.toml`. A hidden
+`--now <RFC3339>` pins the clock for tests and goldens.
+
+### Sweep flow
+
+```mermaid
+sequenceDiagram
+    participant O as Orchestrator (/pb:unstick-beads)
+    participant P as pb unstick
+    participant B as bd
+    participant W as Batch workers (one per batch)
+    O->>P: preflight: pb unstick --help
+    O->>P: prepare
+    P->>B: export -o export.jsonl, then ready -n 0 --json
+    P->>P: gate check (in-process, dry-run), triage, cluster, pack
+    P-->>O: counts, partition line, batches, claim candidates
+    O->>W: dispatch one worker per batches/B<NN>
+    loop each bead in the batch
+        W->>P: marker --outcome ... --reason ... --recheck-when ...
+        W->>B: update --append-notes (marker), plus any metadata fix or close
+    end
+    W-->>O: results/B<NN>.md
+    O->>P: report
+    P->>B: export -o export.post.jsonl, then ready -n 0 --json
+    P-->>O: before/after arithmetic, attribution, markers, OPERATOR/FOLLOWUP lines
+```
+
+```mermaid
+flowchart TD
+    T[Targets: open or blocked beads not in bd ready, plus status deferred] --> A{Assigned?}
+    A -- yes --> C[claim candidate: listed, never swept]
+    A -- no --> L{LIVE fixpoint}
+    L -- "chain reaches a drainable or fresh in_progress bead" --> LIVE[LIVE: skipped]
+    L -- no --> M{Marker skip}
+    M -- "valid recent marker, nothing changed, recheck not due" --> MS[MARKER: skipped]
+    M -- otherwise --> R[REVIEW]
+    R --> K[cluster by links, pack 10-15 per batch]
+    K --> BT[batches/B01 ... facts/B01.json]
+```
+
+`in_progress` beads are never targets; they appear only as claim candidates (and seed LIVE
+when updated within 24 hours of `--now`).
+
+### Exit codes
+
+| Code | Meaning                                                                                                                |
+| ---- | ---------------------------------------------------------------------------------------------------------------------- |
+| `0`  | Success.                                                                                                               |
+| `1`  | Usage, IO or internal error (including a broken triage partition or batch coverage). `marker --check`: non-conforming. |
+| `2`  | A `bd` call failed (`prepare` export or ready, `report` export).                                                       |
+
+### Work directory
+
+`prepare` allocates a fresh `/tmp/bead-unstick-<YYYY-MM-DD>[-N]` with an exclusive `mkdir`
+loop (never reused), or creates the absolute `--workdir` you name (it MUST NOT exist).
+
+```text
+export.jsonl          bd export taken before bd ready (bd ready un-defers elapsed deferred beads)
+export.post.jsonl     written by report
+ready.json            bd ready -n 0 --json, the {data, schema_version} envelope (a bare array is tolerated)
+prepare.json          pre-sweep snapshot read back by report
+triage-targets.txt    triage-live.txt   triage-marker.txt   triage-review.txt
+triage-inprog.txt     triage-assigned_open.txt              triage-drain.txt
+batches/B<NN>         one bead id per line
+facts/B<NN>.json      per-bead facts for the worker (projection; no raw dependencies)
+results/              workers write B<NN>.md here
+probes/gate-check.json
+work/                 scratch for the orchestrator and workers
+progress.txt          line 1 is the sweep start (UTC)
+followups.txt         OPERATOR: / FOLLOWUP: lines
+```
+
+`prepare.json` holds `start`, `now`, `counts` (open, blocked, deferred, in_progress, ready,
+targets, live_skip, marker_skip, review, drainable), the sorted `review` ids, `ready_ids`,
+`pre` (id to status for every non-closed bead) and `closed` (ids closed before the sweep).
+`prepare` asserts that LIVE + MARKER + REVIEW partition the targets
+(`targets N = live a + marker b + review c`) and that every REVIEW id is in exactly one
+batch; a violation is an internal error (exit 1).
+
+### Sweep marker grammar
+
+A worker records every decision on the bead (notes or a comment) so the next sweep can skip
+a bead whose reason is still valid. The grammar lives once, in `internal/unstick/marker.go`:
+
+```text
+[unstick YYYY-MM-DDTHH:MM:SSZ] <outcome>: <reason>; recheck-when: <recheck>
+```
+
+- `outcome` matches `[a-z][a-z-]*` (`unchanged` and `released` are reserved meanings).
+- `reason` is plain text: no control characters (newline included), backtick, `$`, quotes
+  or the substring `; recheck-when:`.
+- `recheck` is `YYYY-MM-DD`, `<bead-id> closes` or `on-change`.
+- The timestamp is UTC with a `Z` suffix. A date-only or non-`Z` timestamp is MALFORMED and
+  counts as no marker; `prepare` reports those beads and `marker --check --export FILE` lists
+  them. When several markers exist the newest by parsed time wins.
+
+Prefer `pb unstick marker ...` over hand-built strings; its output always round-trips
+through the parser.
+
+### `results/*.md`
+
+Workers return one line per bead in free text; only this grammar is machine-read by
+`report` (a leading `- ` or `* ` bullet is allowed, anything else is ignored):
+
+```text
+closed <bead-id>: <reason>
+```
+
+`<bead-id>` is letters and digits joined by `-` or `.` (so `tc-mol-4prt` and `tc-o14i5.3.7`
+work). Prose such as `closed tc-1 because it was stale` does not match.
+
+### Attribution (a heuristic)
+
+`bd` records no closer and no actor on a state change, so `report` cannot know who changed a
+bead. A bead is attributed to the sweep iff it is in a dispatched batch AND either it carries
+a non-`unchanged` marker with a timestamp at or after the sweep start, OR it is closed now,
+was non-closed before, and appears as closed in `results/*.md`. Every other change in the
+window is attributed to peers (concurrent drain sessions, humans). Limits:
+
+- A peer that closes a batched bead the worker also marks or lists is counted as the sweep.
+- A worker that closes a bead but omits the `closed <id>: ...` line is counted as a peer.
+- Marker-only outcomes change no status, so they appear under "markers added by outcome" but
+  not in the "changed in window" arithmetic.
+- Beads that were never in a batch (LIVE, MARKER-skipped) are always peers.
+
+### Preflight
+
+`pb` is `phillipgreenii.programs.pb.enable` (default false) while the plugin is enabled by
+default, so the command may be missing or too old. The orchestrator runs `pb unstick --help`
+first and, on failure, stops with: `pb too old or not installed; run pn workspace apply`.
+
+### Contract test
+
+`go test -tags contract -run TestContract_UnstickSweep ./cmd/pb/` seeds a synthetic workspace
+in a throwaway embedded Dolt database (real `bd`, real `pb` binary, never a server or the
+real tracker), pins the real `bd export` and `bd ready --json` row shapes, and runs prepare,
+marker, close and report end to end. `TestUnstickRealShapeSample` asserts the same shape
+facts over a committed sample, so decoder drift is caught without `bd`.
+
 ## Versioning
 
 Per-source content digest (agent-support "Versioning"): `mkGoApp` stamps `main.Version`.
