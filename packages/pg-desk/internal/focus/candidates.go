@@ -159,6 +159,7 @@ type view struct {
 	deps      []issueDep
 	dueDate   string
 	priority  string
+	createdAt string
 
 	reasons   []string // the exclusions that apply, in the documented order
 	eligible  bool     // no exclusion applies
@@ -383,6 +384,7 @@ func decodeFacts(facts string, v *view) {
 				Deps      []issueDep                 `json:"deps"`
 				DueDate   string                     `json:"due_date"`
 				Priority  string                     `json:"priority"`
+				CreatedAt string                     `json:"created_at"`
 			} `json:"issue_show"`
 		}
 		if json.Unmarshal([]byte(facts), &f) != nil {
@@ -391,6 +393,7 @@ func decodeFacts(facts string, v *view) {
 		v.state, v.labels, v.metadata, v.assignee = f.IssueShow.State, f.IssueShow.Labels, f.IssueShow.Metadata, f.IssueShow.Assignee
 		v.parent, v.issueType, v.deps = f.IssueShow.Parent, f.IssueShow.IssueType, f.IssueShow.Deps
 		v.dueDate, v.priority = f.IssueShow.DueDate, f.IssueShow.Priority
+		v.createdAt = f.IssueShow.CreatedAt
 	}
 }
 

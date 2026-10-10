@@ -168,9 +168,10 @@ type Config struct {
 
 	// Focus is the focus block (docs/behavior/pg-desk/config.md, "Focus
 	// keys"): the daily-focus rank's time zone, coverage backlog bound,
-	// pending-gate age and Jira operator identities. Read them through
-	// FocusTimeZone, FocusCoverageBacklogMax, FocusPendingGateAge and
-	// FocusOperatorIdentities, which own the documented defaults.
+	// pending-gate age, Jira operator identities and priority map. Read them
+	// through FocusTimeZone, FocusCoverageBacklogMax, FocusPendingGateAge,
+	// FocusOperatorIdentities and FocusPriorityMap, which own the documented
+	// defaults.
 	Focus FocusConfig `yaml:"focus,omitempty" json:"focus,omitempty"`
 	// BeadIDPattern is bead_id_pattern: a regular expression telling a bead
 	// id from any other issue id (an issue whose id matches is a bead). Empty
@@ -194,6 +195,22 @@ type FocusConfig struct {
 	// OperatorIdentities lists the assignee strings that make a Jira issue
 	// the operator's. An empty or absent list is valid.
 	OperatorIdentities []string `yaml:"operator_identities,omitempty" json:"operator_identities,omitempty"`
+	// PriorityMap maps a tracker priority value (a Jira priority name) to
+	// one of P0..P4, for the rank's priority key. Empty or absent means
+	// DefaultFocusPriorityMap; a non-empty map REPLACES the default
+	// entirely. Read it through FocusPriorityMap().
+	PriorityMap map[string]string `yaml:"priority_map,omitempty" json:"priority_map,omitempty"`
+}
+
+// DefaultFocusPriorityMap is focus.priority_map's default: the standard
+// Atlassian priority names. A tracker value absent from the map in force
+// (and not already of the form P0..P4) sorts after P4.
+var DefaultFocusPriorityMap = map[string]string{
+	"Highest": "P0",
+	"High":    "P1",
+	"Medium":  "P2",
+	"Low":     "P3",
+	"Lowest":  "P4",
 }
 
 // Defaults for the entity-change-flow keys (design 9.10, 8.4, 8.5).
@@ -385,6 +402,23 @@ func (c *Config) FocusOperatorIdentities() []string {
 	return out
 }
 
+// FocusPriorityMap returns the tracker-priority-to-P0..P4 table in force:
+// focus.priority_map when it has any entry (replacing the default
+// entirely), else DefaultFocusPriorityMap. Keys are trimmed and values are
+// upper-cased and trimmed; matching a tracker value against a key is the
+// caller's (the rank's) case-insensitive lookup. The result is a copy.
+func (c *Config) FocusPriorityMap() map[string]string {
+	src := c.Focus.PriorityMap
+	if len(src) == 0 {
+		src = DefaultFocusPriorityMap
+	}
+	out := make(map[string]string, len(src))
+	for k, v := range src {
+		out[strings.TrimSpace(k)] = strings.ToUpper(strings.TrimSpace(v))
+	}
+	return out
+}
+
 // BeadIDRegexp returns the compiled bead_id_pattern, or nil when unset. It is
 // not named BeadIDPattern because the Config field already is (Go forbids a
 // field and a method of one name). The pattern is unanchored: a deployment
@@ -495,6 +529,16 @@ func validateChangeFlow(cfg *Config) error {
 	return nil
 }
 
+// validFocusPriority reports whether v is P0..P4 (case-insensitive,
+// surrounding whitespace ignored).
+func validFocusPriority(v string) bool {
+	switch strings.ToUpper(strings.TrimSpace(v)) {
+	case "P0", "P1", "P2", "P3", "P4":
+		return true
+	}
+	return false
+}
+
 // validateFocus validates the focus keys and bead_id_pattern; every error
 // names the offending key. An empty or absent operator_identities is valid
 // (RV-E: it is a notice at show time, never a load failure).
@@ -518,6 +562,20 @@ func validateFocus(cfg *Config) error {
 		if strings.TrimSpace(id) == "" {
 			return fmt.Errorf("focus.operator_identities[%d]: identity must not be empty", i)
 		}
+	}
+	seen := map[string]string{}
+	for k, v := range cfg.Focus.PriorityMap {
+		key := strings.ToLower(strings.TrimSpace(k))
+		if key == "" {
+			return fmt.Errorf("focus.priority_map: key %q must not be blank", k)
+		}
+		if !validFocusPriority(v) {
+			return fmt.Errorf("focus.priority_map[%q] %q: must be one of P0, P1, P2, P3, P4", k, v)
+		}
+		if other, dup := seen[key]; dup {
+			return fmt.Errorf("focus.priority_map: keys %q and %q name the same priority (matching is case-insensitive)", other, k)
+		}
+		seen[key] = k
 	}
 	if p := cfg.BeadIDPattern; p != "" {
 		if strings.TrimSpace(p) == "" {

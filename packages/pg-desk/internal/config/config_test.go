@@ -95,7 +95,7 @@ func TestConfigCoversAllSection78Keys(t *testing.T) {
 		{"WatchThreadConfig", reflect.TypeOf(WatchThreadConfig{}), []string{"queries", "active_window"}},
 		{"SweepConfig", reflect.TypeOf(SweepConfig{}), []string{"max_age", "max_per_poll", "reconcile_age"}},
 		{"HydrationConfig", reflect.TypeOf(HydrationConfig{}), []string{"max_per_poll", "read_issue_deps"}},
-		{"FocusConfig", reflect.TypeOf(FocusConfig{}), []string{"time_zone", "coverage_backlog_max", "pending_gate_age", "operator_identities"}},
+		{"FocusConfig", reflect.TypeOf(FocusConfig{}), []string{"time_zone", "coverage_backlog_max", "pending_gate_age", "operator_identities", "priority_map"}},
 	}
 	for _, c := range cases {
 		gotSub := yamlTags(c.typ)
@@ -1073,6 +1073,10 @@ func TestLoadFile_FocusInvalidValuesFail(t *testing.T) {
 		"whitespace-only identity": {"focus:\n  operator_identities: [\"   \"]", "focus.operator_identities[0]"},
 		"uncompilable pattern":     {"bead_id_pattern: '(unclosed'", "bead_id_pattern"},
 		"blank pattern":            {"bead_id_pattern: '  '", "bead_id_pattern"},
+		"unknown priority value":   {"focus:\n  priority_map:\n    Urgent: P9", "focus.priority_map"},
+		"empty priority value":     {"focus:\n  priority_map:\n    Urgent: \"\"", "focus.priority_map"},
+		"blank priority key":       {"focus:\n  priority_map:\n    \" \": P1", "focus.priority_map"},
+		"case-duplicate keys":      {"focus:\n  priority_map:\n    High: P1\n    HIGH: P0", "focus.priority_map"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := LoadFile(writeYAML(t, t.TempDir(), focusBase+tc.block+"\n"))
@@ -1080,5 +1084,54 @@ func TestLoadFile_FocusInvalidValuesFail(t *testing.T) {
 				t.Fatalf("LoadFile: err = %v, want an error naming %q", err, tc.key)
 			}
 		})
+	}
+}
+
+func TestFocusPriorityMap_DefaultIsTheAtlassianNames(t *testing.T) {
+	cfg, err := LoadFile(writeYAML(t, t.TempDir(), focusBase))
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	want := map[string]string{"Highest": "P0", "High": "P1", "Medium": "P2", "Low": "P3", "Lowest": "P4"}
+	if got := cfg.FocusPriorityMap(); !reflect.DeepEqual(got, want) {
+		t.Errorf("FocusPriorityMap = %v, want %v", got, want)
+	}
+	// The accessor returns a copy: editing it leaves the default intact.
+	cfg.FocusPriorityMap()["Highest"] = "P4"
+	if got := cfg.FocusPriorityMap()["Highest"]; got != "P0" {
+		t.Errorf("default mutated through the accessor: Highest = %q", got)
+	}
+	var zero Config
+	if got := zero.FocusPriorityMap(); !reflect.DeepEqual(got, want) {
+		t.Errorf("zero Config FocusPriorityMap = %v, want the default", got)
+	}
+}
+
+// A configured map REPLACES the default; keys and values are trimmed and the
+// values upper-cased.
+func TestFocusPriorityMap_ExplicitReplacesTheDefault(t *testing.T) {
+	cfg, err := LoadFile(writeYAML(t, t.TempDir(), focusBase+`
+focus:
+  priority_map:
+    " Blocker ": p0
+    Normal: P2
+`))
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	want := map[string]string{"Blocker": "P0", "Normal": "P2"}
+	if got := cfg.FocusPriorityMap(); !reflect.DeepEqual(got, want) {
+		t.Errorf("FocusPriorityMap = %v, want %v (no Atlassian names left)", got, want)
+	}
+}
+
+// An empty map is unset: the default stays in force.
+func TestFocusPriorityMap_EmptyMeansDefault(t *testing.T) {
+	cfg, err := LoadFile(writeYAML(t, t.TempDir(), focusBase+"focus:\n  priority_map: {}\n"))
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	if got := cfg.FocusPriorityMap()["High"]; got != "P1" {
+		t.Errorf("High = %q, want P1 from the default", got)
 	}
 }

@@ -131,11 +131,80 @@ The words the run statistics derive from the exit code are `ok`, `partial`, `tot
 - **INV-FOCUS-11.** `show`, `replan` and `explain` MUST read only the store: no network call and no
   tracker call. The rank MUST be a deterministic computation with no language model.
 
+## The rank
+
+The rank orders the candidate set of the daily focus. `show`, `select`, `replan`, `pull` and `explain`
+all call it; there is no `focus rank` verb and the computation itself writes nothing. It is a
+deterministic function of the stored facts and an injected clock: no language model, no network call
+and no tracker call.
+
+**Tiers.** Three strict lexicographic tiers, with no weights and no arithmetic:
+
+1. **Overdue**: the due date is before the addressed day. Inside it: started items first, then the
+   most overdue, then unblocks (descending), then priority, then age.
+2. **Started** (not overdue).
+3. **Not started** (not overdue).
+
+Inside tiers 2 and 3 the keys, in order, are the due date inside the 7-day horizon, unblocks
+(descending), priority and age; the final key is the candidate order (kind `pr`, `jira`, `bead`, then
+key), so the order is total and the same inputs always rank identically.
+
+**Due date.** A date-only value is a calendar day; a timestamp is converted to `focus.time_zone` and
+then truncated to its day. The addressed day is `--date`, else today in that zone. "Inside the
+horizon" means due 0 to 7 days after the addressed day, inclusive; a nearer date sorts ahead of a
+farther one, and any date inside the horizon sorts ahead of none. A due date beyond the horizon is
+equivalent to no due date for this key. An empty value is no due date; an unparseable value also
+counts as no due date and is never an error, but the rank counts it.
+
+**Started** applies to SEEDS only (a candidate reached only through a link is never started): a bead
+in state `in_progress`; a Jira issue whose status category is `indeterminate` (when the snapshot
+carries no category, a state named in `jira.in_progress_statuses`, and the rank counts the absence);
+any open seed pull request. Every open seed PR is therefore started.
+
+**Unblocks** is the count of open items one blocks. For a PR it is the number of open dependents the
+dependency resolver reports (stack and externally recorded `depends_on` edges); for a bead or Jira
+issue it is the number of open DIRECT dependents in the reverse-edge index. It is 0 for an issue whose
+stored facts carry no issue dependencies (issue-dependency hydration is off), and the rank counts
+those issues.
+
+**Priority.** `P0` to `P4`, smaller first; a tracker value is mapped by `focus.priority_map`, and a
+value in neither the map nor the `P0`-`P4` form sorts after `P4` and is counted. A PR with no
+priority of its own takes the highest priority among its correlated items, else `P2`.
+
+**Age.** The tracker's creation time when the snapshot carries it, else the time pg-desk first
+stored the entity; the OLDEST item first. An item with neither sorts after every dated one. Every PR
+ranks on the first-stored time, because a PR snapshot has no creation time.
+
+**Correlation groups and slots.** A correlation group is the set of candidates joined by derived
+`work` links (a PR and the beads that name it); its members inherit the earliest due date and the
+highest priority across the group. The group takes ONE row, its highest-ranked member; the others are
+reported as covered by it. An epic with an open child gives its slot to the child and is reported as
+covered by it (the epic slot rule). A key absorbed by a `--merge` is covered by the key that absorbed
+it. Neither suppression removes anything from a stored plan.
+
+**Cap line.** After those rules the first `cap` rows (default 6) that are not finished are marked in
+the plan, for display only; a finished row keeps its place in the order and is not counted toward the
+cap. The cap never changes the order.
+
+**Counted degradations (`rank_inputs`).** Each silent degradation is counted per rank:
+`unparseable_due`, `unmapped_priority`, `age_fallback`, `unblocks_unavailable` and
+`status_category_absent`.
+
+- **INV-RANK-1.** The rank MUST be a strict weak order and MUST be total: the same inputs MUST rank
+  identically whatever order the candidates arrive in.
+- **INV-RANK-2.** The rank MUST read time only from the injected clock and MUST write nothing, call no
+  tracker and use no language model.
+- **INV-RANK-3.** A candidate reached only through a link MUST NOT be in the started tier.
+- **INV-RANK-4.** A due date beyond the 7-day horizon MUST rank as no due date, and an unparseable due
+  date MUST rank as no due date without failing the verb.
+- **INV-RANK-5.** Every silent degradation MUST be counted in `rank_inputs`.
+
 ## Telemetry and logs
 
 The focus verbs emit nothing over OpenTelemetry and write no Prometheus series of their own.
 
-- **OpenTelemetry:** none.
+- **OpenTelemetry:** none, including from the rank, which also logs nothing; the verbs that call it
+  report its `rank_inputs` counts in the run record and the structured stderr line.
 - **Prometheus:** none from the verbs. The `pg_desk_focus_*` families that `serve` exposes are
   computed from the store at scrape time and are specified with the metrics, not here; the run
   record's rows are what the `pg_desk_focus_runs{verb,outcome}` family counts.

@@ -51,6 +51,8 @@ type prSpec struct {
 	requests  []string
 	ownership string // "" stores no interpretation row
 	inactive  bool
+	branch    string // head branch, for the stack source
+	base      string // base branch, for the stack source
 }
 
 func (f *fixture) writeEntity(k Key, facts string, active bool) {
@@ -77,9 +79,16 @@ func (f *fixture) pr(id string, s prSpec) Key {
 		s.state = "open"
 	}
 	k := Key{"pr", id}
-	f.writeEntity(k, mustJSON(f.t, map[string]any{"pr_show": map[string]any{
+	show := map[string]any{
 		"state": s.state, "merged": s.merged, "review_requests": s.requests, "author": "someone",
-	}}), !s.inactive)
+	}
+	if s.branch != "" {
+		show["branch"] = s.branch
+	}
+	if s.base != "" {
+		show["base"] = s.base
+	}
+	f.writeEntity(k, mustJSON(f.t, map[string]any{"pr_show": show}), !s.inactive)
 	if s.ownership != "" {
 		if err := f.st.UpsertInterpretation(store.Interpretation{
 			Repo: testRepo, EntityType: "pr", EntityID: id, Ownership: s.ownership,
@@ -106,6 +115,10 @@ type issueSpec struct {
 	deps      []map[string]string
 	dueDate   string
 	priority  string
+	createdAt string
+	// hydrated stores an issue_deps block (the recursive blocked-by ids, empty
+	// is still "present"), the signal that issue-dependency hydration was on.
+	hydrated bool
 }
 
 func (f *fixture) issue(id string, s issueSpec) Key {
@@ -142,7 +155,14 @@ func (f *fixture) issue(id string, s issueSpec) Key {
 	if s.priority != "" {
 		show["priority"] = s.priority
 	}
-	f.writeEntity(k, mustJSON(f.t, map[string]any{"issue_show": show}), !s.inactive)
+	if s.createdAt != "" {
+		show["created_at"] = s.createdAt
+	}
+	facts := map[string]any{"issue_show": show}
+	if s.hydrated {
+		facts["issue_deps"] = map[string]any{"ids": []string{}}
+	}
+	f.writeEntity(k, mustJSON(f.t, facts), !s.inactive)
 	return k
 }
 

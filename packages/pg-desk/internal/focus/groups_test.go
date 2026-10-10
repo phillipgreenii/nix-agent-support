@@ -3,6 +3,9 @@ package focus
 import (
 	"reflect"
 	"testing"
+	"time"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/interpret"
 )
 
 // groupRun computes the groups of the candidate set of the fixture.
@@ -21,7 +24,9 @@ func TestCorrelationGroupTakesOneSlot(t *testing.T) {
 	alone := f.issue("bd-alone", issueSpec{state: "open", labels: []string{PlanableLabel}})
 	f.link(anchor, pr, relationWork)
 	f.link(item, pr, relationWork)
-	set, gs := groupRun(f)
+	in := f.inputs()
+	set := Candidates(in)
+	gs := Groups(in, set)
 	wantCandidates(t, set, pr, anchor, item, alone)
 	if len(gs) != 1 {
 		t.Fatalf("groups = %+v, want exactly one (a candidate joined to nothing is no group)", gs)
@@ -29,6 +34,17 @@ func TestCorrelationGroupTakesOneSlot(t *testing.T) {
 	// Members are in candidate order: pr, then the beads by key.
 	if want := []Key{pr, anchor, item}; !reflect.DeepEqual(gs[0].Members, want) {
 		t.Errorf("members = %v, want %v", gs[0].Members, want)
+	}
+	// Through the rank: the group is represented by its highest-ranked member
+	// (the started PR) and consumes ONE slot, so with a cap of 2 the group and
+	// the lone bead fill the plan.
+	r := Rank(in, set, RankOptions{Date: rankDay, Cap: 2, Clock: interpret.FixedClock(fixtureNow)})
+	wantOrder(t, r, pr, alone)
+	if !r.Rows[0].InPlan || !r.Rows[1].InPlan {
+		t.Errorf("rows = %+v: the group must take one slot, leaving one for the lone bead", r.Rows)
+	}
+	if r.Covered[anchor] != pr || r.Covered[item] != pr {
+		t.Errorf("Covered = %v, want the anchor and the item covered by the PR", r.Covered)
 	}
 }
 
@@ -44,10 +60,21 @@ func TestSourceLinkDoesNotJoinCorrelationGroup(t *testing.T) {
 	f.link(focus, pr, "source")
 	f.link(viaMention, pr, relationMentions)
 	f.external(viaExternal, pr, relationWork, "operator link")
-	set, gs := groupRun(f)
+	in := f.inputs()
+	set := Candidates(in)
+	gs := Groups(in, set)
 	wantCandidates(t, set, pr, focus, viaMention, viaExternal)
 	if len(gs) != 0 {
 		t.Errorf("groups = %+v, want none: only a derived work link joins a group", gs)
+	}
+	// End to end through the rank: nothing is grouped, so each is a row of its
+	// own and the focus bead's P0 does not leak into its PR's priority.
+	r := Rank(in, set, RankOptions{Date: rankDay, Clock: interpret.FixedClock(fixtureNow)})
+	if len(r.Rows) != 4 || len(r.Covered) != 0 {
+		t.Errorf("rows = %v, covered = %v, want four separate rows", rowKeys(r), r.Covered)
+	}
+	if got := r.row(t, pr).Priority; got != "P2" {
+		t.Errorf("PR priority = %q, want P2: a source link must not carry the bead's P0", got)
 	}
 }
 
@@ -74,7 +101,10 @@ func TestCorrelatedDueDateInheritance(t *testing.T) {
 	for _, b := range []Key{b1, b2, b3} {
 		f.link(b, pr, relationWork)
 	}
-	_, gs := groupRun(f)
+	f.cfg.Focus.TimeZone = "UTC"
+	in := f.inputs()
+	set := Candidates(in)
+	gs := Groups(in, set)
 	if len(gs) != 1 {
 		t.Fatalf("groups = %+v, want one", gs)
 	}
@@ -92,6 +122,31 @@ func TestCorrelatedDueDateInheritance(t *testing.T) {
 	wantPrio := map[Key]string{pr: "", b1: "P3", b2: "P1", b3: "urgent"}
 	if !reflect.DeepEqual(g.MemberPriority, wantPrio) {
 		t.Errorf("MemberPriority = %v, want %v", g.MemberPriority, wantPrio)
+	}
+
+	// End to end through the rank: the group is ONE row (the started PR),
+	// carrying the earliest due DAY of the group (read in the focus zone) and
+	// its highest priority; the two degradations are counted.
+	r := Rank(in, set, RankOptions{Date: rankDay, Clock: interpret.FixedClock(fixtureNow)})
+	if len(r.Rows) != 1 || r.Rows[0].Key != pr {
+		t.Fatalf("rows = %v, want the PR alone", rowKeys(r))
+	}
+	if r.Rows[0].Due != "2026-10-12" || r.Rows[0].Priority != "P1" {
+		t.Errorf("inherited due/priority = %q/%q, want 2026-10-12/P1", r.Rows[0].Due, r.Rows[0].Priority)
+	}
+	for _, b := range []Key{b1, b2, b3} {
+		if r.Covered[b] != pr {
+			t.Errorf("Covered[%v] = %v, want %v", b, r.Covered[b], pr)
+		}
+	}
+	if r.Inputs.UnparseableDue != 1 || r.Inputs.UnmappedPriority != 1 {
+		t.Errorf("Inputs = %+v, want one unparseable due (b3) and one unmapped priority (b3)", r.Inputs)
+	}
+	// The inherited date decides the TIER: a group whose earliest due is before
+	// the addressed day is overdue, though the PR has no date of its own.
+	later := Rank(in, set, RankOptions{Date: time.Date(2026, 10, 13, 0, 0, 0, 0, time.UTC), Clock: interpret.FixedClock(fixtureNow)})
+	if later.Rows[0].Tier != TierOverdue {
+		t.Errorf("tier on Oct 13 = %q, want overdue through the inherited due date", later.Rows[0].Tier)
 	}
 }
 

@@ -163,6 +163,14 @@ at read time, so a `hide` or `wip` call takes effect on the very next request, n
 the next pipeline run. A hidden PR MUST be excluded from the five panel arrays and exposed only in
 its own `hidden` array.
 
+**The daily-focus rank is NOT an interpret step.** The rank of `pg-desk focus` (tiers, due-date
+horizon, unblocks, priority and age keys, correlation groups) is a read-time view over the stored
+facts, computed on demand with an injected clock; it writes no interpretation row, is never cached
+and is never part of a `run`. It reads what interpret stored (a PR's ownership) and the entity rows,
+and decides nothing that creates, changes or closes work (ADR 0087, "The daily-focus rank is a
+read-time pg-desk view; minting stays in a decider"). Its behavior is specified in
+[`focus.md`](focus.md), "The rank".
+
 ## Exit codes, telemetry, and logs
 
 Interpret has no exit code of its own; like gather, it contributes to `run`'s exit code (`0` on

@@ -80,6 +80,7 @@ let
     coverage_backlog_max = cfg.focus.coverageBacklogMax;
     pending_gate_age = cfg.focus.pendingGateAge;
     operator_identities = cfg.focus.operatorIdentities;
+    priority_map = cfg.focus.priorityMap;
   };
 
   # The only attention.ordering.ties value pg-desk's config loader accepts
@@ -632,6 +633,33 @@ in
           for focus candidacy. Serves Jira only. Null renders nothing; an
           empty list is valid and means no Jira issue is a candidate by
           assignment.
+        '';
+      };
+      priorityMap = lib.mkOption {
+        type = lib.types.nullOr (
+          lib.types.attrsOf (
+            lib.types.enum [
+              "P0"
+              "P1"
+              "P2"
+              "P3"
+              "P4"
+            ]
+          )
+        );
+        default = null;
+        example = {
+          Blocker = "P0";
+          Major = "P2";
+        };
+        description = ''
+          config.yaml's focus.priority_map: maps a tracker priority value (a
+          Jira priority name, matched case-insensitively) to one of P0..P4
+          for the daily-focus rank's priority key. A value that is neither in
+          the map nor already of the form P0..P4 sorts after P4. A non-empty
+          map REPLACES pg-desk's default (Highest = P0, High = P1,
+          Medium = P2, Low = P3, Lowest = P4) entirely, so list every value
+          the tracker uses. Null renders nothing and the default applies.
         '';
       };
     };
