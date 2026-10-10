@@ -22,10 +22,25 @@ import (
 // candidate is adopted leaves the engine READ-ONLY with ReasonAdopt, as an
 // adoption failure does, with the request recorded.
 
-// panicky is a fakeObserver whose Appended or Recovered panics while armed.
+// panicky is a fakeObserver whose Appended, Recovered, Corrected or
+// AppendFailed panics while armed.
 type panicky struct {
 	*fakeObserver
-	appended, recovered atomic.Bool
+	appended, recovered, corrected, appendFailed atomic.Bool
+}
+
+func (p *panicky) Corrected(kind string) {
+	if p.corrected.Load() {
+		panic("injected observer panic")
+	}
+	p.fakeObserver.Corrected(kind)
+}
+
+func (p *panicky) AppendFailed(stage string) {
+	if p.appendFailed.Load() {
+		panic("injected observer panic in AppendFailed")
+	}
+	p.fakeObserver.AppendFailed(stage)
 }
 
 func (p *panicky) Appended(t event.Type, s store.AppendStats) {
@@ -142,6 +157,105 @@ func TestPanicAfterAdoptionLeavesTheEngineConsistentAndWritable(t *testing.T) {
 		h.reopen()
 		consistentAfter(t, h, c)
 	})
+}
+
+// TestPanicInCorrectedLeavesTheEngineConsistentAndWritable checks the one
+// Observer method the table above cannot reach, which only a correction or a
+// retraction calls.
+func TestPanicInCorrectedLeavesTheEngineConsistentAndWritable(t *testing.T) {
+	planDay := taskOf(7, "plan-day")
+	h := newHarness(t, nil)
+	obs := &panicky{fakeObserver: newObserver()}
+	h.openWith(obs)
+	h.bootstrap()
+	h.at(local(9, 5), command.CompleteTask{TaskID: planDay})
+	completed := h.fileEvents()[h.lines()-1].ID
+	obs.corrected.Store(true)
+	c := command.Retract{ID: clientID(), Target: completed}
+	h.clock.Set(local(9, 10))
+	panicOf(t, func() { _, _ = h.try(c) })
+	obs.corrected.Store(false)
+
+	if hl := h.e.Health(); hl != (engine.Health{}) {
+		t.Errorf("Health %+v, want a writable store", hl)
+	}
+	if got := h.task(planDay).Status; got != projection.Open {
+		t.Errorf("the model did not adopt the retraction: task %s", got)
+	}
+	if n := h.countID(c.ID); n != 1 {
+		t.Errorf("event %s is %d times in the log, want once", c.ID, n)
+	}
+	if v := h.e.Version(); v.LogLines != h.lines() || h.e.Snapshot().Model.Lines() != h.lines() {
+		t.Errorf("file %d lines, Version %+v, model %d lines: want them equal", h.lines(), v, h.e.Snapshot().Model.Lines())
+	}
+	retry, err := h.try(c)
+	if err != nil || !retry.Replayed || !slices.Equal(retry.EventIDs, []event.ID{c.ID}) {
+		t.Errorf("the same-id retry %+v, %v, want a replay of %s", retry, err, c.ID)
+	}
+	h.at(local(9, 15), command.SkipTask{TaskID: planDay, Reason: "not today"})
+}
+
+// TestCommitAfterAPanickingOnCommitCallback checks that the request that
+// panicked in OnCommit left the write path usable: the next request commits
+// and runs the callback again.
+func TestCommitAfterAPanickingOnCommitCallback(t *testing.T) {
+	h := newHarness(t, nil)
+	h.bootstrap()
+	var calls atomic.Int32
+	var last atomic.Int64
+	h.e.OnCommit(func(v engine.Version) {
+		last.Store(int64(v.LogLines))
+		if calls.Add(1) == 1 {
+			panic("injected callback panic")
+		}
+	})
+	first := command.CompleteTask{ID: clientID(), TaskID: taskOf(7, "plan-day")}
+	h.clock.Set(local(9, 5))
+	panicOf(t, func() { _, _ = h.try(first) })
+	consistentAfter(t, h, first)
+
+	h.at(local(9, 10), command.SkipTask{TaskID: taskOf(7, "post-plan"), Reason: "not today"})
+	if got := calls.Load(); got != 2 {
+		t.Errorf("OnCommit ran %d times, want the panicking one and the next commit's", got)
+	}
+	if v := h.e.Version(); int64(v.LogLines) != last.Load() || v.LogLines != h.lines() {
+		t.Errorf("Version %+v, last OnCommit %d, file %d lines", v, last.Load(), h.lines())
+	}
+	if got := h.task(taskOf(7, "post-plan")).Status; got != projection.Skipped {
+		t.Errorf("the second commit did not take: task %s", got)
+	}
+}
+
+// TestPanicWhileMarkingReadOnlyRaisesTheOriginal checks that a panic in
+// Observer.AppendFailed or OnHealthChange, run while the store is made
+// read-only after a panic before adoption, does not replace that panic, and
+// that the store is read-only whichever of them panics.
+func TestPanicWhileMarkingReadOnlyRaisesTheOriginal(t *testing.T) {
+	for name, arm := range map[string]func(h *harness, obs *panicky){
+		"Observer.AppendFailed": func(_ *harness, obs *panicky) { obs.appendFailed.Store(true) },
+		"OnHealthChange": func(h *harness, _ *panicky) {
+			h.e.OnHealthChange(func(engine.Health) { panic("injected health panic") })
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, nil)
+			obs := &panicky{fakeObserver: newObserver()}
+			h.openWith(obs)
+			h.bootstrap()
+			arm(h, obs)
+			h.adopt = func() error { panic("injected adoption panic") }
+			c := command.CompleteTask{ID: clientID(), TaskID: taskOf(7, "plan-day")}
+			h.clock.Set(local(9, 5))
+			got := panicOf(t, func() { _, _ = h.try(c) })
+			h.adopt = nil
+			if got != "injected adoption panic" {
+				t.Errorf("panic value %v, want the adoption panic that started it", got)
+			}
+			if hl := h.e.Health(); !hl.ReadOnly || hl.Reason != store.ReasonAdopt {
+				t.Errorf("Health %+v, want read-only with %s", hl, store.ReasonAdopt)
+			}
+		})
+	}
 }
 
 func TestPanicBeforeAdoptionMakesTheStoreReadOnly(t *testing.T) {

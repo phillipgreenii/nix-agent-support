@@ -312,12 +312,30 @@ func (e *Engine) env() command.Env {
 // behind its model, so it first takes the adoption-failure path: the store
 // becomes read-only with ReasonAdopt. One raised after adoption leaves the
 // engine consistent (the request recorded, the model and the version matching
-// the file) and the store writable.
+// the file) and the store writable. The guard stands from the line after the
+// append, so a panic in recording the request counts as one before adoption.
+// A panic in the observer or OnHealthChange while the store is made read-only
+// is dropped: the panic that got there is the one re-raised.
 func (e *Engine) commit(plan command.Plan) (Result, error) {
 	stats, err := e.st.Append(plan.Events)
 	if err != nil {
 		return Result{}, e.appendFailed(err)
 	}
+
+	// settled is set once a panic can no longer leave a writable store behind
+	// its model: the candidate is adopted, or the store is already read-only.
+	// The guard stands from the first line after the append, so a defect panic
+	// in the request record below takes the same path as one in user code.
+	settled := false
+	defer func() {
+		if p := recover(); p != nil {
+			if !settled {
+				e.adoptFailedKeeping()
+			}
+			panic(p)
+		}
+	}()
+
 	result := Result{Changed: true, BatchID: plan.BatchID}
 	for _, ev := range plan.Events {
 		e.index.add(ev)
@@ -325,18 +343,6 @@ func (e *Engine) commit(plan command.Plan) (Result, error) {
 			result.EventIDs = append(result.EventIDs, ev.ID)
 		}
 	}
-
-	// settled is set once a panic can no longer leave a writable store behind
-	// its model: the candidate is adopted, or the store is already read-only.
-	settled := false
-	defer func() {
-		if p := recover(); p != nil {
-			if !settled {
-				e.adoptFailed()
-			}
-			panic(p)
-		}
-	}()
 
 	adoptErr := errors.New("the plan has no candidate model")
 	if plan.Candidate != nil {
@@ -371,6 +377,15 @@ func (e *Engine) adoptFailed() Health {
 	e.st.MarkReadOnly(store.ReasonAdopt)
 	e.obs.AppendFailed(stageProject)
 	return e.healthChanged()
+}
+
+// adoptFailedKeeping is adoptFailed for the recover branch of commit, which
+// re-raises the panic that brought it there: the store is marked read-only
+// first, and a panic in the observer or OnHealthChange it runs after that is
+// recovered, so the original panic value is the one that propagates.
+func (e *Engine) adoptFailedKeeping() {
+	defer func() { _ = recover() }()
+	e.adoptFailed()
 }
 
 // observeAppend reports each appended event, splitting the stats of the

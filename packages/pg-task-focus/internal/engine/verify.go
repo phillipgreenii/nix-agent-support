@@ -18,8 +18,9 @@ type VerifyReport struct {
 	// *store.UnknownVersionError).
 	Check store.CheckReport
 	// Replayed is set when the committed events replayed into a possible
-	// timeline. It is false when Check.Problem is set (nothing is replayed)
-	// and when Invalid is.
+	// timeline. It is false when Check.Problem is set (nothing is replayed),
+	// when Invalid is, and when the replay failed for a reason that is not a
+	// finding, which Verify returns as its error.
 	Replayed bool
 	// Invalid is the finding of the replay when the timeline is impossible:
 	// its specific code, its message and the stored events it names.
