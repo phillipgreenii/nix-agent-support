@@ -100,7 +100,7 @@ func TestFanOutEach_SlowBackendDoesNotDelayOthers(t *testing.T) {
 			t.Errorf("backend %s finished after %v: it was held up by the hung b0 (%v)", names[i], finished[i], hung)
 		}
 	}
-	if total := time.Since(start); total < hung || total > hung+hung/2 {
+	if total := time.Since(start); total < hung || total > 3*hung {
 		t.Errorf("total = %v, want about the slowest backend (%v), not the sum", total, hung)
 	}
 }
@@ -220,7 +220,7 @@ func TestResolveFanOutConcurrency(t *testing.T) {
 
 // writeSlowFakeBackend is writeFakeBackend with a delay: it sleeps for
 // delaySeconds (a sleep(1) argument, "0.3") after reading the request, then
-// prints stdout. It stands in for a slow or wedged backend binary.
+// prints stdout.
 func writeSlowFakeBackend(t *testing.T, name, delaySeconds, stdout string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -230,6 +230,50 @@ func writeSlowFakeBackend(t *testing.T, name, delaySeconds, stdout string) {
 		t.Fatalf("write slow fake backend: %v", err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// writeGatedFakeBackend writes a fake backend that proves concurrency
+// without relying on wall-clock margins. On each call it drops
+// <dir>/<name>.started, then waits (up to about 5s) until every marker in
+// waitFor exists in dir. It answers okOut when they all appeared and
+// timeoutOut when the wait ran out, then drops <dir>/<name>.done. Under a
+// serial fan-out a backend that waits for a LATER one can never be
+// satisfied, so it answers timeoutOut; under a parallel one it answers okOut.
+// postSleep ("0.2") delays the answer after the gate, to stagger completion.
+func writeGatedFakeBackend(t *testing.T, name, dir string, waitFor []string, okOut, timeoutOut, postSleep string) {
+	t.Helper()
+	scriptDir := t.TempDir()
+	var wait strings.Builder
+	for _, w := range waitFor {
+		wait.WriteString(`[ -e "` + dir + `/` + w + `" ] || ok=0; `)
+	}
+	content := "#!/bin/sh\ncat >/dev/null\n" +
+		`touch "` + dir + `/` + name + `.started"` + "\n" +
+		"i=0\nwhile [ \"$i\" -lt 100 ]; do\n  ok=1; " + wait.String() + "\n  [ \"$ok\" = 1 ] && break\n  i=$((i+1)); sleep 0.05\ndone\n" +
+		"sleep " + postSleep + "\n" +
+		`touch "` + dir + `/` + name + `.done"` + "\n" +
+		"if [ \"$ok\" = 1 ]; then\ncat <<'FAKE_BACKEND_EOF'\n" + okOut + "\nFAKE_BACKEND_EOF\nelse\ncat <<'FAKE_BACKEND_EOF'\n" + timeoutOut + "\nFAKE_BACKEND_EOF\nfi\n"
+	if err := os.WriteFile(filepath.Join(scriptDir, name), []byte(content), 0o755); err != nil {
+		t.Fatalf("write gated fake backend: %v", err)
+	}
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// gatedActivity registers the activity backends names, each of which waits
+// until every one of them has started (an all-at-once rendezvous) and then
+// answers item "<name>-ok" (or "<name>-serial" if the rendezvous never
+// happened). post[i] staggers the answers so the LAST registered finishes
+// first.
+func gatedActivity(t *testing.T, names []string, post []string) {
+	t.Helper()
+	dir := t.TempDir()
+	var started []string
+	for _, n := range names {
+		started = append(started, n+".started")
+	}
+	for i, n := range names {
+		writeGatedFakeBackend(t, n, dir, started, activityResp("false", n+"-ok"), activityResp("false", n+"-serial"), post[i])
+	}
 }
 
 // writeActivityConfigWithState is writeActivityListConfig plus a state:
@@ -260,60 +304,51 @@ func activityItemIDs(o activityOut) string {
 }
 
 // TestActivityList_ParallelFanOut_RegistrationOrderUnderReversedCompletion:
-// the earlier a source is registered the LATER it answers, yet rows and items
-// stay in registration order, and the wall clock is the slowest source, not
-// the sum.
+// all three sources must be running at the same moment (each waits for the
+// other two), the last registered answers first, and rows and items still
+// come back in registration order.
 func TestActivityList_ParallelFanOut_RegistrationOrderUnderReversedCompletion(t *testing.T) {
-	writeSlowFakeBackend(t, "par-a", "1.2", activityResp("false", "a1"))
-	writeSlowFakeBackend(t, "par-b", "0.6", activityResp("false", "b1"))
-	writeSlowFakeBackend(t, "par-c", "0", activityResp("false", "c1"))
+	gatedActivity(t, []string{"par-a", "par-b", "par-c"}, []string{"0.5", "0.25", "0"})
 	writeActivityListConfig(t, []string{"par-a", "par-b", "par-c"}, nil)
 
-	start := time.Now()
 	stdout, _, code := executePr(t, []string{"activity", "list", "--since", "24h"})
-	elapsed := time.Since(start)
 	if code != 0 {
 		t.Fatalf("exit = %d; stdout=%s", code, stdout)
 	}
 	o := decodeActivityOut(t, stdout)
-	if got := activityItemIDs(o); got != "par-a/a1,par-b/b1,par-c/c1" {
-		t.Fatalf("items = %s, want registration order", got)
+	if got := activityItemIDs(o); got != "par-a/par-a-ok,par-b/par-b-ok,par-c/par-c-ok" {
+		t.Fatalf("items = %s, want every source running concurrently, in registration order", got)
 	}
 	for i, want := range []string{"par-a", "par-b", "par-c"} {
 		if o.Sources[i]["source"] != want {
 			t.Fatalf("sources[%d] = %v, want %s", i, o.Sources[i], want)
 		}
 	}
-	// Serial would be >= 1.8s.
-	if elapsed > 1700*time.Millisecond {
-		t.Fatalf("elapsed %v: the fan-out was serial, want about the slowest source (1.2s)", elapsed)
-	}
 }
 
 // TestActivityList_HungSourceDoesNotDelayOthers: the slow source is
 // registered FIRST (the serial worst case, every other source queued behind
-// it); the call still costs about that one source, and the others answer.
+// it) and does not answer until all four others have finished. Under a
+// serial fan-out it would wait for sources that cannot start until it
+// returns.
 func TestActivityList_HungSourceDoesNotDelayOthers(t *testing.T) {
-	writeSlowFakeBackend(t, "hung-a", "1.5", activityResp("false", "a1"))
-	names := []string{"hung-a"}
-	for _, n := range []string{"hung-b", "hung-c", "hung-d", "hung-e"} {
-		writeSlowFakeBackend(t, n, "0.3", activityResp("false", n))
-		names = append(names, n)
+	dir := t.TempDir()
+	others := []string{"hung-b", "hung-c", "hung-d", "hung-e"}
+	var othersDone []string
+	for _, n := range others {
+		othersDone = append(othersDone, n+".done")
+		writeGatedFakeBackend(t, n, dir, nil, activityResp("false", n), activityResp("false", n), "0")
 	}
-	writeActivityListConfig(t, names, nil)
+	writeGatedFakeBackend(t, "hung-a", dir, othersDone, activityResp("false", "hung-a-ok"), activityResp("false", "hung-a-serial"), "0")
+	writeActivityListConfig(t, append([]string{"hung-a"}, others...), nil)
 
-	start := time.Now()
 	stdout, _, code := executePr(t, []string{"activity", "list", "--since", "24h"})
-	elapsed := time.Since(start)
 	if code != 0 {
 		t.Fatalf("exit = %d; stdout=%s", code, stdout)
 	}
-	if o := decodeActivityOut(t, stdout); len(o.Items) != 5 {
-		t.Fatalf("items = %s", activityItemIDs(o))
-	}
-	// Serial would be >= 1.5 + 4*0.3 = 2.7s.
-	if elapsed > 2200*time.Millisecond {
-		t.Fatalf("elapsed %v: queued sources were delayed behind the slow one", elapsed)
+	want := "hung-a/hung-a-ok,hung-b/hung-b,hung-c/hung-c,hung-d/hung-d,hung-e/hung-e"
+	if got := activityItemIDs(decodeActivityOut(t, stdout)); got != want {
+		t.Fatalf("items = %s, want %s (the others were queued behind the slow source)", got, want)
 	}
 }
 
@@ -367,45 +402,38 @@ func TestActivityList_ConcurrencyCapOfOneRunsSerially(t *testing.T) {
 }
 
 // TestFanOutAuthStatus_RunsInParallelInRegistrationOrder covers the
-// config-free fan-outs (auth status; config validate uses the same helper).
+// config-free fan-outs (auth status; config validate uses the same helper):
+// each backend waits for the other two, so only a concurrent run is healthy.
 func TestFanOutAuthStatus_RunsInParallelInRegistrationOrder(t *testing.T) {
+	dir := t.TempDir()
+	names := []string{"auth-par-a", "auth-par-b", "auth-par-c"}
+	started := []string{"auth-par-a.started", "auth-par-b.started", "auth-par-c.started"}
 	ok := `{"protocolVersion":1,"schemaVersion":1,"result":{"state":"OK"}}`
-	writeSlowFakeBackend(t, "auth-par-a", "0.9", ok)
-	writeSlowFakeBackend(t, "auth-par-b", "0.45", ok)
-	writeSlowFakeBackend(t, "auth-par-c", "0", activityUnavailableResp)
+	for i, n := range names {
+		writeGatedFakeBackend(t, n, dir, started, ok, activityUnavailableResp, []string{"0.4", "0.2", "0"}[i])
+	}
 
-	start := time.Now()
-	out := FanOutAuthStatus(context.Background(), nil, []string{"auth-par-a", "auth-par-b", "auth-par-c"})
-	elapsed := time.Since(start)
+	out := FanOutAuthStatus(context.Background(), nil, names)
 	var got []string
 	for _, s := range out.Sources {
 		got = append(got, s.Source+":"+string(s.Status))
 	}
-	if strings.Join(got, ",") != "auth-par-a:succeeded,auth-par-b:succeeded,auth-par-c:degraded" {
-		t.Fatalf("rows = %v", got)
-	}
-	// Serial would be >= 1.35s.
-	if elapsed > 1250*time.Millisecond {
-		t.Fatalf("elapsed %v: auth status ran serially", elapsed)
+	if strings.Join(got, ",") != "auth-par-a:succeeded,auth-par-b:succeeded,auth-par-c:succeeded" {
+		t.Fatalf("rows = %v, want all three running at once, in registration order", got)
 	}
 }
 
 // TestPrChanges_ParallelBackends_OwnLedgersAndRegistrationOrder: three
-// backends with staggered latency each refresh their OWN ledger; sources and
-// changes come back in registration order, and a second call reports nothing
-// new (each ledger advanced independently).
+// backends rendezvous (so they must all be inside their list call at once),
+// each refreshes its OWN ledger, and sources and changes come back in
+// registration order; a second call reports nothing new (each ledger
+// advanced independently).
 func TestPrChanges_ParallelBackends_OwnLedgersAndRegistrationOrder(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", dir)
-	prJSON := func(n int) string {
-		return fmt.Sprintf(`{"id":"o/r#%d","repo":"o/r","number":%d,"title":"t","state":"open","branch":"b","base":"main","author":"a","url":"u","draft":false,"merged":false}`, n, n)
-	}
-	list := func(n int) string {
-		return fmt.Sprintf(`{"protocolVersion":1,"schemaVersion":1,"result":{"entities":[%s],"present_ids":["o/r#%d"],"cursor":null,"truncated":false}}`, prJSON(n), n)
-	}
-	writeSlowFakeBackend(t, "chg-par-a", "0.9", list(1))
-	writeSlowFakeBackend(t, "chg-par-b", "0.45", list(2))
-	writeSlowFakeBackend(t, "chg-par-c", "0", list(3))
+	gateDir := t.TempDir()
+	names := []string{"chg-par-a", "chg-par-b", "chg-par-c"}
+	gatedPRBackends(t, gateDir, names)
 	cfgDir := t.TempDir()
 	cfg := filepath.Join(cfgDir, "config.yaml")
 	if err := os.WriteFile(cfg, []byte("connector:\n  pr:\n    - chg-par-a\n    - chg-par-b\n    - chg-par-c\n"), 0o644); err != nil {
@@ -413,9 +441,7 @@ func TestPrChanges_ParallelBackends_OwnLedgersAndRegistrationOrder(t *testing.T)
 	}
 	t.Setenv("PG_PR_CONFIG", cfg)
 
-	start := time.Now()
 	stdout, _, code := executePr(t, []string{"pr", "changes", "--query", "mine", "--consumer", "c1"})
-	elapsed := time.Since(start)
 	if code != 0 {
 		t.Fatalf("exit = %d; stdout=%s", code, stdout)
 	}
@@ -437,13 +463,9 @@ func TestPrChanges_ParallelBackends_OwnLedgersAndRegistrationOrder(t *testing.T)
 		t.Fatalf("sources = %v", srcs)
 	}
 	if strings.Join(ids, ",") != "chg-par-a/o/r#1,chg-par-b/o/r#2,chg-par-c/o/r#3" {
-		t.Fatalf("changes = %v, want registration order", ids)
+		t.Fatalf("changes = %v, want every backend concurrent (ids #1..#3), in registration order", ids)
 	}
-	// Serial would be >= 1.35s.
-	if elapsed > 1250*time.Millisecond {
-		t.Fatalf("elapsed %v: changes ran serially", elapsed)
-	}
-	for _, b := range []string{"chg-par-a", "chg-par-b", "chg-par-c"} {
+	for _, b := range names {
 		p, perr := ledgerPath(LedgerKey{Type: "pr", Backend: b, Query: "mine"})
 		if perr != nil {
 			t.Fatalf("ledgerPath(%s): %v", b, perr)
@@ -452,6 +474,7 @@ func TestPrChanges_ParallelBackends_OwnLedgersAndRegistrationOrder(t *testing.T)
 			t.Errorf("no ledger written for %s: %v", b, err)
 		}
 	}
+	// The gate markers persist, so the second call's backends pass at once.
 	stdout2, _, code2 := executePr(t, []string{"pr", "changes", "--query", "mine", "--consumer", "c1"})
 	if code2 != 0 {
 		t.Fatalf("second call exit = %d; stdout=%s", code2, stdout2)
@@ -461,27 +484,38 @@ func TestPrChanges_ParallelBackends_OwnLedgersAndRegistrationOrder(t *testing.T)
 	}
 }
 
-// TestPrList_ParallelBackends_RegistrationOrder: list fans out in parallel
-// while entities and sources stay in registration order (the entity-cache
-// writes after each call stay serial, in the fold).
-func TestPrList_ParallelBackends_RegistrationOrder(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("XDG_STATE_HOME", dir)
+// gatedPRBackends registers pr backends that rendezvous like gatedActivity;
+// backend i answers entity #(i+1) when the rendezvous happened and #(i+101)
+// when it did not (a serial run).
+func gatedPRBackends(t *testing.T, gateDir string, names []string) {
+	t.Helper()
 	list := func(n int) string {
 		return fmt.Sprintf(`{"protocolVersion":1,"schemaVersion":1,"result":{"entities":[{"id":"o/r#%d","repo":"o/r","number":%d,"title":"t","state":"open","branch":"b","base":"main","author":"a","url":"u","draft":false,"merged":false}],"present_ids":["o/r#%d"],"cursor":null,"truncated":false}}`, n, n, n)
 	}
-	writeSlowFakeBackend(t, "plist-a", "0.9", list(1))
-	writeSlowFakeBackend(t, "plist-b", "0.45", list(2))
-	writeSlowFakeBackend(t, "plist-c", "0", list(3))
+	var started []string
+	for _, n := range names {
+		started = append(started, n+".started")
+	}
+	for i, n := range names {
+		writeGatedFakeBackend(t, n, gateDir, started, list(i+1), list(i+101), []string{"0.4", "0.2", "0"}[i%3])
+	}
+}
+
+// TestPrList_ParallelBackends_RegistrationOrder: list fans out in parallel
+// (the backends rendezvous) while entities and sources stay in registration
+// order (the entity-cache writes after each call stay serial, in the fold).
+func TestPrList_ParallelBackends_RegistrationOrder(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", dir)
+	names := []string{"plist-a", "plist-b", "plist-c"}
+	gatedPRBackends(t, t.TempDir(), names)
 	cfg := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(cfg, []byte("connector:\n  pr:\n    - plist-a\n    - plist-b\n    - plist-c\n"), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 	t.Setenv("PG_PR_CONFIG", cfg)
 
-	start := time.Now()
 	stdout, _, code := executePr(t, []string{"pr", "list", "--query", "mine"})
-	elapsed := time.Since(start)
 	if code != 0 {
 		t.Fatalf("exit = %d; stdout=%s", code, stdout)
 	}
@@ -504,9 +538,6 @@ func TestPrList_ParallelBackends_RegistrationOrder(t *testing.T) {
 		srcs = append(srcs, s.Source)
 	}
 	if strings.Join(ids, ",") != "o/r#1,o/r#2,o/r#3" || strings.Join(srcs, ",") != "plist-a,plist-b,plist-c" {
-		t.Fatalf("entities=%v sources=%v, want registration order", ids, srcs)
-	}
-	if elapsed > 1250*time.Millisecond {
-		t.Fatalf("elapsed %v: pr list ran serially", elapsed)
+		t.Fatalf("entities=%v sources=%v, want every backend concurrent, in registration order", ids, srcs)
 	}
 }

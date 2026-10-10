@@ -10,6 +10,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -125,6 +126,10 @@ func TestInstances_ActivityFansOutOverBothInstances(t *testing.T) {
 	if len(calls) != 2 {
 		t.Fatalf("calls = %v, want exactly one per instance", calls)
 	}
+	// The instances are called concurrently (INV-FANOUT-1), so the log's
+	// arrival order is not registration order; sorting puts the pg2 argv
+	// before the zr one.
+	sort.Strings(calls)
 	// Each instance got ITS argv (command args first, nothing appended)
 	// and ITS OWN backends.<name> block in the request.
 	for i, want := range []struct{ argv, actor string }{
