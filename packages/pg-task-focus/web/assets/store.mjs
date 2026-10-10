@@ -77,34 +77,40 @@ export function createStore({ api, now, newId, browserZone = "", hash = "" }) {
 
   // ---- reading the state ----
 
-  let refreshing = false;
+  let inflight = null;
   let again = false;
 
-  /** Reads the state (and the configuration when its generation changed). Overlapping calls coalesce. */
-  async function refresh() {
-    if (refreshing) {
+  /**
+   * Reads the state (and the configuration when its generation changed). A call made while a read is
+   * in flight asks for one more read after it and returns the same promise, so whoever awaits it
+   * has the state as of after their own request, never an older one.
+   */
+  function refresh() {
+    if (inflight) {
       again = true;
-      return;
+      return inflight;
     }
-    refreshing = true;
-    try {
-      do {
-        again = false;
-        const st = await api.getState();
-        if (model.config === null || model.configGeneration !== st.version.config_generation) {
-          model.config = await api.getConfig();
-          model.configGeneration = st.version.config_generation;
-        }
-        applyState(st);
-        model.loadError = null;
-        model.loaded = true;
-      } while (again);
-    } catch (e) {
-      model.loadError = e instanceof ApiError ? e : new ApiError({ kind: "network", detail: "The service could not be reached." });
-    } finally {
-      refreshing = false;
-      notify();
-    }
+    inflight = (async () => {
+      try {
+        do {
+          again = false;
+          const st = await api.getState();
+          if (model.config === null || model.configGeneration !== st.version.config_generation) {
+            model.config = await api.getConfig();
+            model.configGeneration = st.version.config_generation;
+          }
+          applyState(st);
+          model.loadError = null;
+          model.loaded = true;
+        } while (again);
+      } catch (e) {
+        model.loadError = e instanceof ApiError ? e : new ApiError({ kind: "network", detail: "The service could not be reached." });
+      } finally {
+        inflight = null;
+        notify();
+      }
+    })();
+    return inflight;
   }
 
   function applyState(st) {

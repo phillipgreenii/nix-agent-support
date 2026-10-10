@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { ApiError } from "../assets/api.mjs";
 import { UNDO_MS } from "../assets/store.mjs";
 import { cycle, dimmed, period, readOnlyStore, state, T0 } from "./fixtures.mjs";
-import { harness, networkError, problem, said } from "./harness.mjs";
+import { harness, networkError, problem, said, tick } from "./harness.mjs";
 
 test("the first read loads the state and the configuration, and a configuration change reloads it", async () => {
   const h = harness();
@@ -241,4 +241,27 @@ test("the ApiError of a problem keeps what the page shows", () => {
   assert.ok(e instanceof ApiError);
   assert.equal(e.message, "Deep work cycle is stopped.");
   assert.equal(e.outcomeUnknown, false);
+});
+
+test("a refresh asked for while one is in flight resolves only after a read that began after the ask", async () => {
+  const h = harness();
+  await h.start();
+  const reads = [];
+  let release;
+  h.api.getState = () =>
+    new Promise((resolve) => {
+      reads.push(resolve);
+      if (reads.length === 1) release = () => resolve(state({ version: { log_lines: 41, config_generation: 1 } }));
+    });
+  const first = h.store.refresh(); // in flight
+  await tick();
+  let secondDone = false;
+  const second = h.store.refresh().then(() => (secondDone = true)); // asked for after a change
+  release(); // the first read answers with the old state
+  await tick();
+  assert.equal(secondDone, false, "the one who asked is not told the state is current on the strength of an older read");
+  assert.equal(reads.length, 2, "a second read was made");
+  reads[1](state({ version: { log_lines: 42, config_generation: 1 } }));
+  await Promise.all([first, second]);
+  assert.equal(h.model.state.version.log_lines, 42);
 });
