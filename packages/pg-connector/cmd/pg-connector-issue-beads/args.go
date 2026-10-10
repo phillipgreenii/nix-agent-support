@@ -24,13 +24,16 @@ var errUsage = errors.New("usage")
 // unvalidated for compatibility) a flag is new surface, and a relative path
 // would resolve against whatever cwd the umbrella was launched from, the
 // defect ErrWorkspaceNotConfigured exists to prevent. Giving the flag
-// twice is not an error: the last one wins.
+// twice is not an error: the last one wins. A parse failure is returned
+// (wrapping errUsage), never printed here: the caller prints it exactly
+// once. Only -h prints, the single usage line on stderr.
 func parseArgs(args []string, stderr io.Writer) (beadsDir string, err error) {
 	fs := flag.NewFlagSet(progName, flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	fs.Usage = func() {
-		_, _ = fmt.Fprintf(stderr, "usage: %s [--beads-dir DIR]\n", progName)
-	}
+	// The flag package would print its own copy of a parse error (and the
+	// usage text) to its output; the caller reports the returned error
+	// once, so keep the package silent and print usage only for -h.
+	fs.SetOutput(io.Discard)
+	fs.Usage = func() {}
 	var dir string
 	given := false
 	fs.Func("beads-dir", "absolute path of the bd tracker this instance serves (beats $PG_CONNECTOR_ISSUE_BEADS_DIR and $BEADS_DIR)", func(v string) error {
@@ -40,6 +43,7 @@ func parseArgs(args []string, stderr io.Writer) (beadsDir string, err error) {
 	})
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
+			_, _ = fmt.Fprintf(stderr, "usage: %s [--beads-dir DIR]\n", progName)
 			return "", err
 		}
 		return "", fmt.Errorf("%w: %v", errUsage, err)

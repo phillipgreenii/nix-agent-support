@@ -33,11 +33,13 @@ type ExecBackend struct {
 	// Binary is the backend executable's path (absolute, or resolved via
 	// $PATH).
 	Binary string
-	// Args are extra command-line arguments passed to Binary. A real
-	// Tier-2 backend binary takes none (it only ever reads stdin, matching
-	// exec.go's own zero-arg invocation) — Args exists for a test double
-	// built from a self-re-exec'd test binary, which needs e.g.
-	// -test.run=... to target the right helper-process test function.
+	// Args are extra command-line arguments passed to Binary: the words of a
+	// registered {name, command} instance after command[0] (e.g.
+	// --beads-dir DIR; the umbrella passes the command's arguments and puts
+	// the request on stdin, matching exec.go's runInvoke), or, for a test
+	// double built from a self-re-exec'd test binary, e.g. -test.run=... to
+	// target the right helper-process test function. A plain-string
+	// registration takes none.
 	Args []string
 }
 
