@@ -1,0 +1,14 @@
+{
+  "name": "16-focus-selected-mints-a-bead",
+  "description": "A team PR still in draft that today's daily focus selects, with no focus bead yet: the new side mints one focus bead for it (a create of kind focus-item); the old side has no such notion.",
+  "entities": ["acme/api#116"],
+  "focus_selected": { "acme/api#116": "2026-10-10" },
+  "prs": [
+    {
+      "number": 116,
+      "title": "WIP: split the config loader",
+      "author": "teammate",
+      "draft": true
+    }
+  ]
+}

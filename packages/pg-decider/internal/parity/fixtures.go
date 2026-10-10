@@ -95,6 +95,12 @@ type Fixture struct {
 	// ledger, which the harness's fresh store cannot seed. `issue show`
 	// answers every bead either way.
 	WorkBeadsOpenOnly bool `json:"work_beads_open_only,omitempty"`
+	// FocusSelected maps an evaluated entity to the period key (YYYY-MM-DD) of
+	// the daily focus that selects it. The new side writes it as the
+	// focus_selected annotation after hydrating the entity; an entity with no
+	// entry has the annotation unset (null), which reads as "not selected". The
+	// old side has no such notion and ignores it.
+	FocusSelected map[string]string `json:"focus_selected,omitempty"`
 }
 
 // PRFixture is one synthetic pull request; unset fields take realistic
@@ -146,7 +152,7 @@ type CIRunFixture struct {
 type BeadFixture struct {
 	ID        string            `json:"id"`
 	Title     string            `json:"title"`
-	State     string            `json:"state,omitempty"` // open, in_progress or closed; default open
+	State     string            `json:"state,omitempty"` // open, in_progress, deferred or closed; default open
 	IssueType string            `json:"issue_type,omitempty"`
 	Parent    string            `json:"parent,omitempty"`
 	Labels    []string          `json:"labels,omitempty"`
@@ -241,6 +247,14 @@ func (fx *Fixture) validate() error {
 			return fmt.Errorf("fixture %s: hidden %q is not an evaluated entity", fx.Name, h)
 		}
 	}
+	for e, period := range fx.FocusSelected {
+		if !contains(fx.Entities, e) {
+			return fmt.Errorf("fixture %s: focus_selected names %q, which is not an evaluated entity", fx.Name, e)
+		}
+		if period == "" {
+			return fmt.Errorf("fixture %s: focus_selected of %s is empty (omit the entity to leave it unset)", fx.Name, e)
+		}
+	}
 	beads := map[string]bool{}
 	for _, b := range fx.Beads {
 		if b.ID == "" || b.Title == "" {
@@ -251,9 +265,9 @@ func (fx *Fixture) validate() error {
 		}
 		beads[b.ID] = true
 		switch b.State {
-		case "", "open", "in_progress", "closed":
+		case "", "open", "in_progress", "deferred", "closed":
 		default:
-			return fmt.Errorf("fixture %s: bead %s has state %q (want open, in_progress or closed)", fx.Name, b.ID, b.State)
+			return fmt.Errorf("fixture %s: bead %s has state %q (want open, in_progress, deferred or closed)", fx.Name, b.ID, b.State)
 		}
 	}
 	return nil

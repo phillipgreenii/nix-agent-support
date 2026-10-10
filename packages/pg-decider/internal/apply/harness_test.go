@@ -31,7 +31,11 @@ type record struct {
 func (r record) line() string { return r.Name + " " + strings.Join(r.Args, " ") }
 
 type respRule struct {
-	Match  string `json:"match"`
+	Match string `json:"match"`
+	// Nth, when non-zero, restricts the rule to the Nth exec (counting this
+	// one) whose "<binary> <args...>" text contains Match, so a bead can read
+	// one way before a write and another way after it.
+	Nth    int    `json:"nth,omitempty"`
 	Exit   int    `json:"exit"`
 	Stdout string `json:"stdout"`
 	Stderr string `json:"stderr"`
@@ -61,9 +65,16 @@ func helperMain() {
 		rec.BeadsDir = &v
 	}
 	seq := 1
+	var prevLines []record
 	if logPath := os.Getenv("GO_HELPER_LOG"); logPath != "" {
 		if prev, err := os.ReadFile(logPath); err == nil {
 			seq = strings.Count(string(prev), "\n") + 1
+			for _, l := range strings.Split(strings.TrimSpace(string(prev)), "\n") {
+				var pr record
+				if json.Unmarshal([]byte(l), &pr) == nil {
+					prevLines = append(prevLines, pr)
+				}
+			}
 		}
 		f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 		if err == nil {
@@ -81,6 +92,17 @@ func helperMain() {
 	line := rec.line()
 	for _, r := range rules {
 		if strings.Contains(line, r.Match) {
+			if r.Nth > 0 {
+				n := 1
+				for _, pr := range prevLines {
+					if strings.Contains(pr.line(), r.Match) {
+						n++
+					}
+				}
+				if n != r.Nth {
+					continue
+				}
+			}
 			_, _ = os.Stdout.WriteString(strings.ReplaceAll(r.Stdout, "{seq}", strconv.Itoa(seq)))
 			_, _ = os.Stderr.WriteString(r.Stderr)
 			os.Exit(r.Exit)

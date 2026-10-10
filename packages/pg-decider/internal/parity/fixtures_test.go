@@ -214,3 +214,27 @@ func TestFixtureWorkBeadsOpenOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestFixtureFocusSelectedAndDeferredBead(t *testing.T) {
+	good := `{
+	  "name": "x", "description": "d", "entities": ["acme/api#1"],
+	  "focus_selected": {"acme/api#1": "2026-10-10"},
+	  "prs": [{"number": 1}],
+	  "beads": [{"id": "bd-1", "title": "Focus acme/api#1", "state": "deferred"}]
+	}`
+	fx, err := ParseFixture([]byte(good))
+	if err != nil {
+		t.Fatalf("ParseFixture: %v", err)
+	}
+	if fx.FocusSelected["acme/api#1"] != "2026-10-10" || fx.Beads[0].State != "deferred" {
+		t.Fatalf("fixture %+v", fx)
+	}
+	for name, in := range map[string]string{
+		"focus_selected names a non-entity": strings.Replace(good, `"acme/api#1": "2026-10-10"`, `"acme/api#2": "2026-10-10"`, 1),
+		"focus_selected is empty":           strings.Replace(good, `"2026-10-10"`, `""`, 1),
+	} {
+		if _, err := ParseFixture([]byte(in)); err == nil {
+			t.Errorf("%s: want an error", name)
+		}
+	}
+}

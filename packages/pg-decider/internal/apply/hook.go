@@ -61,6 +61,11 @@ const (
 	OutcomeDeduped           Outcome = "deduped"
 	OutcomeFailed            Outcome = "failed"
 	OutcomeSkippedDependency Outcome = "skipped-dependency"
+	// OutcomeSkippedStale is an update the live re-read (focus hold or
+	// release) abandoned because the bead changed since the view was read, or
+	// because the re-read could not be trusted. Nothing was written. It is
+	// counted under skipped, is not a failure and posts no audit comment.
+	OutcomeSkippedStale Outcome = "skipped-stale"
 )
 
 // Event is one action's outcome, handed to every Hook.

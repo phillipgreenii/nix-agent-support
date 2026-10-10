@@ -1,0 +1,28 @@
+{
+  "name": "18-focus-reselect-releases-a-held-bead",
+  "description": "A team PR still in draft with a HELD focus bead (status deferred, marker struck, unassigned), which today's daily focus selects again: the new side releases the bead with one update of kind focus-item (status open, deferral cleared, marker released); the old side has no such notion.",
+  "entities": ["acme/api#118"],
+  "focus_selected": { "acme/api#118": "2026-10-10" },
+  "prs": [
+    {
+      "number": 118,
+      "title": "WIP: connection pool",
+      "author": "teammate",
+      "draft": true
+    }
+  ],
+  "beads": [
+    {
+      "id": "bd-118f",
+      "title": "Focus acme/api#118 - WIP: connection pool",
+      "state": "deferred",
+      "labels": ["focus-item"],
+      "metadata": {
+        "source_type": "pr",
+        "source_id": "acme/api#118",
+        "dedup_key": "pr:acme/api#118:focus-item",
+        "focus_hold": "struck"
+      }
+    }
+  ]
+}

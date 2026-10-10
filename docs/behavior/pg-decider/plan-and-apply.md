@@ -39,10 +39,19 @@ fields, the rule that produced it and the facts the rule keyed on.
 | Operation  | Effect                                                                                         |
 | ---------- | ---------------------------------------------------------------------------------------------- |
 | `create`   | Create a work item; its parent may be the anchor created earlier in the same list              |
-| `update`   | Change fields, metadata or labels of an existing work item                                     |
+| `update`   | Change fields, metadata, labels, status or deferral of an existing work item                   |
 | `reopen`   | Reopen a closed work item; the previous claimant and any deferral are cleared in the same call |
 | `close`    | Close a work item, recording the rule id and a summary as the close reason                     |
 | `annotate` | Set a decider annotation on the entity, or clear the one-shot force-review flag                |
+
+An `update` MAY carry a `status` (`deferred` to hold a focus bead, `open` to release it) and a
+deferral clearing (a release). `apply` renders them to the tracker as `--status <status>` and
+`--clear-defer`, ahead of the metadata, label, priority, title and description flags, so a hold is
+`issue update <id> --status deferred --metadata focus_hold=struck` and a release is
+`issue update <id> --status open --clear-defer --metadata focus_hold=released`. A release never
+clears the assignee (`reopen`, by contrast, clears the previous claimant and any deferral in the
+same call). `status` and the deferral clearing are omitted from an action's JSON when unset, so no
+other action changes.
 
 Actions follow rule order and, within a rule, the order the rule returned them. An anchor create
 always precedes every action that is parented to it.
@@ -126,10 +135,41 @@ before anything else happens.
   tracker's work items, in either key form (see [`work-items.md`](work-items.md)). A hit applies
   nothing and is reported as `deduped`. A lookup that fails or returns an unreadable result fails
   the action rather than creating, because creating without a trustworthy lookup could duplicate.
-- **Best effort, in order.** Each action's outcome is `applied`, `deduped`, `failed` or
-  `skipped-dependency`. A failure is captured and later actions continue, except those that depend
-  on it: a child whose parent is an anchor create that did not apply, and an action marked as
-  requiring every earlier action of its own rule.
+- **The focus dedup lookup.** The lookup for the `focus-item` kind does not use the work-beads
+  query, which lists only title-matched anchor and feedback beads. It lists focus beads in EVERY
+  status, closed included, through the named query `focus_beads_query` (see
+  [`config.md`](config.md)), so a closed focus bead is never re-minted. With no `focus_beads_query`
+  configured, or with a truncated listing, the create fails closed: it is counted `failed` and
+  nothing is written; it never falls back to the work-beads query. On a hit for a source whose view
+  shows no linked bead (the store row is missing or stale, for example after a failed refresh), `apply`
+  runs `pg-desk issue refresh <hit>` and writes nothing else.
+- **A hold or release re-reads the bead live.** The decider decides a focus hold or release from
+  the stored view, which can be minutes behind the tracker, so before the write `apply` reads the
+  bead live with `pg-connector issue show <id> --fresh` (a plain `show` answers from the entity cache
+  for up to `cache_read_ttl`, so a claim that landed minutes ago would be invisible) and re-checks
+  the conditions the plan used: a hold needs the bead still `open` and unassigned; a release needs
+  it still `deferred` with the `focus_hold` marker `struck` and no assignee (a marker-only
+  rewrite needs it still `open`, unassigned and `struck`). The read is trusted only when it is
+  served from the origin and not marked stale; any other answer, and any failure, FAILS CLOSED: no
+  write. A write whose condition no longer holds, or whose live read cannot be trusted, is
+  ABANDONED with the outcome `skipped-stale`, no audit comment, and a `pg-desk issue refresh <bead>`
+  that repairs the stale store row (without it every later run would re-plan the same write and
+  abandon it forever). The live read MAY only abandon a write; it MUST NOT choose a different one.
+- **A hold reads the bead's children live.** The "no open children" condition of a hold is read with
+  `pg-connector issue children <id>`, a live read that bypasses the entity cache. Open children
+  abandon the hold as `skipped-stale`. A children read that fails (including a backend without the
+  operation) is unknown, never "none": the hold is not written and the action is counted `failed`.
+- **A hold restores a claim that landed in the window.** After a successful hold `apply` reads the bead
+  once more (`issue show <id> --fresh`). If a claim landed between the first read and the write (the
+  bead is `deferred` AND has an assignee, the stranded shape), it issues ONE
+  `issue update <id> --status in_progress`, leaves the marker alone and reports
+  `claimed, left running` on stderr; the hold itself still counts as `applied`. If that restoring
+  update fails the action is `failed`. A post-write read that fails is only reported on stderr.
+- **Best effort, in order.** Each action's outcome is `applied`, `deduped`, `failed`,
+  `skipped-dependency` or `skipped-stale`. A failure is captured and later actions continue, except
+  those that depend on it: a child whose parent is an anchor create that did not apply, and an action
+  marked as requiring every earlier action of its own rule (an action of a rule whose earlier action
+  was `skipped-stale` is `skipped-dependency`).
 - **No rollback.** The tracker is the source of truth. A write that was applied stands even when a
   later action or hook fails; the failed work is re-derived by the next item or sweep.
 - **Refresh after an external write.** After a `create`, `update`, `reopen` or `close`, the decider
@@ -145,7 +185,7 @@ before anything else happens.
 
 | Code | Meaning                                                                                                      |
 | ---- | ------------------------------------------------------------------------------------------------------------ |
-| `0`  | Every action was applied or deduped, or none was needed                                                      |
+| `0`  | Every action was applied, deduped or `skipped-stale`, or none was needed                                     |
 | `1`  | Usage or other error: bad arguments, unknown entity type, no decider for the type, unreadable item or config |
 | `2`  | Some actions failed or were skipped for a failed dependency, or a hook failed; captured and retried next run |
 | `3`  | The view could not be read, or lacks `annotations.focus_selected`; nothing was applied                       |
@@ -176,7 +216,7 @@ at: 2026-10-05T12:00:00Z
 - `at` is the time of the run in UTC, RFC 3339.
 
 A comment is written for an applied `create`, `update`, `reopen` or `close`. None is written for a
-`deduped`, `failed` or `skipped-dependency` action, nor for an `annotate` (pg-desk's change log
+`deduped`, `failed`, `skipped-dependency` or `skipped-stale` action, nor for an `annotate` (pg-desk's change log
 already records its origin and actor). If posting the comment fails, the tracker write stands, the
 comment is not retried, and the run exits `2`, because the next idempotent run will not re-derive a
 comment whose write has already happened.
@@ -200,7 +240,8 @@ Clearing last means a failed run never loses the request.
 A rule that keeps failing is escalated to a person rather than retried forever.
 
 - **Counting.** A run counts as one failure for a rule when any of the rule's actions failed. A
-  `skipped-dependency` outcome is neutral: it neither adds to nor resets the count. A run in which
+  `skipped-dependency` or `skipped-stale` outcome is neutral: it neither adds to nor resets the
+  count. A run in which
   all of the rule's actions applied or were deduped resets the count, as does a run in which a rule
   that has recorded state produced no action at all because its condition cleared.
 - **Once per routed item.** The decider's own annotation writes re-route the entity, so an
@@ -252,7 +293,7 @@ is written even for a run that planned nothing.
 
 - `rules` is an object keyed by rule id, never null, and holds a rule only if it planned an action.
 - `planned` is every action of the rule, and `planned = applied + deduped + failed + skipped`.
-  `skipped` counts `skipped-dependency` outcomes, which are not failures.
+  `skipped` counts `skipped-dependency` and `skipped-stale` outcomes, which are not failures.
 - `escalations` is the number of escalation items the run created.
 - Members MAY be added to `v1`; none will be removed or change meaning.
 
@@ -260,25 +301,33 @@ is written even for a run that planned nothing.
 
 - **INV-DECIDER-7.** `plan` MUST write nothing: no work-item write, no annotation and no comment.
 - **INV-DECIDER-8.** Deciding MUST be a pure function of the view alone and MUST NOT depend on why
-  the item was routed; re-running on an unchanged view MUST write nothing.
+  the item was routed; re-running on an unchanged view MUST write nothing. The one declared second
+  input is `apply`'s live read of a focus bead before a hold or release: `apply` MAY read that work
+  item live to ABANDON a write, and MUST NOT use the read to choose a different write.
 - **INV-DECIDER-9.** `apply` MUST re-read the view on every run. `--from-item` MUST only identify
-  the trigger and MUST NOT decide what is applied.
+  the trigger and MUST NOT decide what is applied. The live read of a focus bead (INV-DECIDER-8) MAY
+  only abandon a planned write; it MUST NOT add, change or substitute one.
 - **INV-DECIDER-10.** A hidden entity MUST skip every rule, and a suppressed kind MUST skip only the
   rules of that kind. Both stops MUST be evaluated before any rule runs.
 - **INV-DECIDER-11.** A skipped rule MUST carry exactly one of the five reasons `hidden`,
   `suppressed`, `already handled`, `review-pending` and `not matched`.
 - **INV-DECIDER-12.** A `create` that carries a `dedup_key` MUST look the key up in the tracker
-  before creating, and MUST NOT create when the lookup hits or cannot be trusted.
+  before creating, and MUST NOT create when the lookup hits or cannot be trusted. The lookup for a
+  focus bead MUST list every status, closed included, through `focus_beads_query`, and MUST fail
+  closed when that key is unset.
 - **INV-DECIDER-13.** Actions MUST apply in order and best effort: a failure MUST NOT stop
   independent actions, and an action that depends on a failed one MUST be reported as
-  `skipped-dependency` rather than attempted.
+  `skipped-dependency` rather than attempted. A focus hold or release whose live re-read shows the
+  bead changed, or cannot be trusted, MUST NOT be written and MUST be reported as `skipped-stale`.
 - **INV-DECIDER-14.** `apply` MUST NOT roll back an applied tracker write.
-- **INV-DECIDER-15.** After an external work-item write, `apply` MUST refresh the work item in
-  pg-desk; a failed refresh MUST NOT make the run fail.
+- **INV-DECIDER-15.** After an external work-item write, and after an abandoned focus hold or
+  release (`skipped-stale`), `apply` MUST refresh the work item in pg-desk; a failed refresh MUST
+  NOT make the run fail.
 - **INV-DECIDER-16.** Every applied external action MUST append exactly one audit comment on the
   work item it wrote, carrying the rule id, the facts, the routed `seq` and a timestamp. No other
-  outcome MAY write one.
-- **INV-DECIDER-17.** The exit code MUST be `0` when all actions applied or none were needed, `2`
+  outcome MAY write one, `skipped-stale` included.
+- **INV-DECIDER-17.** The exit code MUST be `0` when all actions applied (or were deduped or
+  `skipped-stale`) or none were needed, `2`
   when some failed, were skipped for a dependency or a hook failed, and `3` when the view was
   unreadable and nothing was applied.
 - **INV-DECIDER-18.** A rule that fails on K consecutive runs, counted once per routed `seq`, MUST be
@@ -288,7 +337,8 @@ is written even for a run that planned nothing.
   the consumption record have succeeded; otherwise the flag MUST stay set.
 - **INV-DECIDER-20.** Each `apply` run that reaches its action list MUST write exactly one run
   counters line to stderr whose counts satisfy `planned = applied + deduped + failed + skipped` for
-  every rule.
+  every rule. The outcome set is `applied`, `deduped`, `failed`, `skipped-dependency` and
+  `skipped-stale`; the last two are counted under `skipped`.
 - **INV-DECIDER-25.** For a merged or closed PR, the rules that keep the anchor in step with the PR
   and close its open work are the only ones that MAY act, with one deliberate exception: the
   `focus.item` rule MAY hold (one `update` of status and marker, never a `create`, `reopen` or

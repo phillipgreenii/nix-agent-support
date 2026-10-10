@@ -178,11 +178,23 @@ func CreateIssue(ctx context.Context, env Env, f action.Fields) (string, error) 
 
 // updateArgs builds `issue update <id>`; reopen adds the status move and the
 // two clears (a reopen MUST clear the previous claimant and any stale
-// deferral, or no worker can claim the reopened item).
+// deferral, or no worker can claim the reopened item). A non-reopen update
+// renders Fields.Status as --status <s> and Fields.ClearDefer as
+// --clear-defer, in that order and before the metadata flags (a focus hold is
+// `issue update <id> --status deferred --metadata focus_hold=struck`, a
+// release `issue update <id> --status open --clear-defer --metadata
+// focus_hold=released`). A release never clears the assignee.
 func updateArgs(env Env, id string, f action.Fields, reopen bool) []string {
 	args := []string{"issue", "update", id}
 	if reopen {
 		args = append(args, "--status", "open", "--clear-assignee", "--clear-defer")
+	} else {
+		if f.Status != "" {
+			args = append(args, "--status", f.Status)
+		}
+		if f.ClearDefer {
+			args = append(args, "--clear-defer")
+		}
 	}
 	args = append(args, metadataFlags(f.Metadata)...)
 	for _, l := range sortedCopy(f.AddLabels) {
@@ -258,11 +270,37 @@ func decodeList(stdout []byte) ([]listEntity, error) {
 	return arr, nil
 }
 
+// listTruncated reports whether a list answer says it was cut short.
+func listTruncated(stdout []byte) bool {
+	var top struct {
+		Truncated bool `json:"truncated"`
+	}
+	return json.Unmarshal(stdout, &top) == nil && top.Truncated
+}
+
 // lookupDedup lists the tracker's work beads and returns the id of one whose
 // dedup_key is the same identity as key. A failed or degraded list is an error:
 // creating without a trustworthy lookup could duplicate.
 func lookupDedup(ctx context.Context, env Env, ref workitem.EntityRef, key string) (string, bool, error) {
-	args := append([]string{"issue", "list", "--query", "work-beads"}, backendFlag(env)...)
+	return lookupDedupIn(ctx, env, ref, key, "work-beads", false)
+}
+
+// lookupFocusDedup is lookupDedup for the focus-item kind: it lists focus
+// beads in EVERY status, closed included, through the named query
+// config.focus_beads_query, because the work-beads query lists only
+// title-matched anchor and feedback beads and a lookup that omitted a closed
+// focus bead would re-mint it. No query configured is an error (the create
+// fails closed), never a fallback to work-beads. A truncated listing is an
+// error too: the bead could be in the part that was cut off.
+func lookupFocusDedup(ctx context.Context, env Env, ref workitem.EntityRef, key string) (string, bool, error) {
+	if env.Config == nil || env.Config.FocusBeadsQuery == "" {
+		return "", false, fmt.Errorf("dedup lookup: focus_beads_query is not configured, so a focus bead cannot be looked up in every status; nothing was created")
+	}
+	return lookupDedupIn(ctx, env, ref, key, env.Config.FocusBeadsQuery, true)
+}
+
+func lookupDedupIn(ctx context.Context, env Env, ref workitem.EntityRef, key, query string, failOnTruncated bool) (string, bool, error) {
+	args := append([]string{"issue", "list", "--query", query}, backendFlag(env)...)
 	out, err := call(ctx, env, args)
 	if err != nil {
 		return "", false, fmt.Errorf("dedup lookup: %w", err)
@@ -270,6 +308,9 @@ func lookupDedup(ctx context.Context, env Env, ref workitem.EntityRef, key strin
 	ents, err := decodeList(out)
 	if err != nil {
 		return "", false, fmt.Errorf("dedup lookup: decode pg-connector %s stdout: %w", strings.Join(args, " "), err)
+	}
+	if failOnTruncated && listTruncated(out) {
+		return "", false, fmt.Errorf("dedup lookup: pg-connector %s was truncated, so the lookup cannot be trusted", strings.Join(args, " "))
 	}
 	for _, e := range ents {
 		if k := e.Metadata["dedup_key"]; k != "" && sameKey(ref, key, k) {

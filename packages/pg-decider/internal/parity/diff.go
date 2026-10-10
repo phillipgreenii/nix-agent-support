@@ -115,10 +115,12 @@ var expectedDiffJSON []byte
 // knownIDs are the exception ids the expected diff may use: the design's
 // decision ids (S13..S26), UNOBS, and "pg2-nbkps", the operator ruling (Phillip,
 // 2026-10-05) that scenario 13's title-prefix adoption is out of scope. That id
-// names a ruling, not a design-spec section.
+// names a ruling, not a design-spec section. "D-F13" is the daily-focus
+// decision that one focus bead per source entity is minted, held and released
+// by the decider (the focus.item rule), which has no counterpart on the old side.
 var knownIDs = map[string]bool{
 	"S13": true, "S14": true, "S15": true, "S16": true, "S19": true, "S24": true, "S26": true,
-	"UNOBS": true, "pg2-nbkps": true,
+	"UNOBS": true, "pg2-nbkps": true, "D-F13": true,
 }
 
 // LoadExpected reads the embedded testdata/expected-diff.json, keyed by

@@ -299,3 +299,31 @@ func TestFinishDoesNothing(t *testing.T) {
 		t.Fatalf("err %v execs %q", err, f.execs)
 	}
 }
+
+// A focus hold or release the live re-read abandons is skipped-stale: it writes
+// nothing, so it posts no audit comment (INV-DECIDER-16), while an applied
+// focus hold posts exactly one.
+func TestSkippedStaleFocusHoldPostsNoComment(t *testing.T) {
+	respond := func(line string) (string, int) {
+		if strings.HasPrefix(line, "pg-connector issue show bd-f --fresh") {
+			return `{"result":{"id":"bd-f","state":"open","assignee":"worker-1","served_from":"origin","stale":false}}`, 0
+		}
+		return `{"result":{}}`, 0
+	}
+	hold := action.Action{
+		Op: action.OpUpdate, Kind: "focus-item", Target: str("bd-f"), Rule: "focus.item",
+		Fields: action.Fields{Status: "deferred", Metadata: map[string]string{"focus_hold": "struck"}},
+		Facts:  map[string]any{"transition": "hold"},
+	}
+	f := newFake(t, respond)
+	res := apply.Run(context.Background(), apply.Input{
+		Type: "pr", ID: "acme/widgets#42", View: &view.View{Type: "pr", ID: "acme/widgets#42"},
+		Actions: []action.Action{hold}, Env: envFor(f, nil), Hooks: []apply.Hook{New()},
+	})
+	if len(res.Events) != 1 || res.Events[0].Outcome != apply.OutcomeSkippedStale || res.ExitCode != 0 {
+		t.Fatalf("result %+v", res)
+	}
+	if cs := f.comments(); len(cs) != 0 {
+		t.Fatalf("an abandoned write must post no comment: %q", cs)
+	}
+}

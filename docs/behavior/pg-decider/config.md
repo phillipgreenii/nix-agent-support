@@ -63,6 +63,13 @@ bead"). Each is optional.
 | `focus_beads_query`  | string | empty                                                       | The name of the pg-connector named query that lists focus beads in EVERY status, closed included. The focus rule's dedup lookup reads it; it MUST NOT be a feed name the work-bead feeds share                                      |
 | `focus_priority_map` | object | `Highest:P0`, `High:P1`, `Medium:P2`, `Low:P3`, `Lowest:P4` | Tracker priority name to `P0` to `P4`: the priority of a focus bead minted for that source. A configured map REPLACES the default whole. An unmapped name, and a PR source (which has no priority), map to `P2`                     |
 
+`focus_beads_query` is read only by the dedup lookup of a focus bead's `create`. With the key unset,
+a focus-item `create` fails closed: `apply` counts it `failed` and writes nothing, and never falls back
+to the work-beads query, which would not list a closed or an untitled focus bead and so could mint a
+duplicate. The deployment supplies a query that lists the label `focus-item` in every status, closed
+included, under a name no work-bead feed shares (widening a feed's query would make it dispatch
+non-PR beads as errors).
+
 `bead_id_pattern` MUST compile and MUST NOT be blank when present, and every `focus_priority_map`
 value MUST be one of `P0`, `P1`, `P2`, `P3`, `P4`; otherwise `apply` exits `1` before any write
 (`INV-DECIDER-22`). The deployment supplies the pattern and the query name; the decider names no

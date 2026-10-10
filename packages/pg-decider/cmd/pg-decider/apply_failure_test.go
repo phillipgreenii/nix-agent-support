@@ -195,3 +195,48 @@ func TestAnIdleRunStillEmitsOneCounterLine(t *testing.T) {
 		t.Fatalf("exit %d err %q execs %+v", code, errOut, *recs)
 	}
 }
+
+// A focus hold the live re-read abandons is the apply outcome skipped-stale: it
+// exits 0, writes no update and no audit comment, repairs the stale store row
+// with an issue refresh, and the run counters line counts it under skipped so
+// that planned = applied + deduped + failed + skipped still holds.
+func TestApplyAbandonedFocusHoldIsSkippedStaleExitsZeroAndWritesNoComment(t *testing.T) {
+	withHelper(t, "GO_HELPER_STDOUT_FILE="+fixture("pr_view_minimal.json"))
+	t.Setenv("PG_DECIDER_CONFIG", "")
+	target := "bd-focus-1"
+	recs := scriptedWrites(t,
+		func(*view.View) []action.Action {
+			return []action.Action{{
+				Op: action.OpUpdate, Kind: "focus-item", Target: &target, Rule: "focus.item",
+				Fields: action.Fields{Status: "deferred", Metadata: map[string]string{"focus_hold": "struck"}},
+				Facts:  map[string]any{"transition": "hold"},
+			}}
+		},
+		func(name, args string) (string, string) {
+			if strings.HasPrefix(args, "issue show bd-focus-1 --fresh") {
+				return `{"result":{"id":"bd-focus-1","state":"in_progress","assignee":"worker-1","served_from":"origin","stale":false}}`, "0"
+			}
+			return `{"result":{}}`, "0"
+		})
+	_, errOut, code := runCLI(t, "apply", "pr", "acme/widgets#42")
+	if code != exitcode.OK {
+		t.Fatalf("a skipped-stale outcome is not a failure: exit %d, stderr %q", code, errOut)
+	}
+	var updates, comments, refreshes int
+	for _, r := range *recs {
+		switch {
+		case strings.HasPrefix(r.args, "issue update"):
+			updates++
+		case strings.HasPrefix(r.args, "issue comment"):
+			comments++
+		case r.name == "pg-desk" && r.args == "issue refresh bd-focus-1":
+			refreshes++
+		}
+	}
+	if updates != 0 || comments != 0 || refreshes != 1 {
+		t.Fatalf("updates %d comments %d refreshes %d: %+v", updates, comments, refreshes, *recs)
+	}
+	if !strings.Contains(errOut, "skipped-stale") || !strings.Contains(errOut, `"skipped":1`) || !strings.Contains(errOut, `"planned":1`) {
+		t.Fatalf("stderr must name the outcome and count it under skipped: %q", errOut)
+	}
+}

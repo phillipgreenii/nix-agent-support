@@ -33,6 +33,11 @@ var oldWantKinds = map[string][]string{
 	"13-": nil,
 	"14-": nil,
 	"15-": {"feedback-cycle", "review-request"},
+	// The focus scenarios: the old sync has no focus bead, and a draft team PR
+	// with no comments plans nothing else.
+	"16-": nil,
+	"17-": nil,
+	"18-": nil,
 }
 
 func wantFor[T any](t *testing.T, table map[string]T, name string) T {

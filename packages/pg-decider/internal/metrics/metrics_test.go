@@ -58,9 +58,10 @@ func TestARunThatPlannedNothingStillEmitsOneLineWithAnEmptyRulesObject(t *testin
 func TestPlannedIsTheSumOfTheOutcomes(t *testing.T) {
 	evs := []apply.Event{
 		ev("r", apply.OutcomeApplied), ev("r", apply.OutcomeDeduped), ev("r", apply.OutcomeFailed), ev("r", apply.OutcomeSkippedDependency),
+		ev("r", apply.OutcomeSkippedStale),
 	}
 	c := Counters(evs)["r"]
-	if c.Planned != 4 || c.Applied+c.Deduped+c.Failed+c.Skipped != c.Planned {
+	if c.Planned != 5 || c.Skipped != 2 || c.Applied+c.Deduped+c.Failed+c.Skipped != c.Planned {
 		t.Fatalf("%+v", c)
 	}
 }

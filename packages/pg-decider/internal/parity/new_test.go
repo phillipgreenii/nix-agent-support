@@ -31,6 +31,9 @@ var newWantActions = map[string][]rule{
 	"13-": {{"update", "review-pr", "adoption"}, {"update", "process-feedback", "adoption"}},
 	"14-": {{"create", "process-feedback", "feedback.digest-changed"}},
 	"15-": {{"create", "process-feedback", "feedback.digest-changed"}},
+	"16-": {{"create", "focus-item", "focus.item"}},
+	"17-": {{"update", "focus-item", "focus.item"}},
+	"18-": {{"update", "focus-item", "focus.item"}},
 }
 
 var newWantAbsent = map[string][]rule{

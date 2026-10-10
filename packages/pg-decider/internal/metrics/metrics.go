@@ -87,7 +87,7 @@ func Counters(evs []apply.Event) map[string]RuleCounters {
 			c.Deduped++
 		case apply.OutcomeFailed:
 			c.Failed++
-		case apply.OutcomeSkippedDependency:
+		case apply.OutcomeSkippedDependency, apply.OutcomeSkippedStale:
 			c.Skipped++
 		}
 		out[ev.Action.Rule] = c

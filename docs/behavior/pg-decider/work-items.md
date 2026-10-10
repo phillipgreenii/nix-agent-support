@@ -241,6 +241,14 @@ the rule, which does not read who closed it or why, and the rule never plans a `
 `reopen` for a focus bead. A hold and a release are both `update` actions: the only fields they add
 to the action are a status and a deferral clearing.
 
+The rule decides from the stored view, which can be minutes behind the tracker, so `apply` does
+not trust a hold or a release blindly: it reads the bead live first and abandons the write
+(`skipped-stale`) if a claim landed, the bead closed, was already held or gained open children (see
+"Executing actions" in [`plan-and-apply.md`](plan-and-apply.md)). That live read can only abandon
+the rule's write, never choose another one. The dedup lookup for a focus bead lists beads in every
+status through `focus_beads_query` (see [`config.md`](config.md)), so a closed focus bead is never
+recreated.
+
 The plan names its transition in `facts.transition` (`mint`, `hold`, `release` or `hold_terminal`).
 The rule is idempotent by construction: after the hold the view shows the marker, so a re-run on an
 unchanged view writes nothing; a held bead is only released by a reselect, and a later strike

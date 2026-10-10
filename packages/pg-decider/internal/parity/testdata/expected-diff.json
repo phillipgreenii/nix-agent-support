@@ -361,6 +361,36 @@
         "side": "old-only",
         "reason": "review.head-advanced (S26): a closed review request for the unchanged head is not recreated however it was closed. Production lists only open beads for the work-beads query, so the old sync (with no ledger row for it) cannot see the closed request and plans a fresh one; the new decider reads the closed item and plans nothing. The feedback cycle is planned on both sides: the old sync plans one for every comment the invisible closed cycle covered, the new decider only for the comment no earlier cycle covered."
       }
+    ],
+    "16-focus-selected-mints-a-bead": [
+      {
+        "id": "D-F13",
+        "entity": "acme/api#116",
+        "kind": "focus-item",
+        "op": "create",
+        "side": "new-only",
+        "reason": "New rule focus.item (D-F13): a PR the daily focus selects, with no focus bead yet, gets one focus bead minted (one create); the old sync has no focus bead."
+      }
+    ],
+    "17-focus-strike-holds-an-open-bead": [
+      {
+        "id": "D-F13",
+        "entity": "acme/api#117",
+        "kind": "focus-item",
+        "op": "update",
+        "side": "new-only",
+        "reason": "focus.item hold (D-F13): a source whose selection was struck gets its open, unclaimed focus bead held with one update (status deferred, marker struck); the old sync has no focus bead. The write is against an existing bead, so the old side could not show it either way."
+      }
+    ],
+    "18-focus-reselect-releases-a-held-bead": [
+      {
+        "id": "D-F13",
+        "entity": "acme/api#118",
+        "kind": "focus-item",
+        "op": "update",
+        "side": "new-only",
+        "reason": "focus.item release (D-F13): a source the daily focus selects again gets its held focus bead released with one update (status open, deferral cleared, marker released); the old sync has no focus bead. The write is against an existing bead, so the old side could not show it either way."
+      }
     ]
   }
 }

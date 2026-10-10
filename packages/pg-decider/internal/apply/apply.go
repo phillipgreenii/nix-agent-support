@@ -92,7 +92,7 @@ func (r *runner) step(ctx context.Context, a action.Action) Event {
 	ev := Event{Action: a}
 	finish := func(o Outcome, id string, err error) Event {
 		ev.Outcome, ev.WorkItemID, ev.Err = o, id, err
-		if o == OutcomeFailed || o == OutcomeSkippedDependency {
+		if o == OutcomeFailed || o == OutcomeSkippedDependency || o == OutcomeSkippedStale {
 			r.ruleBroken[a.Rule] = true
 		}
 		if isAnchorCreate(a) {
@@ -122,6 +122,9 @@ func (r *runner) step(ctx context.Context, a action.Action) Event {
 	case action.OpCreate:
 		return r.create(ctx, a, finish)
 	case action.OpUpdate, action.OpReopen, action.OpClose:
+		if _, ok := focusTransition(a); ok {
+			return r.holdOrRelease(ctx, a, finish)
+		}
 		return r.write(ctx, a, finish)
 	case action.OpAnnotate:
 		return r.annotate(ctx, a, finish)
@@ -133,12 +136,23 @@ type finishFn func(Outcome, string, error) Event
 
 func (r *runner) create(ctx context.Context, a action.Action, finish finishFn) Event {
 	env := r.in.Env
+	focus := a.Kind == string(workitem.KindFocusItem)
+	if focus && a.Fields.Metadata["dedup_key"] == "" {
+		return finish(OutcomeFailed, "", fmt.Errorf("a focus-item create carries no dedup_key; nothing was created"))
+	}
 	if key := a.Fields.Metadata["dedup_key"]; key != "" {
-		id, found, err := lookupDedup(ctx, env, r.ref, key)
+		lookup := lookupDedup
+		if focus {
+			lookup = lookupFocusDedup
+		}
+		id, found, err := lookup(ctx, env, r.ref, key)
 		if err != nil {
 			return finish(OutcomeFailed, "", err)
 		}
 		if found {
+			if focus {
+				r.refreshFocusHit(ctx, id)
+			}
 			return finish(OutcomeDeduped, id, nil)
 		}
 	}
