@@ -16,8 +16,9 @@ not there or cannot write, and how it tells a script what happened. The service 
   `INV-CLI-7`, `INV-CLI-8`, `INV-CLI-9`, `INV-CLI-10`.)_
 - **`STORY-CLI-SCRIPT`** <!-- uuid: aa3164b4-1098-4e56-bbd9-c4c700879bb2 --> — As a script or a menu-bar plugin, I want machine output that matches a
   published schema, a stream of whole state objects, and exit codes that say what kind of failure
-  happened, so I never parse prose. _(→ `JOURNEY-CLI-DAY`, `JOURNEY-CLI-FAILURES`; `INV-CLI-2`,
-  `INV-CLI-3`, `INV-CLI-4`.)_
+  happened, so I never parse prose, and a way to say which kind of client I am, so a silent menu-bar plugin is told
+  apart from a silent shell. _(→ `JOURNEY-CLI-DAY`, `JOURNEY-CLI-FAILURES`; `INV-CLI-2`,
+  `INV-CLI-3`, `INV-CLI-4`, `INV-CLI-13`.)_
 - **`STORY-CLI-RETRY-SAFELY`** <!-- uuid: dd38d929-4839-4fc4-89af-dd29017c6b24 --> — As the operator whose request got no answer, I want to repeat it and
   be sure it happens once, and to be told plainly when the service is read-only, so a flaky disk never
   costs me a duplicated or a lost action. _(→ `JOURNEY-CLI-FAILURES`; `INV-CLI-3`, `INV-CLI-4`,
@@ -31,7 +32,7 @@ not there or cannot write, and how it tells a script what happened. The service 
 ### `JOURNEY-CLI-DAY` — a day at the terminal <!-- uuid: 22fbbefc-2cef-4e4a-be37-2efb14041d9e -->
 
 **Primary actor:** `ACTOR-OPERATOR`. **Other actors:** `ACTOR-CLIENT`. _Requires:_ `INV-CLI-1`,
-`INV-CLI-2`, `INV-CLI-6`, `INV-CLI-7`, `INV-CLI-8`, `INV-CLI-9`, `INV-CLI-10`, `INV-CLI-12`.
+`INV-CLI-2`, `INV-CLI-6`, `INV-CLI-7`, `INV-CLI-8`, `INV-CLI-9`, `INV-CLI-10`, `INV-CLI-12`, `INV-CLI-13`.
 _Includes:_ none.
 
 1. The operator runs the status view: the periods, the checklist with short task names, the next task
@@ -50,6 +51,9 @@ _Includes:_ none.
 
 Extensions:
 
+- 1a. The menu-bar plugin runs a watch instead of the status view, naming itself `swiftbar`, so the service counts its
+  requests under that kind of client and the dashboard shows when the plugin goes quiet
+  (`INV-CLI-13`).
 - 2a. A skip with no reason, or a blank one, is refused before anything is sent (`INV-CLI-12`).
 - 2b. The name matches several tasks. The operator is told which and asked to be more specific
   (`INV-CLI-7`).
@@ -58,7 +62,7 @@ Extensions:
 
 ### `JOURNEY-CLI-FAILURES` — when it does not work <!-- uuid: 89861007-43c6-4849-b253-d21c3995e6d4 -->
 
-**Primary actor:** `ACTOR-OPERATOR`. **Other actors:** `ACTOR-CLIENT`, `ACTOR-HOST`. _Requires:_ `INV-CLI-2`, `INV-CLI-3`, `INV-CLI-4`, `INV-CLI-5`, `INV-CLI-11`. _Includes:_ none.
+**Primary actor:** `ACTOR-OPERATOR`. **Other actors:** `ACTOR-CLIENT`, `ACTOR-HOST`. _Requires:_ `INV-CLI-2`, `INV-CLI-3`, `INV-CLI-4`, `INV-CLI-5`, `INV-CLI-11`, `INV-CLI-13`. _Includes:_ none.
 
 1. The service is not running. A verb prints one line on standard error saying so and exits with the
    code for "not reachable" (`INV-CLI-3`, `INV-CLI-4`).
@@ -69,6 +73,9 @@ Extensions:
    prints the same sentence and exits with the store code (`INV-CLI-5`).
 4. The service will not start. The operator checks the log offline and is told the line number of the
    corruption, and checks the configuration and is told each problem by path (`INV-CLI-11`).
+5. A script names a kind of client the command line does not know. The verb prints one line saying
+   which kinds are allowed, sends nothing, and exits with the code for a bad argument (`INV-CLI-13`,
+   `INV-CLI-4`).
 
 ## Invariants
 
@@ -130,3 +137,11 @@ Extensions:
 - **`INV-CLI-12`** <!-- uuid: fee9ab7a-f6f2-4a4a-9821-43147873d4ef --> — A skip MUST be refused by the command line before a request is
   sent when its reason is empty or only white space, as the service refuses it. _(Operator ruling,
   2026-10-08, decision log row 42.)_
+- **`INV-CLI-13`** <!-- uuid: 30ad281a-7f9e-4b5f-a33f-ad3a59d7e0da --> — A verb MUST tell the service which kind of client it is, one of
+  `cli`, `web`, `connector` or `swiftbar`, so the service can count requests per kind of client
+  (`INV-OBS-4`). The kind is the `--client` option when given, else the `PG_TASK_FOCUS_CLIENT`
+  environment variable when it is set and not empty, else `cli`; the option wins over the variable. A
+  kind outside those four, whether it comes from the option or from the variable, MUST be refused
+  before any request is sent and before the verb runs: the command line prints which kinds are allowed
+  and exits with the code for a bad argument (`INV-CLI-4`). This holds for every verb, the offline
+  checks included.

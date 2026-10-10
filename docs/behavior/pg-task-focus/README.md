@@ -123,7 +123,7 @@ it where there is one:
 - `INV-PERIOD-1` to `INV-PERIOD-25` are in [`periods-and-rollover.md`](periods-and-rollover.md).
 - `INV-CYCLE-1` to `INV-CYCLE-23` are in [`cycles-and-timer.md`](cycles-and-timer.md).
 - `INV-SVC-1` to `INV-SVC-17` are in [`service.md`](service.md).
-- `INV-CLI-1` to `INV-CLI-12` are in [`command-line.md`](command-line.md).
+- `INV-CLI-1` to `INV-CLI-13` are in [`command-line.md`](command-line.md).
 - `INV-OBS-1` to `INV-OBS-10` are in [`observability.md`](observability.md).
 - `INV-CONN-1` to `INV-CONN-12` are in [`connector.md`](connector.md).
 - `INV-WEB-1` to `INV-WEB-22` are in [`web-ui.md`](web-ui.md).
