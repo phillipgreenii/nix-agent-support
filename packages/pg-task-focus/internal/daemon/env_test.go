@@ -26,6 +26,7 @@ import (
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/notify"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/testutil"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-task-focus/internal/wire"
 )
 
 // The daemon tests run the real daemon on an ephemeral loopback port, over a
@@ -315,17 +316,36 @@ func (e *env) state() map[string]any {
 	return s
 }
 
-// bootstrap sets the day, week and sprint, as the first change of a log.
-func (e *env) bootstrap() map[string]any {
-	e.t.Helper()
-	return e.ok("/api/v1/periods/change", map[string]any{
+// bootstrapBody is the periods change that sets the day, week and sprint.
+func (e *env) bootstrapBody() map[string]any {
+	return map[string]any{
 		"id": e.id(),
 		"changes": []map[string]any{
 			{"kind": "day", "start": "2026-10-07", "tz": "America/New_York"},
 			{"kind": "week", "start": "2026-10-05", "end": "2026-10-11", "tz": "America/New_York"},
 			{"kind": "sprint", "start": "2026-10-05", "end": "2026-10-18", "tz": "America/New_York"},
 		},
-	})
+	}
+}
+
+// bootstrap sets the day, week and sprint, as the first change of a log.
+func (e *env) bootstrap() map[string]any {
+	e.t.Helper()
+	return e.ok("/api/v1/periods/change", e.bootstrapBody())
+}
+
+// commitBootstrap makes the change bootstrap posts, through the engine and not
+// over HTTP, for a daemon whose write timeout a commit can outlast: the server
+// then stores the change but never answers, and the client reads EOF.
+func (e *env) commitBootstrap() {
+	e.t.Helper()
+	var req wire.ChangePeriodsRequest
+	if err := json.Unmarshal(marshal(e.t, e.bootstrapBody()), &req); err != nil {
+		e.t.Fatal(err)
+	}
+	if _, err := e.d.Engine().Do(context.Background(), req.ToCommand()); err != nil {
+		e.t.Fatalf("committing the periods change: %v", err)
+	}
 }
 
 // startCycle starts a cycle of a type now and returns its id.

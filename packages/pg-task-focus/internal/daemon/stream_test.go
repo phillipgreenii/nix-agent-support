@@ -108,8 +108,12 @@ loop:
 		t.Errorf("only %d heartbeats in 900ms with a 300ms write timeout and a 50ms heartbeat interval", beats)
 	}
 
-	// A mutation advances the version.
-	e.bootstrap()
+	// A mutation advances the version. It is committed through the engine, not
+	// posted: this daemon's write timeout is 300ms, and a handler that outlasts
+	// it (the first append's fsync, on a host busy with other test suites) has
+	// committed the change but its response is dropped, so the client reads EOF.
+	// The stream is what this test is about, and it sees the same commit.
+	e.commitBootstrap()
 	ev := s.next(t)
 	if ev.name != "state" || ev.data == first.data {
 		t.Errorf("after a mutation: %+v (was %s)", ev, first.data)
