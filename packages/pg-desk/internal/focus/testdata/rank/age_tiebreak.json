@@ -1,0 +1,90 @@
+{
+  "name": "age_tiebreak",
+  "now": "2026-10-10T12:00:00Z",
+  "time_zone": "UTC",
+  "config": {
+    "operator_identities": ["Pat Example", "pat@example.test"],
+    "bead_id_pattern": "^bd-"
+  },
+  "entities": [
+    {
+      "type": "issue",
+      "id": "PRJ-41",
+      "facts": {
+        "issue_show": {
+          "id": "PRJ-41",
+          "title": "Issue PRJ-41",
+          "state": "Open",
+          "issue_type": "Task",
+          "labels": [],
+          "status_category": "new",
+          "priority": "Medium",
+          "assignee": "Pat Example",
+          "created_at": "2026-08-30T00:00:00Z"
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    },
+    {
+      "type": "issue",
+      "id": "PRJ-42",
+      "facts": {
+        "issue_show": {
+          "id": "PRJ-42",
+          "title": "Issue PRJ-42",
+          "state": "Open",
+          "issue_type": "Task",
+          "labels": [],
+          "status_category": "new",
+          "priority": "Medium",
+          "assignee": "Pat Example",
+          "created_at": "2026-08-01T00:00:00Z"
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    },
+    {
+      "type": "issue",
+      "id": "PRJ-43",
+      "facts": {
+        "issue_show": {
+          "id": "PRJ-43",
+          "title": "Issue PRJ-43",
+          "state": "Open",
+          "issue_type": "Task",
+          "labels": [],
+          "status_category": "new",
+          "priority": "Medium",
+          "assignee": "Pat Example"
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      },
+      "first_seen_at": "2026-08-15T00:00:00Z"
+    }
+  ],
+  "expected": {
+    "order": ["issue:PRJ-42", "issue:PRJ-43", "issue:PRJ-41"],
+    "tiers": {
+      "issue:PRJ-42": "not_started",
+      "issue:PRJ-43": "not_started",
+      "issue:PRJ-41": "not_started"
+    },
+    "deciding": {
+      "issue:PRJ-42": "age",
+      "issue:PRJ-43": "age"
+    },
+    "rank_inputs": {
+      "unparseable_due": 0,
+      "unmapped_priority": 0,
+      "age_fallback": 1,
+      "unblocks_unavailable": 0,
+      "status_category_absent": 0
+    }
+  }
+}

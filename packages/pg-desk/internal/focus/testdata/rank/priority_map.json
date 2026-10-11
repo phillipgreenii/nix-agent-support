@@ -1,0 +1,195 @@
+{
+  "name": "priority_map",
+  "now": "2026-09-02T12:00:00Z",
+  "time_zone": "UTC",
+  "config": {
+    "operator_identities": ["Pat Example", "pat@example.test"],
+    "bead_id_pattern": "^bd-"
+  },
+  "entities": [
+    {
+      "type": "issue",
+      "id": "PRJ-10",
+      "facts": {
+        "issue_show": {
+          "id": "PRJ-10",
+          "title": "Issue PRJ-10",
+          "state": "Open",
+          "issue_type": "Task",
+          "labels": [],
+          "status_category": "new",
+          "priority": "Highest",
+          "assignee": "Pat Example",
+          "created_at": "2026-08-01T00:00:00Z"
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    },
+    {
+      "type": "issue",
+      "id": "PRJ-11",
+      "facts": {
+        "issue_show": {
+          "id": "PRJ-11",
+          "title": "Issue PRJ-11",
+          "state": "Open",
+          "issue_type": "Task",
+          "labels": [],
+          "status_category": "new",
+          "priority": "High",
+          "assignee": "Pat Example",
+          "created_at": "2026-08-01T00:00:00Z"
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    },
+    {
+      "type": "issue",
+      "id": "PRJ-12",
+      "facts": {
+        "issue_show": {
+          "id": "PRJ-12",
+          "title": "Issue PRJ-12",
+          "state": "Open",
+          "issue_type": "Task",
+          "labels": [],
+          "status_category": "new",
+          "priority": "Medium",
+          "assignee": "Pat Example",
+          "created_at": "2026-08-01T00:00:00Z"
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    },
+    {
+      "type": "issue",
+      "id": "PRJ-13",
+      "facts": {
+        "issue_show": {
+          "id": "PRJ-13",
+          "title": "Issue PRJ-13",
+          "state": "Open",
+          "issue_type": "Task",
+          "labels": [],
+          "status_category": "new",
+          "priority": "Low",
+          "assignee": "Pat Example",
+          "created_at": "2026-08-01T00:00:00Z"
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    },
+    {
+      "type": "issue",
+      "id": "PRJ-14",
+      "facts": {
+        "issue_show": {
+          "id": "PRJ-14",
+          "title": "Issue PRJ-14",
+          "state": "Open",
+          "issue_type": "Task",
+          "labels": [],
+          "status_category": "new",
+          "priority": "Lowest",
+          "assignee": "Pat Example",
+          "created_at": "2026-08-01T00:00:00Z"
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    },
+    {
+      "type": "issue",
+      "id": "PRJ-15",
+      "facts": {
+        "issue_show": {
+          "id": "PRJ-15",
+          "title": "Issue PRJ-15",
+          "state": "Open",
+          "issue_type": "Task",
+          "labels": [],
+          "status_category": "new",
+          "priority": "Needs Priority",
+          "assignee": "Pat Example",
+          "created_at": "2026-08-01T00:00:00Z"
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    },
+    {
+      "type": "issue",
+      "id": "PRJ-16",
+      "facts": {
+        "issue_show": {
+          "id": "PRJ-16",
+          "title": "Issue PRJ-16",
+          "state": "Open",
+          "issue_type": "Task",
+          "labels": [],
+          "status_category": "new",
+          "priority": "Whatever",
+          "assignee": "Pat Example",
+          "created_at": "2026-08-01T00:00:00Z"
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    }
+  ],
+  "expected": {
+    "order": [
+      "issue:PRJ-10",
+      "issue:PRJ-11",
+      "issue:PRJ-12",
+      "issue:PRJ-13",
+      "issue:PRJ-14",
+      "issue:PRJ-15",
+      "issue:PRJ-16"
+    ],
+    "tiers": {
+      "issue:PRJ-10": "not_started",
+      "issue:PRJ-11": "not_started",
+      "issue:PRJ-12": "not_started",
+      "issue:PRJ-13": "not_started",
+      "issue:PRJ-14": "not_started",
+      "issue:PRJ-15": "not_started",
+      "issue:PRJ-16": "not_started"
+    },
+    "deciding": {
+      "issue:PRJ-10": "priority",
+      "issue:PRJ-11": "priority",
+      "issue:PRJ-12": "priority",
+      "issue:PRJ-13": "priority",
+      "issue:PRJ-14": "priority",
+      "issue:PRJ-15": "tiebreak"
+    },
+    "priorities": {
+      "issue:PRJ-10": "P0",
+      "issue:PRJ-11": "P1",
+      "issue:PRJ-12": "P2",
+      "issue:PRJ-13": "P3",
+      "issue:PRJ-14": "P4",
+      "issue:PRJ-15": "Needs Priority",
+      "issue:PRJ-16": "Whatever"
+    },
+    "rank_inputs": {
+      "unparseable_due": 0,
+      "unmapped_priority": 2,
+      "age_fallback": 0,
+      "unblocks_unavailable": 0,
+      "status_category_absent": 0
+    }
+  }
+}

@@ -1,0 +1,88 @@
+{
+  "name": "total_order_tiebreak",
+  "now": "2026-10-10T12:00:00Z",
+  "time_zone": "UTC",
+  "config": {
+    "operator_identities": ["Pat Example"],
+    "bead_id_pattern": "^BD-"
+  },
+  "entities": [
+    {
+      "type": "issue",
+      "id": "ZED-9",
+      "facts": {
+        "issue_show": {
+          "id": "ZED-9",
+          "title": "Issue ZED-9",
+          "state": "Open",
+          "issue_type": "Task",
+          "labels": [],
+          "status_category": "new",
+          "priority": "Medium",
+          "assignee": "Pat Example",
+          "created_at": "2026-08-01T00:00:00Z"
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    },
+    {
+      "type": "issue",
+      "id": "AAA-9",
+      "facts": {
+        "issue_show": {
+          "id": "AAA-9",
+          "title": "Issue AAA-9",
+          "state": "Open",
+          "issue_type": "Task",
+          "labels": [],
+          "status_category": "new",
+          "priority": "Medium",
+          "assignee": "Pat Example",
+          "created_at": "2026-08-01T00:00:00Z"
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    },
+    {
+      "type": "issue",
+      "id": "BD-1",
+      "facts": {
+        "issue_show": {
+          "id": "BD-1",
+          "title": "Bead BD-1",
+          "state": "open",
+          "labels": ["pg-focus-planable"],
+          "issue_type": "task",
+          "created_at": "2026-08-01T00:00:00Z",
+          "priority": "P2"
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    }
+  ],
+  "expected": {
+    "order": ["issue:AAA-9", "issue:ZED-9", "issue:BD-1"],
+    "tiers": {
+      "issue:AAA-9": "not_started",
+      "issue:ZED-9": "not_started",
+      "issue:BD-1": "not_started"
+    },
+    "deciding": {
+      "issue:AAA-9": "tiebreak",
+      "issue:ZED-9": "tiebreak"
+    },
+    "rank_inputs": {
+      "unparseable_due": 0,
+      "unmapped_priority": 0,
+      "age_fallback": 0,
+      "unblocks_unavailable": 0,
+      "status_category_absent": 0
+    }
+  }
+}

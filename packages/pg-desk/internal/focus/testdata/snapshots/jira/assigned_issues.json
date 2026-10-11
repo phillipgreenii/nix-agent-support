@@ -1,0 +1,234 @@
+{
+  "name": "assigned_issues",
+  "provenance": "Shape of `pg-connector issue show --json` (Jira backend) plus `issue deps --json`, loaded under issue_show and issue_deps. Values are synthetic placeholders that keep the real field names, the raw Jira timestamp form (offset without a colon), the date-only due_date and the status spellings. Not recorded from a live tracker; re-record per README.md.",
+  "now": "2026-10-10T12:00:00Z",
+  "time_zone": "UTC",
+  "config": {
+    "operator_identities": ["Pat Example", "pat@example.test"],
+    "bead_id_pattern": "^bd-"
+  },
+  "entities": [
+    {
+      "type": "issue",
+      "id": "PRJ-101",
+      "first_seen_at": "2026-10-01T08:00:00Z",
+      "facts": {
+        "issue_show": {
+          "id": "PRJ-101",
+          "title": "Synthetic issue PRJ-101",
+          "state": "In Progress",
+          "url": "https://tracker.example.test/browse/PRJ-101",
+          "issue_type": "Task",
+          "tracker": "https://tracker.example.test",
+          "description": "Synthetic description.",
+          "assignee": "Pat Example",
+          "as_of": "2026-10-10T08:00:00Z",
+          "stale": false,
+          "created_at": "2026-09-14T09:30:00.000+0000",
+          "updated_at": "2026-10-09T17:20:41.000+0000",
+          "status_category": "indeterminate",
+          "priority": "High",
+          "due_date": "2026-10-12",
+          "labels": []
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    },
+    {
+      "type": "issue",
+      "id": "PRJ-102",
+      "first_seen_at": "2026-10-01T08:00:00Z",
+      "facts": {
+        "issue_show": {
+          "id": "PRJ-102",
+          "title": "Synthetic issue PRJ-102",
+          "state": "To Do",
+          "url": "https://tracker.example.test/browse/PRJ-102",
+          "issue_type": "Task",
+          "tracker": "https://tracker.example.test",
+          "description": "Synthetic description.",
+          "assignee": "pat@example.test",
+          "as_of": "2026-10-10T08:00:00Z",
+          "stale": false,
+          "created_at": "2026-08-02T15:05:10.000+0000",
+          "updated_at": "2026-10-09T17:20:41.000+0000",
+          "status_category": "new",
+          "priority": "Highest",
+          "due_date": "2026-10-08",
+          "labels": []
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    },
+    {
+      "type": "issue",
+      "id": "PRJ-103",
+      "first_seen_at": "2026-10-01T08:00:00Z",
+      "facts": {
+        "issue_show": {
+          "id": "PRJ-103",
+          "title": "Synthetic issue PRJ-103",
+          "state": "To Do",
+          "url": "https://tracker.example.test/browse/PRJ-103",
+          "issue_type": "Task",
+          "tracker": "https://tracker.example.test",
+          "description": "Synthetic description.",
+          "assignee": "Pat Example",
+          "as_of": "2026-10-10T08:00:00Z",
+          "stale": false,
+          "created_at": "2026-07-20T08:00:00.000+0000",
+          "updated_at": "2026-10-09T17:20:41.000+0000",
+          "status_category": "new",
+          "priority": "Medium",
+          "labels": []
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    },
+    {
+      "type": "issue",
+      "id": "PRJ-104",
+      "first_seen_at": "2026-10-01T08:00:00Z",
+      "facts": {
+        "issue_show": {
+          "id": "PRJ-104",
+          "title": "Synthetic issue PRJ-104",
+          "state": "Backlog",
+          "url": "https://tracker.example.test/browse/PRJ-104",
+          "issue_type": "Task",
+          "tracker": "https://tracker.example.test",
+          "description": "Synthetic description.",
+          "assignee": "Pat Example",
+          "as_of": "2026-10-10T08:00:00Z",
+          "stale": false,
+          "created_at": "2026-06-01T08:00:00.000+0000",
+          "updated_at": "2026-10-09T17:20:41.000+0000",
+          "status_category": "new",
+          "priority": "Low",
+          "due_date": "2026-10-30",
+          "labels": []
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    },
+    {
+      "type": "issue",
+      "id": "PRJ-105",
+      "first_seen_at": "2026-10-01T08:00:00Z",
+      "facts": {
+        "issue_show": {
+          "id": "PRJ-105",
+          "title": "Synthetic issue PRJ-105",
+          "state": "In Progress",
+          "url": "https://tracker.example.test/browse/PRJ-105",
+          "issue_type": "Task",
+          "tracker": "https://tracker.example.test",
+          "description": "Synthetic description.",
+          "assignee": "Pat Example",
+          "as_of": "2026-10-10T08:00:00Z",
+          "stale": false,
+          "created_at": "2026-09-02T10:10:10.000+0000",
+          "updated_at": "2026-10-09T17:20:41.000+0000",
+          "status_category": "indeterminate",
+          "priority": "Needs Priority",
+          "labels": []
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    },
+    {
+      "type": "issue",
+      "id": "PRJ-106",
+      "first_seen_at": "2026-10-01T08:00:00Z",
+      "facts": {
+        "issue_show": {
+          "id": "PRJ-106",
+          "title": "Synthetic issue PRJ-106",
+          "state": "Complete",
+          "url": "https://tracker.example.test/browse/PRJ-106",
+          "issue_type": "Task",
+          "tracker": "https://tracker.example.test",
+          "description": "Synthetic description.",
+          "assignee": "Pat Example",
+          "as_of": "2026-10-10T08:00:00Z",
+          "stale": false,
+          "created_at": "2026-05-02T10:10:10.000+0000",
+          "updated_at": "2026-10-09T17:20:41.000+0000",
+          "status_category": "done",
+          "priority": "Medium",
+          "labels": []
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    },
+    {
+      "type": "issue",
+      "id": "PRJ-107",
+      "first_seen_at": "2026-10-01T08:00:00Z",
+      "facts": {
+        "issue_show": {
+          "id": "PRJ-107",
+          "title": "Synthetic issue PRJ-107",
+          "state": "To Do",
+          "url": "https://tracker.example.test/browse/PRJ-107",
+          "issue_type": "Task",
+          "tracker": "https://tracker.example.test",
+          "description": "Synthetic description.",
+          "assignee": "Someone Else",
+          "as_of": "2026-10-10T08:00:00Z",
+          "stale": false,
+          "created_at": "2026-08-02T15:05:10.000+0000",
+          "updated_at": "2026-10-09T17:20:41.000+0000",
+          "status_category": "new",
+          "priority": "Highest",
+          "due_date": "2026-10-09",
+          "labels": []
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    }
+  ],
+  "expected": {
+    "order": [
+      "issue:PRJ-102",
+      "issue:PRJ-101",
+      "issue:PRJ-105",
+      "issue:PRJ-103",
+      "issue:PRJ-104"
+    ],
+    "tiers": {
+      "issue:PRJ-102": "overdue",
+      "issue:PRJ-101": "started",
+      "issue:PRJ-105": "started",
+      "issue:PRJ-103": "not_started",
+      "issue:PRJ-104": "not_started"
+    },
+    "deciding": {
+      "issue:PRJ-102": "tier",
+      "issue:PRJ-101": "due",
+      "issue:PRJ-105": "tier",
+      "issue:PRJ-103": "priority"
+    },
+    "rank_inputs": {
+      "unparseable_due": 0,
+      "unmapped_priority": 1,
+      "age_fallback": 5,
+      "unblocks_unavailable": 0,
+      "status_category_absent": 0
+    }
+  }
+}

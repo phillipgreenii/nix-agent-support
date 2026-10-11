@@ -4421,6 +4421,50 @@
                     '';
                   });
 
+              # pg-desk daily-focus rank regression gate (bead pg2-2j5ac.44.13, daily-focus design
+              # "Rank regression"). TestFocusRankGate runs the committed, scrubbed
+              # RECORDED snapshots of each backend (Jira, bd, GitHub PR) through the
+              # rank and asserts the rank order and the rank_inputs counts, so a
+              # real-input drift (a changed due-date format) fails a check and not
+              # only a synthetic fixture. Built in the pattern of
+              # pg-decider-parity-gate (single-test -run plus a PASS-line assertion,
+              # so a renamed or filtered-out test cannot pass vacuously) but with the
+              # src and modRoot of pg-desk-go-tests, because pg-desk's module has a
+              # local replace of ../pg-connector (Pattern B). The module's vendor env
+              # comes from mkGoTest; only the buildPhase is replaced. Emits no
+              # telemetry; the log is go test's own output.
+              pg-desk-focus-rank-gate =
+                (pkgs._agentSupportGoBuilders.mkGoTest {
+                  pname = "pg-desk-focus-rank-gate";
+                  src = lib.fileset.toSource {
+                    root = ./packages;
+                    fileset = lib.fileset.unions [
+                      ./packages/pg-desk
+                      ./packages/pg-connector
+                    ];
+                  };
+                  modRoot = "pg-desk";
+                  gomod2nixToml = ./packages/pg-desk/gomod2nix.toml;
+                }).overrideAttrs
+                  (_: {
+                    buildPhase = ''
+                      runHook preBuild
+                      export HOME="$TMPDIR" GOCACHE="$TMPDIR/go-build"
+                      export GOFLAGS=''${GOFLAGS//-trimpath/}
+                      if ! go test -count=1 -v -run '^TestFocusRankGate$' ./internal/focus/ > "$TMPDIR/focus-rank-gate.log" 2>&1; then
+                        cat "$TMPDIR/focus-rank-gate.log"
+                        echo "pg-desk-focus-rank-gate: TestFocusRankGate FAILED" >&2
+                        exit 1
+                      fi
+                      cat "$TMPDIR/focus-rank-gate.log"
+                      if ! grep -q -- '^--- PASS: TestFocusRankGate ' "$TMPDIR/focus-rank-gate.log"; then
+                        echo "pg-desk-focus-rank-gate: TestFocusRankGate did not report PASS (skipped or not run)" >&2
+                        exit 1
+                      fi
+                      runHook postBuild
+                    '';
+                  });
+
               # pg-router-probe (docket pg2-93e5s, packet 1) — fixture-driven
               # unit/integration suite (fingerprinting, "nothing new"
               # dedup, snapshot robustness, the reentrant test-helper-process

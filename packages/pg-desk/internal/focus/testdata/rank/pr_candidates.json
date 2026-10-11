@@ -1,0 +1,201 @@
+{
+  "name": "pr_candidates",
+  "now": "2026-10-10T12:00:00Z",
+  "time_zone": "UTC",
+  "config": {
+    "self_login": "me-login",
+    "operator_identities": ["Pat Example"],
+    "bead_id_pattern": "^bd-"
+  },
+  "entities": [
+    {
+      "type": "pr",
+      "id": "example-org/example-repo#21",
+      "facts": {
+        "pr_show": {
+          "id": "example-org/example-repo#21",
+          "repo": "example-org/example-repo",
+          "number": 21,
+          "title": "Change 21",
+          "state": "open",
+          "branch": "feature-21",
+          "base": "main",
+          "author": "teammate",
+          "url": "",
+          "draft": false,
+          "merged": false,
+          "review_requests": [],
+          "as_of": "2026-10-10T08:00:00Z",
+          "stale": false
+        }
+      },
+      "first_seen_at": "2026-09-20T00:00:00Z",
+      "interpretation": {
+        "ownership": "mine"
+      }
+    },
+    {
+      "type": "pr",
+      "id": "example-org/example-repo#22",
+      "facts": {
+        "pr_show": {
+          "id": "example-org/example-repo#22",
+          "repo": "example-org/example-repo",
+          "number": 22,
+          "title": "Change 22",
+          "state": "open",
+          "branch": "feature-22",
+          "base": "main",
+          "author": "teammate",
+          "url": "",
+          "draft": false,
+          "merged": false,
+          "review_requests": ["me-login"],
+          "as_of": "2026-10-10T08:00:00Z",
+          "stale": false
+        }
+      },
+      "first_seen_at": "2026-09-05T00:00:00Z",
+      "interpretation": {
+        "ownership": "team"
+      }
+    },
+    {
+      "type": "pr",
+      "id": "example-org/example-repo#23",
+      "facts": {
+        "pr_show": {
+          "id": "example-org/example-repo#23",
+          "repo": "example-org/example-repo",
+          "number": 23,
+          "title": "Change 23",
+          "state": "open",
+          "branch": "feature-23",
+          "base": "main",
+          "author": "teammate",
+          "url": "",
+          "draft": false,
+          "merged": false,
+          "review_requests": [],
+          "as_of": "2026-10-10T08:00:00Z",
+          "stale": false
+        }
+      },
+      "first_seen_at": "2026-09-01T00:00:00Z",
+      "interpretation": {
+        "ownership": "team"
+      }
+    },
+    {
+      "type": "pr",
+      "id": "example-org/example-repo#24",
+      "facts": {
+        "pr_show": {
+          "id": "example-org/example-repo#24",
+          "repo": "example-org/example-repo",
+          "number": 24,
+          "title": "Change 24",
+          "state": "open",
+          "branch": "feature-24",
+          "base": "main",
+          "author": "teammate",
+          "url": "",
+          "draft": false,
+          "merged": false,
+          "review_requests": ["other-team"],
+          "as_of": "2026-10-10T08:00:00Z",
+          "stale": false
+        }
+      },
+      "first_seen_at": "2026-09-02T00:00:00Z",
+      "interpretation": {
+        "ownership": "team"
+      }
+    },
+    {
+      "type": "pr",
+      "id": "example-org/example-repo#25",
+      "facts": {
+        "pr_show": {
+          "id": "example-org/example-repo#25",
+          "repo": "example-org/example-repo",
+          "number": 25,
+          "title": "Change 25",
+          "state": "merged",
+          "branch": "feature-25",
+          "base": "main",
+          "author": "teammate",
+          "url": "",
+          "draft": false,
+          "merged": true,
+          "review_requests": [],
+          "as_of": "2026-10-10T08:00:00Z",
+          "stale": false
+        }
+      },
+      "first_seen_at": "2026-08-20T00:00:00Z",
+      "interpretation": {
+        "ownership": "mine"
+      }
+    },
+    {
+      "type": "issue",
+      "id": "PRJ-30",
+      "facts": {
+        "issue_show": {
+          "id": "PRJ-30",
+          "title": "Issue PRJ-30",
+          "state": "Open",
+          "issue_type": "Task",
+          "labels": [],
+          "status_category": "new",
+          "priority": "Medium",
+          "assignee": "Pat Example",
+          "created_at": "2026-08-01T00:00:00Z"
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    }
+  ],
+  "links": [
+    {
+      "from": "issue:PRJ-30",
+      "to": "pr:example-org/example-repo#23",
+      "relation": "jira"
+    }
+  ],
+  "expected": {
+    "order": [
+      "pr:example-org/example-repo#22",
+      "pr:example-org/example-repo#21",
+      "issue:PRJ-30",
+      "pr:example-org/example-repo#23"
+    ],
+    "tiers": {
+      "pr:example-org/example-repo#22": "started",
+      "pr:example-org/example-repo#21": "started",
+      "issue:PRJ-30": "not_started",
+      "pr:example-org/example-repo#23": "not_started"
+    },
+    "deciding": {
+      "pr:example-org/example-repo#22": "age",
+      "pr:example-org/example-repo#21": "tier",
+      "issue:PRJ-30": "age"
+    },
+    "priorities": {
+      "pr:example-org/example-repo#22": "P2",
+      "pr:example-org/example-repo#21": "P2",
+      "pr:example-org/example-repo#23": "P2",
+      "issue:PRJ-30": "P2"
+    },
+    "rank_inputs": {
+      "unparseable_due": 0,
+      "unmapped_priority": 0,
+      "age_fallback": 3,
+      "unblocks_unavailable": 0,
+      "status_category_absent": 0
+    }
+  }
+}

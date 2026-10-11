@@ -1,0 +1,139 @@
+{
+  "name": "priority_inheritance",
+  "now": "2026-10-10T12:00:00Z",
+  "time_zone": "UTC",
+  "config": {
+    "self_login": "me-login",
+    "operator_identities": ["Pat Example"],
+    "bead_id_pattern": "^bd-"
+  },
+  "entities": [
+    {
+      "type": "pr",
+      "id": "example-org/example-repo#9",
+      "facts": {
+        "pr_show": {
+          "id": "example-org/example-repo#9",
+          "repo": "example-org/example-repo",
+          "number": 9,
+          "title": "Change 9",
+          "state": "open",
+          "branch": "feature-9",
+          "base": "main",
+          "author": "teammate",
+          "url": "",
+          "draft": false,
+          "merged": false,
+          "review_requests": [],
+          "as_of": "2026-10-10T08:00:00Z",
+          "stale": false
+        }
+      },
+      "first_seen_at": "2026-09-20T00:00:00Z",
+      "interpretation": {
+        "ownership": "mine"
+      }
+    },
+    {
+      "type": "pr",
+      "id": "example-org/example-repo#3",
+      "facts": {
+        "pr_show": {
+          "id": "example-org/example-repo#3",
+          "repo": "example-org/example-repo",
+          "number": 3,
+          "title": "Change 3",
+          "state": "open",
+          "branch": "feature-3",
+          "base": "main",
+          "author": "teammate",
+          "url": "",
+          "draft": false,
+          "merged": false,
+          "review_requests": [],
+          "as_of": "2026-10-10T08:00:00Z",
+          "stale": false
+        }
+      },
+      "first_seen_at": "2026-09-05T00:00:00Z",
+      "interpretation": {
+        "ownership": "mine"
+      }
+    },
+    {
+      "type": "issue",
+      "id": "PRJ-20",
+      "facts": {
+        "issue_show": {
+          "id": "PRJ-20",
+          "title": "Issue PRJ-20",
+          "state": "Open",
+          "issue_type": "Task",
+          "labels": [],
+          "status_category": "new",
+          "priority": "Highest",
+          "assignee": "Pat Example",
+          "created_at": "2026-08-01T00:00:00Z"
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    },
+    {
+      "type": "issue",
+      "id": "PRJ-21",
+      "facts": {
+        "issue_show": {
+          "id": "PRJ-21",
+          "title": "Issue PRJ-21",
+          "state": "Open",
+          "issue_type": "Task",
+          "labels": [],
+          "status_category": "new",
+          "priority": "Medium",
+          "assignee": "Pat Example",
+          "created_at": "2026-08-01T00:00:00Z"
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    }
+  ],
+  "links": [
+    {
+      "from": "pr:example-org/example-repo#9",
+      "to": "issue:PRJ-20",
+      "relation": "work"
+    }
+  ],
+  "expected": {
+    "order": [
+      "pr:example-org/example-repo#9",
+      "pr:example-org/example-repo#3",
+      "issue:PRJ-21"
+    ],
+    "tiers": {
+      "pr:example-org/example-repo#9": "started",
+      "pr:example-org/example-repo#3": "started",
+      "issue:PRJ-21": "not_started"
+    },
+    "deciding": {
+      "pr:example-org/example-repo#9": "priority",
+      "pr:example-org/example-repo#3": "tier"
+    },
+    "priorities": {
+      "pr:example-org/example-repo#9": "P0",
+      "pr:example-org/example-repo#3": "P2",
+      "issue:PRJ-21": "P2"
+    },
+    "rank_inputs": {
+      "unparseable_due": 0,
+      "unmapped_priority": 0,
+      "age_fallback": 2,
+      "unblocks_unavailable": 0,
+      "status_category_absent": 0
+    }
+  }
+}

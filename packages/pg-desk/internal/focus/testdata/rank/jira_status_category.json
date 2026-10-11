@@ -1,0 +1,146 @@
+{
+  "name": "jira_status_category",
+  "now": "2026-10-10T12:00:00Z",
+  "time_zone": "UTC",
+  "config": {
+    "operator_identities": ["Pat Example", "pat@example.test"],
+    "bead_id_pattern": "^bd-"
+  },
+  "entities": [
+    {
+      "type": "issue",
+      "id": "PRJ-81",
+      "facts": {
+        "issue_show": {
+          "id": "PRJ-81",
+          "title": "Issue PRJ-81",
+          "state": "In Review",
+          "issue_type": "Task",
+          "labels": [],
+          "status_category": "indeterminate",
+          "priority": "Medium",
+          "assignee": "Pat Example",
+          "created_at": "2026-08-01T00:00:00Z"
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    },
+    {
+      "type": "issue",
+      "id": "PRJ-82",
+      "facts": {
+        "issue_show": {
+          "id": "PRJ-82",
+          "title": "Issue PRJ-82",
+          "state": "In Progress",
+          "issue_type": "Task",
+          "labels": [],
+          "priority": "High",
+          "assignee": "Pat Example",
+          "created_at": "2026-08-01T00:00:00Z"
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    },
+    {
+      "type": "issue",
+      "id": "PRJ-83",
+      "facts": {
+        "issue_show": {
+          "id": "PRJ-83",
+          "title": "Issue PRJ-83",
+          "state": "Open",
+          "issue_type": "Task",
+          "labels": [],
+          "status_category": "new",
+          "priority": "High",
+          "assignee": "Pat Example",
+          "created_at": "2026-08-01T00:00:00Z"
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    },
+    {
+      "type": "issue",
+      "id": "PRJ-84",
+      "facts": {
+        "issue_show": {
+          "id": "PRJ-84",
+          "title": "Issue PRJ-84",
+          "state": "In Progress",
+          "issue_type": "Task",
+          "labels": [],
+          "status_category": "new",
+          "priority": "Highest",
+          "assignee": "Pat Example",
+          "created_at": "2026-08-01T00:00:00Z"
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    },
+    {
+      "type": "issue",
+      "id": "PRJ-85",
+      "facts": {
+        "issue_show": {
+          "id": "PRJ-85",
+          "title": "Issue PRJ-85",
+          "state": "In Progress",
+          "issue_type": "Task",
+          "labels": [],
+          "status_category": "indeterminate",
+          "priority": "Low",
+          "assignee": "Someone Else",
+          "created_at": "2026-08-01T00:00:00Z"
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    }
+  ],
+  "links": [
+    {
+      "from": "issue:PRJ-83",
+      "to": "issue:PRJ-85",
+      "relation": "jira"
+    }
+  ],
+  "expected": {
+    "order": [
+      "issue:PRJ-82",
+      "issue:PRJ-81",
+      "issue:PRJ-84",
+      "issue:PRJ-83",
+      "issue:PRJ-85"
+    ],
+    "tiers": {
+      "issue:PRJ-82": "started",
+      "issue:PRJ-81": "started",
+      "issue:PRJ-84": "not_started",
+      "issue:PRJ-83": "not_started",
+      "issue:PRJ-85": "not_started"
+    },
+    "deciding": {
+      "issue:PRJ-82": "priority",
+      "issue:PRJ-81": "tier",
+      "issue:PRJ-84": "priority",
+      "issue:PRJ-83": "priority"
+    },
+    "rank_inputs": {
+      "unparseable_due": 0,
+      "unmapped_priority": 0,
+      "age_fallback": 0,
+      "unblocks_unavailable": 0,
+      "status_category_absent": 1
+    }
+  }
+}

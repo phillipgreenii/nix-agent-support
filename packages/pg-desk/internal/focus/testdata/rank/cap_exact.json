@@ -1,0 +1,114 @@
+{
+  "name": "cap_exact",
+  "now": "2026-10-10T12:00:00Z",
+  "time_zone": "UTC",
+  "cap": 4,
+  "config": {
+    "operator_identities": ["Pat Example", "pat@example.test"],
+    "bead_id_pattern": "^bd-"
+  },
+  "entities": [
+    {
+      "type": "issue",
+      "id": "CAP-1",
+      "facts": {
+        "issue_show": {
+          "id": "CAP-1",
+          "title": "Issue CAP-1",
+          "state": "Open",
+          "issue_type": "Task",
+          "labels": [],
+          "status_category": "new",
+          "priority": "Highest",
+          "assignee": "Pat Example",
+          "created_at": "2026-08-01T00:00:00Z"
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    },
+    {
+      "type": "issue",
+      "id": "CAP-2",
+      "facts": {
+        "issue_show": {
+          "id": "CAP-2",
+          "title": "Issue CAP-2",
+          "state": "Open",
+          "issue_type": "Task",
+          "labels": [],
+          "status_category": "new",
+          "priority": "High",
+          "assignee": "Pat Example",
+          "created_at": "2026-08-01T00:00:00Z"
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    },
+    {
+      "type": "issue",
+      "id": "CAP-3",
+      "facts": {
+        "issue_show": {
+          "id": "CAP-3",
+          "title": "Issue CAP-3",
+          "state": "Open",
+          "issue_type": "Task",
+          "labels": [],
+          "status_category": "new",
+          "priority": "Medium",
+          "assignee": "Pat Example",
+          "created_at": "2026-08-01T00:00:00Z"
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    },
+    {
+      "type": "issue",
+      "id": "CAP-4",
+      "facts": {
+        "issue_show": {
+          "id": "CAP-4",
+          "title": "Issue CAP-4",
+          "state": "Open",
+          "issue_type": "Task",
+          "labels": [],
+          "status_category": "new",
+          "priority": "Low",
+          "assignee": "Pat Example",
+          "created_at": "2026-08-01T00:00:00Z"
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    }
+  ],
+  "expected": {
+    "order": ["issue:CAP-1", "issue:CAP-2", "issue:CAP-3", "issue:CAP-4"],
+    "tiers": {
+      "issue:CAP-1": "not_started",
+      "issue:CAP-2": "not_started",
+      "issue:CAP-3": "not_started",
+      "issue:CAP-4": "not_started"
+    },
+    "deciding": {
+      "issue:CAP-1": "priority",
+      "issue:CAP-2": "priority",
+      "issue:CAP-3": "priority"
+    },
+    "in_plan": ["issue:CAP-1", "issue:CAP-2", "issue:CAP-3", "issue:CAP-4"],
+    "rank_inputs": {
+      "unparseable_due": 0,
+      "unmapped_priority": 0,
+      "age_fallback": 0,
+      "unblocks_unavailable": 0,
+      "status_category_absent": 0
+    }
+  }
+}

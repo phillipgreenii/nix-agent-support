@@ -388,3 +388,64 @@ func TestIdentifierAllowlistGuardIgnoresZrNamingFamily(t *testing.T) {
 		t.Fatalf("the zr/ZR naming family must never be flagged, got violations: %v", violations)
 	}
 }
+
+// TestIdentifierAllowlistGuardScansFocusTestdata proves the guard reaches the
+// daily-focus rank fixtures (bead pg2-2j5ac.44.13): the goldens and the
+// recorded snapshots under internal/focus/testdata are ported from private
+// suites and scrubbed from real backend output, so a login that survived the
+// scrub must fail here. The guard walks every testdata directory of the
+// module, so no allowlist or scope was widened; this test pins that the
+// directories are inside the walk, counted independently of the scanner, and
+// that a planted identifier under the same relative path is flagged.
+func TestIdentifierAllowlistGuardScansFocusTestdata(t *testing.T) {
+	focusDir := filepath.Join(pgDeskModuleRoot(t), "internal", "focus")
+
+	// Count the regular files under internal/focus/testdata without the
+	// scanner, then require the scanner counted exactly those.
+	want := 0
+	walkErr := filepath.WalkDir(filepath.Join(focusDir, "testdata"), func(_ string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.Type().IsRegular() {
+			want++
+		}
+		return nil
+	})
+	if walkErr != nil {
+		t.Fatalf("walk %s: %v", focusDir, walkErr)
+	}
+	// 20 rank goldens, DIFFS.md, the three recorded snapshots and their README.
+	const floor = 25
+	if want < floor {
+		t.Fatalf("internal/focus/testdata holds %d file(s), want at least %d (the rank goldens, DIFFS.md and the snapshots)", want, floor)
+	}
+	violations, scanned, err := scanTree(focusDir)
+	if err != nil {
+		t.Fatalf("scanning %s: %v", focusDir, err)
+	}
+	if scanned != want {
+		t.Errorf("the guard scanned %d file(s) under internal/focus, want all %d under its testdata", scanned, want)
+	}
+	if len(violations) != 0 {
+		t.Errorf("internal/focus/testdata carries non-allowlisted identifier-shaped tokens: %v", violations)
+	}
+
+	// A planted violation under the same relative path is flagged.
+	dir := t.TempDir()
+	planted := filepath.Join(dir, "internal", "focus", "testdata", "snapshots", "github-pr")
+	if err := os.MkdirAll(planted, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", planted, err)
+	}
+	body := `{"pr_show": {"author": "areallyrealcolleague", "review_requests": []}}` + "\n"
+	if err := os.WriteFile(filepath.Join(planted, "planted.json"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write planted fixture: %v", err)
+	}
+	got, n, err := scanTree(dir)
+	if err != nil {
+		t.Fatalf("scanning %s: %v", dir, err)
+	}
+	if n != 1 || len(got) != 1 || !strings.Contains(got[0], "areallyrealcolleague") {
+		t.Fatalf("planted identifier under internal/focus/testdata was not flagged: scanned=%d violations=%v", n, got)
+	}
+}

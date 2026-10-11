@@ -1,0 +1,121 @@
+{
+  "name": "epic_buried_p1",
+  "now": "2026-10-10T12:00:00Z",
+  "time_zone": "UTC",
+  "cap": 1,
+  "config": {
+    "operator_identities": ["Pat Example", "pat@example.test"],
+    "bead_id_pattern": "^bd-"
+  },
+  "entities": [
+    {
+      "type": "issue",
+      "id": "bd-e1",
+      "facts": {
+        "issue_show": {
+          "id": "bd-e1",
+          "title": "Bead bd-e1",
+          "state": "open",
+          "labels": ["pg-focus-planable"],
+          "issue_type": "epic",
+          "created_at": "2026-09-01T00:00:00Z",
+          "priority": "P3"
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    },
+    {
+      "type": "issue",
+      "id": "bd-e1.1",
+      "facts": {
+        "issue_show": {
+          "id": "bd-e1.1",
+          "title": "Bead bd-e1.1",
+          "state": "in_progress",
+          "labels": [],
+          "issue_type": "task",
+          "created_at": "2026-09-01T00:00:00Z",
+          "priority": "P1",
+          "parent": "bd-e1"
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    },
+    {
+      "type": "issue",
+      "id": "bd-e1.2",
+      "facts": {
+        "issue_show": {
+          "id": "bd-e1.2",
+          "title": "Bead bd-e1.2",
+          "state": "open",
+          "labels": [],
+          "issue_type": "task",
+          "created_at": "2026-09-01T00:00:00Z",
+          "priority": "P3",
+          "parent": "bd-e1"
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    },
+    {
+      "type": "issue",
+      "id": "PRJ-60",
+      "facts": {
+        "issue_show": {
+          "id": "PRJ-60",
+          "title": "Issue PRJ-60",
+          "state": "Open",
+          "issue_type": "Task",
+          "labels": [],
+          "status_category": "new",
+          "priority": "Medium",
+          "assignee": "Pat Example",
+          "created_at": "2026-08-01T00:00:00Z"
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    }
+  ],
+  "links": [
+    {
+      "from": "issue:bd-e1.1",
+      "to": "issue:bd-e1",
+      "relation": "parent"
+    },
+    {
+      "from": "issue:bd-e1.2",
+      "to": "issue:bd-e1",
+      "relation": "parent"
+    }
+  ],
+  "expected": {
+    "order": ["issue:bd-e1.1", "issue:PRJ-60", "issue:bd-e1.2"],
+    "tiers": {
+      "issue:bd-e1.1": "not_started",
+      "issue:PRJ-60": "not_started",
+      "issue:bd-e1.2": "not_started"
+    },
+    "deciding": {
+      "issue:bd-e1.1": "priority",
+      "issue:PRJ-60": "priority"
+    },
+    "epics_in_play": ["issue:bd-e1"],
+    "in_plan": ["issue:bd-e1.1"],
+    "rank_inputs": {
+      "unparseable_due": 0,
+      "unmapped_priority": 0,
+      "age_fallback": 0,
+      "unblocks_unavailable": 0,
+      "status_category_absent": 0
+    }
+  }
+}

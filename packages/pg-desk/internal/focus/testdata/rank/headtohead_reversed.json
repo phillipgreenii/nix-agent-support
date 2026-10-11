@@ -1,0 +1,271 @@
+{
+  "name": "headtohead_reversed",
+  "now": "2026-10-10T12:00:00Z",
+  "time_zone": "UTC",
+  "config": {
+    "bead_id_pattern": "^bd-"
+  },
+  "entities": [
+    {
+      "type": "issue",
+      "id": "bd-45",
+      "facts": {
+        "issue_show": {
+          "id": "bd-45",
+          "title": "Bead M",
+          "state": "open",
+          "priority": "P1",
+          "labels": ["pg-focus-planable"],
+          "issue_type": "task",
+          "created_at": "2026-09-01T00:00:00Z"
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    },
+    {
+      "type": "issue",
+      "id": "bd-31",
+      "facts": {
+        "issue_show": {
+          "id": "bd-31",
+          "title": "Bead L",
+          "state": "open",
+          "priority": "P2",
+          "labels": ["pg-focus-planable"],
+          "issue_type": "task",
+          "created_at": "2026-09-01T00:00:00Z"
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    },
+    {
+      "type": "issue",
+      "id": "dep-bd-31-1",
+      "facts": {
+        "issue_show": {
+          "id": "dep-bd-31-1",
+          "title": "Dependent",
+          "state": "open",
+          "deps": [
+            {
+              "id": "bd-31",
+              "type": "blocks"
+            }
+          ],
+          "created_at": "2026-09-01T00:00:00Z"
+        }
+      }
+    },
+    {
+      "type": "issue",
+      "id": "dep-bd-31-2",
+      "facts": {
+        "issue_show": {
+          "id": "dep-bd-31-2",
+          "title": "Dependent",
+          "state": "open",
+          "deps": [
+            {
+              "id": "bd-31",
+              "type": "blocks"
+            }
+          ],
+          "created_at": "2026-09-01T00:00:00Z"
+        }
+      }
+    },
+    {
+      "type": "issue",
+      "id": "dep-bd-31-3",
+      "facts": {
+        "issue_show": {
+          "id": "dep-bd-31-3",
+          "title": "Dependent",
+          "state": "open",
+          "deps": [
+            {
+              "id": "bd-31",
+              "type": "blocks"
+            }
+          ],
+          "created_at": "2026-09-01T00:00:00Z"
+        }
+      }
+    },
+    {
+      "type": "issue",
+      "id": "bd-38",
+      "facts": {
+        "issue_show": {
+          "id": "bd-38",
+          "title": "Bead J",
+          "state": "open",
+          "priority": "P3",
+          "labels": ["pg-focus-planable"],
+          "issue_type": "task",
+          "created_at": "2026-09-01T00:00:00Z",
+          "due_date": "2026-10-13"
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    },
+    {
+      "type": "issue",
+      "id": "bd-22",
+      "facts": {
+        "issue_show": {
+          "id": "bd-22",
+          "title": "Bead H",
+          "state": "open",
+          "priority": "P3",
+          "labels": ["pg-focus-planable"],
+          "issue_type": "task",
+          "created_at": "2026-09-01T00:00:00Z",
+          "due_date": "2026-10-11"
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    },
+    {
+      "type": "issue",
+      "id": "bd-52",
+      "facts": {
+        "issue_show": {
+          "id": "bd-52",
+          "title": "Bead P",
+          "state": "in_progress",
+          "priority": "P3",
+          "labels": ["pg-focus-planable"],
+          "issue_type": "task",
+          "created_at": "2026-09-01T00:00:00Z"
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    },
+    {
+      "type": "issue",
+      "id": "bd-17",
+      "facts": {
+        "issue_show": {
+          "id": "bd-17",
+          "title": "Bead C",
+          "state": "in_progress",
+          "priority": "P2",
+          "labels": ["pg-focus-planable"],
+          "issue_type": "task",
+          "created_at": "2026-09-01T00:00:00Z"
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    },
+    {
+      "type": "issue",
+      "id": "bd-61",
+      "facts": {
+        "issue_show": {
+          "id": "bd-61",
+          "title": "Bead D",
+          "state": "in_progress",
+          "priority": "P1",
+          "labels": ["pg-focus-planable"],
+          "issue_type": "task",
+          "created_at": "2026-09-01T00:00:00Z"
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    },
+    {
+      "type": "issue",
+      "id": "bd-09",
+      "facts": {
+        "issue_show": {
+          "id": "bd-09",
+          "title": "Bead B",
+          "state": "in_progress",
+          "priority": "P3",
+          "labels": ["pg-focus-planable"],
+          "issue_type": "task",
+          "created_at": "2026-09-01T00:00:00Z",
+          "due_date": "2026-10-11"
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    },
+    {
+      "type": "issue",
+      "id": "bd-26",
+      "facts": {
+        "issue_show": {
+          "id": "bd-26",
+          "title": "Bead A",
+          "state": "open",
+          "priority": "P1",
+          "labels": ["pg-focus-planable"],
+          "issue_type": "task",
+          "created_at": "2026-09-01T00:00:00Z",
+          "due_date": "2026-10-09"
+        },
+        "issue_deps": {
+          "ids": []
+        }
+      }
+    }
+  ],
+  "expected": {
+    "order": [
+      "issue:bd-26",
+      "issue:bd-09",
+      "issue:bd-61",
+      "issue:bd-17",
+      "issue:bd-52",
+      "issue:bd-22",
+      "issue:bd-38",
+      "issue:bd-31",
+      "issue:bd-45"
+    ],
+    "tiers": {
+      "issue:bd-26": "overdue",
+      "issue:bd-09": "started",
+      "issue:bd-61": "started",
+      "issue:bd-17": "started",
+      "issue:bd-52": "started",
+      "issue:bd-22": "not_started",
+      "issue:bd-38": "not_started",
+      "issue:bd-31": "not_started",
+      "issue:bd-45": "not_started"
+    },
+    "deciding": {
+      "issue:bd-26": "tier",
+      "issue:bd-09": "due",
+      "issue:bd-61": "priority",
+      "issue:bd-17": "priority",
+      "issue:bd-52": "tier",
+      "issue:bd-22": "due",
+      "issue:bd-38": "due",
+      "issue:bd-31": "unblocks"
+    },
+    "rank_inputs": {
+      "unparseable_due": 0,
+      "unmapped_priority": 0,
+      "age_fallback": 0,
+      "unblocks_unavailable": 0,
+      "status_category_absent": 0
+    }
+  }
+}
