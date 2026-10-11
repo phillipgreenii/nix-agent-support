@@ -89,6 +89,15 @@ if given.
 
 - REMOVE from TARGETS any open bead with a non-empty `assignee`; it goes to Stage 2 only.
 - `in_progress` beads are never TARGETS; they also go to Stage 2.
+- REMOVE from TARGETS any bead whose `labels` contain `focus-item`, in EVERY status. A focus bead
+  held by the decider is `status=deferred` with an elapsed or empty `defer_until`, which would
+  otherwise be a REVIEW bead that a worker might undefer, re-date, turn into a `blocks` edge, or
+  close as stale (a closed focus bead is never reopened, so a close ends the item for good). The
+  exclusion lives HERE, in the selection, and not only in the worker prompt. The label is the key
+  because the export row names labels and not metadata. Count the removed beads as
+  `EXCLUDED-focus-item` in `progress.txt`. Such a bead is never a Stage 2 candidate either unless
+  it is claimed (`in_progress` or a non-empty `assignee`), in which case Stage 2 reports it and
+  releases nothing it cannot prove dead.
 
 ## Stage 2 — claim liveness (in parallel with the batches)
 
@@ -122,6 +131,13 @@ The candidates are every `in_progress` bead and every open bead with a non-empty
 
 Classify every TARGET from `export.jsonl` and write the lists to `WORKDIR/triage-*.txt`. Each
 pre-filtered bead gets NO subagent and NO note; it only counts in the report.
+
+**SKIP-focus-item** comes FIRST and is checked before every other class and before any override:
+a bead whose `labels` contain `focus-item` is never REVIEW, whatever its status, `defer_until`,
+blockers or markers. Stage 1 already removed such beads from TARGETS; this class is the second
+line of defense for a TARGETS list built any other way (a narrowing `$ARGUMENTS`, a re-queued
+bead, a FOLLOWUPS batch). Write the ids to `WORKDIR/triage-skip-focus-item.txt`, count them, send
+them to NO subagent, and give them NO note and NO marker.
 
 **SKIP-live-chain** is computed as a LEAST fixpoint:
 
@@ -162,7 +178,8 @@ of these hold:
 - its `defer_until` has elapsed;
 - it is `status=deferred` with an elapsed or empty `defer_until`.
 
-**REVIEW** is every TARGET not skipped.
+**REVIEW** is every TARGET not skipped, and never a `focus-item`-labelled bead (SKIP-focus-item
+above; the Overrides do not apply to it).
 
 ## Stage 4 — cluster and batch the REVIEW set
 
@@ -241,7 +258,8 @@ When the last worker hands back, check `followups.txt`:
 4. **Report**, in at most 40 lines:
    - before/after counts with the arithmetic (open, ready, deferred, open-not-ready), split
      into this sweep versus peers;
-   - triage counts: live-chain skips, marker skips, reviewed;
+   - triage counts: live-chain skips, marker skips, reviewed, and the `focus-item` beads
+     excluded (Stage 1 `EXCLUDED-focus-item` plus any `SKIP-focus-item`; a count only, no ids);
    - closed beads, as id plus reason;
    - undeferred, retargeted, de-labelled, and dependency-fixed beads;
    - claims released;

@@ -61,6 +61,13 @@ already cached in `WORKDIR/probes/gate-check.json`.
 
 ## Per-bead procedure
 
+0. **Focus beads are off limits.** A bead whose `labels` contain `focus-item` MUST NOT be
+   touched by this sweep: no undefer, no re-date, no `blocks` edge in place of its defer, no
+   de-label, no close, no note and no marker. The decider holds such a bead as `status=deferred`
+   (metadata `focus_hold=struck`) on purpose, and closing one ends the item for good. The
+   orchestrator already removes these beads before dispatch, so one in your batch is a mistake:
+   skip it and report `skipped — focus-item (excluded from sweeps)`. This is the second line of
+   defense; it holds even if a dispatch prompt names the bead.
 1. **Claimed?** A bead is claimed ONLY if its JSON `assignee` is non-empty. The text `Owner:`
    line in `bd show` and `created_by` are the CREATOR, not a claim.
    - The orchestrator removes claimed beads from your batch. If one appears anyway (`open`

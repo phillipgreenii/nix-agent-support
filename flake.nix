@@ -1543,6 +1543,82 @@
                     touch $out
                   '';
 
+              # Focus-item exclusion conformance (pg2-2j5ac.44.33): the sweep that undefers or
+              # closes deferred beads MUST NOT touch a `focus-item` bead (the decider holds one as
+              # status=deferred; a close ends the item for good). The rule must live in the
+              # command's Stage 1 SELECTION and Stage 3 PRE-TRIAGE and in the worker prompt, not
+              # only in the worker prompt. The pb Go package is built from cleanSource
+              # ./packages/pb, where claude-marketplace/pb is absent, so a Go test would be
+              # vacuous; this fileset-scoped check reads the two markdown files directly and
+              # carries a mutated-copy negative control per rule.
+              test-pb-unstick-focus-exclusion =
+                let
+                  unstickSrc = lib.fileset.toSource {
+                    root = ./claude-marketplace/pb;
+                    fileset = lib.fileset.unions [
+                      ./claude-marketplace/pb/commands/unstick-beads.md
+                      ./claude-marketplace/pb/agents/unstick-batch-worker.md
+                    ];
+                  };
+                in
+                pkgs.runCommand "test-pb-unstick-focus-exclusion"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.gawk
+                      pkgs.gnugrep
+                      pkgs.coreutils
+                    ];
+                  }
+                  ''
+                    set -eu
+                    # section DIR FILE START-RE END-RE: print the lines of FILE from the first line
+                    # matching START-RE up to (not including) the next line matching END-RE.
+                    section() {
+                      awk -v s="$2" -v e="$3" '
+                        $0 ~ s { on = 1; next }
+                        on && $0 ~ e { exit }
+                        on { print }
+                      ' "$1"
+                    }
+                    # check CMD WORKER: exit 0 only when every rule is present.
+                    check() {
+                      cmd="$1"; worker="$2"
+                      section "$cmd" '^## Stage 1 ' '^## Stage 2 ' > "$TMPDIR/stage1"
+                      section "$cmd" '^## Stage 3 ' '^## Stage 4 ' > "$TMPDIR/stage3"
+                      section "$worker" '^## Per-bead procedure' '^## Standing permissions' > "$TMPDIR/procedure"
+                      grep -q 'REMOVE from TARGETS any bead whose `labels` contain `focus-item`' "$TMPDIR/stage1" || { echo "FAIL: Stage 1 lacks the focus-item exclusion" >&2; return 1; }
+                      grep -q 'SKIP-focus-item' "$TMPDIR/stage3" || { echo "FAIL: Stage 3 lacks SKIP-focus-item" >&2; return 1; }
+                      grep -q 'focus-item' "$TMPDIR/procedure" || { echo "FAIL: worker prompt lacks the focus-item exclusion" >&2; return 1; }
+                      grep -q 'focus-item' "$cmd" && grep -q 'excluded' "$cmd" || return 1
+                      awk '/^   - triage counts/ { on = 1 } on && /focus-item/ { found = 1 } /^   - closed beads/ { on = 0 } END { exit !found }' "$cmd" || { echo "FAIL: report lacks the focus-item count" >&2; return 1; }
+                    }
+
+                    cmd=${unstickSrc}/commands/unstick-beads.md
+                    worker=${unstickSrc}/agents/unstick-batch-worker.md
+
+                    echo "positive: real files carry the exclusion"
+                    check "$cmd" "$worker"
+
+                    # Negative controls: each mutated copy MUST fail the check.
+                    mkdir -p "$TMPDIR/mut"
+                    drop() { # drop FILE OUT: delete every line mentioning focus-item
+                      sed '/focus-item/d' "$1" > "$2"
+                    }
+                    echo "negative 1: command without the exclusion"
+                    drop "$cmd" "$TMPDIR/mut/cmd.md"
+                    if check "$TMPDIR/mut/cmd.md" "$worker"; then echo "negative control 1 passed but must fail" >&2; exit 1; fi
+                    echo "negative 2: worker without the exclusion"
+                    drop "$worker" "$TMPDIR/mut/worker.md"
+                    if check "$cmd" "$TMPDIR/mut/worker.md"; then echo "negative control 2 passed but must fail" >&2; exit 1; fi
+                    echo "negative 3: Stage 1 only (Stage 3 class removed)"
+                    sed 's/SKIP-focus-item/SKIP-x/g' "$cmd" > "$TMPDIR/mut/cmd3.md"
+                    if check "$TMPDIR/mut/cmd3.md" "$worker"; then echo "negative control 3 passed but must fail" >&2; exit 1; fi
+                    echo "negative 4: exclusion only in the worker prompt"
+                    awk '/^## Stage 1 /{s=1} /^## Stage 2 /{s=0} s && /focus-item/ {next} {print}' "$cmd" > "$TMPDIR/mut/cmd4.md"
+                    if check "$TMPDIR/mut/cmd4.md" "$worker"; then echo "negative control 4 passed but must fail" >&2; exit 1; fi
+                    touch $out
+                  '';
+
               # J-1 envelope guard for the pb plugin's skills and commands (pg2-dyztr): a lint
               # that no runnable jq filter indexes `.data` without the shape-agnostic prelude,
               # plus the documented bd commands, extracted from the markdown and run against the
