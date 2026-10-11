@@ -391,9 +391,21 @@ func causeText(cause string, f Facts) string {
 // is a bead (an epic or a bd task), else the bead minted for it (linked by
 // relation source, a human escalation sibling excepted), else "".
 func beadIDOf(in Inputs, k Key) string {
+	bk, ok := BeadKeyOf(in, k)
+	if !ok {
+		return ""
+	}
+	return bk.ID
+}
+
+// BeadKeyOf is the key of the bead the effect on k lands on, as beadIDOf
+// finds it: k itself when it is a bead, else the first bead (in key order)
+// linked to k by relation source that is not a human escalation sibling.
+// ok is false when there is none.
+func BeadKeyOf(in Inputs, k Key) (Key, bool) {
 	if k.Type == entityTypeIssue {
 		if re := in.Config.BeadIDRegexp(); re != nil && re.MatchString(k.ID) {
-			return k.ID
+			return k, true
 		}
 	}
 	var ids []Key
@@ -411,9 +423,9 @@ func beadIDOf(in Inputs, k Key) string {
 		if hasLabel(decodeEntityFacts(e).labels, humanLabel) {
 			continue
 		}
-		return bk.ID
+		return bk, true
 	}
-	return ""
+	return Key{}, false
 }
 
 // HydrateHandAdds hydrates every key of keys that the store has never
