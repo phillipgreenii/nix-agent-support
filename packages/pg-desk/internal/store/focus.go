@@ -781,6 +781,54 @@ func (t *FocusTx) ClosePeriod(periodID int64, closedAt, closeNote string) error 
 		`UPDATE focus_period SET closed_at = ?, close_note = ? WHERE id = ?`, closedAt, closeNote, periodID)
 }
 
+// FocusPeriodClosedError is returned by CloseOpenPeriod (and so by
+// FocusPeriodClose) when the period is already closed: the recorded close
+// time and summary are kept untouched and carried here.
+type FocusPeriodClosedError struct {
+	PeriodType, PeriodKey, ClosedAt, CloseNote string
+}
+
+func (e *FocusPeriodClosedError) Error() string {
+	return fmt.Sprintf("store: focus period (%s,%s) is already closed at %s", e.PeriodType, e.PeriodKey, e.ClosedAt)
+}
+
+// CloseOpenPeriod is the close write of `focus close`: inside the
+// transaction it get-or-creates the period, refuses (a *FocusPeriodClosedError,
+// nothing written) when the period already has a closed_at, sets closed_at and
+// close_note, and deletes the stored draft when it is the draft of exactly
+// that period, so a closed day leaves no draft behind. It returns the closed
+// row.
+func (t *FocusTx) CloseOpenPeriod(periodType, periodKey, note, at string) (FocusPeriod, error) {
+	p, err := t.GetOrCreatePeriod(periodType, periodKey)
+	if err != nil {
+		return FocusPeriod{}, err
+	}
+	if p.ClosedAt != "" {
+		return FocusPeriod{}, &FocusPeriodClosedError{
+			PeriodType: p.PeriodType, PeriodKey: p.PeriodKey, ClosedAt: p.ClosedAt, CloseNote: p.CloseNote,
+		}
+	}
+	if err := t.ClosePeriod(p.ID, at, note); err != nil {
+		return FocusPeriod{}, err
+	}
+	if err := t.DeleteDraftOfPeriod(periodType, periodKey); err != nil {
+		return FocusPeriod{}, err
+	}
+	p.ClosedAt, p.CloseNote = at, note
+	return p, nil
+}
+
+// FocusPeriodClose closes the period (periodType, periodKey) at the instant
+// at with the summary note: CloseOpenPeriod in one transaction of its own
+// (period get-or-create, the close, the draft deletion). An already-closed
+// period is a *FocusPeriodClosedError and nothing changes.
+func (s *Store) FocusPeriodClose(periodType, periodKey, note, at string) error {
+	return s.FocusLockTx(func(tx *FocusTx) error {
+		_, err := tx.CloseOpenPeriod(periodType, periodKey, note, at)
+		return err
+	})
+}
+
 func (t *FocusTx) mustUpdate(what, q string, args ...any) error {
 	res, err := t.x.exec(q, args...)
 	if err != nil {
