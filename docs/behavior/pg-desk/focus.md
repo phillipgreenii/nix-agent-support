@@ -551,6 +551,70 @@ record. Both forms read one table, so `show` and the echo cannot drift.
   applied token in the echo table with an effect, a because clause and a cause as separate fields read
   from the one state-by-outcome table, and a dry run's echo MUST equal the apply's.
 
+## `pull`: add to the plan without replacing it
+
+`pg-desk focus pull [--date] [--top K | key...] [--dry-run] [--json]` adds candidates to the plan of the
+addressed period. It is strictly additive and outside the draft and lock cycle: it computes the rank in
+its own run, ignores the stored draft and leaves it alone (the draft's marks survive; a pulled entity
+now in the plan shows in the `PLAN` block instead of the candidates, and at the lock a draft row that
+is already in the plan is simply already there), and it removes nothing, re-caps nothing and re-sorts
+nothing. "Pull more" is deliberately uncapped. It IS a lock of what it adds: each row takes the next
+`rank_position` by the lock sequence rule (the maximum plus one, in rank order) and records the tier of
+the run, the period row is created when missing, and each pulled entity receives the same
+`focus_selected` annotation `select` writes, under the same per-entity lock, so the decider reacts
+to a pulled row exactly as to a selected one. Nothing is minted here. A pulled row is an ordinary plan
+row and persists across later `select` runs unless struck.
+
+**What is asked.** A positional argument is ALWAYS a key (a PR number, a PR URL, `OWNER/REPO#N` or a
+tracker key), so `pull 3` can never mean "three more" or "PR number 3" by guesswork: it is PR 3. A count
+is only ever `--top K`, which takes the first K candidates that are not yet selected and not finished,
+by the CURRENT rank (which can differ from the stored draft). `--top` together with a key, or a `K`
+that is not positive, is a usage error. A bare invocation previews: it recomputes and prints the plan
+and what is left to pull, and changes nothing (the same answer to "what is left today?").
+
+**Named keys.** A named key must already have an entity row: `pull` hydrates nothing. A key that is
+already in the plan, that is finished, hidden or inactive (merged or closed since), or that is no
+candidate at all is a routine skip, not a failure; each skip is one stderr line,
+`skip <canonical key>: <reason>`, with the reason `already-selected`, `no-longer-candidate` or
+`not-a-candidate`. A request whose every key is such a skip exits `0`.
+
+**The period rules.** A pull never replaces a plan, so two live plans can never exist. A pull into a
+period that has no rows while ANOTHER period holds rows is exit `1` with the remedy
+`lock today's plan first: run show, then select --apply`; a pull into a future period is exit `1`; a
+pull into a closed period is exit `6`, terminal. The first two are checked again INSIDE the pull's
+transaction, so a lock that commits after the verb read the store still refuses the pull and leaves
+no period row behind.
+
+**Exit codes.** `0` done, including nothing left to pull and routine skips; `1` usage, the no-plan and
+the future-period cases; `2` the rows committed but some `focus_selected` annotation writes failed
+(`select --repair` mends them); `3` a store write failure, or no named key has an entity row at all;
+`6` the period is closed. A candidate source that failed or degraded does not change the exit code: a
+`NOTICE` line on stderr names it, so a pull that looks complete cannot hide a missing source.
+
+**Output.** Text is the CHANGES block of `select` over the rows selected (one line per key with its
+consequence), followed by the skips on stderr. `--json` prints `{contract, verb, run_id, period,
+selected[], skipped[], annotations[]}`: `selected` members carry `key`, `title`, `effect` and `because`
+(the vocabulary of the `select` echo), `skipped` members `key` and `reason`, `annotations` members
+`key`, `outcome` and `seq`; `run_id` is the empty string under `--dry-run`.
+
+**Dry run.** `--dry-run` runs the same resolution and reports exactly what would be selected and
+annotated, writing nothing to any table, and does not create the period row, so a no-op preview never
+leaves even an empty period behind. A non-dry-run `pull` writes one run record row, verb `pull`.
+
+- **INV-FOCUS-31.** A `pull` MUST be additive: it MUST NOT delete, re-sort or re-cap a plan row, MUST
+  NOT delete or change the stored draft, and MUST give each row it adds the `rank_position` of the
+  maximum plus one in rank order and the tier of its run.
+- **INV-FOCUS-32.** A `pull` MUST write each added row's `focus_selected` annotation exactly as
+  `select` does, and a re-run MUST add no row and append no change record.
+- **INV-FOCUS-33.** A positional argument of `pull` MUST be a key; a count MUST be `--top K` only, and
+  `--top` together with a key MUST be a usage error; a bare invocation MUST write nothing.
+- **INV-FOCUS-34.** A `pull` into a period with no rows while another period holds rows, and a `pull`
+  into a future period, MUST be exit `1`, checked inside the pull's transaction; a `pull` into a closed
+  period MUST be exit `6`.
+- **INV-FOCUS-35.** A named key that is already selected or is no longer a candidate MUST be a routine
+  skip (exit `0`); only a request in which no named key has an entity row MUST be exit `3`.
+- **INV-FOCUS-36.** A `pull --dry-run` MUST write nothing in any table, including the period row.
+
 ## The rank
 
 The rank orders the candidate set of the daily focus. `show`, `select`, `replan`, `pull` and `explain`
@@ -646,4 +710,8 @@ The focus verbs emit nothing over OpenTelemetry and write no Prometheus series o
   one run record row and prints the one structured stderr line, plus the `WARNING` and `NOTE` lines.
   The `focus_selected` annotation's change-log record is the only other trace of a write, and its
   sequence is carried in the run record.
+- **`pull`:** the verb and `internal/focus`'s pull emit no OpenTelemetry or Prometheus signal and log
+  nothing; a non-dry-run writes one run record row (verb `pull`) and prints the one structured stderr
+  line, plus the `NOTE`, `NOTICE` and `skip` lines. The annotation's change-log record is the only
+  other trace of a write.
 - **Store:** the run record row (see "The run record") is the durable copy of that line.
