@@ -34,9 +34,10 @@ them with neutral placeholders that keep the field's shape: `PRJ-<n>` keys, `bd-
 guard, `TestIdentifierAllowlistGuard`, scans these directories and fails on any other login-shaped
 token in a structured identity field).
 
-## A known gap the Jira snapshot pins
+## The Jira creation-time layout
 
-The age key reads a creation time as RFC 3339. The raw Jira layout `...000+0000` is not RFC 3339, so
-every Jira issue in `jira/assigned_issues.json` ranks on its first-stored time and counts toward
-`age_fallback` (5 of 5). The expectation pins that current behavior. If the rank learns the Jira
-layout, `age_fallback` drops to 0 and this gate fails; update the expected count in the same change.
+The age key reads a creation time as RFC 3339 first, then as Jira's own layout (`...000+0000`, an
+offset with no colon, with or without fractional seconds), which is how pjira forwards `created`.
+Every Jira issue in `jira/assigned_issues.json` therefore ranks on its tracker creation time and
+`age_fallback` is 0 (it was 5 of 5 before bead pg2-z77pu taught the rank the Jira layout). If the rank
+stops reading that layout, `age_fallback` rises back to 5 and this gate fails.

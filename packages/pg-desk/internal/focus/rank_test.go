@@ -529,6 +529,58 @@ func TestAgeTrackerCreationElseFirstSeen(t *testing.T) {
 	}
 }
 
+// TestAgeReadsJiraOffsetCreatedAt pins that Jira's own creation-time spelling
+// (offset without a colon, as pjira forwards it) is read as the age key, not
+// counted as an age_fallback (bead pg2-z77pu).
+func TestAgeReadsJiraOffsetCreatedAt(t *testing.T) {
+	f := rankFixture(t)
+	// Oldest first by the instant, not the text: a is 00:00 UTC (fractional
+	// seconds, +0000), b is 01:00 UTC (written 03:00 at +0200, no fraction),
+	// c is 02:00 UTC (RFC 3339).
+	a := f.bead("bd-a", issueSpec{createdAt: "2026-01-01T00:00:00.000+0000"})
+	b := f.bead("bd-b", issueSpec{createdAt: "2026-01-01T03:00:00+0200"})
+	c := f.bead("bd-c", issueSpec{createdAt: "2026-01-01T02:00:00Z"})
+	in := f.inputs()
+	// A first-seen time that would reorder the rows if the fallback were taken.
+	for k, ts := range map[Key]string{a: "2026-10-01T00:00:00Z", b: "2026-09-01T00:00:00Z", c: "2026-08-01T00:00:00Z"} {
+		ent := in.Entities[k]
+		ent.FirstSeenAt = ts
+		in.Entities[k] = ent
+	}
+	r := Rank(in, Candidates(in), rankOpts())
+	wantOrder(t, r, a, b, c)
+	if r.Inputs.AgeFallback != 0 {
+		t.Errorf("AgeFallback = %d, want 0 (every +0000/+0200/Z created_at is readable)", r.Inputs.AgeFallback)
+	}
+}
+
+func TestParseAgeLayouts(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want string
+		ok   bool
+	}{
+		{"2026-09-05T10:00:00Z", "2026-09-05T10:00:00Z", true},
+		{"2026-09-05T10:00:00.123456789Z", "2026-09-05T10:00:00.123456789Z", true},
+		{"2026-09-05T10:00:00.000+0000", "2026-09-05T10:00:00Z", true},
+		{" 2026-09-05T10:00:00.000+0000 ", "2026-09-05T10:00:00Z", true},
+		{"2026-09-05T10:00:00+0000", "2026-09-05T10:00:00Z", true},
+		{"2026-09-05T12:00:00.000+0200", "2026-09-05T10:00:00Z", true},
+		{"", "", false},
+		{"soon", "", false},
+		{"2026-09-05", "", false},
+	} {
+		got, ok := parseAge(tc.in)
+		if ok != tc.ok {
+			t.Errorf("parseAge(%q) ok = %v, want %v", tc.in, ok, tc.ok)
+			continue
+		}
+		if ok && got.UTC().Format(time.RFC3339Nano) != tc.want {
+			t.Errorf("parseAge(%q) = %s, want %s", tc.in, got.UTC().Format(time.RFC3339Nano), tc.want)
+		}
+	}
+}
+
 func TestPRRanksOnFirstSeenAndCountsAsFallback(t *testing.T) {
 	f := rankFixture(t)
 	old := f.pr("o/r#2", prSpec{ownership: "mine"})

@@ -385,14 +385,37 @@ func (r *ranker) started(c Candidate, v *view, e store.Entity) bool {
 	return false
 }
 
+// ageLayouts are the creation-time spellings the age key reads: RFC 3339
+// first (bd, GitHub, first-seen), then Jira's own offset-without-colon forms
+// ("2026-09-05T10:00:00.000+0000", as pjira forwards it) with and without
+// fractional seconds. They mirror the Jira connector's jiraUpdatedLayouts
+// (packages/pg-connector/cmd/pg-connector-issue-jira/internal/listrange.go),
+// which sits under an internal/ path and cannot be imported from here.
+var ageLayouts = []string{
+	time.RFC3339Nano,
+	"2006-01-02T15:04:05.000-0700",
+	"2006-01-02T15:04:05-0700",
+}
+
+// parseAge parses s under the first ageLayouts layout that accepts it.
+func parseAge(s string) (time.Time, bool) {
+	s = strings.TrimSpace(s)
+	for _, layout := range ageLayouts {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
+}
+
 // age reads the age key: the tracker creation time, else first-seen.
 func (r *ranker) age(it *item, v *view, e store.Entity) {
-	if t, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(v.createdAt)); err == nil {
+	if t, ok := parseAge(v.createdAt); ok {
 		it.age, it.ageKnown = t, true
 		return
 	}
 	r.counts.AgeFallback++
-	if t, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(e.FirstSeenAt)); err == nil {
+	if t, ok := parseAge(e.FirstSeenAt); ok {
 		it.age, it.ageKnown = t, true
 	}
 }

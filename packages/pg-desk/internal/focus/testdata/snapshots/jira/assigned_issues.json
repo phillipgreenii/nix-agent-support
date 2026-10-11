@@ -226,7 +226,7 @@
     "rank_inputs": {
       "unparseable_due": 0,
       "unmapped_priority": 1,
-      "age_fallback": 5,
+      "age_fallback": 0,
       "unblocks_unavailable": 0,
       "status_category_absent": 0
     }
