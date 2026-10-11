@@ -33,19 +33,19 @@ const (
 	DefaultCIMaxAge    = 30 * time.Minute
 	DefaultCIFailedTTL = 5 * time.Minute
 
-	DefaultTerminalTTL    = 24 * time.Hour
-	DefaultSettleTimeout  = 30 * time.Second
-	DefaultKeepaliveWin   = 24 * time.Hour
-	DefaultExpiry         = 7 * 24 * time.Hour
-	DefaultFillHorizon    = DefaultSummaryTTL // "one summary_ttl"; follows summary_ttl when unset
-	DefaultChangeLogRet   = 14 * 24 * time.Hour
-	DefaultConsumerStale  = 7 * 24 * time.Hour
-	DefaultChangeBodyCap  = 4 * 1024 // bytes (4 KiB)
-	DefaultBatchSize      = 74
-	DefaultWorkers        = 4
-	DefaultRateReserve    = 1000
-	DefaultRESTPerHour    = 3000
-	DefaultRESTSearchPerM = 20
+	DefaultTerminalTTL         = 24 * time.Hour
+	DefaultSettleTimeout       = 30 * time.Second
+	DefaultKeepaliveWindow     = 24 * time.Hour
+	DefaultExpiry              = 7 * 24 * time.Hour
+	DefaultFillHorizon         = DefaultSummaryTTL // "one summary_ttl"; follows summary_ttl when unset
+	DefaultChangeLogRetention  = 14 * 24 * time.Hour
+	DefaultConsumerStaleAfter  = 7 * 24 * time.Hour
+	DefaultChangeBodyCap       = 4 * 1024 // bytes (4 KiB)
+	DefaultBatchSize           = 74
+	DefaultWorkers             = 4
+	DefaultRateReservePoints   = 1000
+	DefaultRESTRequestsPerHour = 3000
+	DefaultRESTSearchPerMinute = 20
 
 	// DefaultGraphQLPointsPerHour is the SHADOW value: Phase A's kill
 	// criterion while the daemon runs beside the live flow. The nix module

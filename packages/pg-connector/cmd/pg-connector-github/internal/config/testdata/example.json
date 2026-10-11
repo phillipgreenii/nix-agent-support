@@ -14,9 +14,7 @@
       ]
     }
   },
-  "ci": {
-    "queries": {}
-  },
+  "ci": {},
   "query_ttl": { "mine": "60s", "team": "120s" },
   "adhoc_query_ttl": "120s",
   "summary_ttl": "60s",

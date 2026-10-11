@@ -16,16 +16,22 @@
 //	"host"             string   GitHub host, passed to every gh call as GH_HOST (default "github.com")
 //	"gh_path"          string   the gh binary (default "gh"; env PG_CONNECTOR_GITHUB_GH wins)
 //	"state_dir"        string   REQUIRED absolute directory for the store, logs and lock (env ..._STATE_DIR wins)
-//	"socket_path"      string   unix socket path (default <state_dir>/sock; env ..._SOCKET wins)
+//	"socket_path"      string   absolute unix socket path (default <state_dir>/sock; env ..._SOCKET wins)
 //	"supervisor_label" string   launchd label (default "com.phillipg.pg-connector-github-daemon")
 //	"otel_endpoint"    string   OpenTelemetry endpoint; absent or "" means no export
 //	"config_hash"      string   the hash the renderer stamped (see "Config hash")
+//	"config_path"      string   optional: where the renderer installs this file (see "Config hash")
+//
+// state_dir and socket_path MUST be absolute: a relative path would resolve
+// against whatever directory started the process, so serve started by hand and
+// under a supervisor (working directory /) would differ.
 //
 // Queries (named, in their native syntax; none is built in, the deployment
 // supplies them):
 //
 //	"pr":  {"queries": {"<name>": "<query>" | ["<query>", ...]}}
-//	"ci":  {"queries": {...}}     the ci instance resolves a query name against "pr"
+//	"ci":  {}     reserved, takes no keys: CI runs have no queries of their own,
+//	              so a ci --query resolves against the "pr" queries
 //
 // Settings: every row of the design's "Defaults" table is a top-level key with
 // the table's snake_case name. Durations are strings ("60s", "10m", "24h",
@@ -36,6 +42,9 @@
 // 1500; the nix module sets 4000 after cutover, and
 // PG_CONNECTOR_GITHUB_GRAPHQL_POINTS_PER_HOUR overrides it for the shadow
 // harness.
+//
+// A JSON null for any key means unset, so its default applies: a renderer
+// MAY emit null for a nix option the operator left unset.
 //
 // # Environment
 //
@@ -51,12 +60,15 @@
 // The renderer stamps the same hash into this file ("config_hash") and into
 // every umbrella-side backends.<name> block ("config_hash" plus "config_path",
 // the path of the rendered file; see FieldConfigHash and FieldConfigPath). The
-// loader returns the stamped value when the file carries one; otherwise it
-// computes a deterministic sha256 over the effective file settings (defaults
-// applied, durations canonical, keys sorted), so two files differing only in
-// key order, whitespace or equivalent spellings hash alike. Environment
-// overrides are not hashed: the hash identifies the file. A block that carries
-// neither field is accepted by CheckBlock.
+// file itself MAY also carry "config_path" (a renderer cannot always know its
+// own install path, so it is optional); it is recorded as Config.StampedPath,
+// is informational only (messages name the path actually read, Config.Path),
+// and never enters the hash. The loader returns the stamped hash when the file
+// carries one; otherwise it computes a deterministic sha256 over the effective
+// file settings (defaults applied, durations canonical, keys sorted), so two
+// files differing only in key order, whitespace or equivalent spellings hash
+// alike. Environment overrides are not hashed: the hash identifies the file. A
+// block that carries neither field is accepted by CheckBlock.
 package config
 
 import (
@@ -114,12 +126,18 @@ type Settings struct {
 	RESTSearchPerMinute  int     `json:"rest_search_per_minute"`
 }
 
-// Section is the per-instance block ("pr" or "ci").
-type Section struct {
+// PRSection is the "pr" block, the settings of the pr instance.
+type PRSection struct {
 	// Queries maps a caller-facing query name to its native-syntax
-	// expression (a string or a list of strings, schema.QueryExpr).
+	// expression (a string or a list of strings, schema.QueryExpr). The ci
+	// instance resolves a query name against these too, because CI runs have
+	// no queries of their own.
 	Queries map[string]schema.QueryExpr `json:"queries,omitempty"`
 }
+
+// CISection is the "ci" block. The ci instance has no settings of its own, so
+// the section is reserved: it accepts an empty object and no keys.
+type CISection struct{}
 
 // Config is the loaded daemon and client configuration.
 type Config struct {
@@ -131,13 +149,17 @@ type Config struct {
 	// OTelEndpoint is the OpenTelemetry endpoint; empty means no export.
 	OTelEndpoint string `json:"otel_endpoint,omitempty"`
 
-	PR Section `json:"pr"`
-	CI Section `json:"ci"`
+	PR PRSection `json:"pr"`
+	CI CISection `json:"ci"`
 
 	Settings
 
 	// StampedHash is the "config_hash" the file carried, or empty.
 	StampedHash string `json:"config_hash,omitempty"`
+	// StampedPath is the optional "config_path" the file carried: where the
+	// renderer says it installs the file. Informational only: Path is the
+	// file actually read, and StampedPath never enters the hash.
+	StampedPath string `json:"config_path,omitempty"`
 
 	// Path is the config file that was loaded (flag, else env). Hash is the
 	// stamped hash when present, else the computed one. Neither is part of
@@ -193,19 +215,19 @@ func Defaults() *Config {
 			CIFailedTTL:        Duration(DefaultCIFailedTTL),
 			TerminalTTL:        Duration(DefaultTerminalTTL),
 			SettleTimeout:      Duration(DefaultSettleTimeout),
-			KeepaliveWindow:    Duration(DefaultKeepaliveWin),
+			KeepaliveWindow:    Duration(DefaultKeepaliveWindow),
 			Expiry:             Duration(DefaultExpiry),
 			// FillHorizon stays zero: parse resolves it to SummaryTTL.
-			ChangeLogRetention:   Duration(DefaultChangeLogRet),
-			ConsumerStaleAfter:   Duration(DefaultConsumerStale),
+			ChangeLogRetention:   Duration(DefaultChangeLogRetention),
+			ConsumerStaleAfter:   Duration(DefaultConsumerStaleAfter),
 			ChangeBodyCap:        ByteSize(DefaultChangeBodyCap),
 			BatchSize:            DefaultBatchSize,
 			Workers:              DefaultWorkers,
-			RateReservePoints:    DefaultRateReserve,
+			RateReservePoints:    DefaultRateReservePoints,
 			GraphQLPointsPerHour: DefaultGraphQLPointsPerHour,
 			BackgroundShare:      DefaultBackgroundShare,
-			RESTRequestsPerHour:  DefaultRESTPerHour,
-			RESTSearchPerMinute:  DefaultRESTSearchPerM,
+			RESTRequestsPerHour:  DefaultRESTRequestsPerHour,
+			RESTSearchPerMinute:  DefaultRESTSearchPerMinute,
 		},
 	}
 }
@@ -284,6 +306,11 @@ func parse(raw []byte) (*Config, error) {
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
 		return nil, errors.New("unexpected data after the top-level object")
 	}
+	if cfg.QueryTTL == nil {
+		// "query_ttl": null clears the map; null means unset, so the defaults
+		// for "mine" and "team" stay.
+		cfg.QueryTTL = Defaults().QueryTTL
+	}
 	if cfg.FillHorizon == 0 {
 		cfg.FillHorizon = cfg.SummaryTTL
 	}
@@ -332,6 +359,12 @@ func (c *Config) validate() error {
 	if c.SupervisorLabel == "" {
 		return errors.New("supervisor_label must not be empty")
 	}
+	if !filepath.IsAbs(c.StateDir) {
+		return fmt.Errorf("state_dir must be an absolute path, got %q", c.StateDir)
+	}
+	if !filepath.IsAbs(c.SocketPath) {
+		return fmt.Errorf("socket_path must be an absolute path, got %q", c.SocketPath)
+	}
 	for name, d := range map[string]Duration{
 		"adhoc_query_ttl": c.AdhocQueryTTL, "summary_ttl": c.SummaryTTL,
 		"detail_ttl": c.DetailTTL, "detail_max_age": c.DetailMaxAge,
@@ -372,10 +405,11 @@ func (c *Config) validate() error {
 
 // computeHash is the sha256 of the canonical encoding of the effective file
 // settings: the struct (fixed field order, sorted map keys, canonical
-// durations) with the stamped hash cleared.
+// durations) with the stamp fields (hash and path) cleared.
 func computeHash(cfg *Config) (string, error) {
 	view := *cfg
 	view.StampedHash = ""
+	view.StampedPath = ""
 	b, err := json.Marshal(&view)
 	if err != nil {
 		return "", fmt.Errorf("hash config: %w", err)

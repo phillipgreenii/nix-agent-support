@@ -1,0 +1,19 @@
+{
+  "config_hash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "gh_path": "/opt/example/bin/gh",
+  "state_dir": "/srv/example/pg-connector-github",
+  "socket_path": "/srv/example/pg-connector-github/sock",
+  "otel_endpoint": "http://127.0.0.1:4318",
+  "ci": {},
+  "pr": {
+    "queries": {
+      "mine": "is:pr is:open author:@me",
+      "team": [
+        "is:pr is:open review-requested:@me",
+        "is:pr is:open assignee:@me"
+      ]
+    }
+  },
+  "graphql_points_per_hour": 4000,
+  "summary_ttl": null
+}

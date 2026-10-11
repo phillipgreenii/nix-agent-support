@@ -96,8 +96,8 @@ func TestDefaultsTable(t *testing.T) {
 	if cfg.OTelEnabled() {
 		t.Errorf("otel must be off when no endpoint is configured")
 	}
-	if len(cfg.PR.Queries) != 0 || len(cfg.CI.Queries) != 0 {
-		t.Errorf("no query is hardcoded, got pr=%v ci=%v", cfg.PR.Queries, cfg.CI.Queries)
+	if len(cfg.PR.Queries) != 0 || cfg.HasQuery("mine") || cfg.HasQuery("team") {
+		t.Errorf("no query is hardcoded, got pr=%v", cfg.PR.Queries)
 	}
 	if cfg.SocketPath != filepath.Join("/tmp/s", SocketFileName) {
 		t.Errorf("socket default = %q", cfg.SocketPath)
@@ -252,6 +252,9 @@ func TestInvalidValuesRejected(t *testing.T) {
 		"empty host":             `{"state_dir":"/s","host": ""}`,
 		"bad size":               `{"state_dir":"/s","change_body_cap": "lots"}`,
 		"non-positive query ttl": `{"state_dir":"/s","query_ttl": {"mine": "0s"}}`,
+		"relative state_dir":     `{"state_dir":"state"}`,
+		"relative socket_path":   `{"state_dir":"/s","socket_path":"run/sock"}`,
+		"null state_dir":         `{"state_dir":null}`,
 	}
 	for name, body := range cases {
 		if _, err := Load(write(t, body), noEnv); err == nil {
@@ -329,5 +332,94 @@ func TestBlockHelpers(t *testing.T) {
 	// FieldConfigHash / FieldConfigPath are the documented names.
 	if FieldConfigHash != "config_hash" || FieldConfigPath != "config_path" {
 		t.Errorf("stamp field names = %q %q", FieldConfigHash, FieldConfigPath)
+	}
+}
+
+func TestRelativeEnvPathsRejected(t *testing.T) {
+	for _, env := range []map[string]string{{EnvStateDir: "state"}, {EnvSocket: "run/sock"}} {
+		if _, err := Load(write(t, minimal), envOf(env)); err == nil || !strings.Contains(err.Error(), "absolute") {
+			t.Errorf("env %v: want an absolute-path error, got %v", env, err)
+		}
+	}
+}
+
+func TestNullMeansUnset(t *testing.T) {
+	// A renderer MAY emit null for an unset nix option; the default applies.
+	cfg, err := Load(write(t, `{"state_dir":"/tmp/s","host":null,"gh_path":null,"summary_ttl":null,
+		"expiry":null,"change_body_cap":null,"workers":null,"background_share":null,
+		"query_ttl":null,"pr":null,"ci":null,"otel_endpoint":null,"socket_path":null}`), noEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	def, err := Load(write(t, minimal), noEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, _ := json.Marshal(cfg)
+	b, _ := json.Marshal(def)
+	if string(a) != string(b) {
+		t.Fatalf("null must equal unset:\n%s\n%s", a, b)
+	}
+	if cfg.QueryTTLFor("mine").Std() != time.Minute || cfg.QueryTTLFor("team").Std() != 2*time.Minute {
+		t.Errorf("query_ttl null must keep the mine/team defaults, got %v", cfg.QueryTTL)
+	}
+	if cfg.Hash != def.Hash {
+		t.Errorf("null and unset must hash alike: %q vs %q", cfg.Hash, def.Hash)
+	}
+}
+
+func TestCISectionTakesNoKeys(t *testing.T) {
+	if _, err := Load(write(t, `{"state_dir":"/tmp/s","ci":{}}`), noEnv); err != nil {
+		t.Errorf("empty ci section must load: %v", err)
+	}
+	_, err := Load(write(t, `{"state_dir":"/tmp/s","ci":{"queries":{"mine":"q"}}}`), noEnv)
+	if err == nil || !strings.Contains(err.Error(), "queries") || !strings.Contains(err.Error(), "unknown key") {
+		t.Errorf("ci.queries must be rejected naming the key, got %v", err)
+	}
+	// The ci instance resolves a query name against the pr queries.
+	cfg, err := Load(write(t, `{"state_dir":"/tmp/s","pr":{"queries":{"mine":"q"}}}`), noEnv)
+	if err != nil || !cfg.HasQuery("mine") || cfg.HasQuery("nope") {
+		t.Errorf("HasQuery: %v %v", err, cfg)
+	}
+}
+
+func TestConfigPathStampIsInformational(t *testing.T) {
+	plain, err := Load(write(t, minimal), noEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withPath, err := Load(write(t, `{"state_dir":"/tmp/s","config_path":"/etc/rendered/config.json"}`), noEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if withPath.StampedPath != "/etc/rendered/config.json" {
+		t.Errorf("StampedPath = %q", withPath.StampedPath)
+	}
+	if withPath.Path == withPath.StampedPath {
+		t.Errorf("Path is the file actually read, not the stamp: %q", withPath.Path)
+	}
+	if withPath.Hash != plain.Hash || withPath.HashStamped() {
+		t.Errorf("the path stamp must not enter the hash: %q vs %q (stamped=%v)", withPath.Hash, plain.Hash, withPath.HashStamped())
+	}
+}
+
+func TestRenderedGolden(t *testing.T) {
+	// testdata/rendered.json is what the nix module renders after cutover: only
+	// the keys it sets, a stamped hash, and a null for an unset option.
+	cfg, err := Load("testdata/rendered.json", noEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.HashStamped() || cfg.Hash != "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" {
+		t.Errorf("stamped hash must be returned as stamped: %q (stamped=%v)", cfg.Hash, cfg.HashStamped())
+	}
+	if cfg.GraphQLPointsPerHour != CutoverGraphQLPointsPerHour || !cfg.OTelEnabled() || cfg.GH != "/opt/example/bin/gh" {
+		t.Errorf("gql=%d otel=%q gh=%q", cfg.GraphQLPointsPerHour, cfg.OTelEndpoint, cfg.GH)
+	}
+	if cfg.SummaryTTL.Std() != DefaultSummaryTTL || cfg.FillHorizon != cfg.SummaryTTL {
+		t.Errorf("a null summary_ttl keeps the default: summary=%v fill=%v", cfg.SummaryTTL.Std(), cfg.FillHorizon.Std())
+	}
+	if !cfg.HasQuery("mine") || !cfg.HasQuery("team") {
+		t.Errorf("queries = %#v", cfg.PR.Queries)
 	}
 }

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -23,8 +24,17 @@ func (d Duration) MarshalJSON() ([]byte, error) {
 	return json.Marshal(time.Duration(d).String())
 }
 
-// UnmarshalJSON implements json.Unmarshaler.
+// isNull reports whether data is the JSON literal null. Both Unmarshalers here
+// treat null as "unset" and leave their value alone, so the default stays.
+func isNull(data []byte) bool {
+	return bytes.Equal(bytes.TrimSpace(data), []byte("null"))
+}
+
+// UnmarshalJSON implements json.Unmarshaler. A JSON null leaves d unchanged.
 func (d *Duration) UnmarshalJSON(data []byte) error {
+	if isNull(data) {
+		return nil
+	}
 	var s string
 	if err := json.Unmarshal(data, &s); err != nil {
 		return fmt.Errorf("duration must be a string such as \"60s\", \"10m\" or \"7d\", got %s", strings.TrimSpace(string(data)))
@@ -68,8 +78,11 @@ func (b ByteSize) MarshalJSON() ([]byte, error) {
 	return json.Marshal(int64(b))
 }
 
-// UnmarshalJSON implements json.Unmarshaler.
+// UnmarshalJSON implements json.Unmarshaler. A JSON null leaves b unchanged.
 func (b *ByteSize) UnmarshalJSON(data []byte) error {
+	if isNull(data) {
+		return nil
+	}
 	var n int64
 	if err := json.Unmarshal(data, &n); err == nil {
 		*b = ByteSize(n)

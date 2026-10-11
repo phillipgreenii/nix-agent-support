@@ -2,8 +2,11 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -11,6 +14,77 @@ import (
 )
 
 const golden = "internal/config/testdata/example.json"
+
+// reexecEnv marks a child process that is this test binary standing in for the
+// real command: TestMain runs the real main() in it, so a test sees what a
+// supervisor or a shell would see (a real exit status, a real process).
+const reexecEnv = "PG_CONNECTOR_GITHUB_TEST_REEXEC"
+
+func TestMain(m *testing.M) {
+	if os.Getenv(reexecEnv) == "1" {
+		main() // exits the process
+		return
+	}
+	os.Exit(m.Run())
+}
+
+// runReal runs the real command in a child process the way a supervisor starts
+// it: an otherwise empty environment (env -i) and working directory "/".
+func runReal(t *testing.T, args ...string) (code int, stdout, stderr string) {
+	t.Helper()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(exe, args...)
+	cmd.Dir = "/"
+	cmd.Env = []string{reexecEnv + "=1"}
+	var out, errb bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	err = cmd.Run()
+	var exitErr *exec.ExitError
+	switch {
+	case err == nil:
+	case errors.As(err, &exitErr):
+		code = exitErr.ExitCode()
+	default:
+		t.Fatal(err)
+	}
+	return code, out.String(), errb.String()
+}
+
+func TestRealProcessModesFailCleanlyUnderEmptyEnvironment(t *testing.T) {
+	abs, err := filepath.Abs(golden)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []string{"serve", "pr", "ci"} {
+		code, out, errs := runReal(t, "--config", abs, mode)
+		if code != exitNotImplemented || out != "" {
+			t.Errorf("%s: exit=%d stdout=%q stderr=%q", mode, code, out, errs)
+		}
+		if !strings.Contains(errs, "not implemented") || !strings.Contains(errs, mode) {
+			t.Errorf("%s: stderr %q must name the missing implementation and the mode", mode, errs)
+		}
+		if strings.Contains(errs, "panic") || strings.Contains(errs, "goroutine") {
+			t.Errorf("%s: a stub must fail cleanly, not panic: %q", mode, errs)
+		}
+	}
+}
+
+func TestRealProcessVersionAndUsage(t *testing.T) {
+	code, out, errs := runReal(t, "--version")
+	if code != 0 || !regexp.MustCompile(`^pg-connector-github \S+\n$`).MatchString(out) {
+		t.Errorf("--version: exit=%d stdout=%q stderr=%q", code, out, errs)
+	}
+	if code, _, errs := runReal(t); code != exitUsage || !strings.Contains(errs, "usage:") {
+		t.Errorf("no mode: exit=%d stderr=%q", code, errs)
+	}
+	// With nothing in the environment and no flag there is no config to load.
+	if code, _, errs := runReal(t, "serve"); code != exitConfig || !strings.Contains(errs, config.EnvConfig) {
+		t.Errorf("no config: exit=%d stderr=%q", code, errs)
+	}
+}
 
 func noEnv(string) string { return "" }
 
