@@ -887,3 +887,14 @@ func TestFocusItemExcludedFromTargets(t *testing.T) {
 	trEq(t, "narrowed targets", narrowed.Targets, nil)
 	trEq(t, "narrowed focus excluded", narrowed.FocusExcluded, []string{"f-blocked", "f-deferred", "f-open"})
 }
+
+func TestElapsedDeferredInReadyGoesToReview(t *testing.T) {
+	// bd ready un-defers elapsed beads, so the bead is in ready.json while the
+	// earlier export still says deferred. It MUST NOT be seeded LIVE.
+	rows := []Row{trMk("d", trStatus(StatusDeferred), trDeferUntil("2026-10-01T00:00:00Z"), trNotes(trMarker(markerTS, "on-change")))}
+	ready := trRdy(rows, "d")
+	res := trRun(t, rows, ready, TriageOptions{})
+	trEq(t, "live", res.Live, nil)
+	trEq(t, "drainable", res.Drainable, nil)
+	trEq(t, "review", res.Review, []string{"d"})
+}

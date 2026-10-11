@@ -80,6 +80,9 @@ Typical entries:
 ## Stage 1 — prepare (one call: inventory, triage, cluster, fact sheets)
 
 Run it with an explicit timeout of at least 300000 ms (it exports the whole bead database).
+Both `prepare` and `report` call `bd ready`, which MUTATES: it un-defers beads whose
+`defer_until` has elapsed (the export taken just before still shows them `deferred`; triage
+routes those to REVIEW).
 Pass `$ARGUMENTS` narrowing through as `--full`, `--label X` or `--id-prefix P`:
 
 ```text
@@ -100,7 +103,7 @@ Read the JSON summary and record it in `progress.txt`. Its fields:
   `targets`, `live_skip`, `marker_skip`, `review`, `drainable`, `focus_excluded`) and
   `partition`, the arithmetic line `targets N = live a + marker b + review c`;
 - `batches` (`name`, `size`): the batches to dispatch in Stage 6;
-- `claim_candidates` (`id`, `assignee`, `updated_at`, `heartbeat_at`, `lease_expires_at`): the
+- `claim_candidates` (`id`, `status`, `assignee`, `updated_at`): the
   input to Stage 2;
 - `malformed_markers` (`count`, `ids`): beads carrying a marker that does not match the
   grammar. They count as unmarked; mention them in the report;
@@ -172,7 +175,8 @@ report it); `2` a `bd` call failed (STOP and report; do not retry blindly). `pb 
 ## Stage 2 — claim liveness (in parallel with the batches)
 
 The candidates are the `claim_candidates` from the Stage 1 summary: every `in_progress` bead
-and every open bead with a non-empty `assignee`. `pb` only LISTS them. Proving a claimer dead
+and every open bead with a non-empty `assignee`. `pb` only LISTS them (no heartbeat or lease
+data: the subagent runs `bd show <id>` when it needs those). Proving a claimer dead
 and releasing the claim stays here, by judgement.
 
 - If PERMISSIONS do not allow releasing dead claims, list the candidates in the report and do
@@ -245,7 +249,8 @@ When the last worker hands back, check `followups.txt`:
 1. **Services (manual):** for each service PERMISSIONS let workers pause, run its status
    command YOURSELF. Resume it if it is paused, and report it loudly if it is not running.
    `pb` knows nothing about services.
-2. **Report:** run `pb unstick report --workdir WORKDIR --root ROOT` (add `--json` to
+2. **Report:** first run `pb unstick marker --check --export WORKDIR/export.jsonl </dev/null` to
+   surface malformed legacy markers, then run `pb unstick report --workdir WORKDIR --root ROOT` (add `--json` to
    post-process). It re-exports to `WORKDIR/export.post.jsonl`, diffs against `prepare.json`,
    and prints every figure with its arithmetic: before/after counts, the open-not-ready split
    between this sweep and peers, markers added by outcome, closed beads (id plus close

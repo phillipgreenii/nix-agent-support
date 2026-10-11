@@ -62,8 +62,7 @@ type TriageOptions struct {
 }
 
 // ClaimCandidate is an in_progress or assigned-but-not-ready bead whose claim
-// may be dead. Heartbeat and lease data are not part of the export row; the
-// caller (which owns the bd calls) may enrich them.
+// may be dead. Heartbeat and lease data are not part of the export row.
 type ClaimCandidate struct {
 	ID        string `json:"id"`
 	Status    string `json:"status"`
@@ -281,6 +280,12 @@ func (t *triager) drainable() []string {
 	var out []string
 	for id, r := range t.ready {
 		if r.IsTemplate || r.IssueType == issueTypeEpic || hasAnyLabel(r.Labels, ExcludedLabels()) {
+			continue
+		}
+		// bd ready un-defers beads whose defer_until elapsed, so an earlier
+		// export can still say deferred for a ready row; such a bead is not
+		// drainable and must reach the marker/override path.
+		if er, ok := t.g.Row(id); ok && er.Status != StatusOpen && er.Status != StatusInProgress {
 			continue
 		}
 		out = append(out, id)

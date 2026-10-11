@@ -216,6 +216,10 @@ de-label, fix dependencies, close as stale) stays with the `pb:unstick-batch-wor
 subagents; the services pause/resume and the "needs you" prose stay with the orchestrator.
 The same inputs plus the same `--now` always produce byte-identical files.
 
+Note: `prepare` and `report` call `bd ready`, which mutates (it un-defers beads whose
+`defer_until` elapsed). Triage ignores ready rows whose export status is not open or
+in_progress, so such a bead lands in REVIEW rather than LIVE.
+
 ```bash
 pb unstick prepare [--root R] [--workdir W] [--full] [--label L] [--id-prefix P] [--json]
 pb unstick batch   --workdir W --name FOLLOWUPS --ids a,b,c

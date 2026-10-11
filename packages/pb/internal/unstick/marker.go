@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Sweep marker grammar, the single definition shared by `pb unstick marker`,
@@ -114,6 +115,9 @@ func ValidateOutcome(outcome string) error {
 func ValidateReason(reason string) error {
 	if strings.TrimSpace(reason) == "" {
 		return errors.New("reason must not be empty")
+	}
+	if !utf8.ValidString(reason) {
+		return errors.New("reason must be valid UTF-8")
 	}
 	if reason != strings.TrimSpace(reason) {
 		return errors.New("reason must not have leading or trailing whitespace")

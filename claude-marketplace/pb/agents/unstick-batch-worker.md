@@ -207,7 +207,7 @@ closed <bead-id>: <reason>
 ```
 
 Any other line is free text and ignored. Prose such as `closed tc-1 because it was stale` does
-NOT match; the id must be followed by `: `. Your reply (the hand-back) stays the terse
+NOT match; the id must be followed by `: ` (colon, then a space), and the line MUST be plain text: no numbered list, backticks or bold. Your reply (the hand-back) stays the terse
 per-bead summary below; the results file is where the `closed` lines go. Your reply MUST be
 terse:
 

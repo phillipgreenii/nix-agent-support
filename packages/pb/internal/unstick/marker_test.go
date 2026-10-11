@@ -209,3 +209,9 @@ func TestScanMarkers_idsAndNewline(t *testing.T) {
 		t.Errorf("ids = %+v", s.Valid)
 	}
 }
+
+func TestValidateReasonRejectsInvalidUTF8(t *testing.T) {
+	if err := ValidateReason("bad \xff byte"); err == nil {
+		t.Fatal("expected invalid UTF-8 to be rejected")
+	}
+}
