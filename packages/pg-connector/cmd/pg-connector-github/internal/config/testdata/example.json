@@ -1,0 +1,46 @@
+{
+  "host": "github.com",
+  "gh_path": "gh",
+  "state_dir": "/tmp/pg-connector-github-example",
+  "socket_path": "/tmp/pg-connector-github-example/sock",
+  "supervisor_label": "com.phillipg.pg-connector-github-daemon",
+  "otel_endpoint": "",
+  "pr": {
+    "queries": {
+      "mine": "is:pr is:open author:@me",
+      "team": [
+        "is:pr is:open review-requested:@me",
+        "is:pr is:open assignee:@me"
+      ]
+    }
+  },
+  "ci": {
+    "queries": {}
+  },
+  "query_ttl": { "mine": "60s", "team": "120s" },
+  "adhoc_query_ttl": "120s",
+  "summary_ttl": "60s",
+  "detail_ttl": "10m",
+  "detail_max_age": "30m",
+  "conversation_ttl": "10m",
+  "conversation_max_age": "30m",
+  "pending_ttl": "2m",
+  "ci_active_ttl": "60s",
+  "ci_max_age": "30m",
+  "ci_failed_ttl": "5m",
+  "terminal_ttl": "24h",
+  "settle_timeout": "30s",
+  "keepalive_window": "24h",
+  "expiry": "7d",
+  "fill_horizon": "60s",
+  "change_log_retention": "14d",
+  "consumer_stale_after": "7d",
+  "change_body_cap": "4KiB",
+  "batch_size": 74,
+  "workers": 4,
+  "rate_reserve_points": 1000,
+  "graphql_points_per_hour": 1500,
+  "background_share": 0.9,
+  "rest_requests_per_hour": 3000,
+  "rest_search_per_minute": 20
+}
