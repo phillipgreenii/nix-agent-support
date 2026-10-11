@@ -199,6 +199,17 @@ func (r *focusRun) Start(st *store.Store) error {
 	return nil
 }
 
+// Adopt marks the run's focus_run row as already inserted, by the lock
+// transaction (which commits the row together with the plan rows), so Finish
+// finalizes it. It is a no-op for a dry run.
+func (r *focusRun) Adopt(st *store.Store) {
+	r.st = st
+	r.rowInserted = !r.dryRun
+}
+
+// Inserted reports whether the run's row exists (written by Start or adopted).
+func (r *focusRun) Inserted() bool { return r.rowInserted }
+
 // SetCounts replaces the run's counts. Annotation outcomes recorded with
 // Annotation are kept and appended after any carried in c.
 func (r *focusRun) SetCounts(c focusCounts) { r.counts = c }

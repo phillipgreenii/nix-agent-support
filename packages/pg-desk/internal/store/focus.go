@@ -905,6 +905,42 @@ func (t *FocusTx) MaxOtherPeriodKey(periodID int64) (string, error) {
 	return v.String, nil
 }
 
+// RowsOfOtherPeriods returns every focus_selection row of every period other
+// than periodID, ordered by (focus_period_id, rank_position, id), read inside
+// the transaction (what a first lock of a new period is about to replace).
+func (t *FocusTx) RowsOfOtherPeriods(periodID int64) ([]FocusSelection, error) {
+	return t.selections("other periods",
+		`WHERE focus_period_id <> ? ORDER BY focus_period_id, rank_position, id`, periodID)
+}
+
+// RowsOfEntity returns the rows of one entity in every period, ordered by
+// focus_period_id, read inside the transaction (what a strike deletes).
+func (t *FocusTx) RowsOfEntity(repo, entityType, entityID string) ([]FocusSelection, error) {
+	return t.selections(fmt.Sprintf("(%s,%s,%s)", repo, entityType, entityID),
+		`WHERE repo = ? AND entity_type = ? AND entity_id = ? ORDER BY focus_period_id, id`,
+		repo, entityType, entityID)
+}
+
+func (t *FocusTx) selections(what, where string, args ...any) ([]FocusSelection, error) {
+	rows, err := t.x.query(`SELECT `+focusSelectionCols+` FROM focus_selection `+where, args...)
+	if err != nil {
+		return nil, fmt.Errorf("store: focus rows of %s: %w", what, err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []FocusSelection
+	for rows.Next() {
+		r, err := scanFocusSelection(rows)
+		if err != nil {
+			return nil, fmt.Errorf("store: scan focus row of %s: %w", what, err)
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: focus rows of %s: %w", what, err)
+	}
+	return out, nil
+}
+
 // MaxRankPosition returns the greatest rank_position of the period's rows,
 // 0 when it holds none.
 func (t *FocusTx) MaxRankPosition(periodID int64) (int, error) {
