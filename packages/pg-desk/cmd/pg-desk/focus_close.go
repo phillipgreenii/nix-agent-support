@@ -151,7 +151,7 @@ func decodeCloseSummary(r io.Reader) (string, error) {
 		return "", focusUsageError(`focus close: the JSON object has no "summary" member`, remedy)
 	}
 	var summary string
-	if err := json.Unmarshal(field, &summary); err != nil {
+	if err := json.Unmarshal(field, &summary); err != nil || bytes.Equal(bytes.TrimSpace(field), []byte("null")) {
 		return "", focusUsageError(`focus close: "summary" must be a string`, remedy)
 	}
 	return summary, nil
@@ -254,6 +254,10 @@ func (c *closeRun) once() error {
 // recorded (or would-be) close time and note.
 func (c *closeRun) report(st closeState, already bool) error {
 	env := c.env
+	if c.writing && !c.run.Inserted() {
+		// The already-closed outcome wrote nothing yet; the run still leaves its row.
+		_ = c.run.Start(env.Store)
+	}
 	w := c.cmd.OutOrStdout()
 	if env.JSON {
 		runID := ""

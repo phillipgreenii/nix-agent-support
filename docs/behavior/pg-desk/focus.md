@@ -615,6 +615,63 @@ leaves even an empty period behind. A non-dry-run `pull` writes one run record r
   skip (exit `0`); only a request in which no named key has an entity row MUST be exit `3`.
 - **INV-FOCUS-36.** A `pull --dry-run` MUST write nothing in any table, including the period row.
 
+## `close`: end the day
+
+`pg-desk focus close [--date] [--dry-run] [--json]` closes the addressed period. It reads ONE JSON
+object on stdin, `{"summary": "<day summary text>"}`: the text is free-form (quotes and newlines
+included, which is why it is not an argument), unknown members are ignored, and `summary` MUST be a
+string. In ONE transaction `close` creates the period row when the day has none, writes `closed_at`
+(the run's clock, RFC 3339 UTC) and `close_note` (the summary, verbatim) onto it, deletes the stored
+draft when it is the draft of exactly this period (so a closed day leaves no draft behind, while
+another period's draft is untouched), and writes the run's `focus_run` row. The day's plan rows stay (close does not
+touch them); the next period's first lock replaces them.
+
+**Per-bead progress notes are not written here.** pg-desk executes no tracker write verb, so the
+note a day leaves on each bead is the command prose's job: it appends each note with the connector's
+issue comment, refreshes the bead with `pg-desk issue refresh`, and only then calls `close`, stopping
+at the first failed append (no rollback of notes already appended) and not calling `close` at all
+when any note failed. The reason it lives there and not in `close` is that the comment is the only
+durable, dated, per-bead record of what happened, and the store holds no narrative text; the plan
+rows of a past day are not kept (a lock replaces them), so those comments are also the only trace of
+which items a past day's plan held.
+
+**Idempotence.** Closing an already-closed period with an IDENTICAL summary is exit `0`, reported as
+`already closed <date> (same summary)`, so a retried command does not look like a failure after the
+summary was recorded; nothing changes (the recorded `closed_at` stays) and the run still writes its
+row. With a DIFFERENT summary it is exit `6`: the recorded summary is kept and the message names the
+recorded close time. A closed day cannot be amended or reopened this phase; `select` and `pull` on it
+exit `6` with `period <date> is closed; use --date <tomorrow>`. Two concurrent closes serialize on
+the transaction, and the loser decides again against what the winner recorded.
+
+**Exit codes.** `0` closed, or already closed with the same summary; `1` usage: a malformed stdin
+(empty, not one JSON object, no `summary`, a `summary` that is not a string, more than one JSON
+value), a `--date` later than today, a store not yet migrated; `3` the store write failed (nothing
+is written: the close, the draft deletion and the period row commit together or not at all); `6`
+already closed with a different summary. Checks run in that order: usage and flag errors, the store,
+the closed-period comparison, then the write.
+
+**Output.** Text is one line: `closed <date>`, or `already closed <date> (same summary)`. `--json`
+prints `{contract, verb, run_id, period, closed_at, close_note, already_closed, dry_run}`; `closed_at`
+and `close_note` are the recorded values.
+
+**Dry run.** `--dry-run` reports the resolved `close_note` and writes nothing to any table: not the
+period row, not a run row. Its text line is `would close <date> with close_note "<summary>"` (the
+summary quoted, so it stays one line), its `--json` has `run_id` empty, `dry_run` true and
+`already_closed` false (the would-be `closed_at` is the run's clock). A dry run of a day that is
+already closed reports what the real run would: exit `0` for the same summary, `6` for another.
+
+- **INV-FOCUS-37.** A `close` MUST, in one transaction, write `closed_at` and `close_note` onto the
+  period row (creating it when absent), delete the stored draft only when it is the draft of the
+  period being closed, and write one run record row; a failure MUST leave every one of them unwritten.
+- **INV-FOCUS-38.** Closing an already-closed period MUST change nothing: with an identical summary
+  it MUST be exit `0` (`already closed`), with a different summary exit `6` naming the recorded close
+  time and keeping the recorded summary. A closed period MUST NOT be reopened or amended.
+- **INV-FOCUS-39.** `close` MUST read the summary as a string member of ONE JSON object on stdin;
+  a malformed stdin or a `--date` later than today MUST be exit `1`.
+- **INV-FOCUS-40.** `close` MUST NOT execute a tracker write verb; the per-bead progress notes MUST
+  be written by the caller before it calls `close`.
+- **INV-FOCUS-41.** A `close --dry-run` MUST write nothing in any table, including the period row.
+
 ## The rank
 
 The rank orders the candidate set of the daily focus. `show`, `select`, `replan`, `pull` and `explain`
@@ -714,4 +771,7 @@ The focus verbs emit nothing over OpenTelemetry and write no Prometheus series o
   nothing; a non-dry-run writes one run record row (verb `pull`) and prints the one structured stderr
   line, plus the `NOTE`, `NOTICE` and `skip` lines. The annotation's change-log record is the only
   other trace of a write.
+- **`close`:** the verb and the store's close write emit no OpenTelemetry or Prometheus signal and
+  log nothing; a non-dry-run writes one run record row (verb `close`) and prints the one structured
+  stderr line, plus the `NOTE` line when the day is not today.
 - **Store:** the run record row (see "The run record") is the durable copy of that line.

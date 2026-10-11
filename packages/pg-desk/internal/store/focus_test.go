@@ -640,6 +640,49 @@ func TestFocusTxDraftDeletes(t *testing.T) {
 	}
 }
 
+func TestFocusPeriodCloseCreatesClosesAndDropsItsDraft(t *testing.T) {
+	s := OpenNewSchemaForTest(t)
+	if _, err := s.FocusDraftReplace(draftOf("2026-09-23", `{}`)); err != nil {
+		t.Fatal(err)
+	}
+	// No period row yet: close creates it.
+	if err := s.FocusPeriodClose("day", "2026-9-23", "line1\nline2", "2026-09-23T20:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	p, found, err := s.FocusPeriodGet("day", "2026-09-23")
+	if err != nil || !found || p.ClosedAt != "2026-09-23T20:00:00Z" || p.CloseNote != "line1\nline2" {
+		t.Fatalf("period = %+v, %v, %v", p, found, err)
+	}
+	if _, ok, _ := s.FocusDraftGet(); ok {
+		t.Errorf("the draft of the closed period survived")
+	}
+	// Again: refused with the recorded values, nothing changed.
+	err = s.FocusPeriodClose("day", "2026-09-23", "other", "2026-09-24T01:00:00Z")
+	var closed *FocusPeriodClosedError
+	if !errors.As(err, &closed) || closed.ClosedAt != "2026-09-23T20:00:00Z" || closed.CloseNote != "line1\nline2" {
+		t.Fatalf("second close = %v, want a FocusPeriodClosedError carrying the recorded close", err)
+	}
+	if again, _, _ := s.FocusPeriodGet("day", "2026-09-23"); again != p {
+		t.Errorf("a refused close changed the period: %+v", again)
+	}
+}
+
+func TestFocusPeriodCloseKeepsAnotherPeriodsDraft(t *testing.T) {
+	s := OpenNewSchemaForTest(t)
+	if _, err := s.FocusDraftReplace(draftOf("2026-09-24", `{}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.FocusPeriodClose("day", "2026-09-23", "n", "2026-09-23T20:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	if d, ok, _ := s.FocusDraftGet(); !ok || d.PeriodKey != "2026-09-24" {
+		t.Errorf("draft = %+v, %v; want the other period's draft kept", d, ok)
+	}
+	if err := s.FocusPeriodClose("day", "not a date", "n", "x"); err == nil {
+		t.Errorf("an invalid key closed a period")
+	}
+}
+
 func TestFocusRunInsertAndFinalize(t *testing.T) {
 	s := OpenNewSchemaForTest(t)
 	p, _ := s.GetOrCreateFocusPeriod("day", "2026-09-23")
