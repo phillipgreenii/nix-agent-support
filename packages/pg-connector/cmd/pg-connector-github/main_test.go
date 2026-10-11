@@ -176,3 +176,28 @@ func TestModeIsFirstNonFlagWord(t *testing.T) {
 		t.Fatalf("%+v %v", o, err)
 	}
 }
+
+func TestGlobalFlagsAcceptedAfterMode(t *testing.T) {
+	// --config is global: given after the mode word it takes effect, it is never
+	// handed to the mode (where the stub would silently ignore it).
+	o, err := parseArgs([]string{"pr", "--config", "c.json", "--query", "mine"})
+	if err != nil || o.mode != "pr" || o.configPath != "c.json" || len(o.modeArgs) != 2 || o.modeArgs[0] != "--query" {
+		t.Fatalf("%+v %v", o, err)
+	}
+	o, err = parseArgs([]string{"ci", "--config=c.json"})
+	if err != nil || o.mode != "ci" || o.configPath != "c.json" || len(o.modeArgs) != 0 {
+		t.Fatalf("%+v %v", o, err)
+	}
+	if _, err = parseArgs([]string{"serve", "--config"}); err == nil {
+		t.Error("--config without a path must fail after the mode too")
+	}
+	for _, mode := range []string{"serve", "pr", "ci"} {
+		code, out, errs := runArgs(t, noEnv, mode, "--config", golden)
+		if code != exitNotImplemented || out != "" || !strings.Contains(errs, golden) {
+			t.Errorf("%s --config after the mode: code=%d out=%q stderr=%q (the config named after the mode must be the one loaded)", mode, code, out, errs)
+		}
+	}
+	if code, out, _ := runArgs(t, noEnv, "serve", "--version"); code != 0 || !strings.Contains(out, "pg-connector-github") {
+		t.Errorf("--version after the mode: code=%d out=%q", code, out)
+	}
+}

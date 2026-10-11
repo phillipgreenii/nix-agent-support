@@ -5,7 +5,8 @@
 //	pg-connector-github [--config <path>] pr      client mode for the pr instance
 //	pg-connector-github [--config <path>] ci      client mode for the ci instance
 //
-// --config names the rendered config file (see internal/config); when absent,
+// --config is a global flag (accepted before or after the mode word) naming the
+// rendered config file (see internal/config); when absent,
 // PG_CONNECTOR_GITHUB_CONFIG is used. --version prints the stamped version.
 //
 // This is the skeleton: every mode loads and validates the config and then
@@ -56,9 +57,11 @@ type options struct {
 	help       bool
 }
 
-// parseArgs splits args into the global flags and the mode. Global flags are
-// accepted before the mode word only; everything after the mode word belongs to
-// the mode.
+// parseArgs scans args for the global flags (--config, --version and --help;
+// accepted before or after the mode word, so a --config given after the mode is
+// never silently ignored) and for the mode, the first non-flag word. An unknown
+// flag before the mode is an error; every other argument after the mode word
+// belongs to the mode.
 func parseArgs(args []string) (options, error) {
 	var o options
 	for i := 0; i < len(args); i++ {
@@ -78,12 +81,12 @@ func parseArgs(args []string) (options, error) {
 			o.configPath = strings.TrimPrefix(a, "--config=")
 		case strings.HasPrefix(a, "-config="):
 			o.configPath = strings.TrimPrefix(a, "-config=")
+		case o.mode != "":
+			o.modeArgs = append(o.modeArgs, a)
 		case strings.HasPrefix(a, "-"):
 			return o, fmt.Errorf("unknown flag %q", a)
 		default:
 			o.mode = a
-			o.modeArgs = args[i+1:]
-			return o, nil
 		}
 	}
 	return o, nil
