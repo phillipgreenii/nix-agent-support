@@ -430,3 +430,341 @@ groups:
                 - evaluator:
                     type: gte
                     params: [1]
+
+      # ---- Daily-focus alert rules (Phase 15, pg2-2j5ac.44.25) ----
+      # Each rule reads a family of internal/metrics/focus.go (or the
+      # change-flow families) that is computed at scrape time from the
+      # store by focus.ComputeHealth -- the one function the doctor/status
+      # focus block reads too. Shape is pg-desk-sweep-bound-violated's: A is
+      # an instant query, B reduces it with `last`, C is a `gt` threshold.
+      # All eight are severity warning with noDataState: OK: a store with no
+      # draft, no plan, no watch query or no focus tables exposes no series
+      # (or zero-filled series), which is a legitimately quiet state and
+      # MUST NOT page. The expressions, label selectors and `for:` values are
+      # pinned by internal/alertrules/focus_rules_test.go and named in
+      # docs/behavior/pg-desk/serve.md. Decider failures reach
+      # pg_router_failures_total{role="<focus role>"}, which the existing
+      # pg-router-failure-rate rule already covers: no rule here.
+      #
+      # The wired-and-evaluating-but-doing-nothing shape: pending-beads-age
+      # is the alert that catches a decider role that is unbound or still in
+      # plan mode -- plan rows exist, nothing mints their beads.
+      - uid: pg-desk-focus-pending-beads-age
+        title: pg-desk focus rows have waited too long for their bead
+        condition: C
+        for: 10m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "A selected focus row has had no bead for over 30 minutes"
+          description: "The oldest focus row that is selected, live and has no bead (reason=unminted) has waited over 1800 seconds for 10 minutes. The decider role that mints focus beads is unbound, still in plan mode, or failing. Run `pg-desk doctor` for the focus block, then check the router's focus role binding and mode."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: max(pg_desk_focus_oldest_pending_bead_age_seconds{reason="unminted"})
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [1800]
+
+      - uid: pg-desk-focus-divergence-selected-held
+        title: pg-desk focus - a selected item's bead is held
+        condition: C
+        for: 30m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "A selected focus row's bead is held"
+          description: "At least one item in the current plan has a held focus bead (deferred, marker struck or unassigned) although its source is not terminal, for over 30 minutes. The plan and the bead disagree: re-select the item or release the bead. Run `pg-desk focus show` and `pg-desk doctor`."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: max(pg_desk_focus_divergence{kind="selected_bead_held"})
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      - uid: pg-desk-focus-divergence-removed-claimable
+        title: pg-desk focus - a removed item's bead is still claimable
+        condition: C
+        for: 1h
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "A removed focus item still has an open, unclaimed bead"
+          description: "At least one item removed from the plan (annotation none or absent) still has an open, unclaimed focus bead for over an hour, so a worker can claim work the operator dropped. The decider's hold did not run: check the focus role binding and mode. Run `pg-desk doctor`."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: max(pg_desk_focus_divergence{kind="removed_bead_open_unclaimed"})
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      - uid: pg-desk-focus-annotation-divergence
+        title: pg-desk focus - plan rows and focus_selected annotations disagree
+        condition: C
+        for: 15m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "Focus plan rows and focus_selected annotations disagree"
+          description: "A plan row has no matching focus_selected annotation (row_without_annotation) or an annotation names a period with no row (annotation_without_row) for over 15 minutes, so a select was interrupted between its row and its annotation write. Re-run `pg-desk focus select` for the period to repair it."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: sum(pg_desk_focus_divergence{kind=~"row_without_annotation|annotation_without_row"})
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      - uid: pg-desk-focus-terminal-source-bead-open
+        title: pg-desk focus - a finished item's bead is still open
+        condition: C
+        for: 1h
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "A finished focus item's bead is still open"
+          description: "At least one plan row whose source is terminal (merged or closed PR, done issue) still has an open, unclaimed focus bead for over an hour. The issue-closed listener is missing or its decider role is still in plan mode. Check the router's closed-listener binding and the role's mode."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: max(pg_desk_focus_divergence{kind="terminal_source_bead_open"})
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      - uid: pg-desk-watch-listing-degraded
+        title: pg-desk watch query listing is degraded or failed
+        condition: C
+        for: 30m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "A watch query's last listing was not complete"
+          description: "At least one configured watch query has a persisted listing status of degraded or failed for over 30 minutes, so the watch sets (and the focus candidate set built on them) may be incomplete. Run `pg-desk focus show` for the coverage header and check the connector that serves the query."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: sum(pg_desk_watch_listing_status{status!="ok"})
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      - uid: pg-desk-focus-rank-degraded
+        title: pg-desk focus rank is running on degraded inputs
+        condition: C
+        for: 30m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "The focus rank is silently degraded"
+          description: "At least one rank input has been degraded for over 30 minutes (unparseable due dates, unmapped priorities, age fallbacks, unavailable unblocks or an absent status category), so the ranking is less reliable than it looks. The input label of pg_desk_focus_rank_degraded_inputs names which; run `pg-desk focus explain` on an affected item."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: sum(pg_desk_focus_rank_degraded_inputs)
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      - uid: pg-desk-focus-consumer-lag
+        title: pg-desk focus issue consumer is lagging
+        condition: C
+        for: 30m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "The focus role's issue.changed consumer is over 500 changes behind"
+          description: "The lag of an issue change-log consumer (highest issue change sequence minus the consumer cursor) has exceeded 500 for over 30 minutes, so the focus decider is not keeping up with issue changes. The 500 threshold is provisional: the operator checkpoint sets the final budget from the measured decider cost."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: max(pg_desk_consumer_lag{type="issue"})
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [500]

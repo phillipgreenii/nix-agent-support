@@ -221,6 +221,32 @@ Telemetry declaration: the focus verbs emit no OpenTelemetry. This section's fam
 Prometheus view of the store; the verbs' own record is the `focus_run` row and the structured
 stderr line ([`focus.md`](focus.md)). The scrape computation logs nothing.
 
+### Focus alert rules
+
+The focus and watch-listing families have eight Grafana alert rules in
+`packages/pg-desk/grafana/alerting/alerts.yaml`, in the same folder and group as the other `pg-desk`
+rules. Each is a warning with `noDataState: OK` and `execErrState: Error`: query A is the instant
+expression below, B reduces it with `last`, and C is a `gt` threshold. An empty state (no draft, no
+plan, no series) is no data and is Normal, never an alert. Each rule fires only after its condition
+has held for the whole `for` duration. Each expression, selector and `for` is pinned by
+`internal/alertrules/focus_rules_test.go`.
+
+| uid                                          | expression                                                                              | threshold | for   | meaning                                                                                                                       |
+| -------------------------------------------- | --------------------------------------------------------------------------------------- | --------- | ----- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `pg-desk-focus-pending-beads-age`            | `max(pg_desk_focus_oldest_pending_bead_age_seconds{reason="unminted"})`                 | `> 1800`  | `10m` | a selected, live row has waited over 30 minutes for a bead: the decider role is unbound, still in plan mode, or failing       |
+| `pg-desk-focus-divergence-selected-held`     | `max(pg_desk_focus_divergence{kind="selected_bead_held"})`                              | `> 0`     | `30m` | a selected item's bead is held although its source is not terminal                                                            |
+| `pg-desk-focus-divergence-removed-claimable` | `max(pg_desk_focus_divergence{kind="removed_bead_open_unclaimed"})`                     | `> 0`     | `1h`  | a removed item's bead is still open and unclaimed, so a worker can claim work the operator dropped                            |
+| `pg-desk-focus-annotation-divergence`        | `sum(pg_desk_focus_divergence{kind=~"row_without_annotation\|annotation_without_row"})` | `> 0`     | `15m` | a plan row and its `focus_selected` annotation disagree, so a select was interrupted between the two writes                   |
+| `pg-desk-focus-terminal-source-bead-open`    | `max(pg_desk_focus_divergence{kind="terminal_source_bead_open"})`                       | `> 0`     | `1h`  | a finished item's bead is still open: the issue-closed listener is missing or its role is in plan mode                        |
+| `pg-desk-watch-listing-degraded`             | `sum(pg_desk_watch_listing_status{status!="ok"})`                                       | `> 0`     | `30m` | a configured watch query's persisted listing is degraded or failed, so the watch sets and the candidate set may be incomplete |
+| `pg-desk-focus-rank-degraded`                | `sum(pg_desk_focus_rank_degraded_inputs)`                                               | `> 0`     | `30m` | the rank is silently running on a degraded input (the `input` label names which)                                              |
+| `pg-desk-focus-consumer-lag`                 | `max(pg_desk_consumer_lag{type="issue"})`                                               | `> 500`   | `30m` | the focus role's single `issue.changed` consumer is over 500 changes behind                                                   |
+
+The lag threshold of `pg-desk-focus-consumer-lag` is provisional: the design does not fix it, and
+the operator checkpoint sets the final budget from the decider cost it measures. Decider failures
+are not covered by a rule here: they reach `pg_router_failures_total{role="<focus role>"}`, which the
+existing `pg-router-failure-rate` rule already watches.
+
 ## Out of scope (Phase 9, narrowed by Phase 10)
 
 The primary port (`9818`) and the removal of the temporary soak board are the Phase 11 flip.
