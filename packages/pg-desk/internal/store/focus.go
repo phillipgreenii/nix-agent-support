@@ -529,6 +529,50 @@ func (s *Store) FocusDraftReplace(d FocusDraft) (planNowExists bool, err error) 
 	return planNowExists, nil
 }
 
+// FocusDraftReplan replaces the single draft with d (the replan verb's
+// explicit recompute), in one transaction that re-checks whether the draft's
+// period holds plan rows and writes the row only when that matches what the
+// caller computed against: expectPlan is true when the draft was computed over
+// a locked plan (a plan-mode replan) and false when it was computed as an
+// initial draft. planStateChanged=true means the period's plan state differs
+// from expectPlan and nothing was written, so the caller recomputes for the
+// state it now finds. A draft for any period replaces whatever is stored.
+func (s *Store) FocusDraftReplan(d FocusDraft, expectPlan bool) (planStateChanged bool, err error) {
+	key, err := NormalizeFocusPeriodKey(d.PeriodType, d.PeriodKey)
+	if err != nil {
+		return false, err
+	}
+	d.PeriodKey = key
+	err = s.focusImmediate("replan focus draft", func(x focusExec) error {
+		held, err := periodHoldsRows(x, d.PeriodType, key)
+		if err != nil {
+			return err
+		}
+		if held != expectPlan {
+			planStateChanged = true
+			return nil
+		}
+		if _, err := x.exec(
+			`INSERT INTO focus_draft (id, period_type, period_key, cap, made_at, body_json)
+			 VALUES (1, ?, ?, ?, ?, ?)
+			 ON CONFLICT (id) DO UPDATE SET
+			   period_type = excluded.period_type,
+			   period_key  = excluded.period_key,
+			   cap         = excluded.cap,
+			   made_at     = excluded.made_at,
+			   body_json   = excluded.body_json`,
+			d.PeriodType, d.PeriodKey, d.Cap, d.MadeAt, d.BodyJSON,
+		); err != nil {
+			return fmt.Errorf("store: replan focus draft: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return planStateChanged, nil
+}
+
 // ---------------------------------------------------------------- runs
 
 // FocusRunInsert inserts a focus_run row outside a lock transaction (for

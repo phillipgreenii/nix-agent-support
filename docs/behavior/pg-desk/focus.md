@@ -184,6 +184,144 @@ the cap line counts the proposed (`+`) rows as the rows in plan.
   period, it is always read live (never copied into the draft), and a first lock of a later period
   replaces it.
 
+## `show` and `replan`
+
+`pg-desk focus show [--date YYYY-MM-DD] [--cap N] [--all] [--no-store] [--json]` prints the period's
+plan or draft; `pg-desk focus replan [--date YYYY-MM-DD] [--cap N] [--all] [--json]` opens a draft
+again over the locked plan. Both read only the store, never prompt and write no run record.
+
+**The three modes of `show`.**
+
+- **An applicable draft is stored (a stored draft whose period is the addressed one).** `show`
+  re-renders it. The order, tiers, deciding keys and cap line are the draft's; every fact (title, due
+  date, priority, status, bead column, stale mark) is read live and the PLAN block is read live from
+  the plan rows. A drift notice names how many draft rows would sit differently under a fresh rank
+  and which rows are now finished or no longer candidates, and a `new since draft` block lists
+  candidates the draft does not hold without ever adding them to the table. `--cap` with an
+  applicable draft is a usage error. An unreadable draft is treated as absent.
+- **No applicable draft and no plan.** `show` computes ONE draft (candidate set and rank) and prints
+  a PLAN block of the proposed rows (`+`), the cap line and the other candidates sorted by the rank.
+  It stores that draft only when ALL of these hold: no `--no-store`; the addressed period is today in
+  `focus.time_zone` (any other `--date` implies `--no-store` and prints
+  `NOTICE period <date> is not today; no draft stored`); the period is not closed; the period has no
+  plan; and the single draft row is free (empty, stale, or unreadable). The store is one transaction
+  that re-checks "no plan rows for the period", so a lock that committed after the compute makes
+  `show` print the plan and store nothing, and a draft for the same period is never overwritten (it
+  is re-rendered). A stale draft is replaced without a message; an unreadable one prints
+  `NOTICE stored draft unreadable; replaced`. A stored draft of a LATER period is left alone with
+  `NOTICE stored draft is for <date>; pass --date <date> or run replan`. `--no-store` computes and
+  renders but never stores and never re-renders a stored draft (it prints
+  `NOTICE stored draft ignored (--no-store)` when one applies). When it stored a draft the draft line
+  reads `DRAFT (stored; reply to lock it in)`; a second bare `show` re-renders it, so the order the
+  operator saw is the order the lock uses.
+- **A plan exists and no applicable draft.** `show` prints the PLAN in the recorded order and tier
+  with its cap line, `PLAN (locked <selected_at>)`, and stores nothing. The cap line counts only
+  UNFINISHED rows against the cap, so finishing work frees its slot. The candidates below it are in
+  the CURRENT rank, labelled `current rank, not frozen`, with a notice counting those that now rank
+  above the plan's last row and suggesting `replan`.
+
+`replan` prints the same layout with the existing plan as the PLAN block and every other candidate,
+new ones included (marked `new`), ranked afresh below it. It proposes nothing. It replaces the stored
+draft (whatever its period) only when the addressed period is today and not closed; for any other
+`--date` it prints and stores nothing with the same `period <date> is not today` notice. The store is
+a transaction that re-checks the plan state: when a lock changed it between the compute and the
+store, `replan` recomputes for the state it now finds (a plan-mode replan proposes nothing). On a
+closed period `replan` prints the plan (mode `plan`, `period closed`), stores nothing and exits `0`.
+On a period with no plan it prints what `show` prints (the first plan is the degenerate replan).
+
+**Layout (fixed section order).** Scope; notices; coverage; a `candidates:` count line per source;
+the draft line; the PLAN table (a finished row is marked `finished` INSIDE it); the cap line; the
+candidates table; the epics block; `new since draft` when a stored draft is re-rendered; the
+footer. The initial draft, `replan` and plan mode share this skeleton and differ only in what fills
+PLAN. The tables have a leading MARK column (`*` in the plan, `+` proposed and would be selected on
+`ok`, blank otherwise), then rank, tier, the key that put the row ahead of the row below it, due
+date, priority, the bead column, the key and the title, and for a linked candidate a
+`via <seed key> (<relation>)` fact; a row carries `(stale)` when its snapshot is flagged stale. The
+per-source line reads like `candidates: pr 5, jira 3, bead 0 (label pg-focus-planable matches none of 233 open beads; label one or use +key), 2 of them via links`,
+so an empty source says why. By default the candidates table shows the next ten; `--all` shows every
+candidate and a footer `<n> shown of <m> candidates (--all)` says when it truncates. Every failed,
+degraded or unknown candidate source prints one `NOTICE` line above the table, and a
+`NOTICE period <date> was never closed` line names each older period that still holds rows and has
+no `closed_at`.
+
+**`--json`.** Beside `contract` and `verb`, the document carries `mode` (`draft` or `plan`),
+`stored`, `has_plan` (mode independent), `plan_rows` (the locked rows, live facts),
+`unclosed_periods`, `period`, `made_at`, `cap`, `cap_line`, the ordered `rows` (every candidate, with
+its mark, tier, deciding key, bead column and `via`), the `epics` block, `new_since_draft`, the
+`coverage` state, `rank_inputs` and the `notices`. A stored replan draft over a locked plan reads
+`mode: draft` with `has_plan: true`, so a caller asking whether a period has a plan MUST test
+`has_plan` on `show --json --no-store` and never `mode`.
+
+**Coverage and the exit codes of `show` and `replan`.** The coverage header gives, per watched type,
+the active count, the count still due or never hydrated (the shared `changes.ActiveCount` and
+`changes.DueBacklog`), the age of the oldest `hydrated_at`, the persisted listing status of each
+watch query, each epic's count of children the store does not hold yet, and the `rank_inputs`
+counts. A configured watch query with no persisted status is `unknown` and counts as incomplete. A
+source outside every recorded watch set reads `unwatched` in the bead column.
+
+| Exit | Meaning                                                                                                                                                        |
+| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`  | Coverage complete (a small routine hydration backlog is a notice), including a legitimately empty candidate set and an empty `focus.operator_identities` list. |
+| `2`  | Coverage incomplete: a listing degraded, failed or unknown, or a due backlog above `focus.coverage_backlog_max`. The table is shown, never silently omitted.   |
+| `3`  | Total failure: no candidates are computable (an empty set and every known listing failed). Nothing is stored.                                                  |
+| `1`  | Usage error (`--cap` not positive, `--cap` with an applicable draft, a bad `--date`) or a store that is not migrated.                                          |
+
+An empty `focus.operator_identities` list is not a failure: `show` and `replan` print
+`NOTICE focus.operator_identities is empty: no Jira issue can be a candidate by assignment` and
+exit `0` with the table the other sources produce. Exit `6` is not used: reading a closed period is
+allowed.
+
+**The bead column.** A closed vocabulary, so `pending` never hides a reason. Each value is the
+"Shown as" word of the state-by-outcome table below, which is also the table of the `select` echo, so
+the two cannot drift; it is defined once, as the `BeadStates` table in `internal/focus/beadstate.go`,
+and a test keeps this document and that table equal. A bead is linked to its source by relation
+`source`, so its status, assignee and hold marker are read from the store with no tracker call. A
+selected row whose bead is not minted yet shows `pending` with its age (`pending 12m`) and never a
+bare "pending". `focus.suppressed_kind` names the work kind a source's `suppress.<kind>` annotation
+is read for: the deployment, not pg-desk code, names it, and an empty value means suppression is
+never reported.
+
+| Bead state                                                        | Shown as                   | On strike                        | On select                           | Skip reason     |
+| ----------------------------------------------------------------- | -------------------------- | -------------------------------- | ----------------------------------- | --------------- |
+| No bead yet, decider not run                                      | pending                    | nothing to do                    | will mint                           | not matched     |
+| No bead yet, source hidden                                        | pending (hidden)           | nothing to do                    | no change (source hidden)           | hidden          |
+| No bead yet, kind suppressed                                      | pending (suppressed)       | nothing to do                    | no change (suppressed)              | suppressed      |
+| No bead yet, source terminal (finished)                           | source done (no bead)      | nothing to do                    | no change (source finished)         | not matched     |
+| Source is an epic or a bd task (its id is a bead id)              | n/a (epic or bead)         | no bead                          | no bead                             | n/a             |
+| open, unclaimed, no marker or marker released                     | open                       | will hold                        | bead open, no change                | already handled |
+| open, unclaimed, no marker or marker released, with open children | open (has children)        | no change (has open children)    | bead open, no change                | already handled |
+| open, unclaimed, marker struck (undeferred by hand)               | open (marker stale)        | will hold                        | will rewrite the marker             | already handled |
+| in_progress or assigned                                           | claimed                    | claimed by <actor>, left running | claimed by <actor>, no change       | already handled |
+| deferred, marker struck, unassigned (held)                        | held                       | no change (already held)         | held, will release                  | already handled |
+| deferred, no marker (parked by someone else)                      | deferred by someone else   | no change                        | deferred by someone else, no change | already handled |
+| blocked, pinned or hooked                                         | the status word            | no change                        | no change                           | already handled |
+| closed                                                            | closed                     | no change                        | worker-closed, no change            | already handled |
+| Source terminal (merged or closed PR, done issue), bead unclaimed | source done                | will hold                        | will hold (source done)             | already handled |
+| A hold failed or was abandoned after the live re-read             | hold stale                 | no change (changed since read)   | no change (changed since read)      | skipped-stale   |
+| An escalated human sibling exists (INV-DECIDER-18)                | escalated                  | unchanged                        | unchanged                           | n/a             |
+| Source outside every watch query                                  | unwatched (added to above) | unchanged                        | unchanged                           | n/a             |
+
+A bead closed as stale or moot by a sweep reads `closed` too, because the decider does not read who
+closed it, and the word does not claim the work was done. A source that is terminal holds an
+unclaimed bead exactly like a strike. `show` reads the decider's plan versus apply mode from
+nowhere, so a bead that stays `pending` past `focus.pending_gate_age` is the signal and `doctor`
+reports it. The skip-reason column is the decider's closed vocabulary plus the apply outcome
+`skipped-stale`; `already handled` covers several states on purpose, and the "Shown as" column is
+what separates them for a human.
+
+- **INV-FOCUS-15.** A lock MUST write the draft's order: the order the operator saw in a stored draft
+  is the order `select` locks, so a second bare `show` MUST re-render the stored draft instead of
+  recomputing, and only `replan` recomputes.
+- **INV-FOCUS-16.** `show` MUST store a draft only when no `--no-store` is given, the addressed
+  period is today and not closed and has no plan, and the draft row is empty, stale or unreadable,
+  inside a transaction that re-checks that the period has no plan rows; `replan` MUST write only the
+  single draft row.
+- **INV-FOCUS-17.** `show` and `replan` MUST exit `0` for complete coverage (an empty candidate set
+  and an empty identity list included), `2` for incomplete coverage, `3` for no computable
+  candidates and `1` for a usage error or an unmigrated store, and MUST NOT exit `6`.
+- **INV-FOCUS-18.** The bead column MUST use only the "Shown as" words of the state-by-outcome table,
+  defined once in code.
+
 ## The rank
 
 The rank orders the candidate set of the daily focus. `show`, `select`, `replan`, `pull` and `explain`
@@ -268,4 +406,7 @@ The focus verbs emit nothing over OpenTelemetry and write no Prometheus series o
   `pg-desk.focus-select/v1`, and a dry run prints the same line with `dry_run` true. Every other
   line a verb prints on stderr is ordinary CLI text: the `NOTE` line, a notice, and the one-line
   remedy of a failure.
+- **`show` and `replan`:** they emit no OpenTelemetry and no Prometheus series, log nothing and write
+  no run record; `show` writes the single draft row in the one case above and `replan` replaces it.
+  Their output (the table, the NOTICE lines and `--json`) is the whole of what they leave behind.
 - **Store:** the run record row (see "The run record") is the durable copy of that line.

@@ -839,3 +839,37 @@ func TestFocusLockTxSerializesConcurrentLocks(t *testing.T) {
 		t.Fatalf("rows = %+v, want two with distinct positions", rows)
 	}
 }
+
+func TestFocusDraftReplan(t *testing.T) {
+	s := OpenNewSchemaForTest(t)
+	focusSeed(t, s, "1")
+	// No plan, expectPlan false: written, replacing a draft of any period.
+	if _, err := s.FocusDraftStore(draftOf("2026-09-22", `{"v":1}`), "2026-09-22"); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := s.FocusDraftReplan(draftOf("2026-09-23", `{"v":2}`), false); err != nil || changed {
+		t.Fatalf("replan = %v, %v; want a write", changed, err)
+	}
+	if d, _, _ := s.FocusDraftGet(); d.PeriodKey != "2026-09-23" || d.BodyJSON != `{"v":2}` {
+		t.Fatalf("draft = %+v", d)
+	}
+	// No plan but a plan was expected: nothing written, state changed.
+	if changed, err := s.FocusDraftReplan(draftOf("2026-09-23", `{"v":3}`), true); err != nil || !changed {
+		t.Fatalf("replan expecting a plan with none = %v, %v; want changed", changed, err)
+	}
+	// A plan exists and one was expected: written.
+	focusPlan(t, s, "2026-09-23", "1")
+	if changed, err := s.FocusDraftReplan(draftOf("2026-09-23", `{"v":4}`), true); err != nil || changed {
+		t.Fatalf("replan over a plan = %v, %v; want a write", changed, err)
+	}
+	if d, _, _ := s.FocusDraftGet(); d.BodyJSON != `{"v":4}` {
+		t.Fatalf("draft = %+v", d)
+	}
+	// A plan appeared where an initial draft was computed: nothing written.
+	if changed, err := s.FocusDraftReplan(draftOf("2026-09-23", `{"v":5}`), false); err != nil || !changed {
+		t.Fatalf("replan with an unexpected plan = %v, %v; want changed", changed, err)
+	}
+	if d, _, _ := s.FocusDraftGet(); d.BodyJSON != `{"v":4}` {
+		t.Fatalf("a draft was written despite the changed plan state: %+v", d)
+	}
+}

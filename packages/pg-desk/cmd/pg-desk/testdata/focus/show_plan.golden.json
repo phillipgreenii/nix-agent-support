@@ -1,0 +1,115 @@
+{
+  "candidates_shown": 1,
+  "candidates_total": 1,
+  "cap": 6,
+  "cap_line": {
+    "cap": 6,
+    "in_plan": 1,
+    "open_slots": 5,
+    "finished": 0,
+    "text": "cap 6: 1 in plan, 5 open slots"
+  },
+  "contract": "pg-desk.focus/v1",
+  "coverage": {
+    "incomplete": false,
+    "notices": [],
+    "per_type": {
+      "issue": {
+        "active": 0,
+        "due_backlog": 0
+      },
+      "pr": {
+        "active": 2,
+        "due_backlog": 0,
+        "oldest_hydrated_at": "2026-10-10T11:00:00Z"
+      }
+    },
+    "reasons": []
+  },
+  "epics": [],
+  "has_plan": true,
+  "made_at": null,
+  "mode": "plan",
+  "new_since_draft": [],
+  "notices": [],
+  "period": "2026-10-10",
+  "period_closed": false,
+  "plan_rows": [
+    {
+      "mark": "*",
+      "rank": 1,
+      "key": "pr:o/r#1",
+      "type": "pr",
+      "id": "o/r#1",
+      "title": "alpha",
+      "tier": "not_started",
+      "priority": "P2",
+      "state": "open",
+      "bead": "pending 3h",
+      "bead_state": "pending",
+      "plus": false,
+      "in_plan": true,
+      "finished": false,
+      "new": false,
+      "stale": false,
+      "marks": [],
+      "selected_at": "2026-10-10T09:00:00Z"
+    }
+  ],
+  "proposed": [],
+  "rank_inputs": {
+    "unparseable_due": 0,
+    "unmapped_priority": 0,
+    "age_fallback": 2,
+    "unblocks_unavailable": 0,
+    "status_category_absent": 0
+  },
+  "rows": [
+    {
+      "mark": "*",
+      "rank": 1,
+      "key": "pr:o/r#1",
+      "type": "pr",
+      "id": "o/r#1",
+      "title": "alpha",
+      "tier": "not_started",
+      "priority": "P2",
+      "state": "open",
+      "bead": "pending 3h",
+      "bead_state": "pending",
+      "plus": false,
+      "in_plan": true,
+      "finished": false,
+      "new": false,
+      "stale": false,
+      "marks": [],
+      "selected_at": "2026-10-10T09:00:00Z"
+    },
+    {
+      "mark": "",
+      "rank": 2,
+      "key": "pr:o/r#2",
+      "type": "pr",
+      "id": "o/r#2",
+      "kind": "pr",
+      "title": "bravo",
+      "tier": "started",
+      "priority": "P2",
+      "state": "open",
+      "bead": "pending",
+      "bead_state": "pending",
+      "plus": false,
+      "in_plan": false,
+      "finished": false,
+      "new": false,
+      "stale": false,
+      "marks": []
+    }
+  ],
+  "scope": "o/r",
+  "sources": "candidates: pr 2, jira 0, bead 0 (bead_id_pattern is unset, so no issue is a bead; label pg-focus-planable needs it)",
+  "stored": false,
+  "unclosed_periods": [],
+  "unknown_children": {},
+  "verb": "show"
+}

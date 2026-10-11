@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/gather"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
 )
 
 func truncatedListing() gather.ListFingerprintsResult {
@@ -157,5 +158,25 @@ func TestReadListingStatusesSkipsUndecodableAndScopesToType(t *testing.T) {
 	}
 	if none, err := ReadListingStatuses(st, "thread"); err != nil || len(none) != 0 {
 		t.Errorf("thread = %+v, %v", none, err)
+	}
+}
+
+func TestWatchedIDsUnionsTheConfiguredQueriesAndReportsKnown(t *testing.T) {
+	st := store.OpenNewSchemaForTest(t)
+	if ids, known := WatchedIDs(st, []string{"a", "b"}, "pr"); known || len(ids) != 0 {
+		t.Fatalf("nothing recorded: ids %v known %v", ids, known)
+	}
+	if err := saveWatchSet(st, "pr", "a", map[string]bool{"x": true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveWatchSet(st, "pr", "b", map[string]bool{"y": true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveWatchSet(st, "pr", "unconfigured", map[string]bool{"z": true}); err != nil {
+		t.Fatal(err)
+	}
+	ids, known := WatchedIDs(st, []string{"a", "b", "never-ran"}, "pr")
+	if !known || len(ids) != 2 || !ids["x"] || !ids["y"] {
+		t.Fatalf("ids %v known %v, want the union of a and b", ids, known)
 	}
 }
