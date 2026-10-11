@@ -35,6 +35,10 @@ const (
 	EchoUnmerged  = "unmerged"
 	EchoHydrate   = "hydrate"
 	EchoCapRemove = "cap"
+	// EchoSelected is a draft proposal the reply's ok selected.
+	EchoSelected = "selected"
+	// EchoNoChange is the row of an ok that selected and removed nothing.
+	EchoNoChange = "nochange"
 )
 
 // ChangeRow is one row the run newly selects or removes. Cause is the stored
@@ -59,13 +63,27 @@ type ChangeRow struct {
 
 // EchoRow names what one applied token or flag resolved to, so a token that
 // resolved to something unintended is visible: Kind is one of the Echo*
-// words, Other the second key of a merge, Detail a short clause.
+// words, Token the token as the echo prints it (ok, -ID, +ID, cap=N,
+// --merge KEEP=ABSORBED), Other the second key of a merge, Detail the result
+// clause ("struck by you, removed from the plan").
+//
+// Effect (mint, hold, release or none), Because and Consequence are the
+// downstream consequence of the row, read from the bead-state table of
+// beadstate.go: a strike reads its strike columns, a selection its select
+// columns. Cause is the stored cause of a removal ("" for a selection), and
+// BeadID the bead the effect lands on ("" when none exists yet).
 type EchoRow struct {
-	Kind   string
-	Key    Key
-	Other  *Key
-	Title  string
-	Detail string
+	Kind        string
+	Token       string
+	Key         Key
+	Other       *Key
+	Title       string
+	Detail      string
+	Effect      string
+	Because     string
+	Consequence string
+	Cause       string
+	BeadID      string
 }
 
 // PreviewResult is what a select would do. Changes holds the selections
@@ -204,6 +222,26 @@ func BuildPreview(ctx context.Context, d LockDeps, in LockInput, fs FinalSet) (P
 	live := BuildLive(inputs, keys, Ranking{}, LiveOptions{Watched: LoadWatched(d.Store, d.Config)})
 
 	pv := PreviewResult{FirstLock: ls.first, ReplacesPlan: ls.replace, NeverClosed: ls.neverClosed}
+	// resolve reads the bead column of k once: the table row it falls in, the
+	// effect and because clause of a select or a strike, the consequence
+	// phrase the echo prints and the bead id.
+	type resolved struct {
+		state                          BeadState
+		shown, effect, because, phrase string
+		beadID                         string
+	}
+	resolve := func(dir string, k Key) resolved {
+		cell := live.Beads[k]
+		trow := RowOf(cell.State)
+		r := resolved{state: cell.State, shown: cell.Shown, beadID: beadIDOf(inputs, k)}
+		if dir == DirectionSelect {
+			r.effect, r.because, r.phrase = trow.SelectEffect, trow.SelectBecause, trow.SelectEcho
+		} else {
+			r.effect, r.because, r.phrase = trow.StrikeEffect, trow.StrikeBecause, trow.StrikeEcho
+		}
+		r.phrase = consequencePhrase(dir, cell.State, cell.Shown, r.phrase, r.beadID)
+		return r
+	}
 	rowSeen := map[string]bool{}
 	mk := func(dir string, k Key, source, cause string) {
 		id := fmt.Sprintf("%s|%s|%s", dir, k, cause)
@@ -211,22 +249,12 @@ func BuildPreview(ctx context.Context, d LockDeps, in LockInput, fs FinalSet) (P
 			return
 		}
 		rowSeen[id] = true
-		cell := live.Beads[k]
-		trow := RowOf(cell.State)
-		cr := ChangeRow{
+		r := resolve(dir, k)
+		pv.Changes = append(pv.Changes, ChangeRow{
 			Direction: dir, Key: k, Title: live.Facts[k].Title, Source: source, Cause: cause,
-			CauseText: causeText(cause, live.Facts[k]), State: cell.State, Shown: cell.Shown,
-			BeadID: beadIDOf(inputs, k),
-		}
-		if dir == DirectionSelect {
-			cr.Effect, cr.Because, cr.Echo = trow.SelectEffect, trow.SelectBecause, trow.SelectEcho
-		} else {
-			cr.Effect, cr.Because, cr.Echo = trow.StrikeEffect, trow.StrikeBecause, trow.StrikeEcho
-		}
-		if actor, ok := strings.CutPrefix(cell.Shown, "claimed by "); ok {
-			cr.Echo = strings.ReplaceAll(cr.Echo, "<actor>", actor)
-		}
-		pv.Changes = append(pv.Changes, cr)
+			CauseText: causeText(cause, live.Facts[k]), State: r.state, Shown: r.shown,
+			Effect: r.effect, Because: r.because, Echo: r.phrase, BeadID: r.beadID,
+		})
 	}
 	for _, i := range fs.Insert {
 		mk(DirectionSelect, i.Key, i.Source, "")
@@ -241,42 +269,104 @@ func BuildPreview(ctx context.Context, d LockDeps, in LockInput, fs FinalSet) (P
 	}
 
 	title := func(k Key) string { return live.Facts[k].Title }
-	for _, k := range fs.Forced {
-		pv.Echo = append(pv.Echo, EchoRow{Kind: EchoForced, Key: k, Title: title(k), Detail: "force-pulled from the candidates"})
+	hydrated := map[Key]bool{}
+	for _, k := range in.Hydrated {
+		hydrated[k] = true
 	}
+	echo := func(kind, token string, k Key, dir, cause, detail string) {
+		r := resolve(dir, k)
+		pv.Echo = append(pv.Echo, EchoRow{
+			Kind: kind, Token: token, Key: k, Title: title(k), Detail: detail,
+			Effect: r.effect, Because: r.because, Consequence: r.phrase, Cause: cause, BeadID: r.beadID,
+		})
+	}
+	forced := map[Key]bool{}
+	for _, k := range fs.Forced {
+		forced[k] = true
+	}
+	handAdded := map[Key]bool{}
 	for _, k := range fs.HandAdded {
-		detail := "hand-added"
-		if _, stored := inputs.Entities[k]; !stored {
-			detail = "hand-added (hydrated, new to store)"
-			pv.WouldHydrate = append(pv.WouldHydrate, k)
+		handAdded[k] = true
+	}
+	// The selections, in the order the lock inserts them: the draft's
+	// proposals (ok), then the force-pulled and hand-added keys (+key).
+	for _, i := range fs.Insert {
+		switch {
+		case handAdded[i.Key]:
+			detail := "hand-added"
+			if _, stored := inputs.Entities[i.Key]; !stored {
+				pv.WouldHydrate = append(pv.WouldHydrate, i.Key)
+				detail = "hydrated, new to store"
+			} else if hydrated[i.Key] {
+				detail = "hydrated, new to store"
+			}
+			echo(EchoHandAdd, "+"+i.Key.ID, i.Key, DirectionSelect, "", detail)
+		case forced[i.Key]:
+			echo(EchoForced, "+"+i.Key.ID, i.Key, DirectionSelect, "", "force-pulled from the candidates")
+		default:
+			echo(EchoSelected, "ok", i.Key, DirectionSelect, "", "selected from the draft")
 		}
-		pv.Echo = append(pv.Echo, EchoRow{Kind: EchoHandAdd, Key: k, Title: title(k), Detail: detail})
 	}
 	for _, x := range fs.Delete {
-		kind, detail := EchoStruck, "struck by you, removed from the plan"
-		if x.Cause != CauseOperator {
-			kind, detail = EchoCapRemove, "removed from the plan ("+causeText(x.Cause, live.Facts[x.Key])+")"
+		switch x.Cause {
+		case CauseOperator:
+			echo(EchoStruck, "-"+x.Key.ID, x.Key, DirectionRemove, x.Cause, "struck by you, removed from the plan")
+		case CauseCap:
+			token := "cap"
+			if in.ReplyCap != nil {
+				token = fmt.Sprintf("cap=%d", *in.ReplyCap)
+			}
+			echo(EchoCapRemove, token, x.Key, DirectionRemove, x.Cause, "removed from the plan ("+causeText(x.Cause, live.Facts[x.Key])+")")
+		default:
+			echo(EchoCapRemove, "(dropped)", x.Key, DirectionRemove, x.Cause, "removed from the plan ("+causeText(x.Cause, live.Facts[x.Key])+")")
 		}
-		pv.Echo = append(pv.Echo, EchoRow{Kind: kind, Key: x.Key, Title: title(x.Key), Detail: detail})
+	}
+	if in.ReplyOk && len(fs.Insert) == 0 && len(fs.Delete) == 0 && !ls.replace {
+		detail := "no change; name items with +key or use pull"
+		if ls.first {
+			detail = "no change"
+		}
+		pv.Echo = append(pv.Echo, EchoRow{Kind: EchoNoChange, Token: "ok", Detail: detail, Effect: "none"})
 	}
 	for _, s := range fs.Skipped {
-		pv.Echo = append(pv.Echo, EchoRow{Kind: EchoSkipped, Key: s.Key, Title: title(s.Key), Detail: s.Reason})
+		pv.Echo = append(pv.Echo, EchoRow{Kind: EchoSkipped, Key: s.Key, Title: title(s.Key), Detail: s.Reason, Effect: "none"})
 	}
 	for _, m := range fs.Absorbed {
 		kept := m.Kept
 		pv.Echo = append(pv.Echo, EchoRow{
-			Kind: EchoMerged, Key: m.Absorbed, Other: &kept, Title: title(m.Absorbed),
-			Detail: fmt.Sprintf("merged %s into %s (link recorded; no bead for %s)", m.Absorbed.ID, m.Kept.ID, m.Absorbed.ID),
+			Kind: EchoMerged, Token: fmt.Sprintf("--merge %s=%s", m.Kept.ID, m.Absorbed.ID), Key: m.Absorbed, Other: &kept, Title: title(m.Absorbed),
+			Detail: fmt.Sprintf("merged %s into %s (link recorded; no bead for %s)", m.Absorbed.ID, m.Kept.ID, m.Absorbed.ID), Effect: "none",
 		})
 	}
 	for _, m := range fs.Unmerge {
 		kept := m.Kept
 		pv.Echo = append(pv.Echo, EchoRow{
-			Kind: EchoUnmerged, Key: m.Absorbed, Other: &kept, Title: title(m.Absorbed),
-			Detail: fmt.Sprintf("merge of %s into %s reversed (link removed)", m.Absorbed.ID, m.Kept.ID),
+			Kind: EchoUnmerged, Token: "+" + m.Absorbed.ID, Key: m.Absorbed, Other: &kept, Title: title(m.Absorbed),
+			Detail: fmt.Sprintf("merge of %s into %s reversed (link removed)", m.Absorbed.ID, m.Kept.ID), Effect: "none",
 		})
 	}
 	return pv, nil
+}
+
+// consequencePhrase is the words the echo and the CHANGES block print for a
+// row's downstream consequence: the table's echo for the state, with the
+// claimant filled in, the bead id named for an item that is a bead, and the
+// reminder that pg-desk cannot stop a claimed bead on a strike. The words
+// themselves live in BeadStates only.
+func consequencePhrase(dir string, state BeadState, shown, phrase, beadID string) string {
+	if actor, ok := strings.CutPrefix(shown, "claimed by "); ok {
+		phrase = strings.ReplaceAll(phrase, "<actor>", actor)
+	}
+	switch {
+	case state == StateNotApplicable && beadID != "":
+		if dir == DirectionRemove {
+			return "is bead " + beadID + "; strike does not defer it"
+		}
+		return "is bead " + beadID
+	case state == StateClaimed && dir == DirectionRemove:
+		return phrase + " (stop it with bd; pg-desk cannot)"
+	}
+	return phrase
 }
 
 // causeText is the display word of a stored cause.

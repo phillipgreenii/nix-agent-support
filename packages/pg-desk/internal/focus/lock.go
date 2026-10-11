@@ -126,7 +126,11 @@ type Seen struct {
 //     computed from (nil: computed in process, FreshOrder is then set).
 //   - RunID, when not empty, is the focus_run row the transaction inserts
 //     (exit_code NULL until the caller finalizes it).
-//   - ReplyCap is the reply's cap=N, if any.
+//   - ReplyCap is the reply's cap=N, if any; ReplyOk is whether the reply
+//     said ok.
+//   - Hydrated are the hand-added keys this run hydrated before the lock (the
+//     echo says "hydrated, new to store" for them, as a dry run does for the
+//     keys it would hydrate).
 type LockInput struct {
 	Period     Period
 	Actor      string
@@ -137,6 +141,8 @@ type LockInput struct {
 	FreshOrder bool
 	Merges     []Merge
 	ReplyCap   *int
+	ReplyOk    bool
+	Hydrated   []Key
 	RunID      string
 	Seen       Seen
 }

@@ -30,10 +30,13 @@ import (
 // and flag errors (exit 1), period closed (6), reply (1), the first-lock rule
 // (1), hand-add hydration (1), then the writes (3, 2 partial, 0).
 //
-// Printing the CHANGES block and the echo table is the next packet: until it
-// lands every change is one machine-readable stdout line
-// `<verb> <canonical key> <effect> <cause>`, and --json carries the same
-// fields.
+// Output (spec section 7.2 step 7): a preview prints the draft and then the
+// CHANGES block (focus.RenderChanges) and nothing else; --dry-run and --apply
+// add the echo table (focus.RenderEcho), which names the resolved entity and
+// title of every applied token and the effect and because clause of its
+// downstream consequence, read from the one bead-state table `focus show`
+// reads. --json carries changes[] and echo[] with effect, because and cause
+// as separate fields. The routine skips go to stderr.
 //
 // Telemetry (D24): the verb emits no OpenTelemetry and no Prometheus signal.
 // It writes one focus_run row per non-dry run and prints the same record as
@@ -394,6 +397,7 @@ func (s *selectRun) once() error {
 			return err
 		}
 		p.hydrated = hydrated
+		p.lockIn.Hydrated = hydrated
 	}
 
 	if p.fresh && s.f.apply {
@@ -521,65 +525,85 @@ func (s *selectRun) counts(p *planned) focusCounts {
 	return c
 }
 
-// effectWord is the effect of a change as the verb prints it: the table's
-// effect with "will-" in front, none stays none.
-func effectWord(effect string) string {
-	if effect == "" || effect == "none" {
-		return "none"
-	}
-	return "will-" + effect
+// selectChangeJSON is one member of the --json `changes` array: a row the
+// run newly selects or removes. effect is the closed vocabulary (mint, hold,
+// release, none), because the "Shown as" clause of the bead-state table,
+// cause the stored cause of a removal ("" for a selection) and cause_text its
+// display words; consequence is the phrase the text prints.
+type selectChangeJSON struct {
+	Direction   string `json:"direction"`
+	Key         string `json:"key"`
+	Title       string `json:"title"`
+	Effect      string `json:"effect"`
+	Because     string `json:"because"`
+	Cause       string `json:"cause"`
+	CauseText   string `json:"cause_text"`
+	Consequence string `json:"consequence"`
+	State       string `json:"state"`
+	Bead        string `json:"bead"`
+	Source      string `json:"source,omitempty"`
 }
 
-type selectChangeLine struct {
-	Verb    string `json:"verb"`
-	Key     string `json:"key"`
-	Effect  string `json:"effect"`
-	Cause   string `json:"cause"`
-	Because string `json:"because"`
-	BeadID  string `json:"bead_id,omitempty"`
-	Title   string `json:"title,omitempty"`
-	Source  string `json:"source,omitempty"`
-	Removed bool   `json:"removed"`
+// selectEchoJSON is one member of the --json `echo` array.
+type selectEchoJSON struct {
+	Kind        string `json:"kind"`
+	Token       string `json:"token"`
+	Key         string `json:"key"`
+	Other       string `json:"other,omitempty"`
+	Title       string `json:"title"`
+	Result      string `json:"result"`
+	Effect      string `json:"effect"`
+	Because     string `json:"because"`
+	Cause       string `json:"cause"`
+	Consequence string `json:"consequence"`
+	Bead        string `json:"bead"`
 }
 
-// print writes the machine-readable summary (or --json) of the run. pv is
-// the effects resolved before any write; res the lock's own result.
-func (s *selectRun) print(p *planned, pv focus.PreviewResult, res focus.LockResult) error {
-	var lines []selectChangeLine
+func changesJSON(pv focus.PreviewResult) []selectChangeJSON {
+	out := make([]selectChangeJSON, 0, len(pv.Changes))
 	for _, c := range pv.Changes {
-		l := selectChangeLine{
-			Verb: "select", Key: keyText(c.Key), Effect: effectWord(c.Effect), Cause: "-", Because: c.Because,
-			BeadID: c.BeadID, Title: c.Title, Source: c.Source, Removed: c.Direction == focus.DirectionRemove,
-		}
-		if c.Cause != "" {
-			l.Cause = c.Cause
-		}
-		lines = append(lines, l)
+		out = append(out, selectChangeJSON{
+			Direction: c.Direction, Key: keyText(c.Key), Title: c.Title, Effect: c.Effect, Because: c.Because,
+			Cause: c.Cause, CauseText: c.CauseText, Consequence: c.Echo, State: string(c.State), Bead: c.BeadID, Source: c.Source,
+		})
 	}
-	var extra []selectChangeLine
+	return out
+}
+
+func echoJSON(pv focus.PreviewResult) []selectEchoJSON {
+	out := make([]selectEchoJSON, 0, len(pv.Echo))
 	for _, e := range pv.Echo {
-		switch e.Kind {
-		case focus.EchoMerged:
-			word := "would-link"
-			if s.f.apply {
-				word = "link-recorded"
-			}
-			extra = append(extra, selectChangeLine{Verb: "merge", Key: keyText(e.Key), Effect: word, Cause: "-", Because: e.Detail, Title: e.Title})
-		case focus.EchoUnmerged:
-			word := "would-unlink"
-			if s.f.apply {
-				word = "link-removed"
-			}
-			extra = append(extra, selectChangeLine{Verb: "unmerge", Key: keyText(e.Key), Effect: word, Cause: "-", Because: e.Detail, Title: e.Title})
-		case focus.EchoSkipped:
-			extra = append(extra, selectChangeLine{Verb: "skip", Key: keyText(e.Key), Effect: "none", Cause: e.Detail, Title: e.Title})
+		row := selectEchoJSON{
+			Kind: e.Kind, Token: e.Token, Title: e.Title, Result: e.Detail, Effect: e.Effect, Because: e.Because,
+			Cause: e.Cause, Consequence: e.Consequence, Bead: e.BeadID,
 		}
+		if e.Key != (focus.Key{}) {
+			row.Key = keyText(e.Key)
+		}
+		if e.Other != nil {
+			row.Other = keyText(*e.Other)
+		}
+		out = append(out, row)
 	}
-	for _, k := range pv.WouldHydrate {
-		extra = append(extra, selectChangeLine{Verb: "hydrate", Key: keyText(k), Effect: "would-hydrate", Cause: "-"})
+	return out
+}
+
+// print writes what the run did (or would do): in text the draft (a preview
+// only), the hydration report, the CHANGES block and the echo table, in --json
+// the same facts as members. pv is the preview resolved before any write; res
+// the lock's own result. The routine skips go to stderr.
+func (s *selectRun) print(p *planned, pv focus.PreviewResult, res focus.LockResult) error {
+	var draft *focusScreen
+	if !s.f.apply {
+		draft = s.draftScreen(p)
 	}
-	for _, k := range p.hydrated {
-		extra = append(extra, selectChangeLine{Verb: "hydrate", Key: keyText(k), Effect: "hydrated", Cause: "-"})
+	hydrated := keyTexts(p.hydrated)
+	wouldHydrate := keyTexts(pv.WouldHydrate)
+	if s.f.apply {
+		wouldHydrate = []string{}
+	}
+	if _, err := io.WriteString(s.cmd.ErrOrStderr(), focus.RenderSkips(pv)); err != nil {
+		return err
 	}
 	w := s.cmd.OutOrStdout()
 	if s.env.JSON {
@@ -589,25 +613,58 @@ func (s *selectRun) print(p *planned, pv focus.PreviewResult, res focus.LockResu
 		}
 		payload := map[string]any{
 			"period": s.env.Period.Key, "applied": s.f.apply, "dry_run": !s.f.apply,
-			"changes": lines, "other": nonNilLines(extra), "annotations": anns,
+			"changes": changesJSON(pv), "echo": echoJSON(pv), "annotations": anns,
+			"hydrated": nonNilStrings(hydrated), "would_hydrate": nonNilStrings(wouldHydrate),
 			"fresh_order": p.fresh, "first_lock": pv.FirstLock, "replaces_plan": pv.ReplacesPlan,
 			"never_closed": nonNilStrings(pv.NeverClosed),
 		}
-		return printFocusJSON(w, "select", payload, s.run.RunID())
+		if draft != nil {
+			payload["draft"] = draft.payload()
+		}
+		runID := ""
+		if s.f.apply {
+			runID = s.run.RunID()
+		}
+		return printFocusJSON(w, "select", payload, runID)
 	}
-	for _, l := range append(lines, extra...) {
-		if _, err := fmt.Fprintf(w, "%s %s %s %s\n", l.Verb, l.Key, l.Effect, l.Cause); err != nil {
+	if draft != nil {
+		draft.writeText(w)
+	}
+	for _, k := range wouldHydrate {
+		if _, err := fmt.Fprintf(w, "would hydrate %s\n", k); err != nil {
+			return err
+		}
+	}
+	for _, k := range hydrated {
+		if _, err := fmt.Fprintf(w, "hydrated %s\n", k); err != nil {
+			return err
+		}
+	}
+	if _, err := io.WriteString(w, focus.RenderChanges(pv)); err != nil {
+		return err
+	}
+	// A bare preview prints the CHANGES block alone; --dry-run and --apply
+	// add the echo table (a dry run's echo equals the apply echo).
+	if s.f.apply || s.f.dry {
+		if _, err := io.WriteString(w, focus.RenderEcho(pv)); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func nonNilLines(l []selectChangeLine) []selectChangeLine {
-	if l == nil {
-		return []selectChangeLine{}
+// draftScreen builds the draft a preview prints before the CHANGES block: the
+// stored draft re-rendered, or the one computed in this process.
+func (s *selectRun) draftScreen(p *planned) *focusScreen {
+	line := "DRAFT (computed in this run, not stored)"
+	in := screenInput{
+		verb: "select", mode: focusModeDraft, draftLine: line, fresh: p.rk, cap: p.cap, doc: &p.doc, madeAt: p.madeAt,
 	}
-	return l
+	if !p.fresh {
+		in.stored, in.reRender = true, true
+		in.draftLine = fmt.Sprintf("DRAFT (stored), draft made %s ago", ageText(maxDuration(s.env.Now.Sub(p.madeAt), 0)))
+	}
+	return p.g.buildScreen(in)
 }
 
 func nonNilStrings(l []string) []string {

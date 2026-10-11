@@ -243,7 +243,7 @@ func TestSelectApplyLocksThePlanInOrderAndWritesTheRecord(t *testing.T) {
 	if p.Cap == nil || *p.Cap != focus.DefaultCap {
 		t.Errorf("period cap = %v, want the draft's cap %d", p.Cap, focus.DefaultCap)
 	}
-	mustContain(t, out, "select pr:o/r#1 will-mint -", "select pr:o/r#2 will-mint -")
+	mustContain(t, out, "CHANGES", "pr:o/r#1", "pr:o/r#2", "will mint", "ECHO")
 	r := f.lastRun(t)
 	if r.Verb != "select" || !r.Exit.Valid || r.Exit.Int64 != 0 {
 		t.Fatalf("run = %+v, want an exited select", r)
@@ -308,7 +308,7 @@ func TestSelectPreviewWithoutApplyWritesNothingInAnyTable(t *testing.T) {
 			if _, found := f.draftRow(t); !found {
 				t.Errorf("a preview deleted the stored draft")
 			}
-			mustContain(t, out, "select pr:o/r#1 will-mint -")
+			mustContain(t, out, "CHANGES", "pr:o/r#1", "will mint")
 			mustContain(t, errOut, `"dry_run":true`)
 		})
 	}
@@ -483,7 +483,7 @@ func TestSelectHandAddHasNullTierAndIsHydratedFirst(t *testing.T) {
 	// Under --dry-run nothing is hydrated and the key is reported.
 	out, _, err := sel(t, "ok +J-9", "--dry-run")
 	mustOK(t, err)
-	mustContain(t, out, "hydrate issue:J-9 would-hydrate")
+	mustContain(t, out, "would hydrate issue:J-9", "hydrated, new to store")
 	if h.calls != 0 {
 		t.Fatalf("a dry run hydrated %d keys", h.calls)
 	}
@@ -492,7 +492,7 @@ func TestSelectHandAddHasNullTierAndIsHydratedFirst(t *testing.T) {
 	if h.calls != 1 {
 		t.Fatalf("hydrate calls = %d, want 1", h.calls)
 	}
-	mustContain(t, out, "hydrate issue:J-9 hydrated")
+	mustContain(t, out, "hydrated issue:J-9", "hydrated, new to store")
 	rows := f.plan(t, showToday)
 	if len(rows) != 2 || rows[1].EntityID != "J-9" || rows[1].Tier != nil || rows[1].RankPosition != 2 {
 		t.Fatalf("rows = %+v, want the hand-add last with a NULL tier", rows)
@@ -805,7 +805,7 @@ func TestFirstLockOfALaterPeriodReplacesThePlan(t *testing.T) {
 	f.showDraft(t)
 	out, _, err := sel(t, "ok", "--apply")
 	mustOK(t, err)
-	mustContain(t, out, "new_period")
+	mustContain(t, out, "new plan")
 	// The old plan's only row is gone and its entity annotated none.
 	p, _, _ := f.st.FocusPeriodGet("day", "2026-10-09")
 	rows, _ := f.st.FocusPlanRows(p.ID)
@@ -1014,7 +1014,7 @@ func TestMergePersistsAcrossRunsAndTheAbsorbedItemIsNeverSelected(t *testing.T) 
 	f.pr(t, 2, "absorbed", "2026-10-09T09:00:00Z")
 	out, _, err := sel(t, "ok", "--apply", "--merge", "1=2")
 	mustOK(t, err)
-	mustContain(t, out, "merge pr:o/r#2 link-recorded -")
+	mustContain(t, out, "merged o/r#2 into o/r#1 (link recorded; no bead for o/r#2)")
 	if got := strings.Join(f.planKeys(t, showToday), ","); got != "o/r#1" {
 		t.Fatalf("plan = %s, want only the kept item", got)
 	}
@@ -1076,7 +1076,7 @@ func TestMergeReversedByPlusAbsorbedKey(t *testing.T) {
 	mustOK(t, err)
 	out, _, err := sel(t, "+2", "--apply")
 	mustOK(t, err)
-	mustContain(t, out, "unmerge pr:o/r#2 link-removed -")
+	mustContain(t, out, "merge of o/r#2 into o/r#1 reversed (link removed)")
 	if n := len(f.mergeLinks(t, prKey(1))); n != 0 {
 		t.Fatalf("the merge link survives +<absorbedKey>: %d", n)
 	}
@@ -1146,7 +1146,7 @@ func TestSelectJSONCarriesTheContractRunIdAndChanges(t *testing.T) {
 		t.Fatalf("changes = %v", m["changes"])
 	}
 	c := ch[0].(map[string]any)
-	if c["verb"] != "select" || c["key"] != "pr:o/r#1" || c["effect"] != "will-mint" || c["cause"] != "-" {
+	if c["direction"] != "select" || c["key"] != "pr:o/r#1" || c["effect"] != "mint" || c["cause"] != "" {
 		t.Errorf("change = %v", c)
 	}
 }

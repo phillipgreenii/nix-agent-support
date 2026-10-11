@@ -294,7 +294,7 @@ func TestBuildPreviewResolvesEffectAndBecauseFromTheBeadStateTable(t *testing.T)
 	if c := by[src]; c.Effect != "hold" || c.BeadID != "bd-10" || c.State != StateOpen || c.CauseText != "you" || c.Echo != "will hold" {
 		t.Errorf("strike of a source with an open bead = %+v", c)
 	}
-	if c := by[claimed]; c.Effect != "none" || c.BeadID != "bd-11" || c.Echo != "claimed by worker-1, left running" || c.CauseText != "cap" {
+	if c := by[claimed]; c.Effect != "none" || c.BeadID != "bd-11" || c.Echo != "claimed by worker-1, left running (stop it with bd; pg-desk cannot)" || c.CauseText != "cap" {
 		t.Errorf("strike of a source with a claimed bead = %+v", c)
 	}
 	if c := by[Key{"pr", "3"}]; c.Effect != "mint" || c.Echo != "will mint" || c.Direction != DirectionSelect {
