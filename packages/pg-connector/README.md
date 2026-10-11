@@ -197,6 +197,7 @@ packages/pg-connector/
     eventlog/     shared writer mechanics behind each backend's OWN event log (see below)
   cmd/
     pg-connector/                        umbrella; imports pkg/schema + pkg/provider + pkg/scriptout only
+    pg-connector-github/                 daemon-backed GitHub connector (serve, pr, ci modes); internal/config loads its rendered config
     pg-connector-pr-github/internal/     backend-private
     pg-connector-issue-beads/internal/
     pg-connector-ci-github-actions/internal/
