@@ -1,0 +1,89 @@
+package store
+
+import (
+	"database/sql"
+	"fmt"
+)
+
+// SchemaVersion is the newest schema version this binary knows. A store
+// above it is refused (ErrSchemaNewer); a store below it is migrated up.
+const SchemaVersion = 1
+
+// builtinMigrations is the ladder; len(builtinMigrations) == SchemaVersion
+// (asserted by a test). A migration, once shipped, MUST NOT change: add a
+// new step and a fixture store for the version it produces under testdata/.
+var builtinMigrations = []Migration{
+	{Version: 1, Name: "query, alias, entity, entity_group, budget", Apply: migrateV1},
+}
+
+// Times are INTEGER Unix milliseconds (NULL = unset). Booleans are INTEGER
+// 0/1. A group's `content` is an opaque BLOB owned by the group's Strategy.
+//
+// The tables pending_change, change_log, consumer and job are NOT part of
+// version 1; they arrive by later migrations.
+const schemaV1 = `
+CREATE TABLE query (
+    key             TEXT    NOT NULL PRIMARY KEY,
+    configured      INTEGER NOT NULL DEFAULT 0,
+    ids             TEXT    NOT NULL DEFAULT '[]',
+    complete        INTEGER NOT NULL DEFAULT 0,
+    fetched_at      INTEGER,
+    fresh_until     INTEGER,
+    last_success_at INTEGER,
+    last_error      TEXT    NOT NULL DEFAULT ''
+);
+
+CREATE TABLE alias (
+    node_id  TEXT    NOT NULL PRIMARY KEY,
+    ref      TEXT    NOT NULL,
+    seen_at  INTEGER NOT NULL
+);
+CREATE INDEX alias_ref ON alias (ref);
+
+CREATE TABLE entity (
+    kind                 TEXT    NOT NULL,
+    id                   TEXT    NOT NULL,
+    version              INTEGER NOT NULL DEFAULT 0,
+    last_access          INTEGER,
+    keep_alive           INTEGER NOT NULL DEFAULT 0,
+    last_known_mergeable TEXT    NOT NULL DEFAULT '',
+    tombstoned_at        INTEGER,
+    PRIMARY KEY (kind, id)
+);
+
+CREATE TABLE entity_group (
+    kind             TEXT    NOT NULL,
+    id               TEXT    NOT NULL,
+    group_name       TEXT    NOT NULL,
+    content          BLOB,
+    fingerprint      TEXT    NOT NULL DEFAULT '',
+    fetched_at       INTEGER,
+    fresh_until      INTEGER,
+    max_age_at       INTEGER,
+    last_error       TEXT    NOT NULL DEFAULT '',
+    generation       INTEGER NOT NULL DEFAULT 0,
+    fetched_for_head TEXT    NOT NULL DEFAULT '',
+    fetched_for_base TEXT    NOT NULL DEFAULT '',
+    PRIMARY KEY (kind, id, group_name)
+);
+CREATE INDEX entity_group_due ON entity_group (fresh_until);
+
+CREATE TABLE budget (
+    seq       INTEGER PRIMARY KEY AUTOINCREMENT,
+    bucket    TEXT    NOT NULL,
+    at        INTEGER NOT NULL,
+    remaining INTEGER NOT NULL,
+    reset_at  INTEGER,
+    spent     INTEGER NOT NULL DEFAULT 0,
+    purpose   TEXT    NOT NULL DEFAULT ''
+);
+CREATE INDEX budget_bucket_at ON budget (bucket, at);
+`
+
+func migrateV1(tx *sql.Tx, report func(string)) error {
+	report("creating the version 1 tables")
+	if _, err := tx.Exec(schemaV1); err != nil {
+		return fmt.Errorf("create version 1 schema: %w", err)
+	}
+	return nil
+}
