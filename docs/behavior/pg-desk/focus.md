@@ -322,6 +322,99 @@ what separates them for a human.
 - **INV-FOCUS-18.** The bead column MUST use only the "Shown as" words of the state-by-outcome table,
   defined once in code.
 
+## The reply grammar and the final set
+
+`select` reads one reply, parses it completely, and only then decides what would change. Both steps are
+pure code in `internal/focus`: they read the draft, the plan and the live facts and write nothing; the
+lock that applies the result is specified with `select`.
+
+**The grammar.** A reply is a list of tokens separated by whitespace or commas (a CRLF, a tab and a mix
+of separators all work):
+
+| Token    | Meaning                                                                                                                                                                                                                 |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ok`     | Accept. It may be combined with any other token and changes nothing by itself: the draft's `+` rows are locked whether or not it is written, so it exists to make an accepting reply distinguishable from an empty one. |
+| `-<key>` | Strike the entity: its row is deleted in every period.                                                                                                                                                                  |
+| `+<key>` | Force-pull a candidate, or hand-add a key that is no candidate (any bead, labelled or not).                                                                                                                             |
+| `cap=N`  | Re-cap. `N` is a positive integer (ASCII digits, at least 1); `cap=` may appear once.                                                                                                                                   |
+
+Keywords are case-insensitive. An exact repeat of `ok`, `+<key>` or `-<key>` is harmless and counts once.
+These are usage errors (exit 1, one line naming the problem and the way out, no selection state
+changed, the caller re-prompts): an EMPTY reply (`reply ok to accept`, so a closed stdin in a
+non-interactive run can never apply the whole plan), an unrecognized token, a sign with no key, `cap=`
+with a value that is empty, zero, negative, not a number or too large, `cap=` twice, a conflicting pair
+for one key (`-X +X`, also when the two are written in different forms of the same key), a key that
+resolves to nothing, and a hand-add that is closed, finished or hidden. Parsing is atomic: it returns a
+whole reply or an error and nothing else.
+
+**Keys.** A key is written in any form the typed verbs resolve: a bare positive integer (a PR number in
+the configured repository), a PR URL ending `/pull/N`, `OWNER/REPO#N` or `#N`, a bead id matching
+`bead_id_pattern`, or a tracker key shaped like a configured ticket pattern (matched as a whole; a key
+that matches only in upper case is upper-cased). A PR reference that names another repository than the
+configured one is a usage error, so a number is never resolved against the wrong repository. The echo
+prints the canonical key and the title, so a key that resolved to something unintended is visible.
+
+**The final set** is computed from the draft the operator saw, the plan, the live candidate set and the
+live facts. The rank is never recomputed (the order is the draft's). `cap` has two roles.
+
+- _Initial-plan size_: the reply's `cap=N`, else the draft's own cap (its `--cap`, else the period's
+  persisted cap, else the default 6). A first `ok` selects exactly the rows the operator saw marked
+  `+`; `cap=N` re-takes the first `N` UNFINISHED rows of the SAME draft order instead. A finished row
+  keeps its place in that walk and does not count.
+- _Removal threshold_: over an existing plan only a reply `cap=N` counts, and it deletes only when `N`
+  is LESS THAN the persisted period cap (the default 6 when none is persisted). The rows it can delete
+  are those already in the plan before the reply: the unfinished ones with the highest
+  `rank_position` beyond `N`, cause `cap`. Rows added by the same reply's `+key` and the draft's own
+  `+` proposals are exempt and raise the effective cap. `cap=N` at or above the persisted cap deletes
+  nothing and only moves the cap line; `replan --cap` and `select --cap` persist nothing, so
+  `replan --cap 3` followed by a bare `ok` removes nothing.
+
+The persisted period cap is the reply's `cap=N` when given; at a first lock with no reply cap it is the
+draft's cap; otherwise it is unchanged.
+
+- **First lock** (the period has no row): the final set is the draft's `+` rows in draft order plus
+  force-pulled and hand-added keys. Each force-pull or hand-add raises the effective cap by one, since
+  it falls outside the top `cap`. A finished draft row is skipped and does not count. A `-key` on a
+  proposal never selected writes no row and backfills nothing; the key is left out of the set.
+- **A plan exists**: the final set is every selected row, in its recorded order, plus the draft's `+`
+  rows not yet in the plan (only an initial draft has any; a replan draft marks none, so a bare `ok`
+  over it never adds and never removes), plus any `+key`, minus any `-key`. A row whose source is
+  terminal stays, shown finished. A row that lost candidacy for a NON-terminal reason is deleted with
+  cause `dropped` (the closed list: an entity hidden; an entity inactive without a terminal state). A
+  worker claiming a bead, a defer, a release, a reassignment, a slot, a correlation group and a merge
+  never remove a row: candidacy is for entry only and only `-key` removes it.
+- **Finished is read before active**: a closed entity is also deactivated, so a row that is finished
+  stays whatever else is true of it.
+
+**Keys of both signs.** A key known to the draft or the plan is valid with both signs. For a finished
+or no-longer-candidate row, `+key` is a routine skip (exit 0) and `-key` is a no-op, both reported on
+stderr; `+key` of a row already selected is the routine skip `already-selected`. A `-key` naming no
+candidate and no row in ANY period's plan is a usage error; one that exists only as a row of another
+period is accepted and deletes it. A `+key` of a candidate that arrived after the draft is judged against
+the LIVE candidate set and is a force-pull, not a hand-add. `+<epicKey>` of an epic with an open child is a
+usage error naming the child.
+
+**Merges.** `--merge keep=absorbed` drops the absorbed key from consideration (it never gets a row,
+and nothing backfills its proposal slot) and is reported for the lock to record as an external link.
+`+<absorbedKey>` reverses a merge: for a recorded merge the lock removes the link and the key is an
+ordinary `+key`; for a merge of the same run it cancels the merge.
+
+**What it decides.** Inserted rows with their source (`draft`, `force`, `handadd`) and tier, deleted
+rows with their cause (`operator`, `cap`, `dropped`; `new_period` belongs to the lock that replaces an
+earlier period's plan), the routine skips (`finished`, `no-longer-candidate`, `already-selected`,
+`not-a-candidate`), the effective cap, the cap to persist and the merges to record or reverse. It
+assigns no `rank_position`, performs no store write and takes no transaction.
+
+- **INV-FOCUS-19.** A reply MUST be parsed completely before any selection state is applied: a
+  malformed, empty or conflicting reply MUST be a usage error (exit 1) that changes no state.
+- **INV-FOCUS-20.** The final set MUST be computed from the draft's order and MUST NOT recompute the
+  rank; a bare `ok` over a plan MUST NOT remove or add by rank.
+- **INV-FOCUS-21.** A reply `cap=N` MUST delete rows only when `N` is below the persisted period cap and
+  only among the unfinished rows already in the plan, highest `rank_position` first; a finished row,
+  and a row the same reply adds, MUST NOT be removed by it.
+- **INV-FOCUS-22.** A row MUST be deleted only with cause `operator`, `cap`, `dropped` or `new_period`,
+  and a claim, a defer, a reassignment, a slot, a group or a merge MUST NOT remove one.
+
 ## The rank
 
 The rank orders the candidate set of the daily focus. `show`, `select`, `replan`, `pull` and `explain`
@@ -397,6 +490,9 @@ The focus verbs emit nothing over OpenTelemetry and write no Prometheus series o
 - **The draft model:** the draft document, its re-render, the plan view and the cap line are pure
   computations over their arguments and the injected clock; they emit no OpenTelemetry or Prometheus
   signal and log nothing.
+- **The reply parser, key resolution and the final set:** pure computations over their arguments; they
+  emit no OpenTelemetry or Prometheus signal and log nothing. A usage error they return is printed by
+  the verb as its one-line stderr remedy and counted by the run record's `usage` outcome.
 - **OpenTelemetry:** none, including from the rank, which also logs nothing; the verbs that call it
   report its `rank_inputs` counts in the run record and the structured stderr line.
 - **Prometheus:** none from the verbs. The `pg_desk_focus_*` families that `serve` exposes are
