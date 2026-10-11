@@ -1583,13 +1583,14 @@
                     # check CMD WORKER: exit 0 only when every rule is present.
                     check() {
                       c="$1"; w="$2"
+                      # Triage runs inside `pb unstick prepare` (ADR 0093), so the command's Stage 1
+                      # reference carries both the selection rule and the SKIP-focus-item class.
                       section "$c" '^## Stage 1 ' '^## Stage 2 ' > "$TMPDIR/stage1"
-                      section "$c" '^## Stage 3 ' '^## Stage 4 ' > "$TMPDIR/stage3"
                       section "$w" '^## Per-bead procedure' '^## Standing permissions' > "$TMPDIR/procedure"
-                      grep -q 'REMOVE from TARGETS any bead whose `labels` contain `focus-item`' "$TMPDIR/stage1" || { echo "FAIL: Stage 1 lacks the focus-item exclusion" >&2; return 1; }
-                      grep -q 'SKIP-focus-item' "$TMPDIR/stage3" || { echo "FAIL: Stage 3 lacks SKIP-focus-item" >&2; return 1; }
+                      grep -q 'whose `labels` contain `focus-item` is removed from TARGETS' "$TMPDIR/stage1" || { echo "FAIL: Stage 1 lacks the focus-item exclusion" >&2; return 1; }
+                      grep -q 'SKIP-focus-item' "$TMPDIR/stage1" || { echo "FAIL: Stage 1 lacks SKIP-focus-item" >&2; return 1; }
                       grep -q 'focus-item' "$TMPDIR/procedure" || { echo "FAIL: worker prompt lacks the focus-item exclusion" >&2; return 1; }
-                      awk '/^   - triage counts/ { on = 1 } on && /focus-item/ { found = 1 } /^   - closed beads/ { on = 0 } END { exit !found }' "$c" || { echo "FAIL: report lacks the focus-item count" >&2; return 1; }
+                      awk '/^4\. \*\*Final report\*\*/ { on = 1 } on && /focus_excluded/ { found = 1 } /^## Rules/ { on = 0 } END { exit !found }' "$c" || { echo "FAIL: report lacks the focus-item count" >&2; return 1; }
                     }
 
                     cmd=${unstickSrc}/commands/unstick-beads.md
@@ -1611,16 +1612,16 @@
                     drop "$worker" "$TMPDIR/mut/worker.md"
                     if check "$cmd" "$TMPDIR/mut/worker.md" 2> "$TMPDIR/err"; then echo "negative control 2 passed but must fail" >&2; exit 1; fi
                     grep -q "worker prompt lacks" "$TMPDIR/err"
-                    echo "negative 3: Stage 1 only (Stage 3 class removed)"
+                    echo "negative 3: selection rule only (SKIP-focus-item class removed)"
                     sed 's/SKIP-focus-item/SKIP-x/g' "$cmd" > "$TMPDIR/mut/cmd3.md"
                     if check "$TMPDIR/mut/cmd3.md" "$worker" 2> "$TMPDIR/err"; then echo "negative control 3 passed but must fail" >&2; exit 1; fi
-                    grep -q "Stage 3 lacks" "$TMPDIR/err"
+                    grep -q "lacks SKIP-focus-item" "$TMPDIR/err"
                     echo "negative 4: exclusion only in the worker prompt"
                     awk '/^## Stage 1 /{s=1} /^## Stage 2 /{s=0} s && /focus-item/ {next} {print}' "$cmd" > "$TMPDIR/mut/cmd4.md"
                     if check "$TMPDIR/mut/cmd4.md" "$worker" 2> "$TMPDIR/err"; then echo "negative control 4 passed but must fail" >&2; exit 1; fi
                     grep -q "Stage 1 lacks" "$TMPDIR/err"
                     echo "negative 5: report without the focus-item count"
-                    sed 's/and the `focus-item` beads/and the beads/; s/excluded (Stage 1 `EXCLUDED-focus-item` plus any `SKIP-focus-item`; a count only, no ids);/excluded;/' "$cmd" > "$TMPDIR/mut/cmd5.md"
+                    sed 's/(including `focus_excluded`: a count only, no/(including `x`: a count only, no/' "$cmd" > "$TMPDIR/mut/cmd5.md"
                     cmp -s "$cmd" "$TMPDIR/mut/cmd5.md" && { echo "negative 5 mutation was a no-op" >&2; exit 1; }
                     if check "$TMPDIR/mut/cmd5.md" "$worker" 2> "$TMPDIR/err"; then echo "negative control 5 passed but must fail" >&2; exit 1; fi
                     grep -q "report lacks" "$TMPDIR/err"

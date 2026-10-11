@@ -64,7 +64,7 @@ func MentionsID(text, id string) bool {
 		i += from
 		end := i + len(id)
 		okBefore := i == 0 || !idChar(text[i-1])
-		okAfter := end == len(text) || (!idChar(text[end]) && !(text[end] == '.' && end+1 < len(text) && idChar(text[end+1])))
+		okAfter := end == len(text) || (!idChar(text[end]) && (text[end] != '.' || end+1 >= len(text) || !idChar(text[end+1])))
 		if okBefore && okAfter {
 			return true
 		}

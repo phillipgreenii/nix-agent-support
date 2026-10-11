@@ -837,6 +837,12 @@ func TestTriageSyntheticFixture(t *testing.T) {
 // non-drainable.
 func TestExcludedLabelsMatchDrainBeads(t *testing.T) {
 	b, err := os.ReadFile("../../../../claude-marketplace/pb/commands/drain-beads.md")
+	if os.IsNotExist(err) {
+		// The nix go-tests gate builds from ./packages/pb alone, where the
+		// marketplace tree is absent. The in-tree run (go test, the commit-time
+		// run-unit-tests hook) still enforces this.
+		t.Skip("claude-marketplace/pb is not in this source tree (nix sandbox)")
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
