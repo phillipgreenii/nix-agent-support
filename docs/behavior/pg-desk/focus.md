@@ -97,8 +97,9 @@ session, whose stderr is gone by the next week. The record carries:
 Absent counts are written as zero or empty, never omitted. The members are additive: a later
 revision MAY add members and MUST NOT rename or remove one.
 
-The row is written when the run starts, with no exit code, and finalized LAST, so a crash between the
-two leaves a row without an exit code. Such a row is counted as a total failure. A usage error or a
+The row is written with no exit code, by the lock transaction for a lock (together with the plan
+rows) and when the run starts for any other run, and finalized LAST, so a crash between the two
+leaves a row without an exit code. Such a row is counted as a total failure. A usage error or a
 closed period still writes its row when the store is writable, so those outcomes are counted too. A
 dry run prints the same line with `dry_run` true and writes no row. The run identifier is a ULID, sortable
 by time, generated without any new dependency.
@@ -415,6 +416,107 @@ assigns no `rank_position`, performs no store write and takes no transaction.
 - **INV-FOCUS-22.** A row MUST be deleted only with cause `operator`, `cap`, `dropped` or `new_period`,
   and a claim, a defer, a reassignment, a slot, a group or a merge MUST NOT remove one.
 
+## `select`: the lock, repair and merge
+
+`pg-desk focus select [--date] [--cap N] [--apply | --dry-run] [--merge KEEP=ABSORBED,...] [--repair]
+[--json]` reads a reply on stdin and, with `--apply`, LOCKS the draft into the plan. Without
+`--apply`, or with `--dry-run` (alone or together with `--apply`), it previews: it computes everything
+and writes nothing, in any table, and leaves the stored draft. `--cap N` with an applicable stored
+draft is a usage error (the draft's cap stands; `cap=N` in the reply is where it changes); with no
+stored draft it sets the cap of the draft computed in process. Nothing is minted here: `select`
+writes selection state only, and the annotation it writes is what the decider reacts to.
+
+**The draft.** An applicable stored draft is locked as stored: its order is the order written. With
+no applicable draft, or an unreadable one, `--apply` computes one in process, exactly as `replan`
+would, prints `WARNING: no stored draft; the order was computed now and may differ from what you
+saw` on stderr and records `fresh_order` in the run record. A second lock that finds the draft
+already consumed by a concurrent lock, pull or replan reads the plan as it now stands and computes
+afresh the same way.
+
+**The order of checks.** The first failing check decides the exit code: usage and flag errors (`1`),
+the period is closed (`6`), a malformed reply (`1`), a first lock for an earlier or a future period
+(`1`), hand-add hydration (`1`), then the writes (`3`, or `2` partial, or `0`). A malformed reply over
+a closed period is therefore `6`, and a run that is doomed by an earlier check never hydrates.
+
+**Hand-add hydration** is a separate, reported pre-step, not part of the atomic parse: a key the store
+has never gathered is hydrated first (a read of the tracker that writes the store's own entity row),
+the run is recomputed over the result and the hydrated keys are listed. A failure is a usage error
+that says hydration may already have written store rows and that no selection state changed. Under a
+preview nothing is hydrated and the key is reported as would-hydrate.
+
+**The lock** is one store transaction that holds, together: the plan rows (inserts and deletes, the
+rows of other periods on a first lock included), the deletion of the stored draft (when its period
+is at or below the locked one), the period row (get or create, with the persisted cap) and the run
+record row. Whether the lock is a FIRST lock is tested inside that transaction, by counting the
+period's rows (a period row that exists does not matter), so of two concurrent first locks the second
+takes the plan-exists branch. After the commit each affected entity's `focus_selected` annotation is
+written under pg-desk's per-entity lock, its value computed from the committed table: the maximum
+period key over the entity's rows, else `none`, and a value already held writes nothing. Then the run
+record's per-entity `{outcome, seq}` is completed and its exit code is set last. A crash between the
+steps leaves rows without annotations, which `--repair` mends.
+
+**A first lock may replace the plan.** When the period has no row, the final set is non-empty, the
+period key is greater than every other period's key that holds rows and is not later than today in
+`focus.time_zone`, the same transaction deletes every row of every other period (cause `new_period`;
+a closed period's own row, `closed_at` and note stay), and a period that was never closed is named in
+the preview. A first lock for an earlier period is exit `1` (`period <date> is earlier than the
+current plan (<date>); history is not rewritten`) and one for a future date is exit `1` (`period
+<date> is in the future; plan it on the day`). An EMPTY first lock replaces nothing but still applies
+`-key` deletions, writes its run row (outcome `empty`) and deletes the draft, so with no `-key` it
+writes nothing but that row and the draft deletion.
+
+**Rows.** `rank_position` is a per-period lock sequence, not a rank: the first lock numbers its rows
+1..n in draft order (force-pulled and hand-added rows after them, in reply order) and every later add
+takes the maximum over the period's rows plus one, in reply order. A row already in the plan is never
+rewritten and a deletion leaves a gap. A hand-add has no tier. `-key` deletes the entity's rows in
+EVERY period (so the annotation reads `none` and the decider always holds the bead), and a row whose
+source is terminal stays and is shown finished.
+
+**Exit codes.** `0` applied (or previewed); `1` a usage error, including a first lock for an earlier
+or a future period, with no selection state changed; `2` the rows committed but some annotation write
+failed (the run record says which; run `select --repair`); `3` a write failed outright and the
+transaction rolled back; `6` the period is closed.
+
+**Merge.** `--merge KEEP=ABSORBED` (repeatable, comma-separated) records an EXTERNAL `references` link
+from the kept entity to the absorbed one with reason `focus:merge`; it writes no row, no annotation
+and no change record, whether or not the kept key is in the plan. The absorbed key is dropped from
+consideration and never gets a row. The link persists, so a later `select`, run without the flag or by
+another caller, does not return the absorbed item as a candidate. A self-merge is a usage error.
+`+<absorbedKey>` reverses the merge: the link is removed and the key is an ordinary candidate again.
+
+**Repair.** `select --repair` re-writes every missing or mismatched `focus_selected` annotation from
+the table. It scans every entity whose annotation is not `none` and every entity with a plan row in any
+period, reads no reply, takes no `--merge` or `--cap`, is exempt from the period-closed check, and writes a run record
+row of verb `repair`. An annotation whose entity has no row is rewritten to `none`. With `--dry-run`
+it lists what it would write and writes nothing.
+
+**Output until the echo.** Printing the CHANGES block and the echo table belongs to a later revision;
+until then the verb prints one machine-readable stdout line per change, `<verb> <canonical key>
+<effect> <cause>` (for example `select pr:o/r#1 will-mint -` or `select pr:o/r#2 will-hold operator`),
+and `--json` carries the same fields as `changes` (with the bead id and the because clause), the
+merges, the hydrated keys and the annotation outcomes. The effect and the because clause of every
+row come from the state-by-outcome table, the same for a preview, a dry run and an apply.
+
+- **INV-FOCUS-23.** A lock MUST reconcile the plan rows, delete the stored draft, write the period row
+  and write the run record row in ONE store transaction, MUST choose its first-lock or plan-exists
+  branch by re-reading the period's rows inside that transaction, and MUST write the annotations and
+  finalize the run record's exit code only after it commits.
+- **INV-FOCUS-24.** A first lock MUST replace the plan (delete every row of every other period) only
+  when the final set is non-empty, the period key is greater than every other period's key that holds
+  rows and the period is not later than today in `focus.time_zone`; otherwise an earlier or a future
+  first lock MUST be exit `1` and an empty one MUST replace nothing.
+- **INV-FOCUS-25.** A strike (`-key`) MUST delete the entity's rows in every period, and the
+  `focus_selected` annotation of every affected entity MUST be the maximum period key over its rows,
+  else `none`.
+- **INV-FOCUS-26.** A preview, a dry run and `--repair --dry-run` MUST write nothing in any table and
+  MUST leave the stored draft.
+- **INV-FOCUS-27.** `--repair` MUST read no reply, MUST ignore the period-closed check and MUST rewrite
+  an annotation that has no row to `none`.
+- **INV-FOCUS-28.** `--merge` MUST record only an external `focus:merge` link and MUST NOT write a row,
+  an annotation or a change record; `+<absorbedKey>` MUST remove the link.
+- **INV-FOCUS-29.** Hand-add hydration MUST run only after every earlier check has passed and MUST
+  NOT run under a preview.
+
 ## The rank
 
 The rank orders the candidate set of the daily focus. `show`, `select`, `replan`, `pull` and `explain`
@@ -505,4 +607,9 @@ The focus verbs emit nothing over OpenTelemetry and write no Prometheus series o
 - **`show` and `replan`:** they emit no OpenTelemetry and no Prometheus series, log nothing and write
   no run record; `show` writes the single draft row in the one case above and `replan` replaces it.
   Their output (the table, the NOTICE lines and `--json`) is the whole of what they leave behind.
+- **`select`, the lock, repair and merge:** `internal/focus` (the lock, the preview, repair, merge
+  and hydration helpers) emits no OpenTelemetry or Prometheus signal and logs nothing; the verb writes
+  one run record row and prints the one structured stderr line, plus the `WARNING` and `NOTE` lines.
+  The `focus_selected` annotation's change-log record is the only other trace of a write, and its
+  sequence is carried in the run record.
 - **Store:** the run record row (see "The run record") is the durable copy of that line.

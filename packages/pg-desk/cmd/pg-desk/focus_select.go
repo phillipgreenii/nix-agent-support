@@ -299,9 +299,6 @@ func (s *selectRun) plan() (*planned, error) {
 		p.rk = g.rank(p.cap)
 		p.doc = focus.NewReplanDraft(g.plan, p.rk, g.cov.State, p.cap, g.firstSeen)
 		p.madeAt = env.Now
-		if f.apply {
-			_, _ = fmt.Fprintln(s.cmd.ErrOrStderr(), "WARNING: no stored draft; the order was computed now and may differ from what you saw")
-		}
 	}
 
 	// Live facts of every key the draft, the plan and the reply name.
@@ -399,6 +396,9 @@ func (s *selectRun) once() error {
 		p.hydrated = hydrated
 	}
 
+	if p.fresh && s.f.apply {
+		_, _ = fmt.Fprintln(s.cmd.ErrOrStderr(), "WARNING: no stored draft; the order was computed now and may differ from what you saw")
+	}
 	counts := s.counts(p)
 	if !s.f.apply {
 		res, lerr := focus.Lock(ctx, p.deps, p.lockIn)
