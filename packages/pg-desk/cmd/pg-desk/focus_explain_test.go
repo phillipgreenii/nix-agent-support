@@ -189,6 +189,7 @@ func TestExplainTextLineOrder(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-43: explain carries no flip-history member.
 func TestExplainHasNoFlipHistory(t *testing.T) {
 	f := newExplainFixture(t)
 	wantMembers := []string{"annotation", "bead", "candidate", "cap_position", "contract", "deciding", "key", "plan_row", "reasons", "run_id", "slot", "tier", "verb", "via"}
@@ -235,6 +236,8 @@ func sameSet(a, b []string) bool {
 // TestExplainIsReadOnly: a full-store snapshot, every table and meta, is
 // byte-identical after every shape of the verb, and no period, run or
 // change row appears for a day nothing was written for.
+//
+// Traces INV-FOCUS-42: explain writes no table and calls no tracker.
 func TestExplainIsReadOnly(t *testing.T) {
 	f := newExplainFixture(t)
 	before := f.snapshot(t)
@@ -278,6 +281,7 @@ func firstDiff(a, b string) string {
 	return "length differs"
 }
 
+// Traces INV-FOCUS-44: an unknown key is not held, exit 0.
 func TestExplainUnknownKeyIsNotHeldAndExitsZero(t *testing.T) {
 	newExplainFixture(t)
 	out, _, err := explain(t, "o/r#99")
@@ -291,6 +295,7 @@ func TestExplainUnknownKeyIsNotHeldAndExitsZero(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-44: an unmigrated store is exit 1.
 func TestExplainUnmigratedStoreExitsOne(t *testing.T) {
 	newFocusFixture(t, "old")
 	_, _, err := explain(t, "o/r#1")
@@ -313,6 +318,7 @@ func TestExplainUsageErrorsExitOne(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-44: explain accepts the key forms select accepts.
 func TestExplainKeyFormsMatchSelect(t *testing.T) {
 	f := newExplainFixture(t)
 	want := explainJSON(t, f.pr2.ID)
@@ -380,6 +386,7 @@ func TestExplainPlanRowOfAnotherPeriodIsNamed(t *testing.T) {
 	mustContain(t, out, "plan row: selected_at 2026-10-10T09:00:00Z, rank_position 1, tier not_started")
 }
 
+// Traces INV-FOCUS-43: the decider's skip reasons are labelled as recomputed now.
 func TestExplainBeadAuditStates(t *testing.T) {
 	f := newShowFixture(t)
 	f.cfg.BeadIDPattern = `^bd-`

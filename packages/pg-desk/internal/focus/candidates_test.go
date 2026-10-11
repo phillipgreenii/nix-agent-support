@@ -676,6 +676,8 @@ func TestCandidateOrderIsByKindThenKey(t *testing.T) {
 
 // Shuffled store insertion order yields an identical candidate set,
 // including the via of every linked candidate.
+//
+// Traces INV-FOCUS-11: the candidate computation is deterministic.
 func TestCandidateSetIsDeterministicUnderInsertionOrder(t *testing.T) {
 	build := func(order []int) CandidateSet {
 		f := newFixture(t)

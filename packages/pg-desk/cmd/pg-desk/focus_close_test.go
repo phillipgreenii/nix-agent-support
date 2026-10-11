@@ -59,6 +59,7 @@ func (f *selFixture) period(t *testing.T, key string) (store.FocusPeriod, bool) 
 	return p, found
 }
 
+// Traces INV-FOCUS-37: the close note and the period row.
 func TestCloseWritesTheNoteAndCreatesThePeriodRow(t *testing.T) {
 	f := newSelFixture(t)
 	if _, found := f.period(t, showToday); found {
@@ -77,6 +78,7 @@ func TestCloseWritesTheNoteAndCreatesThePeriodRow(t *testing.T) {
 	mustContain(t, errOut, `"verb":"close"`, `"contract":"pg-desk.focus-select/v1"`, `"dry_run":false`, `"exit_code":0`)
 }
 
+// Traces INV-FOCUS-37: close writes one run record row.
 func TestCloseWritesAFocusRunRow(t *testing.T) {
 	f := newSelFixture(t)
 	_, _, err := closeVerb(t, summaryJSON(t, "done"))
@@ -119,6 +121,7 @@ func (f *selFixture) rawExec(t *testing.T, q string) {
 	}
 }
 
+// Traces INV-FOCUS-38: an identical summary on a closed period is exit 0.
 func TestCloseIdempotentWithSameSummary(t *testing.T) {
 	f := newSelFixture(t)
 	_, _, err := closeVerb(t, summaryJSON(t, "done"))
@@ -147,6 +150,7 @@ func TestCloseIdempotentWithSameSummary(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-38: a different summary on a closed period is exit 6.
 func TestCloseWithADifferentSummaryExitsSixAndKeepsTheFirst(t *testing.T) {
 	f := newSelFixture(t)
 	_, _, err := closeVerb(t, summaryJSON(t, "first"))
@@ -168,6 +172,7 @@ func TestCloseWithADifferentSummaryExitsSixAndKeepsTheFirst(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-37: close deletes the draft of the closed period.
 func TestCloseDeletesTheDraftOfItsPeriod(t *testing.T) {
 	f := newSelFixture(t)
 	f.pr(t, 1, "alpha", "2026-10-09T08:00:00Z")
@@ -179,6 +184,7 @@ func TestCloseDeletesTheDraftOfItsPeriod(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-37: close keeps another period's draft.
 func TestCloseKeepsTheDraftOfAnotherPeriod(t *testing.T) {
 	f := newSelFixture(t)
 	f.pr(t, 1, "alpha", "2026-10-09T08:00:00Z")
@@ -205,6 +211,7 @@ func TestCloseKeepsThePlanRows(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-41: a close dry run writes nothing.
 func TestCloseDryRunWritesNothingNotEvenThePeriodRow(t *testing.T) {
 	f := newSelFixture(t)
 	f.pr(t, 1, "alpha", "2026-10-09T08:00:00Z")
@@ -255,6 +262,7 @@ func TestCloseJSONEnvelope(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-39: the summary is a string member of one JSON object.
 func TestCloseDecoderIgnoresUnknownMembersAndRequiresAStringSummary(t *testing.T) {
 	f := newSelFixture(t)
 	_, _, err := closeVerb(t, `{"extra": [1,2], "summary": "ok", "n": null}`)
@@ -277,6 +285,7 @@ func TestCloseDecoderIgnoresUnknownMembersAndRequiresAStringSummary(t *testing.T
 	}
 }
 
+// Traces INV-FOCUS-39: a --date later than today is exit 1.
 func TestCloseFutureDateIsExitOne(t *testing.T) {
 	f := newSelFixture(t)
 	_, _, err := closeVerb(t, summaryJSON(t, "x"), "--date", "2026-10-11")
@@ -369,6 +378,8 @@ func TestFocusExitCodesClose(t *testing.T) {
 
 // The same-transaction rule: when the write fails after the draft deletion
 // would have run, the draft survives (nothing partial commits).
+//
+// Traces INV-FOCUS-37: a failure leaves every write undone.
 func TestCloseIsAtomicWithTheDraftDeletion(t *testing.T) {
 	f := newSelFixture(t)
 	f.pr(t, 1, "alpha", "2026-10-09T08:00:00Z")

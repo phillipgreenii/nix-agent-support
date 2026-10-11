@@ -1,0 +1,1466 @@
+{
+  "contract": "pg-desk.focus-state-scenarios/v1",
+  "doc": "Bead-state scenarios shared by pg-desk (the echo prediction) and pg-decider (the actual plan over the same view). Each scenario is one source entity view with its linked focus bead, run twice: as a strike (annotations.focus_selected set to none) and as a select (set to the period). pg_desk is what the select echo and the bead column say, read from the state-by-outcome table; decider is what decide.Decide plans for the same view. This file is kept as byte-identical copies under packages/pg-desk/internal/focus/testdata and packages/pg-decider/internal/rules/testdata/focus; edit both together.",
+  "period": "2026-10-10",
+  "config": {
+    "bead_id_pattern": "^bd-",
+    "suppressed_kind": "focus-item"
+  },
+  "scenarios": [
+    {
+      "name": "no bead yet",
+      "row": "pending",
+      "view": {
+        "contract": "pg-desk.view/v1",
+        "type": "pr",
+        "id": "acme/widgets#42",
+        "version": 1,
+        "as_of": "2026-10-10T09:00:00Z",
+        "stale": false,
+        "snapshot": {
+          "id": "acme/widgets#42",
+          "repo": "acme/widgets",
+          "number": 42,
+          "title": "Add retry to client",
+          "state": "open",
+          "merged": false,
+          "draft": false
+        },
+        "decorations": {
+          "relationship": "mine",
+          "dispositions": [],
+          "urgency": "",
+          "category": ""
+        },
+        "annotations": {
+          "hidden": {
+            "value": false,
+            "reason": null
+          },
+          "wip": false,
+          "suppress": [],
+          "force_review": false,
+          "force_review_sha": null,
+          "focus_selected": "2026-10-10",
+          "decider": {}
+        },
+        "links": []
+      },
+      "pg_desk": {
+        "state": "pending",
+        "shown": "pending",
+        "strike": {
+          "effect": "none",
+          "because": ""
+        },
+        "select": {
+          "effect": "mint",
+          "because": ""
+        }
+      },
+      "decider": {
+        "strike": {
+          "skip_reason": "not matched",
+          "cause": "not-selected"
+        },
+        "select": {
+          "transition": "mint"
+        }
+      }
+    },
+    {
+      "name": "no bead yet, source hidden",
+      "row": "pending_hidden",
+      "view": {
+        "contract": "pg-desk.view/v1",
+        "type": "pr",
+        "id": "acme/widgets#42",
+        "version": 1,
+        "as_of": "2026-10-10T09:00:00Z",
+        "stale": false,
+        "snapshot": {
+          "id": "acme/widgets#42",
+          "repo": "acme/widgets",
+          "number": 42,
+          "title": "Add retry to client",
+          "state": "open",
+          "merged": false,
+          "draft": false
+        },
+        "decorations": {
+          "relationship": "mine",
+          "dispositions": [],
+          "urgency": "",
+          "category": ""
+        },
+        "annotations": {
+          "hidden": {
+            "value": true,
+            "reason": "parked by the operator"
+          },
+          "wip": false,
+          "suppress": [],
+          "force_review": false,
+          "force_review_sha": null,
+          "focus_selected": "2026-10-10",
+          "decider": {}
+        },
+        "links": []
+      },
+      "pg_desk": {
+        "state": "pending_hidden",
+        "shown": "pending (hidden)",
+        "strike": {
+          "effect": "none",
+          "because": ""
+        },
+        "select": {
+          "effect": "none",
+          "because": "source hidden"
+        }
+      },
+      "decider": {
+        "strike": {
+          "skip_reason": "hidden"
+        },
+        "select": {
+          "skip_reason": "hidden"
+        }
+      }
+    },
+    {
+      "name": "no bead yet, kind suppressed",
+      "row": "pending_suppressed",
+      "view": {
+        "contract": "pg-desk.view/v1",
+        "type": "pr",
+        "id": "acme/widgets#42",
+        "version": 1,
+        "as_of": "2026-10-10T09:00:00Z",
+        "stale": false,
+        "snapshot": {
+          "id": "acme/widgets#42",
+          "repo": "acme/widgets",
+          "number": 42,
+          "title": "Add retry to client",
+          "state": "open",
+          "merged": false,
+          "draft": false
+        },
+        "decorations": {
+          "relationship": "mine",
+          "dispositions": [],
+          "urgency": "",
+          "category": ""
+        },
+        "annotations": {
+          "hidden": {
+            "value": false,
+            "reason": null
+          },
+          "wip": false,
+          "suppress": ["focus-item"],
+          "force_review": false,
+          "force_review_sha": null,
+          "focus_selected": "2026-10-10",
+          "decider": {}
+        },
+        "links": []
+      },
+      "pg_desk": {
+        "state": "pending_suppressed",
+        "shown": "pending (suppressed)",
+        "strike": {
+          "effect": "none",
+          "because": ""
+        },
+        "select": {
+          "effect": "none",
+          "because": "suppressed"
+        }
+      },
+      "decider": {
+        "strike": {
+          "skip_reason": "suppressed"
+        },
+        "select": {
+          "skip_reason": "suppressed"
+        }
+      }
+    },
+    {
+      "name": "no bead yet, source merged",
+      "row": "source_done_no_bead",
+      "view": {
+        "contract": "pg-desk.view/v1",
+        "type": "pr",
+        "id": "acme/widgets#42",
+        "version": 1,
+        "as_of": "2026-10-10T09:00:00Z",
+        "stale": false,
+        "snapshot": {
+          "id": "acme/widgets#42",
+          "repo": "acme/widgets",
+          "number": 42,
+          "title": "Add retry to client",
+          "state": "closed",
+          "merged": true,
+          "draft": false
+        },
+        "decorations": {
+          "relationship": "mine",
+          "dispositions": [],
+          "urgency": "",
+          "category": ""
+        },
+        "annotations": {
+          "hidden": {
+            "value": false,
+            "reason": null
+          },
+          "wip": false,
+          "suppress": [],
+          "force_review": false,
+          "force_review_sha": null,
+          "focus_selected": "2026-10-10",
+          "decider": {}
+        },
+        "links": []
+      },
+      "pg_desk": {
+        "state": "source_done_no_bead",
+        "shown": "source done (no bead)",
+        "strike": {
+          "effect": "none",
+          "because": ""
+        },
+        "select": {
+          "effect": "none",
+          "because": "source finished"
+        }
+      },
+      "decider": {
+        "strike": {
+          "skip_reason": "not matched",
+          "cause": "not-selected"
+        },
+        "select": {
+          "skip_reason": "not matched",
+          "cause": "source-terminal"
+        }
+      }
+    },
+    {
+      "name": "source is itself a bead",
+      "row": "not_applicable",
+      "view": {
+        "contract": "pg-desk.view/v1",
+        "type": "issue",
+        "id": "bd-70",
+        "version": 1,
+        "as_of": "2026-10-10T09:00:00Z",
+        "stale": false,
+        "snapshot": {
+          "id": "bd-70",
+          "title": "Crash on startup",
+          "state": "open",
+          "status_category": "indeterminate",
+          "labels": []
+        },
+        "decorations": {
+          "relationship": "",
+          "dispositions": [],
+          "urgency": "",
+          "category": ""
+        },
+        "annotations": {
+          "hidden": {
+            "value": false,
+            "reason": null
+          },
+          "wip": false,
+          "suppress": [],
+          "force_review": false,
+          "force_review_sha": null,
+          "ready_to_land": null,
+          "focus_selected": "2026-10-10",
+          "decider": {}
+        },
+        "links": []
+      },
+      "pg_desk": {
+        "state": "not_applicable",
+        "shown": "n/a (epic or bead)",
+        "strike": {
+          "effect": "none",
+          "because": "no bead"
+        },
+        "select": {
+          "effect": "none",
+          "because": "no bead"
+        }
+      },
+      "decider": {
+        "strike": {
+          "skip_reason": "not matched",
+          "cause": "not-selected"
+        },
+        "select": {
+          "skip_reason": "not matched",
+          "cause": "source-is-bead"
+        }
+      }
+    },
+    {
+      "name": "open bead, no marker",
+      "row": "open",
+      "view": {
+        "contract": "pg-desk.view/v1",
+        "type": "pr",
+        "id": "acme/widgets#42",
+        "version": 1,
+        "as_of": "2026-10-10T09:00:00Z",
+        "stale": false,
+        "snapshot": {
+          "id": "acme/widgets#42",
+          "repo": "acme/widgets",
+          "number": 42,
+          "title": "Add retry to client",
+          "state": "open",
+          "merged": false,
+          "draft": false
+        },
+        "decorations": {
+          "relationship": "mine",
+          "dispositions": [],
+          "urgency": "",
+          "category": ""
+        },
+        "annotations": {
+          "hidden": {
+            "value": false,
+            "reason": null
+          },
+          "wip": false,
+          "suppress": [],
+          "force_review": false,
+          "force_review_sha": null,
+          "focus_selected": "2026-10-10",
+          "decider": {}
+        },
+        "links": [
+          {
+            "type": "issue",
+            "id": "bd-focus-1",
+            "relation": "source",
+            "state": "open",
+            "assignee": "",
+            "title": "Focus acme/widgets#42",
+            "labels": ["focus-item"],
+            "metadata": {
+              "source_type": "pr",
+              "source_id": "acme/widgets#42",
+              "dedup_key": "pr:acme/widgets#42:focus-item"
+            }
+          }
+        ]
+      },
+      "pg_desk": {
+        "state": "open",
+        "shown": "open",
+        "strike": {
+          "effect": "hold",
+          "because": ""
+        },
+        "select": {
+          "effect": "none",
+          "because": "bead open"
+        }
+      },
+      "decider": {
+        "strike": {
+          "transition": "hold"
+        },
+        "select": {
+          "skip_reason": "already handled",
+          "cause": "in-play"
+        }
+      }
+    },
+    {
+      "name": "open bead, marker released",
+      "row": "open",
+      "view": {
+        "contract": "pg-desk.view/v1",
+        "type": "pr",
+        "id": "acme/widgets#42",
+        "version": 1,
+        "as_of": "2026-10-10T09:00:00Z",
+        "stale": false,
+        "snapshot": {
+          "id": "acme/widgets#42",
+          "repo": "acme/widgets",
+          "number": 42,
+          "title": "Add retry to client",
+          "state": "open",
+          "merged": false,
+          "draft": false
+        },
+        "decorations": {
+          "relationship": "mine",
+          "dispositions": [],
+          "urgency": "",
+          "category": ""
+        },
+        "annotations": {
+          "hidden": {
+            "value": false,
+            "reason": null
+          },
+          "wip": false,
+          "suppress": [],
+          "force_review": false,
+          "force_review_sha": null,
+          "focus_selected": "2026-10-10",
+          "decider": {}
+        },
+        "links": [
+          {
+            "type": "issue",
+            "id": "bd-focus-1",
+            "relation": "source",
+            "state": "open",
+            "assignee": "",
+            "title": "Focus acme/widgets#42",
+            "labels": ["focus-item"],
+            "metadata": {
+              "source_type": "pr",
+              "source_id": "acme/widgets#42",
+              "dedup_key": "pr:acme/widgets#42:focus-item",
+              "focus_hold": "released"
+            }
+          }
+        ]
+      },
+      "pg_desk": {
+        "state": "open",
+        "shown": "open",
+        "strike": {
+          "effect": "hold",
+          "because": ""
+        },
+        "select": {
+          "effect": "none",
+          "because": "bead open"
+        }
+      },
+      "decider": {
+        "strike": {
+          "transition": "hold"
+        },
+        "select": {
+          "skip_reason": "already handled",
+          "cause": "in-play"
+        }
+      }
+    },
+    {
+      "name": "open bead with open children",
+      "row": "open_has_children",
+      "view": {
+        "contract": "pg-desk.view/v1",
+        "type": "pr",
+        "id": "acme/widgets#42",
+        "version": 1,
+        "as_of": "2026-10-10T09:00:00Z",
+        "stale": false,
+        "snapshot": {
+          "id": "acme/widgets#42",
+          "repo": "acme/widgets",
+          "number": 42,
+          "title": "Add retry to client",
+          "state": "open",
+          "merged": false,
+          "draft": false
+        },
+        "decorations": {
+          "relationship": "mine",
+          "dispositions": [],
+          "urgency": "",
+          "category": ""
+        },
+        "annotations": {
+          "hidden": {
+            "value": false,
+            "reason": null
+          },
+          "wip": false,
+          "suppress": [],
+          "force_review": false,
+          "force_review_sha": null,
+          "focus_selected": "2026-10-10",
+          "decider": {}
+        },
+        "links": [
+          {
+            "type": "issue",
+            "id": "bd-focus-1",
+            "relation": "source",
+            "state": "open",
+            "assignee": "",
+            "title": "Focus acme/widgets#42",
+            "labels": ["focus-item"],
+            "metadata": {
+              "source_type": "pr",
+              "source_id": "acme/widgets#42",
+              "dedup_key": "pr:acme/widgets#42:focus-item"
+            }
+          }
+        ]
+      },
+      "pg_desk": {
+        "state": "open_has_children",
+        "shown": "open (has children)",
+        "open_children": true,
+        "strike": {
+          "effect": "none",
+          "because": "has open children"
+        },
+        "select": {
+          "effect": "none",
+          "because": "bead open"
+        }
+      },
+      "decider": {
+        "strike": {
+          "transition": "hold",
+          "apply_skips": true
+        },
+        "select": {
+          "skip_reason": "already handled",
+          "cause": "in-play"
+        }
+      }
+    },
+    {
+      "name": "open bead, marker struck",
+      "row": "open_marker_stale",
+      "view": {
+        "contract": "pg-desk.view/v1",
+        "type": "pr",
+        "id": "acme/widgets#42",
+        "version": 1,
+        "as_of": "2026-10-10T09:00:00Z",
+        "stale": false,
+        "snapshot": {
+          "id": "acme/widgets#42",
+          "repo": "acme/widgets",
+          "number": 42,
+          "title": "Add retry to client",
+          "state": "open",
+          "merged": false,
+          "draft": false
+        },
+        "decorations": {
+          "relationship": "mine",
+          "dispositions": [],
+          "urgency": "",
+          "category": ""
+        },
+        "annotations": {
+          "hidden": {
+            "value": false,
+            "reason": null
+          },
+          "wip": false,
+          "suppress": [],
+          "force_review": false,
+          "force_review_sha": null,
+          "focus_selected": "2026-10-10",
+          "decider": {}
+        },
+        "links": [
+          {
+            "type": "issue",
+            "id": "bd-focus-1",
+            "relation": "source",
+            "state": "open",
+            "assignee": "",
+            "title": "Focus acme/widgets#42",
+            "labels": ["focus-item"],
+            "metadata": {
+              "source_type": "pr",
+              "source_id": "acme/widgets#42",
+              "dedup_key": "pr:acme/widgets#42:focus-item",
+              "focus_hold": "struck"
+            }
+          }
+        ]
+      },
+      "pg_desk": {
+        "state": "open_marker_stale",
+        "shown": "open (marker stale)",
+        "strike": {
+          "effect": "hold",
+          "because": ""
+        },
+        "select": {
+          "effect": "none",
+          "because": "will rewrite the marker"
+        }
+      },
+      "decider": {
+        "strike": {
+          "transition": "hold"
+        },
+        "select": {
+          "transition": "release",
+          "marker_only": true
+        }
+      }
+    },
+    {
+      "name": "bead in progress",
+      "row": "claimed",
+      "view": {
+        "contract": "pg-desk.view/v1",
+        "type": "pr",
+        "id": "acme/widgets#42",
+        "version": 1,
+        "as_of": "2026-10-10T09:00:00Z",
+        "stale": false,
+        "snapshot": {
+          "id": "acme/widgets#42",
+          "repo": "acme/widgets",
+          "number": 42,
+          "title": "Add retry to client",
+          "state": "open",
+          "merged": false,
+          "draft": false
+        },
+        "decorations": {
+          "relationship": "mine",
+          "dispositions": [],
+          "urgency": "",
+          "category": ""
+        },
+        "annotations": {
+          "hidden": {
+            "value": false,
+            "reason": null
+          },
+          "wip": false,
+          "suppress": [],
+          "force_review": false,
+          "force_review_sha": null,
+          "focus_selected": "2026-10-10",
+          "decider": {}
+        },
+        "links": [
+          {
+            "type": "issue",
+            "id": "bd-focus-1",
+            "relation": "source",
+            "state": "in_progress",
+            "assignee": "",
+            "title": "Focus acme/widgets#42",
+            "labels": ["focus-item"],
+            "metadata": {
+              "source_type": "pr",
+              "source_id": "acme/widgets#42",
+              "dedup_key": "pr:acme/widgets#42:focus-item"
+            }
+          }
+        ]
+      },
+      "pg_desk": {
+        "state": "claimed",
+        "shown": "claimed",
+        "strike": {
+          "effect": "none",
+          "because": "claimed, left running"
+        },
+        "select": {
+          "effect": "none",
+          "because": "claimed"
+        }
+      },
+      "decider": {
+        "strike": {
+          "skip_reason": "already handled",
+          "cause": "claimed"
+        },
+        "select": {
+          "skip_reason": "already handled",
+          "cause": "claimed"
+        }
+      }
+    },
+    {
+      "name": "bead assigned",
+      "row": "claimed",
+      "view": {
+        "contract": "pg-desk.view/v1",
+        "type": "pr",
+        "id": "acme/widgets#42",
+        "version": 1,
+        "as_of": "2026-10-10T09:00:00Z",
+        "stale": false,
+        "snapshot": {
+          "id": "acme/widgets#42",
+          "repo": "acme/widgets",
+          "number": 42,
+          "title": "Add retry to client",
+          "state": "open",
+          "merged": false,
+          "draft": false
+        },
+        "decorations": {
+          "relationship": "mine",
+          "dispositions": [],
+          "urgency": "",
+          "category": ""
+        },
+        "annotations": {
+          "hidden": {
+            "value": false,
+            "reason": null
+          },
+          "wip": false,
+          "suppress": [],
+          "force_review": false,
+          "force_review_sha": null,
+          "focus_selected": "2026-10-10",
+          "decider": {}
+        },
+        "links": [
+          {
+            "type": "issue",
+            "id": "bd-focus-1",
+            "relation": "source",
+            "state": "open",
+            "assignee": "worker-1",
+            "title": "Focus acme/widgets#42",
+            "labels": ["focus-item"],
+            "metadata": {
+              "source_type": "pr",
+              "source_id": "acme/widgets#42",
+              "dedup_key": "pr:acme/widgets#42:focus-item"
+            }
+          }
+        ]
+      },
+      "pg_desk": {
+        "state": "claimed",
+        "shown": "claimed by worker-1",
+        "strike": {
+          "effect": "none",
+          "because": "claimed, left running"
+        },
+        "select": {
+          "effect": "none",
+          "because": "claimed"
+        }
+      },
+      "decider": {
+        "strike": {
+          "skip_reason": "already handled",
+          "cause": "claimed"
+        },
+        "select": {
+          "skip_reason": "already handled",
+          "cause": "claimed"
+        }
+      }
+    },
+    {
+      "name": "held bead",
+      "row": "held",
+      "view": {
+        "contract": "pg-desk.view/v1",
+        "type": "pr",
+        "id": "acme/widgets#42",
+        "version": 1,
+        "as_of": "2026-10-10T09:00:00Z",
+        "stale": false,
+        "snapshot": {
+          "id": "acme/widgets#42",
+          "repo": "acme/widgets",
+          "number": 42,
+          "title": "Add retry to client",
+          "state": "open",
+          "merged": false,
+          "draft": false
+        },
+        "decorations": {
+          "relationship": "mine",
+          "dispositions": [],
+          "urgency": "",
+          "category": ""
+        },
+        "annotations": {
+          "hidden": {
+            "value": false,
+            "reason": null
+          },
+          "wip": false,
+          "suppress": [],
+          "force_review": false,
+          "force_review_sha": null,
+          "focus_selected": "2026-10-10",
+          "decider": {}
+        },
+        "links": [
+          {
+            "type": "issue",
+            "id": "bd-focus-1",
+            "relation": "source",
+            "state": "deferred",
+            "assignee": "",
+            "title": "Focus acme/widgets#42",
+            "labels": ["focus-item"],
+            "metadata": {
+              "source_type": "pr",
+              "source_id": "acme/widgets#42",
+              "dedup_key": "pr:acme/widgets#42:focus-item",
+              "focus_hold": "struck"
+            }
+          }
+        ]
+      },
+      "pg_desk": {
+        "state": "held",
+        "shown": "held",
+        "strike": {
+          "effect": "none",
+          "because": "already held"
+        },
+        "select": {
+          "effect": "release",
+          "because": ""
+        }
+      },
+      "decider": {
+        "strike": {
+          "skip_reason": "already handled",
+          "cause": "held"
+        },
+        "select": {
+          "transition": "release"
+        }
+      }
+    },
+    {
+      "name": "deferred by someone else",
+      "row": "deferred_by_someone_else",
+      "view": {
+        "contract": "pg-desk.view/v1",
+        "type": "pr",
+        "id": "acme/widgets#42",
+        "version": 1,
+        "as_of": "2026-10-10T09:00:00Z",
+        "stale": false,
+        "snapshot": {
+          "id": "acme/widgets#42",
+          "repo": "acme/widgets",
+          "number": 42,
+          "title": "Add retry to client",
+          "state": "open",
+          "merged": false,
+          "draft": false
+        },
+        "decorations": {
+          "relationship": "mine",
+          "dispositions": [],
+          "urgency": "",
+          "category": ""
+        },
+        "annotations": {
+          "hidden": {
+            "value": false,
+            "reason": null
+          },
+          "wip": false,
+          "suppress": [],
+          "force_review": false,
+          "force_review_sha": null,
+          "focus_selected": "2026-10-10",
+          "decider": {}
+        },
+        "links": [
+          {
+            "type": "issue",
+            "id": "bd-focus-1",
+            "relation": "source",
+            "state": "deferred",
+            "assignee": "",
+            "title": "Focus acme/widgets#42",
+            "labels": ["focus-item"],
+            "metadata": {
+              "source_type": "pr",
+              "source_id": "acme/widgets#42",
+              "dedup_key": "pr:acme/widgets#42:focus-item"
+            }
+          }
+        ]
+      },
+      "pg_desk": {
+        "state": "deferred_by_someone_else",
+        "shown": "deferred by someone else",
+        "strike": {
+          "effect": "none",
+          "because": ""
+        },
+        "select": {
+          "effect": "none",
+          "because": "deferred by someone else"
+        }
+      },
+      "decider": {
+        "strike": {
+          "skip_reason": "already handled",
+          "cause": "deferred-by-someone-else"
+        },
+        "select": {
+          "skip_reason": "already handled",
+          "cause": "deferred-by-someone-else"
+        }
+      }
+    },
+    {
+      "name": "blocked bead",
+      "row": "status_word",
+      "view": {
+        "contract": "pg-desk.view/v1",
+        "type": "pr",
+        "id": "acme/widgets#42",
+        "version": 1,
+        "as_of": "2026-10-10T09:00:00Z",
+        "stale": false,
+        "snapshot": {
+          "id": "acme/widgets#42",
+          "repo": "acme/widgets",
+          "number": 42,
+          "title": "Add retry to client",
+          "state": "open",
+          "merged": false,
+          "draft": false
+        },
+        "decorations": {
+          "relationship": "mine",
+          "dispositions": [],
+          "urgency": "",
+          "category": ""
+        },
+        "annotations": {
+          "hidden": {
+            "value": false,
+            "reason": null
+          },
+          "wip": false,
+          "suppress": [],
+          "force_review": false,
+          "force_review_sha": null,
+          "focus_selected": "2026-10-10",
+          "decider": {}
+        },
+        "links": [
+          {
+            "type": "issue",
+            "id": "bd-focus-1",
+            "relation": "source",
+            "state": "blocked",
+            "assignee": "",
+            "title": "Focus acme/widgets#42",
+            "labels": ["focus-item"],
+            "metadata": {
+              "source_type": "pr",
+              "source_id": "acme/widgets#42",
+              "dedup_key": "pr:acme/widgets#42:focus-item"
+            }
+          }
+        ]
+      },
+      "pg_desk": {
+        "state": "status_word",
+        "shown": "blocked",
+        "strike": {
+          "effect": "none",
+          "because": ""
+        },
+        "select": {
+          "effect": "none",
+          "because": ""
+        }
+      },
+      "decider": {
+        "strike": {
+          "skip_reason": "already handled",
+          "cause": "status-not-open"
+        },
+        "select": {
+          "skip_reason": "already handled",
+          "cause": "status-not-open"
+        }
+      }
+    },
+    {
+      "name": "pinned bead",
+      "row": "status_word",
+      "view": {
+        "contract": "pg-desk.view/v1",
+        "type": "pr",
+        "id": "acme/widgets#42",
+        "version": 1,
+        "as_of": "2026-10-10T09:00:00Z",
+        "stale": false,
+        "snapshot": {
+          "id": "acme/widgets#42",
+          "repo": "acme/widgets",
+          "number": 42,
+          "title": "Add retry to client",
+          "state": "open",
+          "merged": false,
+          "draft": false
+        },
+        "decorations": {
+          "relationship": "mine",
+          "dispositions": [],
+          "urgency": "",
+          "category": ""
+        },
+        "annotations": {
+          "hidden": {
+            "value": false,
+            "reason": null
+          },
+          "wip": false,
+          "suppress": [],
+          "force_review": false,
+          "force_review_sha": null,
+          "focus_selected": "2026-10-10",
+          "decider": {}
+        },
+        "links": [
+          {
+            "type": "issue",
+            "id": "bd-focus-1",
+            "relation": "source",
+            "state": "pinned",
+            "assignee": "",
+            "title": "Focus acme/widgets#42",
+            "labels": ["focus-item"],
+            "metadata": {
+              "source_type": "pr",
+              "source_id": "acme/widgets#42",
+              "dedup_key": "pr:acme/widgets#42:focus-item"
+            }
+          }
+        ]
+      },
+      "pg_desk": {
+        "state": "status_word",
+        "shown": "pinned",
+        "strike": {
+          "effect": "none",
+          "because": ""
+        },
+        "select": {
+          "effect": "none",
+          "because": ""
+        }
+      },
+      "decider": {
+        "strike": {
+          "skip_reason": "already handled",
+          "cause": "status-not-open"
+        },
+        "select": {
+          "skip_reason": "already handled",
+          "cause": "status-not-open"
+        }
+      }
+    },
+    {
+      "name": "hooked bead",
+      "row": "status_word",
+      "view": {
+        "contract": "pg-desk.view/v1",
+        "type": "pr",
+        "id": "acme/widgets#42",
+        "version": 1,
+        "as_of": "2026-10-10T09:00:00Z",
+        "stale": false,
+        "snapshot": {
+          "id": "acme/widgets#42",
+          "repo": "acme/widgets",
+          "number": 42,
+          "title": "Add retry to client",
+          "state": "open",
+          "merged": false,
+          "draft": false
+        },
+        "decorations": {
+          "relationship": "mine",
+          "dispositions": [],
+          "urgency": "",
+          "category": ""
+        },
+        "annotations": {
+          "hidden": {
+            "value": false,
+            "reason": null
+          },
+          "wip": false,
+          "suppress": [],
+          "force_review": false,
+          "force_review_sha": null,
+          "focus_selected": "2026-10-10",
+          "decider": {}
+        },
+        "links": [
+          {
+            "type": "issue",
+            "id": "bd-focus-1",
+            "relation": "source",
+            "state": "hooked",
+            "assignee": "",
+            "title": "Focus acme/widgets#42",
+            "labels": ["focus-item"],
+            "metadata": {
+              "source_type": "pr",
+              "source_id": "acme/widgets#42",
+              "dedup_key": "pr:acme/widgets#42:focus-item"
+            }
+          }
+        ]
+      },
+      "pg_desk": {
+        "state": "status_word",
+        "shown": "hooked",
+        "strike": {
+          "effect": "none",
+          "because": ""
+        },
+        "select": {
+          "effect": "none",
+          "because": ""
+        }
+      },
+      "decider": {
+        "strike": {
+          "skip_reason": "already handled",
+          "cause": "status-not-open"
+        },
+        "select": {
+          "skip_reason": "already handled",
+          "cause": "status-not-open"
+        }
+      }
+    },
+    {
+      "name": "closed bead",
+      "row": "closed",
+      "view": {
+        "contract": "pg-desk.view/v1",
+        "type": "pr",
+        "id": "acme/widgets#42",
+        "version": 1,
+        "as_of": "2026-10-10T09:00:00Z",
+        "stale": false,
+        "snapshot": {
+          "id": "acme/widgets#42",
+          "repo": "acme/widgets",
+          "number": 42,
+          "title": "Add retry to client",
+          "state": "open",
+          "merged": false,
+          "draft": false
+        },
+        "decorations": {
+          "relationship": "mine",
+          "dispositions": [],
+          "urgency": "",
+          "category": ""
+        },
+        "annotations": {
+          "hidden": {
+            "value": false,
+            "reason": null
+          },
+          "wip": false,
+          "suppress": [],
+          "force_review": false,
+          "force_review_sha": null,
+          "focus_selected": "2026-10-10",
+          "decider": {}
+        },
+        "links": [
+          {
+            "type": "issue",
+            "id": "bd-focus-1",
+            "relation": "source",
+            "state": "closed",
+            "assignee": "",
+            "title": "Focus acme/widgets#42",
+            "labels": ["focus-item"],
+            "metadata": {
+              "source_type": "pr",
+              "source_id": "acme/widgets#42",
+              "dedup_key": "pr:acme/widgets#42:focus-item"
+            }
+          }
+        ]
+      },
+      "pg_desk": {
+        "state": "closed",
+        "shown": "closed",
+        "strike": {
+          "effect": "none",
+          "because": ""
+        },
+        "select": {
+          "effect": "none",
+          "because": "worker-closed"
+        }
+      },
+      "decider": {
+        "strike": {
+          "skip_reason": "already handled",
+          "cause": "closed"
+        },
+        "select": {
+          "skip_reason": "already handled",
+          "cause": "closed"
+        }
+      }
+    },
+    {
+      "name": "source merged, bead open and unclaimed",
+      "row": "source_done",
+      "view": {
+        "contract": "pg-desk.view/v1",
+        "type": "pr",
+        "id": "acme/widgets#42",
+        "version": 1,
+        "as_of": "2026-10-10T09:00:00Z",
+        "stale": false,
+        "snapshot": {
+          "id": "acme/widgets#42",
+          "repo": "acme/widgets",
+          "number": 42,
+          "title": "Add retry to client",
+          "state": "closed",
+          "merged": true,
+          "draft": false
+        },
+        "decorations": {
+          "relationship": "mine",
+          "dispositions": [],
+          "urgency": "",
+          "category": ""
+        },
+        "annotations": {
+          "hidden": {
+            "value": false,
+            "reason": null
+          },
+          "wip": false,
+          "suppress": [],
+          "force_review": false,
+          "force_review_sha": null,
+          "focus_selected": "2026-10-10",
+          "decider": {}
+        },
+        "links": [
+          {
+            "type": "issue",
+            "id": "bd-focus-1",
+            "relation": "source",
+            "state": "open",
+            "assignee": "",
+            "title": "Focus acme/widgets#42",
+            "labels": ["focus-item"],
+            "metadata": {
+              "source_type": "pr",
+              "source_id": "acme/widgets#42",
+              "dedup_key": "pr:acme/widgets#42:focus-item"
+            }
+          }
+        ]
+      },
+      "pg_desk": {
+        "state": "source_done",
+        "shown": "source done",
+        "strike": {
+          "effect": "hold",
+          "because": ""
+        },
+        "select": {
+          "effect": "hold",
+          "because": "source done"
+        }
+      },
+      "decider": {
+        "strike": {
+          "transition": "hold_terminal"
+        },
+        "select": {
+          "transition": "hold_terminal"
+        }
+      }
+    },
+    {
+      "name": "a hold failed or was abandoned after the live re-read",
+      "row": "hold_stale",
+      "view": null,
+      "na": "skipped-stale is an apply-time outcome of the live re-read, not a property of any view: pg-desk reads no such fact this phase and decide.Decide over a view cannot produce it"
+    },
+    {
+      "name": "an escalated human sibling exists",
+      "row": "escalated",
+      "view": {
+        "contract": "pg-desk.view/v1",
+        "type": "pr",
+        "id": "acme/widgets#42",
+        "version": 1,
+        "as_of": "2026-10-10T09:00:00Z",
+        "stale": false,
+        "snapshot": {
+          "id": "acme/widgets#42",
+          "repo": "acme/widgets",
+          "number": 42,
+          "title": "Add retry to client",
+          "state": "open",
+          "merged": false,
+          "draft": false
+        },
+        "decorations": {
+          "relationship": "mine",
+          "dispositions": [],
+          "urgency": "",
+          "category": ""
+        },
+        "annotations": {
+          "hidden": {
+            "value": false,
+            "reason": null
+          },
+          "wip": false,
+          "suppress": [],
+          "force_review": false,
+          "force_review_sha": null,
+          "focus_selected": "2026-10-10",
+          "decider": {}
+        },
+        "links": [
+          {
+            "type": "issue",
+            "id": "bd-escalation-1",
+            "relation": "source",
+            "state": "open",
+            "assignee": "",
+            "title": "Focus acme/widgets#42",
+            "labels": ["human"],
+            "metadata": {
+              "source_type": "pr",
+              "source_id": "acme/widgets#42",
+              "dedup_key": "pr:acme/widgets#42:focus-item"
+            }
+          }
+        ]
+      },
+      "pg_desk": {
+        "state": "escalated",
+        "shown": "escalated",
+        "strike": {
+          "effect": "none",
+          "because": ""
+        },
+        "select": {
+          "effect": "none",
+          "because": ""
+        }
+      },
+      "decider": null,
+      "decider_na": "the escalation bead is made by the run machinery after repeated rule failures, outside the focus rule: decide.Decide over a view does not read it"
+    },
+    {
+      "name": "source outside every watch query",
+      "row": "unwatched",
+      "view": {
+        "contract": "pg-desk.view/v1",
+        "type": "pr",
+        "id": "acme/widgets#42",
+        "version": 1,
+        "as_of": "2026-10-10T09:00:00Z",
+        "stale": false,
+        "snapshot": {
+          "id": "acme/widgets#42",
+          "repo": "acme/widgets",
+          "number": 42,
+          "title": "Add retry to client",
+          "state": "open",
+          "merged": false,
+          "draft": false
+        },
+        "decorations": {
+          "relationship": "mine",
+          "dispositions": [],
+          "urgency": "",
+          "category": ""
+        },
+        "annotations": {
+          "hidden": {
+            "value": false,
+            "reason": null
+          },
+          "wip": false,
+          "suppress": [],
+          "force_review": false,
+          "force_review_sha": null,
+          "focus_selected": "2026-10-10",
+          "decider": {}
+        },
+        "links": [
+          {
+            "type": "issue",
+            "id": "bd-focus-1",
+            "relation": "source",
+            "state": "open",
+            "assignee": "",
+            "title": "Focus acme/widgets#42",
+            "labels": ["focus-item"],
+            "metadata": {
+              "source_type": "pr",
+              "source_id": "acme/widgets#42",
+              "dedup_key": "pr:acme/widgets#42:focus-item"
+            }
+          }
+        ]
+      },
+      "pg_desk": {
+        "state": "open",
+        "shown": "open unwatched",
+        "unwatched": true,
+        "strike": {
+          "effect": "hold",
+          "because": ""
+        },
+        "select": {
+          "effect": "none",
+          "because": "bead open"
+        }
+      },
+      "decider": {
+        "strike": {
+          "transition": "hold"
+        },
+        "select": {
+          "skip_reason": "already handled",
+          "cause": "in-play"
+        }
+      }
+    }
+  ]
+}

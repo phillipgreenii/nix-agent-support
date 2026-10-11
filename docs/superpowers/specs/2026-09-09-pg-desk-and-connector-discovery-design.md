@@ -78,6 +78,13 @@ revision 5, in the session that continued this one (`pg2-rfvgl`). D21 through D2
 | D26 | daily-focus reconciles from `pg-desk`'s store, closing D19's open half: focus ranking is an interpret step, the cap a `focus` sync step, and `df-survey`, `df-wire`, and `df-pull` retire into `pg-desk` in phase 15.                                                                                                                                                                                                                                                                       |
 | D27 | The soak option lives on the generic `services.pg-desk-serve` module with defaults, `soak.port` 9819 among them; `phillipg-nix-ziprecruiter` overrides a default only with a comment saying why.                                                                                                                                                                                                                                                                                            |
 
+> **Note on D26 (added 2026-10-11).** The daily-focus store-first design
+> (`docs/superpowers/specs/2026-09-23-daily-focus-store-first-design.md`, with `docs/adr/0087-daily-focus-rank-is-a-read-time-pg-desk-view.md`)
+> amends D26: the focus rank is a read-time view of `pg-desk`, not an interpret step, and the
+> cap is a property of the plan that `pg-desk focus select` locks, not a `focus` sync step. D26
+> above is left as written (ADR 0077 says D26 is "not edited"); where the two differ, the
+> daily-focus design governs.
+
 ## 3. Architecture overview
 
 ```mermaid

@@ -169,7 +169,8 @@ facts, computed on demand with an injected clock; it writes no interpretation ro
 and is never part of a `run`. It reads what interpret stored (a PR's ownership) and the entity rows,
 and decides nothing that creates, changes or closes work (ADR 0087, "The daily-focus rank is a
 read-time pg-desk view; minting stays in a decider"). Its behavior is specified in
-[`focus.md`](focus.md), "The rank".
+[`focus.md`](focus.md), "The rank". A hidden entity is not a focus candidate: the rank reads the
+`hidden` annotation exactly as `serve` does and leaves a hidden entity out of the candidate set.
 
 ## Exit codes, telemetry, and logs
 

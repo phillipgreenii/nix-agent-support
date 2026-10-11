@@ -85,9 +85,11 @@ The invariants of this set are numbered `INV-DECIDER-<n>` across the docs, in RF
 ## Scope
 
 In scope: the `pr` entity type, which carries the PR rules, and the `issue` entity type, whose only
-rule is `focus.item` (which also runs for a `pr`). `pg-decider plan` and `apply` accept the types
-`pr`, `issue` and `thread`; for a type with no registered rules (`thread`), both exit `1` with a
-message saying no decider is registered for that type.
+rule is `focus.item` (which also runs for a `pr`): `pr` and `issue` have deciders (the focus rule
+registers for both; `issue` has only that rule), and any other type has none until a rule registers
+for it. `pg-decider plan` and `apply` accept the types `pr`, `issue` and `thread`; for a type with
+no registered rules (`thread`), both exit `1` with a message saying no decider is registered for
+that type.
 
 Out of scope for the whole set:
 

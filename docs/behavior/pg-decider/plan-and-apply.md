@@ -8,7 +8,8 @@ pg-decider plan  <type> <id> [--json]
 pg-decider apply <type> <id> [--from-item <path|->]
 ```
 
-`<type>` is `pr`, `issue` or `thread`; today only `pr` has a decider (see
+`<type>` is `pr`, `issue` or `thread`; `pr` and `issue` have deciders (the focus rule registers for
+both; `issue` has only that rule), and any other type has none until a rule registers for it (see
 [`README.md`](README.md)). Both commands read the view with `pg-desk <type> show <id> --json` and
 nothing else: the decider reads no tracker or forge data directly.
 

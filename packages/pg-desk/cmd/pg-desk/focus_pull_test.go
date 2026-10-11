@@ -55,6 +55,7 @@ func (f *selFixture) foreignPR(t *testing.T, n int, title string) focus.Key {
 	return k
 }
 
+// Traces INV-FOCUS-31: a pull adds after the maximum position with the run's tier.
 func TestPullTopAddsRowsAfterTheLockedPlanWithTheRunsTier(t *testing.T) {
 	f := newSelFixture(t)
 	k1 := f.pr(t, 1, "alpha", "2026-10-09T08:00:00Z")
@@ -114,6 +115,7 @@ func TestPullTopAddsRowsAfterTheLockedPlanWithTheRunsTier(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-31: a pull is additive.
 func TestPullIsUncappedAndNeverRemovesOrReSorts(t *testing.T) {
 	f := newSelFixture(t)
 	k1 := f.pr(t, 1, "alpha", "2026-10-09T08:00:00Z")
@@ -137,6 +139,7 @@ func TestPullIsUncappedAndNeverRemovesOrReSorts(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-31: a pull leaves the draft.
 func TestPullLeavesTheDraftAndItsMarksSurvive(t *testing.T) {
 	f := newSelFixture(t)
 	f.pr(t, 1, "alpha", "2026-10-09T08:00:00Z")
@@ -170,6 +173,7 @@ func TestPullLeavesTheDraftAndItsMarksSurvive(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-33: a positional argument is a key.
 func TestPullBareIntegerIsAKeyEndToEnd(t *testing.T) {
 	f := newSelFixture(t)
 	f.pr(t, 1, "alpha", "2026-10-09T08:00:00Z")
@@ -186,6 +190,7 @@ func TestPullBareIntegerIsAKeyEndToEnd(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-33: --top with a key is a usage error.
 func TestPullTopWithAKeyIsUsage(t *testing.T) {
 	f := newSelFixture(t)
 	f.pr(t, 1, "alpha", "2026-10-09T08:00:00Z")
@@ -213,6 +218,7 @@ func TestPullUnresolvableKeyIsUsage(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-33: a bare pull writes nothing.
 func TestPullBareInvocationPreviewsAndWritesNothing(t *testing.T) {
 	f := newSelFixture(t)
 	k1 := f.pr(t, 1, "alpha", "2026-10-09T08:00:00Z")
@@ -232,6 +238,7 @@ func TestPullBareInvocationPreviewsAndWritesNothing(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-36: a pull dry run writes nothing, not even the period row.
 func TestPullDryRunWritesNoPeriodRowAndNoTableChanges(t *testing.T) {
 	for _, args := range [][]string{{"--top", "2", "--dry-run"}, {"o/r#1", "o/r#2", "--dry-run"}} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
@@ -268,6 +275,7 @@ func TestPullDryRunReportsExactlyWhatAnApplyDoes(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-34: a pull into a period with no rows is exit 1.
 func TestPullIntoNewPeriodBeforeFirstLockExitsOne(t *testing.T) {
 	f := newSelFixture(t)
 	y := f.pr(t, 9, "yesterday", "2026-10-08T08:00:00Z")
@@ -297,6 +305,7 @@ func TestPullIntoNewPeriodBeforeFirstLockExitsOne(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-34: a pull into a future period is exit 1.
 func TestPullIntoFuturePeriodIsExitOne(t *testing.T) {
 	f := newSelFixture(t)
 	f.pr(t, 1, "alpha", "2026-10-09T08:00:00Z")
@@ -310,6 +319,7 @@ func TestPullIntoFuturePeriodIsExitOne(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-34: the exit 1 check runs inside the transaction.
 func TestPullExitOneCheckRunsInsideTheTransaction(t *testing.T) {
 	f := newSelFixture(t)
 	y := f.pr(t, 9, "yesterday", "2026-10-08T08:00:00Z")
@@ -334,6 +344,7 @@ func TestPullExitOneCheckRunsInsideTheTransaction(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-34: a pull into a closed period is exit 6.
 func TestPullIntoClosedPeriodExitsSix(t *testing.T) {
 	f := newSelFixture(t)
 	f.pr(t, 1, "alpha", "2026-10-09T08:00:00Z")
@@ -347,6 +358,7 @@ func TestPullIntoClosedPeriodExitsSix(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-35: an already selected or non-candidate key is a routine skip.
 func TestPullNamedKeysAlreadySelectedOrNoLongerCandidatesAreRoutineSkips(t *testing.T) {
 	f := newSelFixture(t)
 	k1 := f.pr(t, 1, "alpha", "2026-10-09T08:00:00Z")
@@ -376,6 +388,7 @@ func TestPullNamedKeysAlreadySelectedOrNoLongerCandidatesAreRoutineSkips(t *test
 	}
 }
 
+// Traces INV-FOCUS-35: no named key with an entity row is exit 3.
 func TestPullNoNamedKeyWithAnEntityRowIsExitThree(t *testing.T) {
 	f := newSelFixture(t)
 	f.pr(t, 1, "alpha", "2026-10-09T08:00:00Z")
@@ -397,6 +410,7 @@ func TestPullNoNamedKeyWithAnEntityRowIsExitThree(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-32: a pull annotates as select does and a re-run adds nothing.
 func TestPullAnnotationIsTheMaxPeriodKeyAndARerunIsIdempotent(t *testing.T) {
 	f := newSelFixture(t)
 	f.pr(t, 1, "alpha", "2026-10-09T08:00:00Z")

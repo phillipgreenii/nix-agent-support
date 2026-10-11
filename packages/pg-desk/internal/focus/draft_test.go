@@ -175,6 +175,7 @@ func TestReplanOnEmptyPeriodEqualsShow(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-12: a draft holds neither a plan row nor a fact.
 func TestDraftStoresNoPlanRowsAndNoFacts(t *testing.T) {
 	plan, rk, firstSeen := replanFixture()
 	body, err := EncodeDraft(NewReplanDraft(plan, rk, CoverageState{}, 6, firstSeen))

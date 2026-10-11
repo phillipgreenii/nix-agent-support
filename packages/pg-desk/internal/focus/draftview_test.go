@@ -30,6 +30,7 @@ func TestNewCandidatesAfterDraftShowAsNewSinceDraft(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-13, INV-FOCUS-15: a stored draft renders in its own order.
 func TestReRenderUsesDraftOrderAndLiveFacts(t *testing.T) {
 	d := NewInitialDraft(rankingOf(
 		rrow(kp("1"), KindPR, TierOverdue, false),
@@ -66,6 +67,7 @@ func TestReRenderUsesDraftOrderAndLiveFacts(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-13: rank drift never moves or removes a row.
 func TestReRenderNeverRemovesARow(t *testing.T) {
 	d := NewInitialDraft(rankingOf(
 		rrow(kp("1"), KindPR, TierOverdue, false),
@@ -99,6 +101,7 @@ func TestReRenderNeverRemovesARow(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-14: the plan is always read live, never copied into the draft.
 func TestStoredDraftPlanBlockIsReadLive(t *testing.T) {
 	_, rk, firstSeen := replanFixture()
 	plan, _, _ := replanFixture()

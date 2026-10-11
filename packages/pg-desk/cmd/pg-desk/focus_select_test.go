@@ -264,6 +264,7 @@ func TestSelectApplyLocksThePlanInOrderAndWritesTheRecord(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-15: a lock writes the draft's order.
 func TestSelectTwiceWithOkIsByteIdentical(t *testing.T) {
 	f := newSelFixture(t)
 	f.pr(t, 1, "alpha", "2026-10-09T08:00:00Z")
@@ -293,6 +294,7 @@ func TestSelectTwiceWithOkIsByteIdentical(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-26: a preview writes nothing in any table.
 func TestSelectPreviewWithoutApplyWritesNothingInAnyTable(t *testing.T) {
 	for _, args := range [][]string{{}, {"--dry-run"}, {"--apply", "--dry-run"}} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
@@ -469,6 +471,7 @@ func TestSelectWithoutStoredDraftComputesOnce(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-29: hand-add hydration.
 func TestSelectHandAddHasNullTierAndIsHydratedFirst(t *testing.T) {
 	f := newSelFixture(t)
 	f.pr(t, 1, "alpha", "2026-10-09T08:00:00Z")
@@ -595,6 +598,7 @@ func TestSelectAnnotationFailureExitsTwoAndRepairMendsIt(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-23: one transaction, then annotations, then the run record is finalized.
 func TestRowsCommitBeforeAnnotationsAndRunRecordIsFinalizedLast(t *testing.T) {
 	f := newSelFixture(t)
 	f.pr(t, 1, "alpha", "2026-10-09T08:00:00Z")
@@ -711,6 +715,7 @@ func TestLockOverDegradedSourceRecordsCoverage(t *testing.T) {
 
 // ------------------------------------------------------------ check order
 
+// Traces INV-FOCUS-19, INV-FOCUS-29: usage errors change no state; hydration runs after every earlier check.
 func TestCheckOrderIsUsageThenClosedThenReplyThenHydrationThenWrite(t *testing.T) {
 	f := newSelFixture(t)
 	f.pr(t, 1, "alpha", "2026-10-09T08:00:00Z")
@@ -790,6 +795,7 @@ func TestFocusExitCodesSelect(t *testing.T) {
 
 // ------------------------------------------------------------ plan lifecycle
 
+// Traces INV-FOCUS-14, INV-FOCUS-24: only the current plan exists; a first lock of a later period replaces it.
 func TestFirstLockOfALaterPeriodReplacesThePlan(t *testing.T) {
 	f := newSelFixture(t)
 	old := f.pr(t, 1, "old plan", "2026-10-08T08:00:00Z")
@@ -823,6 +829,7 @@ func TestFirstLockOfALaterPeriodReplacesThePlan(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-24: an earlier or future first lock is exit 1; an empty one replaces nothing.
 func TestFirstLockEarlierOrFutureIsUsageAndEmptyReplacesNothing(t *testing.T) {
 	f := newSelFixture(t)
 	a := f.pr(t, 1, "a", "2026-10-09T08:00:00Z")
@@ -873,6 +880,7 @@ func TestEmptyFirstLockReplacesNothingAppliesStrikesAndConsumesTheDraft(t *testi
 	}
 }
 
+// Traces INV-FOCUS-25: a strike deletes the entity's rows in every period.
 func TestStrikeDeletesTheRowInEveryPeriod(t *testing.T) {
 	f := newSelFixture(t)
 	a := f.pr(t, 1, "a", "2026-10-09T08:00:00Z")
@@ -931,6 +939,7 @@ func TestFirstLockOfALaterPeriodDeletesAStaleDraft(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-22: a row is deleted only with a known cause.
 func TestRemovalReasonPerCause(t *testing.T) {
 	f := newSelFixture(t)
 	for i := 1; i <= 4; i++ {
@@ -1037,6 +1046,7 @@ func TestMergePersistsAcrossRunsAndTheAbsorbedItemIsNeverSelected(t *testing.T) 
 	}
 }
 
+// Traces INV-FOCUS-28: a merge records only the external link.
 func TestMergeWithUnselectedKeptKeyRecordsLinkOnly(t *testing.T) {
 	f := newSelFixture(t)
 	f.pr(t, 1, "kept", "2026-10-09T08:00:00Z")
@@ -1068,6 +1078,7 @@ func TestMergeSelfIsUsageAndAbsorbedKeyAlreadyInThePlanStays(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-28: +absorbedKey removes the merge link.
 func TestMergeReversedByPlusAbsorbedKey(t *testing.T) {
 	f := newSelFixture(t)
 	f.pr(t, 1, "kept", "2026-10-09T08:00:00Z")
@@ -1087,6 +1098,7 @@ func TestMergeReversedByPlusAbsorbedKey(t *testing.T) {
 
 // ------------------------------------------------------------ repair
 
+// Traces INV-FOCUS-26, INV-FOCUS-27: a repair dry run writes nothing; repair reads no reply.
 func TestRepairScansEveryAnnotatedEntityAndEveryPlanRowEntity(t *testing.T) {
 	f := newSelFixture(t)
 	withRow := f.pr(t, 1, "row without annotation", "2026-10-09T08:00:00Z")
@@ -1116,6 +1128,7 @@ func TestRepairScansEveryAnnotatedEntityAndEveryPlanRowEntity(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-27: repair ignores the closed-period check.
 func TestRepairIgnoresClosedPeriod(t *testing.T) {
 	f := newSelFixture(t)
 	a := f.pr(t, 1, "a", "2026-10-08T08:00:00Z")

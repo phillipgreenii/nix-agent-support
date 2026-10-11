@@ -167,6 +167,7 @@ func TestFocusGroupIsRegisteredAndListed(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-2: --period accepts day only and is hidden from help.
 func TestFocusSharedFlagsAndHiddenPeriod(t *testing.T) {
 	newFocusFixture(t, "new")
 	out, _, err := runFocusVerb(t, "--help")
@@ -217,6 +218,7 @@ func assertFocusExit(t *testing.T, err error, code int, want string) {
 	}
 }
 
+// Traces INV-FOCUS-5: an unmigrated store is refused with exit 1 and nothing applied.
 func TestFocusUnmigratedStoreRefusal(t *testing.T) {
 	f := newFocusFixture(t, "old")
 	_, stderr, err := runFocusVerb(t)
@@ -234,6 +236,7 @@ func TestFocusUnmigratedStoreRefusal(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-6: the NOTE line for a write into a day other than today.
 func TestFocusNoteForNonTodayDateOnWritingVerbs(t *testing.T) {
 	newFocusFixture(t, "new")
 	const note = "NOTE: writing into period 2026-10-09, not today\n"
@@ -267,6 +270,7 @@ func TestFocusNoteForNonTodayDateOnWritingVerbs(t *testing.T) {
 	assertFocusExit(t, err, 1, `--date "tomorrow"`)
 }
 
+// Traces INV-FOCUS-1: the addressed period never comes from a stored draft.
 func TestFocusAddressedPeriodNeverComesFromStoredDraft(t *testing.T) {
 	f := newFocusFixture(t, "new")
 	st := f.open(t)
@@ -289,6 +293,7 @@ func TestFocusAddressedPeriodNeverComesFromStoredDraft(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-1: the period is --date, else today in the focus time zone.
 func TestResolveFocusPeriod(t *testing.T) {
 	newCmd := func(args ...string) *cobra.Command {
 		c := &cobra.Command{Use: "x", RunE: func(*cobra.Command, []string) error { return nil }}
@@ -398,6 +403,8 @@ func TestDraftPredicates(t *testing.T) {
 // TestFocusExitCodes is the verb x documented-code table. It grows with each
 // verb packet; this packet covers what exists: usage, an unmigrated store, a
 // closed period, partial and total failure, for the stub verb.
+//
+// Traces INV-FOCUS-3, INV-FOCUS-4: the exit codes, and one stderr line naming the problem and the way out.
 func TestFocusExitCodes(t *testing.T) {
 	closePeriod := func(t *testing.T, f *focusFixture, key string) {
 		t.Helper()
@@ -461,6 +468,7 @@ func TestFocusExitCodes(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-3: a focus verb exits with 0, 1, 2, 3 or 6 only.
 func TestFocusExitCodeVocabularyIsPinned(t *testing.T) {
 	if exitPeriodClosed != 6 {
 		t.Errorf("exitPeriodClosed = %d, want 6", exitPeriodClosed)
@@ -490,6 +498,7 @@ func TestFocusExitCodeVocabularyIsPinned(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-7: the pg-desk.focus/v1 contract and run_id in --json output.
 func TestFocusJSONEnvelopeFromEnvironment(t *testing.T) {
 	newFocusFixture(t, "new")
 	t.Setenv(outputEnvVar, "json")
@@ -511,6 +520,8 @@ func TestFocusJSONEnvelopeFromEnvironment(t *testing.T) {
 
 // TestFocusJSONGolden pins the envelope convention: a contract member, the
 // verb, the payload members, and run_id only for a verb that writes.
+//
+// Traces INV-FOCUS-7: the pg-desk.focus/v1 contract and run_id in --json output.
 func TestFocusJSONGolden(t *testing.T) {
 	var b bytes.Buffer
 	if err := printFocusJSON(&b, "select", map[string]any{
@@ -553,6 +564,8 @@ func TestFocusJSONGolden(t *testing.T) {
 // writing stub verb leaves one focus_run row per run, whatever the exit,
 // including a total failure on a writable store, and the usage and
 // period_closed outcomes are counted.
+//
+// Traces INV-FOCUS-8: a non-dry-run verb writes one run record row.
 func TestFocusRunRowWrittenByStubVerbs(t *testing.T) {
 	f := newFocusFixture(t, "new")
 	st := f.open(t)
@@ -640,6 +653,7 @@ func snapshotAllTables(t *testing.T, path string) string {
 	return sb.String()
 }
 
+// Traces INV-FOCUS-8, INV-FOCUS-26: a dry run prints the line and writes no row in any table.
 func TestFocusDryRunWritesNothingInAnyTable(t *testing.T) {
 	f := newFocusFixture(t, "new")
 	before := snapshotAllTables(t, f.path)

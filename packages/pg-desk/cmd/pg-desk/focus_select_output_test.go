@@ -96,6 +96,7 @@ func effectsScenario(t *testing.T) *selFixture {
 
 const effectsReply = "-1 -2 -bd-5 -3 +6 +7 +8"
 
+// Traces INV-FOCUS-30: the echo table's effect and because fields.
 func TestSelectGoldenEchoEffects(t *testing.T) {
 	f := effectsScenario(t)
 	before := f.snapshot(t)
@@ -138,6 +139,7 @@ func TestSelectGoldenEchoEffects(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-30: the CHANGES block's causes.
 func TestSelectGoldenCauses(t *testing.T) {
 	f := newSelFixture(t)
 	var keys []focus.Key
@@ -178,6 +180,7 @@ func TestSelectGoldenCauses(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-30: a dry run's echo equals the apply's.
 func TestDryRunEchoEqualsApplyEcho(t *testing.T) {
 	section := func(out, heading string) string {
 		i := strings.Index(out, heading+"\n")

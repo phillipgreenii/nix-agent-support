@@ -81,6 +81,7 @@ func TestRepairScansEveryAnnotatedEntityAndEveryPlanRowEntity(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-27: repair rewrites an annotation with no row to none.
 func TestRepairIgnoresAClosedPeriodAndMendsAnnotationWithoutRow(t *testing.T) {
 	f := newFixture(t)
 	a, orphan := f.pr("1", prSpec{ownership: "mine"}), f.pr("2", prSpec{ownership: "mine"})

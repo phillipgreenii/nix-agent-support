@@ -93,6 +93,7 @@ func TestLockInsertsInLockOrderAnnotatesAndWritesTheRunRow(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-23: the lock reconciles rows and deletes the draft in one transaction.
 func TestLockDeletesTheDraftInTheSameTransaction(t *testing.T) {
 	f := newFixture(t)
 	f.pr("1", prSpec{ownership: "mine"})
@@ -121,6 +122,7 @@ func TestLockDeletesTheDraftInTheSameTransaction(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-26: a preview writes nothing.
 func TestLockPreviewWritesNothing(t *testing.T) {
 	f := newFixture(t)
 	a := f.pr("1", prSpec{ownership: "mine"})
@@ -266,6 +268,7 @@ func TestApplyAnnotationsReportsAFailureAndKeepsGoing(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-30: effect and because read from the one state-by-outcome table.
 func TestBuildPreviewResolvesEffectAndBecauseFromTheBeadStateTable(t *testing.T) {
 	f := newFixture(t)
 	src := f.pr("1", prSpec{ownership: "mine"})
@@ -305,6 +308,7 @@ func TestBuildPreviewResolvesEffectAndBecauseFromTheBeadStateTable(t *testing.T)
 	}
 }
 
+// Traces INV-FOCUS-29: hand-add hydration.
 func TestHydrateHandAddsOnlyHydratesUnknownKeysAndNamesAFailure(t *testing.T) {
 	f := newFixture(t)
 	known := f.pr("1", prSpec{ownership: "mine"})

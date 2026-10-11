@@ -10,6 +10,8 @@ import (
 // FuzzParseReply: ParseReply never panics, an error comes with a zero Reply
 // and is a usage error, and a success carries at least one token's worth of
 // meaning and no key on both sides.
+//
+// Traces INV-FOCUS-19: the reply parser never panics and rejects malformed replies.
 func FuzzParseReply(f *testing.F) {
 	for _, s := range []string{
 		"", "ok", "OK -a +b cap=3", "cap=0", "cap=-1", "cap=", "-X +X", "ok\r\n-a",

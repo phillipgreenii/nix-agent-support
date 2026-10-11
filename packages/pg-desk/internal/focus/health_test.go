@@ -438,6 +438,7 @@ func TestPlanRowsAgainstThePeriodCap(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-9: a row with no exit code counts as a total failure.
 func TestRunsDerivedFromFocusRunWithANullExitCodeCountedAsTotal(t *testing.T) {
 	w := newHealthWorld(t)
 	exit := func(n int) *int { return &n }

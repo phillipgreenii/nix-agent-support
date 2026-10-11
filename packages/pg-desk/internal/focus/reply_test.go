@@ -9,6 +9,7 @@ import (
 
 func intp(n int) *int { return &n }
 
+// Traces INV-FOCUS-19: a reply is parsed completely before any state changes.
 func TestReplyGrammarTable(t *testing.T) {
 	type want struct {
 		ok          bool

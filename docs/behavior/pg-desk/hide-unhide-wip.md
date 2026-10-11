@@ -11,6 +11,11 @@ only in the `hidden` array — interpret does not consider hidden or WIP state a
 convert a ready PR to a draft upstream: that upstream conversion is an accepted, recorded loss
 for this whole window (D15); `wip` here only ever records the annotation.
 
+A hidden entity MUST NOT be a candidate of `pg-desk focus`: the candidate set excludes every entity
+whose `hidden` annotation is true, so `hide` takes it out of the daily-focus view and `unhide` lets
+it back in at the next computation (see [`focus.md`](focus.md)). A hidden entity that
+is already in a locked plan is reported as `no longer a candidate: hidden` and never re-ordered.
+
 ## Typed forms
 
 The three verbs also exist under each entity type: `pg-desk <type> hide <id> [reason]`,

@@ -1,14 +1,13 @@
 package focus
 
 import (
-	"os"
-	"strings"
 	"testing"
 	"time"
 )
 
 // The bead column: one test row per row of the state-by-outcome table, the
-// vocabulary pinned against the behavior doc, and the classification order.
+// vocabulary pinned against the behavior doc (TestSection83TableMatchesCode, in
+// doc_conformance_test.go), and the classification order.
 
 type beadCase struct {
 	name  string
@@ -18,6 +17,7 @@ type beadCase struct {
 	shown string
 }
 
+// Traces INV-FOCUS-18: the bead column uses only the table words.
 func TestClassifyBeadOneCasePerTableRow(t *testing.T) {
 	cases := []beadCase{
 		{"no bead yet", StatePending, LinkedBead{}, SourceFlags{}, "pending"},
@@ -132,57 +132,4 @@ func TestBeadStateTableShape(t *testing.T) {
 	if RowOf("nope").State != "" {
 		t.Errorf("RowOf of an unknown state must be the zero row")
 	}
-}
-
-// TestBeadStateTableMatchesTheBehaviorDoc keeps docs/behavior/pg-desk/focus.md
-// and BeadStates equal: the doc table has the columns Bead state, Shown as,
-// On strike, On select and Skip reason, one row per table row, same words.
-func TestBeadStateTableMatchesTheBehaviorDoc(t *testing.T) {
-	b, err := os.ReadFile("../../../../docs/behavior/pg-desk/focus.md")
-	if err != nil {
-		t.Fatalf("read behavior doc: %v", err)
-	}
-	var rows [][]string
-	in := false
-	for _, l := range strings.Split(string(b), "\n") {
-		cells := splitRow(l)
-		if len(cells) == 5 && cells[0] == "Bead state" {
-			in = true
-			continue
-		}
-		if !in {
-			continue
-		}
-		if len(cells) != 5 {
-			break
-		}
-		if strings.HasPrefix(cells[0], "---") {
-			continue
-		}
-		rows = append(rows, cells)
-	}
-	if len(rows) != len(BeadStates) {
-		t.Fatalf("doc table has %d rows, BeadStates has %d", len(rows), len(BeadStates))
-	}
-	for i, r := range BeadStates {
-		want := []string{r.Description, r.Shown, r.StrikeEcho, r.SelectEcho, r.SkipReason}
-		for j := range want {
-			if rows[i][j] != want[j] {
-				t.Errorf("doc row %d column %d = %q, want %q", i+1, j+1, rows[i][j], want[j])
-			}
-		}
-	}
-}
-
-func splitRow(l string) []string {
-	l = strings.TrimSpace(l)
-	if !strings.HasPrefix(l, "|") || !strings.HasSuffix(l, "|") {
-		return nil
-	}
-	parts := strings.Split(strings.Trim(l, "|"), "|")
-	out := make([]string, len(parts))
-	for i, p := range parts {
-		out[i] = strings.Trim(strings.TrimSpace(p), "`")
-	}
-	return out
 }

@@ -40,6 +40,8 @@ func moduleRoot(t *testing.T) string {
 // decision logic (no focus-item or dedup_key literal, no exec of bd, no
 // connector write verb). It walks to the module's own go.mod (never
 // flake.nix), so it RUNS under the nix build instead of skipping.
+//
+// Traces INV-FOCUS-40: no tracker write verb is executed by pg-desk.
 func TestNoDecisionLogicInPgDesk(t *testing.T) {
 	root := moduleRoot(t)
 	res, err := ScanDecisionLogic(root, PreCutoverAllowlist)

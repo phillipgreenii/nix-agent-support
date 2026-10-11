@@ -215,6 +215,7 @@ func TestCapPrecedenceReplyThenDraftThenPeriodThenSix(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-20: the final set is computed from the draft's order.
 func TestReplyCapRetakesTheTopOfTheSameDraftOrder(t *testing.T) {
 	in := baseInput(t, "cap=3")
 	in.Draft = draftOf(drow(fk("1"), true), drow(fk("2"), true), drow(fk("3"), false), drow(fk("4"), false), drow(fk("5"), false))
@@ -520,6 +521,7 @@ func TestPlusOfANeverSeenFinishedCandidateIsASkip(t *testing.T) {
 
 // --- a plan exists ----------------------------------------------------------
 
+// Traces INV-FOCUS-20: a bare ok over a plan never removes or adds by rank.
 func TestBareOkOverPlanNeverRemovesOrAdds(t *testing.T) {
 	in := baseInput(t, "ok")
 	in.PeriodHasRows, in.Plan = true, planRows(4)
@@ -543,6 +545,7 @@ func TestBareOkOverPlanNeverRemovesOrAdds(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-20: the final set does not recompute the rank.
 func TestReplanCapThenBareOkNeverRemoves(t *testing.T) {
 	// replan --cap 3 moved the displayed line only: the draft carries cap 3,
 	// the period cap is still 6, the plan holds 5 rows, and a bare ok removes
@@ -575,6 +578,7 @@ func TestBareOkLocksUnlockedProposalsOfAFirstDraftAfterAPull(t *testing.T) {
 	wantFinalKeys(t, "Insert under cap=4", insertKeys(fs), []Key{fk("1"), fk("3"), fk("4")})
 }
 
+// Traces INV-FOCUS-21: a cap shrink deletes the highest positions only.
 func TestCapShrinkRemovesHighestPositionsOnly(t *testing.T) {
 	in := baseInput(t, "cap=2")
 	in.PeriodHasRows, in.Plan = true, planRows(5)
@@ -617,6 +621,7 @@ func TestLowerCapDeletesTheHighestUnfinishedPositions(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-21: a cap shrink never removes a finished row.
 func TestCapShrinkNeverRemovesFinishedRow(t *testing.T) {
 	in := baseInput(t, "cap=1")
 	in.PeriodHasRows = true
@@ -677,6 +682,7 @@ func TestCapRestatingCurrentCapKeepsPulledRows(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-21: a cap shrink exempts rows the reply adds.
 func TestReplyCapShrinkExemptsRowsAddedByThisReply(t *testing.T) {
 	in := baseInput(t, "cap=2 +bd-new +20")
 	in.PeriodHasRows, in.Plan = true, planRows(3)
@@ -772,6 +778,7 @@ func TestFinishedIsEvaluatedBeforeActive(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-22: a slot, a group or a merge never removes a row.
 func TestSlotGroupAndMergeSuppressionNeverRemove(t *testing.T) {
 	covering := fk("9")
 	in := baseInput(t, "ok")
@@ -811,6 +818,7 @@ func TestForcedAndHandaddedRowsSurviveRerun(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-22: a reassignment never removes a row.
 func TestReassignedItemStaysInPlan(t *testing.T) {
 	// Reassignment is not a loss of candidacy: the row stays whoever holds it
 	// now, until a new-period lock or a -key.

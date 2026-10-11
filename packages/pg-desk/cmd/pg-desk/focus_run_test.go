@@ -26,6 +26,7 @@ func runStat(t *testing.T, st *store.Store, verb, outcome string) int {
 	return stats.ByVerbOutcome[[2]string{verb, outcome}]
 }
 
+// Traces INV-FOCUS-8: one run record row per non-dry-run verb.
 func TestFocusRunRowWritten(t *testing.T) {
 	st := newRunFixture(t)
 	var stderr bytes.Buffer
@@ -77,6 +78,8 @@ func TestFocusRunStartedRowCarriesActorPeriodAndTime(t *testing.T) {
 // TestRunRowExitCodeFinalisedLast: the row exists from Start with a NULL
 // exit_code (counted as total), Finish writes exit_code and counts together
 // and only then prints the stderr line.
+//
+// Traces INV-FOCUS-9: the run record row is finalized last.
 func TestRunRowExitCodeFinalisedLast(t *testing.T) {
 	st := newRunFixture(t)
 	var stderr bytes.Buffer
@@ -158,6 +161,8 @@ func TestFocusRunOutcomeWordsFollowTheExitCode(t *testing.T) {
 // TestSelectStderrLineIsParseableJSON checks the pg-desk.focus-select/v1
 // line at the helper level: ONE line, the specified member set, the run id,
 // and the per-entity seq.
+//
+// Traces INV-FOCUS-8: the stderr line is the run record as one JSON object.
 func TestSelectStderrLineIsParseableJSON(t *testing.T) {
 	st := newRunFixture(t)
 	var stderr bytes.Buffer
@@ -292,6 +297,7 @@ func TestFocusRunCountsReadByStatistics(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-8: a dry run prints the line with dry_run true and writes no row.
 func TestFocusRunDryRunWritesNoRowButPrintsTheLine(t *testing.T) {
 	st := newRunFixture(t)
 	var stderr bytes.Buffer
@@ -339,6 +345,7 @@ func TestFocusRunWithoutWritableStoreStillPrintsTheLine(t *testing.T) {
 
 // ---------------------------------------------------------------- ULID
 
+// Traces INV-FOCUS-10: the run identifier is a ULID.
 func TestRunIDIsAULID(t *testing.T) {
 	g := &ulidGen{}
 	// The ULID specification's own example timestamp encodes to 01ARYZ6S41.

@@ -28,6 +28,7 @@ func mustHaveAll(t *testing.T, what, text string, phrases ...string) {
 	}
 }
 
+// Traces INV-FOCUS-47: select help documents the grammar, the exit codes and --dry-run.
 func TestFocusSelectHelpDocumentsReplyGrammarExitCodesAndDryRun(t *testing.T) {
 	out, _, err := runFocusCmd(t, newFocusSelectCmd, "--help")
 	mustOK(t, err)
@@ -48,6 +49,7 @@ func TestFocusSelectHelpDocumentsReplyGrammarExitCodesAndDryRun(t *testing.T) {
 	mustHaveAll(t, "select --help", out, "--dry-run", "--apply")
 }
 
+// Traces INV-FOCUS-45, INV-FOCUS-46: the group help links the verbs, names the label, and calls operator_identities Jira-only.
 func TestFocusGroupHelpLinksVerbsAndNamesThePlanableLabel(t *testing.T) {
 	var out bytes.Buffer
 	rootCmd.SetOut(&out)
@@ -116,6 +118,7 @@ func completionWords(out string) map[string]bool {
 	return words
 }
 
+// Traces INV-FOCUS-48: key completion reads the store.
 func TestFocusExplainCompletesKeysFromTheStoresCandidates(t *testing.T) {
 	f := newExplainFixture(t)
 	useReadOnlySeam(t, f)
@@ -151,6 +154,7 @@ func TestFocusExplainCompletesKeysFromTheStoresCandidates(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-48: key completion for pull.
 func TestFocusPullCompletesCandidatesNotYetSelected(t *testing.T) {
 	f := newExplainFixture(t)
 	useReadOnlySeam(t, f)
@@ -177,6 +181,7 @@ func TestFocusPullCompletesCandidatesNotYetSelected(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-48: completion prints nothing on any error.
 func TestFocusKeyCompletionIsSilentOnAnyError(t *testing.T) {
 	f := newExplainFixture(t)
 	useReadOnlySeam(t, f)
@@ -209,6 +214,7 @@ func TestFocusKeyCompletionIsSilentOnAnyError(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-48: completion writes nothing.
 func TestFocusKeyCompletionWritesNothing(t *testing.T) {
 	f := newExplainFixture(t)
 	useReadOnlySeam(t, f)

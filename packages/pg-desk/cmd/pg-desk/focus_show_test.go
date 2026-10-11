@@ -241,6 +241,7 @@ func sectionOrder(out string) []string {
 	return got
 }
 
+// Traces INV-FOCUS-12, INV-FOCUS-15, INV-FOCUS-16: one stored draft, re-rendered by a second bare show.
 func TestShowStoresOneDraftAndReRendersIt(t *testing.T) {
 	f := newShowFixture(t)
 	a := f.pr(t, 1, "alpha", "2026-10-09T08:00:00Z")
@@ -299,6 +300,7 @@ func TestShowWithLockedPlanStoresNothing(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-16: --no-store stores no draft.
 func TestShowNoStoreStoresNothing(t *testing.T) {
 	f := newShowFixture(t)
 	f.pr(t, 1, "alpha", showAt)
@@ -324,6 +326,7 @@ func TestShowNoStoreStoresNothing(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-16: a closed period stores no draft.
 func TestShowOnAClosedPeriodStoresNothing(t *testing.T) {
 	f := newShowFixture(t)
 	f.pr(t, 1, "alpha", showAt)
@@ -341,6 +344,7 @@ func TestShowOnAClosedPeriodStoresNothing(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-16: the plan check is re-made inside the transaction.
 func TestShowLockRaceStoresNothingAndPrintsThePlan(t *testing.T) {
 	f := newShowFixture(t)
 	a := f.pr(t, 1, "alpha", showAt)
@@ -405,6 +409,7 @@ func TestStaleEarlierPeriodDraftIsReplacedByReplan(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-16: a day other than today stores no draft.
 func TestNonTodayDateStoresNothing(t *testing.T) {
 	f := newShowFixture(t)
 	f.pr(t, 1, "alpha", showAt)
@@ -548,6 +553,7 @@ func TestEmptyCandidateSetExitsZero(t *testing.T) {
 	_ = f
 }
 
+// Traces INV-FOCUS-12: a replan replaces the draft.
 func TestReplanReplacesTheStoredDraft(t *testing.T) {
 	f := newShowFixture(t)
 	f.pr(t, 1, "alpha", showAt)
@@ -571,6 +577,7 @@ func TestReplanReplacesTheStoredDraft(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-16: replan writes only the single draft row.
 func TestReplanWritesTheDraftRowAndNoRunRow(t *testing.T) {
 	f := newShowFixture(t)
 	a := f.pr(t, 1, "alpha", showAt)
@@ -671,6 +678,7 @@ func TestInitialDraftAndReplanShareSkeleton(t *testing.T) {
 	}
 }
 
+// Traces INV-FOCUS-13: a locked plan renders in its recorded order, drift only counted.
 func TestShowPlanModeFreezesOrderAndShowsDrift(t *testing.T) {
 	f := newShowFixture(t)
 	a := f.pr(t, 1, "alpha", "2026-10-09T08:00:00Z")
@@ -769,6 +777,8 @@ func TestShowTruncatesAndFootnotesWithoutAll(t *testing.T) {
 // TestFocusExitCodesShowAndReplan covers the show exit-code rows of the spec: coverage
 // complete 0, a degraded or failed listing 2, a backlog above
 // focus.coverage_backlog_max 2, no candidates computable 3, unmigrated 1.
+//
+// Traces INV-FOCUS-17: the exit codes of show and replan.
 func TestFocusExitCodesShowAndReplan(t *testing.T) {
 	setListing := func(t *testing.T, f *showFixture, query, status string) {
 		t.Helper()
@@ -860,6 +870,7 @@ func TestFocusExitCodesShowAndReplan(t *testing.T) {
 	})
 }
 
+// Traces INV-FOCUS-18: the bead column.
 func TestShowBeadColumnReadsTheLinkedBead(t *testing.T) {
 	f := newShowFixture(t)
 	f.cfg.BeadIDPattern = `^bd-`

@@ -9,6 +9,8 @@ import (
 
 // Load and Candidates write nothing: the whole computation runs over a store
 // opened read-only (query_only), where any write would fail.
+//
+// Traces INV-FOCUS-11: show, replan and explain read only the store.
 func TestLoadAndCandidatesWriteNothing(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "pg-desk.db")
 	st, err := store.Open(path)
