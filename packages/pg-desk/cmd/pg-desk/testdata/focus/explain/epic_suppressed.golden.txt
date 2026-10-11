@@ -1,0 +1,10 @@
+key: issue:EP-1
+candidate: yes
+tier and deciding keys: not ranked
+slot: suppressed by issue:EP-2
+cap line: outside the cap line (cap 6)
+plan row: not in the plan
+annotation: focus_selected=unset
+bead: pending (marker none; latest audit: none)
+skip reasons (recomputed now): not matched
+run_id: null

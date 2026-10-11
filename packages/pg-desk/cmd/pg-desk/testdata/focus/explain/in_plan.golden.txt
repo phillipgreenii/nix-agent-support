@@ -1,0 +1,10 @@
+key: pr:o/r#2
+candidate: yes
+tier and deciding keys: started; above age / below priority
+slot: ranked
+cap line: position 2 of cap 6
+plan row: selected_at 2026-10-10T09:00:00Z, rank_position 1, tier not_started
+annotation: focus_selected=unset
+bead: pending 3h (marker none; latest audit: none)
+skip reasons (recomputed now): not matched
+run_id: null

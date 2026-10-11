@@ -1,0 +1,27 @@
+{
+  "annotation": "unset",
+  "bead": {
+    "state": "pending (hidden)",
+    "marker": "",
+    "audit": "",
+    "recomputed_now": ["hidden"]
+  },
+  "candidate": false,
+  "cap_position": null,
+  "contract": "pg-desk.focus/v1",
+  "deciding": {
+    "above": "",
+    "below": ""
+  },
+  "key": "pr:o/r#3",
+  "plan_row": null,
+  "reasons": ["hidden"],
+  "run_id": null,
+  "slot": {
+    "state": "none",
+    "covered_by": ""
+  },
+  "tier": "",
+  "verb": "explain",
+  "via": null
+}

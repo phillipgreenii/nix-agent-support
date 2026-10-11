@@ -1,0 +1,27 @@
+{
+  "annotation": "unset",
+  "bead": {
+    "state": "",
+    "marker": "",
+    "audit": "",
+    "recomputed_now": []
+  },
+  "candidate": false,
+  "cap_position": null,
+  "contract": "pg-desk.focus/v1",
+  "deciding": {
+    "above": "",
+    "below": ""
+  },
+  "key": "pr:o/r#99",
+  "plan_row": null,
+  "reasons": ["not-in-store"],
+  "run_id": null,
+  "slot": {
+    "state": "none",
+    "covered_by": ""
+  },
+  "tier": "",
+  "verb": "explain",
+  "via": null
+}

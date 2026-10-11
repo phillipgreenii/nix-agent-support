@@ -1,0 +1,11 @@
+key: issue:ZZ-7
+candidate: yes
+via: pr:o/r#1 by mentions
+tier and deciding keys: not_started; above tier / below none
+slot: ranked
+cap line: position 4 of cap 6
+plan row: not in the plan
+annotation: focus_selected=unset
+bead: pending (marker none; latest audit: none)
+skip reasons (recomputed now): not matched
+run_id: null

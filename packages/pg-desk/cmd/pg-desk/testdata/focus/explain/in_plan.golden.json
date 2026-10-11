@@ -1,0 +1,32 @@
+{
+  "annotation": "unset",
+  "bead": {
+    "state": "pending 3h",
+    "marker": "",
+    "audit": "",
+    "recomputed_now": ["not matched"]
+  },
+  "candidate": true,
+  "cap_position": 2,
+  "contract": "pg-desk.focus/v1",
+  "deciding": {
+    "above": "age",
+    "below": "priority"
+  },
+  "key": "pr:o/r#2",
+  "plan_row": {
+    "period": "2026-10-10",
+    "selected_at": "2026-10-10T09:00:00Z",
+    "rank_position": 1,
+    "tier": "not_started"
+  },
+  "reasons": [],
+  "run_id": null,
+  "slot": {
+    "state": "ranked",
+    "covered_by": ""
+  },
+  "tier": "started",
+  "verb": "explain",
+  "via": null
+}

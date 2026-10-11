@@ -1,0 +1,27 @@
+{
+  "annotation": "unset",
+  "bead": {
+    "state": "n/a (epic or bead)",
+    "marker": "struck",
+    "audit": "pg-decider audit\nrule: focus.item\nop: hold\nbecause: struck",
+    "recomputed_now": ["n/a"]
+  },
+  "candidate": false,
+  "cap_position": null,
+  "contract": "pg-desk.focus/v1",
+  "deciding": {
+    "above": "",
+    "below": ""
+  },
+  "key": "issue:bd-9",
+  "plan_row": null,
+  "reasons": ["minted-bead", "deferred"],
+  "run_id": null,
+  "slot": {
+    "state": "none",
+    "covered_by": ""
+  },
+  "tier": "",
+  "verb": "explain",
+  "via": null
+}

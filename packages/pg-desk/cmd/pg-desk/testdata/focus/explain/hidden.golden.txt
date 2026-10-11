@@ -1,0 +1,10 @@
+key: pr:o/r#3
+candidate: no (hidden)
+tier and deciding keys: not ranked
+slot: none
+cap line: outside the cap line (cap 6)
+plan row: not in the plan
+annotation: focus_selected=unset
+bead: pending (hidden) (marker none; latest audit: none)
+skip reasons (recomputed now): hidden
+run_id: null

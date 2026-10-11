@@ -672,6 +672,68 @@ already closed reports what the real run would: exit `0` for the same summary, `
   be written by the caller before it calls `close`.
 - **INV-FOCUS-41.** A `close --dry-run` MUST write nothing in any table, including the period row.
 
+## `explain`: why is this entity here, or not
+
+`pg-desk focus explain <key> [--date] [--json]` answers "why is X among my candidates, or not in my
+plan" and "why did a bead appear" for ONE entity. It is a pure read: it writes nothing, creates no
+period row, stores no draft, writes no run record and appends no change record, so it is safe to run
+at any time, on a closed or a not-yet-started day alike. It is computed live only: there is no
+history to read, so the output carries no flip-history member in either form. It accepts the key
+forms `select` accepts (a PR number, a PR URL, `OWNER/REPO#N` or a tracker key). `--date` addresses
+the period as for every verb: it selects the plan rows to read and the day the rank is computed for.
+
+**The text form** is a fixed list of labelled lines, in this order:
+
+1. `key:` the canonical key.
+2. `candidate:` `yes`, or `no (<reasons>)` where the reasons come from the closed list the candidate
+   set answers with: `inactive`, `hidden`, `minted-bead`, `work-item-bead`, `deferred`, `terminal`,
+   `absorbed`, `not-seed-or-linked` (`not-in-store` is the unknown key, below).
+3. `via:` only for a linked candidate: the seed it is joined to, the relation, and how many further
+   seeds are joined to it.
+4. `tier and deciding keys:` the tier, and the key that decided its position against the row above it
+   and the row below it (`above <key> / below <key>`, from the rank's closed list: `tier`, `overdue`,
+   `started`, `due`, `unblocks`, `priority`, `age`, `tiebreak`; `none` at either end). A candidate with
+   no row of its own (suppressed by an epic, a correlation group or a merge) is `not ranked`.
+5. `slot:` `ranked`, `suppressed by <key>` (the epic slot rule, a correlation group or a merge) or
+   `epics in play` (listed in the trailing block), else `none`.
+6. `cap line:` `position <n> of cap <c>` (n counts the unfinished rows inside the cap line up to and
+   including this one) or `outside the cap line`. The cap is the addressed period's, else the
+   applicable stored draft's, else the default.
+7. `plan row:` `selected_at`, `rank_position` and `tier` of its plan row, or `not in the plan`. When
+   the addressed period holds no row of it but another period does, that row is shown and the line
+   says which period it is in, because only one period holds plan rows.
+8. `annotation:` `focus_selected=<value>`: the stored period key or `none`, or `unset`.
+9. `bead:` the bead column's shown word, then the bead's hold marker (`none` when absent) and its
+   latest audit comment, both read from the bead's stored snapshot. The bead is the issue linked to
+   the source by relation `source`; when the snapshot carries no comment list the line says
+   `audit: not stored` and prints nothing it does not hold.
+10. `skip reasons (recomputed now):` the decider's closed skip reason for the row the bead falls in.
+    The decider's skip reasons are NOT recalled (no durable record of them exists and a plan writes
+    nothing): they are recomputed from the same view and labelled so.
+11. `run_id: null`: explain writes no run row.
+
+**An unknown key** (no stored entity) prints `<key>: not held by pg-desk` and `run_id: null` and
+exits `0`, the house convention of `attention explain`; its `--json` has `candidate` false and the
+reason `not-in-store`. **An unmigrated store** exits `1` with the usual refusal. A malformed key or a
+repository other than the configured one is a usage error, exit `1`.
+
+**`--json`** prints `contract` `pg-desk.focus/v1`, `verb` `explain`, and the members the text shows:
+`key`, `candidate`, `reasons`, `via` (`{seed_key, relation, more}` or null), `tier`, `deciding`
+(`{above, below}`), `slot` (`{state, covered_by}`; state is `ranked`, `suppressed`, `epics_in_play`
+or `none`), `cap_position` (integer or null), `plan_row` (`{period, selected_at, rank_position,
+tier}` or null), `annotation`, `bead` (`{state, marker, audit, recomputed_now}`) and `run_id`, which
+is always null.
+
+**Telemetry.** The verb emits no OpenTelemetry and no Prometheus signal, writes no run record and logs
+nothing; its output is the whole of what it leaves behind.
+
+- **INV-FOCUS-42.** `explain` MUST be a pure read: it MUST NOT write any table (no period row, no
+  draft, no run record, no change record), call the tracker or the network, or use a language model.
+- **INV-FOCUS-43.** `explain` MUST compute from the live rows only, MUST carry no flip-history member
+  in text or `--json`, and MUST label the decider's skip reasons as recomputed now.
+- **INV-FOCUS-44.** `explain` MUST accept the key forms `select` accepts; an unknown key MUST print
+  that it is not held and exit `0`, and an unmigrated store MUST exit `1`.
+
 ## The rank
 
 The rank orders the candidate set of the daily focus. `show`, `select`, `replan`, `pull` and `explain`
@@ -774,4 +836,7 @@ The focus verbs emit nothing over OpenTelemetry and write no Prometheus series o
 - **`close`:** the verb and the store's close write emit no OpenTelemetry or Prometheus signal and
   log nothing; a non-dry-run writes one run record row (verb `close`) and prints the one structured
   stderr line, plus the `NOTE` line when the day is not today.
+- **`explain`:** the verb and `internal/focus`'s bead-note reader emit no OpenTelemetry or Prometheus
+  signal, write no run record and log nothing; its output (text or `--json`) is the whole of what it
+  leaves behind.
 - **Store:** the run record row (see "The run record") is the durable copy of that line.

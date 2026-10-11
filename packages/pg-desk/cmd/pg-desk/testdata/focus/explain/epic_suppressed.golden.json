@@ -1,0 +1,27 @@
+{
+  "annotation": "unset",
+  "bead": {
+    "state": "pending",
+    "marker": "",
+    "audit": "",
+    "recomputed_now": ["not matched"]
+  },
+  "candidate": true,
+  "cap_position": null,
+  "contract": "pg-desk.focus/v1",
+  "deciding": {
+    "above": "",
+    "below": ""
+  },
+  "key": "issue:EP-1",
+  "plan_row": null,
+  "reasons": [],
+  "run_id": null,
+  "slot": {
+    "state": "suppressed",
+    "covered_by": "issue:EP-2"
+  },
+  "tier": "",
+  "verb": "explain",
+  "via": null
+}

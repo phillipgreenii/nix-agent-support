@@ -1,0 +1,27 @@
+{
+  "annotation": "unset",
+  "bead": {
+    "state": "pending",
+    "marker": "",
+    "audit": "",
+    "recomputed_now": ["not matched"]
+  },
+  "candidate": false,
+  "cap_position": null,
+  "contract": "pg-desk.focus/v1",
+  "deciding": {
+    "above": "",
+    "below": ""
+  },
+  "key": "issue:ZZ-5",
+  "plan_row": null,
+  "reasons": ["not-seed-or-linked"],
+  "run_id": null,
+  "slot": {
+    "state": "none",
+    "covered_by": ""
+  },
+  "tier": "",
+  "verb": "explain",
+  "via": null
+}

@@ -1,0 +1,27 @@
+{
+  "annotation": "unset",
+  "bead": {
+    "state": "held",
+    "marker": "struck",
+    "audit": "pg-decider audit\nrule: focus.item\nop: hold\nbecause: struck",
+    "recomputed_now": ["already handled"]
+  },
+  "candidate": true,
+  "cap_position": 1,
+  "contract": "pg-desk.focus/v1",
+  "deciding": {
+    "above": "",
+    "below": "age"
+  },
+  "key": "pr:o/r#1",
+  "plan_row": null,
+  "reasons": [],
+  "run_id": null,
+  "slot": {
+    "state": "ranked",
+    "covered_by": ""
+  },
+  "tier": "started",
+  "verb": "explain",
+  "via": null
+}
