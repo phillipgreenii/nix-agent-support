@@ -356,7 +356,7 @@ func (s *selectRun) plan() (*planned, error) {
 	p.lockIn = focus.LockInput{
 		Period: focus.Period{Type: env.Period.Type, Key: env.Period.Key}, Actor: env.Actor,
 		Apply: f.apply, DryRun: f.dry, Final: fs, Draft: &p.doc, FreshOrder: p.fresh,
-		Merges: p.merges, ReplyCap: reply.Cap, RunID: s.run.RunID(),
+		Merges: p.merges, ReplyCap: reply.Cap, ReplyOk: reply.Ok, RunID: s.run.RunID(),
 		Seen: focus.Seen{Plan: g.plan, Draft: p.stored},
 	}
 	if p.fresh {

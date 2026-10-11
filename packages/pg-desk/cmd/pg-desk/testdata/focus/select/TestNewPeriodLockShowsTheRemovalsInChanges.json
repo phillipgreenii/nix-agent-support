@@ -1,0 +1,178 @@
+{
+  "annotations": [],
+  "applied": false,
+  "changes": [
+    {
+      "direction": "select",
+      "key": "pr:o/r#1",
+      "title": "old plan",
+      "effect": "mint",
+      "because": "",
+      "cause": "",
+      "cause_text": "",
+      "consequence": "will mint",
+      "state": "pending",
+      "bead": "",
+      "source": "draft"
+    },
+    {
+      "direction": "select",
+      "key": "pr:o/r#2",
+      "title": "new",
+      "effect": "mint",
+      "because": "",
+      "cause": "",
+      "cause_text": "",
+      "consequence": "will mint",
+      "state": "pending",
+      "bead": "",
+      "source": "draft"
+    },
+    {
+      "direction": "remove",
+      "key": "pr:o/r#1",
+      "title": "old plan",
+      "effect": "none",
+      "because": "",
+      "cause": "new_period",
+      "cause_text": "new plan",
+      "consequence": "nothing to do",
+      "state": "pending",
+      "bead": ""
+    }
+  ],
+  "contract": "pg-desk.focus/v1",
+  "draft": {
+    "candidates_shown": 0,
+    "candidates_total": 0,
+    "cap": 6,
+    "cap_line": {
+      "cap": 6,
+      "in_plan": 2,
+      "open_slots": 4,
+      "finished": 0,
+      "text": "cap 6: 2 in plan, 4 open slots"
+    },
+    "coverage": {
+      "incomplete": false,
+      "notices": [],
+      "per_type": {
+        "issue": {
+          "active": 0,
+          "due_backlog": 0
+        },
+        "pr": {
+          "active": 2,
+          "due_backlog": 0,
+          "oldest_hydrated_at": "2026-10-10T11:00:00Z"
+        }
+      },
+      "reasons": []
+    },
+    "drift": {
+      "rows_placed_differently": 0,
+      "now_finished": [],
+      "no_longer_candidate": []
+    },
+    "epics": [],
+    "has_plan": false,
+    "made_at": "2026-10-10T12:00:00Z",
+    "mode": "draft",
+    "new_since_draft": [],
+    "notices": [],
+    "period": "2026-10-10",
+    "period_closed": false,
+    "plan_rows": [],
+    "proposed": ["pr:o/r#1", "pr:o/r#2"],
+    "rank_inputs": {
+      "unparseable_due": 0,
+      "unmapped_priority": 0,
+      "age_fallback": 2,
+      "unblocks_unavailable": 0,
+      "status_category_absent": 0
+    },
+    "rows": [
+      {
+        "mark": "+",
+        "rank": 1,
+        "key": "pr:o/r#1",
+        "type": "pr",
+        "id": "o/r#1",
+        "kind": "pr",
+        "title": "old plan",
+        "tier": "started",
+        "deciding_key": "age",
+        "priority": "P2",
+        "state": "open",
+        "bead": "pending",
+        "bead_state": "pending",
+        "plus": true,
+        "in_plan": false,
+        "finished": false,
+        "new": false,
+        "stale": false,
+        "marks": []
+      },
+      {
+        "mark": "+",
+        "rank": 2,
+        "key": "pr:o/r#2",
+        "type": "pr",
+        "id": "o/r#2",
+        "kind": "pr",
+        "title": "new",
+        "tier": "started",
+        "priority": "P2",
+        "state": "open",
+        "bead": "pending",
+        "bead_state": "pending",
+        "plus": true,
+        "in_plan": false,
+        "finished": false,
+        "new": false,
+        "stale": false,
+        "marks": []
+      }
+    ],
+    "scope": "o/r",
+    "sources": "candidates: pr 2, jira 0, bead 0 (bead_id_pattern is unset, so no issue is a bead; label pg-focus-planable needs it)",
+    "stored": true,
+    "unclosed_periods": [],
+    "unknown_children": {}
+  },
+  "dry_run": true,
+  "echo": [
+    {
+      "kind": "selected",
+      "token": "ok",
+      "key": "pr:o/r#1",
+      "title": "old plan",
+      "result": "selected from the draft",
+      "effect": "mint",
+      "because": "",
+      "cause": "",
+      "consequence": "will mint",
+      "bead": ""
+    },
+    {
+      "kind": "selected",
+      "token": "ok",
+      "key": "pr:o/r#2",
+      "title": "new",
+      "result": "selected from the draft",
+      "effect": "mint",
+      "because": "",
+      "cause": "",
+      "consequence": "will mint",
+      "bead": ""
+    }
+  ],
+  "first_lock": true,
+  "fresh_order": false,
+  "hydrated": [],
+  "never_closed": [],
+  "period": "2026-10-10",
+  "replaces_plan": true,
+  "verb": "select",
+  "would_hydrate": []
+}

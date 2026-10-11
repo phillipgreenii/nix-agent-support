@@ -1,0 +1,24 @@
+scope: o/r, period 2026-10-10
+coverage: complete
+  issue: 0 active, 0 due or never hydrated, oldest hydrated never; queries: none
+  pr: 2 active, 0 due or never hydrated, oldest hydrated 2026-10-10T11:00:00Z; queries: none
+  rank_inputs: unparseable_due 0, unmapped_priority 0, age_fallback 2, unblocks_unavailable 0, status_category_absent 0
+candidates: pr 2, jira 0, bead 0 (bead_id_pattern is unset, so no issue is a bead; label pg-focus-planable needs it)
+DRAFT (stored), draft made 0s ago
+PLAN
+MARK  RANK  TIER     DECIDES  DUE  PRI  BEAD     KEY       TITLE
++     1     started  age      -    P2   pending  pr:o/r#1  old plan
++     2     started  -        -    P2   pending  pr:o/r#2  new
+cap 6: 2 in plan, 4 open slots
+candidates (draft order; every fact is live)
+  (none)
+CHANGES
+  CHANGE  KEY       TITLE     EFFECT         CAUSE     BEAD
+  select  pr:o/r#1  old plan  will mint      -         -
+  select  pr:o/r#2  new       will mint      -         -
+  remove  pr:o/r#1  old plan  nothing to do  new plan  -
+ECHO
+  TOKEN  KEY       TITLE     RESULT                   EFFECT  BECAUSE  CONSEQUENCE  BEAD
+  ok     pr:o/r#1  old plan  selected from the draft  mint    -        will mint    -
+  ok     pr:o/r#2  new       selected from the draft  mint    -        will mint    -
+will mint (the router creates it on its next run; show reads pending until then)

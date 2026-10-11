@@ -490,12 +490,42 @@ period, reads no reply, takes no `--merge` or `--cap`, is exempt from the period
 row of verb `repair`. An annotation whose entity has no row is rewritten to `none`. With `--dry-run`
 it lists what it would write and writes nothing.
 
-**Output until the echo.** Printing the CHANGES block and the echo table belongs to a later revision;
-until then the verb prints one machine-readable stdout line per change, `<verb> <canonical key>
-<effect> <cause>` (for example `select pr:o/r#1 will-mint -` or `select pr:o/r#2 will-hold operator`),
-and `--json` carries the same fields as `changes` (with the bead id and the because clause), the
-merges, the hydrated keys and the annotation outcomes. The effect and the because clause of every
-row come from the state-by-outcome table, the same for a preview, a dry run and an apply.
+**Output: the CHANGES block and the echo table.** After the draft, a preview prints the **CHANGES
+block** and nothing else; `--dry-run` and `--apply` add the **echo table**. The CHANGES block lists
+every row the run will newly SELECT (`will mint`, `will release`) and every row it will REMOVE
+(`will hold`, `left running`), selections first, each with its CAUSE, so a removal is visible before it
+takes a bead out of play. A cause is shown as `you` (stored `operator`), `cap`, `no longer a candidate:
+hidden` or `no longer a candidate: inactive` (stored `dropped`, by the row's loss reason) or `new plan`
+(stored `new_period`); a selection has no cause. When the first lock would delete the rows of an older
+period that has no `closed_at`, the block also prints `period <date> was never closed; its rows are
+deleted by this lock`. A bare `ok` over an existing plan removes nothing for rank or for a finished
+source, so its block is empty unless the plan holds a row that lost candidacy or the lock is the first of
+a new period.
+
+The echo table names the resolved entity AND title of every applied token (`ok` for each draft proposal
+it selects, `+key`, `-key`, `cap=N`, `--merge KEEP=ABSORBED`), so a token that resolved to something other
+than intended is visible at once, and gives each row its downstream consequence as an EFFECT (`mint`,
+`hold`, `release`, `none`) plus a BECAUSE clause, both read from the state-by-outcome table above (a
+strike reads its strike columns, a selection its select columns; the "Shown as" word is the `show` word
+only). It prints the bead id wherever it names a bead; for an item that IS a bead it says `is bead <id>;
+strike does not defer it`, and for a claimed bead `claimed by <actor>, left running (stop it with bd;
+pg-desk cannot)`. The fixed messages are `+<key> (hydrated, new to store)` for a hand-add new to the
+store, `merged PROJ-5 into OWNER/REPO#400 (link recorded; no bead for PROJ-5)` for a merge, `no change;
+name items with +key or use pull` for a bare `ok` over an existing plan, `no change` for a first lock that
+selects nothing, and `will mint (the router creates it on its next run; show reads pending until then)`
+under any `will mint` row. A routine skip (`finished`, `no-longer-candidate`, `already-selected`) is not an
+applied token: it is one `skipped <key>: <reason>` line on stderr. A dry run's CHANGES block and echo table
+are the apply's, byte for byte over keys the store already holds; a hand-add new to the store has no title
+under `--dry-run` because nothing is hydrated, and the run reports `would hydrate <key>` (`hydrated <key>`
+after an apply) on its own line before the block.
+
+`--json` carries `changes[]` (`direction`, `key`, `title`, `effect`, `because`, `cause`, `cause_text`,
+`consequence`, `state`, `bead`, `source`) and `echo[]` (`kind`, `token`, `key`, `other`, `title`,
+`result`, `effect`, `because`, `cause`, `consequence`, `bead`), with `effect`, `because` and `cause` as
+separate fields over the closed vocabularies (`effect` is one of `mint`, `hold`, `release`, `none`;
+`cause` the stored word), plus `hydrated`, `would_hydrate`, `annotations`, `first_lock`, `replaces_plan`,
+`never_closed`, `fresh_order` and, for a preview, the `draft`. `run_id` is present when the run wrote a
+record. Both forms read one table, so `show` and the echo cannot drift.
 
 - **INV-FOCUS-23.** A lock MUST reconcile the plan rows, delete the stored draft, write the period row
   and write the run record row in ONE store transaction, MUST choose its first-lock or plan-exists
@@ -516,6 +546,10 @@ row come from the state-by-outcome table, the same for a preview, a dry run and 
   an annotation or a change record; `+<absorbedKey>` MUST remove the link.
 - **INV-FOCUS-29.** Hand-add hydration MUST run only after every earlier check has passed and MUST
   NOT run under a preview.
+- **INV-FOCUS-30.** A select MUST print every row it newly selects or removes in the CHANGES block with
+  its cause before anything takes a bead out of play, MUST name the resolved entity and title of every
+  applied token in the echo table with an effect, a because clause and a cause as separate fields read
+  from the one state-by-outcome table, and a dry run's echo MUST equal the apply's.
 
 ## The rank
 
