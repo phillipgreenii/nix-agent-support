@@ -7650,6 +7650,14 @@
                                 type = lib.types.attrsOf lib.types.anything;
                                 default = { };
                               };
+                              # pg-desk registers its pg-desk-focus tldr page
+                              # (docket pg2-2j5ac.44), reading home-manager's
+                              # programs.tldr.enable.
+                              programs.tldr.enable = lib.mkEnableOption "tldr (stub)";
+                              programs.tldr.customPages = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
                             };
                           }
                         )
@@ -10997,6 +11005,38 @@
                 assert r.disabled.sources == [ "pg-connector-alert-grafana" ];
                 assert !r.disabled.hasPlugin && r.disabled.hasDesk;
                 pkgs.runCommand "pg-desk-attention-registration-ok" { } "touch $out";
+
+              # The pg-desk-focus tldr page and shell completions (docket
+              # pg2-2j5ac.44, help packet): the package installs the page and
+              # the bash/zsh/fish completions, and the home module registers the
+              # page through programs.tldr.customPages only when programs.tldr is
+              # enabled. Module eval for the registration plus one tiny build
+              # that looks inside the package.
+              test-pg-desk-tldr-registration =
+                let
+                  r = import ./tests/pg-desk-tldr-registration.nix { inherit lib pkgs; };
+                  page = "${pkgs.pg-desk}/share/tldr/pages.common/pg-desk-focus.md";
+                in
+                assert r.tldrOn.pages == [ "pg-desk-focus" ];
+                assert r.tldrOn.platform == "common";
+                assert r.tldrOn.source == page;
+                assert r.tldrOff.pages == [ ];
+                assert r.deskDisabled.pages == [ ];
+                pkgs.runCommand "pg-desk-tldr-registration-ok" { } ''
+                  for f in \
+                    ${pkgs.pg-desk}/share/tldr/pages.common/pg-desk-focus.md \
+                    ${pkgs.pg-desk}/share/bash-completion/completions/pg-desk \
+                    ${pkgs.pg-desk}/share/zsh/site-functions/_pg-desk \
+                    ${pkgs.pg-desk}/share/fish/vendor_completions.d/pg-desk.fish; do
+                    if [ ! -s "$f" ]; then
+                      echo "missing or empty: $f" >&2
+                      exit 1
+                    fi
+                  done
+                  grep -q 'pg-desk focus select --dry-run' ${pkgs.pg-desk}/share/tldr/pages.common/pg-desk-focus.md
+                  grep -q '__complete' ${pkgs.pg-desk}/share/bash-completion/completions/pg-desk
+                  touch $out
+                '';
 
               # home/programs/pg-desk's `routerSource` and `shadow` options
               # (bead pg2-wmv6p): pg-router-source-pg-desk and pg-desk-shadow

@@ -926,6 +926,15 @@ in
       lib.mkAfter [ "pg-desk-attention" ]
     );
 
+    # The pg-desk-focus tldr page ships in the package (postInstall in
+    # packages/pg-desk/default.nix); same registration shape as
+    # home/programs/wtdone. `config.programs.tldr` is home-manager's, so a
+    # standalone eval of this module must declare it (tests/pg-desk-*.nix do).
+    programs.tldr.customPages.pg-desk-focus = lib.mkIf config.programs.tldr.enable {
+      platform = "common";
+      source = "${cfg.package}/share/tldr/pages.common/pg-desk-focus.md";
+    };
+
     xdg.configFile."pg-desk/config.yaml".source =
       (pkgs.formats.yaml { }).generate "pg-desk-config.yaml"
         renderedConfig;

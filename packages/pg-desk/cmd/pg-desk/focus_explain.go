@@ -68,6 +68,8 @@ a store not yet migrated, 3 the store could not be read.`,
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error { return runFocusExplain(cmd, args[0]) },
+		// The key completes from the store's candidates (focus_complete.go).
+		ValidArgsFunction: completeFocusExplainKeys,
 	}
 	addFocusFlags(c)
 	return c

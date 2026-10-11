@@ -734,6 +734,55 @@ nothing; its output is the whole of what it leaves behind.
 - **INV-FOCUS-44.** `explain` MUST accept the key forms `select` accepts; an unknown key MUST print
   that it is not held and exit `0`, and an unmigrated store MUST exit `1`.
 
+## Help, the tldr page and shell completions
+
+The focus group is documented to the operator at the command line, not only here.
+
+**`pg-desk focus --help`** lists the six verbs (`show`, `replan`, `select`, `pull`, `close`,
+`explain`) with one line each and says where each verb's own help is. It names the label that marks a
+bead for planning, `pg-focus-planable`, with the command that sets it,
+`bd update <id> --add-label pg-focus-planable`, and says the label is the only bead marker: no
+assignee and no owner is set. It also says the label needs `bead_id_pattern` in the configuration,
+because without one no issue is read as a bead. Where it mentions `focus.operator_identities` it says
+that the key is Jira-only: it lists the assignee strings that make a Jira issue the operator's, has no
+effect on pull requests or beads, and an empty list yields no Jira candidates, not a failure. The
+group's help carries the morning flow as its example.
+
+**`pg-desk focus select --help`** documents the reply grammar (`ok`, `-<key>`, `+<key>`, `cap=N`, the
+separators and what an empty reply does), the exit codes `0`, `1`, `2`, `3` and `6` one per line, and
+`--dry-run` and `--apply`, with examples that preview, lock, and strike or add or re-cap. It names no
+exit code outside that set.
+
+**The tldr page** `pg-desk-focus` is installed with the package under
+`share/tldr/pages.common/pg-desk-focus.md` and registered by the pg-desk home module through
+`programs.tldr.customPages`, only when `programs.tldr` is enabled. It shows the morning flow in the
+order an operator runs it: `show`, `select --dry-run`, `select --apply`, `replan`, `pull --top 2`
+and `close`, then `explain`, the label command, and the `--date` and `--json` flags.
+
+**Shell completions** for bash, zsh and fish are generated into the package at build time
+(`pg-desk completion <shell>`), and cover the verbs and their flags. The keys that `explain <key>` and
+`pull <key>...` take complete from the store's candidates: a PR as its number, any other candidate as
+its key, each with a short description. `pull` offers only candidates not already in the plan and not
+already typed, and nothing with `--top`; `explain` takes one key. A completion is a read: it opens the
+store read-only, calls no tracker and no network, writes nothing, is cut off after two seconds, and on
+ANY failure (an unreadable config, a store that cannot be opened or is not migrated) it offers
+nothing and prints nothing, because a shell shows everything a completion writes. Ranking order is not
+promised: the candidates come in the candidate order (PRs, Jira issues, beads, then key).
+
+**Telemetry.** Help text and completions emit no OpenTelemetry and no Prometheus signal and log
+nothing; a completion writes no run record.
+
+- **INV-FOCUS-45.** `focus --help` MUST link the verbs `show`, `replan`, `select`, `pull`, `close` and
+  `explain`, and MUST name the label `pg-focus-planable` with
+  `bd update <id> --add-label pg-focus-planable` as the only bead marker.
+- **INV-FOCUS-46.** Wherever the help mentions `focus.operator_identities` it MUST describe it as a
+  Jira-only key.
+- **INV-FOCUS-47.** `focus select --help` MUST document the reply grammar with examples, the exit codes
+  `0`, `1`, `2`, `3` and `6`, and `--dry-run`.
+- **INV-FOCUS-48.** The key completion of `explain` and `pull` MUST read the store read-only, MUST NOT
+  write, call the tracker or the network, MUST give up after a short time limit, and MUST print
+  nothing on any error.
+
 ## The rank
 
 The rank orders the candidate set of the daily focus. `show`, `select`, `replan`, `pull` and `explain`
@@ -839,4 +888,6 @@ The focus verbs emit nothing over OpenTelemetry and write no Prometheus series o
 - **`explain`:** the verb and `internal/focus`'s bead-note reader emit no OpenTelemetry or Prometheus
   signal, write no run record and log nothing; its output (text or `--json`) is the whole of what it
   leaves behind.
+- **Help and completions:** the help text, the tldr page and the key completion emit no OpenTelemetry or
+  Prometheus signal, log nothing and write no run record; a completion prints only its candidates.
 - **Store:** the run record row (see "The run record") is the durable copy of that line.

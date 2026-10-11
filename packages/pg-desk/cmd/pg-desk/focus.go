@@ -79,7 +79,33 @@ Every verb addresses ONE period: --date, else today in focus.time_zone. The
 exit codes are pg-desk's own scheme: 0 ok, 1 usage error or a store not yet
 migrated, 2 partial, 3 total failure, 6 period closed. Every non-zero exit
 prints a one-line remedy on stderr. --json (or PG_DESK_OUTPUT=json) prints one
-object whose contract member is "` + focusContract + `".`,
+object whose contract member is "` + focusContract + `".
+
+Verbs:
+  show      the plan or draft of the period, live facts and the coverage header
+  replan    open a draft again over the locked plan
+  select    lock the draft into the plan; the reply is read on stdin
+  pull      add candidates to the plan: --top K, or named keys
+  close     close the day with a summary on stdin
+  explain   why one entity is, or is not, a candidate and where it sits
+Run pg-desk focus <verb> --help for a verb's flags, examples and exit codes.
+
+Marking a bead for planning: label it pg-focus-planable, with
+  bd update <id> --add-label pg-focus-planable
+The label is the only bead marker: no assignee and no owner is set. It needs
+bead_id_pattern in the pg-desk config, or no issue is read as a bead.
+
+Jira issues become candidates by assignment: focus.operator_identities lists
+the assignee strings that make a Jira issue yours. It is a Jira-only key; it
+has no effect on pull requests or beads, and an empty list simply yields no
+Jira candidates.`,
+		Example: `  # the morning flow
+  pg-desk focus show
+  echo ok | pg-desk focus select --dry-run
+  echo ok | pg-desk focus select --apply
+  pg-desk focus replan
+  pg-desk focus pull --top 2
+  echo '{"summary": "shipped the fix"}' | pg-desk focus close`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error { return cmd.Help() },
 	}

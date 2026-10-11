@@ -28,6 +28,11 @@ let
                 type = lib.types.attrsOf lib.types.anything;
                 default = { };
               };
+              programs.tldr.enable = lib.mkEnableOption "tldr (stub)";
+              programs.tldr.customPages = lib.mkOption {
+                type = lib.types.attrsOf lib.types.anything;
+                default = { };
+              };
             };
           }
         )

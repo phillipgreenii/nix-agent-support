@@ -72,8 +72,27 @@ mkGoApp {
   # which runs the nix-wrapped binary (this wrapper, pointed at a stub
   # pg-connector) against the unwrapped binary under `env -i` as a negative
   # control.
+  #
+  # The same hook installs the `pg-desk-focus` tldr page (flat under
+  # share/tldr/pages.common, the layout wtdone and pg-pr ship; the home
+  # module registers it through programs.tldr.customPages) and the shell
+  # completions cobra generates, written the way packages/pg-connector does
+  # (no `|| true`: a generator failure must fail the build, never ship an
+  # empty completion). `pg-desk completion <shell>` reads no config and no
+  # store, so it runs in the build sandbox; the focus verbs' key completion
+  # itself runs at tab time against the operator's store.
   postInstall = ''
     wrapProgram $out/bin/pg-desk --prefix PATH : ${lib.makeBinPath [ pg-connector ]}
+
+    mkdir -p $out/share/tldr/pages.common
+    cp ${./share/tldr/pages.common/pg-desk-focus.md} $out/share/tldr/pages.common/pg-desk-focus.md
+
+    mkdir -p $out/share/bash-completion/completions
+    mkdir -p $out/share/zsh/site-functions
+    mkdir -p $out/share/fish/vendor_completions.d
+    $out/bin/pg-desk completion bash > $out/share/bash-completion/completions/pg-desk
+    $out/bin/pg-desk completion zsh > $out/share/zsh/site-functions/_pg-desk
+    $out/bin/pg-desk completion fish > $out/share/fish/vendor_completions.d/pg-desk.fish
   '';
 
   meta = {

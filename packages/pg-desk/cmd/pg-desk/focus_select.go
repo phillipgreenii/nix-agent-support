@@ -74,7 +74,15 @@ func newFocusSelectCmd() *cobra.Command {
 		Use:   "select [--date YYYY-MM-DD] [--cap N] [--apply | --dry-run] [--merge KEEP=ABSORBED,...] [--repair] [--json]",
 		Short: "Lock the draft into the plan: the reply on stdin (ok, -key, +key, cap=N)",
 		Long: `Lock the draft of the addressed period into its plan. The reply is read from
-stdin: ok, -<key>, +<key> and cap=N, separated by whitespace or commas.
+stdin.
+
+Reply grammar: tokens separated by whitespace or commas, keywords in any case.
+  ok        accept; the draft's + rows are locked whether or not it is written
+  -<key>    strike the entity: its row is deleted
+  +<key>    force-pull a candidate, or hand-add a key that is no candidate
+  cap=N     re-cap to N (a positive integer; once per reply)
+A key is a PR number, a PR URL, OWNER/REPO#N, a bead id or a tracker key. An
+empty reply is a usage error (reply ok to accept): nothing is applied.
 
 Without --apply (or with --dry-run, alone or together with --apply) select
 PREVIEWS: it computes everything and writes nothing, and leaves the stored
@@ -91,9 +99,24 @@ no --merge, and works on a closed period.
 
 Nothing is minted here: select writes selection state only.
 
-Exit codes: 0 applied (or previewed), 1 usage (including a first lock for an
-earlier or a future period), 2 rows committed but an annotation write failed
-(run select --repair), 3 a write failed outright, 6 period closed.`,
+Exit codes:
+  0  applied (or previewed)
+  1  usage (including a malformed reply and a first lock for an earlier or a
+     future period) or a store not yet migrated
+  2  rows committed but an annotation write failed (run select --repair)
+  3  a write failed outright
+  6  period closed`,
+		Example: `  # preview what an accepting reply would lock; nothing is written
+  echo ok | pg-desk focus select --dry-run
+
+  # lock the plan as drafted
+  echo ok | pg-desk focus select --apply
+
+  # strike one entity, add another, and keep the first 4 rows
+  echo "ok -1234 +ZZ-9 cap=4" | pg-desk focus select --apply
+
+  # re-write missing focus_selected annotations after exit 2
+  pg-desk focus select --repair`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error { return runFocusSelect(cmd) },
 	}

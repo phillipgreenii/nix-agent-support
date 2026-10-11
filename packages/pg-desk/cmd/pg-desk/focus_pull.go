@@ -83,6 +83,9 @@ write failed (run select --repair), 3 a store write failed or no named key has
 an entity row, 6 period closed.`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error { return runFocusPull(cmd, args) },
+		// The keys complete from the store's candidates not yet in the plan
+		// (focus_complete.go).
+		ValidArgsFunction: completeFocusPullKeys,
 	}
 	addFocusFlags(c)
 	c.Flags().Int(focusFlagTop, 0, "Pull the top K candidates not yet selected, by the current rank")
