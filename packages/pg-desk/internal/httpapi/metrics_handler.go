@@ -12,6 +12,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/changes"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/focus"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/freshness"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/metrics"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
@@ -114,6 +115,19 @@ func newMetricsHandler(st *store.Store, cfg *config.Config, pollInterval PollInt
 	}
 	if err := metrics.RegisterChangeFlow(mp, flowFn, metrics.WithSweepBound(sweepBound)); err != nil {
 		return nil, fmt.Errorf("httpapi: register change-flow metrics: %w", err)
+	}
+
+	// The focus families (daily-focus store-first design, observability) are
+	// computed fresh on every scrape from the stored rows by the SAME function
+	// the alert rules and the doctor block read (focus.ComputeHealth); the
+	// rank is computed at most once per scrape. A store that is not migrated
+	// for the focus tables yields a zero Health, so serve keeps working there
+	// and simply omits these series.
+	focusFn := func() (focus.Health, error) {
+		return focus.ComputeHealth(st, cfg, nowUTC())
+	}
+	if err := metrics.RegisterFocus(mp, focusFn); err != nil {
+		return nil, fmt.Errorf("httpapi: register focus metrics: %w", err)
 	}
 
 	return scrapeHandler(registry, scrapeTimeout), nil

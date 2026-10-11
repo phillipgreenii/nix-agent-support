@@ -146,6 +146,81 @@ its bound is checked and alerting. An absent series (no verdict) is Normal, not 
 On a store that has not been cut over to the new schema these families MUST be absent from the
 scrape; `serve` keeps answering with the dashboard families and MUST NOT refuse or fail the scrape.
 
+### Focus metrics
+
+`/metrics` also exposes the daily-focus families, computed from the store at scrape time by the one
+function (`focus.ComputeHealth`) that the focus alert rules and the `doctor`/`status` focus block
+read, so the three cannot disagree. The scrape reads only stored rows: it MUST NOT call a tracker,
+and the rank behind the candidate and rank-input series is computed at most once per scrape. Every
+family is a gauge with a CLOSED, bounded label set, and NO series carries an entity key or a bead
+id. "The current plan" and "selected rows" mean the rows of the NEWEST period that holds rows,
+never the local day. A focus bead is an issue entity whose own metadata carries `source_id`; an
+escalation bead (labelled `human`) is not a focus bead. A bead's age is now minus its tracker
+creation time, else the time the store first saw it.
+
+| Family                                          | Labels                                                                                                            | Meaning                                                                                                                                                                                                                          |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pg_desk_focus_selected`                        | none                                                                                                              | rows of the current plan                                                                                                                                                                                                         |
+| `pg_desk_focus_beads`                           | `state`: `open`, `claimed`, `held`, `deferred_other`, `blocked`, `closed`                                         | every focus bead in the store, by state (`blocked` also carries a pinned or hooked bead)                                                                                                                                         |
+| `pg_desk_focus_oldest_bead_age_seconds`         | `state`: `open`, `held`                                                                                           | age of the oldest unclaimed open bead (minted and never claimed) and of the oldest held bead; no series for a state with no bead                                                                                                 |
+| `pg_desk_focus_pending_beads`                   | `reason`: `unminted`, `hidden`, `suppressed`, `no_bead_by_design`, `unwatched`, `source_terminal`                 | rows of the current plan with no bead to wait for, by reason (below)                                                                                                                                                             |
+| `pg_desk_focus_oldest_pending_bead_age_seconds` | `reason`                                                                                                          | seconds since the oldest row of that reason was selected; no series for a reason with no row                                                                                                                                     |
+| `pg_desk_focus_divergence`                      | `kind`: the seven kinds below                                                                                     | disagreements between the plan rows, the `focus_selected` annotation and the beads                                                                                                                                               |
+| `pg_desk_focus_unwatched_selected`              | none                                                                                                              | selected rows whose entity is in no `change_flow.watchset.<type>.<query>` set                                                                                                                                                    |
+| `pg_desk_focus_runs`                            | `verb`, `outcome`: `ok`, `partial`, `total`, `period_closed`, `usage`, `empty`                                    | `focus_run` rows by verb and outcome, so partial (exit 2) and total (exit 3) are distinguishable; a run with a NULL exit code (a crash left it unfinalised) counts as `total`; only observed (verb, outcome) pairs have a series |
+| `pg_desk_focus_run_age_seconds`                 | none                                                                                                              | seconds since the last non-dry-run `select`; informational; absent when none ran                                                                                                                                                 |
+| `pg_desk_focus_rank_degraded_inputs`            | `input`: `unparseable_due`, `unmapped_priority`, `age_fallback`, `unblocks_unavailable`, `status_category_absent` | the silent rank degradations of this scrape's rank                                                                                                                                                                               |
+| `pg_desk_watch_listing_status`                  | `type`, `status`: `ok`, `degraded`, `failed`                                                                      | configured watch queries by entity type and persisted listing status; a query whose status was never persisted has no series (it is counted incomplete by `show`, not here)                                                      |
+| `pg_desk_focus_candidates`                      | `source`: `pr`, `jira`, `bead`                                                                                    | the candidate set by source, as `show` prints it                                                                                                                                                                                 |
+| `pg_desk_focus_linked_candidates`               | none                                                                                                              | candidates in the set only through a link                                                                                                                                                                                        |
+| `pg_desk_focus_draft_age_seconds`               | none                                                                                                              | seconds since the stored draft's `made_at`; ABSENT when no draft is stored (never `0`)                                                                                                                                           |
+| `pg_desk_focus_plan_rows`                       | `state`: `in_plan`, `finished`, `open_slots`                                                                      | the current plan against its cap (the period's persisted cap, else the default cap); finished rows do not count against the cap                                                                                                  |
+| `pg_desk_focus_last_lock_draft_age_seconds`     | none                                                                                                              | the stored draft's age at the last `select` run (its `counts_json.draft_age_seconds`); absent when not recorded                                                                                                                  |
+| `pg_desk_focus_last_lock_drift_rows`            | none                                                                                                              | rows a fresh rank would have placed differently at that lock (`counts_json.drift_rows`); absent when not recorded                                                                                                                |
+| `pg_desk_focus_jira_status_category_absent`     | none                                                                                                              | active Jira issues whose stored facts carry no status category                                                                                                                                                                   |
+
+Pending reasons are disjoint and are decided in this order for each row of the current plan: the
+source is an epic or a bead (its id matches `bead_id_pattern`) is `no_bead_by_design`; the source is
+terminal (a merged or closed PR, a done issue) is `source_terminal` whether or not a bead exists,
+because a finished item stays in the plan and its bead is held by the decider's terminal-source
+hold; a bead exists means the row is not pending at all; then `hidden`, `suppressed`, `unwatched`
+(the source is outside every watch query), and finally `unminted` (the `focus_selected` annotation
+is set, the source is live, and no bead was minted). Only `unminted` can page: the other reasons are
+legitimate permanent states, and counting them would train the operator to mute the alert.
+
+The seven divergence kinds. The row-based kinds are defined over each item's NEWEST `focus_selection`
+row only (so an item with rows in two periods, which the verbs never create but a restored backup can,
+is not forever mismatched); the two `removed_bead_*` kinds are defined over the annotation and the
+link, not over a row (a removed item has no stored row):
+
+- `row_without_annotation` — an item's newest row exists and its `focus_selected` annotation is
+  missing, `none` or names a different period than that row.
+- `annotation_without_row` — the annotation names a period (it is not `none`) and the item has no
+  row in any period.
+- `stale_period` — a period that STILL HOLDS rows, has no `closed_at`, and is older than the newest
+  period that holds rows or older than yesterday (in `focus.time_zone`). Counted per period.
+- `selected_bead_held` — an item's newest row exists and its bead is held (deferred, marker struck,
+  unassigned), and the source is not terminal: a finished item's bead is held by design.
+- `removed_bead_open_unclaimed` and `removed_bead_claimed` — the item's annotation is `none` (or
+  absent) and its focus bead is open and unclaimed, or claimed.
+- `terminal_source_bead_open` — an item's newest row exists, its source is terminal, and its bead is
+  NOT held (open and unclaimed): the signal that the issue-closed listener is missing or its role is
+  still in plan mode. A terminal source whose bead is held counts under none of
+  `selected_bead_held`, `terminal_source_bead_open` and `unminted`.
+
+The bounded series are zero-filled: every state, reason, kind, input and source of a closed set has
+a series, so a recovery reads as a fall to `0`. The one gap against the design's audit report line
+is that the doctor cannot report "the audit comments written today": the stored issue snapshot
+carries no comments, so that figure is not available and is never exported.
+
+On a store that is not migrated for the focus tables, or a configuration with no repository, the
+focus families MUST be absent from the scrape and the scrape MUST still succeed. A read failure of
+the store, by contrast, fails the collection rather than reading as an all-clear.
+
+Telemetry declaration: the focus verbs emit no OpenTelemetry. This section's families are the
+Prometheus view of the store; the verbs' own record is the `focus_run` row and the structured
+stderr line ([`focus.md`](focus.md)). The scrape computation logs nothing.
+
 ## Out of scope (Phase 9, narrowed by Phase 10)
 
 The primary port (`9818`) and the removal of the temporary soak board are the Phase 11 flip.
