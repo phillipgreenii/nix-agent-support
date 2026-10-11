@@ -256,9 +256,6 @@ func ComputeFinalSet(in FinalSetInput) (FinalSet, error) {
 	// Plan rows that lost candidacy for a non-terminal reason are dropped.
 	planOrder := c.planInOrder()
 	for _, p := range planOrder {
-		if c.finished(p.Key, false) {
-			continue
-		}
 		if c.lost(p.Key) && !c.struck[p.Key] {
 			c.out.Delete = append(c.out.Delete, Deletion{Key: p.Key, Cause: CauseDropped})
 			c.struck[p.Key] = true
@@ -443,9 +440,6 @@ func (c *finalCtx) applyMinus(minus []Key) error {
 // proposes anything (a replan draft marks none, and a reply cap never makes
 // it propose), and its window is built the same way.
 func (c *finalCtx) proposalWindow(rows []DraftRow, replyCap *int) []Key {
-	if len(rows) == 0 {
-		return nil
-	}
 	if !c.firstLock && !c.initialDraft(rows) {
 		return nil
 	}

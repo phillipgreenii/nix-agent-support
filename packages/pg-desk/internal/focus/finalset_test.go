@@ -978,3 +978,113 @@ func TestDeletionOrderIsOperatorThenDroppedThenCap(t *testing.T) {
 		t.Errorf("Delete = %+v, want %+v", fs.Delete, want)
 	}
 }
+
+// --- mutation-driven additions ------------------------------------------------
+
+func TestLostIsFalseForAFinishedKeyWhateverElseIsTrue(t *testing.T) {
+	c := &finalCtx{in: FinalSetInput{Facts: LiveFacts{
+		fk("1"): {Finished: true, Hidden: true},
+		fk("2"): {Finished: true, Inactive: true},
+		fk("3"): {Hidden: true},
+		fk("4"): {Inactive: true},
+		fk("5"): {Claimant: "x", Deferred: true},
+	}}}
+	want := map[Key]bool{fk("1"): false, fk("2"): false, fk("3"): true, fk("4"): true, fk("5"): false, fk("6"): false}
+	for k, w := range want {
+		if got := c.lost(k); got != w {
+			t.Errorf("lost(%v) = %v, want %v", k, got, w)
+		}
+	}
+}
+
+func TestReplyCapOfZeroOrLessIsIgnoredWhenBuiltByHand(t *testing.T) {
+	for _, n := range []int{0, -1} {
+		in := baseInput(t, "ok")
+		in.Reply.Cap = intp(n)
+		in.PeriodHasRows, in.Plan = true, planRows(3)
+		in.PeriodCap = intp(5)
+		in.Draft = replanDraft()
+		fs := mustFinal(t, in)
+		if fs.PersistCap != nil || len(fs.Delete) != 0 || fs.EffectiveCap != 5 {
+			t.Errorf("cap %d was honoured: %+v", n, fs)
+		}
+	}
+}
+
+func TestPlanOrderIsByPositionThenKey(t *testing.T) {
+	// Keys and positions disagree: positions decide.
+	in := baseInput(t, "cap=1")
+	in.PeriodHasRows = true
+	in.Plan = []PlanRow{prow(fk("1"), 3), prow(fk("2"), 1), prow(fk("3"), 2)}
+	in.PeriodCap = intp(6)
+	in.Draft = replanDraft()
+	fs := mustFinal(t, in)
+	want := []Deletion{{fk("1"), CauseCap}, {fk("3"), CauseCap}}
+	if !reflect.DeepEqual(fs.Delete, want) {
+		t.Errorf("Delete = %+v, want %+v", fs.Delete, want)
+	}
+	// Equal positions fall back to the key: 2 is kept, 3 is cut.
+	in.Plan = []PlanRow{prow(fk("3"), 1), prow(fk("2"), 1)}
+	fs = mustFinal(t, in)
+	if !reflect.DeepEqual(fs.Delete, []Deletion{{fk("3"), CauseCap}}) {
+		t.Errorf("tie: Delete = %+v", fs.Delete)
+	}
+	// Type breaks a tie on position and key text too.
+	in.Plan = []PlanRow{prow(jk("a"), 1), prow(Key{"pr", "a"}, 1)}
+	fs = mustFinal(t, in)
+	if !reflect.DeepEqual(fs.Delete, []Deletion{{Key{"pr", "a"}, CauseCap}}) {
+		t.Errorf("type tie: Delete = %+v", fs.Delete)
+	}
+}
+
+func TestTwoFormsOfOneStruckKeyDeleteOnce(t *testing.T) {
+	in := baseInput(t, "-5 -acme/widgets#5")
+	in.PeriodHasRows, in.Plan = true, planRows(5)
+	in.Draft = replanDraft()
+	fs := mustFinal(t, in)
+	if !reflect.DeepEqual(fs.Delete, []Deletion{{fk("5"), CauseOperator}}) {
+		t.Errorf("Delete = %+v, want one deletion", fs.Delete)
+	}
+}
+
+func TestProposalsOfAnInitialDraftWhosePullsWereOtherRows(t *testing.T) {
+	// The plan was created by a pull of a row the draft does not hold: the
+	// draft is still an initial draft (it marks + rows) and ok locks them.
+	in := baseInput(t, "ok")
+	in.PeriodHasRows, in.Plan = true, []PlanRow{prow(fk("50"), 1)}
+	in.Draft = draftOf(drow(fk("1"), true), drow(fk("2"), true), drow(fk("3"), false))
+	fs := mustFinal(t, in)
+	wantFinalKeys(t, "Insert", insertKeys(fs), []Key{fk("1"), fk("2")})
+
+	// A draft that holds a plan row but marks none is also initial (its
+	// proposals were all pulled): with a reply cap it re-takes the top.
+	in = baseInput(t, "cap=3")
+	in.PeriodHasRows, in.Plan = true, []PlanRow{prow(fk("1"), 1)}
+	in.PeriodCap = intp(3)
+	in.Draft = draftOf(drow(fk("1"), false), drow(fk("2"), false), drow(fk("3"), false), drow(fk("4"), false))
+	fs = mustFinal(t, in)
+	wantFinalKeys(t, "Insert", insertKeys(fs), []Key{fk("2"), fk("3")})
+}
+
+func TestMinusOfAnUnresolvableKeyNamesTheKey(t *testing.T) {
+	_, err := ComputeFinalSet(baseInput(t, "-nonsense"))
+	if !errors.Is(err, ErrUsage) || !strings.Contains(err.Error(), "cannot resolve key") {
+		t.Errorf("err = %v", err)
+	}
+	_, err = ComputeFinalSet(baseInput(t, "+nonsense"))
+	if !errors.Is(err, ErrUsage) || !strings.Contains(err.Error(), "cannot resolve key") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestPlanOrderLaterLargerPositionWithSmallerKeyStaysLater(t *testing.T) {
+	in := baseInput(t, "cap=1")
+	in.PeriodHasRows = true
+	in.Plan = []PlanRow{prow(fk("2"), 1), prow(fk("1"), 2)}
+	in.PeriodCap = intp(6)
+	in.Draft = replanDraft()
+	fs := mustFinal(t, in)
+	if !reflect.DeepEqual(fs.Delete, []Deletion{{fk("1"), CauseCap}}) {
+		t.Errorf("Delete = %+v, want the row at the higher position", fs.Delete)
+	}
+}

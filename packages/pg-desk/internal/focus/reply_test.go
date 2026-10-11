@@ -156,3 +156,33 @@ func TestUsageErrorFormat(t *testing.T) {
 		t.Errorf("UsageError must match ErrUsage only")
 	}
 }
+
+// A token whose first byte sorts below the signs is unrecognized, not a key.
+func TestReplyTokensBelowTheSignsAreUnrecognized(t *testing.T) {
+	for _, tok := range []string{"!x", "*x", "'x", "\x01x", "(x", ")x", ".x", "/x"} {
+		_, err := ParseReply(strings.NewReader("ok " + tok))
+		if err == nil || !strings.Contains(err.Error(), "unrecognized token") {
+			t.Errorf("%q: err = %v, want an unrecognized-token error", tok, err)
+		}
+	}
+}
+
+func TestParseReplyLimitIsExact(t *testing.T) {
+	over := "ok" + strings.Repeat(" ", maxReplyBytes-1)
+	if len(over) != maxReplyBytes+1 {
+		t.Fatalf("fixture length %d", len(over))
+	}
+	if _, err := ParseReply(strings.NewReader(over)); !errors.Is(err, ErrUsage) {
+		t.Errorf("a reply one byte over the limit: err = %v", err)
+	}
+}
+
+func TestParseReplyEmptyKeyRemedies(t *testing.T) {
+	for _, in := range []string{"+", "-"} {
+		_, err := ParseReply(strings.NewReader(in))
+		var ue *UsageError
+		if !errors.As(err, &ue) || ue.Remedy == "" || !strings.Contains(ue.Msg, "names no key") {
+			t.Errorf("%q: %v", in, err)
+		}
+	}
+}
