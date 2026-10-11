@@ -132,6 +132,27 @@ func (rc *routerConfig) RolesBoundTo(entityType string) []routerRole {
 	return out
 }
 
+// RolesBinding returns the names of the enabled roles that bind exactly the
+// given change name (such as issue.changed), in config order. A disabled role
+// is listed with a (disabled) suffix so the report shows the wiring is there
+// but off.
+func (rc *routerConfig) RolesBinding(bind string) []string {
+	var out []string
+	for _, r := range rc.Roles {
+		for _, b := range r.Binds {
+			if b == bind {
+				name := r.Name
+				if !r.Enabled {
+					name += " (disabled)"
+				}
+				out = append(out, name)
+				break
+			}
+		}
+	}
+	return out
+}
+
 // loadRouterConfig reads and parses the router config at path.
 func loadRouterConfig(path string) (*routerConfig, error) {
 	b, err := os.ReadFile(path)

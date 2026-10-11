@@ -153,6 +153,14 @@ func runStatus(cmd *cobra.Command) error {
 		return fmt.Errorf("status: %w", err)
 	}
 
+	// The focus: block (gate and report lines of the shared health model). A
+	// config-load failure degrades to defaults, like the change-flow section.
+	focusCfg, focusCfgErr := deskConfigLoad(cmd.Context())
+	if focusCfgErr != nil || focusCfg == nil {
+		focusCfg = &config.Config{}
+	}
+	printFocusBlock(cmd.Context(), w, st, focusCfg, nil, nil)
+
 	ledgerOut, ledgerErr := statusRunPgConnectorLedgerShow(cmd.Context())
 	if ledgerErr != nil {
 		fmt.Fprintf(w, "pg-connector ledger show: unavailable (%v)\n", ledgerErr)

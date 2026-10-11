@@ -417,6 +417,7 @@ func runDoctor(cmd *cobra.Command) error {
 		}
 	}
 	doctorChangeFlow(ctx, w, cfg, rc, &failures)
+	doctorFocus(ctx, w, cfg, rc, &failures)
 
 	if len(failures) > 0 {
 		return fmt.Errorf("doctor: %d check(s) failed: %v", len(failures), failures)

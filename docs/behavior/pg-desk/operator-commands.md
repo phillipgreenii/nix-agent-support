@@ -38,6 +38,11 @@ the router's timer period, which `pg-desk` does not own, so only `doctor` evalua
 `--router-config`). On a store that has not been cut over, the section reads `unmigrated` instead of
 failing.
 
+`status` also prints the `focus:` block described under `doctor` below, from the same shared
+health model, with every tripped gate marked `FAIL` (`status` itself never fails on one: its exit
+code is unchanged). It has no `--router-config`, so the reconcile consumer lag line reads `n/a`.
+On a store without the focus tables the block is the single line `focus: unmigrated`.
+
 Exit codes: `0` on success; `1` when the store cannot be opened. A config-load failure (needed
 only to check `sync.mode`, and to read the sweep bound's inputs) degrades to omitting the planned-sync-rows section rather than failing
 `status` outright — status's own exit-code floor stays "1 only when the store cannot be opened."
@@ -212,8 +217,60 @@ lack a status category`, counting the active `issue` entities whose id is shaped
   `ticket_patterns` no issue is recognized as Jira, so the count is 0. A report, not a gate.
 - **Router roles** (only with `--router-config`): per type, the decider roles bound to it. A role
   binds to a type when any of its `binds` entries starts with `<type>.` — exact string comparison, no
-  wildcard. The list is expected empty for `issue` and `thread` until their deciders exist. A report,
-  not a gate.
+  wildcard. A type no role binds prints `none`: that stays true for `thread`, but for `issue` it
+  means the focus decider role is not wired, because the focus role binds `issue.changed` and
+  `pr.changed` (and no `*.reconcile`, `*.closed` or `*.merged` name). The list therefore names the
+  focus role: one line per focus change name, `focus role: <role> binds <name>` or `focus role:
+nothing binds <name>` (a disabled role is listed with `(disabled)`). A report, not a gate.
+- **The `focus:` block** (described in its own subsection below).
+
+### The `focus:` block
+
+`doctor` (and `status`) print a `focus:` block, one line per figure, each in the shape
+`[gate|report] <name>: <count> (<detail>); remedy: <one line>`. A tripped gate is marked `FAIL` and
+fails `doctor` (naming it); a report never does. Every figure is the shared `focus.ComputeHealth` of
+the stored rows, the same function behind the `pg_desk_focus_*` metric families and their alert rules
+(see [`serve.md`](serve.md)), so `doctor`, `status` and the alerts cannot disagree. The block reads
+only the store (and the `--router-config` file for the lag line); it writes nothing.
+
+The four gates, in print order:
+
+- **Unminted selections.** A row of the current plan whose `focus_selected` annotation is set, whose
+  source is live and has no bead, is `unminted`; the gate trips when the OLDEST such row is older than
+  `focus.pending_gate_age` (default 30m). The definition is the metric's: it excludes an epic or bd
+  task (which has no bead by design), a hidden source, a suppressed source, a source outside every
+  watch query and a terminal source, so only a selection that can and should have a bead counts. It
+  catches the missing-role and plan-mode case: `doctor` cannot read a role's plan-versus-apply mode
+  from the router config (which carries only `name`, `enabled` and `binds`), so the age is the signal.
+  Remedy: bind the focus decider role to `issue.changed` and `pr.changed` and set it to apply.
+- **`row_without_annotation` divergence.** A plan row whose `focus_selected` annotation is missing,
+  `none` or names another period. Remedy: `pg-desk focus select --repair`.
+- **`selected_bead_held` divergence.** A selected item whose bead is held although its source is not
+  finished.
+- **The view contract.** `doctor` builds the composite view in-process with the builder `show` uses,
+  for the first row of the newest plan (or, with no plan rows, any one stored entity), marshals it to
+  JSON and checks that the `annotations` object has a `focus_selected` member: `focus view contract:
+ok` or `focus view contract: missing annotations.focus_selected` (the gate). With no entity in the
+  store the line reads `focus view contract: n/a (no entity in the store)`, a line that never trips.
+
+The reports, none of which ever fails `doctor`: the coverage backlog (types whose due backlog exceeds
+`focus.coverage_backlog_max`, with the oldest `hydrated_at`) and the degraded or failed watch-query
+listings; unwatched selections; an item removed from the plan whose bead is still in play (open or
+claimed); a held bead whose item is selected again; a bead minted and never claimed (open, unassigned
+and older than `focus.pending_gate_age`); the reconcile consumer's lag (the figure behind
+`pg_desk_consumer_lag`, for the consumer of the router's `desk-<type>-changes` query, `n/a (no
+--router-config)` without one); the audit comments written today, which reads `not available (the
+stored issue snapshot carries no comments)`; an escalated focus rule (a source carrying a
+key/value annotation whose key starts `escalated.focus`); the operator identity list (an EMPTY
+`focus.operator_identities` is a report and never a gate: it zeroes the Jira candidates, and the
+`focus show` notice is the other symptom); open beads exist and bead candidates are `0` (the empty
+set until a bead carries `pg-focus-planable`); a stored draft older than its period; and active Jira
+issues lacking a status category, which refers to the `jira status category:` line of the
+`change_flow:` section rather than repeating it.
+
+On a store not migrated for the focus tables the block is the single line `focus: unmigrated` and
+the focus checks are skipped. `doctor`'s exit code is non-zero exactly when a gate trips (or another
+check fails).
 
 `--router-config <path>` points `doctor` at the pg-router config, read as a file (no dependency on
 pg-router). `doctor` reads only: each `[[query]]`'s `trigger = { kind = "period", every = "..." }`
@@ -236,8 +293,8 @@ primary-checkout relocation), update the deployment's pg-desk `repos[].beads_dir
 change, then run `pg-desk doctor` and confirm the config check passes.
 
 Exit codes: `0` when every check passes; `1` when any check fails (naming which one) — including an
-unresolvable watched query, a stalled consumer, a violated sweep bound and an unreadable
-`--router-config`, so an alert can hang off the exit code.
+unresolvable watched query, a stalled consumer, a violated sweep bound, an unreadable
+`--router-config` and a tripped `focus:` gate, so an alert can hang off the exit code.
 
 ## heartbeat / heartbeat-item
 
@@ -270,7 +327,9 @@ to "logs only ordinary CLI report/error text" below: because it calls the SAME p
 `run` does (see [`pipeline-run.md`](pipeline-run.md)), it carries `run`'s own structured-JSON
 logging contract too — one line per entity, to stderr, plus the three-stage timeline under
 `sweep`'s own `--verbose`. `show`, `status`, `doctor`, `heartbeat`, and `heartbeat-item` carry no
-such contract; each of those five logs only ordinary CLI report/error text.
+such contract; each of those five logs only ordinary CLI report/error text. The `focus:` block of
+`doctor` and `status` emits no OpenTelemetry or Prometheus signal of its own: it reads the same
+health model that `serve` exposes as the `pg_desk_focus_*` families (see [`serve.md`](serve.md)).
 
 ## Out of scope (Phase 9, narrowed by Phase 10)
 

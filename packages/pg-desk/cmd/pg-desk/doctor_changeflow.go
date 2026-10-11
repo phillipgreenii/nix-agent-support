@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/changes"
@@ -265,8 +266,10 @@ func countActiveJiraIssuesWithoutCategory(entities []store.Entity, patterns []st
 	return n
 }
 
-// doctorRouterRoles lists which decider roles bind to each type. The list is
-// expected empty for issue and thread on day one [design 11].
+// doctorRouterRoles lists which decider roles bind to each type, then names
+// the focus decider role: the role binding issue.changed and pr.changed. A
+// type no role binds prints none (still true for thread; for issue it means
+// the focus decider is not wired, so selected items get no bead). Report-only.
 func doctorRouterRoles(w io.Writer, rc *routerConfig) {
 	fmt.Fprintln(w, "  router roles:")
 	for _, t := range changes.FlowEntityTypes {
@@ -283,4 +286,17 @@ func doctorRouterRoles(w io.Writer, rc *routerConfig) {
 			fmt.Fprintf(w, "    %s: %s%s\n", t, r.Name, state)
 		}
 	}
+	for _, bind := range focusRoleBinds {
+		names := rc.RolesBinding(bind)
+		if len(names) == 0 {
+			fmt.Fprintf(w, "    focus role: nothing binds %s (a selected item gets no focus bead from it); report only\n", bind)
+			continue
+		}
+		fmt.Fprintf(w, "    focus role: %s binds %s\n", strings.Join(names, ", "), bind)
+	}
 }
+
+// focusRoleBinds are the change names the focus decider role binds (the
+// router config the deployment ships binds these two and no reconcile, closed
+// or merged name).
+var focusRoleBinds = []string{"issue.changed", "pr.changed"}
