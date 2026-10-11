@@ -131,6 +131,59 @@ The words the run statistics derive from the exit code are `ok`, `partial`, `tot
 - **INV-FOCUS-11.** `show`, `replan` and `explain` MUST read only the store: no network call and no
   tracker call. The rank MUST be a deterministic computation with no language model.
 
+## The draft, the plan view and the cap line
+
+A **plan** is the period's `focus_selection` rows: what has been locked, in its recorded order. A
+**draft** is the one stored row of `focus_draft`, which pg-desk keeps and manages; the caller never
+holds a file. The draft is a Memento: the order, tiers and cap line computed ONCE, so the order does
+not shift while the operator reads it, until a lock deletes it or a `replan` replaces it. The model
+lives in `internal/focus` as pure code; the verbs that store, render and lock it are specified with
+each verb.
+
+**The stored document.** Contract `pg-desk.focus.draft/v1`, mode `draft`. It holds the ordered rows,
+the trailing epics block, the coverage state and the `rank_inputs` it was computed under, and nothing
+else. Each row holds its entity key, kind, tier, the key that put it ahead of the row below, the `+`
+proposal flag, the `finished` and `new` marks, and `via` for a linked candidate. It holds NO plan rows
+and NO facts (title, due date, priority, state): the `PLAN` block and every fact are read live from the
+store at render, so a plan that changes between two `show` calls (a `pull`, a strike) is never shown
+stale. The `--json` output of a verb carries the same document and is read by the command prose; it is
+never passed back in. A stored body that is undecodable, or whose contract is missing or is not exactly
+`pg-desk.focus.draft/v1`, is unreadable and is treated as ABSENT, never as an error.
+
+**Two ways to compute a draft.** An initial draft (a period with no plan) lists every ranked candidate in
+rank order and proposes (`+`) the top `cap` UNFINISHED rows. A finished row keeps its place, is never
+proposed and does not count toward `cap`. A replan draft (a period with a plan) keeps the plan rows out
+of the document, orders every other candidate afresh and proposes NOTHING, so a bare `ok` over a replan
+changes nothing; a candidate that arrived after the plan was locked (first seen later than the earliest
+plan row's `selected_at`) carries `new`. A replan over a period with no plan is the initial draft.
+
+**Re-rendering a stored draft.** The rows are shown in the DRAFT's order with live facts. A fresh rank is
+computed only to report drift and never orders anything: `rows placed differently` (rows both hold that
+sit at a different position, so a removal is not a displacement of its neighbours), the rows that have
+finished since, and the rows that are no longer candidates. A row whose source finished stays visible,
+marked `finished`. A candidate the draft does not hold shows as `new since draft` and is never added to
+the table.
+
+**The plan view.** The plan block lists the plan's rows in recorded `rank_position` order with their
+recorded tier and live facts, each marked `finished`, `claimed by <actor>`, `deferred`,
+`no longer a candidate: hidden|inactive` or `covered by <key>`. It never re-orders, re-tiers or removes
+a row because the rank now differs; drift is a notice.
+
+**The cap line.** `cap N: A in plan, B open slots; C finished, not counted`. `A` counts the UNFINISHED
+rows in the plan, `B` is `N - A` and is never negative, and the finished clause is omitted when no row
+is finished. A finished row is shown once, inside the plan, and its slot is free. For an initial draft
+the cap line counts the proposed (`+`) rows as the rows in plan.
+
+- **INV-FOCUS-12.** A draft MUST be stored singly, as one row that holds the order, tiers, proposals and
+  marks and neither a plan row nor a fact, and it MUST end at lock: a lock deletes it, a `replan`
+  replaces it, and a draft is never kept per period or per caller.
+- **INV-FOCUS-13.** Rank drift MUST NEVER move or remove a row: a stored draft renders in its own order,
+  a locked plan renders in its recorded order and tier, and a fresh rank is used only to count and name
+  drift.
+- **INV-FOCUS-14.** Only the current plan MUST exist: the plan is the `focus_selection` rows of one
+  period, it is always read live (never copied into the draft), and a first lock of a later period
+  replaces it.
+
 ## The rank
 
 The rank orders the candidate set of the daily focus. `show`, `select`, `replan`, `pull` and `explain`
@@ -203,6 +256,9 @@ cap. The cap never changes the order.
 
 The focus verbs emit nothing over OpenTelemetry and write no Prometheus series of their own.
 
+- **The draft model:** the draft document, its re-render, the plan view and the cap line are pure
+  computations over their arguments and the injected clock; they emit no OpenTelemetry or Prometheus
+  signal and log nothing.
 - **OpenTelemetry:** none, including from the rank, which also logs nothing; the verbs that call it
   report its `rank_inputs` counts in the run record and the structured stderr line.
 - **Prometheus:** none from the verbs. The `pg_desk_focus_*` families that `serve` exposes are

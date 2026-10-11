@@ -1,0 +1,93 @@
+{
+  "contract": "pg-desk.focus.draft/v1",
+  "mode": "draft",
+  "rows": [
+    {
+      "key": {
+        "type": "pr",
+        "id": "1"
+      },
+      "kind": "pr",
+      "tier": "overdue",
+      "deciding_key": "started",
+      "plus": false,
+      "finished": true,
+      "new": false
+    },
+    {
+      "key": {
+        "type": "pr",
+        "id": "2"
+      },
+      "kind": "pr",
+      "tier": "overdue",
+      "plus": true,
+      "finished": false,
+      "new": false
+    },
+    {
+      "key": {
+        "type": "issue",
+        "id": "bd-3"
+      },
+      "kind": "bead",
+      "tier": "not_started",
+      "plus": true,
+      "finished": false,
+      "new": false,
+      "via": {
+        "seed_key": {
+          "type": "pr",
+          "id": "2"
+        },
+        "relation": "work",
+        "more": 1
+      }
+    }
+  ],
+  "epics": [
+    {
+      "key": {
+        "type": "issue",
+        "id": "bd-epic"
+      },
+      "in_play": 2,
+      "total": 5
+    }
+  ],
+  "coverage": {
+    "per_type": {
+      "issue": {
+        "active": 12,
+        "due_backlog": 0,
+        "listings": [
+          {
+            "query": "assigned",
+            "status": "failed",
+            "reason": "timeout"
+          }
+        ]
+      },
+      "pr": {
+        "active": 7,
+        "due_backlog": 1,
+        "oldest_hydrated_at": "2026-10-09T06:00:00Z",
+        "listings": [
+          {
+            "query": "mine",
+            "status": "ok"
+          }
+        ]
+      }
+    },
+    "incomplete": true,
+    "reasons": ["issue listing assigned failed: timeout"]
+  },
+  "rank_inputs": {
+    "unparseable_due": 1,
+    "unmapped_priority": 2,
+    "age_fallback": 3,
+    "unblocks_unavailable": 4,
+    "status_category_absent": 5
+  }
+}

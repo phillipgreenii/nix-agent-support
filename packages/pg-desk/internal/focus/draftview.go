@@ -20,8 +20,8 @@ type Drift struct {
 }
 
 // DraftViewRow is one draft row with its live facts. The embedded DraftRow
-// is the stored one, except that Finished is also true when the live facts
-// say the source has finished since.
+// is the stored one, except that Finished is also true when the live facts or
+// the fresh rank say the source has finished since.
 type DraftViewRow struct {
 	DraftRow
 	Facts Facts
@@ -72,7 +72,7 @@ func ReRender(d DraftDoc, madeAt, now time.Time, live LiveFacts, fresh Ranking, 
 		inDraft[r.Key] = true
 		f := live[r.Key]
 		row := r
-		if f.Finished && !row.Finished {
+		if f.Finished || freshFinished[r.Key] {
 			row.Finished = true
 		}
 		v.Rows = append(v.Rows, DraftViewRow{DraftRow: row, Facts: f})
