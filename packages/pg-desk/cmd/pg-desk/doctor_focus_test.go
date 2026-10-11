@@ -31,6 +31,11 @@ func newDoctorFocusWorld(t *testing.T) *doctorFocusWorld {
 	f.cfg.BeadIDPattern = `^bd-`
 	f.cfg.Watch.PR.Queries = []string{"mine"}
 	stubDoctorSeams(t, nil, nil, nil)
+	// The watch query probe execs pg-connector by default: stub it so no test
+	// depends on the binary or reaches a backend.
+	origProbe := doctorProbeQuery
+	t.Cleanup(func() { doctorProbeQuery = origProbe })
+	doctorProbeQuery = func(_ context.Context, _ *config.Config, _, _ string) error { return nil }
 	return &doctorFocusWorld{showFixture: f}
 }
 
