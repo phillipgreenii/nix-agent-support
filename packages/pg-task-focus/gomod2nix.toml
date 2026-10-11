@@ -32,7 +32,6 @@ cachePackages = [
   'go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp',
   'go.opentelemetry.io/otel/log',
   'go.opentelemetry.io/otel/log/embedded',
-  'go.opentelemetry.io/otel/log/global',
   'go.opentelemetry.io/otel/log/noop',
   'go.opentelemetry.io/otel/metric',
   'go.opentelemetry.io/otel/metric/embedded',
@@ -43,6 +42,7 @@ cachePackages = [
   'go.opentelemetry.io/otel/sdk/log',
   'go.opentelemetry.io/otel/sdk/resource',
   'go.opentelemetry.io/otel/sdk/trace',
+  'go.opentelemetry.io/otel/sdk/trace/tracetest',
   'go.opentelemetry.io/otel/semconv/v1.26.0',
   'go.opentelemetry.io/otel/semconv/v1.37.0',
   'go.opentelemetry.io/otel/semconv/v1.43.0',
@@ -154,6 +154,14 @@ cachePackages = [
     version = 'v2.30.0'
     hash = 'sha256-SKvojuMn48wxg9Dd8D0BcS4PZO3OHIFOJEMYlpvgLsk='
 
+  [mod.'github.com/inconshreveable/mousetrap']
+    version = 'v1.1.0'
+    hash = 'sha256-XWlYH0c8IcxAwQTnIi6WYqq44nOKUylSWxWO/vi+8pE='
+
+  [mod.'github.com/kr/text']
+    version = 'v0.2.0'
+    hash = 'sha256-fadcWxZOORv44oak3jTxm6YcITcFxdGt4bpn869HxUE='
+
   [mod.'github.com/munnerz/goautoneg']
     version = 'v0.0.0-20191010083416-a7dc8b61c822'
     hash = 'sha256-79URDDFenmGc9JZu+5AXHToMrtTREHb3BC84b/gym9Q='
@@ -169,6 +177,10 @@ cachePackages = [
   [mod.'github.com/prometheus/common']
     version = 'v0.70.1'
     hash = 'sha256-xlhVEswCWaBnAXn53KOUzquoDEnZVd/NcTbj52EJ6rE='
+
+  [mod.'github.com/prometheus/procfs']
+    version = 'v0.21.1'
+    hash = 'sha256-5SpWprdX29oVntHJyadiICOk9UAP+hu+xJM51/A8Ig4='
 
   [mod.'github.com/santhosh-tekuri/jsonschema/v6']
     version = 'v6.0.3'
