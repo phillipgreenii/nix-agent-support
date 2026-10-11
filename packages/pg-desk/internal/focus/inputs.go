@@ -9,7 +9,10 @@ import (
 
 // Key names one stored entity. Type is the store's entity type: "pr" or
 // "issue".
-type Key struct{ Type, ID string }
+type Key struct {
+	Type string `json:"type"`
+	ID   string `json:"id"`
+}
 
 // Kind is the focus kind of a candidate: a PR, a Jira issue (an issue entity
 // whose id is not a bead id) or a bead (an issue entity whose id matches the
@@ -42,9 +45,9 @@ func (k Kind) order() int {
 // (the first relation by name when several do), and how many further seeds
 // are joined to it.
 type Via struct {
-	SeedKey  Key
-	Relation string
-	More     int
+	SeedKey  Key    `json:"seed_key"`
+	Relation string `json:"relation"`
+	More     int    `json:"more"`
 }
 
 // Candidate is one member of the candidate set. Seed is true for a seed;

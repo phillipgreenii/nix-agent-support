@@ -19,9 +19,9 @@ const depTypeParentChild = "parent-child"
 // in an open status); InPlay is how many of those are keys in
 // Inputs.PlanKeys.
 type EpicEntry struct {
-	Key    Key
-	InPlay int
-	Total  int
+	Key    Key `json:"key"`
+	InPlay int `json:"in_play"`
+	Total  int `json:"total"`
 }
 
 // SlotResult is the answer of ApplySlotRule.

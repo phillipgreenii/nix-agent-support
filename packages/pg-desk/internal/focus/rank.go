@@ -75,11 +75,11 @@ type RankOptions struct {
 //   - StatusCategoryAbsent: a Jira issue candidate whose snapshot carries no
 //     status category, so started fell back to the configured name list.
 type RankInputs struct {
-	UnparseableDue       int
-	UnmappedPriority     int
-	AgeFallback          int
-	UnblocksUnavailable  int
-	StatusCategoryAbsent int
+	UnparseableDue       int `json:"unparseable_due"`
+	UnmappedPriority     int `json:"unmapped_priority"`
+	AgeFallback          int `json:"age_fallback"`
+	UnblocksUnavailable  int `json:"unblocks_unavailable"`
+	StatusCategoryAbsent int `json:"status_category_absent"`
 }
 
 // RankedRow is one row of the ranking, in rank order.
