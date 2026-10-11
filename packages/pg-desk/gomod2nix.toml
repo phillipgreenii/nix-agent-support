@@ -13,6 +13,8 @@ cachePackages = [
   'github.com/mattn/go-isatty',
   'github.com/munnerz/goautoneg',
   'github.com/ncruces/go-strftime',
+  'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider',
+  'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/provider/attention',
   'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/schema',
   'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout',
   'github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout/conformance',
@@ -320,8 +322,8 @@ cachePackages = [
     hash = 'sha256-FqL9TKYJ0XkNwJFnq9j0VvJ5ZUU1RvH/52h/f5bkYAU='
 
   [mod.'modernc.org/libc']
-    version = 'v1.75.7'
-    hash = 'sha256-Iq3Pcr3RrbhC82RWDM1I4gyKh3V/HI1gVQzoGR+0YYo='
+    version = 'v1.77.1'
+    hash = 'sha256-XH7HBvMVe0lsBw0W+lkcRkItPL4//7c0p9RurXDcwqg='
 
   [mod.'modernc.org/mathutil']
     version = 'v1.7.1'
@@ -332,5 +334,5 @@ cachePackages = [
     hash = 'sha256-Y/kW9/A5uF+Y66kDbxrh4muFgE3CEee6YzSl2FMPcRg='
 
   [mod.'modernc.org/sqlite']
-    version = 'v1.59.0'
-    hash = 'sha256-CaNi9UvS9y6aiiSy3GUlRHX84og+i4MWOZmxbFONeb4='
+    version = 'v1.60.1'
+    hash = 'sha256-NEuPcq63wseHfHZ0BorTAesJ0dPBwaPepsbFQOjM8Jo='
