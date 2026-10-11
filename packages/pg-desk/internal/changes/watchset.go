@@ -48,3 +48,27 @@ func saveWatchSet(st *store.Store, entityType, query string, set map[string]bool
 	}
 	return st.SetMeta(watchSetKey(entityType, query), string(b))
 }
+
+// WatchedIDs returns the union of the ids the configured watch queries of
+// entityType listed at their last complete listing, read from the persisted
+// watch-set meta, and known=false when none of those queries has a persisted
+// watch set (never listed), so a reader can tell "not watched" from "never
+// recorded". It only reads the store.
+func WatchedIDs(st *store.Store, queries []string, entityType string) (ids map[string]bool, known bool) {
+	ids = map[string]bool{}
+	for _, q := range queries {
+		raw, found, err := st.GetMeta(watchSetKey(entityType, q))
+		if err != nil || !found {
+			continue
+		}
+		var list []string
+		if json.Unmarshal([]byte(raw), &list) != nil {
+			continue
+		}
+		known = true
+		for _, id := range list {
+			ids[id] = true
+		}
+	}
+	return ids, known
+}

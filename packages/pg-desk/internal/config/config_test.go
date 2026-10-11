@@ -95,7 +95,7 @@ func TestConfigCoversAllSection78Keys(t *testing.T) {
 		{"WatchThreadConfig", reflect.TypeOf(WatchThreadConfig{}), []string{"queries", "active_window"}},
 		{"SweepConfig", reflect.TypeOf(SweepConfig{}), []string{"max_age", "max_per_poll", "reconcile_age"}},
 		{"HydrationConfig", reflect.TypeOf(HydrationConfig{}), []string{"max_per_poll", "read_issue_deps"}},
-		{"FocusConfig", reflect.TypeOf(FocusConfig{}), []string{"time_zone", "coverage_backlog_max", "pending_gate_age", "operator_identities", "priority_map"}},
+		{"FocusConfig", reflect.TypeOf(FocusConfig{}), []string{"time_zone", "coverage_backlog_max", "pending_gate_age", "operator_identities", "priority_map", "suppressed_kind"}},
 	}
 	for _, c := range cases {
 		gotSub := yamlTags(c.typ)
@@ -1027,6 +1027,27 @@ bead_id_pattern: '^pg2-[a-z0-9]+(\.[0-9]+)*$'
 	re := cfg.BeadIDRegexp()
 	if re == nil || !re.MatchString("pg2-abc.4") || re.MatchString("PROJ-12") {
 		t.Errorf("BeadIDRegexp = %v: wrong match behavior", re)
+	}
+}
+
+func TestFocusSuppressedKind(t *testing.T) {
+	cfg, err := LoadFile(writeYAML(t, t.TempDir(), focusBase))
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	if got := cfg.FocusSuppressedKind(); got != "" {
+		t.Errorf("FocusSuppressedKind default = %q, want empty", got)
+	}
+	cfg, err = LoadFile(writeYAML(t, t.TempDir(), focusBase+"focus:\n  suppressed_kind: ' example-kind '\n"))
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	if got := cfg.FocusSuppressedKind(); got != "example-kind" {
+		t.Errorf("FocusSuppressedKind = %q, want example-kind", got)
+	}
+	var nilCfg *Config
+	if got := nilCfg.FocusSuppressedKind(); got != "" {
+		t.Errorf("nil Config FocusSuppressedKind = %q, want empty", got)
 	}
 }
 

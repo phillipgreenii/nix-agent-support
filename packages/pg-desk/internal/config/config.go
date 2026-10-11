@@ -200,6 +200,11 @@ type FocusConfig struct {
 	// DefaultFocusPriorityMap; a non-empty map REPLACES the default
 	// entirely. Read it through FocusPriorityMap().
 	PriorityMap map[string]string `yaml:"priority_map,omitempty" json:"priority_map,omitempty"`
+	// SuppressedKind is the work-kind name the decider uses for focus beads,
+	// SUPPLIED BY THE DEPLOYMENT so pg-desk code carries no work-kind
+	// literal. Empty means suppression is never reported by the bead column.
+	// Read it through FocusSuppressedKind().
+	SuppressedKind string `yaml:"suppressed_kind,omitempty" json:"suppressed_kind,omitempty"`
 }
 
 // DefaultFocusPriorityMap is focus.priority_map's default: the standard
@@ -417,6 +422,16 @@ func (c *Config) FocusPriorityMap() map[string]string {
 		out[strings.TrimSpace(k)] = strings.ToUpper(strings.TrimSpace(v))
 	}
 	return out
+}
+
+// FocusSuppressedKind returns focus.suppressed_kind, trimmed: the work-kind
+// name the decider uses for focus beads, supplied by the deployment. Empty
+// means suppression is never reported. Safe on a nil Config.
+func (c *Config) FocusSuppressedKind() string {
+	if c == nil {
+		return ""
+	}
+	return strings.TrimSpace(c.Focus.SuppressedKind)
 }
 
 // BeadIDRegexp returns the compiled bead_id_pattern, or nil when unset. It is

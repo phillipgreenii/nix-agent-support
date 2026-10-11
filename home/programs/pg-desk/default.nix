@@ -81,6 +81,7 @@ let
     pending_gate_age = cfg.focus.pendingGateAge;
     operator_identities = cfg.focus.operatorIdentities;
     priority_map = cfg.focus.priorityMap;
+    suppressed_kind = cfg.focus.suppressedKind;
   };
 
   # The only attention.ordering.ties value pg-desk's config loader accepts
@@ -660,6 +661,17 @@ in
           map REPLACES pg-desk's default (Highest = P0, High = P1,
           Medium = P2, Low = P3, Lowest = P4) entirely, so list every value
           the tracker uses. Null renders nothing and the default applies.
+        '';
+      };
+      suppressedKind = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = ''
+          config.yaml's focus.suppressed_kind: the work-kind name the decider
+          uses for focus beads. pg-desk carries no work-kind literal, so the
+          deployment supplies the name; the bead column of `focus show` reads
+          a source whose kind is suppressed as "pending (suppressed)". Null
+          renders nothing and suppression is never reported.
         '';
       };
     };

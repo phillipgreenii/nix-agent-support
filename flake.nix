@@ -7793,6 +7793,7 @@
                         Blocker = "P0";
                         Minor = "P3";
                       };
+                      suppressedKind = "example-kind";
                     };
                     beadIdPattern = "^example-[a-z0-9]+$";
                   };
@@ -7996,7 +7997,7 @@
 
                   # Focus keys: none rendered by default (all options null).
                   ! grep -qE '^(focus|bead_id_pattern):' "$d"
-                  ! grep -qE 'time_zone|coverage_backlog_max|pending_gate_age|operator_identities|priority_map' "$d"
+                  ! grep -qE 'time_zone|coverage_backlog_max|pending_gate_age|operator_identities|priority_map|suppressed_kind' "$d"
                   # All six render under the loader's key names when set.
                   fo=${hmFocus.xdg.configFile."pg-desk/config.yaml".source}
                   grep -q '^focus:' "$fo"
@@ -8007,17 +8008,18 @@
                   sed -n '/^  operator_identities:/,/^[a-z]/p' "$fo" | grep -q 'example@example.com'
                   sed -n '/^  priority_map:/,/^[a-z]/p' "$fo" | grep -q 'Blocker: P0'
                   sed -n '/^  priority_map:/,/^[a-z]/p' "$fo" | grep -q 'Minor: P3'
+                  grep -q '^  suppressed_kind: example-kind$' "$fo"
                   grep -q '^bead_id_pattern:' "$fo"
                   grep -qF 'example-[a-z0-9]+$' "$fo"
                   # A partial setting renders only its own key.
                   fp=${hmFocusPartial.xdg.configFile."pg-desk/config.yaml".source}
                   grep -q '^focus:' "$fp"
                   grep -q '^  time_zone: UTC$' "$fp"
-                  ! grep -qE 'coverage_backlog_max|pending_gate_age|operator_identities|priority_map|bead_id_pattern' "$fp"
+                  ! grep -qE 'coverage_backlog_max|pending_gate_age|operator_identities|priority_map|suppressed_kind|bead_id_pattern' "$fp"
                   # An explicit empty identity list is set, not null: it renders.
                   fe=${hmFocusEmptyIdentities.xdg.configFile."pg-desk/config.yaml".source}
                   grep -q '^  operator_identities: \[\]$' "$fe"
-                  ! grep -qE 'time_zone|coverage_backlog_max|pending_gate_age|priority_map|bead_id_pattern' "$fe"
+                  ! grep -qE 'time_zone|coverage_backlog_max|pending_gate_age|priority_map|suppressed_kind|bead_id_pattern' "$fe"
 
                   touch $out
                 '';
