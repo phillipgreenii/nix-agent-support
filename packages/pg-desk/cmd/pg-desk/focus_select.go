@@ -203,8 +203,12 @@ type planned struct {
 	hydrated []focus.Key
 }
 
-func (s *selectRun) deps() focus.LockDeps {
-	env := s.env
+func (s *selectRun) deps() focus.LockDeps { return focusLockDeps(s.cmd, s.env) }
+
+// focusLockDeps are the seams of the lock, shared by select and pull: the
+// store, the annotator, the clock of the run, hand-add hydration and the
+// stderr the one-line warnings go to.
+func focusLockDeps(cmd *cobra.Command, env *focusEnv) focus.LockDeps {
 	return focus.LockDeps{
 		Store: env.Store, Annotator: newFocusAnnotator(env.Store), Config: env.Cfg,
 		Now: func() time.Time { return env.Now },
@@ -218,7 +222,7 @@ func (s *selectRun) deps() focus.LockDeps {
 			}
 			return nil
 		},
-		Stderr: s.cmd.ErrOrStderr(), Actor: env.Actor,
+		Stderr: cmd.ErrOrStderr(), Actor: env.Actor,
 	}
 }
 
