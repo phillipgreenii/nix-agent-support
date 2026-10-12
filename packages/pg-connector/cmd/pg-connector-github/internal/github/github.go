@@ -955,7 +955,18 @@ query($q: String!, $after: String) {
     pageInfo { hasNextPage endCursor }
     nodes {
       ... on PullRequest {
-        id
+%s      }
+    }
+  }
+}
+`, searchBatchedPageSize, BatchedPRFields)
+
+// BatchedPRFields is the selection inside searchBatchedQuery's
+// `... on PullRequest { ... }` fragment, exported so the daemon's summary
+// fetcher requests exactly the batched search field set through nodes(ids:)
+// plus its own additions, rather than restating it. TestSearchBatchedQuery_
+// PinnedFieldSet pins the whole search document, and so this text.
+const BatchedPRFields = `        id
         number title url state body isDraft updatedAt reviewDecision mergeable
         author { login }
         repository { nameWithOwner }
@@ -965,11 +976,7 @@ query($q: String!, $after: String) {
         reviewThreads { totalCount }
         headRefOid
         commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
-      }
-    }
-  }
-}
-`, searchBatchedPageSize)
+`
 
 // ghBatchedSearchNode is one `... on PullRequest` node in
 // searchBatchedQuery's own response shape. A node whose fragment did not

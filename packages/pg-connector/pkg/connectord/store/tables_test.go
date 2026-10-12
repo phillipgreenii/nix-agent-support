@@ -291,3 +291,28 @@ func TestBudgetAccessors(t *testing.T) {
 		t.Error("search sample survived the prune")
 	}
 }
+
+func TestAliasByRefFold(t *testing.T) {
+	ctx := context.Background()
+	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	for _, a := range []AliasRow{
+		{NodeID: "N1", Ref: "Org/Repo#7", SeenAt: time.UnixMilli(100)},
+		{NodeID: "N2", Ref: "org/other#7", SeenAt: time.UnixMilli(200)},
+	} {
+		if err := s.PutAlias(ctx, a); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, in := range []string{"Org/Repo#7", "org/repo#7", "ORG/REPO#7"} {
+		a, ok, err := s.AliasByRefFold(ctx, in)
+		if err != nil || !ok || a.NodeID != "N1" || a.Ref != "Org/Repo#7" {
+			t.Errorf("AliasByRefFold(%q) = %+v ok=%v err=%v, want N1 with its stored form", in, a, ok, err)
+		}
+	}
+	if _, ok, _ := s.AliasByRef(ctx, "org/repo#7"); ok {
+		t.Error("AliasByRef must stay case-sensitive")
+	}
+	if _, ok, _ := s.AliasByRefFold(ctx, "org/repo#8"); ok {
+		t.Error("AliasByRefFold matched a different number")
+	}
+}

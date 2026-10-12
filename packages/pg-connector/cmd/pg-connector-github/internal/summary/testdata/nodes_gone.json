@@ -1,0 +1,17 @@
+{
+  "data": {
+    "rateLimit": {
+      "cost": 1,
+      "remaining": 4899,
+      "resetAt": "2026-10-12T10:00:00Z"
+    },
+    "nodes": [null, {}]
+  },
+  "errors": [
+    {
+      "type": "NOT_FOUND",
+      "path": ["nodes", 0],
+      "message": "Could not resolve to a node"
+    }
+  ]
+}

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -180,6 +181,14 @@ func (s *Store) AliasByNodeID(ctx context.Context, nodeID string) (AliasRow, boo
 // recently seen one when several node ids carry it).
 func (s *Store) AliasByRef(ctx context.Context, ref string) (AliasRow, bool, error) {
 	return s.getAlias(ctx, "ref", ref)
+}
+
+// AliasByRefFold is AliasByRef matching the reference case-insensitively (ASCII
+// folding, which covers GitHub owner and repository names), the most recently
+// seen row first. It does not use the alias_ref index; the table holds one row
+// per entity the daemon has seen, which is small enough for a scan.
+func (s *Store) AliasByRefFold(ctx context.Context, ref string) (AliasRow, bool, error) {
+	return s.getAlias(ctx, "lower(ref)", strings.ToLower(ref))
 }
 
 // DeleteAlias removes the row for nodeID (no error when absent).
