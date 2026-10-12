@@ -67,7 +67,7 @@ func TestSpendIsRecordedPerBucketAndPurposeAndSurvivesAStoreReopen(t *testing.T)
 	}
 	byPurpose := map[Purpose]int64{}
 	for _, r := range rows {
-		_, p := decodePurpose(r.Purpose)
+		_, p := DecodePurpose(r.Purpose)
 		byPurpose[p] += r.Spent
 	}
 	if byPurpose[PurposeQuery] != 3000 || byPurpose[PurposeInteractive] != 200 {

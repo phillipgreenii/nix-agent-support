@@ -244,7 +244,7 @@ func (b *bucketState) apply(e entry, r *Reading) bool {
 
 // replay books a stored row at start-up.
 func (b *bucketState) replay(row store.BudgetSample) {
-	class, purpose := decodePurpose(row.Purpose)
+	class, purpose := DecodePurpose(row.Purpose)
 	var r *Reading
 	if row.Remaining >= 0 {
 		r = &Reading{Remaining: row.Remaining, ResetAt: row.ResetAt, At: row.At}
@@ -440,8 +440,11 @@ type Ticket struct {
 func (t *Ticket) Request() Request { return t.req }
 
 // Settle releases the reservation and records what the call actually spent. A
-// zero Bucket or Class in s defaults to the ticket's. The in-memory accounting
-// is updated even when persisting fails; the returned error is that failure.
+// zero Bucket or Class in s defaults to the ticket's. The actual cost may exceed
+// the estimate (GraphQL reports it only afterwards); the overshoot is recorded
+// and counts against every later admission, so callers estimate high rather than
+// low. The in-memory accounting is updated even when persisting fails; the
+// returned error is that failure.
 func (t *Ticket) Settle(s Spend) error {
 	t.g.mu.Lock()
 	done := t.done
@@ -522,7 +525,7 @@ func (g *Governor) record(s Spend, reserved *Request) error {
 	}
 	row := store.BudgetSample{
 		Bucket: string(s.Bucket), At: at, Remaining: unknownRemaining,
-		Spent: cost, Purpose: encodePurpose(s.Class, s.Purpose),
+		Spent: cost, Purpose: EncodePurpose(s.Class, s.Purpose),
 	}
 	if accepted {
 		row.Remaining, row.ResetAt = rd.Remaining, rd.ResetAt

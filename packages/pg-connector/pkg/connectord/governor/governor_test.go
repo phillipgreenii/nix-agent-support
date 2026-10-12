@@ -633,6 +633,22 @@ func TestConcurrentWorkersNeverPassTheCap(t *testing.T) {
 	}
 }
 
+func TestASpendWithoutAClassCountsAsBackground(t *testing.T) {
+	g, _ := newGov(t, testConfig(), Options{})
+	if err := g.Record(Spend{Bucket: BucketGraphQL, Purpose: PurposeRefresh, Cost: 3600}); err != nil {
+		t.Fatal(err)
+	}
+	if bs, _ := g.State().Bucket(BucketGraphQL); bs.BackgroundSpent != 3600 || bs.Spent != 3600 {
+		t.Errorf("state = %+v: unknown spend must not be assumed to be the foreground's", bs)
+	}
+	if k := kindOf(g.Check(Request{Bucket: BucketGraphQL, Class: ClassQuery, Cost: 1})); k != RefusedBackgroundShare {
+		t.Errorf("background after an unclassified 3600: %v", k)
+	}
+	if err := g.Check(Request{Bucket: BucketGraphQL, Class: ClassInteractive, Cost: 400}); err != nil {
+		t.Errorf("the foreground's 400 refused: %v", err)
+	}
+}
+
 func TestConfigValidate(t *testing.T) {
 	ok := testConfig()
 	if err := ok.Validate(); err != nil {
@@ -660,17 +676,17 @@ func TestConfigValidate(t *testing.T) {
 func TestPurposeEncodingRoundTrips(t *testing.T) {
 	for _, c := range []Class{ClassInteractive, ClassInvalidated, ClassQuery, ClassKeepAlive, ClassFill} {
 		for _, p := range []Purpose{PurposeInteractive, PurposeWrite, PurposeQuery, PurposeRefresh, PurposeSettle, PurposeFill, PurposePassthrough, ""} {
-			gc, gp := decodePurpose(encodePurpose(c, p))
+			gc, gp := DecodePurpose(EncodePurpose(c, p))
 			if gc != c || gp != p {
 				t.Errorf("(%v, %q) round-tripped to (%v, %q)", c, p, gc, gp)
 			}
 		}
 	}
 	// A row this package did not write has no class, and counts as background.
-	if c, p := decodePurpose("legacy"); c != 0 || p != "legacy" {
+	if c, p := DecodePurpose("legacy"); c != 0 || p != "legacy" {
 		t.Errorf("foreign purpose decoded to (%v, %q)", c, p)
 	}
-	if c, p := decodePurpose("x:c9"); c != 0 || p != "x:c9" {
+	if c, p := DecodePurpose("x:c9"); c != 0 || p != "x:c9" {
 		t.Errorf("out-of-range class decoded to (%v, %q)", c, p)
 	}
 	if !(entry{}).background() {

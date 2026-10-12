@@ -200,7 +200,10 @@ type Request struct {
 // Spend is one origin call that happened, to record.
 type Spend struct {
 	Bucket Bucket
-	Class  Class
+	// Class is the priority class the call ran as. A class left unset (zero)
+	// counts as background, so a caller that forgets it is never counted into
+	// the foreground's share.
+	Class Class
 	// Purpose, Group and BatchSize describe the call for the observers; Group
 	// is the field group ("" when the call is not tied to one) and BatchSize
 	// the number of entities it carried.

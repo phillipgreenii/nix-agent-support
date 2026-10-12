@@ -27,17 +27,22 @@ var _ Store = (*store.Store)(nil)
 // A budget row has no class column, and the background share must survive a
 // restart too, so the governor stores the class inside the purpose column as
 // "<purpose>:c<class>" (for example "query:c3"). The purpose part is the
-// event log's vocabulary; a reader that wants per-purpose spend splits on the
-// last ":c". A row without the suffix (not written by this package) decodes
-// with class 0, which counts as background: unknown spend is never assumed to
-// be the foreground's.
+// event log's vocabulary. A reader of the table (status, a shadow harness)
+// that wants per-purpose spend calls DecodePurpose. A row without the suffix
+// (not written by this package) decodes with class 0, which counts as
+// background: unknown spend is never assumed to be the foreground's.
 const classMarker = ":c"
 
-func encodePurpose(class Class, p Purpose) string {
+// EncodePurpose is the form of a purpose, with its class, in the budget table's
+// purpose column.
+func EncodePurpose(class Class, p Purpose) string {
 	return string(p) + classMarker + strconv.Itoa(int(class))
 }
 
-func decodePurpose(s string) (Class, Purpose) {
+// DecodePurpose splits a budget row's purpose column into the class and the
+// purpose EncodePurpose wrote; a column it did not write decodes as class 0 with
+// the text as the purpose.
+func DecodePurpose(s string) (Class, Purpose) {
 	i := strings.LastIndex(s, classMarker)
 	if i < 0 {
 		return 0, Purpose(s)
