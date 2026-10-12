@@ -98,9 +98,23 @@ func TestGlobalFlagOperandsAreResolved(t *testing.T) {
 	if reads := effectPaths(got.Effects, AccessRead); !reflect.DeepEqual(reads, []string{"/secret/db.sqlite"}) {
 		t.Errorf("bd --db: reads = %v, want the --db path read to be emitted", reads)
 	}
-	if bad := interpretDefault(t, "git -c core.pager=evil status"); bad.Sufficient {
-		t.Error("git -c core.pager=evil status: sufficient, want the closed-set check to fail it")
+	// Packet tc-o14i5.3.5: the -c pair is resolved and classified by K9's P16
+	// table (an exec-sink fact; the VERDICT is effectpolicy's).
+	bad := interpretDefault(t, "git -c core.pager=evil status")
+	if cls := configKeyClasses(bad.Effects); !reflect.DeepEqual(cls, []GitConfigClass{GitConfigExecSink}) {
+		t.Errorf("git -c core.pager=evil status: config-key classes = %v, want [exec-sink]", cls)
 	}
+}
+
+// configKeyClasses returns the P16 classes of the EffectConfigKey effects.
+func configKeyClasses(effs []Effect) []GitConfigClass {
+	var out []GitConfigClass
+	for _, e := range effs {
+		if e.Kind == EffectConfigKey {
+			out = append(out, e.ConfigClass)
+		}
+	}
+	return out
 }
 
 func TestGitConfigPairClosedSet(t *testing.T) {
@@ -115,18 +129,26 @@ func TestGitConfigPairClosedSet(t *testing.T) {
 			t.Errorf("%q: insufficient (%s), want sufficient", c, got.Insufficiency)
 		}
 	}
-	bad := []string{
-		"git -c core.fsmonitor=/tmp/x.sh status",      // a hook program, not a boolean
-		"git -c core.editor=/tmp/evil.sh status",      // non-inert editor
-		"git -c alias.ci=commit ci",                   // alias injection
-		"git -c core.pager=less log",                  // pager exec
-		"git -c Rerere.Enabled=false log",             // not the exact spelling: closed means closed
-		"git -c rerere.enabled=false -c core.x=1 log", // all-or-nothing
-		`git -c "$PAIR" log`,                          // runtime expansion
+	// A runtime-expanded pair stays insufficient.
+	if got := interpretDefault(t, `git -c "$PAIR" log`); got.Sufficient {
+		t.Error(`git -c "$PAIR" log: sufficient, want insufficient`)
 	}
-	for _, c := range bad {
-		if got := interpretDefault(t, c); got.Sufficient {
-			t.Errorf("%q: sufficient, want insufficient (the pair is outside the closed inert set)", c)
+	// Every other pair is no longer a bare insufficiency: it carries K9's P16
+	// fact class, and effectpolicy.GitConfigKeyPolicy decides (exec-sink =>
+	// Reject, unlisted => Abstain).
+	classes := map[string][]GitConfigClass{
+		"git -c core.fsmonitor=/tmp/x.sh status":      {GitConfigExecSink},
+		"git -c core.editor=/tmp/evil.sh status":      {GitConfigExecSink},
+		"git -c core.pager=less log":                  {GitConfigExecSink},
+		"git -c Rerere.Enabled=false log":             {GitConfigInertMetadata}, // keys are case-insensitive (git help config)
+		"git -c rerere.enabled=false -c core.x=1 log": {GitConfigInertMetadata, GitConfigUnlisted},
+		"git -c alias.ci=commit ci":                   {GitConfigUnlisted},
+		"git --config-env=core.pager=PAGER log":       {GitConfigExecSink},
+	}
+	for c, want := range classes {
+		got := interpretDefault(t, c)
+		if cls := configKeyClasses(got.Effects); !reflect.DeepEqual(cls, want) {
+			t.Errorf("%q: config-key classes = %v, want %v", c, cls, want)
 		}
 	}
 }

@@ -20,6 +20,31 @@
       }
     },
     "flags": {
+      "--config-env": {
+        "arity": "one",
+        "operand": {
+          "kind": "option-pair",
+          "set": "git-config"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "git --help: \"[--config-env=\u003cname\u003e=\u003cenvvar\u003e]\""
+        }
+      },
+      "--exec-path": {
+        "arity": "optional-glued",
+        "operand": {
+          "kind": "exec-path"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "git --help: \"[--exec-path[=\u003cpath\u003e]]\""
+        }
+      },
       "--glob-pathspecs": {
         "arity": "none",
         "operand": {
@@ -167,8 +192,8 @@
       "-c": {
         "arity": "one",
         "operand": {
-          "kind": "allowed-literal",
-          "set": "git-inert-config-pair"
+          "kind": "option-pair",
+          "set": "git-config"
         },
         "transform": {
           "kind": "none"

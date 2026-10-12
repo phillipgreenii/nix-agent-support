@@ -108,8 +108,10 @@ func interpretSubcommand(leaf cmdparse.ParsedCommand, schema CommandSchema, ctx 
 		insufficiency = sub.Insufficiency
 	}
 	return Interpretation{
-		Effects:       effects,
-		Children:      sub.Children,
+		Effects: effects,
+		// The parent's own children (a global flag such as git -c alias.x=!cmd)
+		// ride along with the subcommand's.
+		Children:      append(append([]ChildInvocation(nil), st.children...), sub.Children...),
 		Sufficient:    st.insuff == "" && sub.Sufficient,
 		Insufficiency: insufficiency,
 	}
@@ -211,9 +213,11 @@ func interpretVerbDispatch(leaf cmdparse.ParsedCommand, schema CommandSchema, ct
 	if !st.scanned {
 		return st.result()
 	}
-	st.resolve() // the wrapper's own flag operands; see interpretSubcommand
+	if verbIdx >= 0 {
+		st.resolve() // the wrapper's own flag operands; see interpretSubcommand
+	}
 	if verbIdx < 0 {
-		st.finish()
+		st.finish() // resolves the flag operands itself; resolving twice duplicated their effects
 		if schema.DefaultVerb != "" {
 			st.effects = append(st.effects, Effect{Kind: EffectExec, Family: schema.VerbFamily, Operation: schema.DefaultVerb, Source: "implicit"})
 		}

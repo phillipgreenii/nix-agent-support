@@ -717,7 +717,7 @@ var treefmtSchema = CommandSchema{
 		"--allow-missing-formatter": inert,
 		"--ci":                      inert,
 		"--completion":              literal1,
-		"--config-file":             {Arity: ArityOne, Operand: PathRead},
+		"--config-file":             {Arity: ArityOne, Operand: ConfigSource},
 		"--cpu-profile":             {Arity: ArityOne, Operand: PathTruncate},
 		"--excludes":                literal1,
 		"--fail-on-change":          inert,
@@ -899,6 +899,7 @@ var goBuildFlags = map[string]FlagSpec{
 	"-mod": literal1, "-modcacherw": inert, "-modfile": literal1,
 	"-pgo": literal1, "-pkgdir": literal1,
 	"-tags": literal1, "-trimpath": inert,
+	"-toolexec": {Arity: ArityOne, Operand: ExecCommand},
 }
 
 // goTestSchema: `go test [build/test flags] [packages]`. Every invocation
@@ -932,6 +933,7 @@ var goTestSchema = CommandSchema{
 		"-cpu": literal1, "-shuffle": literal1,
 		"-short": inert, "-failfast": inert,
 		"-coverprofile": {Arity: ArityOne, Operand: PathTruncate},
+		"-exec":         {Arity: ArityOne, Operand: ExecCommand},
 	}),
 	Positionals:     PositionalSpec{Rest: PathRead},
 	ImplicitEffects: []ImplicitEffect{{Role: Exec, Target: "go test"}},
@@ -985,7 +987,7 @@ var goRunSchema = CommandSchema{
 	Name:       "run",
 	Provenance: "go help run (go1.26.6, this host 2026-09-07)",
 	Flags: mergeFlags(goBuildFlags, map[string]FlagSpec{
-		"-exec": literal1,
+		"-exec": {Arity: ArityOne, Operand: ExecCommand},
 	}),
 	Positionals: PositionalSpec{
 		Leading: []OperandRole{Unmodeled},
@@ -1707,9 +1709,10 @@ var sshSchema = CommandSchema{
 	Provenance: sshProvenance,
 	Flags: map[string]FlagSpec{
 		"-i": {Arity: ArityOne, Operand: KeyMaterial},
-		"-F": {Arity: ArityOne, Operand: PathRead},
+		"-F": {Arity: ArityOne, Operand: ConfigSource},
 		"-E": {Arity: ArityOne, Operand: PathTruncate},
-		"-p": literal1, "-l": literal1, "-o": literal1, "-J": literal1,
+		"-p": literal1, "-l": literal1, "-J": literal1,
+		"-o": {Arity: ArityOne, Operand: OptionPair("ssh-config")},
 		"-L": literal1, "-R": literal1, "-D": literal1, "-W": literal1,
 		"-b": literal1, "-c": literal1, "-m": literal1, "-I": literal1,
 		"-Q": literal1, "-S": literal1, "-w": literal1, "-B": literal1, "-e": literal1,
@@ -1835,8 +1838,9 @@ var scpSchema = CommandSchema{
 	Provenance: scpProvenance,
 	Flags: map[string]FlagSpec{
 		"-i": {Arity: ArityOne, Operand: KeyMaterial},
-		"-F": {Arity: ArityOne, Operand: PathRead},
-		"-P": literal1, "-o": literal1, "-J": literal1, "-c": literal1,
+		"-F": {Arity: ArityOne, Operand: ConfigSource},
+		"-P": literal1, "-J": literal1, "-c": literal1,
+		"-o": {Arity: ArityOne, Operand: OptionPair("ssh-config")},
 		"-l": literal1, "-S": literal1, "-D": literal1, "-X": literal1,
 		"-3": inert, "-4": inert, "-6": inert, "-A": inert, "-B": inert,
 		"-C": inert, "-O": inert, "-p": inert, "-q": inert, "-R": inert,
@@ -1917,7 +1921,9 @@ var scpSchema = CommandSchema{
 // DELIBERATELY ABSENT (each makes the WHOLE invocation Insufficient rather
 // than silently inert or misread), each a distinct trust boundary this
 // slice does not cover:
-//   - -f/--justfile FILE, -d/--working-directory DIR, --justfile-name
+//   - (-f/--justfile FILE and -d/--working-directory DIR are NOW modeled as
+//     config sources, packet tc-o14i5.3.5; the remaining entries here stay
+//     absent.) --justfile-name
 //     NAME, --ceiling DIR: each can point verb discovery at a DIFFERENT
 //     justfile than the one deletable.DiscoveredVerbs would find by
 //     walking CWD's ancestors — modeling them would need this schema to
@@ -1957,6 +1963,9 @@ var justSchema = CommandSchema{
 		"--command-color": literal1,
 		"--alias-style":   literal1,
 		"--set":           {Arity: ArityN, Operands: []OperandRole{Literal, Literal}},
+		// tc-o14i5.3.5: a different justfile / working directory is a config source.
+		"-f": {Arity: ArityOne, Operand: ConfigSource}, "--justfile": {Arity: ArityOne, Operand: ConfigSource},
+		"-d": {Arity: ArityOne, Operand: ConfigSource}, "--working-directory": {Arity: ArityOne, Operand: ConfigSource},
 	},
 	Stdin:        StdinNever,
 	Stdout:       StdoutMetadata,
@@ -2139,7 +2148,7 @@ var nixSchema = CommandSchema{
 	// behaviour) are exactly the trust-relevant surface this sub-slice does
 	// not model — any of them makes the whole invocation Insufficient, the
 	// conservative direction.
-	Flags:        map[string]FlagSpec{},
+	Flags:        nixExecSettingFlags,
 	UnknownFlag:  UnknownFlagInsufficient,
 	EndOfOptions: true,
 	Subcommands: map[string]CommandSchema{
@@ -2152,6 +2161,9 @@ var nixSchema = CommandSchema{
 		// registry_repo_base.go.
 		"eval": nixEvalSchema,
 		"fmt":  nixFmtSchema,
+		// tc-o14i5.3.5: non-local develop|shell refs are config sources.
+		"develop": nixDevelopSchema,
+		"shell":   nixShellSchema,
 	},
 }
 
@@ -2200,7 +2212,7 @@ var nixRunSchema = CommandSchema{
 	Provenance:   "nix (Nix) 2.34.8 (this host, nix run --help), 2026-09-08",
 	VerbFamily:   "nix",
 	DefaultVerb:  ".",
-	Flags:        map[string]FlagSpec{},
+	Flags:        nixExecSettingFlags,
 	UnknownFlag:  UnknownFlagInsufficient,
 	EndOfOptions: true,
 }

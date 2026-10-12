@@ -367,6 +367,18 @@
               "source": "go help build: \"-tags tag,list a comma-separated list of additional build tags to consider satisfied\""
             }
           },
+          "-toolexec": {
+            "arity": "one",
+            "operand": {
+              "kind": "exec-command"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            }
+          },
           "-trimpath": {
             "arity": "none",
             "operand": {
@@ -1216,6 +1228,18 @@
               "source": "go help get: \"usage: go get [-t] [-u] [-tool] [build flags] [packages]\""
             }
           },
+          "-toolexec": {
+            "arity": "one",
+            "operand": {
+              "kind": "exec-command"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
+            }
+          },
           "-trimpath": {
             "arity": "none",
             "operand": {
@@ -1622,6 +1646,18 @@
             },
             "citation": {
               "source": "go help build (shared build flags): \"-tags tag,list a comma-separated list of additional build tags to consider satisfied\""
+            }
+          },
+          "-toolexec": {
+            "arity": "one",
+            "operand": {
+              "kind": "exec-command"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
             }
           },
           "-trimpath": {
@@ -2066,6 +2102,18 @@
             },
             "citation": {
               "source": "go help build (shared build flags): \"-tags tag,list a comma-separated list of additional build tags to consider satisfied\""
+            }
+          },
+          "-toolexec": {
+            "arity": "one",
+            "operand": {
+              "kind": "exec-command"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
             }
           },
           "-trimpath": {
@@ -3039,7 +3087,7 @@
           "-exec": {
             "arity": "one",
             "operand": {
-              "kind": "literal"
+              "kind": "exec-command"
             },
             "transform": {
               "kind": "none"
@@ -3238,6 +3286,18 @@
             },
             "citation": {
               "source": "go help build (shared build flags): \"-tags tag,list a comma-separated list of additional build tags to consider satisfied\""
+            }
+          },
+          "-toolexec": {
+            "arity": "one",
+            "operand": {
+              "kind": "exec-command"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
             }
           },
           "-trimpath": {
@@ -3485,6 +3545,18 @@
             },
             "citation": {
               "source": "go help test: \"-coverprofile, -cpu, -failfast, -fullpath, -list, -outputdir, -parallel,\""
+            }
+          },
+          "-exec": {
+            "arity": "one",
+            "operand": {
+              "kind": "exec-command"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
             }
           },
           "-failfast": {
@@ -3737,6 +3809,18 @@
             },
             "citation": {
               "source": "go help test: \"-run, -short, -skip, -timeout and -v.\""
+            }
+          },
+          "-toolexec": {
+            "arity": "one",
+            "operand": {
+              "kind": "exec-command"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
             }
           },
           "-trimpath": {
@@ -4229,6 +4313,18 @@
             },
             "citation": {
               "source": "go help vet: \"and execution, such as -C, -n, -x, -v, -tags, and -toolexec.\""
+            }
+          },
+          "-toolexec": {
+            "arity": "one",
+            "operand": {
+              "kind": "exec-command"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"go\"]"
             }
           },
           "-trimpath": {

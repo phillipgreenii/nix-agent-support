@@ -38,6 +38,18 @@
           "source": "curl --help all: \"--compressed Request compressed response\""
         }
       },
+      "--config": {
+        "arity": "one",
+        "operand": {
+          "kind": "config-source"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "curl --help all: \"-K, --config \u003cfile\u003e Read config from a file\""
+        }
+      },
       "--connect-timeout": {
         "arity": "one",
         "operand": {
@@ -396,6 +408,18 @@
         },
         "citation": {
           "source": "curl --help all: \"-I, --head Show document info only\""
+        }
+      },
+      "-K": {
+        "arity": "one",
+        "operand": {
+          "kind": "config-source"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "curl --help all: \"-K, --config \u003cfile\u003e Read config from a file\""
         }
       },
       "-L": {

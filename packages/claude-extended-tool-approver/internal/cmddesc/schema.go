@@ -130,6 +130,33 @@ const (
 	// (alias.*, core.pager, core.fsmonitor=<program>, ...) can run code: the
 	// closedness of the set is the control, not any denylist (P3).
 	KindAllowedLiteral
+	// KindConfigSource is a path the tool LOADS AS CONFIGURATION and obeys
+	// (treefmt --config-file, just -f, ssh -F, curl -K, sqlite3 -init):
+	// EffectConfigSource (packet tc-o14i5.3.5). `-` is stdin (Dynamic).
+	KindConfigSource
+	// KindExecCommand is a COMMAND LINE the tool will run (go -exec/
+	// -toolexec, ssh ProxyCommand): EffectExecProgram plus a shell-dialect
+	// child so the text's own effects are judged.
+	KindExecCommand
+	// KindExecPath is a program or directory PATH the tool will run or load
+	// code from (nix --post-build-hook, git --exec-path): EffectExecProgram
+	// with no child; the engine cannot see the code.
+	KindExecPath
+	// KindExecOpaque is program text in a language this engine has no
+	// interpreter for (sqlite3 -cmd): EffectExecProgram, never a child.
+	KindExecOpaque
+	// KindFlakeRef is a nix flake reference / installable the tool will
+	// evaluate and run code from (nix develop|shell): EffectConfigSource with
+	// Detail "flake-ref".
+	KindFlakeRef
+	// KindOptionPair is a `key=value` (or `key value`) operand whose KEY
+	// decides what the value means; Set names the key table (optionTables).
+	KindOptionPair
+	// KindOptionName / KindOptionValue are the two operands of a flag whose
+	// first operand names a setting and whose second is its value (nix
+	// --option NAME VALUE); Set names the key table.
+	KindOptionName
+	KindOptionValue
 )
 
 // String returns the deterministic role name used in labels and reasons.
@@ -169,6 +196,22 @@ func (k RoleKind) String() string {
 		return "command-dir"
 	case KindAllowedLiteral:
 		return "allowed-literal"
+	case KindConfigSource:
+		return "config-source"
+	case KindExecCommand:
+		return "exec-command"
+	case KindExecPath:
+		return "exec-path"
+	case KindExecOpaque:
+		return "exec-opaque"
+	case KindFlakeRef:
+		return "flake-ref"
+	case KindOptionPair:
+		return "option-pair"
+	case KindOptionName:
+		return "option-name"
+	case KindOptionValue:
+		return "option-value"
 	default:
 		return "role-invalid"
 	}
@@ -207,7 +250,25 @@ var (
 	// CommandDir is the per-command working-directory role (`git -C`,
 	// `bd -C`); see KindCommandDir.
 	CommandDir = OperandRole{Kind: KindCommandDir}
+	// ConfigSource, ExecCommand, ExecPath, ExecOpaque and FlakeRef are the
+	// packet tc-o14i5.3.5 source roles (see their Kind docs).
+	ConfigSource = OperandRole{Kind: KindConfigSource}
+	ExecCommand  = OperandRole{Kind: KindExecCommand}
+	ExecPath     = OperandRole{Kind: KindExecPath}
+	ExecOpaque   = OperandRole{Kind: KindExecOpaque}
+	FlakeRef     = OperandRole{Kind: KindFlakeRef}
 )
+
+// OptionPair returns the role for a key/value operand resolved through the
+// named option table (see optionTables).
+func OptionPair(table string) OperandRole { return OperandRole{Kind: KindOptionPair, Set: table} }
+
+// OptionName returns the role of the NAME operand of a `--flag NAME VALUE`
+// setting flag resolved through the named option table.
+func OptionName(table string) OperandRole { return OperandRole{Kind: KindOptionName, Set: table} }
+
+// OptionValue returns the role of the VALUE operand paired with OptionName.
+func OptionValue(table string) OperandRole { return OperandRole{Kind: KindOptionValue, Set: table} }
 
 // AllowedLiteral returns the operand role for a literal that must be a member
 // of the named closed set (see KindAllowedLiteral and allowedLiteralSets).

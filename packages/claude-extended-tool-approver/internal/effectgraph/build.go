@@ -456,6 +456,13 @@ func (b *builder) interpret(i int, reg cmddesc.Registry, ctx cmddesc.Context, ch
 			EnvGitInvoking: gitInvoking,
 			EnvPersistent:  leaf.Executable == "",
 		})
+		// Packet tc-o14i5.3.5: an assignment of an exec-SOURCE name
+		// (GIT_EXEC_PATH, SSH_ASKPASS*) additionally yields an exec-program
+		// effect. It is a separate axis from the EffectEnv above (and from
+		// effectpolicy.EnvAssignment's PATH-hijack allowlist).
+		if x, ok := cmddesc.ExecSourceEnvEffect(e.Name, e.Value, e.Expansion != cmdparse.ExpansionNone); ok {
+			effects = append(effects, x)
+		}
 	}
 	if reason := b.assignUnmodeled[id]; reason != "" {
 		effects = append(effects, cmddesc.Effect{Kind: cmddesc.EffectOpaque, Detail: reason})

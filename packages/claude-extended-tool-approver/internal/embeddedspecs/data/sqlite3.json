@@ -1,0 +1,143 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "sqlite3",
+  "command": {
+    "name": "sqlite3",
+    "provenance": "sqlite3 command-line shell documentation, https://sqlite.org/cli.html (options -init, -cmd, -readonly, -bail, -batch, -echo, -header, -noheader); no sqlite3 binary on this host to verify against, 2026-10-11",
+    "citations": {
+      "provenance": {
+        "source": "sqlite3 command-line shell documentation, https://sqlite.org/cli.html (options -init, -cmd, -readonly, -bail, -batch, -echo, -header, -noheader); no sqlite3 binary on this host to verify against, 2026-10-11"
+      },
+      "stdin": {
+        "source": "sqlite3 command-line shell documentation, https://sqlite.org/cli.html (options -init, -cmd, -readonly, -bail, -batch, -echo, -header, -noheader); no sqlite3 binary on this host to verify against, 2026-10-11"
+      },
+      "stdout": {
+        "source": "sqlite3 command-line shell documentation, https://sqlite.org/cli.html (options -init, -cmd, -readonly, -bail, -batch, -echo, -header, -noheader); no sqlite3 binary on this host to verify against, 2026-10-11"
+      },
+      "unknownFlag": {
+        "source": "sqlite3 command-line shell documentation, https://sqlite.org/cli.html (options -init, -cmd, -readonly, -bail, -batch, -echo, -header, -noheader); no sqlite3 binary on this host to verify against, 2026-10-11"
+      }
+    },
+    "flags": {
+      "-bail": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "sqlite3 -help (sqlite3 command-line shell; https://sqlite.org/cli.html, \"Command-line options\"); no sqlite3 binary on this host, text recalled from the documentation page: \"-bail stop after hitting an error\""
+        }
+      },
+      "-batch": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "sqlite3 -help (sqlite3 command-line shell; https://sqlite.org/cli.html, \"Command-line options\"); no sqlite3 binary on this host, text recalled from the documentation page: \"-batch force batch I/O\""
+        }
+      },
+      "-cmd": {
+        "arity": "one",
+        "operand": {
+          "kind": "exec-opaque"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "sqlite3 -help (sqlite3 command-line shell; https://sqlite.org/cli.html, \"Command-line options\"); no sqlite3 binary on this host, text recalled from the documentation page: \"-cmd COMMAND run \\\"COMMAND\\\" before reading stdin\""
+        }
+      },
+      "-echo": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "sqlite3 -help (sqlite3 command-line shell; https://sqlite.org/cli.html, \"Command-line options\"); no sqlite3 binary on this host, text recalled from the documentation page: \"-echo print inputs before execution\""
+        }
+      },
+      "-header": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "sqlite3 -help (sqlite3 command-line shell; https://sqlite.org/cli.html, \"Command-line options\"); no sqlite3 binary on this host, text recalled from the documentation page: \"-header turn headers on\""
+        }
+      },
+      "-init": {
+        "arity": "one",
+        "operand": {
+          "kind": "config-source"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "sqlite3 -help (sqlite3 command-line shell; https://sqlite.org/cli.html, \"Command-line options\"); no sqlite3 binary on this host, text recalled from the documentation page: \"-init FILE read/process named file\""
+        }
+      },
+      "-noheader": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "sqlite3 -help (sqlite3 command-line shell; https://sqlite.org/cli.html, \"Command-line options\"); no sqlite3 binary on this host, text recalled from the documentation page: \"-noheader turn headers off\""
+        }
+      },
+      "-readonly": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "sqlite3 -help (sqlite3 command-line shell; https://sqlite.org/cli.html, \"Command-line options\"); no sqlite3 binary on this host, text recalled from the documentation page: \"-readonly open the database read-only\""
+        }
+      }
+    },
+    "positionals": {
+      "leading": [
+        {
+          "kind": "path-modify"
+        }
+      ],
+      "leadingOptional": true,
+      "rest": {
+        "kind": "unmodeled"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"sqlite3\"]"
+      }
+    },
+    "stdin": "never",
+    "stdout": "content",
+    "unknownFlag": "insufficient"
+  }
+}

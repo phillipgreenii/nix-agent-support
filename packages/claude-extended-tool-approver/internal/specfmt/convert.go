@@ -9,12 +9,12 @@ import (
 // roleKindByName is the reverse of cmddesc.RoleKind.String(), built BY
 // CALLING that method over every known constant so the two directions can
 // never drift apart (there is exactly one place, cmddesc/schema.go, that
-// spells "path-read" etc.). KindLiteral..KindAllowedLiteral are contiguous
-// iota values in cmddesc (verified 2026-09-29 against schema.go), so the
+// spells "path-read" etc.). KindLiteral..KindOptionValue are contiguous
+// iota values in cmddesc (verified 2026-10-11 against schema.go; KindOptionValue is the last, packet tc-o14i5.3.5 appended the config/exec-source roles), so the
 // range loop below visits every one of them.
 var roleKindByName = func() map[string]cmddesc.RoleKind {
 	m := make(map[string]cmddesc.RoleKind)
-	for k := cmddesc.KindLiteral; k <= cmddesc.KindAllowedLiteral; k++ {
+	for k := cmddesc.KindLiteral; k <= cmddesc.KindOptionValue; k++ {
 		m[k.String()] = k
 	}
 	return m

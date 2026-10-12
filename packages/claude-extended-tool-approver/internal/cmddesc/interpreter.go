@@ -177,6 +177,10 @@ type interpState struct {
 	cmdDir        string
 	cmdDirSet     bool
 	cmdDirDynamic bool
+	// optName/optNameLive remember the NAME operand of a `--flag NAME VALUE`
+	// setting flag (KindOptionName) for the VALUE operand that follows it.
+	optName     string
+	optNameLive bool
 }
 
 // scan is the flag pass: it walks the argv, records every modeled flag and
@@ -330,6 +334,8 @@ func (st *interpState) operand(op pendingOp, role OperandRole) {
 		st.commandDir(op.tok, live, source)
 	case role.Kind == KindAllowedLiteral:
 		st.allowedLiteral(role, op.tok, live, source)
+	case isSourceRole(role.Kind):
+		st.sourceOperand(op, role, live, source)
 	case role.Kind == KindLiteral, role.Kind == KindMessage:
 		// Inert: no effect of its own. But a positional that BEGINS with a live
 		// expansion may expand to an option the schema never saw (`git log $X`
@@ -903,6 +909,10 @@ func (st *interpState) emitImplicit(ie ImplicitEffect) {
 		})
 	case ie.Role.Kind == KindChdir:
 		st.chdir(ie.Target, ie.Dynamic, "implicit")
+	case ie.Role.Kind == KindFlakeRef:
+		st.configSource(ie.Target, ie.Dynamic, "implicit", FlakeRefDetail)
+	case ie.Role.Kind == KindConfigSource:
+		st.configSource(ie.Target, ie.Dynamic, "implicit", "")
 	case ie.Role.Kind == KindExec:
 		st.effects = append(st.effects, Effect{
 			Kind:   EffectExec,

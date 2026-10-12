@@ -19,6 +19,78 @@
         "source": "nix --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
       }
     },
+    "flags": {
+      "--build-hook": {
+        "arity": "one",
+        "operand": {
+          "kind": "exec-opaque"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "nix show-config (Nix 2.34.8) lists this setting; verified live that `nix eval --post-build-hook /bin/true --expr 1` accepts a setting spelled as its own flag"
+        }
+      },
+      "--diff-hook": {
+        "arity": "one",
+        "operand": {
+          "kind": "exec-opaque"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "nix show-config (Nix 2.34.8) lists this setting; verified live that `nix eval --post-build-hook /bin/true --expr 1` accepts a setting spelled as its own flag"
+        }
+      },
+      "--option": {
+        "arity": "n",
+        "operand": {
+          "kind": "literal"
+        },
+        "operands": [
+          {
+            "kind": "option-name",
+            "set": "nix-settings"
+          },
+          {
+            "kind": "option-value",
+            "set": "nix-settings"
+          }
+        ],
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "nix --help: \"--option name value\""
+        }
+      },
+      "--post-build-hook": {
+        "arity": "one",
+        "operand": {
+          "kind": "exec-opaque"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "nix show-config (Nix 2.34.8) lists this setting; verified live that `nix eval --post-build-hook /bin/true --expr 1` accepts a setting spelled as its own flag"
+        }
+      },
+      "--pre-build-hook": {
+        "arity": "one",
+        "operand": {
+          "kind": "exec-opaque"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "nix show-config (Nix 2.34.8) lists this setting; verified live that `nix eval --post-build-hook /bin/true --expr 1` accepts a setting spelled as its own flag"
+        }
+      }
+    },
     "positionals": {
       "rest": {
         "kind": "literal"
@@ -55,6 +127,30 @@
           }
         },
         "flags": {
+          "--build-hook": {
+            "arity": "one",
+            "operand": {
+              "kind": "exec-opaque"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "nix show-config (Nix 2.34.8) lists this setting; verified live that `nix eval --post-build-hook /bin/true --expr 1` accepts a setting spelled as its own flag"
+            }
+          },
+          "--diff-hook": {
+            "arity": "one",
+            "operand": {
+              "kind": "exec-opaque"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "nix show-config (Nix 2.34.8) lists this setting; verified live that `nix eval --post-build-hook /bin/true --expr 1` accepts a setting spelled as its own flag"
+            }
+          },
           "--dry-run": {
             "arity": "none",
             "operand": {
@@ -103,6 +199,28 @@
               "source": "nix build --help: \"Unless --no-link is specified, after a successful build, it\""
             }
           },
+          "--option": {
+            "arity": "n",
+            "operand": {
+              "kind": "literal"
+            },
+            "operands": [
+              {
+                "kind": "option-name",
+                "set": "nix-settings"
+              },
+              {
+                "kind": "option-value",
+                "set": "nix-settings"
+              }
+            ],
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "nix --help: \"--option name value\""
+            }
+          },
           "--out-link": {
             "arity": "one",
             "operand": {
@@ -113,6 +231,30 @@
             },
             "citation": {
               "source": "nix build --help: \"can be overridden using the --out-link option. Each symlink\""
+            }
+          },
+          "--post-build-hook": {
+            "arity": "one",
+            "operand": {
+              "kind": "exec-opaque"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "nix show-config (Nix 2.34.8) lists this setting; verified live that `nix eval --post-build-hook /bin/true --expr 1` accepts a setting spelled as its own flag"
+            }
+          },
+          "--pre-build-hook": {
+            "arity": "one",
+            "operand": {
+              "kind": "exec-opaque"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "nix show-config (Nix 2.34.8) lists this setting; verified live that `nix eval --post-build-hook /bin/true --expr 1` accepts a setting spelled as its own flag"
             }
           },
           "--print-build-logs": {
@@ -200,6 +342,170 @@
         ],
         "stdin": "never",
         "stdout": "metadata",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "develop": {
+        "name": "develop",
+        "provenance": "nix develop --help (Nix 2.34.8), this host 2026-10-11",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+          }
+        },
+        "flags": {
+          "--build-hook": {
+            "arity": "one",
+            "operand": {
+              "kind": "exec-opaque"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "nix show-config (Nix 2.34.8) lists this setting; verified live that `nix eval --post-build-hook /bin/true --expr 1` accepts a setting spelled as its own flag"
+            }
+          },
+          "--diff-hook": {
+            "arity": "one",
+            "operand": {
+              "kind": "exec-opaque"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "nix show-config (Nix 2.34.8) lists this setting; verified live that `nix eval --post-build-hook /bin/true --expr 1` accepts a setting spelled as its own flag"
+            }
+          },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+            }
+          },
+          "--option": {
+            "arity": "n",
+            "operand": {
+              "kind": "literal"
+            },
+            "operands": [
+              {
+                "kind": "option-name",
+                "set": "nix-settings"
+              },
+              {
+                "kind": "option-value",
+                "set": "nix-settings"
+              }
+            ],
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "nix --help: \"--option name value\""
+            }
+          },
+          "--post-build-hook": {
+            "arity": "one",
+            "operand": {
+              "kind": "exec-opaque"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "nix show-config (Nix 2.34.8) lists this setting; verified live that `nix eval --post-build-hook /bin/true --expr 1` accepts a setting spelled as its own flag"
+            }
+          },
+          "--pre-build-hook": {
+            "arity": "one",
+            "operand": {
+              "kind": "exec-opaque"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "nix show-config (Nix 2.34.8) lists this setting; verified live that `nix eval --post-build-hook /bin/true --expr 1` accepts a setting spelled as its own flag"
+            }
+          },
+          "--print-build-logs": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+            }
+          },
+          "-L": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "flake-ref"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "flake-ref"
+            },
+            "target": ".",
+            "whenNoPositionals": true,
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+            }
+          },
+          {
+            "role": {
+              "kind": "unmodeled"
+            },
+            "target": "nix develop without -c starts an interactive shell",
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "none",
         "unknownFlag": "insufficient",
         "endOfOptions": true
       },
@@ -711,6 +1017,78 @@
             "source": "nix run --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
           }
         },
+        "flags": {
+          "--build-hook": {
+            "arity": "one",
+            "operand": {
+              "kind": "exec-opaque"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "nix show-config (Nix 2.34.8) lists this setting; verified live that `nix eval --post-build-hook /bin/true --expr 1` accepts a setting spelled as its own flag"
+            }
+          },
+          "--diff-hook": {
+            "arity": "one",
+            "operand": {
+              "kind": "exec-opaque"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "nix show-config (Nix 2.34.8) lists this setting; verified live that `nix eval --post-build-hook /bin/true --expr 1` accepts a setting spelled as its own flag"
+            }
+          },
+          "--option": {
+            "arity": "n",
+            "operand": {
+              "kind": "literal"
+            },
+            "operands": [
+              {
+                "kind": "option-name",
+                "set": "nix-settings"
+              },
+              {
+                "kind": "option-value",
+                "set": "nix-settings"
+              }
+            ],
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "nix --help: \"--option name value\""
+            }
+          },
+          "--post-build-hook": {
+            "arity": "one",
+            "operand": {
+              "kind": "exec-opaque"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "nix show-config (Nix 2.34.8) lists this setting; verified live that `nix eval --post-build-hook /bin/true --expr 1` accepts a setting spelled as its own flag"
+            }
+          },
+          "--pre-build-hook": {
+            "arity": "one",
+            "operand": {
+              "kind": "exec-opaque"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "nix show-config (Nix 2.34.8) lists this setting; verified live that `nix eval --post-build-hook /bin/true --expr 1` accepts a setting spelled as its own flag"
+            }
+          }
+        },
         "positionals": {
           "rest": {
             "kind": "literal"
@@ -730,6 +1108,160 @@
         "endOfOptions": true,
         "verbFamily": "nix",
         "defaultVerb": "."
+      },
+      "shell": {
+        "name": "shell",
+        "provenance": "nix shell --help (Nix 2.34.8), this host 2026-10-11",
+        "citations": {
+          "provenance": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+          },
+          "stdin": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+          },
+          "stdout": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+          },
+          "unknownFlag": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+          }
+        },
+        "flags": {
+          "--build-hook": {
+            "arity": "one",
+            "operand": {
+              "kind": "exec-opaque"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "nix show-config (Nix 2.34.8) lists this setting; verified live that `nix eval --post-build-hook /bin/true --expr 1` accepts a setting spelled as its own flag"
+            }
+          },
+          "--diff-hook": {
+            "arity": "one",
+            "operand": {
+              "kind": "exec-opaque"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "nix show-config (Nix 2.34.8) lists this setting; verified live that `nix eval --post-build-hook /bin/true --expr 1` accepts a setting spelled as its own flag"
+            }
+          },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+            }
+          },
+          "--option": {
+            "arity": "n",
+            "operand": {
+              "kind": "literal"
+            },
+            "operands": [
+              {
+                "kind": "option-name",
+                "set": "nix-settings"
+              },
+              {
+                "kind": "option-value",
+                "set": "nix-settings"
+              }
+            ],
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "nix --help: \"--option name value\""
+            }
+          },
+          "--post-build-hook": {
+            "arity": "one",
+            "operand": {
+              "kind": "exec-opaque"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "nix show-config (Nix 2.34.8) lists this setting; verified live that `nix eval --post-build-hook /bin/true --expr 1` accepts a setting spelled as its own flag"
+            }
+          },
+          "--pre-build-hook": {
+            "arity": "one",
+            "operand": {
+              "kind": "exec-opaque"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "nix show-config (Nix 2.34.8) lists this setting; verified live that `nix eval --post-build-hook /bin/true --expr 1` accepts a setting spelled as its own flag"
+            }
+          },
+          "--print-build-logs": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+            }
+          },
+          "-L": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "flake-ref"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "unmodeled"
+            },
+            "target": "nix shell without -c starts an interactive shell",
+            "citation": {
+              "source": "internal/cmddesc/registry.go: cmddesc.DefaultRegistry()[\"nix\"]"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "none",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
       }
     }
   }

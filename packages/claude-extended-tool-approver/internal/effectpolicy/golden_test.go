@@ -765,7 +765,7 @@ var goldenCases = []goldenCase{
 	// inert pairs in cmddesc's git-inert-config-pair set pass, so a pair that
 	// names a program (core.pager) still abstains.
 	{"git_C_status", "git -C sub status", evalcontract.Approve, nil},
-	{"git_c_config_status", "git -c core.pager=cat status", evalcontract.Abstain, nil},
+	{"git_c_config_status", "git -c core.pager=cat status", evalcontract.Reject, nil}, // tc-o14i5.3.5: P16 exec-sink per key (was abstain: closed-set insufficiency)
 	{"git_no_pager_status", "git --no-pager status", evalcontract.Approve, nil},
 	{"git_unknown_subcommand", "git frobnicate", evalcontract.Abstain, nil},
 	{"git_no_subcommand", "git", evalcontract.Abstain, nil},
@@ -1783,7 +1783,8 @@ var goldenCases = []goldenCase{
 	{"redirect_dev_fd", "echo hi >/dev/fd/2", evalcontract.Approve, nil},
 	{"redirect_dynamic_target_not_dev_null", `echo hi > "$OUT"`, evalcontract.Abstain, nil},
 	{"redirect_dev_null_lookalike", "echo hi > /dev/nullx", evalcontract.Abstain, nil},
-	// nix_develop_unmodeled: nixSchema models "run" (operator-declared
+	// nix_develop_unmodeled (tc-o14i5.3.5: now classified as a config-source
+	// flake-ref, but still insufficient - an interactive shell): nixSchema models "run" (operator-declared
 	// installables) and, since pg2-cjfpy.2, "build" and "flake
 	// check|update|lock" of the LOCAL flake — any other subcommand stays an
 	// unmodeled subcommand, Insufficient.

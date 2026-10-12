@@ -25,10 +25,17 @@ package cmddesc
 // `git config <key> <value>` (config writes are judged per key, P16 — a later
 // phase), `git rebase -i`/`--exec` (editor / arbitrary commands).
 
-// gitInertConfigPairFlag is git's global `-c <key>=<value>`: inert ONLY for
-// the closed pairs in allowedLiteralSets["git-inert-config-pair"]; any other
-// pair (alias.*, core.pager, core.fsmonitor=<program>, ...) is insufficient.
-var gitInertConfigPairFlag = FlagSpec{Arity: ArityOne, Operand: AllowedLiteral("git-inert-config-pair")}
+// gitConfigPairFlag is git's global `-c <key>=<value>` (packet tc-o14i5.3.5): each
+// pair is classified by K9's P16 table (LookupGitConfigKey), judged per key by
+// effectpolicy.GitConfigKeyPolicy. An exec-sink pair (core.pager, core.fsmonitor=<program>,
+// ...) is Forbidden, a provably inert one (core.fsmonitor=false, rerere.enabled=false, ...)
+// is Permitted, an unlisted key abstains. Before this packet the flag accepted only the
+// closed allowedLiteralSets["git-inert-config-pair"] set and made every other pair insufficient.
+var gitConfigPairFlag = FlagSpec{Arity: ArityOne, Operand: OptionPair("git-config")}
+
+// gitConfigEnvFlag is git's global `--config-env=<name>=<envvar>`: the key is
+// classified by the same table, the value (read from the environment) is unknown.
+var gitConfigEnvFlag = FlagSpec{Arity: ArityOne, Operand: OptionPair("git-config")}
 
 // gitMergeBaseSchema: `git merge-base [--all] [--octopus] [--independent]
 // [--fork-point] [--is-ancestor] <commit>...` — read-only ancestry queries

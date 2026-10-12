@@ -91,6 +91,9 @@ func coreSchemas() []CommandSchema {
 		// passthrough registration — see registry_breadth.go's rtkSchema
 		// doc comment.
 		rtkSchema,
+		// Phase 2 packet tc-o14i5.3.5: sqlite3 (-init config source, -cmd exec
+		// program) - see registry_execsource.go.
+		sqlite3Schema,
 	}
 }
 
@@ -345,7 +348,8 @@ var xargsSchema = CommandSchema{
 // interpreter turns into net effects; the data flags use the generic
 // data-or-@file convention; -o truncates, -T reads. Deliberately left out so
 // they abstain: -k/--insecure, -u/--user, -O/--remote-name, -b/-c cookies,
-// -K/--config, -x/--proxy, and -H's own `@file` form (modeled as a literal).
+// -x/--proxy, and -H's own `@file` form (modeled as a literal). -K/--config
+// is a config-source operand (packet tc-o14i5.3.5).
 // `--include` is the pre-8.10 spelling of `--show-headers`; this host still
 // accepts it.
 var curlSchema = CommandSchema{
@@ -378,6 +382,9 @@ var curlSchema = CommandSchema{
 		"-F":               {Arity: ArityOne, Operand: DataOrAtFile}, "--form": {Arity: ArityOne, Operand: DataOrAtFile},
 		"-T": {Arity: ArityOne, Operand: PathRead}, "--upload-file": {Arity: ArityOne, Operand: PathRead},
 		"--url": literal1,
+		// -K/--config: curl.1 "Specify a text file to read curl arguments from"; the
+		// file can carry any option (url, output, proxy, ...), so it is a config source.
+		"-K": {Arity: ArityOne, Operand: ConfigSource}, "--config": {Arity: ArityOne, Operand: ConfigSource},
 	},
 	Positionals:  PositionalSpec{Rest: Literal},
 	Stdin:        StdinNever,
@@ -425,10 +432,12 @@ var gitSchema = CommandSchema{
 		// pg2-cjfpy.2: the two global options the integrate-branch and
 		// session-wrapup skills pass. -C is the per-command working-directory
 		// role (the command's relative paths re-base against it); -c is
-		// inert only for a closed set of provably inert key=value pairs (see
+		// judged per key by the P16 table (packet tc-o14i5.3.5; see
 		// registry_git_ext.go).
-		"-C": {Arity: ArityOne, Operand: CommandDir},
-		"-c": gitInertConfigPairFlag,
+		"-C":           {Arity: ArityOne, Operand: CommandDir},
+		"-c":           gitConfigPairFlag,
+		"--config-env": gitConfigEnvFlag,
+		"--exec-path":  {Arity: ArityOptionalGlued, Operand: ExecPath},
 	},
 	UnknownFlag:  UnknownFlagInsufficient,
 	EndOfOptions: true,

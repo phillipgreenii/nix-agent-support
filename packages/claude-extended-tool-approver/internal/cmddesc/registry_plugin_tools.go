@@ -942,12 +942,12 @@ var manSchema = CommandSchema{
 var nixBuildSchema = CommandSchema{
 	Name:       "build",
 	Provenance: "nix build --help (Nix 2.34), this host 2026-10-05",
-	Flags: map[string]FlagSpec{
+	Flags: mergeFlags(nixExecSettingFlags, map[string]FlagSpec{
 		"-L": inert, "--print-build-logs": inert, "--no-link": inert, "--print-out-paths": inert,
 		"--dry-run": inert, "--json": inert,
 		"-o": {Arity: ArityOne, Operand: PathCreate}, "--out-link": {Arity: ArityOne, Operand: PathCreate},
 		"--help": inert,
-	},
+	}),
 	Positionals: PositionalSpec{Rest: AllowedLiteral("local-flake-installable")},
 	ImplicitEffects: []ImplicitEffect{
 		{Role: Exec, Target: "nix build"},

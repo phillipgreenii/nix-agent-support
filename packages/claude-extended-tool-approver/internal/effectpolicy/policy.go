@@ -204,6 +204,7 @@ func DefaultPolicies() []Policy {
 		ChdirScoped{},
 		TrustedCheckoutExec{},
 		GitConfigKeyPolicy{},
+		ConfigExecSourcePolicy{},
 	}
 }
 

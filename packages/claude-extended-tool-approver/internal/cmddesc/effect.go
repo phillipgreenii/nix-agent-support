@@ -70,6 +70,24 @@ const (
 	// (never a verdict - effectpolicy.GitConfigKeyPolicy maps class and
 	// scope to one).
 	EffectConfigKey
+	// EffectConfigSource is a CONFIG SOURCE the invoked tool will load and
+	// obey (docket tc-o14i5.3, packet tc-o14i5.3.5, design item e + P13): a
+	// file named on the command line (treefmt --config-file, just -f, ssh -F,
+	// curl -K, sqlite3 -init, ssh -o Include=) or a flake reference
+	// (nix develop|shell installables, Detail "flake-ref"). Path is the
+	// source as written and Dynamic marks a runtime expansion. The engine
+	// cannot see what the file DIRECTS the tool to do, so effectpolicy's
+	// ConfigExecSourcePolicy judges only WHERE it lives (R2 boundary).
+	EffectConfigSource
+	// EffectExecProgram is an EXEC SOURCE the invoked tool will run (same
+	// packet): ssh -o ProxyCommand|LocalCommand|KnownHostsCommand, go -exec/
+	// -toolexec, nix --post-build-hook|--option, sqlite3 -cmd, git
+	// --exec-path, and the GIT_EXEC_PATH / SSH_ASKPASS* environment names.
+	// Program is the command line or path as written. Dialect is "shell"
+	// when Program is a command line the interpreter ALSO handed to the
+	// graph builder as a shell child (so its own effects are judged), and ""
+	// when the engine cannot see what runs (a bare path or opaque text).
+	EffectExecProgram
 )
 
 // String returns the deterministic kind name.
@@ -97,6 +115,10 @@ func (k EffectKind) String() string {
 		return "key-material"
 	case EffectConfigKey:
 		return "config-key"
+	case EffectConfigSource:
+		return "config-source"
+	case EffectExecProgram:
+		return "exec-program"
 	default:
 		return "effect-invalid"
 	}
@@ -506,6 +528,22 @@ func (e Effect) String() string {
 		fmt.Fprintf(&b, ": %s=%q {%s,%s}", e.ConfigKey, e.ConfigValue, e.ConfigScope, e.ConfigClass)
 		if e.Dynamic {
 			b.WriteString(" (dynamic)")
+		}
+	case EffectConfigSource:
+		fmt.Fprintf(&b, ": %s", e.Path)
+		if e.Dynamic {
+			b.WriteString(" (dynamic)")
+		}
+		if e.Source != "" {
+			fmt.Fprintf(&b, " [%s]", e.Source)
+		}
+	case EffectExecProgram:
+		fmt.Fprintf(&b, ":%s %q", e.Dialect, e.Program)
+		if e.Dynamic {
+			b.WriteString(" (dynamic)")
+		}
+		if e.Source != "" {
+			fmt.Fprintf(&b, " [%s]", e.Source)
 		}
 	case EffectKeyMaterial:
 		fmt.Fprintf(&b, ": %s", e.Path)

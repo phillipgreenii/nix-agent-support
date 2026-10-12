@@ -125,7 +125,7 @@
       "-F": {
         "arity": "one",
         "operand": {
-          "kind": "path-read"
+          "kind": "config-source"
         },
         "transform": {
           "kind": "none"
@@ -449,7 +449,8 @@
       "-o": {
         "arity": "one",
         "operand": {
-          "kind": "literal"
+          "kind": "option-pair",
+          "set": "ssh-config"
         },
         "transform": {
           "kind": "none"

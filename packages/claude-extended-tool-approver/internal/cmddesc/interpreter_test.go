@@ -295,6 +295,8 @@ func TestRegistryNames(t *testing.T) {
 	want = append(want, "command", "date", "diff", "readlink")
 	// pg2-33slg: darwin-rebuild (build only) and pa-monitor (status / info).
 	want = append(want, "darwin-rebuild", "pa-monitor")
+	// tc-o14i5.3.5: sqlite3 (-init config source, -cmd exec program).
+	want = append(want, "sqlite3")
 	sort.Strings(want)
 	if got := DefaultRegistry().Names(); !reflect.DeepEqual(got, want) {
 		t.Errorf("names = %v, want %v", got, want)

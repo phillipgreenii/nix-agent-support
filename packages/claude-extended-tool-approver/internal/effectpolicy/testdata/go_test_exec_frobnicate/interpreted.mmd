@@ -1,2 +1,8 @@
 flowchart LR
-    n0["command: go test -exec frobnicate ./...<br/>mark=insufficient: unknown flag -exec"]
+    n0["command: go test -exec frobnicate ./...<br/>- exec-program:shell #quot;frobnicate#quot; [arg 1]<br/>- path:read ./... [arg 2]<br/>- exec: go test (trusted checkout code)<br/>- stdio:stdout metadata<br/>mark=permitted"]
+    n1[/"file: ./..."/]
+    subgraph sg_s0["test -exec"]
+        n2["command: frobnicate<br/>- opaque (no schema for frobnicate)<br/>mark=insufficient: no schema for frobnicate"]
+    end
+    n0 -->|"reads: read"| n1
+    n2 -->|"executes: test -exec"| n0

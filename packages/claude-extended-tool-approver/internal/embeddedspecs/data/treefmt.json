@@ -59,7 +59,7 @@
       "--config-file": {
         "arity": "one",
         "operand": {
-          "kind": "path-read"
+          "kind": "config-source"
         },
         "transform": {
           "kind": "none"

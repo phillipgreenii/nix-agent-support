@@ -116,6 +116,18 @@
           "source": "just --help: \"--highlight Highlight echoed recipe lines in bold [env: JUST_HIGHLIGHT=]\""
         }
       },
+      "--justfile": {
+        "arity": "one",
+        "operand": {
+          "kind": "config-source"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "just --help: \"-f, --justfile \u003cJUSTFILE\u003e Use \u003cJUSTFILE\u003e as justfile or `-` to read from standard input\""
+        }
+      },
       "--no-deps": {
         "arity": "none",
         "operand": {
@@ -220,6 +232,18 @@
           "source": "just --help: \"-V, --version Print version\""
         }
       },
+      "--working-directory": {
+        "arity": "one",
+        "operand": {
+          "kind": "config-source"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "just --help: \"-d, --working-directory \u003cWORKING-DIRECTORY\u003e Use \u003cWORKING-DIRECTORY\u003e as working directory. --justfile must also be set\""
+        }
+      },
       "--yes": {
         "arity": "none",
         "operand": {
@@ -242,6 +266,30 @@
         },
         "citation": {
           "source": "just --help: \"-V, --version Print version\""
+        }
+      },
+      "-d": {
+        "arity": "one",
+        "operand": {
+          "kind": "config-source"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "just --help: \"-d, --working-directory \u003cWORKING-DIRECTORY\u003e Use \u003cWORKING-DIRECTORY\u003e as working directory. --justfile must also be set\""
+        }
+      },
+      "-f": {
+        "arity": "one",
+        "operand": {
+          "kind": "config-source"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "just --help: \"-f, --justfile \u003cJUSTFILE\u003e Use \u003cJUSTFILE\u003e as justfile or `-` to read from standard input\""
         }
       },
       "-h": {

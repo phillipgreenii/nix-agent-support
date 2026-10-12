@@ -179,8 +179,8 @@ func TestSshKeyMaterialIsNotAPathRead(t *testing.T) {
 	}
 }
 
-// TestSshFPathReadAndETruncate: -F is an ordinary PathRead (ssh reads and
-// applies the config file's content); -E is a PathTruncate (ssh's own
+// TestSshFPathReadAndETruncate: -F is a CONFIG SOURCE (ssh reads and obeys the
+// config file; packet tc-o14i5.3.5); -E is a PathTruncate (ssh's own
 // debug-log flag).
 func TestSshFPathReadAndETruncate(t *testing.T) {
 	reg := DefaultRegistry()
@@ -189,6 +189,10 @@ func TestSshFPathReadAndETruncate(t *testing.T) {
 	res := in.Interpret(leaf(t, "ssh -F myconfig -E mylog host uptime"), schema, Context{})
 	var sawRead, sawTruncate bool
 	for _, e := range res.Effects {
+		if e.Kind == EffectConfigSource && e.Path == "myconfig" {
+			sawRead = true
+			continue
+		}
 		if e.Kind != EffectPath {
 			continue
 		}
@@ -200,7 +204,7 @@ func TestSshFPathReadAndETruncate(t *testing.T) {
 		}
 	}
 	if !sawRead {
-		t.Errorf("expected a PathRead for -F's value, got %+v", res.Effects)
+		t.Errorf("expected a config-source for -F's value, got %+v", res.Effects)
 	}
 	if !sawTruncate {
 		t.Errorf("expected a PathTruncate for -E's value, got %+v", res.Effects)
