@@ -9,9 +9,11 @@
 // rendered config file (see internal/config); when absent,
 // PG_CONNECTOR_GITHUB_CONFIG is used. --version prints the stamped version.
 //
-// This is the skeleton: every mode loads and validates the config and then
-// stops with a clear "not implemented" error. The daemon, the socket server and
-// the client forwarding are filled in by later work.
+// Every mode loads and validates the config first. serve runs the daemon's
+// process shell (state directory, lock, socket, drain on SIGTERM; see
+// pkg/connectord/proc) with a handler that answers nothing yet; pr and ci are
+// still stubs that stop with a clear "not implemented" error. The request
+// protocol, the store and the client forwarding are filled in by later work.
 package main
 
 import (
@@ -138,9 +140,12 @@ func run(args []string, stdout, stderr io.Writer, getenv func(string) string) in
 	return runMode(o.mode, o.modeArgs, cfg, stderr)
 }
 
-// runMode dispatches to the selected mode. Each mode is a stub that later work
-// fills in.
+// runMode dispatches to the selected mode. serve runs the process shell; the
+// client modes are stubs that later work fills in.
 func runMode(mode string, _ []string, cfg *config.Config, stderr io.Writer) int {
+	if mode == modeServe {
+		return runServe(cfg, stderr)
+	}
 	fmt.Fprintf(stderr, "pg-connector-github %s: not implemented yet (skeleton stub; config %s loaded, hash %s)\n", mode, cfg.Path, cfg.Hash)
 	return exitNotImplemented
 }

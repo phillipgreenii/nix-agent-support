@@ -58,7 +58,7 @@ func TestRealProcessModesFailCleanlyUnderEmptyEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, mode := range []string{"serve", "pr", "ci"} {
+	for _, mode := range []string{"pr", "ci"} {
 		code, out, errs := runReal(t, "--config", abs, mode)
 		if code != exitNotImplemented || out != "" {
 			t.Errorf("%s: exit=%d stdout=%q stderr=%q", mode, code, out, errs)
@@ -105,8 +105,9 @@ func TestVersionIsStamped(t *testing.T) {
 	}
 }
 
+// serve is no longer a stub (see serve_test.go); pr and ci still are.
 func TestModesAreStubsThatFailCleanly(t *testing.T) {
-	for _, mode := range []string{"serve", "pr", "ci"} {
+	for _, mode := range []string{"pr", "ci"} {
 		for name, args := range map[string][]string{
 			"flag before mode": {"--config", golden, mode},
 			"equals form":      {"--config=" + golden, mode},
@@ -129,12 +130,12 @@ func TestConfigFromEnvWhenFlagAbsent(t *testing.T) {
 		}
 		return ""
 	}
-	if code, _, errs := runArgs(t, env, "serve"); code != exitNotImplemented {
+	if code, _, errs := runArgs(t, env, "pr"); code != exitNotImplemented {
 		t.Fatalf("code=%d stderr=%q", code, errs)
 	}
 	// The flag wins over the variable: a bad flag path fails even though the
 	// variable names a good file.
-	if code, _, errs := runArgs(t, env, "--config", filepath.Join(t.TempDir(), "missing.json"), "serve"); code != exitConfig {
+	if code, _, errs := runArgs(t, env, "--config", filepath.Join(t.TempDir(), "missing.json"), "pr"); code != exitConfig {
 		t.Fatalf("flag must win, code=%d stderr=%q", code, errs)
 	}
 }
@@ -191,7 +192,7 @@ func TestGlobalFlagsAcceptedAfterMode(t *testing.T) {
 	if _, err = parseArgs([]string{"serve", "--config"}); err == nil {
 		t.Error("--config without a path must fail after the mode too")
 	}
-	for _, mode := range []string{"serve", "pr", "ci"} {
+	for _, mode := range []string{"pr", "ci"} {
 		code, out, errs := runArgs(t, noEnv, mode, "--config", golden)
 		if code != exitNotImplemented || out != "" || !strings.Contains(errs, golden) {
 			t.Errorf("%s --config after the mode: code=%d out=%q stderr=%q (the config named after the mode must be the one loaded)", mode, code, out, errs)
