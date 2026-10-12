@@ -504,6 +504,29 @@ func TestComputeMatchReasons(t *testing.T) {
 	}
 }
 
+// A PENDING (unsubmitted) review of mine admits the PR as review-in-progress,
+// not reviewed-by-me; DISMISSED and other people's pending reviews admit nothing.
+func TestComputeMatchReasons_PendingReview(t *testing.T) {
+	tests := []struct {
+		name    string
+		reviews []prReview
+		want    []string
+	}{
+		{"my pending", []prReview{{Author: "me", State: "PENDING"}}, []string{MatchReasonReviewInProgress}},
+		{"my dismissed", []prReview{{Author: "me", State: "DISMISSED"}}, nil},
+		{"their pending", []prReview{{Author: "other", State: "PENDING"}}, nil},
+		{"my comment + my pending", []prReview{{Author: "me", State: "COMMENTED"}, {Author: "me", State: "PENDING"}}, []string{MatchReasonReviewedByMe, MatchReasonReviewInProgress}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := computeMatchReasons(prShow{Author: "stranger", Reviews: tt.reviews}, nil, nil, "me")
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("computeMatchReasons = %v; want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 // --- approvals / bot verdict ---
 
 func TestComputeApprovals(t *testing.T) {

@@ -156,6 +156,32 @@ func TestReviewRequestedRule(t *testing.T) {
 	}
 }
 
+// An operator with a review in progress (not requested) is the acting
+// reviewer: the PR raises pr.review-requested with a summary that says so
+// (operator ruling 2026-10-12, pg2-tgq8o).
+func TestReviewRequestedRule_ReviewInProgressSummary(t *testing.T) {
+	st := store.OpenNewSchemaForTest(t)
+	put(t, st, prSpec{
+		number: 1, ownership: "team", panel: interpret.PanelTeamAwaitingMe,
+		approvals: interpret.Approvals{SelfReviewInProgress: true}, match: []string{interpret.MatchReasonReviewInProgress},
+	})
+	put(t, st, prSpec{
+		number: 2, ownership: "team", panel: interpret.PanelTeamAwaitingMe,
+		approvals: interpret.Approvals{SelfReviewInProgress: true}, match: []string{interpret.MatchReasonReviewRequested},
+	})
+
+	res := evaluate(t, st, baseConfig())
+
+	inProgress := mustItem(t, res, 1)
+	if inProgress.Rule != KindReviewRequested || !strings.Contains(inProgress.Summary, "my review is in progress") {
+		t.Errorf("item = %+v, want pr.review-requested saying my review is in progress", inProgress)
+	}
+	requested := mustItem(t, res, 2)
+	if !strings.Contains(requested.Summary, "review requested of me") {
+		t.Errorf("item = %+v, a live request must keep its own summary even with a review in progress", requested)
+	}
+}
+
 func TestOwnCIFailingRule(t *testing.T) {
 	mine := func(n int, ci string, mod func(*prSpec)) prSpec {
 		p := prSpec{number: n, ownership: "mine", panel: interpret.PanelMineAwaitingMe, ci: ci}

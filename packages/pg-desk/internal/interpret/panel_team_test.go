@@ -104,6 +104,82 @@ func TestClassifyPanel_TeamBotDisapprovalIsAdvice(t *testing.T) {
 	}
 }
 
+// Operator ruling 2026-10-12 (pg2-tgq8o): an operator with a PENDING or
+// COMMENTED review of their own is the acting reviewer and is treated like a
+// requested reviewer. Motivating PRs: 105206 and 113985 (bot disapproved, only
+// a pending review of mine, not requested -> was owner).
+func TestClassifyPanel_TeamActingReviewer(t *testing.T) {
+	reasons := []string{MatchReasonTeamAuthored}
+	green := ciRollupResult{State: "success"}
+	realFailure := ciRollupResult{State: "failure"}
+	open := prShow{State: "open"}
+	acting := Approvals{SelfReviewInProgress: true}
+	botNo := Approvals{SelfReviewInProgress: true, BotVerdict: BotVerdictDisapproved}
+	otherApproved := Approvals{SelfReviewInProgress: true, HumanApproved: true, HumanApprovers: 1}
+
+	tests := []struct {
+		name         string
+		pr           prShow
+		ci           ciRollupResult
+		appr         Approvals
+		matchReasons []string
+		want         string
+	}{
+		{"review in progress, not requested -> me", open, green, acting, reasons, PanelTeamAwaitingMe},
+		{"review in progress + bot disapproved -> me (105206/113985)", open, green, botNo, reasons, PanelTeamAwaitingMe},
+		{"review in progress + another human approved, BLOCKED -> me (their approval does not end it)", prShow{State: "open", MergeStateStatus: "BLOCKED"}, green, otherApproved, reasons, PanelTeamAwaitingMe},
+		{"review in progress + another human approved, CLEAN -> me", prShow{State: "open", MergeStateStatus: "CLEAN"}, green, otherApproved, reasons, PanelTeamAwaitingMe},
+		{"review in progress, only a pending review admits it -> me", open, green, acting, []string{MatchReasonReviewInProgress}, PanelTeamAwaitingMe},
+		{"review in progress + real CI failure -> owner (hard blocker first)", open, realFailure, acting, reasons, PanelTeamAwaitingOwner},
+		{"review in progress + conflict -> owner", prShow{State: "open", MergeStateStatus: "DIRTY"}, green, acting, reasons, PanelTeamAwaitingOwner},
+		{"review in progress + human changes-requested -> owner", open, green, Approvals{SelfReviewInProgress: true, HumanChangesRequested: true}, reasons, PanelTeamAwaitingOwner},
+		{"no review in progress, bot disapproved -> owner (unchanged)", open, green, Approvals{BotVerdict: BotVerdictDisapproved}, reasons, PanelTeamAwaitingOwner},
+		{"standing own approval (not in progress), BLOCKED -> team (unchanged)", prShow{State: "open", MergeStateStatus: "BLOCKED"}, green, Approvals{SelfApproved: true, HumanApproved: true}, reasons, PanelTeamAwaitingTeam},
+		{"review in progress on a draft -> none", prShow{State: "open", Draft: true}, green, acting, reasons, PanelNone},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := classifyPanel(OwnershipTeam, tt.pr, tt.ci, tt.appr, tt.matchReasons); got != tt.want {
+				t.Errorf("classifyPanel = %q; want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// computeApprovals derives SelfReviewInProgress from the operator's own review
+// states.
+func TestComputeApprovals_SelfReviewInProgress(t *testing.T) {
+	rev := func(state, at string) prReview {
+		return prReview{Author: "me", State: state, SubmittedAt: at}
+	}
+	tests := []struct {
+		name    string
+		reviews []prReview
+		want    bool
+	}{
+		{"none", nil, false},
+		{"pending only", []prReview{rev("PENDING", "")}, true},
+		{"submitted comment", []prReview{rev("COMMENTED", "2026-10-01T00:00:00Z")}, true},
+		{"dismissed only", []prReview{rev("DISMISSED", "2026-10-01T00:00:00Z")}, false},
+		{"dismissed + pending (113985)", []prReview{rev("DISMISSED", "2026-09-24T20:22:09Z"), rev("PENDING", "")}, true},
+		{"approved", []prReview{rev("APPROVED", "2026-10-01T00:00:00Z")}, false},
+		{"approved then pending follow-up", []prReview{rev("APPROVED", "2026-10-01T00:00:00Z"), rev("PENDING", "")}, false},
+		{"changes requested only", []prReview{rev("CHANGES_REQUESTED", "2026-10-01T00:00:00Z")}, false},
+		{"someone else's pending", []prReview{{Author: "other", State: "PENDING"}}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := computeApprovals(prShow{Reviews: tt.reviews}, "me", nil, nil).SelfReviewInProgress
+			if got != tt.want {
+				t.Errorf("SelfReviewInProgress = %v; want %v", got, tt.want)
+			}
+		})
+	}
+	if computeApprovals(prShow{Reviews: []prReview{{Author: "", State: "PENDING"}}}, "", nil, nil).SelfReviewInProgress {
+		t.Error("an empty self login must never match")
+	}
+}
+
 func TestClassifyPanel_TeamReviewerCIState(t *testing.T) {
 	reasons := []string{MatchReasonTeamAuthored}
 	requested := []string{MatchReasonReviewRequested}

@@ -224,6 +224,16 @@ type Approvals struct {
 	// approval, no bot). A standing teammate approval takes a stale review of
 	// the operator's off their plate (pr.review-stale-after-push).
 	HumanApprovalStanding bool `json:"human_approval_standing,omitempty"`
+	// SelfReviewInProgress is true iff the operator has a PENDING (started, not
+	// yet submitted) or a submitted COMMENTED review on this PR and no APPROVED
+	// review of their own standing (operator ruling 2026-10-12, bead
+	// pg2-tgq8o). Such an operator is the acting reviewer: classifyPanel treats
+	// them like a requested reviewer, because the originally requested reviewer
+	// will likely not review once the operator has. An own CHANGES_REQUESTED
+	// review is a hard blocker instead; DISMISSED reviews never count. Omitted
+	// from the stored JSON when false, so a row written before this field
+	// existed reads false.
+	SelfReviewInProgress bool `json:"self_review_in_progress,omitempty"`
 }
 
 // Interpretation is this package's own return type: the same set of concepts

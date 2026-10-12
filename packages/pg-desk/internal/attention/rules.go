@@ -2,6 +2,7 @@ package attention
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"sync"
 
@@ -138,7 +139,9 @@ func (r reviewStaleAfterPush) Raise(v *View, p RuleSettings) ([]Candidate, strin
 }
 
 // reviewRequested raises for a team PR in panel team_awaiting_me: a live
-// review request on the operator, not hard-blocked.
+// review request on the operator, or a review of the operator's in progress
+// (Approvals.SelfReviewInProgress, operator ruling 2026-10-12), not
+// hard-blocked. The summary says which.
 type reviewRequested struct{}
 
 func (reviewRequested) Kind() string              { return KindReviewRequested }
@@ -154,7 +157,11 @@ func (r reviewRequested) Raise(v *View, p RuleSettings) ([]Candidate, string) {
 	if v.Panel != interpret.PanelTeamAwaitingMe {
 		return nil, "pr is not in panel team_awaiting_me"
 	}
-	return []Candidate{v.candidate(r.Kind(), p.Severity, "review requested of me")}, ""
+	summary := "review requested of me"
+	if !slices.Contains(v.MatchReasons, interpret.MatchReasonReviewRequested) && v.Approvals.SelfReviewInProgress {
+		summary = "my review is in progress"
+	}
+	return []Candidate{v.candidate(r.Kind(), p.Severity, summary)}, ""
 }
 
 // ownCIFailing raises for an own, open, non-draft PR whose CI rollup state is

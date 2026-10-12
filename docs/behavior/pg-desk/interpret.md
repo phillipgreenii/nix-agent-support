@@ -34,7 +34,8 @@ and MUST NOT use an LLM for any step below.
   directly.
 - **Match reasons** — recomputed from facts each run, never from which named query returned the
   PR: author in the team-members list, a review requested of self, a self review already exists,
-  or the PR's labels intersect the configured watch labels.
+  a self review is started but still pending (unsubmitted), or the PR's labels intersect the
+  configured watch labels.
 - **Ready-to-promote** — a stored flag (own PR, not co-owned, draft, not WIP, checks green — judged
   by the same review-exempt rule as the owner-side "blocked" below, and NOT softened by the
   reviewer-only cancelled-run and no-CI-data rules, so an own draft whose only run was cancelled
@@ -109,13 +110,27 @@ and MUST NOT use an LLM for any step below.
        `team_awaiting_owner`, even when the operator is a requested reviewer: fixing those is the PR
        owner's job, not the reviewer's. (A reviewer's own `CHANGES_REQUESTED` therefore still beats a
        later re-request; that is existing behavior, not part of the 2026-10-05 ruling.)
-    2. **Requested of the operator** → `team_awaiting_me`, whether or not they already approved
+    2. **Requested of the operator, or the operator is the acting reviewer** →
+       `team_awaiting_me`, whether or not they already approved
        (GitHub drops a reviewer from the requested list once they submit any review, so a
        requested-and-already-approved operator means the PR author re-requested a look, usually after
        new commits; a live re-request wins over the prior approval). A bot disapproval does not
        override a live request: the review bot's own comment states that its review does not satisfy
        code-owner requirements and human review is still required, so its verdict is advice to a
        human reviewer, not a gate (operator ruling 2026-10-05).
+
+       The operator is the **acting reviewer** when they have a review of their own in progress — a
+       pending (started, unsubmitted) review or a submitted comment-only review — and no approval of
+       their own stands (`self_review_in_progress`; operator ruling 2026-10-12, bead `pg2-tgq8o`).
+       The originally requested reviewer will likely not review once the operator has, so the PR
+       stays with the operator for re-review exactly as if they were requested. A teammate's
+       approval does NOT end it: the operator still needs to see what to re-review. The operator's
+       own standing approval DOES end it (nothing is left to do), and a later comment-only review
+       does not revive it. A dismissed review never counts, because GitHub does not report what it
+       originally was. An own `CHANGES_REQUESTED` review is a hard blocker (rule 1), not an acting
+       review. This applies in the same position as a live request, so a bot disapproval does not
+       override it either, and the hard blockers above still do.
+
     3. **Bot disapproved** (operator not requested) → `team_awaiting_owner`.
     4. **A human approval exists** → decided by GitHub's merge state, because an approval count says
        nothing about whether the PR is ready (operator ruling 2026-10-05): `BLOCKED` →
@@ -139,6 +154,7 @@ and MUST NOT use an LLM for any step below.
        aside); both limits fall toward `team_awaiting_team`. A top-level comment is never a thread.
     6. **Otherwise** → `team_awaiting_team`: the team is the outcome only when nobody has reviewed
        yet or the owner owes nothing.
+
   - **Mine**, once not blocked: any unresolved review-thread comment → `mine_awaiting_me` (no
     author qualifier — an open thread is on the operator regardless of who left it). Otherwise, an
     existing human approval → `mine_awaiting_me` (nothing left to do but merge). Otherwise, an own

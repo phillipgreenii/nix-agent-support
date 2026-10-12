@@ -166,7 +166,13 @@ func computeApprovals(pr prShow, self string, approverAllowlist []string, verdic
 
 	selfStale, teammateStanding := computeReviewStaleness(pr, self, approverAllowlist)
 
+	// A standing own approval means nothing is left for the operator to do, so
+	// it ends acting-reviewer status; a later COMMENTED review does not revive
+	// it (latestDecision ignores COMMENTED, matching SelfApproved).
+	selfInProgress := !selfApproved && selfHasReview(pr, self, selfInProgressReviewStates)
+
 	return Approvals{
+		SelfReviewInProgress:  selfInProgress,
 		HumanApprovers:        len(approvers),
 		HumanApproved:         len(approvers) > 0,
 		SelfApproved:          selfApproved,
@@ -347,8 +353,32 @@ const (
 	MatchReasonTeamAuthored    = "team-authored"
 	MatchReasonReviewRequested = "review-requested"
 	MatchReasonReviewedByMe    = "reviewed-by-me"
-	MatchReasonLabelPrefix     = "label:"
+	// MatchReasonReviewInProgress admits a PR on which the operator has started
+	// a review that is still PENDING (unsubmitted); a submitted review already
+	// yields MatchReasonReviewedByMe.
+	MatchReasonReviewInProgress = "review-in-progress"
+	MatchReasonLabelPrefix      = "label:"
 )
+
+// selfInProgressReviewStates are the operator's review states that make them
+// the acting reviewer (Approvals.SelfReviewInProgress): a started-but-unsubmitted
+// review, or a submitted comment-only review. APPROVED ends the work,
+// CHANGES_REQUESTED is a hard blocker, DISMISSED carries no usable signal.
+var selfInProgressReviewStates = map[string]bool{"PENDING": true, "COMMENTED": true}
+
+// selfHasReview reports whether self authored a review on pr whose state is in
+// states.
+func selfHasReview(pr prShow, self string, states map[string]bool) bool {
+	if self == "" {
+		return false
+	}
+	for _, r := range pr.Reviews {
+		if r.Author == self && states[r.State] {
+			return true
+		}
+	}
+	return false
+}
 
 // selfSubmittedReviewStates mirrors
 // packages/pg-pr/internal/snapshot/builder.go's selfSubmittedReviewStates
@@ -379,6 +409,9 @@ func computeMatchReasons(pr prShow, teamMembers, watchLabels []string, self stri
 				reasons = append(reasons, MatchReasonReviewedByMe)
 				break
 			}
+		}
+		if selfHasReview(pr, self, map[string]bool{"PENDING": true}) {
+			reasons = append(reasons, MatchReasonReviewInProgress)
 		}
 	}
 
@@ -430,7 +463,10 @@ func computeMatchReasons(pr prShow, teamMembers, watchLabels []string, self stri
 //     fixing those is the PR owner's job. CI is judged by ReviewerState,
 //     which also sets aside a harmless cancelled run and reads "no CI
 //     data" as pending (neither is a verdict about the code).
-//     2. I'm a requested reviewer (MatchReasonReviewRequested) ->
+//     2. I'm a requested reviewer (MatchReasonReviewRequested) or the acting
+//     reviewer (Approvals.SelfReviewInProgress: a PENDING or COMMENTED
+//     review of mine with no standing approval of mine; operator ruling
+//     2026-10-12, pg2-tgq8o -- another human's approval does not end it) ->
 //     team_awaiting_me, whether or not I already approved (GitHub drops a
 //     reviewer from review_requests once they submit any review, so
 //     requested && SelfApproved is the RE-REQUEST case -- a live
@@ -509,11 +545,14 @@ func classifyPanel(own Ownership, pr prShow, ci ciRollupResult, appr Approvals, 
 	}
 
 	_, requested := toSet(matchReasons)[MatchReasonReviewRequested]
-	if requested {
+	if requested || appr.SelfReviewInProgress {
 		// A live review request wins over a prior self-approval: GitHub
 		// clears the request on any submitted review, so requested &&
 		// SelfApproved means the author re-requested (pg2-4ajtt). It also wins
-		// over a bot disapproval (operator ruling 2026-10-05).
+		// over a bot disapproval (operator ruling 2026-10-05). An operator with
+		// a review in progress is the acting reviewer and is treated the same
+		// way (operator ruling 2026-10-12, pg2-tgq8o); SelfReviewInProgress is
+		// never true alongside a standing own approval.
 		return PanelTeamAwaitingMe
 	}
 	if botBlocked {
