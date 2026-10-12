@@ -28,6 +28,9 @@ type Persister struct {
 	Identity *entity.Identity
 	// TTL is summary_ttl: how long a stored summary stays fresh.
 	TTL time.Duration
+	// TerminalTTL is terminal_ttl: how long a stored summary of a merged or
+	// closed PR stays fresh. Zero means TTL.
+	TerminalTTL time.Duration
 	// Clock is the time source; nil means the system clock.
 	Clock governor.Clock
 }
@@ -113,6 +116,7 @@ func (p *Persister) Persist(ctx context.Context, s Summary) (Stored, error) {
 		st.PrevMergeable = prevMergeable
 	}
 
+	row.TombstonedAt = time.Time{} // the PR is visible again
 	row.LastKnownMergeable = ""
 	if entity.Known(carried) {
 		row.LastKnownMergeable = carried
@@ -125,7 +129,7 @@ func (p *Persister) Persist(ctx context.Context, s Summary) (Stored, error) {
 		group = store.GroupRow{Kind: entity.KindPR, ID: s.NodeID, Group: GroupName}
 	}
 	group.Content, group.Fingerprint = content, st.Fingerprint
-	group.FetchedAt, group.FreshUntil = now, now.Add(p.TTL)
+	group.FetchedAt, group.FreshUntil = now, now.Add(p.FreshFor(s.State))
 	group.LastError = ""
 	group.Generation++
 	group.FetchedForHead, group.FetchedForBase = s.HeadRefOid, s.BaseRefOid
@@ -145,6 +149,15 @@ func (p *Persister) Persist(ctx context.Context, s Summary) (Stored, error) {
 		st.Rename = &up
 	}
 	return st, nil
+}
+
+// FreshFor is how long a summary of a PR in the given state stays fresh: the
+// terminal_ttl for a merged or closed PR, the summary_ttl otherwise.
+func (p *Persister) FreshFor(state string) time.Duration {
+	if IsTerminal(state) && p.TerminalTTL > 0 {
+		return p.TerminalTTL
+	}
+	return p.TTL
 }
 
 func (p *Persister) now() time.Time {

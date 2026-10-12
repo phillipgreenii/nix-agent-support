@@ -5,13 +5,21 @@
 //
 //   - Summary is the typed value; Fingerprint is the hash the keep-alive step
 //     compares.
+//
 //   - Fetcher.Fetch turns node ids into Summaries, at most 74 ids per call, and
 //     books each call's spend with the governor.
+//
 //   - Persister.Persist stores one Summary, applying the mergeability rule
 //     (entity.Carry) and recording the head and base it describes.
 //
-// What decides WHEN a summary is fetched (queues, batches, keep-alive, expiry)
-// and what serves it to a caller belong to other packages.
+//   - Service (service.go) is the refresh engine's summary side: the executor
+//     the scheduler runs (one `nodes(ids:)` call per batch of due and fill
+//     summaries), the keep-alive set, the refresh on summary_ttl and
+//     terminal_ttl, Track, Access, Interactive and expiry.
+//
+// The queue, the priority classes and the batch packing are the scheduler's
+// (pkg/connectord/scheduler); what serves a stored summary to a caller belongs
+// to other packages.
 package summary
 
 import (
@@ -62,6 +70,10 @@ type Summary struct {
 	// it; empty when the commit has no checks.
 	ChecksState string `json:"checks_state"`
 }
+
+// IsTerminal reports whether a PR in the given state (GitHub's spelling) is
+// merged or closed: effectively frozen, so every group of it uses terminal_ttl.
+func IsTerminal(state string) bool { return state == "MERGED" || state == "CLOSED" }
 
 // Ref is the wire reference owner/repo#n, or "" for a Gone summary.
 func (s Summary) Ref() string {

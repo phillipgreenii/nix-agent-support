@@ -226,3 +226,35 @@ func TestPersist_PreservesEntityBookkeepingAndSkipsGone(t *testing.T) {
 		t.Error("a Gone summary must not create an entity")
 	}
 }
+
+func TestPersist_TerminalTTLAndTombstoneCleared(t *testing.T) {
+	p, st, clk := newPersister(t)
+	p.TerminalTTL = 24 * time.Hour
+	ctx := context.Background()
+	for state, want := range map[string]time.Duration{
+		"OPEN": 60 * time.Second, "MERGED": 24 * time.Hour, "CLOSED": 24 * time.Hour,
+	} {
+		s := sample()
+		s.State = state
+		if _, err := p.Persist(ctx, s); err != nil {
+			t.Fatal(err)
+		}
+		g, _, _ := st.GetGroup(ctx, entity.KindPR, "PR_1", GroupName)
+		if got := g.FreshUntil.Sub(g.FetchedAt); got != want {
+			t.Errorf("%s: fresh for %v, want %v", state, got, want)
+		}
+	}
+	// A tombstoned entity that is visible again is no longer tombstoned.
+	row, _, _ := st.GetEntity(ctx, entity.KindPR, "PR_1")
+	row.TombstonedAt = clk.Now()
+	if err := st.PutEntity(ctx, row); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Persist(ctx, sample()); err != nil {
+		t.Fatal(err)
+	}
+	row, _, _ = st.GetEntity(ctx, entity.KindPR, "PR_1")
+	if !row.TombstonedAt.IsZero() {
+		t.Error("Persist must clear the tombstone")
+	}
+}
