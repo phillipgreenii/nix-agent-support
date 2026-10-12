@@ -21,7 +21,7 @@ import "strings"
 // judges a DryRun-marked "mutation" as if it were a "read" — nothing actually
 // changes the cluster, the same dry-run-needs-only-read-permission reasoning
 // slice 3w established for git push.
-var remoteMutationOps = map[string]bool{"push": true, "push-lease": true, "force-push": true, "delete-ref": true, "mutation": true}
+var remoteMutationOps = map[string]bool{"push": true, "push-lease": true, "push-multiref": true, "force-push": true, "delete-ref": true, "mutation": true}
 
 // applyTransform rewrites effects under t by effect shape alone. It reports
 // false for a Kind it does not know so the caller fails closed instead of
@@ -86,9 +86,26 @@ func applyTransform(t EffectTransform, effects []Effect) ([]Effect, bool) {
 	case TransformAppend:
 		return retarget(effects, AccessTruncate, AccessModify), true
 	case TransformForce:
-		return retargetRemote(retargetRemote(effects, "push", "force-push"), "push-lease", "force-push"), true
+		// A plain force dominates every other push shape, including a delete
+		// already seen (`--delete --force` must Reject like `--force --delete`).
+		for _, from := range []string{"push", "push-lease", "push-multiref", "delete-ref"} {
+			effects = retargetRemote(effects, from, "force-push")
+		}
+		return effects, true
 	case TransformDeleteRef:
-		return retargetRemote(retargetRemote(effects, "push", "delete-ref"), "push-lease", "delete-ref"), true
+		for _, from := range []string{"push", "push-lease", "push-multiref"} {
+			effects = retargetRemote(effects, from, "delete-ref")
+		}
+		// --delete turns every plain ref operand into a deleted ref.
+		out := make([]Effect, len(effects))
+		for i, e := range effects {
+			if e.Kind == EffectRemote && e.Operation == "delete-ref" && e.Refs != "" {
+				e.DelRefs = joinNL(e.DelRefs, e.Refs)
+				e.Refs = ""
+			}
+			out[i] = e
+		}
+		return out, true
 	case TransformForceWithLease:
 		return retargetRemote(effects, "push", "push-lease"), true
 	case TransformRetargetRemote:
@@ -128,4 +145,15 @@ func retargetRemote(effects []Effect, from, to string) []Effect {
 		out[i] = e
 	}
 	return out
+}
+
+// joinNL joins two newline-separated lists, skipping empty ones.
+func joinNL(a, b string) string {
+	switch {
+	case a == "":
+		return b
+	case b == "":
+		return a
+	}
+	return a + "\n" + b
 }

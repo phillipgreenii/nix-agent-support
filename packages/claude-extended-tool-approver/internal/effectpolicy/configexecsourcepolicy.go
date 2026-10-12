@@ -52,6 +52,12 @@ func (ConfigExecSourcePolicy) Judge(e cmddesc.Effect, ctx PolicyContext) (Findin
 		}
 		return judgeSourcePath("config source", p, ctx), true
 	case cmddesc.EffectExecProgram:
+		if e.Detail == cmddesc.RemoteProgramDetail {
+			// git push --receive-pack/--exec (packet tc-o14i5.3.10, R6/D8): the
+			// caller chose a program to run on the remote end (or locally for a
+			// path remote). Rejected whatever the value, even a runtime one.
+			return Finding{Verdict: Forbidden, Reason: "the command line chooses a program to run on the push remote (--receive-pack/--exec): " + e.Program}, true
+		}
 		if e.Dynamic {
 			return Finding{Verdict: Unknown, Reason: "exec program " + e.Program + " is a runtime value"}, true
 		}

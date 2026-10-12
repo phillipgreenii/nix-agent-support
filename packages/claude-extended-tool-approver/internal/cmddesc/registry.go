@@ -561,16 +561,24 @@ var gitCleanSchema = CommandSchema{
 //   - the remote must be a plain configured remote NAME (policy: a URL or
 //     path remote is Unknown — repository contents would leave to an
 //     arbitrary host);
-//   - the refspec positionals are Literal-gated: a `+src:dst` (force) or
-//     `:dst` (delete) refspec, or one with a glob, is insufficient;
+//   - the refspec positionals are GitRefspec-gated (packet tc-o14i5.3.10): a
+//     `+src:dst` (force) refspec or one with a glob is insufficient; a `:dst`
+//     (delete) refspec, like --delete, retargets the push to "delete-ref" and
+//     records the deleted refs on the effect (Effect.DelRefs) so the policy can
+//     reject deleting the primary branch or a tag and abstain on any other;
 //   - --force-with-lease takes NO glued value: `--force-with-lease=<ref>`
 //     (cross-branch lease) is an error → insufficient;
-//   - --all/--branches/--tags/--prune/--mirror push or delete MORE than the
-//     named refs: retargeted to the Forbidden "push-bulk" operation (R6
-//     rejects --mirror and --prune; the golden corpus pins --all/--tags/
-//     --branches the same);
+//   - --prune/--mirror push or delete MORE than the named refs: retargeted to
+//     the Forbidden "push-bulk" operation (R6 rejects --mirror and --prune);
+//   - --all/--branches/--tags push more than the named refs WITHOUT rewriting
+//     or deleting any: retargeted to "push-multiref", judged like an ordinary
+//     push (packet tc-o14i5.3.10; a force/delete on the same line still wins);
 //   - --receive-pack/--exec (a program run on the remote side — or locally
-//     for a path remote) are NOT modeled at all, so they abstain.
+//     for a path remote) are modeled as the exec-program effect kind
+//     (ExecRemote, Detail RemoteProgramDetail), which ConfigExecSourcePolicy
+//     rejects. Source: git 2.54.0 `git help push`: "--receive-pack=<git-
+//     receive-pack>, --exec=<git-receive-pack>: Path to the git-receive-pack
+//     program on the remote end".
 //
 // Deliberately left unmodeled (abstain): --no-verify (skips the pre-push
 // hook — a materially different trust boundary), --signed[=] (changes what
@@ -591,8 +599,9 @@ var gitPushSchema = CommandSchema{
 		"--progress":  inert, "--no-progress": inert,
 		"-u": inert, "--set-upstream": inert,
 		"--follow-tags": inert,
-		"--tags":        pushBulk, "--all": pushBulk, "--branches": pushBulk,
+		"--tags":        pushMultiRef, "--all": pushMultiRef, "--branches": pushMultiRef,
 		"--prune": pushBulk, "--mirror": pushBulk,
+		"--receive-pack": {Arity: ArityOne, Operand: ExecRemote}, "--exec": {Arity: ArityOne, Operand: ExecRemote},
 		"--atomic": inert, "--no-atomic": inert,
 		"--thin": inert, "--no-thin": inert,
 		"-o": literal1, "--push-option": literal1,
@@ -600,7 +609,7 @@ var gitPushSchema = CommandSchema{
 	Positionals: PositionalSpec{
 		Leading:         []OperandRole{Remote("push")},
 		LeadingOptional: true,
-		Rest:            AllowedLiteral("git-plain-refspec"),
+		Rest:            GitRefspec("push"),
 	},
 	ImplicitEffects: []ImplicitEffect{
 		{Role: Remote("push"), Target: "<default-remote>", Dynamic: true, WhenNoPositionals: true},
@@ -614,7 +623,15 @@ var gitPushSchema = CommandSchema{
 // pushBulk is the flag shape for git push options that push or delete more
 // than the refs the command line names: it retargets BOTH push spellings to
 // the Forbidden "push-bulk" operation.
-var pushBulk = FlagSpec{Transform: EffectTransform{Kind: TransformRetargetRemote, From: "push,push-lease", To: "push-bulk"}}
+var pushBulk = FlagSpec{Transform: EffectTransform{Kind: TransformRetargetRemote, From: "push,push-lease,push-multiref,delete-ref", To: "push-bulk"}}
+
+// pushMultiRef is the flag shape for git push options that push MORE THAN the
+// named refs without rewriting or deleting any (--all, --branches, --tags):
+// the "push-multiref" Operation, judged like an ordinary push (every ref a
+// non-forced push updates must fast-forward; server-side protection is the
+// backstop, R6). A plain --force / --delete seen on the same command still
+// wins (TransformForce / TransformDeleteRef retarget it).
+var pushMultiRef = FlagSpec{Transform: EffectTransform{Kind: TransformRetargetRemote, From: "push,push-lease", To: "push-multiref"}}
 
 // gitLogSchema, gitShowSchema, gitDiffSchema, gitRevParseSchema,
 // gitRevListSchema: read-only history/plumbing queries, verified against

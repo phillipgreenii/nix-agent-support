@@ -157,6 +157,19 @@ const (
 	// --option NAME VALUE); Set names the key table.
 	KindOptionName
 	KindOptionValue
+	// KindExecRemote is a program the tool will run on the REMOTE end (or
+	// locally for a path remote) because the command line named it
+	// (git push --receive-pack/--exec): EffectExecProgram with Dialect
+	// "path" and Detail RemoteProgramDetail, so effectpolicy can reject it
+	// whatever the path is (packet tc-o14i5.3.10, R6/D8).
+	KindExecRemote
+	// KindGitRefspec is a `git push` refspec operand (OperandRole.Operation
+	// names the remote Operation it refines). A plain `src[:dst]` ref is
+	// recorded on the remote effect's Refs; a `:dst` delete refspec on
+	// DelRefs (and the effect becomes "delete-ref"); `+src:dst` force
+	// refspecs, globs and option-shaped tokens are insufficient, as is a
+	// runtime expansion.
+	KindGitRefspec
 )
 
 // String returns the deterministic role name used in labels and reasons.
@@ -212,6 +225,10 @@ func (k RoleKind) String() string {
 		return "option-name"
 	case KindOptionValue:
 		return "option-value"
+	case KindExecRemote:
+		return "exec-remote"
+	case KindGitRefspec:
+		return "git-refspec"
 	default:
 		return "role-invalid"
 	}
@@ -257,7 +274,13 @@ var (
 	ExecPath     = OperandRole{Kind: KindExecPath}
 	ExecOpaque   = OperandRole{Kind: KindExecOpaque}
 	FlakeRef     = OperandRole{Kind: KindFlakeRef}
+	// ExecRemote is the role of git push's --receive-pack/--exec operand.
+	ExecRemote = OperandRole{Kind: KindExecRemote}
 )
+
+// GitRefspec returns the role of a `git push` refspec operand that refines
+// the EffectRemote whose Operation is op (see KindGitRefspec).
+func GitRefspec(op string) OperandRole { return OperandRole{Kind: KindGitRefspec, Operation: op} }
 
 // OptionPair returns the role for a key/value operand resolved through the
 // named option table (see optionTables).

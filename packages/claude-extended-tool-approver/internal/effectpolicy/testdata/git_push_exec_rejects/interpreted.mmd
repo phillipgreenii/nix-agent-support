@@ -1,0 +1,2 @@
+flowchart LR
+    n0["command: git push --exec evil origin main<br/>- exec-program:path #quot;evil#quot; [arg 1] (remote-program)<br/>- remote:push origin [arg 2]<br/>mark=forbidden: exec-program:path #quot;evil#quot; [arg 1] (remote-program): config-exec-source (the command line chooses a program to run on the push remote (--receive-pack/--exec): evil)"]

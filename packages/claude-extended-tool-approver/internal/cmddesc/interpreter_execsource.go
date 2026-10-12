@@ -23,6 +23,12 @@ const (
 	// ExecDialectOpaque ("") : text the engine has no interpreter for.
 )
 
+// RemoteProgramDetail is the Detail of an EffectExecProgram that names a
+// program the tool runs on the remote end because the command line chose it
+// (git push --receive-pack / --exec): effectpolicy rejects it whatever the
+// path, because the program is chosen by the caller, not by repository state.
+const RemoteProgramDetail = "remote-program"
+
 // FlakeRefDetail is the Detail of an EffectConfigSource that names a nix flake
 // reference rather than a file.
 const FlakeRefDetail = "flake-ref"
@@ -30,7 +36,7 @@ const FlakeRefDetail = "flake-ref"
 func isSourceRole(k RoleKind) bool {
 	switch k {
 	case KindConfigSource, KindExecCommand, KindExecPath, KindExecOpaque, KindFlakeRef,
-		KindOptionPair, KindOptionName, KindOptionValue:
+		KindOptionPair, KindOptionName, KindOptionValue, KindExecRemote:
 		return true
 	}
 	return false
@@ -50,6 +56,8 @@ func (st *interpState) sourceOperand(op pendingOp, role OperandRole, live bool, 
 		st.execProgram(op.tok, ExecDialectPath, live, source, label, "")
 	case KindExecOpaque:
 		st.execProgram(op.tok, "", live, source, label, "")
+	case KindExecRemote:
+		st.execProgram(op.tok, ExecDialectPath, live, source, label, RemoteProgramDetail)
 	case KindOptionName:
 		st.optName, st.optNameLive = op.tok, live
 	case KindOptionValue:

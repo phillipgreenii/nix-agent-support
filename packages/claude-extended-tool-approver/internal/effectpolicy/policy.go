@@ -1008,14 +1008,14 @@ func (RemoteMutation) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool)
 	// repository's own (R2 repo trust, ADR 0053), so it is not a runtime
 	// expansion in the sense the check below guards (a `$REMOTE` the shell
 	// substitutes) — the plain push forms treat it as a configured remote.
-	defaultRemotePush := e.Dynamic && e.Resource == defaultRemoteResource && e.Source == "implicit" && (e.Operation == "push" || e.Operation == "push-lease")
+	defaultRemotePush := e.Dynamic && e.Resource == defaultRemoteResource && e.Source == "implicit" && isGitPushOperation(e.Operation)
 	if e.Dynamic && !defaultRemotePush {
 		return Finding{Verdict: Unknown, Reason: "remote resource is a runtime expansion"}, true
 	}
 	switch e.Operation {
 	case "read":
 		return Finding{Verdict: Permitted, Reason: "read of a named remote resource"}, true
-	case "push", "push-lease":
+	case "push", "push-lease", "push-multiref":
 		if e.DryRun {
 			return Finding{Verdict: Permitted, Reason: "dry run of an ordinary push mutates nothing"}, true
 		}
@@ -1058,7 +1058,7 @@ func (RemoteMutation) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool)
 		if e.DryRun {
 			return Finding{Verdict: Unknown, Reason: "dry run of a delete-ref mutates nothing, but a forbidden mutation's dry run is not auto-approved either (operator ruling, Phillip 2026-09-07, tc-ife3/tc-vn5z)"}, true
 		}
-		return Finding{Verdict: Forbidden, Reason: "delete-ref removes a shared ref"}, true
+		return judgeDeleteRef(e), true
 	case "dolt-server":
 		if ctx.RemoteLifecycleClass(e.Resource) == "reject" {
 			return Finding{Verdict: Forbidden, Reason: "operator configuration rejects Dolt server lifecycle changes to " + e.Resource + " (tc-vn5z)"}, true
@@ -1216,6 +1216,22 @@ func (TargetSpecPolicy) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, boo
 		return judgeTargetSpecMutation(ctx, e.Resource, targetspec.TargetKindKubeContext, e.Dynamic, "kube context")
 	case e.Kind == cmddesc.EffectPath && e.Remote != "" && e.Access.IsWrite():
 		return judgeTargetSpecMutation(ctx, e.Remote, targetspec.TargetKindSSHHost, e.Dynamic, "ssh host")
+	case e.Kind == cmddesc.EffectRemote && e.Family == "" && isGitPushOperation(e.Operation):
+		// Packet tc-o14i5.3.10 (R6, D8): a git remote NAME is looked up in
+		// the P8 target spec. Only a PRODUCTION-classed remote changes the
+		// verdict (Forbidden); an unlisted or trusted-dev remote defers to
+		// RemoteMutation, which already abstains on URL/path remotes (R11).
+		// Unlike kube/ssh, an unlisted git remote does NOT abstain here: the
+		// configured-remotes set lives in git config, not the target spec, and
+		// making every push abstain for an operator who only listed kube
+		// contexts would silently undo R6.
+		if e.Dynamic || e.Resource == "" || !isPlainRemoteName(e.Resource) {
+			return Finding{}, false
+		}
+		if class, found := ctx.TargetSpecClass(e.Resource, targetspec.TargetKindGitRemote); found && class == targetspec.TargetClassProduction {
+			return Finding{Verdict: Forbidden, Reason: fmt.Sprintf("git remote %q is a production-classed P8 target: push rejected", e.Resource)}, true
+		}
+		return Finding{}, false
 	default:
 		return Finding{}, false
 	}
@@ -1873,3 +1889,40 @@ func isPlainRemoteName(s string) bool {
 // defaultRemoteResource is the placeholder Resource the git push schema gives
 // the implicit default-remote effect of a bare `git push`.
 const defaultRemoteResource = "<default-remote>"
+
+// primaryBranchNames are the branch names RemoteMutation treats as a
+// repository's primary branch when a delete names one (R6: "deleting the
+// primary branch or a tag => REJECT"). The engine has no per-repo primary
+// branch signal, so this is the closed conventional set; a delete of any
+// other branch is Unknown (abstain), never Permitted.
+var primaryBranchNames = map[string]bool{"main": true, "master": true}
+
+// judgeDeleteRef is the R6 delete verdict ladder (packet tc-o14i5.3.10): a
+// single-ref delete abstains, EXCEPT deleting the primary branch or a tag,
+// which is Forbidden. A delete that names no ref the policy can read
+// (`git push --delete origin`) is Unknown.
+func judgeDeleteRef(e cmddesc.Effect) Finding {
+	for _, ref := range strings.Split(e.DelRefs, "\n") {
+		if ref == "" {
+			continue
+		}
+		if strings.HasPrefix(ref, "refs/tags/") {
+			return Finding{Verdict: Forbidden, Reason: "deleting tag " + ref + " rewrites published release history (R6)"}
+		}
+		name := strings.TrimPrefix(ref, "refs/heads/")
+		if primaryBranchNames[name] {
+			return Finding{Verdict: Forbidden, Reason: "deleting the primary branch " + name + " (R6)"}
+		}
+	}
+	return Finding{Verdict: Unknown, Reason: "deleting a remote ref requires consent (R6: a single-ref delete abstains; only the primary branch or a tag rejects)"}
+}
+
+// isGitPushOperation reports whether op is one of the EffectRemote
+// Operations a `git push` can produce.
+func isGitPushOperation(op string) bool {
+	switch op {
+	case "push", "push-lease", "push-multiref", "push-bulk", "force-push", "delete-ref":
+		return true
+	}
+	return false
+}

@@ -181,6 +181,11 @@ type interpState struct {
 	// setting flag (KindOptionName) for the VALUE operand that follows it.
 	optName     string
 	optNameLive bool
+	// refspecs/delRefspecs/refspecOp collect a KindGitRefspec role's operands
+	// (see attachRefspecs).
+	refspecs    []string
+	delRefspecs []string
+	refspecOp   string
 }
 
 // scan is the flag pass: it walks the argv, records every modeled flag and
@@ -334,6 +339,8 @@ func (st *interpState) operand(op pendingOp, role OperandRole) {
 		st.commandDir(op.tok, live, source)
 	case role.Kind == KindAllowedLiteral:
 		st.allowedLiteral(role, op.tok, live, source)
+	case role.Kind == KindGitRefspec:
+		st.gitRefspec(role, op.tok, live, source)
 	case isSourceRole(role.Kind):
 		st.sourceOperand(op, role, live, source)
 	case role.Kind == KindLiteral, role.Kind == KindMessage:
@@ -950,6 +957,7 @@ func (st *interpState) stdio() {
 // packages the interpretation.
 func (st *interpState) result() Interpretation {
 	effects := st.rebaseUnderCommandDir(st.effects)
+	effects = st.attachRefspecs(effects)
 	for _, t := range st.transforms {
 		var ok bool
 		effects, ok = applyTransform(t, effects)
@@ -964,4 +972,68 @@ func (st *interpState) result() Interpretation {
 		Sufficient:    st.insuff == "",
 		Insufficiency: st.insuff,
 	}
+}
+
+// gitRefspec records one `git push` refspec operand (KindGitRefspec). A
+// plain `src[:dst]` ref is inert and remembered; a `:dst` delete refspec is
+// remembered as a deletion; a `+src:dst` force refspec, a glob, an
+// option-shaped token or a runtime expansion is insufficient (closed set —
+// P3). Source: git push(1) "<refspec>...": `+` forces, an empty <src>
+// deletes, a `*` globs (verified against git 2.54.0 `git help push`).
+func (st *interpState) gitRefspec(role OperandRole, tok string, live bool, source string) {
+	switch {
+	case live:
+		st.fail("refspec at %s is a runtime expansion", source)
+	case tok == "" || strings.HasPrefix(tok, "+") || strings.HasPrefix(tok, "-") || strings.Contains(tok, "*"):
+		st.fail("operand %q at %s is not accepted by the closed literal set git-plain-refspec", tok, source)
+	case strings.HasPrefix(tok, ":"):
+		if len(tok) == 1 {
+			st.fail("refspec %q at %s is the matching-branches refspec", tok, source)
+			return
+		}
+		st.refspecOp = role.Operation
+		st.delRefspecs = append(st.delRefspecs, tok[1:])
+	default:
+		st.refspecOp = role.Operation
+		st.refspecs = append(st.refspecs, tok)
+	}
+}
+
+// attachRefspecs stamps the collected refspecs on the EffectRemote whose
+// Operation the KindGitRefspec role named, BEFORE the flag transforms run
+// (so TransformDeleteRef/TransformForce see them). `tag <name>` is git's
+// shorthand for refs/tags/<name> (git push(1) "tag <tag>") and is expanded.
+// A `:dst` refspec turns the effect into "delete-ref".
+func (st *interpState) attachRefspecs(effects []Effect) []Effect {
+	if st.refspecOp == "" {
+		return effects
+	}
+	refs := expandTagShorthand(st.refspecs)
+	out := make([]Effect, len(effects))
+	copy(out, effects)
+	for i, e := range out {
+		if e.Kind != EffectRemote || e.Family != "" || e.Operation != st.refspecOp {
+			continue
+		}
+		e.Refs = strings.Join(refs, "\n")
+		e.DelRefs = strings.Join(st.delRefspecs, "\n")
+		if len(st.delRefspecs) > 0 {
+			e.Operation = "delete-ref"
+		}
+		out[i] = e
+	}
+	return out
+}
+
+func expandTagShorthand(refs []string) []string {
+	var out []string
+	for i := 0; i < len(refs); i++ {
+		if refs[i] == "tag" && i+1 < len(refs) {
+			out = append(out, "refs/tags/"+refs[i+1])
+			i++
+			continue
+		}
+		out = append(out, refs[i])
+	}
+	return out
 }

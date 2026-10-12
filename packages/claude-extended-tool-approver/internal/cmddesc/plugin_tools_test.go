@@ -195,13 +195,13 @@ func TestPushOperationLadder(t *testing.T) {
 		"git push --force --force-with-lease origin main":  "force-push",
 		"git push --force-with-lease --delete origin main": "delete-ref",
 		"git push --delete --force-with-lease origin main": "delete-ref",
-		"git push --all origin":                            "push-bulk",
-		"git push --force-with-lease --all origin":         "push-bulk",
-		"git push --all --force-with-lease origin":         "push-bulk",
-		"git push --tags origin":                           "push-bulk",
+		"git push --all origin":                            "push-multiref",
+		"git push --force-with-lease --all origin":         "push-multiref",
+		"git push --all --force-with-lease origin":         "push-multiref",
+		"git push --tags origin":                           "push-multiref",
 		"git push --prune origin":                          "push-bulk",
 		"git push --mirror origin":                         "push-bulk",
-		"git push --branches origin":                       "push-bulk",
+		"git push --branches origin":                       "push-multiref",
 	}
 	for command, want := range cases {
 		got := interpretDefault(t, command)
@@ -221,11 +221,9 @@ func TestPushOperationLadder(t *testing.T) {
 	}
 	insufficient := []string{
 		"git push origin +main",                       // force via refspec
-		"git push origin :main",                       // delete via refspec
+		"git push origin :",                           // matching-branches delete refspec
 		"git push origin refs/heads/*:refs/heads/*",   // glob
 		"git push --force-with-lease=main:abc origin", // cross-branch lease
-		"git push --receive-pack=evil origin main",    // program on the remote side
-		"git push --exec=evil origin main",
 		"git push --no-verify origin main",
 	}
 	for _, c := range insufficient {

@@ -393,6 +393,14 @@ type Effect struct {
 	Operation string
 	DryRun    bool
 
+	// Refs and DelRefs (packet tc-o14i5.3.10, R6) are the git refs a `git push`
+	// remote effect names, newline-separated (a string, not a slice, so Effect
+	// stays comparable): Refs are plain `src[:dst]` ref operands, DelRefs the
+	// refs being deleted (`:dst` refspecs, or every ref once --delete applied).
+	// They are FACTS; effectpolicy.RemoteMutation judges "delete-ref" by them.
+	Refs    string
+	DelRefs string
+
 	// Family marks WHICH remote-effect FAMILY produced this EffectRemote
 	// (slice 3y, tc-lc8f item 4f; tc-vn5z item 3): empty (the zero value,
 	// used by every pre-existing producer — git's remote positional, bd's
@@ -508,6 +516,9 @@ func (e Effect) String() string {
 		}
 		if e.DryRun {
 			b.WriteString(" (dry-run)")
+		}
+		if e.DelRefs != "" {
+			fmt.Fprintf(&b, " del=%s", strings.ReplaceAll(e.DelRefs, "\n", ","))
 		}
 		if e.Source != "" {
 			fmt.Fprintf(&b, " [%s]", e.Source)
