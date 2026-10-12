@@ -139,7 +139,7 @@ func FuzzExecIdentity(f *testing.F) {
 			if want != realpath {
 				t.Fatalf("argv0 %q trusted with realpath %q but %s/%s resolves to %q", argv0, realpath, trusted, path.Base(argv0), want)
 			}
-		case os.IsNotExist(werr) || errors.Is(werr, syscall.EINVAL):
+		case os.IsNotExist(werr) || errors.Is(werr, syscall.EINVAL) || errors.Is(werr, syscall.ENAMETOOLONG):
 			if realpath != filepath.Join(realTrusted, path.Base(argv0)) {
 				t.Fatalf("argv0 %q trusted (realpath %q) but it is not a direct child of the trusted dir %q", argv0, realpath, realTrusted)
 			}
