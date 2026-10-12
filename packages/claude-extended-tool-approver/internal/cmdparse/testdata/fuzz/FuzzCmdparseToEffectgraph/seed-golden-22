@@ -1,0 +1,2 @@
+go test fuzz v1
+string("git -C /repo/.worktrees/wt diff --name-only --diff-filter=U")

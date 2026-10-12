@@ -1,0 +1,2 @@
+go test fuzz v1
+string("claude-extended-tool-approver evaluate --settings=/repo/.claude/settings.local.json --format=json > /tmp/ceta-settings-eval.json")

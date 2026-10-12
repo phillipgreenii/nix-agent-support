@@ -1,0 +1,9 @@
+go test fuzz v1
+string("PATH")
+string("$(echo /tmp/x):$PATH")
+uint8(3)
+bool(true)
+bool(false)
+bool(false)
+bool(false)
+bool(false)

@@ -1,0 +1,2 @@
+go test fuzz v1
+string("pg-wi-flow next --id pg2-abc12")

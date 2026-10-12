@@ -1,0 +1,2 @@
+go test fuzz v1
+string("bd update pg2-abc12 --remove-label worktree-review --priority 2 --append-notes \"resolved\" --actor sess-1")

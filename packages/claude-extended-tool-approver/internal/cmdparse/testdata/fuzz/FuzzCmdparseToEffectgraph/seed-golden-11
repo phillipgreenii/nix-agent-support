@@ -1,0 +1,2 @@
+go test fuzz v1
+string("bd update pg2-map1 --body-file /tmp/body.md")

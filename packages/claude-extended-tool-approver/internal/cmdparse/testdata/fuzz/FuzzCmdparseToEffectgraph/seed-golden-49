@@ -1,0 +1,2 @@
+go test fuzz v1
+string("diff -u /repo/a.md /repo/b.md")

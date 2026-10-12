@@ -1,0 +1,2 @@
+go test fuzz v1
+string("bd comment pg2-t1 --file /tmp/report.md")

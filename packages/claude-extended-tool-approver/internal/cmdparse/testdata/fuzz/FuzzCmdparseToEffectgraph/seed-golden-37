@@ -1,0 +1,2 @@
+go test fuzz v1
+string("pb gate attach-verified-child --impl pg2-abc12 --title \"verify thing works after apply (pg2-abc12): run the check\" --gate phillipgreenii-nix-agent-support=0123456789abcdef0123456789abcdef01234567 --actor \"sess-1-drain\"")

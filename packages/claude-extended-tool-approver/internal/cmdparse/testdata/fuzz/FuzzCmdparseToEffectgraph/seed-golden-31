@@ -1,0 +1,2 @@
+go test fuzz v1
+string("gh extension list | cut -f1 | grep -qxF 'gh stack'")

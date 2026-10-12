@@ -1,0 +1,2 @@
+go test fuzz v1
+string("git -C /tmp log --oneline -n5")

@@ -1,0 +1,2 @@
+go test fuzz v1
+string("bd show pg2-abc12 --json | jq -r '(if type==\"object\" and has(\"data\") then .data else . end)[0].notes // \"\"' | rg -o 'Promoted P[0-9]->P[0-9]' | tail -1")

@@ -1,0 +1,2 @@
+go test fuzz v1
+string("df-pull p3 j2 --dry-run --actor sess-1")

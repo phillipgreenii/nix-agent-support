@@ -1,0 +1,9 @@
+go test fuzz v1
+string("GIT_DIR")
+string("/tmp/x/.git")
+uint8(0)
+bool(true)
+bool(false)
+bool(false)
+bool(false)
+bool(false)

@@ -1,0 +1,2 @@
+go test fuzz v1
+string("git -C /Users/phillipg/phillipg_mbp/phillipgreenii-nix-agent-support cherry -v main")

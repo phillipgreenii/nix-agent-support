@@ -1,0 +1,2 @@
+go test fuzz v1
+string("bd label add pg2-abc12 claude-extended-tool-approver")

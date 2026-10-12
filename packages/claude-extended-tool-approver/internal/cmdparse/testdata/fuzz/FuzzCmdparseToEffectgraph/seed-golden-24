@@ -1,0 +1,2 @@
+go test fuzz v1
+string("jq --arg file collect.go --argjson line 95 --arg type branch_condition '.statistics' pgm.json")

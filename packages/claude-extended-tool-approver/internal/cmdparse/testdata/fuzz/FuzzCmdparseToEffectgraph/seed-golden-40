@@ -1,0 +1,2 @@
+go test fuzz v1
+string("mkdir -p /tmp/bead-unstick-2026-10-05/batches /tmp/bead-unstick-2026-10-05/results /tmp/bead-unstick-2026-10-05/facts /tmp/bead-unstick-2026-10-05/probes /tmp/bead-unstick-2026-10-05/work")
