@@ -74,6 +74,23 @@ in
       reads this flag across `config.home-manager.users.<u>`.
     '';
 
+    pprof.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Expose the daemon's Go profiling endpoint (net/http/pprof) on a unix
+        socket at `$XDG_STATE_HOME/pa-monitor/pprof.sock` (mode 0600, owner
+        only; never a TCP port). The launchd agent sets `PA_MONITOR_PPROF_ADDR`
+        to that path; with it unset the daemon opens no listener. Capture a CPU
+        profile with curl, then read the file with `go tool pprof` (which cannot
+        dial a unix socket itself):
+
+            curl --unix-socket ~/.local/state/pa-monitor/pprof.sock \
+              'http://pprof/debug/pprof/profile?seconds=30' -o cpu.pb.gz
+            go tool pprof -top cpu.pb.gz
+      '';
+    };
+
     swiftbar = {
       enable = lib.mkEnableOption ''
         the pa-monitor SwiftBar menu bar plugin: the current 5-hour usage window,
@@ -220,6 +237,12 @@ in
               # it yield to builds, tests and the user's own tools when the host is
               # saturated, and costs nothing when the host is idle.
               ProcessType = "Background";
+              # Profiling endpoint (internal/pprofserver): a 0600 unix socket beside
+              # the daemon's own socket, so no port is allocated or exposed. The
+              # daemon creates the socket itself and ignores a bad value.
+              EnvironmentVariables = lib.optionalAttrs cfg.pprof.enable {
+                PA_MONITOR_PPROF_ADDR = "${config.xdg.stateHome}/pa-monitor/pprof.sock";
+              };
               # OTel is sourced from ~/.config/pa-monitor/config.toml (single source
               # of truth, written above from the system observability stack) — not
               # injected as plist env.

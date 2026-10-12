@@ -10579,6 +10579,14 @@
                     declareLaunchd = false;
                     cfg = daemonOn;
                   };
+                  # pprof.enable (default on) points the daemon at a 0600 unix socket
+                  # beside its own; off leaves the variable out so no listener opens.
+                  pprofOff = evalWith {
+                    cfg.phillipgreenii.programs.pa-monitor = {
+                      daemon.enable = true;
+                      pprof.enable = false;
+                    };
+                  };
                   failedAssertions = c: lib.filter (a: !a.assertion) c.assertions;
                   # Linux: the registry is a darwin-only construct; the module must
                   # neither emit the entry nor require the (undeclared) option.
@@ -10606,6 +10614,12 @@
                 assert e.logCollection.enable == false;
                 # pg2-klusl: the daemon yields CPU/IO to builds and tests under host load
                 assert e.serviceConfig.ProcessType == "Background";
+                # profiling endpoint: an absolute unix-socket path (never a TCP address),
+                # opt-out via pprof.enable
+                assert
+                  e.serviceConfig.EnvironmentVariables.PA_MONITOR_PPROF_ADDR
+                  == "/Users/tester/.local/state/pa-monitor/pprof.sock";
+                assert (entries pprofOff).pa-monitor-daemon.serviceConfig.EnvironmentVariables == { };
                 assert
                   e.serviceConfig.StandardOutPath == "/Users/tester/.local/state/pa-monitor/launchd-stdout.log";
                 assert

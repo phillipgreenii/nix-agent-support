@@ -356,6 +356,36 @@ A single-path `command` with no arguments and no `[decorator.env]` behaves exact
 | Runtime state (caffeinate toggle) | `$XDG_STATE_HOME/pa-monitor/runtime.json`                                                            |
 | Daemon stderr (LaunchAgent)       | `$XDG_STATE_HOME/pa-monitor/launchd-stderr.log`                                                      |
 
+## Profiling (pprof)
+
+The daemon can expose Go's runtime profiler (`net/http/pprof`) for diagnosing CPU or memory use.
+It is off unless `PA_MONITOR_PPROF_ADDR` is set. The Home-Manager module sets it by default
+(`phillipgreenii.programs.pa-monitor.pprof.enable`) to the unix socket
+`$XDG_STATE_HOME/pa-monitor/pprof.sock`, created with mode `0600`.
+
+The value MUST be an absolute socket path or a loopback `host:port` (`127.0.0.1`, `localhost`, `::1`).
+Any other value (`:6060`, `0.0.0.0:6060`, a relative path) is refused with a line on stderr, and the
+daemon keeps running. A stale socket from a crashed daemon is replaced; a regular file at that path is
+never removed.
+
+`go tool pprof` cannot dial a unix socket (verified: an `http+unix://` source fails with
+`lookup http+unix: no such host`), so fetch with `curl` and read the saved file:
+
+```bash
+SOCK="$XDG_STATE_HOME/pa-monitor/pprof.sock"
+
+# 30-second CPU profile, then summarise it (or `go tool pprof -http=: cpu.pb.gz` for the web UI)
+curl --unix-socket "$SOCK" 'http://pprof/debug/pprof/profile?seconds=30' -o cpu.pb.gz
+go tool pprof -top cpu.pb.gz
+
+# Heap profile, and a goroutine dump without stopping the daemon
+curl --unix-socket "$SOCK" 'http://pprof/debug/pprof/heap' -o heap.pb.gz
+curl --unix-socket "$SOCK" 'http://pprof/debug/pprof/goroutine?debug=2'
+```
+
+Do NOT send `SIGQUIT` to capture a dump: the daemon traps only `SIGTERM` and `SIGINT`, so the Go
+runtime would print all goroutines and exit. Implementation: `internal/pprofserver`.
+
 ## Configuration
 
 `config.toml` (`~/.config/pa-monitor/config.toml`) is nix-rendered; see `internal/config/config.go`

@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -25,6 +26,7 @@ import (
 	"github.com/phillipgreenii/pa-monitor/internal/labels"
 	"github.com/phillipgreenii/pa-monitor/internal/labels/detectors"
 	"github.com/phillipgreenii/pa-monitor/internal/otel"
+	"github.com/phillipgreenii/pa-monitor/internal/pprofserver"
 	"github.com/phillipgreenii/pa-monitor/internal/service"
 	signallayer "github.com/phillipgreenii/pa-monitor/internal/signal"
 	"github.com/phillipgreenii/pa-monitor/internal/store/sqlite"
@@ -63,6 +65,9 @@ func runDaemon(args []string) {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 
+	stopPprof := startPprofFromEnv(os.Getenv, os.Stderr)
+	defer stopPprof()
+
 	opts, cleanup, err := buildRunOptions(ctx, cfg, paths, version,
 		time.Duration(*tickS)*time.Second, *disablePoller)
 	if err != nil {
@@ -92,6 +97,29 @@ func runDaemon(args []string) {
 		fmt.Fprintf(os.Stderr, "daemon: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// pprofEnv names the environment variable that turns the daemon's profiling
+// endpoint on: an absolute unix socket path, or a loopback host:port. Unset
+// means no profiling listener at all. See internal/pprofserver.
+const pprofEnv = "PA_MONITOR_PPROF_ADDR"
+
+// startPprofFromEnv starts the profiling endpoint when pprofEnv is set and
+// returns the function that stops it (a no-op when disabled or when the address
+// was rejected). A bad address is reported on w and never stops the daemon:
+// profiling is a diagnostic, and losing it must not cost the monitoring.
+func startPprofFromEnv(getenv func(string) string, w io.Writer) func() {
+	addr := getenv(pprofEnv)
+	if addr == "" {
+		return func() {}
+	}
+	srv, err := pprofserver.Start(addr)
+	if err != nil {
+		fmt.Fprintf(w, "daemon: %s ignored: %v\n", pprofEnv, err)
+		return func() {}
+	}
+	fmt.Fprintf(w, "daemon: pprof listening on %s\n", srv.Addr())
+	return srv.Close
 }
 
 // buildRunOptions assembles the daemon's RunOptions exactly the way
