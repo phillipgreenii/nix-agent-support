@@ -124,6 +124,17 @@ func hermeticGitEnviron() []string {
 	return append(env, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null")
 }
 
+// gitProbeConfigArgs are the `-c` overrides placed before the subcommand of
+// every git probe this package runs. Repo-local config is honoured by git, and
+// core.fsmonitor names a PROGRAM git executes during `status` (tc-s6trn), so a
+// hostile repo could run code through the probe. `-c` outranks repo config.
+// The other program-running keys (core.hooksPath, core.pager, core.sshCommand,
+// diff.*.textconv/command) are not reachable from `status --porcelain` or
+// `ls-files` (no hooks, no pager on a pipe, no network, no diff), so only
+// fsmonitor is pinned; extend this list if a probe gains a subcommand that
+// reaches one of them.
+func gitProbeConfigArgs() []string { return []string{"-c", "core.fsmonitor=false"} }
+
 // gitProbeDefaultTimeout is the wall-clock budget this package's own two git
 // subprocess invocations (realWorktreeState, realGitTracked) each get — the
 // P9 hardening gap Ground Truth flagged verbatim: "pathspec/worktree.go:129,
@@ -232,7 +243,7 @@ func realWorktreeState(root string) (WorktreeState, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), gitProbeTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, gitPath, "-C", root, "status", "--porcelain=v1", "--ignored")
+	cmd := exec.CommandContext(ctx, gitPath, append(gitProbeConfigArgs(), "-C", root, "status", "--porcelain=v1", "--ignored")...)
 	cmd.Env = hermeticGitEnviron()
 	// isolateProcessGroup + WaitDelay (procgroup_unix.go): without them the
 	// context deadline bounds only THIS process, not a grandchild a hostile
@@ -340,7 +351,7 @@ func realGitTracked(root, rel string, isDir bool) (bool, error) {
 	if err != nil {
 		return false, &gitTrackedProbeError{root: root, rel: rel, err: err}
 	}
-	args := []string{"-C", root, "ls-files"}
+	args := append(gitProbeConfigArgs(), "-C", root, "ls-files")
 	if !isDir {
 		args = append(args, "--error-unmatch")
 	}

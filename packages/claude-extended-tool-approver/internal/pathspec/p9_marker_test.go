@@ -18,11 +18,9 @@
 // The timeout case pins that a hung (but trusted) git is killed at the
 // deadline and reported WorktreeUnknown rather than hanging the hook.
 //
-// Finding recorded by this test (not asserted away): realWorktreeState runs the
-// trusted git against the repo, and git runs a repo-configured core.fsmonitor
-// program. Closing that needs `-c core.fsmonitor=false` (or equivalent) on the
-// probe's argv; it is an engine change outside this test-only packet, so the
-// normal-conditions subtest asserts the CURRENT behaviour and logs it.
+// Regression (tc-s6trn): the probes pass `-c core.fsmonitor=false`, so a
+// repo-configured core.fsmonitor program must NOT run; an unhardened control
+// run keeps that assertion from passing vacuously.
 package pathspec
 
 import (
@@ -59,8 +57,26 @@ func TestP9Marker(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(scripts) })
 
-	t.Run("normal conditions: trusted git runs, fsmonitor marker fires (positive control)", func(t *testing.T) {
+	t.Run("normal conditions: trusted git runs, fsmonitor marker does NOT fire (tc-s6trn regression)", func(t *testing.T) {
 		root := gitTestRepo(t) // HOME pinned + the PATH-resolved git trusted
+		// Positive control: an UNhardened status of the same repo fires the
+		// marker, proving the no-marker assertion below is not vacuous.
+		controlMarker := filepath.Join(scripts, "fsmonitor-control.marker")
+		controlScript := writeMarkerScript(t, scripts, "fsmonitor-control.sh", controlMarker, "exit 0\n")
+		git(t, root, "config", "core.fsmonitor", controlScript)
+		realGit, err := exec.LookPath("git")
+		if err != nil {
+			t.Skipf("git not on PATH: %v", err)
+		}
+		ctl := exec.Command(realGit, "-C", root, "status", "--porcelain=v1")
+		ctl.Env = hermeticGitEnviron()
+		if out, err := ctl.CombinedOutput(); err != nil {
+			t.Fatalf("control git status: %v\n%s", err, out)
+		}
+		if !markerPresent(controlMarker) {
+			t.Skipf("git %v did not run core.fsmonitor for an unhardened `status` here; the positive control is unavailable on this git", gitVersion())
+		}
+
 		marker := filepath.Join(scripts, "fsmonitor-normal.marker")
 		script := writeMarkerScript(t, scripts, "fsmonitor-normal.sh", marker, "exit 0\n")
 		git(t, root, "config", "core.fsmonitor", script)
@@ -72,10 +88,15 @@ func TestP9Marker(t *testing.T) {
 		if state == WorktreeUnknown {
 			t.Fatalf("got unknown for a clean trusted-git repo")
 		}
-		if !markerPresent(marker) {
-			t.Skipf("git %v did not run core.fsmonitor for `status` here; the marker positive control is unavailable on this git, so the no-marker cases below prove only that git never started", gitVersion())
+		if markerPresent(marker) {
+			t.Fatal("the worktree probe executed the repo-configured core.fsmonitor program")
 		}
-		t.Logf("FINDING: the worktree probe executed the repo-configured core.fsmonitor program (marker present); state=%s", state)
+		if _, err := realGitTracked(root, "README.md", false); err != nil {
+			t.Fatalf("realGitTracked: %v", err)
+		}
+		if markerPresent(marker) {
+			t.Fatal("realGitTracked executed the repo-configured core.fsmonitor program")
+		}
 	})
 
 	t.Run("PATH-shadowed git: no marker, Unknown, shadow never executed", func(t *testing.T) {
