@@ -203,6 +203,7 @@ func DefaultPolicies() []Policy {
 		EnvAssignment{},
 		ChdirScoped{},
 		TrustedCheckoutExec{},
+		GitConfigKeyPolicy{},
 	}
 }
 
@@ -1484,6 +1485,22 @@ func judgeWrite(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) {
 		return Finding{Verdict: Forbidden, Reason: "path is denyWrite"}, true
 	}
 	abs := resolvePathAccessAbs(ctx.PathEval, e.Path)
+	// P5 (tc-o14i5.3.9): a non-git-verb write into the resolved git dir,
+	// common dir or core.hooksPath target is Forbidden unless the repo is a
+	// temp repo (ADR 0059). git's own verbs declare their `.git` writes as
+	// IMPLICIT effects and are judged by the git spec instead. Membership is
+	// tested on the symlink-hardened resolution (pathspec.ResolveComponentwise).
+	if e.Source != "implicit" {
+		gitAbs := pathspec.ResolveComponentwise(ctx.PathEval, e.Path)
+		if gitAbs == "" {
+			gitAbs = abs
+		}
+		if gitAbs != "" {
+			if v, reason := pathspec.GitDirWriteVerdict(gitAbs); v == pathspec.Forbidden {
+				return Finding{Verdict: Forbidden, Reason: reason}, true
+			}
+		}
+	}
 	if abs != "" && !accessModifySecretCarveOut(ctx.PathEval, e.Access, abs) {
 		kinds := pathspec.EffectiveKinds(ctx.PathEval)
 		if v := pathspec.ResolveAccessWithSecrets(kinds, abs).Write; v.Result == pathspec.Forbidden {

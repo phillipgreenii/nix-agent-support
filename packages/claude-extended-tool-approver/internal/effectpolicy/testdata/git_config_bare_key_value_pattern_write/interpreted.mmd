@@ -1,2 +1,2 @@
 flowchart LR
-    n0["command: git config user.name foo bar<br/>- stdio:stdout metadata<br/>mark=insufficient: unmodeled operand role 11 at arg 1"]
+    n0["command: git config user.name foo bar<br/>- stdio:stdout metadata<br/>- config-key: user.name=#quot;foo#quot; {local,}<br/>mark=insufficient: config-key: user.name=#quot;foo#quot; {local,}: git-config-key (git config key user.name has no class (P16))"]

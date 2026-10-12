@@ -351,7 +351,7 @@ func TestPluginToolSpotChecks(t *testing.T) {
 		"fd -x rm", "session-mode hook session-end", "claude-extended-tool-approver archive",
 		"claude-extended-tool-approver spec-drift-check --embedded --record", "git stash pop", "git stash -u",
 		"git checkout main", "git rebase -i main", "git rebase --exec x main", "git merge origin/main", "git fetch --upload-pack=x origin",
-		"git branch -D f", "git branch f", "git apply p.diff", "git config k v", "man -P less jq",
+		"git branch -D f", "git branch f", "git apply p.diff", "man -P less jq",
 	}
 	for _, c := range insufficient {
 		if got := interpretDefault(t, c); got.Sufficient {

@@ -64,6 +64,12 @@ const (
 	// this effect": Insufficient/Abstain, never Approve or Reject, until a
 	// future slice reviews key-material references deliberately.
 	EffectKeyMaterial
+	// EffectConfigKey is a `git config` WRITE of one key (P16, packet
+	// tc-o14i5.3.9): ConfigKey/ConfigValue/ConfigScope are the write as
+	// given and ConfigClass is the FACT class LookupGitConfigKey assigned
+	// (never a verdict - effectpolicy.GitConfigKeyPolicy maps class and
+	// scope to one).
+	EffectConfigKey
 )
 
 // String returns the deterministic kind name.
@@ -89,6 +95,8 @@ func (k EffectKind) String() string {
 		return "exec"
 	case EffectKeyMaterial:
 		return "key-material"
+	case EffectConfigKey:
+		return "config-key"
 	default:
 		return "effect-invalid"
 	}
@@ -407,6 +415,14 @@ type Effect struct {
 	// WHICH KIND of session was requested.
 	RemotePersistent bool
 
+	// EffectConfigKey fields (P16). ConfigClass is a GitConfigClass fact and
+	// ConfigScope a GitConfigScope; Dynamic (shared) is true when the key or
+	// value is a runtime expansion.
+	ConfigKey   string
+	ConfigValue string
+	ConfigClass GitConfigClass
+	ConfigScope GitConfigScope
+
 	// EffectOpaque detail (and free text for any kind).
 	Detail string
 }
@@ -485,6 +501,11 @@ func (e Effect) String() string {
 	case EffectExec:
 		if e.Source != "" {
 			fmt.Fprintf(&b, ": %s", e.Source)
+		}
+	case EffectConfigKey:
+		fmt.Fprintf(&b, ": %s=%q {%s,%s}", e.ConfigKey, e.ConfigValue, e.ConfigScope, e.ConfigClass)
+		if e.Dynamic {
+			b.WriteString(" (dynamic)")
 		}
 	case EffectKeyMaterial:
 		fmt.Fprintf(&b, ": %s", e.Path)

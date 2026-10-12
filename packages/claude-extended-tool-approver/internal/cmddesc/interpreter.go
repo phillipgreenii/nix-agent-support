@@ -89,6 +89,8 @@ var interpreters = map[string]Interpreter{
 	// one EffectNet is emitted per distinct remote host — see
 	// interpreter_scp.go.
 	"scp": scpInterpreter{},
+	// P16 (tc-o14i5.3.9): `git config` write forms - see interpreter_gitconfig.go.
+	"git-config": gitConfigInterpreter{},
 }
 
 // LookupInterpreter resolves a schema's Interpreter name. The empty name

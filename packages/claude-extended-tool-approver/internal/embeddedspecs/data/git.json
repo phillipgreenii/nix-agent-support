@@ -1200,6 +1200,9 @@
         "name": "config",
         "provenance": "git version 2.54.0, git config -h",
         "citations": {
+          "interpreter": {
+            "source": "git config set -h: \"usage: git config set [\u003cfile-option\u003e] [--type=\u003ctype\u003e] [--comment=\u003cmessage\u003e] [--all] [--value=\u003cpattern\u003e] [--fixed-value] \u003cname\u003e \u003cvalue\u003e\" (the write form git-config interpretation keys on: two or three positionals)"
+          },
           "provenance": {
             "source": "git config -h: \"usage: git config list [\\u003cfile-option\\u003e] [\\u003cdisplay-option\\u003e] [--includes]\""
           },
@@ -1214,6 +1217,18 @@
           }
         },
         "flags": {
+          "--file": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-modify"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git config set -h: \"-f, --[no-]file \u003cfile\u003e use given config file\" (the file is written to, so the operand is a path modify judged by P5)"
+            }
+          },
           "--get": {
             "arity": "one",
             "operand": {
@@ -1250,6 +1265,18 @@
               "source": "git config -h (full): \"--get-regexp \\u003cname-regexp\\u003e Replaced by git config get --all --show-names --regexp \\u003cname-regexp\\u003e.\""
             }
           },
+          "--global": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git config set -h: \"--[no-]global use global config file\""
+            }
+          },
           "--list": {
             "arity": "none",
             "operand": {
@@ -1262,6 +1289,18 @@
               "source": "git config -h (full): \"-l, --list Replaced by git config list.\""
             }
           },
+          "--local": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git config set -h: \"--[no-]local use repository config file\""
+            }
+          },
           "--show-origin": {
             "arity": "none",
             "operand": {
@@ -1272,6 +1311,42 @@
             },
             "citation": {
               "source": "git config -h (full): \"--show-origin Augment the output of all queried config options with the origin type\""
+            }
+          },
+          "--system": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git config set -h: \"--[no-]system use system config file\""
+            }
+          },
+          "--worktree": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git config set -h: \"--[no-]worktree use per-worktree config file\""
+            }
+          },
+          "-f": {
+            "arity": "one",
+            "operand": {
+              "kind": "path-modify"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "git config set -h: \"-f, --[no-]file \u003cfile\u003e use given config file\" (the file is written to, so the operand is a path modify judged by P5)"
             }
           },
           "-l": {
@@ -1288,18 +1363,10 @@
           }
         },
         "positionals": {
-          "leading": [
-            {
-              "kind": "literal"
-            }
-          ],
-          "leadingSkippedByFlags": ["--get", "--get-all", "--get-regexp"],
-          "leadingOptional": true,
           "rest": {
-            "kind": "unmodeled"
+            "kind": "literal"
           },
           "restOverride": {
-            "flags": ["--get", "--get-all", "--get-regexp"],
             "role": {
               "kind": "literal"
             }
@@ -1311,7 +1378,8 @@
         "stdin": "never",
         "stdout": "metadata",
         "unknownFlag": "insufficient",
-        "endOfOptions": true
+        "endOfOptions": true,
+        "interpreter": "git-config"
       },
       "diff": {
         "name": "diff",

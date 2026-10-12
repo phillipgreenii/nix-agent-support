@@ -1046,7 +1046,10 @@ var gitWorktreeSchema = CommandSchema{
 	},
 }
 
-// gitConfigSchema: read forms only, via the SAME Unmodeled-positional
+// gitConfigSchema (P16, tc-o14i5.3.9: the write form `<name> <value>` is now
+// interpreted by gitConfigInterpreter, interpreter_gitconfig.go, and judged per
+// key by effectpolicy.GitConfigKeyPolicy; the text below describes the READ
+// forms and still holds): read forms, via the SAME Unmodeled-positional
 // fallback gitBranchSchema uses, now with the SAME RestOverride
 // disambiguator. `--get`/`--get-all`/`--get-regexp` take the config KEY as a
 // FLAG VALUE (Literal — a key name is inert, not a path), so `git config
@@ -1078,20 +1081,27 @@ var gitWorktreeSchema = CommandSchema{
 // zero-positional forms (`git config --list`) satisfied. Flags verified
 // against this host's `git config -h` / `git help config`.
 var gitConfigSchema = CommandSchema{
-	Name:       "config",
-	Provenance: "git version 2.54.0, git config -h",
+	Name:        "config",
+	Provenance:  "git version 2.54.0, git config -h",
+	Interpreter: "git-config",
 	Flags: map[string]FlagSpec{
 		"--get": literal1, "--get-all": literal1, "--get-regexp": literal1,
 		"-l": inert, "--list": inert,
 		"--show-origin": inert,
+		// Write scopes (git config -h: --global/--system/--local/--worktree
+		// "use ... config file"; -f/--file "use given config file"). The scope
+		// is a P16 POLICY input (--global/--system demote an Approve to
+		// Abstain); --file's operand is additionally a path WRITE judged by
+		// P5, so it carries PathModify (an over-strict read of `--file X
+		// --get`, never an under-strict one).
+		"--global": inert, "--system": inert, "--local": inert, "--worktree": inert,
+		"--file": {Arity: ArityOne, Operand: PathModify}, "-f": {Arity: ArityOne, Operand: PathModify},
 	},
-	Positionals: PositionalSpec{
-		Leading:               []OperandRole{Literal},
-		LeadingSkippedByFlags: []string{"--get", "--get-all", "--get-regexp"},
-		LeadingOptional:       true,
-		Rest:                  Unmodeled,
-		RestOverride:          RestOverride{Flags: []string{"--get", "--get-all", "--get-regexp"}, Role: Literal},
-	},
+	// Every positional is a literal; gitConfigInterpreter owns the meaning
+	// (read forms have <=1 positional, the write form `<name> <value>
+	// [<value-pattern>]` has 2-3), because a count-dependent role is not
+	// expressible in a static layout.
+	Positionals:  PositionalSpec{Rest: Literal},
 	Stdin:        StdinNever,
 	Stdout:       StdoutMetadata,
 	UnknownFlag:  UnknownFlagInsufficient,
