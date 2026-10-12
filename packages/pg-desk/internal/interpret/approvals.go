@@ -440,8 +440,15 @@ func computeMatchReasons(pr prShow, teamMembers, watchLabels []string, self stri
 //     verdict is advice to a human reviewer, not a gate.
 //     3. Bot disapproved (and I'm not requested) -> team_awaiting_owner.
 //     4. A human approval exists -> teamApprovedPanel (owner or team,
-//     decided by GitHub's merge state).
-//     5. Otherwise -> team_awaiting_team.
+//     decided by GitHub's merge state; a BLOCKED PR whose CI rollup is a
+//     failure is the owner's, see teamApprovedPanel).
+//     5. An unresolved, non-outdated review thread the PR author has not
+//     answered (hasUnansweredReviewThread) -> team_awaiting_owner: a reviewer
+//     already looked and the author owes a response (operator ruling
+//     2026-10-12 (Phillip), bead pg2-407y2).
+//     6. Otherwise -> team_awaiting_team. This is reached only when nothing is
+//     known to be owed by the owner: the team is the default only for "nobody
+//     has reviewed yet".
 //
 // No staleness axis (package doc): "approved" here means "a currently
 // APPROVED review exists," not "a non-stale one". The stored approvals do
@@ -515,6 +522,9 @@ func classifyPanel(own Ownership, pr prShow, ci ciRollupResult, appr Approvals, 
 	if appr.HumanApproved {
 		return teamApprovedPanel(pr, ci)
 	}
+	if hasUnansweredReviewThread(pr) {
+		return PanelTeamAwaitingOwner
+	}
 	return PanelTeamAwaitingTeam
 }
 
@@ -527,7 +537,13 @@ func classifyPanel(own Ownership, pr prShow, ci ciRollupResult, appr Approvals, 
 //     unmet, normally outstanding required reviews. EXCEPT while CI runs are
 //     still in flight: BLOCKED is then plausibly just the pending required
 //     check, and an approved PR waiting on CI stays with the owner (the
-//     2026-10-01 pending ruling).
+//     2026-10-01 pending ruling). ALSO EXCEPT when the raw CI rollup State is
+//     "failure": the hard-blocker check already set aside every failure the
+//     reviewer-side softenings forgive (review-exempt jobs, a cancelled run),
+//     so a BLOCKED PR carrying one is plausibly blocked by that very failing
+//     required check, which is the owner's to fix, not by outstanding reviews
+//     (operator ruling 2026-10-12 (Phillip), bead pg2-407y2; PR 120050). BLOCKED
+//     with no failure and nothing in flight stays team_awaiting_team.
 //   - UNKNOWN or absent (GitHub computes it lazily; the stored snapshot can
 //     also lag, since merge state is not a change signal) -> fall back to the
 //     weaker proxy "any review request is still outstanding" -> team, else
@@ -541,7 +557,7 @@ func classifyPanel(own Ownership, pr prShow, ci ciRollupResult, appr Approvals, 
 func teamApprovedPanel(pr prShow, ci ciRollupResult) string {
 	switch pr.MergeStateStatus {
 	case "BLOCKED":
-		if ci.RunsInFlight() {
+		if ci.RunsInFlight() || ci.State == "failure" {
 			return PanelTeamAwaitingOwner
 		}
 		return PanelTeamAwaitingTeam
@@ -563,6 +579,66 @@ func teamApprovedPanel(pr prShow, ci ciRollupResult) string {
 func hasUnresolvedThread(comments []prComment) bool {
 	for _, c := range comments {
 		if c.ThreadID != "" && !c.Resolved {
+			return true
+		}
+	}
+	return false
+}
+
+// hasUnansweredReviewThread reports whether the PR carries an inline review
+// thread the author still owes a response to (operator ruling 2026-10-12
+// (Phillip), bead pg2-407y2; PR 120879). Predicate, per thread:
+//
+//   - the thread is unresolved (Resolved) and not outdated (ThreadOutdated: the
+//     lines it anchors to have since changed, the one push signal the stored
+//     comments carry);
+//   - at least one of its comments was written by someone other than the PR
+//     author; and
+//   - none of its comments was written by the PR author (no reply).
+//
+// Comments are grouped into a thread by ReviewThreadID, or, for a payload that
+// predates it, each inline comment (ThreadID != "") stands alone. Top-level
+// comments (no ThreadID) are never threads.
+//
+// Limitations: stored comments carry no timestamps and the facts carry no commit
+// times, so "answered" is order-blind (any author comment in the thread counts,
+// even if the reviewer replied again afterwards) and "no push since" is only
+// approximated by the outdated flag (a push that leaves the commented lines
+// untouched is not seen). Both errors fall toward team_awaiting_team, the old
+// default. An unknown PR author (empty) cannot tell who owes a reply, so it
+// returns false.
+func hasUnansweredReviewThread(pr prShow) bool {
+	if pr.Author == "" {
+		return false
+	}
+	type thread struct {
+		open, byOther, byAuthor bool
+	}
+	threads := map[string]*thread{}
+	for _, c := range pr.allComments() {
+		if c.ThreadID == "" {
+			continue
+		}
+		key := c.ReviewThreadID
+		if key == "" {
+			key = c.ThreadID
+		}
+		t := threads[key]
+		if t == nil {
+			t = &thread{}
+			threads[key] = t
+		}
+		if !c.Resolved && !c.ThreadOutdated {
+			t.open = true
+		}
+		if c.Author == pr.Author {
+			t.byAuthor = true
+		} else {
+			t.byOther = true
+		}
+	}
+	for _, t := range threads {
+		if t.open && t.byOther && !t.byAuthor {
 			return true
 		}
 	}

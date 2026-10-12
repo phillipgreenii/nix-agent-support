@@ -350,11 +350,20 @@ func Interpret(facts gather.Facts, clock Clock, cfg *config.Config) (Interpretat
 // consistent with the sibling packet's own precedent.
 
 type prComment struct {
-	ID       string `json:"id"`
-	Author   string `json:"author"`
-	Body     string `json:"body"`
+	ID     string `json:"id"`
+	Author string `json:"author"`
+	Body   string `json:"body"`
+	// ThreadID is non-empty for an inline review comment. pg-connector sets it
+	// to the comment's OWN id, so it does not group a thread's comments.
 	ThreadID string `json:"thread_id,omitempty"`
-	Resolved bool   `json:"resolved"`
+	// ReviewThreadID is the real review-thread id every comment of one thread
+	// shares; empty from a connector that predates it (pg-connector schema).
+	ReviewThreadID string `json:"review_thread_id,omitempty"`
+	// Resolved is the resolved flag of the comment's thread.
+	Resolved bool `json:"resolved"`
+	// ThreadOutdated is the outdated flag of the comment's thread: the lines it
+	// anchors to have since changed.
+	ThreadOutdated bool `json:"thread_outdated,omitempty"`
 }
 
 type prReview struct {

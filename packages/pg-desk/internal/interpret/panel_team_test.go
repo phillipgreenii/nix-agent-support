@@ -167,3 +167,151 @@ func TestClassifyPanel_MineUnchangedByTeamRulings(t *testing.T) {
 		})
 	}
 }
+
+// Operator ruling 2026-10-12 (Phillip), bead pg2-407y2: team_awaiting_team is
+// reached only when the team positively owes something. These rows pin the two
+// owner-owed cases that used to fall into it.
+
+// Case A (120050): an approved PR whose merge state is BLOCKED while CI has a
+// failure that only the review-exempt / cancelled-run softening sets aside is
+// the owner's to fix, not "reviews outstanding".
+func TestClassifyPanel_TeamApprovedBlockedByCIFailure(t *testing.T) {
+	reasons := []string{MatchReasonTeamAuthored}
+	approved := Approvals{HumanApproved: true, HumanApprovers: 1}
+	blocked := prShow{State: "open", MergeStateStatus: "BLOCKED"}
+	// exemptOnly is what computeCIRollup yields when the only failing job is
+	// review-exempt: State stays "failure", both softened states read success.
+	exemptOnly := ciRollupResult{State: "failure", reviewState: "success", reviewerState: "success"}
+	cancelledOnly := ciRollupResult{State: "failure", reviewerState: "success"}
+
+	tests := []struct {
+		name string
+		pr   prShow
+		ci   ciRollupResult
+		want string
+	}{
+		{"approved, BLOCKED, only an exempt check failing, nothing in flight -> owner (120050)", blocked, exemptOnly, PanelTeamAwaitingOwner},
+		{"approved, BLOCKED, only a cancelled run -> owner (the failure is still the owner's)", blocked, cancelledOnly, PanelTeamAwaitingOwner},
+		{"approved, BLOCKED, green CI -> team (reviews outstanding, unchanged)", blocked, ciRollupResult{State: "success"}, PanelTeamAwaitingTeam},
+		{"approved, BLOCKED, no CI data -> team (unchanged)", blocked, ciRollupResult{State: "none"}, PanelTeamAwaitingTeam},
+		{"approved, BLOCKED, exempt failure, requesters still listed -> owner", prShow{State: "open", MergeStateStatus: "BLOCKED", ReviewRequests: []string{"someone-else"}}, exemptOnly, PanelTeamAwaitingOwner},
+		{"approved, UNKNOWN, exempt failure, requesters pending -> team (UNKNOWN fallback unchanged)", prShow{State: "open", MergeStateStatus: "UNKNOWN", ReviewRequests: []string{"someone-else"}}, exemptOnly, PanelTeamAwaitingTeam},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := classifyPanel(OwnershipTeam, tt.pr, tt.ci, approved, reasons); got != tt.want {
+				t.Errorf("classifyPanel = %q; want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// Case B (120879): a reviewer already reviewed (COMMENTED, no approval) and
+// left review threads the author has not answered; the author owes a reply.
+func TestClassifyPanel_TeamUnansweredReviewThreads(t *testing.T) {
+	const author = "the-author"
+	reasons := []string{MatchReasonTeamAuthored}
+	green := ciRollupResult{State: "success"}
+	unapproved := Approvals{}
+
+	// thread builds one inline review comment of a thread.
+	thread := func(id, threadID, by string, resolved, outdated bool) prComment {
+		return prComment{ID: id, Author: by, ThreadID: id, ReviewThreadID: threadID, Resolved: resolved, ThreadOutdated: outdated}
+	}
+	withReview := func(cs ...prComment) prShow {
+		return prShow{State: "open", Author: author, Reviews: []prReview{{ID: "r1", Author: "reviewer", State: "COMMENTED", Comments: cs}}}
+	}
+
+	tests := []struct {
+		name string
+		pr   prShow
+		want string
+	}{
+		{
+			"two unresolved reviewer threads, no author reply -> owner (120879)",
+			withReview(thread("c1", "PRRT_1", "reviewer", false, false), thread("c2", "PRRT_2", "reviewer", false, false)), PanelTeamAwaitingOwner,
+		},
+		{
+			"one unresolved unanswered thread among a resolved one -> owner",
+			withReview(thread("c1", "PRRT_1", "reviewer", true, false), thread("c2", "PRRT_2", "reviewer", false, false)), PanelTeamAwaitingOwner,
+		},
+		{
+			"author replied in the thread -> team",
+			withReview(thread("c1", "PRRT_1", "reviewer", false, false), thread("c2", "PRRT_1", author, false, false)), PanelTeamAwaitingTeam,
+		},
+		{
+			"author replied in one thread, a second is still unanswered -> owner",
+			withReview(thread("c1", "PRRT_1", "reviewer", false, false), thread("c2", "PRRT_1", author, false, false), thread("c3", "PRRT_2", "reviewer", false, false)), PanelTeamAwaitingOwner,
+		},
+		{
+			"all threads resolved -> team",
+			withReview(thread("c1", "PRRT_1", "reviewer", true, false)), PanelTeamAwaitingTeam,
+		},
+		{
+			"unresolved thread is outdated (code since changed) -> team",
+			withReview(thread("c1", "PRRT_1", "reviewer", false, true)), PanelTeamAwaitingTeam,
+		},
+		{
+			"thread opened by the author alone -> team (nothing owed to a reviewer)",
+			withReview(thread("c1", "PRRT_1", author, false, false)), PanelTeamAwaitingTeam,
+		},
+		{
+			"no thread at all (reviewed with a bare comment) -> team",
+			prShow{State: "open", Author: author, Reviews: []prReview{{ID: "r1", Author: "reviewer", State: "COMMENTED"}}},
+			PanelTeamAwaitingTeam,
+		},
+		{
+			"top-level (non-thread) comment from a reviewer -> team",
+			prShow{State: "open", Author: author, Comments: []prComment{{ID: "i1", Author: "reviewer", Body: "ping"}}},
+			PanelTeamAwaitingTeam,
+		},
+		{
+			"payload without review_thread_id: each comment is its own thread -> owner for the reviewer's",
+			withReview(prComment{ID: "c1", Author: "reviewer", ThreadID: "c1"}, prComment{ID: "c2", Author: author, ThreadID: "c2"}), PanelTeamAwaitingOwner,
+		},
+		{
+			"unknown PR author cannot tell who owes a reply -> team",
+			prShow{State: "open", Reviews: []prReview{{ID: "r1", Author: "reviewer", State: "COMMENTED", Comments: []prComment{thread("c1", "PRRT_1", "reviewer", false, false)}}}},
+			PanelTeamAwaitingTeam,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := classifyPanel(OwnershipTeam, tt.pr, green, unapproved, reasons); got != tt.want {
+				t.Errorf("classifyPanel = %q; want %q", got, tt.want)
+			}
+		})
+	}
+
+	t.Run("unanswered thread + requested of me -> me (a live request wins)", func(t *testing.T) {
+		pr := withReview(thread("c1", "PRRT_1", "reviewer", false, false))
+		if got := classifyPanel(OwnershipTeam, pr, green, unapproved, []string{MatchReasonReviewRequested}); got != PanelTeamAwaitingMe {
+			t.Errorf("classifyPanel = %q; want %q", got, PanelTeamAwaitingMe)
+		}
+	})
+	t.Run("unanswered thread + failing CI -> owner (hard blocker, unchanged)", func(t *testing.T) {
+		pr := withReview(thread("c1", "PRRT_1", "reviewer", false, false))
+		if got := classifyPanel(OwnershipTeam, pr, ciRollupResult{State: "failure"}, unapproved, reasons); got != PanelTeamAwaitingOwner {
+			t.Errorf("classifyPanel = %q; want %q", got, PanelTeamAwaitingOwner)
+		}
+	})
+	t.Run("no review at all -> team (unchanged)", func(t *testing.T) {
+		if got := classifyPanel(OwnershipTeam, prShow{State: "open", Author: author}, green, unapproved, reasons); got != PanelTeamAwaitingTeam {
+			t.Errorf("classifyPanel = %q; want %q", got, PanelTeamAwaitingTeam)
+		}
+	})
+}
+
+// The thread grouping and outdated fields come from the stored pr show payload.
+func TestDecodePRShow_ReviewThreadFields(t *testing.T) {
+	raw := []byte(`{"author":"a","reviews":[{"id":"r","author":"x","state":"COMMENTED","comments":[` +
+		`{"id":"c1","author":"x","thread_id":"c1","review_thread_id":"PRRT_1","resolved":false,"thread_outdated":true}]}]}`)
+	pr, err := decodePRShow(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := pr.Reviews[0].Comments[0]
+	if c.ReviewThreadID != "PRRT_1" || !c.ThreadOutdated {
+		t.Errorf("decoded comment = %+v; want ReviewThreadID PRRT_1 and ThreadOutdated", c)
+	}
+}

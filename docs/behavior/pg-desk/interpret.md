@@ -121,12 +121,24 @@ and MUST NOT use an LLM for any step below.
        nothing about whether the PR is ready (operator ruling 2026-10-05): `BLOCKED` →
        `team_awaiting_team` (merge requirements are still unmet, normally outstanding required
        reviews), except while any CI run is still in flight, when `BLOCKED` is plausibly just the
-       pending check and the PR stays `team_awaiting_owner`; `UNKNOWN` or absent → fall back to the
+       pending check and the PR stays `team_awaiting_owner`, and except when the CI rollup is a
+       failure (including a failure set aside as review-exempt or as a harmless cancelled run),
+       when `BLOCKED` is plausibly the failing required check, which is the owner's to fix, so the
+       PR is `team_awaiting_owner` (operator ruling 2026-10-12 (Phillip), bead pg2-407y2); `UNKNOWN`
+       or absent → fall back to the
        weaker proxy "a review request is still outstanding" → `team_awaiting_team`, otherwise
        `team_awaiting_owner`; any other state (`CLEAN`, `HAS_HOOKS`, `UNSTABLE`, `BEHIND`) →
        `team_awaiting_owner` (nothing is left but the owner merging or updating the branch). A
        conflict (`DIRTY`) is already a hard blocker above.
-    5. **Otherwise** → `team_awaiting_team`.
+    5. **An unanswered review thread** → `team_awaiting_owner`: a reviewer already reviewed and the
+       PR author owes a response (operator ruling 2026-10-12 (Phillip), bead pg2-407y2). A thread is
+       unanswered when it is unresolved, not outdated, was written by someone other than the PR
+       author, and has no comment from the PR author. Stored comments carry no timestamps, so a
+       reply counts regardless of order (a reviewer's later follow-up is not seen), and a push that
+       leaves the commented lines untouched is not seen either (only an outdated thread is set
+       aside); both limits fall toward `team_awaiting_team`. A top-level comment is never a thread.
+    6. **Otherwise** → `team_awaiting_team`: the team is the outcome only when nobody has reviewed
+       yet or the owner owes nothing.
   - **Mine**, once not blocked: any unresolved review-thread comment → `mine_awaiting_me` (no
     author qualifier — an open thread is on the operator regardless of who left it). Otherwise, an
     existing human approval → `mine_awaiting_me` (nothing left to do but merge). Otherwise, an own
@@ -155,7 +167,7 @@ and MUST NOT use an LLM for any step below.
   up to the sweep interval. The error is benign — both `team_awaiting_owner` and
   `team_awaiting_team` are outside the default `open` view. `BLOCKED` can also come from required
   conversation resolution, which is the author's job; the taxonomy does not distinguish that from
-  outstanding reviews. Whether GitHub reports `BLOCKED` or `BEHIND` when a branch is both behind and
+  outstanding reviews (the failing-CI cause is distinguished, rule 4 above). Whether GitHub reports `BLOCKED` or `BEHIND` when a branch is both behind and
   unreviewed is not verified; both are best-effort.
 
 **Hidden and WIP are explicitly NOT interpreted.** `serve` and `open` join the `annotation` table
