@@ -202,7 +202,7 @@ func TestCurlInterpreter(t *testing.T) {
 		{"dynamic url", `curl "$URL"`, false, nil, "option injection"},
 		{"dynamic url after literal prefix", `curl "https://$HOST/x"`, true, []Effect{{Kind: EffectNet, Host: "https://$HOST/x", Direction: NetInbound, Method: "GET", Dynamic: true, Source: "arg 0"}}, ""},
 		{"no url", "curl -s", false, nil, "no URL operand"},
-		{"unparseable host", "curl file:///etc/passwd", false, nil, "cannot determine the host"},
+		{"unparseable host", "curl https:///etc/passwd", false, nil, "cannot determine the host"},
 		{"dynamic method", `curl -X "$M" https://example.com`, false, nil, "runtime expansion"},
 		{"insecure left out", "curl -k https://example.com", false, nil, "unknown flag -k"},
 	}

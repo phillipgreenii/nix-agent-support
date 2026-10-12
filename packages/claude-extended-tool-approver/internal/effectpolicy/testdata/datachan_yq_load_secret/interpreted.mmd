@@ -1,0 +1,6 @@
+flowchart LR
+    n0["command: yq 'load(#quot;/home/u/.ssh/id_rsa#quot;)' x.yml<br/>- path:read x.yml [arg 1]<br/>- stdio:stdout content<br/>- path:read /home/u/.ssh/id_rsa [arg 0] (yq load operator)<br/>mark=forbidden: path:read /home/u/.ssh/id_rsa [arg 0] (yq load operator): path-access (well-known credential store)"]
+    n1[/"file: x.yml"/]
+    n2[/"file: /home/u/.ssh/id_rsa"/]
+    n0 -->|"reads: read"| n1
+    n0 -->|"reads: read"| n2

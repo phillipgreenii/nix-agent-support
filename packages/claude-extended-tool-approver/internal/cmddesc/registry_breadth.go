@@ -458,9 +458,11 @@ var jqSchema = CommandSchema{
 // direction). Deliberately unmodeled (Abstain): `-s`/`--split-exp` and
 // `--split-exp-file` (write result files named by an expression) and
 // `--security-enable-system-operator` (lets the expression execute
-// commands). Accepted gap: with file operations enabled (the default) an
-// expression's `load("path")` reads a file the schema cannot see — a read,
-// never a write or exec. Verified against yq v4.53.2 `yq --help`.
+// commands). With file operations enabled (the default) an
+// expression's `load("path")` reads a file: yqInterpreter (interpreter_yq.go)
+// turns each literal-path load-family call into a PathRead and abstains on a
+// non-literal argument; a `--from-file` expression's own text is not seen.
+// Verified against yq v4.53.2 `yq --help`.
 var yqSchema = CommandSchema{
 	Name:              "yq",
 	Provenance:        "yq (mikefarah) v4.53.2, yq --help",
@@ -475,9 +477,10 @@ var yqSchema = CommandSchema{
 }
 
 var yqEvalSchema = CommandSchema{
-	Name:       "eval",
-	Provenance: "yq (mikefarah) v4.53.2, yq eval --help",
-	Flags:      yqFlags,
+	Name:        "eval",
+	Interpreter: "yq",
+	Provenance:  "yq (mikefarah) v4.53.2, yq eval --help",
+	Flags:       yqFlags,
 	Positionals: PositionalSpec{
 		Leading:               []OperandRole{Literal},
 		LeadingSkippedByFlags: []string{"--from-file", "--expression"},

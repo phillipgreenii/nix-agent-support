@@ -2,6 +2,7 @@ package cmddesc
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
@@ -53,6 +54,17 @@ func interpretSubcommand(leaf cmdparse.ParsedCommand, schema CommandSchema, ctx 
 		name = schema.DefaultSubcommand
 		subSchema, ok = schema.Subcommands[name]
 		start = subIdx
+		if ok && reflect.DeepEqual(subSchema.Flags, schema.Flags) {
+			// The parent and the default subcommand share ONE flag table (yq's
+			// flags are accepted before or after the subcommand word), so the
+			// subcommand owns the WHOLE argv: scanning the global flags at the
+			// parent AND handing down only the tail would hide a global flag
+			// from the subcommand (`yq --from-file x.yml data.yml` read `data.yml`
+			// as the expression and dropped its file read; found by Phase 2f,
+			// tc-o14i5.3.6). The parent contributes nothing of its own.
+			start = 0
+			st = &interpState{schema: schema, leaf: leaf, ctx: ctx, flagsSeen: map[string]bool{}, scanned: true}
+		}
 	}
 	if !ok {
 		st.fail("unmodeled subcommand %s", name)

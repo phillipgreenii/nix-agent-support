@@ -2,6 +2,7 @@ package cmddesc
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmdparse"
@@ -75,6 +76,23 @@ func (curlInterpreter) Interpret(leaf cmdparse.ParsedCommand, schema CommandSche
 	}
 
 	for _, u := range urls {
+		if path, isFile, ok := curlFileURLPath(u.tok); isFile {
+			// Data-read channel (Phase 2f, tc-o14i5.3.6): a file:// URL is a
+			// local path read, not network traffic. Data/upload/non-read
+			// methods against file:// would WRITE the file, which this model
+			// does not describe: abstain.
+			switch {
+			case st.leaf.ArgIsLiveExpansion(u.idx):
+				st.fail("file:// URL at arg %d is a runtime expansion", u.idx)
+			case !ok:
+				st.fail("cannot resolve the path of file URL %q at arg %d", u.tok, u.idx)
+			case direction == NetOutbound:
+				st.fail("file:// URL at arg %d with an outbound/write request", u.idx)
+			default:
+				st.effects = append(st.effects, Effect{Kind: EffectPath, Path: path, Access: AccessRead, Source: fmt.Sprintf("arg %d", u.idx), FromPositional: u.positional, Detail: "curl file:// URL"})
+			}
+			continue
+		}
 		e := Effect{Kind: EffectNet, Direction: direction, Method: method, Source: fmt.Sprintf("arg %d", u.idx)}
 		if st.leaf.ArgIsLiveExpansion(u.idx) {
 			e.Host, e.Dynamic = u.tok, true
@@ -128,4 +146,34 @@ func urlHost(raw string) (string, bool) {
 	}
 	rest = strings.ToLower(rest)
 	return rest, rest != ""
+}
+
+// curlFileURLPath recognises a file:// URL (scheme case-insensitive) and
+// returns the local path it names. isFile reports the scheme match; ok is
+// false when the path cannot be determined (a non-local host, bad percent
+// escape). Facts (P14), verified against curl 8.22.0: `curl file://localhost/p`
+// and `curl file:///p%2Etxt` both read the file (an empty or "localhost"
+// authority is local; percent escapes in the path are decoded), while
+// `curl file://other/p` fails with exit 3 (URL rejected).
+func curlFileURLPath(raw string) (path string, isFile, ok bool) {
+	if len(raw) < 7 || !strings.EqualFold(raw[:7], "file://") {
+		return "", false, false
+	}
+	rest := raw[7:]
+	i := strings.IndexByte(rest, '/')
+	if i < 0 {
+		return "", true, false
+	}
+	if host := rest[:i]; host != "" && !strings.EqualFold(host, "localhost") {
+		return "", true, false
+	}
+	rest = rest[i:]
+	if j := strings.IndexAny(rest, "?#"); j >= 0 {
+		rest = rest[:j]
+	}
+	dec, err := url.PathUnescape(rest)
+	if err != nil {
+		return "", true, false
+	}
+	return dec, true, true
 }

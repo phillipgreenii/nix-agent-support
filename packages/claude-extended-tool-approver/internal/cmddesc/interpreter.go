@@ -69,6 +69,7 @@ var interpreters = map[string]Interpreter{
 	"":      GenericInterpreter{},
 	"xargs": xargsInterpreter{},
 	"curl":  curlInterpreter{},
+	"yq":    yqInterpreter{},
 	"find":  findInterpreter{},
 	// slice 3y (tc-lc8f item 4f; tc-vn5z item 3): kubectl's own bespoke
 	// dispatch (context capture), the `-f -` stdin special case, and cp's

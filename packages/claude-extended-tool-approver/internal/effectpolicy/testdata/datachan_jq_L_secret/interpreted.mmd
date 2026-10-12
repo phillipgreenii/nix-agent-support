@@ -1,0 +1,6 @@
+flowchart LR
+    n0["command: jq -L ~/.ssh . x.json<br/>- path:read ~/.ssh [arg 1]<br/>- path:read x.json [arg 3]<br/>- stdio:stdout content<br/>mark=forbidden: path:read ~/.ssh [arg 1]: path-access (well-known credential store)"]
+    n1[/"file: ~/.ssh"/]
+    n2[/"file: x.json"/]
+    n0 -->|"reads: read"| n1
+    n0 -->|"reads: read"| n2

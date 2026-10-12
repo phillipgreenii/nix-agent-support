@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: date -f ~/.ssh/id_rsa<br/>- path:read ~/.ssh/id_rsa [arg 1]<br/>- stdio:stdout metadata<br/>mark=forbidden: path:read ~/.ssh/id_rsa [arg 1]: path-access (well-known credential store)"]
+    n1[/"file: ~/.ssh/id_rsa"/]
+    n0 -->|"reads: read"| n1

@@ -775,6 +775,9 @@
         "name": "e",
         "provenance": "yq (mikefarah) v4.53.2, yq eval --help",
         "citations": {
+          "interpreter": {
+            "source": "yq eval --help: \"--security-disable-file-ops   Disable file related operations (e.g. load)\" -- documents that an eval expression can read files via load(); interpreter \"yq\" turns each literal load-family call path into a path-read effect (operators load/strload/load_str/load_xml/load_props/load_base64 verified by running yq v4.53.2)"
+          },
           "provenance": {
             "source": "yq e --help: \"yq is a portable command-line data file processor (https://github.com/mikefarah/yq/)\""
           },
@@ -1544,12 +1547,16 @@
         "stdin": "when-no-path-operands",
         "stdout": "content",
         "unknownFlag": "insufficient",
-        "endOfOptions": true
+        "endOfOptions": true,
+        "interpreter": "yq"
       },
       "ea": {
         "name": "ea",
         "provenance": "yq (mikefarah) v4.53.2, yq eval --help",
         "citations": {
+          "interpreter": {
+            "source": "yq eval --help: \"--security-disable-file-ops   Disable file related operations (e.g. load)\" -- documents that an eval expression can read files via load(); interpreter \"yq\" turns each literal load-family call path into a path-read effect (operators load/strload/load_str/load_xml/load_props/load_base64 verified by running yq v4.53.2)"
+          },
           "provenance": {
             "source": "yq ea --help: \"yq is a portable command-line data file processor (https://github.com/mikefarah/yq/)\""
           },
@@ -2319,12 +2326,16 @@
         "stdin": "when-no-path-operands",
         "stdout": "content",
         "unknownFlag": "insufficient",
-        "endOfOptions": true
+        "endOfOptions": true,
+        "interpreter": "yq"
       },
       "eval": {
         "name": "eval",
         "provenance": "yq (mikefarah) v4.53.2, yq eval --help",
         "citations": {
+          "interpreter": {
+            "source": "yq eval --help: \"--security-disable-file-ops   Disable file related operations (e.g. load)\" -- documents that an eval expression can read files via load(); interpreter \"yq\" turns each literal load-family call path into a path-read effect (operators load/strload/load_str/load_xml/load_props/load_base64 verified by running yq v4.53.2)"
+          },
           "provenance": {
             "source": "yq eval --help: \"yq is a portable command-line data file processor (https://github.com/mikefarah/yq/)\""
           },
@@ -3094,12 +3105,16 @@
         "stdin": "when-no-path-operands",
         "stdout": "content",
         "unknownFlag": "insufficient",
-        "endOfOptions": true
+        "endOfOptions": true,
+        "interpreter": "yq"
       },
       "eval-all": {
         "name": "eval-all",
         "provenance": "yq (mikefarah) v4.53.2, yq eval --help",
         "citations": {
+          "interpreter": {
+            "source": "yq eval --help: \"--security-disable-file-ops   Disable file related operations (e.g. load)\" -- documents that an eval expression can read files via load(); interpreter \"yq\" turns each literal load-family call path into a path-read effect (operators load/strload/load_str/load_xml/load_props/load_base64 verified by running yq v4.53.2)"
+          },
           "provenance": {
             "source": "yq eval-all --help: \"yq is a portable command-line data file processor (https://github.com/mikefarah/yq/)\""
           },
@@ -3869,7 +3884,8 @@
         "stdin": "when-no-path-operands",
         "stdout": "content",
         "unknownFlag": "insufficient",
-        "endOfOptions": true
+        "endOfOptions": true,
+        "interpreter": "yq"
       }
     },
     "defaultSubcommand": "eval"

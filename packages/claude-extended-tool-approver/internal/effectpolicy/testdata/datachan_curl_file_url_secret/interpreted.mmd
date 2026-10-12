@@ -1,0 +1,4 @@
+flowchart LR
+    n0["command: curl file:///home/u/.ssh/id_rsa<br/>- stdio:stdout content<br/>- path:read /home/u/.ssh/id_rsa [arg 0] (curl file:// URL)<br/>mark=forbidden: path:read /home/u/.ssh/id_rsa [arg 0] (curl file:// URL): path-access (well-known credential store)"]
+    n1[/"file: /home/u/.ssh/id_rsa"/]
+    n0 -->|"reads: read"| n1
