@@ -210,18 +210,32 @@ const (
 	MetricDeduped = "pg_router_deduped"
 )
 
-// The per-source liveness gauges (bead pg2-tv11a, DEC-OBS-4). They are NOT part
-// of the ten-member INV-OBS-1 catalog's count; they are the two gauges
-// INTF-MON lists after it, registered only when New is given WithPullSources.
-// Both are Float64 gauges in unit "s", so the Prometheus exposition appends
-// "_seconds": pg_router_source_last_success_timestamp_seconds{source} and
+// The per-source liveness gauges (bead pg2-tv11a, DEC-OBS-4; the age gauge is
+// bead pg2-ez292). They are NOT part of the ten-member INV-OBS-1 catalog's
+// count; they are the three gauges INTF-MON lists after it, registered only
+// when New is given WithPullSources. All are Float64 gauges in unit "s", so the
+// Prometheus exposition appends "_seconds":
+// pg_router_source_last_success_timestamp_seconds{source},
+// pg_router_source_last_success_age_seconds{source} and
 // pg_router_source_expected_interval_seconds{source}.
 const (
 	// MetricSourceLastSuccess is the Unix time (seconds) of the source's last
 	// successful pass — or of the last deliberate pause (gate / halted
 	// emitters), which is not a failure — initialised to process start. A
-	// failed pass never advances it.
+	// failed pass never advances it. It is a WALL-clock reading, kept for
+	// dashboards and for a human reading "when"; the persistent-failure alert
+	// does NOT subtract it from time() any more, because a host sleep makes that
+	// difference grow while nothing is failing (see MetricSourceLastSuccessAge).
 	MetricSourceLastSuccess = "pg_router_source_last_success_timestamp"
+	// MetricSourceLastSuccessAge is the time, in seconds, since the same moment
+	// MetricSourceLastSuccess marks, measured when the gauge is collected on the
+	// router's MONOTONIC clock (see WithAwakeSince). That is the clock the
+	// router's own cadence runs on (discover.cadenceDue), and it does not advance
+	// while the host sleeps, so the persistent-failure alert reads "N periods of
+	// awake time without a success", never wall-clock time a sleeping laptop
+	// spent not running anything. A restart resets it to 0 (bead pg2-ez292,
+	// DEC-OBS-4's host-sleep amendment).
+	MetricSourceLastSuccessAge = "pg_router_source_last_success_age"
 	// MetricSourceExpectedInterval is the source's configured period in
 	// seconds, the unit the persistent-failure alert scales its threshold by.
 	MetricSourceExpectedInterval = "pg_router_source_expected_interval"
@@ -414,9 +428,17 @@ type Emitter struct {
 
 	// srcMu guards srcLastSuccess. The key set is fixed at construction
 	// (WithPullSources); OnSourceSucceeded / OnSourcePaused for any other
-	// name are ignored, which bounds the gauge's cardinality.
+	// name are ignored, which bounds the gauge's cardinality. The values come
+	// from now(), which in production is time.Now, so each carries Go's
+	// monotonic reading: that reading is what the age gauge subtracts (via
+	// awakeSince), and stripping it (Round(0), a JSON round trip) would turn the
+	// age back into wall-clock time, which a host sleep inflates.
 	srcMu          sync.Mutex
 	srcLastSuccess map[string]time.Time
+	// awakeSince measures how much awake (monotonic) time has passed since a
+	// stored last-success time; see WithAwakeSince. Set once in New, before any
+	// gauge callback can run.
+	awakeSince func(time.Time) time.Duration
 	// srcInflight is the per-source count of running query attempts (also
 	// guarded by srcMu). Keys are config-bounded source names; every
 	// WithPullSources source is seeded at 0 so its series exists from start.
@@ -470,6 +492,7 @@ type options struct {
 	poolDir       string
 	poolTTL       time.Duration
 	pullSources   map[string]time.Duration
+	awakeSince    func(time.Time) time.Duration
 	queueAges     func() map[string]time.Duration
 	listenerBusy  func() map[string]int
 }
@@ -498,15 +521,35 @@ func WithListenerInFlight(fn func() map[string]int) Option {
 }
 
 // WithPullSources registers the per-source liveness gauges
-// (MetricSourceLastSuccess and MetricSourceExpectedInterval) for exactly the
-// named sources, each mapped to its expected interval. The caller passes only
-// enabled, non-excluded PULL sources that have a period (bead pg2-tv11a);
-// an entry with a non-positive interval is skipped. Every registered source's
-// last-success time starts at the Emitter's clock at construction (process
-// start), NOT zero, so a restart resets the clock. Without this option the
+// (MetricSourceLastSuccess, MetricSourceLastSuccessAge and
+// MetricSourceExpectedInterval) for exactly the named sources, each mapped to
+// its expected interval. The caller passes only enabled, non-excluded PULL
+// sources that have a period (bead pg2-tv11a); an entry with a non-positive
+// interval is skipped. Every registered source's last-success time starts at
+// the Emitter's clock at construction (process start), NOT zero, so a restart
+// resets the clock (and the age gauge starts at 0). Without this option the
 // gauges are not registered.
 func WithPullSources(sources map[string]time.Duration) Option {
 	return func(o *options) { o.pullSources = sources }
+}
+
+// WithAwakeSince injects how MetricSourceLastSuccessAge measures the time since
+// a source's last success: how much time has elapsed since t on a clock that does
+// NOT advance while the host sleeps (bead pg2-ez292).
+//
+// The default is now().Sub(t) with the Emitter's own clock. In production now is
+// time.Now and every stored success time came from it, so both operands carry
+// Go's monotonic reading and Sub uses it: the same sleep-excluding clock the
+// router's cadence (discover.cadenceDue) runs on, which is why a source that
+// "should have ticked by now" and a source the alert calls persistently failing
+// agree about how much time has passed.
+//
+// Only a test needs to override it: a time.Time cannot be built with a wall
+// reading that jumped ahead of its monotonic reading, so a test models a host
+// sleep by supplying a function that excludes the sleep from the elapsed time
+// while its injected wall clock (WithClock) moves on.
+func WithAwakeSince(since func(t time.Time) time.Duration) Option {
+	return func(o *options) { o.awakeSince = since }
 }
 
 // WithQueueLogSize registers MetricQueueLogBytes, an ObservableGauge reading fn
@@ -722,6 +765,11 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 		}
 	}
 	e := &Emitter{gateSeen: map[string]struct{}{}, srcInflight: map[string]int{}, typeSeen: map[string]struct{}{}}
+	e.awakeSince = cfg.awakeSince
+	if e.awakeSince == nil {
+		now := cfg.now
+		e.awakeSince = func(t time.Time) time.Duration { return now().Sub(t) }
+	}
 	if err := e.registerSourceTiming(m, cfg.pullSources); err != nil {
 		return nil, err
 	}
@@ -1347,7 +1395,8 @@ func ClassifySourceFailure(err error) string {
 }
 
 // registerSourceGauges seeds srcLastSuccess with start for every source whose
-// interval is positive and registers the two observable gauges reading it.
+// interval is positive and registers the three observable gauges reading it
+// (last-success timestamp, last-success age, expected interval).
 func (e *Emitter) registerSourceGauges(m metric.Meter, sources map[string]time.Duration, start time.Time) error {
 	intervals := make(map[string]time.Duration, len(sources))
 	e.srcLastSuccess = make(map[string]time.Time, len(sources))
@@ -1361,12 +1410,31 @@ func (e *Emitter) registerSourceGauges(m metric.Meter, sources map[string]time.D
 	if _, err := m.Float64ObservableGauge(
 		MetricSourceLastSuccess,
 		metric.WithUnit("s"),
-		metric.WithDescription("Unix time of each pull source's last successful pass (a gate- or halt-paused pass also advances it; a failed pass does not); starts at process start (DEC-OBS-4)"),
+		metric.WithDescription("Unix time of each pull source's last successful pass (a gate- or halt-paused pass also advances it; a failed pass does not); starts at process start; a wall-clock reading kept for dashboards, the persistent-failure alert reads the last_success_age gauge (DEC-OBS-4)"),
 		metric.WithFloat64Callback(func(_ context.Context, o metric.Float64Observer) error {
 			e.srcMu.Lock()
 			defer e.srcMu.Unlock()
 			for name, at := range e.srcLastSuccess {
 				o.Observe(float64(at.UnixNano())/1e9, metric.WithAttributes(attribute.String("source", name)))
+			}
+			return nil
+		}),
+	); err != nil {
+		return err
+	}
+	// The age is computed here, at collect time, not stored: it must keep
+	// growing while a source goes unserved, and it must be measured on the
+	// monotonic clock (WithAwakeSince) so a host sleep does not count. A reading
+	// below zero (a clock stepped backwards in a test) is reported as 0.
+	if _, err := m.Float64ObservableGauge(
+		MetricSourceLastSuccessAge,
+		metric.WithUnit("s"),
+		metric.WithDescription("seconds since each pull source's last successful pass (a gate- or halt-paused pass also resets it; a failed pass does not), measured at collection on the router's monotonic clock, which does not advance while the host sleeps; 0 at process start (DEC-OBS-4)"),
+		metric.WithFloat64Callback(func(_ context.Context, o metric.Float64Observer) error {
+			e.srcMu.Lock()
+			defer e.srcMu.Unlock()
+			for name, at := range e.srcLastSuccess {
+				o.Observe(max(e.awakeSince(at), 0).Seconds(), metric.WithAttributes(attribute.String("source", name)))
 			}
 			return nil
 		}),
@@ -1388,8 +1456,8 @@ func (e *Emitter) registerSourceGauges(m metric.Meter, sources map[string]time.D
 }
 
 // OnSourceSucceeded implements discover.SourceFailureObserver: it advances the
-// source's last-success gauge to now. A source not registered via
-// WithPullSources is ignored.
+// source's last-success gauge to now, which also resets its age gauge to 0. A
+// source not registered via WithPullSources is ignored.
 func (e *Emitter) OnSourceSucceeded(source string) { e.advanceSource(source) }
 
 // OnSourcePaused implements discover.SourceFailureObserver: a pass skipped
@@ -1405,6 +1473,8 @@ func (e *Emitter) advanceSource(source string) {
 	if _, ok := e.srcLastSuccess[source]; !ok {
 		return
 	}
+	// e.now() keeps the monotonic reading the age gauge subtracts (see
+	// srcLastSuccess): do not strip it here.
 	e.srcLastSuccess[source] = e.now()
 }
 

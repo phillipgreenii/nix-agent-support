@@ -143,7 +143,9 @@ pre-initialized because the core does not know the role set. Singles stay visibl
 pull source, `source_last_success_timestamp` and `source_expected_interval` (`interfaces.md`,
 `INTF-MON`'s catalog), and the `pg-router-source-persistent-failure` alert
 (`grafana/alerting/alerts.yaml`) fires when `time() - last_success` exceeds
-`clamp_min(3 x expected_interval, 1800s)` for 5 minutes.
+`clamp_min(3 x expected_interval, 1800s)` for 5 minutes. **Amended 2026-10-12** (see "Host sleep"
+below): the core exports a third gauge, `source_last_success_age`, measured on its own monotonic clock,
+and the alert compares that with the threshold instead of `time() - last_success`.
 
 **Why.** `source_failures` is a counter, so the only rule it supports
 (`pg-router-source-failure-rate`: any failure for 10m) cannot tell a source that is down from one that
@@ -184,10 +186,55 @@ restart is itself a strong recovery attempt.
 **No-data.** The series exist from daemon start, so the rule keeps `noDataState: OK`: absence means
 the daemon (or its metrics endpoint) is down, which `pg-router-liveness-down` covers.
 
+**Host sleep (amendment, 2026-10-12; bead `pg2-ez292`; implements that bead's recommended option (d),
+no separate operator ruling is recorded for it).** The silence the alert measures is **awake time**, not
+wall-clock time. The paragraphs above cover a pause (a gated pass advances last-success), a restart
+(the clock resets) and no data (the daemon is down); none covered a host that sleeps. The original
+rule computed the silence in Prometheus as `time() - last_success`, a wall-clock difference, while the
+router counts awake time: it paces a pull source on Go's monotonic clock (`cadenceDue`), and on macOS
+that clock does not advance while the host sleeps, so after a wake a slow source is next due only once
+the rest of its period has passed in awake time (up to 30 minutes for a 30-minute source, up to an hour
+for a 60-minute one). Prometheus and Grafana run on the same laptop and resume at the same wake, so
+their first evaluations after a sleep longer than a source's threshold saw a last-success older than
+`max(3 x period, 30m)` for every slow source, and the rule fired five minutes later for each source
+that had not yet ticked. On 2026-10-12 that was six sources within 16 seconds and six escalated beads,
+each costing a triager session, every one of which cleared on its own.
+
+The core now exports a third gauge per pull source, `source_last_success_age` (`interfaces.md`,
+`INTF-MON`'s catalog): the seconds since that source's last success or deliberate pause, computed by the
+core when the gauge is read, as the elapsed time since a stored last-success time that keeps Go's
+monotonic reading. The alert compares it with the same `clamp_min(3 x expected_interval, 1800s)` for the
+same 5 minutes, so "persistently failing" now means three periods (and at least 30 minutes) of **awake**
+time without a success. `source_last_success_timestamp` is kept unchanged, as the wall-clock record of
+when a success happened and for dashboards; the alert no longer reads it. Polling does not change.
+
+- A host sleep adds nothing to the age, so it neither fires the rule nor hides a real outage: a source
+  that is genuinely failing alerts after the same awake time as before, later on the wall clock by exactly
+  the length of the sleep (`TestHostSleepDelaysButDoesNotHideARealOutage`).
+- A dark wake (a few seconds of CPU about every 15 minutes with the lid closed) counts as awake time, as
+  it does for the router's own cadence.
+- A pause still resets the age and a failure still does not. A restart resets it to 0, so the restart
+  semantics above are unchanged except that threshold plus `for` is measured in awake time.
+- No-data is unchanged, with one transition effect: a router build that predates the gauge exports no age
+  series, so the rule reads as no data (OK) until the new build runs. It is not firing then, and it is
+  not protecting either.
+
+Alternatives considered (the bead's own list). (a) A wall-clock due check in the router would fix the
+cause, but a dark wake would then also start passes that the next sleep freezes or fails, adding to
+`source_failures` and to `pg-router-source-failure-rate`. (b) Marking sources due on a full-wake signal
+needs a push path from the power watcher. (c) Requiring a share of the expected scrapes in a trailing
+window masks a real outage that starts during or just after a sleep, for up to 90 minutes. (e) Accepting
+the false positives costs up to six triager sessions per long sleep. (d) leaves polling and the router's
+behaviour at a wake untouched.
+
 **Evidence.** The rule is modelled and replayed in `internal/alertrules/source_persistent_failure_test.go`
 against per-tick outcomes extracted from the daemon's stderr log (`testdata/source_ticks.txt`; the
-log records only failed ticks, so successes are inferred, and the header there states the rule). Registration of
-this rule with `pg-router-probe` is a separate, deployment-side change.
+log records only failed ticks, so successes are inferred, and the header there states the rule). The
+2026-10-12 sleep is replayed there too, from the daemon's queue log and the host's wake/sleep log
+(`pg-router-probe-tick`: 28,505 s of wall clock but 1,767 s of awake time between two ticks of a 1,800 s
+period): the retired wall-clock expression fires on it at 16:35:01Z (the observed alert started at
+16:36:00Z), the age does not. Registration of this rule with `pg-router-probe` is a separate,
+deployment-side change.
 
 ### `DEC-OBS-5` — `role` labels every delivery-side failure class, throughput and dispatch latency; latency buckets span seconds to hours <!-- uuid: c26b6639-0970-4ce9-b42c-a40579df041f -->
 

@@ -18,13 +18,38 @@ import (
 // outcomes extracted from the daemon's stderr log (testdata/source_ticks.txt,
 // whose header documents the extraction and its inference rule), because
 // Prometheus history is too short and the failure counter resets on restart.
+//
+// Bead pg2-ez292 changed what the rule measures. The expression used to be
+// `time() - ..._last_success_timestamp_seconds`: WALL-clock time, so a laptop
+// that slept for longer than a source's threshold made every slow source look
+// silent and the rule fired for all of them with nothing failing. It now reads
+// the router's own last-success age, which is measured on the router's monotonic
+// clock and does not advance while the host sleeps. The model therefore computes
+// the age as AWAKE time (srcRun.age); the retired wall-clock reading survives
+// only as srcRun.wallCondition, the negative control that shows each sleep
+// scenario below is one the retired expression really did fire on.
 
-const wantPersistentFailureExpr = `time() - pg_router_source_last_success_timestamp_seconds > on(source) clamp_min(3 * pg_router_source_expected_interval_seconds, 1800)`
+const wantPersistentFailureExpr = `pg_router_source_last_success_age_seconds > on(source) clamp_min(3 * pg_router_source_expected_interval_seconds, 1800)`
+
+// retiredPersistentFailureExpr is the wall-clock expression this rule used before
+// bead pg2-ez292. It is kept only so a failure message can name what must not come back.
+const retiredPersistentFailureExpr = `time() - pg_router_source_last_success_timestamp_seconds > on(source) clamp_min(3 * pg_router_source_expected_interval_seconds, 1800)`
 
 func TestPersistentFailureRule(t *testing.T) {
 	r := ruleBlock(t, "pg-router-source-persistent-failure")
-	if got := ruleExpr(t, r); got != wantPersistentFailureExpr {
+	got := ruleExpr(t, r)
+	if got != wantPersistentFailureExpr {
 		t.Errorf("persistent-failure expr:\n got %q\nwant %q", got, wantPersistentFailureExpr)
+	}
+	// The regression guard for pg2-ez292, stated as the property rather than the
+	// text: the staleness must come from the router-measured age, never from
+	// subtracting a timestamp from the evaluator's wall clock, which a host sleep
+	// inflates.
+	if strings.Contains(got, "time()") || strings.Contains(got, "last_success_timestamp") {
+		t.Errorf("persistent-failure expr %q measures wall-clock time; a host sleep would fire it for every slow source (retired form: %q)", got, retiredPersistentFailureExpr)
+	}
+	if !strings.Contains(got, "pg_router_source_last_success_age_seconds") {
+		t.Errorf("persistent-failure expr %q does not read the router-measured last-success age", got)
 	}
 	for _, need := range []string{
 		"for: 5m",
@@ -55,6 +80,10 @@ func TestPersistentFailureAnnotations(t *testing.T) {
 		"{{ $labels.source }}",
 		"{{ humanizeDuration $values.B.Value }}",
 		"max(3 x its expected interval, 30m)",
+		// the age is awake time, so the text must say so: a reader seeing "has not
+		// succeeded for 1h 35m" must not think a laptop's sleep is in that figure
+		"of awake time",
+		"host sleep is not counted",
 		// raw YAML: the single-quoted description doubles its own quotes
 		`pg-router status --json | jq ''.sources[]|select(.name=="{{ $labels.source }}")|.failure''`,
 		`sum by (reason)(increase(pg_router_source_failures_total{source="{{ $labels.source }}"}[1h]))`,
@@ -67,6 +96,41 @@ func TestPersistentFailureAnnotations(t *testing.T) {
 	rest := strings.NewReplacer("{{ $labels.source }}", "", "{{ humanizeDuration $values.B.Value }}", "").Replace(ann)
 	if strings.Contains(rest, "{{") {
 		t.Errorf("annotations interpolate something other than the source label and the age: %q", rest)
+	}
+}
+
+// The comment block above the rule states what its staleness measures (bead
+// pg2-ez292): awake time on the router's own clock, with a host sleep excluded,
+// and that the retired wall-clock form must not come back.
+func TestPersistentFailureHeaderStatesAwakeTime(t *testing.T) {
+	b, err := os.ReadFile("../../grafana/alerting/alerts.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(string(b), "\n")
+	var header []string
+	for i, l := range lines {
+		if strings.TrimSpace(l) != "- uid: pg-router-source-persistent-failure" {
+			continue
+		}
+		for j := i - 1; j >= 0 && strings.HasPrefix(strings.TrimSpace(lines[j]), "#"); j-- {
+			header = append([]string{lines[j]}, header...)
+		}
+		break
+	}
+	if len(header) == 0 {
+		t.Fatal("no comment block above pg-router-source-persistent-failure")
+	}
+	text := strings.Join(header, "\n")
+	for _, need := range []string{
+		"awake time",
+		"monotonic clock",
+		"host sleep",
+		"pg_router_source_last_success_age_seconds",
+	} {
+		if !strings.Contains(text, need) {
+			t.Errorf("rule header comment lost %q:\n%s", need, text)
+		}
 	}
 }
 
@@ -111,13 +175,21 @@ type srcTick struct {
 	kind byte
 }
 
+// sleepSpan is a window [from, to) in which the host was asleep: the wall clock
+// ran on, but the router's monotonic clock, Prometheus and Grafana did not.
+type sleepSpan struct{ from, to time.Time }
+
 // srcRun is one process run of one pull source: the gauge starts at start
-// (process start) and ticks are sorted by time.
+// (process start) and ticks are sorted by time. asleep lists the windows the host
+// slept through (testdata `Z` lines); a run without any is awake throughout, so its
+// awake time IS its wall-clock time, which is how every run recorded before bead
+// pg2-ez292 reads.
 type srcRun struct {
 	scenario, source string
 	period           time.Duration
 	start, end       time.Time
 	ticks            []srcTick
+	asleep           []sleepSpan
 }
 
 // lastSuccess is the gauge value at t: the latest success-or-pause tick at or
@@ -135,33 +207,119 @@ func (r srcRun) lastSuccess(t time.Time) time.Time {
 	return ls
 }
 
-// condition models the expression at instant t: age strictly above the threshold.
+// asleepAt reports whether the host is asleep at t.
+func (r srcRun) asleepAt(t time.Time) bool {
+	for _, w := range r.asleep {
+		if !t.Before(w.from) && t.Before(w.to) {
+			return true
+		}
+	}
+	return false
+}
+
+// awakeBetween is the time from a to b that the host was awake: the span minus
+// the sleep inside it. This is what the router's monotonic clock measures.
+func (r srcRun) awakeBetween(a, b time.Time) time.Duration {
+	if !b.After(a) {
+		return 0
+	}
+	d := b.Sub(a)
+	for _, w := range r.asleep {
+		lo, hi := w.from, w.to
+		if lo.Before(a) {
+			lo = a
+		}
+		if hi.After(b) {
+			hi = b
+		}
+		if hi.After(lo) {
+			d -= hi.Sub(lo)
+		}
+	}
+	return d
+}
+
+// age models pg_router_source_last_success_age_seconds at t: the awake time since
+// the gauge's last success-or-pause (or process start). A host sleep adds nothing.
+func (r srcRun) age(t time.Time) time.Duration {
+	return r.awakeBetween(r.lastSuccess(t), t)
+}
+
+// condition models the expression at instant t: the router-measured age strictly
+// above the threshold.
 func (r srcRun) condition(t time.Time) bool {
+	return r.age(t) > persistThreshold(r.period)
+}
+
+// wallCondition models the RETIRED expression, time() - last_success_timestamp: the
+// wall-clock age, which a host sleep inflates. It exists only as the negative control
+// proving a sleep scenario is one the retired rule fired on.
+func (r srcRun) wallCondition(t time.Time) bool {
 	return t.Sub(r.lastSuccess(t)) > persistThreshold(r.period)
 }
 
-// alerting models `for: 5m` the way the queue-depth model does: the condition
-// must hold at every evaluation in the trailing persistFor. Evaluations before
-// the run's start do not exist (a restart resets the series), so an alert needs
-// the whole window inside one run.
-func (r srcRun) alerting(t time.Time) bool {
-	for e := t.Add(-persistFor); !e.After(t); e = e.Add(persistEvalEvery) {
-		if e.Before(r.start) || !r.condition(e) {
+// deployedCondition returns the model of the expression alerts.yaml ACTUALLY carries
+// for this rule, so a replay exercises the rule as deployed instead of an
+// idealisation of it. An expression with no model is a failure: it needs one before
+// anything can be said about how it behaves across a sleep.
+func deployedCondition(t *testing.T, r srcRun) func(time.Time) bool {
+	t.Helper()
+	switch got := ruleExpr(t, ruleBlock(t, "pg-router-source-persistent-failure")); got {
+	case wantPersistentFailureExpr:
+		return r.condition
+	case retiredPersistentFailureExpr:
+		return r.wallCondition
+	default:
+		t.Fatalf("persistent-failure expr %q has no model in this test", got)
+		return nil
+	}
+}
+
+// alertingWith models `for: 5m` the way the queue-depth model does: the condition
+// must hold at every evaluation in the trailing persistFor. Evaluations happen once a
+// minute from the run's start, and only while the host is awake (Prometheus and
+// Grafana sleep with the router); an evaluation before the run's start does not exist
+// (a restart resets the series), so an alert needs the whole window inside one run.
+// The state at a sleeping instant is the state at the last evaluation before it, and a
+// sleep inside the window is not an evaluation: the pending clock runs on across it, as
+// Grafana's does. A run with no sleep evaluates every minute, which is the original
+// model unchanged.
+func (r srcRun) alertingWith(cond func(time.Time) bool, t time.Time) bool {
+	last := t
+	for !last.Before(r.start) && r.asleepAt(last) {
+		last = last.Add(-persistEvalEvery)
+	}
+	for e := last; !e.Before(r.start); e = e.Add(-persistEvalEvery) {
+		if r.asleepAt(e) {
+			continue
+		}
+		if !cond(e) {
 			return false
 		}
+		if !e.After(last.Add(-persistFor)) {
+			return true
+		}
 	}
-	return true
+	return false
+}
+
+func (r srcRun) alerting(t time.Time) bool { return r.alertingWith(r.condition, t) }
+
+// firstAlertingWith returns the first evaluation minute in [from, to) at which the rule
+// is Alerting under cond.
+func (r srcRun) firstAlertingWith(cond func(time.Time) bool, from, to time.Time) (time.Time, bool) {
+	for t := from; t.Before(to); t = t.Add(persistEvalEvery) {
+		if !r.asleepAt(t) && r.alertingWith(cond, t) {
+			return t, true
+		}
+	}
+	return time.Time{}, false
 }
 
 // firstAlerting returns the first minute in [from, to) at which the rule is
 // Alerting.
 func (r srcRun) firstAlerting(from, to time.Time) (time.Time, bool) {
-	for t := from; t.Before(to); t = t.Add(persistEvalEvery) {
-		if r.alerting(t) {
-			return t, true
-		}
-	}
-	return time.Time{}, false
+	return r.firstAlertingWith(r.condition, from, to)
 }
 
 func (r srcRun) everAlerting() bool {
@@ -241,6 +399,19 @@ func loadSourceTicks(t *testing.T) []srcRun {
 				}
 				cur.ticks = append(cur.ticks, srcTick{cur.start.Add(time.Duration(v) * time.Second), tickFailure})
 			}
+		case "Z":
+			if cur == nil || len(f) != 3 {
+				t.Fatalf("source_ticks.txt:%d: bad Z line %q", n+1, line)
+			}
+			from, e1 := strconv.Atoi(f[1])
+			to, e2 := strconv.Atoi(f[2])
+			if e1 != nil || e2 != nil || to <= from {
+				t.Fatalf("source_ticks.txt:%d: bad Z offsets %q", n+1, line)
+			}
+			cur.asleep = append(cur.asleep, sleepSpan{
+				from: cur.start.Add(time.Duration(from) * time.Second),
+				to:   cur.start.Add(time.Duration(to) * time.Second),
+			})
 		default:
 			t.Fatalf("source_ticks.txt:%d: unknown directive %q", n+1, line)
 		}
@@ -424,6 +595,202 @@ func TestReplay_2026_09_28_QueueSourceOutageFires(t *testing.T) {
 		}
 		if r.alerting(outageEnd.Add(10 * time.Minute)) {
 			t.Errorf("%s still Alerting 10m after the outage ended", src)
+		}
+	}
+}
+
+// --- host sleep (bead pg2-ez292) --------------------------------------------
+
+// 2026-10-12: the laptop slept through the morning and most of the afternoon, then woke;
+// the rule fired for six slow pull sources within 16 s of each other although every one
+// of them recovered on its own, and each firing filed an escalated bead. Two of the six
+// have their tick times and the host's awake accounting recorded in testdata/
+// source_ticks.txt (the other four are not: only their bead times are known).
+//
+// The router paces a source on its monotonic clock, which stops while the host sleeps,
+// so after the wake a slow source is next due only when the REST of its period has passed
+// in awake time. In the recorded data the awake time between the two ticks is within 2%
+// of the period for both sources (1,767 s of a 1,800 s period; 3,540 s of 3,600 s), while
+// the wall-clock gap is 28,505 s and 24,014 s against thresholds of 5,400 s and 10,800 s.
+// The retired wall-clock expression therefore read both sources as silent for hours; the
+// age the router now exports is the awake time and stays far below the threshold.
+func TestReplay_2026_10_12_HostSleepDoesNotFire(t *testing.T) {
+	runs := loadSourceTicks(t)
+	for _, c := range []struct {
+		source       string
+		period       time.Duration
+		first, again string
+		wallGap      time.Duration
+		awakeGap     time.Duration
+	}{
+		// 138 s of dark wakes + 829 s (16:32:15-16:46:04) + 800 s (16:47:46-17:01:06).
+		{"pg-router-probe-tick", 30 * time.Minute, "2026-10-12T09:06:01Z", "2026-10-12T17:01:06Z", 28505 * time.Second, 1767 * time.Second},
+		// 116 s of dark wakes + 829 s + 2,595 s (16:47:46-17:31:01).
+		{"work-report-pull", time.Hour, "2026-10-12T10:50:47Z", "2026-10-12T17:31:01Z", 24014 * time.Second, 3540 * time.Second},
+	} {
+		rs := runsFor(runs, "2026-10-12", c.source)
+		if len(rs) != 1 {
+			t.Fatalf("%s: %d segments, want 1", c.source, len(rs))
+		}
+		r := rs[0]
+		a, b := utc(t, c.first), utc(t, c.again)
+		threshold := persistThreshold(c.period)
+
+		// The fixture says what the bead recorded.
+		if got := b.Sub(a); got != c.wallGap {
+			t.Fatalf("%s: wall-clock gap between the ticks = %v, want %v", c.source, got, c.wallGap)
+		}
+		if got := r.awakeBetween(a, b); got != c.awakeGap {
+			t.Fatalf("%s: awake time between the ticks = %v, want %v", c.source, got, c.awakeGap)
+		}
+		if c.wallGap <= threshold {
+			t.Fatalf("%s: the gap %v does not exceed the threshold %v, so the scenario proves nothing", c.source, c.wallGap, threshold)
+		}
+		if c.awakeGap > c.period || c.awakeGap < c.period*95/100 {
+			t.Errorf("%s: awake gap %v is not within 5%% below the %v period: the router ticks once a period of awake time has passed", c.source, c.awakeGap, c.period)
+		}
+		if len(r.asleep) < 2 {
+			t.Fatalf("%s: %d sleep windows, want the long sleep and the 16:46-16:47 clamshell sleep", c.source, len(r.asleep))
+		}
+
+		// The router-measured age never gets near the threshold, so the rule never
+		// fires: before the second tick it peaks at the awake gap, and it stays under
+		// the threshold for the rest of the segment.
+		var peakBefore, peak time.Duration
+		for e := r.start; e.Before(r.end); e = e.Add(persistEvalEvery) {
+			peak = max(peak, r.age(e))
+			if e.Before(b) {
+				peakBefore = max(peakBefore, r.age(e))
+			}
+		}
+		if peakBefore > c.awakeGap || peak >= threshold {
+			t.Errorf("%s: peak age %v before the second tick (want at most the awake gap %v) and %v overall (want under the %v threshold)", c.source, peakBefore, c.awakeGap, peak, threshold)
+		}
+		if at, ok := r.firstAlertingWith(deployedCondition(t, r), r.start, r.end); ok {
+			t.Errorf("%s: the rule in alerts.yaml reached Alerting at %s although the source ticked on time in awake terms", c.source, at.Format(time.RFC3339))
+		}
+
+		// Control: the retired wall-clock expression fires on exactly this data, one
+		// `for` after the first evaluation following the wake (the observed alert
+		// started at 16:36:00Z).
+		wake := r.asleep[0].to
+		at, ok := r.firstAlertingWith(r.wallCondition, r.start, r.end)
+		if !ok {
+			t.Fatalf("%s: control: the retired wall-clock expression never fires, so the fixture does not reproduce the incident", c.source)
+		}
+		if at.Before(wake.Add(persistFor)) || at.After(wake.Add(persistFor+2*persistEvalEvery)) {
+			t.Errorf("%s: control: retired expression first fires at %s, want %v to %v after the wake at %s",
+				c.source, at.Format(time.RFC3339), persistFor, persistFor+2*persistEvalEvery, wake.Format(time.RFC3339))
+		}
+	}
+}
+
+// sleepRun is a healthy source that ticks every period of AWAKE time and whose host
+// sleeps for sleepLen starting sleepAt (an awake offset) into a 4h awake run. A tick that
+// falls due after the sleep begins appears after the wake, shifted by the sleep: the
+// router's cadence is monotonic.
+func sleepRun(period, sleepAt, sleepLen time.Duration, during byte) srcRun {
+	start := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
+	r := srcRun{scenario: "synthetic", source: "src", period: period, start: start, end: start.Add(4*time.Hour + sleepLen)}
+	r.asleep = []sleepSpan{{start.Add(sleepAt), start.Add(sleepAt + sleepLen)}}
+	for o := time.Duration(0); o < 4*time.Hour; o += period {
+		at := start.Add(o)
+		if o >= sleepAt {
+			at = at.Add(sleepLen)
+		}
+		r.ticks = append(r.ticks, srcTick{at, during})
+	}
+	return r
+}
+
+// The regression for bead pg2-ez292, stated generally: a host sleep that advances the
+// wall clock by at least one threshold, while the monotonic clock does not, MUST NOT fire
+// the rule for a healthy source of any period. The retired wall-clock expression does for
+// the slow ones (its `for: 5m` is satisfied whenever a source's next tick is at least 5
+// minutes of awake time after the wake), which is exactly the population that paged; the
+// controls below pin that.
+func TestHostSleepDoesNotFireForAnyPeriod(t *testing.T) {
+	for _, c := range []struct {
+		period       time.Duration
+		retiredFires bool
+	}{
+		{10 * time.Second, false},
+		{time.Minute, false},
+		{5 * time.Minute, false},
+		{30 * time.Minute, true},
+		{35 * time.Minute, true},
+	} {
+		sleepLen := persistThreshold(c.period) + 2*time.Hour // wall clock advances by more than one threshold
+		r := sleepRun(c.period, 2*c.period+time.Minute, sleepLen, tickSuccess)
+		if got := r.awakeBetween(r.start, r.end); got != 4*time.Hour {
+			t.Fatalf("period %v: awake time = %v, want exactly the 4h run", c.period, got)
+		}
+		if at, ok := r.firstAlertingWith(deployedCondition(t, r), r.start, r.end); ok {
+			t.Errorf("period %v: the rule in alerts.yaml reached Alerting at %s across a %v sleep although every tick was on time in awake terms", c.period, at.Format(time.RFC3339), sleepLen)
+		}
+		_, retired := r.firstAlertingWith(r.wallCondition, r.start, r.end)
+		if retired != c.retiredFires {
+			t.Errorf("period %v: control: retired wall-clock expression fires = %v, want %v", c.period, retired, c.retiredFires)
+		}
+	}
+}
+
+// The age is AWAKE time, not "never fires across a sleep": a source that really goes
+// silent still alerts, once it has been silent for the threshold plus `for` of awake
+// time, however long the host slept in between. Here the last success is the tick at the
+// run's start, the source fails from then on, and the host sleeps 8h after 10 awake
+// minutes. The first evaluation with an age over 90m is the one at 91m awake, so the rule
+// fires 5m later, at 96m awake: the sleep delays the alert by exactly its own length.
+// The retired expression fires 5m after the wake instead, with only 10 awake minutes of
+// silence behind it.
+func TestHostSleepDelaysButDoesNotHideARealOutage(t *testing.T) {
+	period := 30 * time.Minute
+	sleepLen := 8 * time.Hour
+	r := sleepRun(period, 10*time.Minute, sleepLen, tickFailure)
+	r.ticks[0].kind = tickSuccess // the last success: the run's first tick
+
+	deployed := deployedCondition(t, r)
+	at, ok := r.firstAlertingWith(deployed, r.start, r.end)
+	if !ok {
+		t.Fatal("a source silent for 4h of awake time never reached Alerting")
+	}
+	want := r.start.Add(96*time.Minute + sleepLen)
+	if !at.Equal(want) {
+		t.Errorf("fired at %s, want %s (96m of awake silence, delayed by the %v sleep)", at.Format(time.RFC3339), want.Format(time.RFC3339), sleepLen)
+	}
+	if r.alertingWith(deployed, r.start.Add(95*time.Minute+sleepLen)) {
+		t.Error("still Alerting a minute before the awake threshold plus for was reached")
+	}
+
+	wake := r.start.Add(10*time.Minute + sleepLen)
+	early, ok := r.firstAlertingWith(r.wallCondition, r.start, r.end)
+	if !ok || !early.Equal(wake.Add(persistFor)) {
+		t.Errorf("control: retired expression first fires at %s (ok=%v), want %s: 5m after the wake, on 10 awake minutes of silence", early.Format(time.RFC3339), ok, wake.Add(persistFor).Format(time.RFC3339))
+	}
+}
+
+// awakeBetween takes every sleep window out of the span it is asked about, however the
+// span and the windows overlap.
+func TestAwakeBetweenExcludesSleepWindows(t *testing.T) {
+	start := time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)
+	r := srcRun{start: start, asleep: []sleepSpan{
+		{start.Add(10 * time.Minute), start.Add(70 * time.Minute)},
+		{start.Add(100 * time.Minute), start.Add(110 * time.Minute)},
+	}}
+	for _, c := range []struct {
+		a, b time.Duration
+		want time.Duration
+	}{
+		{0, 5 * time.Minute, 5 * time.Minute},                                    // before any sleep
+		{0, 70 * time.Minute, 10 * time.Minute},                                  // ends exactly at the wake
+		{0, 120 * time.Minute, 10*time.Minute + 30*time.Minute + 10*time.Minute}, // across both windows
+		{20 * time.Minute, 60 * time.Minute, 0},                                  // entirely asleep
+		{5 * time.Minute, 15 * time.Minute, 5 * time.Minute},                     // starts awake, falls asleep
+		{65 * time.Minute, 80 * time.Minute, 10 * time.Minute},                   // starts asleep, wakes
+		{80 * time.Minute, 70 * time.Minute, 0},                                  // reversed
+	} {
+		if got := r.awakeBetween(start.Add(c.a), start.Add(c.b)); got != c.want {
+			t.Errorf("awakeBetween(+%v, +%v) = %v, want %v", c.a, c.b, got, c.want)
 		}
 	}
 }

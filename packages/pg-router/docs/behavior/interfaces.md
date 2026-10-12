@@ -516,12 +516,23 @@ sequenceDiagram
     source have no series. A **failed** pass never advances it, but a pass the core **deliberately
     skipped** — an active gate blocking the source, or the log-size limit halting the polled emitters
     (`INV-EVT-1`) — advances it exactly like a success, because a pause is not a failure. It starts at
-    **process start**, never at zero, so a restart resets it (`DEC-OBS-4`);
+    **process start**, never at zero, so a restart resets it (`DEC-OBS-4`). It is a **wall-clock**
+    reading, so it is the member for "when did this last succeed", never for "for how long has it
+    not": a host that sleeps leaves the wall clock far ahead of the core's own clock;
+  - **source_last_success_age** — gauge, per source (same set as above), in seconds: how long ago that
+    last successful pass (or deliberate pause) was, **measured by the core, when the gauge is read, on
+    its own monotonic clock** — the clock the core paces its pull sources on, which does **not**
+    advance while the host sleeps. It is therefore time the core was **awake** without a success, so
+    a watcher's "this source has gone quiet" threshold means periods of **awake** time, and a host
+    that slept through several periods does not make every source look silent when it wakes (the
+    watcher would otherwise compute the age from the timestamp above and its own wall clock,
+    `DEC-OBS-4`'s host-sleep amendment). It resets to **0** on a success or a deliberate pause, keeps
+    growing on a failure, and starts at **0** at process start, so a restart resets it;
   - **source_expected_interval** — gauge, per source (same set as above): the source's configured
     period, in seconds — the base a watcher scales its "this source has gone quiet" threshold by.
-    The two together let an observer tell a source that is **persistently** failing (no success for
-    far longer than its period) from one that merely hit transient failures with a success always
-    intervening, which `source_failures` alone cannot (`DEC-OBS-4`);
+    The age and this interval together let an observer tell a source that is **persistently**
+    failing (no success for far longer than its period) from one that merely hit transient failures
+    with a success always intervening, which `source_failures` alone cannot (`DEC-OBS-4`);
   - **source_duration** — histogram, in seconds, per source: how long one **pull-source query
     attempt** ran, recorded for every attempt that ran to its own end (success or failure, so a
     timeout kill lands at the timeout's bucket) and **not** for an attempt cut short by the daemon's
@@ -847,7 +858,7 @@ Inspection's **MUST** set has widened to also offer:
   `tui` subcommand) **MUST** say plainly what is **halted** (polled command-source emitters; and,
   at `log_full` / `log_unwritable`, every new event), what **still runs** (listener dispatch and the
   drain; the timer emitter and pushed events until the maximum), why, and the operator's remedies.
-  This reading adds a metric for the state but no member to `INTF-MON`'s catalog (then ten members; the per-source liveness gauges of `DEC-OBS-4` later made it twelve), and is
+  This reading adds a metric for the state but no member to `INTF-MON`'s catalog (then ten members; the per-source liveness gauges of `DEC-OBS-4` later made it twelve and its host-sleep amendment's last-success age gauge thirteen, before `DEC-OBS-8` and `DEC-OBS-9` added their own), and is
   itself an additive schema change discovered **after** the widening above, carrying the explicit
   operator note this section's own rule requires: **operator-approved** as part of
   `phillipgreenii-nix-agent-support` bead `pg2-5d3ui` (2026-10-02).

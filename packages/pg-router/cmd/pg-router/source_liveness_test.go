@@ -147,6 +147,15 @@ func TestBootCore_exportsSourceLivenessGaugesAndFeedsThem(t *testing.T) {
 	if iv["healthy"] != 60 || iv["broken"] != 1800 {
 		t.Fatalf("expected-interval = %v, want healthy 60s and broken 1800s", iv)
 	}
+	// The age gauge the persistent-failure alert reads (bead pg2-ez292) starts at
+	// process start too: a small reading of the real, monotonic clock, never a
+	// wall-clock difference against some other epoch.
+	ageInit := floatGaugeBySource(t, reader, metrics.MetricSourceLastSuccessAge)
+	for _, src := range []string{"healthy", "broken"} {
+		if a, ok := ageInit[src]; !ok || a < 0 || a > 60 {
+			t.Fatalf("last-success age[%s] = %v (present=%v) at boot, want a small non-negative reading", src, a, ok)
+		}
+	}
 
 	time.Sleep(20 * time.Millisecond)
 	if _, err := o.ProduceTick(ctx, q); err != nil {
@@ -158,5 +167,13 @@ func TestBootCore_exportsSourceLivenessGaugesAndFeedsThem(t *testing.T) {
 	}
 	if after["broken"] != init["broken"] {
 		t.Errorf("broken last-success moved %v -> %v on a failed pass; a failure must not advance it", init["broken"], after["broken"])
+	}
+	// The live hooks reset the age on a success and leave it growing on a failure.
+	age := floatGaugeBySource(t, reader, metrics.MetricSourceLastSuccessAge)
+	if age["broken"] < 0.02 {
+		t.Errorf("broken age = %v s, want it to have kept growing through the 20ms wait and a failed pass", age["broken"])
+	}
+	if age["healthy"] >= age["broken"] {
+		t.Errorf("healthy age = %v s is not below broken age = %v s: a successful pass must reset the age", age["healthy"], age["broken"])
 	}
 }

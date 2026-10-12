@@ -72,7 +72,7 @@ func TestStartMetricsServer_ServesCatalogMemberOverHTTP(t *testing.T) {
 // preserve or escape, regardless of which scheme the scraper offers. This
 // test proves that by sending exactly that Accept header at a real HTTP
 // scrape of the real catalog and asserting every one of the ten members
-// (Task 3.3) plus the two per-source liveness gauges is present, dot-free, and suffixed the way Prometheus's own
+// (Task 3.3) plus the three per-source liveness gauges is present, dot-free, and suffixed the way Prometheus's own
 // counter/histogram conventions expect (_total, _bucket/_sum/_count).
 func TestStartMetricsServer_CatalogSurvivesUTF8EscapingNegotiation(t *testing.T) {
 	var ln net.Listener
@@ -144,10 +144,12 @@ func TestStartMetricsServer_CatalogSurvivesUTF8EscapingNegotiation(t *testing.T)
 		metrics.MetricSourceFailures + "_total",
 		metrics.MetricDeduped + "_total",
 		metrics.MetricDispatchLatency + "_milliseconds_bucket",
-		// The per-source liveness gauges (bead pg2-tv11a): unit "s" makes the
-		// bridge append _seconds, and the pg-router-source-persistent-failure
-		// alert queries exactly these exported names.
+		// The per-source liveness gauges (bead pg2-tv11a; the age gauge is bead
+		// pg2-ez292): unit "s" makes the bridge append _seconds, and the
+		// pg-router-source-persistent-failure alert queries exactly the age and
+		// expected-interval names (the timestamp is kept for dashboards).
 		"pg_router_source_last_success_timestamp_seconds",
+		"pg_router_source_last_success_age_seconds",
 		"pg_router_source_expected_interval_seconds",
 		// Per-source attempt timing (bead pg2-zdowv, DEC-OBS-8).
 		"pg_router_source_duration_seconds_bucket",

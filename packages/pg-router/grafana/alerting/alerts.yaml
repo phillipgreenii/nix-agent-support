@@ -847,27 +847,46 @@ groups:
       # (worst 30m window: ~11 failures in ~30 ticks), so it stays a
       # desktop-only early signal and is deliberately NOT registered with
       # pg-router-probe. THIS rule is the escalation-grade one: it fires only
-      # when a source has gone silent for max(3 x its period, 30m), which no
-      # transient storm reaches but the real outages do (2026-09-28 bd outage;
-      # the 2026-10-01/02 GraphQL rate-limit-reserve episode; thread-me's
+      # when a source has gone silent for max(3 x its period, 30m) of AWAKE time,
+      # which no transient storm reaches but the real outages do (2026-09-28 bd
+      # outage; the 2026-10-01/02 GraphQL rate-limit-reserve episode; thread-me's
       # 2026-10-01 ~4h run of six consecutive failed 30m ticks).
       #
-      # Series: pg_router_source_last_success_timestamp_seconds{source} and
+      # What it measures: AWAKE time, not wall-clock time (bead pg2-ez292,
+      # DEC-OBS-4's host-sleep amendment). The age compared with the threshold,
+      # pg_router_source_last_success_age_seconds, is computed by the router when
+      # it is scraped, on the router's own monotonic clock, and that clock does
+      # not advance while the host sleeps. It is the clock the router paces its
+      # own ticks on: after a wake a slow source is next due only once the REST of
+      # its period has passed in awake time, so "silent for 3 periods" here means
+      # the router itself has gone 3 periods without a success. This rule used to
+      # compute time() - pg_router_source_last_success_timestamp_seconds, a
+      # WALL-clock difference: after a laptop slept for longer than a source's
+      # threshold, every slow source looked silent at the wake and this rule fired
+      # for all of them though nothing had failed (2026-10-12: six sources, six
+      # escalated beads in 16 s). A host sleep therefore neither fires this rule
+      # nor delays it beyond the sleep itself; do not go back to subtracting a
+      # timestamp from time().
+      #
+      # Series: pg_router_source_last_success_age_seconds{source} and
       # pg_router_source_expected_interval_seconds{source} (internal/metrics,
       # exported for enabled, non-excluded PULL sources that have a period).
-      # last-success advances on a successful pass AND on a pass skipped by a
-      # deliberate pause (an active gate or log-limit-halted emitters), so a
-      # pg-router pause does not fire this for every source; a failed pass never
-      # advances it. It starts at PROCESS START, so a restart resets the clock:
-      # a source that keeps failing across restarts re-alerts only after
-      # threshold + `for` following each restart.
+      # pg_router_source_last_success_timestamp_seconds{source} is still exported
+      # (a wall-clock reading, for dashboards) but is not read here. The age resets
+      # to 0 on a successful pass AND on a pass skipped by a deliberate pause (an
+      # active gate or log-limit-halted emitters), so a pg-router pause does not
+      # fire this for every source; a failed pass never resets it. It starts at 0
+      # at PROCESS START, so a restart resets the clock: a source that keeps
+      # failing across restarts re-alerts only after threshold + `for` of awake
+      # time following each restart.
       #
       # noDataState: OK is deliberate: both series exist from daemon start, so
       # absence means the daemon (or /metrics) is down, which is
-      # pg-router-liveness-down's job (noDataState: Alerting). The annotation
-      # interpolates only the source label and the age value -- static-safe, no
-      # error text or URLs. Replay evidence:
-      # internal/alertrules/source_persistent_failure_test.go.
+      # pg-router-liveness-down's job (noDataState: Alerting). (A router build
+      # that predates the age series reads as no data here, so this rule is silent
+      # until the new build runs.) The annotation interpolates only the source
+      # label and the age value -- static-safe, no error text or URLs. Replay
+      # evidence: internal/alertrules/source_persistent_failure_test.go.
       - uid: pg-router-source-persistent-failure
         title: pg-router event source has not succeeded recently (by source)
         condition: C
@@ -877,8 +896,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "pg-router source {{ $labels.source }} has not succeeded for {{ humanizeDuration $values.B.Value }}"
-          description: 'pg-router source {{ $labels.source }} last succeeded {{ humanizeDuration $values.B.Value }} ago, longer than max(3 x its expected interval, 30m) -- it is persistently failing, not a transient blip. Inspect it with: pg-router status --json | jq ''.sources[]|select(.name=="{{ $labels.source }}")|.failure'' and, in Prometheus, sum by (reason)(increase(pg_router_source_failures_total{source="{{ $labels.source }}"}[1h])). A pg-router pause or log-limit halt does NOT trigger this rule (paused passes count as not-a-failure); a restart resets the clock, so a still-failing source re-alerts only after the threshold plus 5m following each restart.'
+          summary: "pg-router source {{ $labels.source }} has not succeeded for {{ humanizeDuration $values.B.Value }} of awake time"
+          description: 'pg-router source {{ $labels.source }} last succeeded {{ humanizeDuration $values.B.Value }} of awake time ago (host sleep is not counted), longer than max(3 x its expected interval, 30m) -- it is persistently failing, not a transient blip. Inspect it with: pg-router status --json | jq ''.sources[]|select(.name=="{{ $labels.source }}")|.failure'' and, in Prometheus, sum by (reason)(increase(pg_router_source_failures_total{source="{{ $labels.source }}"}[1h])). A pg-router pause, a log-limit halt or a host sleep does NOT trigger this rule (paused passes count as not-a-failure, and sleep is not awake time); a restart resets the clock, so a still-failing source re-alerts only after the threshold plus 5m of awake time following each restart.'
         data:
           - refId: A
             relativeTimeRange: { from: 600, to: 0 }
@@ -887,7 +906,7 @@ groups:
               refId: A
               editorMode: code
               instant: true
-              expr: time() - pg_router_source_last_success_timestamp_seconds > on(source) clamp_min(3 * pg_router_source_expected_interval_seconds, 1800)
+              expr: pg_router_source_last_success_age_seconds > on(source) clamp_min(3 * pg_router_source_expected_interval_seconds, 1800)
           - refId: B
             datasourceUid: __expr__
             model: { refId: B, type: reduce, expression: A, reducer: last }

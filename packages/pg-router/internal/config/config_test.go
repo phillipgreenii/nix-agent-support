@@ -1529,6 +1529,15 @@ func minimalRoleCfg(roleName string) string {
 // anchoring setup.
 func TestLoad_worktreeReadsThroughToCanonicalConfigViaGitCommonDir(t *testing.T) {
 	absentGlobalConfig(t)
+	// This test exercises the DEFAULT resolution, so a PG_ROUTER_CONFIG inherited from
+	// the caller must not leak in: the launchd daemon exports it, and so does every
+	// ccpool session the daemon spawns, which made this test fail for them (the config
+	// came back as the daemon's own). t.Setenv registers the restore of the caller's
+	// value; Unsetenv then leaves the variable unset for the test's duration.
+	t.Setenv("PG_ROUTER_CONFIG", "")
+	if err := os.Unsetenv("PG_ROUTER_CONFIG"); err != nil {
+		t.Fatalf("Unsetenv() error = %v", err)
+	}
 	ctx := t.Context()
 	repo := gittest.New(t, gitfixture.RepoOptions{Suite: "pg2-xl659-readthrough"})
 	if _, err := repo.Commit(ctx, "seed", map[string]string{"a.txt": "hello\n"}); err != nil {
