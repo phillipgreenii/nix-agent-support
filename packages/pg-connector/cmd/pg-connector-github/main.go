@@ -11,18 +11,23 @@
 //
 // Every mode loads and validates the config first. serve runs the daemon's
 // process shell (state directory, lock, socket, drain on SIGTERM; see
-// pkg/connectord/proc) with a handler that answers nothing yet; pr and ci are
-// still stubs that stop with a clear "not implemented" error. The request
-// protocol, the store and the client forwarding are filled in by later work.
+// pkg/connectord/proc) with a handler that answers nothing yet. pr and ci are
+// the client modes (internal/client): one scriptout request on stdin, one
+// response on stdout, forwarded to the daemon over its socket
+// (pkg/connectord/socket). The store, the ops and the daemon's request router
+// are wired in by later work.
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/client"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/config"
 )
 
@@ -30,13 +35,23 @@ import (
 // like every pg-connector backend).
 var Version = "dev"
 
-// Exit codes. 1 is reserved for unexpected errors; 2 is a usage error and 3
-// means the selected mode is not implemented yet.
+// clientBudgetOverride is a build-time seam (-ldflags "-X main.clientBudgetOverride=4s"),
+// never set in a shipped build: when it parses as a positive duration it
+// replaces the client's per-op call budget, so the real-binary tests need not
+// wait out the 30 s production budget to see a daemon-down answer. The
+// binary's environment is deliberately not consulted: the config's five
+// variables are the only ones this binary reads.
+var clientBudgetOverride = ""
+
+// Exit codes of the process itself. 1 is reserved for unexpected errors and 2
+// is a usage error. A client mode's own exit codes are the scriptout taxonomy's
+// (2 to 8, see scriptout.ExitCodeForCode) once it has a request to answer, so
+// exitConfig, which precedes any request, shares the value 4 with
+// unavailable on purpose: both mean "this backend cannot be used".
 const (
-	exitOK             = 0
-	exitUsage          = 2
-	exitNotImplemented = 3
-	exitConfig         = 4
+	exitOK     = 0
+	exitUsage  = 2
+	exitConfig = 4
 )
 
 // The three modes, selected by the first non-flag word.
@@ -47,7 +62,7 @@ const (
 )
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr, os.Getenv))
+	os.Exit(run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr, os.Getenv))
 }
 
 // options is the parsed command line.
@@ -108,7 +123,7 @@ used only when the flag is absent.
 
 // run is main with its I/O injected so it is testable. It returns the exit
 // code.
-func run(args []string, stdout, stderr io.Writer, getenv func(string) string) int {
+func run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(string) string) int {
 	o, err := parseArgs(args)
 	if err != nil {
 		fmt.Fprintf(stderr, "pg-connector-github: %v\n\n%s", err, usage)
@@ -137,15 +152,32 @@ func run(args []string, stdout, stderr io.Writer, getenv func(string) string) in
 		fmt.Fprintf(stderr, "pg-connector-github %s: %v\n", o.mode, err)
 		return exitConfig
 	}
-	return runMode(o.mode, o.modeArgs, cfg, stderr)
+	return runMode(o.mode, o.modeArgs, cfg, stdin, stdout, stderr)
 }
 
-// runMode dispatches to the selected mode. serve runs the process shell; the
-// client modes are stubs that later work fills in.
-func runMode(mode string, _ []string, cfg *config.Config, stderr io.Writer) int {
-	if mode == modeServe {
-		return runServe(cfg, stderr)
+// runMode dispatches to the selected mode: serve runs the process shell, pr and
+// ci run the client mode of their instance.
+func runMode(mode string, _ []string, cfg *config.Config, stdin io.Reader, stdout, stderr io.Writer) int {
+	switch mode {
+	case modePR:
+		return runClient(client.PR(), cfg, stdin, stdout)
+	case modeCI:
+		return runClient(client.CI(), cfg, stdin, stdout)
 	}
-	fmt.Fprintf(stderr, "pg-connector-github %s: not implemented yet (skeleton stub; config %s loaded, hash %s)\n", mode, cfg.Path, cfg.Hash)
-	return exitNotImplemented
+	return runServe(cfg, stderr)
+}
+
+// runClient answers one scriptout request for the instance.
+func runClient(inst client.Instance, cfg *config.Config, stdin io.Reader, stdout io.Writer) int {
+	o := client.Options{
+		Instance:        inst,
+		SocketPath:      cfg.SocketPath,
+		SupervisorLabel: cfg.SupervisorLabel,
+		ConfigPath:      cfg.Path,
+		Build:           Version,
+	}
+	if d, err := time.ParseDuration(clientBudgetOverride); err == nil && d > 0 {
+		o.Budget = d
+	}
+	return client.Run(context.Background(), o, stdin, stdout)
 }

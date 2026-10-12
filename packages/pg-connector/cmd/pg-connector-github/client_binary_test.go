@@ -1,0 +1,410 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"slices"
+	"strconv"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/client"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/proc"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/router"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/socket"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
+)
+
+// The client is tested as the real binary: built with go build, run as a child
+// with an empty environment and working directory "/", against an in-process
+// daemon on a short temp socket (the real process shell, the real socket
+// server, the real router), the way the umbrella execs it.
+
+const (
+	exitUnavailable     = 4 // scriptout.ExitCodeForCode("unavailable")
+	exitUnknownOp       = 5
+	exitVersionMismatch = 6
+	exitInvalidArgument = 7
+)
+
+var (
+	buildMu   sync.Mutex
+	buildRoot string
+	buildDirs = map[string]string{}
+)
+
+// removeBuilds deletes the built binaries; TestMain calls it after the run.
+func removeBuilds() {
+	buildMu.Lock()
+	defer buildMu.Unlock()
+	if buildRoot != "" {
+		_ = os.RemoveAll(buildRoot)
+	}
+}
+
+// buildClient builds cmd/pg-connector-github with the given -ldflags and
+// returns the binary. One build per distinct flag set per test process.
+func buildClient(t *testing.T, ldflags string) string {
+	t.Helper()
+	buildMu.Lock()
+	defer buildMu.Unlock()
+	if bin, ok := buildDirs[ldflags]; ok {
+		return bin
+	}
+	goBin, err := exec.LookPath("go")
+	if err != nil {
+		t.Skipf("no go toolchain on PATH to build the real binary: %v", err)
+	}
+	if buildRoot == "" {
+		root, err := os.MkdirTemp("", "pcgbin")
+		if err != nil {
+			t.Fatal(err)
+		}
+		buildRoot = root
+	}
+	bin := filepath.Join(buildRoot, strconv.Itoa(len(buildDirs)), "pg-connector-github")
+	args := []string{"build", "-o", bin}
+	if ldflags != "" {
+		args = append(args, "-ldflags", ldflags)
+	}
+	args = append(args, ".")
+	cmd := exec.Command(goBin, args...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, out)
+	}
+	buildDirs[ldflags] = bin
+	return bin
+}
+
+// fastBudget is the call budget the "fast" binary gives every op: the retry
+// window is half of it. The real default (30 s) would make every daemon-down
+// case wait 15 s.
+const fastBudget = "3s"
+
+func fastClient(t *testing.T) string {
+	return buildClient(t, "-X main.clientBudgetOverride="+fastBudget)
+}
+
+type clientResult struct {
+	code   int
+	stdout string
+	stderr string
+}
+
+// runClient runs bin in mode ("pr" or "ci") with stdin and an empty environment.
+func runClientBinary(t *testing.T, bin, cfgPath, mode, stdin string) clientResult {
+	t.Helper()
+	cmd := exec.Command(bin, "--config", cfgPath, mode)
+	cmd.Dir = "/"
+	cmd.Env = []string{}
+	cmd.Stdin = strings.NewReader(stdin)
+	var out, errb bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	err := cmd.Run()
+	res := clientResult{stdout: out.String(), stderr: errb.String()}
+	var ee *exec.ExitError
+	switch {
+	case err == nil:
+	case errors.As(err, &ee):
+		res.code = ee.ExitCode()
+	default:
+		t.Fatal(err)
+	}
+	return res
+}
+
+func (r clientResult) errorBody(t *testing.T) scriptout.Error {
+	t.Helper()
+	var resp scriptout.Response
+	if err := json.Unmarshal([]byte(r.stdout), &resp); err != nil || resp.Error == nil {
+		t.Fatalf("want an error response, got stdout %q stderr %q (%v)", r.stdout, r.stderr, err)
+	}
+	return *resp.Error
+}
+
+// daemon is an in-process daemon: the real shell, socket server and router.
+type daemon struct {
+	router *router.Router
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+type daemonOpts struct {
+	protocol int
+	peerUID  func(net.Conn) (uint32, error)
+	ownUID   func() uint32
+}
+
+// startDaemonAt serves a router with a "list" op (and nothing else) on
+// socketPath, which the caller's config names.
+func startDaemonAt(t *testing.T, stateDir, socketPath string, o daemonOpts) *daemon {
+	t.Helper()
+	r := router.New(router.Options{Instances: []string{"pr", "ci"}, CheckConfig: func(block json.RawMessage) error {
+		return config.CheckBlock(&config.Config{Path: "/the/daemon/config.json", Hash: "daemon-hash"}, block)
+	}})
+	r.Register("pr", "list", scriptout.OpHandler{SchemaVersion: 1, Handle: func(ctx context.Context, args json.RawMessage) (any, error) {
+		return map[string]any{"items": []string{}, "args": args}, nil
+	}})
+	srv, err := proc.Start(proc.Config{StateDir: stateDir, SocketPath: socketPath, DrainTimeout: time.Second, PeerUID: o.peerUID, OwnUID: o.ownUID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	d := &daemon{router: r, cancel: cancel, done: make(chan struct{})}
+	go func() {
+		defer close(d.done)
+		_ = srv.Serve(ctx, socket.Handler(r, socket.ServerConfig{Build: "test-daemon", Protocol: o.protocol}), nil)
+	}()
+	t.Cleanup(func() { cancel(); <-d.done })
+	return d
+}
+
+func clientSetup(t *testing.T) (cfgPath, stateDir, socketPath string) {
+	t.Helper()
+	stateDir = shortTempDir(t)
+	socketPath = filepath.Join(stateDir, "s")
+	return writeServeConfig(t, stateDir, socketPath), stateDir, socketPath
+}
+
+const listRequest = `{"op":"list","args":{"query":"mine"}}`
+
+func TestClientBinaryDaemonAbsent(t *testing.T) {
+	bin := fastClient(t)
+	cfg, _, sock := clientSetup(t)
+	hint := proc.RestartHint(config.DefaultSupervisorLabel, cfg)
+
+	for _, req := range []string{listRequest, `{"op":"show","args":{"id":"x"}}`, `{"op":"changes"}`, `{"op":"auth_status"}`} {
+		start := time.Now()
+		res := runClientBinary(t, bin, cfg, "pr", req)
+		e := res.errorBody(t)
+		if e.Code != "unavailable" || res.code != exitUnavailable {
+			t.Errorf("%s: code %q exit %d (stdout %q)", req, e.Code, res.code, res.stdout)
+		}
+		for _, want := range []string{sock, hint} {
+			if !strings.Contains(e.Message, want) {
+				t.Errorf("%s: message %q must name %q", req, e.Message, want)
+			}
+		}
+		if strings.Contains(res.stdout, "served_from") || strings.Contains(res.stdout, "cache") {
+			t.Errorf("%s: a down daemon never answers from a cache: %s", req, res.stdout)
+		}
+		// It retried (about half the 3 s budget), and no longer.
+		if took := time.Since(start); took < time.Second || took > 4*time.Second {
+			t.Errorf("%s: took %v, want about half the %s budget", req, took, fastBudget)
+		}
+	}
+}
+
+func TestClientBinaryCapabilitiesWithoutTheDaemon(t *testing.T) {
+	bin := buildClient(t, "") // the unmodified build: nothing is waited on
+	cfg, _, _ := clientSetup(t)
+	for mode, inst := range map[string]client.Instance{"pr": client.PR(), "ci": client.CI()} {
+		start := time.Now()
+		res := runClientBinary(t, bin, cfg, mode, `{"op":"capabilities"}`)
+		if res.code != 0 || time.Since(start) > 3*time.Second {
+			t.Fatalf("%s: exit %d after %v: %s %s", mode, res.code, time.Since(start), res.stdout, res.stderr)
+		}
+		var caps scriptout.CapabilitiesResponse
+		if err := json.Unmarshal([]byte(res.stdout), &caps); err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(caps.Ops, inst.OpNames()) {
+			t.Errorf("%s: ops %v, want the compiled-in table %v", mode, caps.Ops, inst.OpNames())
+		}
+		if caps.Vocabulary["cache_opt_out"] != true || caps.Vocabulary["owns_changes"] != true || caps.ProtocolVersion != scriptout.ProtocolVersion {
+			t.Errorf("%s: %+v", mode, caps)
+		}
+		if caps.Version != "dev" || len(caps.SchemaVersions) == 0 {
+			t.Errorf("%s: %+v", mode, caps)
+		}
+	}
+}
+
+func TestClientBinaryForwardsEverythingToTheDaemon(t *testing.T) {
+	bin := fastClient(t)
+	cfg, state, sock := clientSetup(t)
+	startDaemonAt(t, state, sock, daemonOpts{})
+
+	res := runClientBinary(t, bin, cfg, "pr", listRequest)
+	if res.code != 0 {
+		t.Fatalf("exit %d: %s %s", res.code, res.stdout, res.stderr)
+	}
+	var resp struct {
+		Result struct {
+			Args map[string]string `json:"args"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(res.stdout), &resp); err != nil || resp.Result.Args["query"] != "mine" {
+		t.Errorf("the daemon's answer is relayed: %s (%v)", res.stdout, err)
+	}
+
+	// pr show is not an op this phase's client lists, and no handler is
+	// registered for it: the client forwards it and the daemon says unknown_op.
+	res = runClientBinary(t, bin, cfg, "pr", `{"op":"show","args":{}}`)
+	if e := res.errorBody(t); e.Code != "unknown_op" || res.code != exitUnknownOp {
+		t.Errorf("show: %+v exit %d", e, res.code)
+	}
+	// The ci instance has nothing registered yet: an op not delivered is unknown_op.
+	res = runClientBinary(t, bin, cfg, "ci", `{"op":"list_runs"}`)
+	if e := res.errorBody(t); e.Code != "unknown_op" || res.code != exitUnknownOp {
+		t.Errorf("ci with no handlers: %+v exit %d", e, res.code)
+	}
+
+	// A stale registry fails loudly: a block stamped with another hash.
+	res = runClientBinary(t, bin, cfg, "pr", `{"op":"list","config":{"config_hash":"other","config_path":"/the/umbrella/block.json"}}`)
+	if e := res.errorBody(t); e.Code != "invalid_argument" || !strings.Contains(e.Message, "/the/umbrella/block.json") || !strings.Contains(e.Message, "/the/daemon/config.json") {
+		t.Errorf("config hash mismatch: %+v", e)
+	}
+	// No hash, or no block, is accepted.
+	for _, req := range []string{`{"op":"list","config":{"queries":{}}}`, `{"op":"list"}`} {
+		if res := runClientBinary(t, bin, cfg, "pr", req); res.code != 0 {
+			t.Errorf("%s: %s", req, res.stdout)
+		}
+	}
+}
+
+func TestClientBinaryRelaysTheMigratingAnswer(t *testing.T) {
+	bin := fastClient(t)
+	cfg, state, sock := clientSetup(t)
+	d := startDaemonAt(t, state, sock, daemonOpts{})
+	d.router.SetMigrating(true, "store schema 2 to 3")
+	res := runClientBinary(t, bin, cfg, "pr", listRequest)
+	if e := res.errorBody(t); e.Code != "unavailable" || !strings.HasPrefix(e.Message, "migrating:") || res.code != exitUnavailable {
+		t.Errorf("migrating: %+v exit %d", e, res.code)
+	}
+}
+
+func TestClientBinaryProtocolWindow(t *testing.T) {
+	bin := fastClient(t)
+	for _, tc := range []struct {
+		name     string
+		daemon   int // the daemon's protocol N; the binary speaks socket.ProtocolVersion (1)
+		wantCode string
+		wantExit int
+	}{
+		{"same version", 1, "", 0},
+		{"client is N-1", 2, "", 0},
+		{"client is N-2", 3, "version_mismatch", exitVersionMismatch},
+		{"daemon far ahead", 9, "version_mismatch", exitVersionMismatch},
+	} {
+		cfg, state, sock := clientSetup(t)
+		startDaemonAt(t, state, sock, daemonOpts{protocol: tc.daemon})
+		res := runClientBinary(t, bin, cfg, "pr", listRequest)
+		if res.code != tc.wantExit {
+			t.Errorf("%s: exit %d, want %d (%s)", tc.name, res.code, tc.wantExit, res.stdout)
+			continue
+		}
+		if tc.wantCode != "" {
+			if e := res.errorBody(t); e.Code != tc.wantCode {
+				t.Errorf("%s: %+v", tc.name, e)
+			}
+		}
+	}
+}
+
+func TestClientBinaryRestartWindowIsRetriedInsideTheDeadline(t *testing.T) {
+	bin := fastClient(t)
+	cfg, state, sock := clientSetup(t)
+
+	type outcome struct {
+		res clientResult
+		at  time.Duration
+	}
+	got := make(chan outcome, 1)
+	start := time.Now()
+	go func() {
+		res := runClientBinary(t, bin, cfg, "pr", listRequest)
+		got <- outcome{res, time.Since(start)}
+	}()
+	time.Sleep(500 * time.Millisecond) // the supervisor brings the daemon back
+	startDaemonAt(t, state, sock, daemonOpts{})
+
+	o := <-got
+	if o.res.code != 0 || !strings.Contains(o.res.stdout, `"result"`) {
+		t.Fatalf("the retry must reach a daemon that starts 500ms after the call: exit %d %s", o.res.code, o.res.stdout)
+	}
+	if o.at > 2*time.Second {
+		t.Errorf("answered after %v, inside half the %s budget", o.at, fastBudget)
+	}
+}
+
+func TestClientBinarySocketPathOverThePlatformLimitIsRefused(t *testing.T) {
+	bin := fastClient(t)
+	stateDir := shortTempDir(t)
+	long := filepath.Join(stateDir, strings.Repeat("d", proc.MaxSocketPathBytes()), "sock")
+	cfg := writeServeConfig(t, stateDir, long)
+
+	start := time.Now()
+	res := runClientBinary(t, bin, cfg, "pr", listRequest)
+	e := res.errorBody(t)
+	if e.Code != "unavailable" || res.code != exitUnavailable || !strings.Contains(e.Message, long) || !strings.Contains(e.Message, "sun_path") {
+		t.Errorf("%+v exit %d: the over-long path is refused and named", e, res.code)
+	}
+	if time.Since(start) > 2*time.Second {
+		t.Errorf("an over-long path is final, not retried (took %v)", time.Since(start))
+	}
+}
+
+func TestClientBinarySocketPermissionIsFinal(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores socket permissions")
+	}
+	bin := fastClient(t)
+	cfg, state, sock := clientSetup(t)
+	startDaemonAt(t, state, sock, daemonOpts{})
+	if err := os.Chmod(sock, 0); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	res := runClientBinary(t, bin, cfg, "pr", listRequest)
+	e := res.errorBody(t)
+	if e.Code != "unavailable" || res.code != exitUnavailable || !strings.Contains(e.Message, sock) {
+		t.Errorf("%+v exit %d", e, res.code)
+	}
+	if time.Since(start) > 2*time.Second {
+		t.Errorf("a permission refusal is not retried (took %v)", time.Since(start))
+	}
+}
+
+func TestClientBinaryPeerUIDRejectionIsUnavailableNamingTheSocket(t *testing.T) {
+	bin := fastClient(t)
+	cfg, state, sock := clientSetup(t)
+	// The daemon believes it runs as another user, so it drops this client.
+	startDaemonAt(t, state, sock, daemonOpts{ownUID: func() uint32 { return uint32(os.Getuid()) + 1 }})
+	res := runClientBinary(t, bin, cfg, "pr", listRequest)
+	e := res.errorBody(t)
+	if e.Code != "unavailable" || res.code != exitUnavailable || !strings.Contains(e.Message, sock) {
+		t.Errorf("%+v exit %d", e, res.code)
+	}
+}
+
+func TestClientBinaryOversizeRequestIsRejectedByTheDaemon(t *testing.T) {
+	bin := fastClient(t)
+	cfg, state, sock := clientSetup(t)
+	startDaemonAt(t, state, sock, daemonOpts{})
+	big := `{"op":"list","args":"` + strings.Repeat("a", socket.MaxFrameBytes) + `"}`
+	res := runClientBinary(t, bin, cfg, "pr", big)
+	if e := res.errorBody(t); e.Code != "invalid_argument" || res.code != exitInvalidArgument {
+		t.Errorf("%+v exit %d", e, res.code)
+	}
+}
+
+func TestClientBinaryMalformedStdin(t *testing.T) {
+	bin := fastClient(t)
+	cfg, _, _ := clientSetup(t)
+	for name, in := range map[string]string{"empty": "", "garbage": "][", "no op": `{"args":{}}`} {
+		res := runClientBinary(t, bin, cfg, "ci", in)
+		if e := res.errorBody(t); res.code != scriptout.ExitCodeForCode(e.Code) || res.code == 0 {
+			t.Errorf("%s: %+v exit %d", name, e, res.code)
+		}
+	}
+}

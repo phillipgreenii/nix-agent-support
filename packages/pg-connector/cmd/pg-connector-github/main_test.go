@@ -25,7 +25,9 @@ func TestMain(m *testing.M) {
 		main() // exits the process
 		return
 	}
-	os.Exit(m.Run())
+	code := m.Run()
+	removeBuilds()
+	os.Exit(code)
 }
 
 // runReal runs the real command in a child process the way a supervisor starts
@@ -53,21 +55,20 @@ func runReal(t *testing.T, args ...string) (code int, stdout, stderr string) {
 	return code, out.String(), errb.String()
 }
 
-func TestRealProcessModesFailCleanlyUnderEmptyEnvironment(t *testing.T) {
+func TestRealProcessClientModesAnswerUnderEmptyEnvironment(t *testing.T) {
 	abs, err := filepath.Abs(golden)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, mode := range []string{"pr", "ci"} {
+		// Nothing on stdin: the client answers an unavailable error body and
+		// exits with that code, it does not panic or hang.
 		code, out, errs := runReal(t, "--config", abs, mode)
-		if code != exitNotImplemented || out != "" {
+		if code != 4 || !strings.Contains(out, `"code":"unavailable"`) {
 			t.Errorf("%s: exit=%d stdout=%q stderr=%q", mode, code, out, errs)
 		}
-		if !strings.Contains(errs, "not implemented") || !strings.Contains(errs, mode) {
-			t.Errorf("%s: stderr %q must name the missing implementation and the mode", mode, errs)
-		}
 		if strings.Contains(errs, "panic") || strings.Contains(errs, "goroutine") {
-			t.Errorf("%s: a stub must fail cleanly, not panic: %q", mode, errs)
+			t.Errorf("%s: must fail cleanly, not panic: %q", mode, errs)
 		}
 	}
 }
@@ -90,10 +91,18 @@ func noEnv(string) string { return "" }
 
 func runArgs(t *testing.T, getenv func(string) string, args ...string) (int, string, string) {
 	t.Helper()
+	return runArgsIn(t, "", getenv, args...)
+}
+
+// runArgsIn is runArgs with stdin.
+func runArgsIn(t *testing.T, stdin string, getenv func(string) string, args ...string) (int, string, string) {
+	t.Helper()
 	var out, errb bytes.Buffer
-	code := run(args, &out, &errb, getenv)
+	code := run(args, strings.NewReader(stdin), &out, &errb, getenv)
 	return code, out.String(), errb.String()
 }
+
+const capabilitiesRequest = `{"op":"capabilities"}`
 
 func TestVersionIsStamped(t *testing.T) {
 	old := Version
@@ -105,19 +114,17 @@ func TestVersionIsStamped(t *testing.T) {
 	}
 }
 
-// serve is no longer a stub (see serve_test.go); pr and ci still are.
-func TestModesAreStubsThatFailCleanly(t *testing.T) {
+// pr and ci are client modes: with the config loaded they answer the request on
+// stdin (capabilities is answered with no daemon at all).
+func TestClientModesAnswerCapabilitiesWithoutADaemon(t *testing.T) {
 	for _, mode := range []string{"pr", "ci"} {
 		for name, args := range map[string][]string{
 			"flag before mode": {"--config", golden, mode},
 			"equals form":      {"--config=" + golden, mode},
 		} {
-			code, out, errs := runArgs(t, noEnv, args...)
-			if code != exitNotImplemented || out != "" {
-				t.Errorf("%s %s: code=%d out=%q", mode, name, code, out)
-			}
-			if !strings.Contains(errs, "not implemented") || !strings.Contains(errs, mode) {
-				t.Errorf("%s %s: stderr %q must name the stub and the mode", mode, name, errs)
+			code, out, errs := runArgsIn(t, capabilitiesRequest, noEnv, args...)
+			if code != 0 || !strings.Contains(out, `"cache_opt_out":true`) || !strings.Contains(out, `"owns_changes":true`) {
+				t.Errorf("%s %s: code=%d out=%q stderr=%q", mode, name, code, out, errs)
 			}
 		}
 	}
@@ -130,12 +137,12 @@ func TestConfigFromEnvWhenFlagAbsent(t *testing.T) {
 		}
 		return ""
 	}
-	if code, _, errs := runArgs(t, env, "pr"); code != exitNotImplemented {
+	if code, _, errs := runArgsIn(t, capabilitiesRequest, env, "pr"); code != 0 {
 		t.Fatalf("code=%d stderr=%q", code, errs)
 	}
 	// The flag wins over the variable: a bad flag path fails even though the
 	// variable names a good file.
-	if code, _, errs := runArgs(t, env, "--config", filepath.Join(t.TempDir(), "missing.json"), "pr"); code != exitConfig {
+	if code, _, errs := runArgsIn(t, capabilitiesRequest, env, "--config", filepath.Join(t.TempDir(), "missing.json"), "pr"); code != exitConfig {
 		t.Fatalf("flag must win, code=%d stderr=%q", code, errs)
 	}
 }
@@ -180,7 +187,7 @@ func TestModeIsFirstNonFlagWord(t *testing.T) {
 
 func TestGlobalFlagsAcceptedAfterMode(t *testing.T) {
 	// --config is global: given after the mode word it takes effect, it is never
-	// handed to the mode (where the stub would silently ignore it).
+	// handed to the mode (where it would be silently ignored).
 	o, err := parseArgs([]string{"pr", "--config", "c.json", "--query", "mine"})
 	if err != nil || o.mode != "pr" || o.configPath != "c.json" || len(o.modeArgs) != 2 || o.modeArgs[0] != "--query" {
 		t.Fatalf("%+v %v", o, err)
@@ -192,10 +199,15 @@ func TestGlobalFlagsAcceptedAfterMode(t *testing.T) {
 	if _, err = parseArgs([]string{"serve", "--config"}); err == nil {
 		t.Error("--config without a path must fail after the mode too")
 	}
+	missing := filepath.Join(t.TempDir(), "missing.json")
 	for _, mode := range []string{"pr", "ci"} {
-		code, out, errs := runArgs(t, noEnv, mode, "--config", golden)
-		if code != exitNotImplemented || out != "" || !strings.Contains(errs, golden) {
-			t.Errorf("%s --config after the mode: code=%d out=%q stderr=%q (the config named after the mode must be the one loaded)", mode, code, out, errs)
+		if code, out, errs := runArgsIn(t, capabilitiesRequest, noEnv, mode, "--config", golden); code != 0 || out == "" {
+			t.Errorf("%s --config after the mode: code=%d out=%q stderr=%q", mode, code, out, errs)
+		}
+		// The config named after the mode is the one loaded: a missing file
+		// there fails, even though capabilities needs no daemon.
+		if code, _, errs := runArgsIn(t, capabilitiesRequest, noEnv, mode, "--config", missing); code != exitConfig || !strings.Contains(errs, "missing.json") {
+			t.Errorf("%s --config <missing> after the mode: code=%d stderr=%q", mode, code, errs)
 		}
 	}
 	if code, out, _ := runArgs(t, noEnv, "serve", "--version"); code != 0 || !strings.Contains(out, "pg-connector-github") {
