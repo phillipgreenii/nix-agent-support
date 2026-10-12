@@ -11,6 +11,23 @@ import (
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/userconfig"
 )
 
+// tempDirUnderRealTmp returns a fixture dir under the LITERAL "/tmp" instead
+// of t.TempDir(): under `nix build` $TMPDIR is the build dir beneath
+// /nix/var/nix/builds, which the os-nix Kind (a hard fail-closed write
+// boundary, by operator ruling 2026-10-10 on tc-o14i5.3.7) classifies
+// Forbidden. That is a sandbox test artifact, not a policy defect; /tmp is
+// classified by osTmpKind identically inside and outside the sandbox. (Same
+// fix as internal/claudecodeadapter/adapter_test.go.)
+func tempDirUnderRealTmp(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "ceta-pathspec-fixture-")
+	if err != nil {
+		t.Skipf("cannot create fixture dir under /tmp: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
+
 // claudeConfigProjectRoot builds a throwaway project root (a plain `.git`
 // directory is enough — the same convention repoFixture uses) suitable for
 // exercising claudeConfigGitKind/claudeConfigHomeKind's Write-facet
@@ -18,7 +35,7 @@ import (
 // zone underneath it.
 func claudeConfigProjectRoot(t *testing.T) string {
 	t.Helper()
-	root := t.TempDir()
+	root := tempDirUnderRealTmp(t)
 	if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +86,7 @@ func TestClaudeConfigGoldenR7(t *testing.T) {
 
 	var r7Rows int
 	root := claudeConfigProjectRoot(t)
-	home := t.TempDir()
+	home := tempDirUnderRealTmp(t)
 	homeResolved, err := filepath.EvalSymlinks(home)
 	if err != nil {
 		t.Fatal(err)
@@ -118,7 +135,7 @@ func TestClaudeConfigGoldenR7(t *testing.T) {
 // $HOME/.local/share default) ⇒ Reject, unconditionally — no carve-out
 // (osspec.go's osAsksDBKind).
 func TestAsksDBReject(t *testing.T) {
-	home := t.TempDir()
+	home := tempDirUnderRealTmp(t)
 	dataDir := filepath.Join(home, ".local", "share", "claude-extended-tool-approver")
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -163,7 +180,7 @@ func TestAsksDBReject(t *testing.T) {
 // router's own config, wherever it is named) ⇒ Reject.
 func TestHookRouterConfigReject(t *testing.T) {
 	root := claudeConfigProjectRoot(t)
-	home := t.TempDir()
+	home := tempDirUnderRealTmp(t)
 	homeResolved, err := filepath.EvalSymlinks(home)
 	if err != nil {
 		t.Fatal(err)
@@ -178,7 +195,7 @@ func TestHookRouterConfigReject(t *testing.T) {
 // ~/.claude/plugins/** ⇒ Reject, unconditionally.
 func TestClaudePluginsReject(t *testing.T) {
 	root := claudeConfigProjectRoot(t)
-	home := t.TempDir()
+	home := tempDirUnderRealTmp(t)
 	homeResolved, err := filepath.EvalSymlinks(home)
 	if err != nil {
 		t.Fatal(err)
@@ -206,7 +223,7 @@ func TestClaudePluginsReject(t *testing.T) {
 // rule).
 func TestP18AgentWritableConfig(t *testing.T) {
 	root := claudeConfigProjectRoot(t)
-	home := t.TempDir()
+	home := tempDirUnderRealTmp(t)
 	homeResolved, err := filepath.EvalSymlinks(home)
 	if err != nil {
 		t.Fatal(err)
