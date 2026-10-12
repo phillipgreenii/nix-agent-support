@@ -41,13 +41,19 @@ import (
 type R2Cache struct {
 	mu      sync.Mutex
 	members map[string]map[string]bool
+	// K8 (tc-o14i5.3.8) per-evaluation memo for secretspec.go: tracked-file
+	// vouch results by abs path (so a second lookup never re-shells out to
+	// git), the user-level declarations, and repo-level declarations by root.
+	vouch    map[string]vouchEntry
+	userDecl *SecretDeclarations
+	repoDecl map[string]SecretDeclarations
 }
 
 // NewR2Cache returns a fresh, empty R2Cache — construct one per hook
 // evaluation (see this file's package doc comment for why a package-level
 // cache would be wrong).
 func NewR2Cache() *R2Cache {
-	return &R2Cache{members: make(map[string]map[string]bool)}
+	return &R2Cache{members: make(map[string]map[string]bool), vouch: make(map[string]vouchEntry), repoDecl: make(map[string]SecretDeclarations)}
 }
 
 // WorkforestMembers returns the resolved absolute repo roots that are

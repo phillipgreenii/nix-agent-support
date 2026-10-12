@@ -493,15 +493,16 @@ var goldenCases = []goldenCase{
 	{"rm_dotenv_gitignored", "rm .env", evalcontract.Reject, nil},
 	// rm_dotenv_tracked (tc-8og1 item 2, slice 3af; first row of the
 	// dotenv-verdict-table, see the git-rm/git-mv cases below for the rest):
-	// plain `rm` of trackedenv/.env — TRACKED and not gitignored — still
-	// Rejects. DeleteAccess's ladder step 4 calls secretRead, which is
-	// UNCHANGED by this slice: only NoWriteToSecretPath's AccessModify path
-	// (a git-rm/git-mv positional) consults pathspec.NonSecret for a
-	// WellKnownSecret match. This is exactly the tc-z806 ruling's own
-	// distinction ("rm is different from git rm") — a plain rm's content is
-	// NOT recoverable from git history the way a tracked git-rm's is, so
-	// tracked-ness must not (and, per this row, does not) rescue a plain rm.
-	{"rm_dotenv_tracked", "rm trackedenv/.env", evalcontract.Reject, nil},
+	// plain `rm` of trackedenv/.env — TRACKED and not gitignored. FLIPPED
+	// Reject -> Abstain by tc-o14i5.3.8 (K8): design ruling #7 ("TRACKED
+	// files inside a git repo are non-secret by default, including tracked
+	// credential-format files") means pathspec.ClassifySecretPath no longer
+	// calls this path secret, so the credential-store Forbidden is gone and
+	// the ordinary git-workspace delete verdict ("needs consent") applies —
+	// Abstain, never Approve (git's holdKeep). The earlier "tracked-ness
+	// must not rescue a plain rm" reading (tc-z806) is superseded for the
+	// secret CLASSIFICATION; rm's own deletability judgment is unchanged.
+	{"rm_dotenv_tracked", "rm trackedenv/.env", evalcontract.Abstain, nil},
 	// Workspace declarations (tc-z806.3): gradleproj/build is NOT gitignored
 	// (the fixture anchors `/build/`), so its Approve comes from the gradle
 	// kind alone; gradleproj/src is gradle-silent and git says Keep; .git is
@@ -1109,7 +1110,7 @@ var goldenCases = []goldenCase{
 	// by rm_dotenv_gitignored and rm_dotenv_tracked):
 	//
 	//	verb     | untracked (gitignored) | tracked (not gitignored)
-	//	rm       | Reject                 | Reject   (unaffected: rm is not git rm)
+	//	rm       | Reject                 | Abstain  (K8 tc-o14i5.3.8: tracked => non-secret; was Reject)
 	//	git rm   | Reject (unchanged)     | Approve  (NEW, this slice's fix)
 	//	git mv   | Reject (unchanged)     | Approve  (NEW, this slice's fix)
 	//

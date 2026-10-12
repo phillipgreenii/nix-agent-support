@@ -108,6 +108,11 @@ var secretDirs = map[string]Kind{
 	// home directory names a specific credential store exactly like .ssh, so
 	// it is WellKnownSecret rather than GenericSecretsDir.
 	".gnupg": WellKnownSecret,
+	// vault-secrets (tc-o14i5.3.8, K8): the /run/vault-secrets/* store where
+	// the operator's NixOS hosts materialize Vault-agent secrets. Source:
+	// the packet's own Binding decisions list "/run/vault-secrets/*" as a
+	// built-in known secret store.
+	"vault-secrets": WellKnownSecret,
 }
 
 // secretBasenames are whole basenames that are credential files by name alone:
@@ -125,6 +130,12 @@ var secretBasenames = map[string]bool{
 	".pgpass": true,
 	".npmrc":  true,
 	".envrc":  true,
+	// tc-o14i5.3.8 (K8) additions. ".git-credentials" is git's
+	// credential.helper=store plaintext file (gitcredentials(7)). OpenSSH id_*
+	// key names are deliberately NOT bare basenames here: the legacy rule
+	// engine's tests rely on id_rsa outside a .ssh dir being non-secret;
+	// they are covered via the .ssh/ component arm.
+	".git-credentials": true,
 }
 
 // scopedBasenames pairs a basename that is too GENERIC to treat as secret on
@@ -148,6 +159,10 @@ var scopedBasenames = []struct {
 }{
 	{"credentials", ".aws"},
 	{"config.json", ".docker"},
+	// ~/.config/beads/credentials: the beads Dolt-server password file (the
+	// operator's beads remote-server rule names it); "credentials" bare says
+	// nothing, directly inside a "beads" directory it is that file.
+	{"credentials", "beads"},
 }
 
 // isScopedSecretBasename reports whether base is one of scopedBasenames'
@@ -411,4 +426,47 @@ func equalFoldRune(a, b rune) bool {
 		}
 	}
 	return false
+}
+
+// credentialFormatBasenames are the basename-only credential FORMATS
+// (tc-o14i5.3.8, K8; the packet's "Credential-FORMAT files (.envrc, .env*,
+// *.pem, id_* private keys, .netrc, .pgpass, ...)"; bare id_* names are not
+// matched, see secretBasenames): files that are secret
+// by what they ARE rather than by living in a specific named store. K8's
+// precedence layer (internal/pathspec/secretspec.go) lets a TRACKED
+// credential-format file be non-secret (ruling #7) and lets a PATH-spec
+// not-secret declaration override one; it never does either for a NAMED
+// STORE (the .ssh/.gnupg/vault-secrets directories, .git-credentials,
+// scoped credentials/config.json, Claude credential files, auth.json,
+// *token*.json).
+var credentialFormatBasenames = map[string]bool{
+	".netrc":  true,
+	".pgpass": true,
+	".npmrc":  true,
+	".envrc":  true,
+}
+
+// IsCredentialFormat reports whether path is secret by its credential FORMAT
+// alone: its BASENAME is a credential format (credentialFormatBasenames;
+// ".env"/".env.*"; "*.pem"/"*.key") AND its parent directory chain is not
+// itself a named store (an id_rsa inside ".ssh/" is a named-store member,
+// not a free-standing format file). It is a refinement of Classify ==
+// WellKnownSecret: every IsCredentialFormat path is also WellKnownSecret,
+// but not vice versa.
+func IsCredentialFormat(path string) bool {
+	trimmed := strings.TrimRight(path, "/")
+	i := strings.LastIndex(trimmed, "/")
+	base, dir := trimmed, ""
+	if i >= 0 {
+		base, dir = trimmed[i+1:], trimmed[:i]
+	}
+	if base == "" || base == "." || base == ".." {
+		return false
+	}
+	isFormat := anyEqualFold(credentialFormatBasenames, base) || isSecretDotEnv(base)
+	if !isFormat {
+		ext := filepath.Ext(base)
+		isFormat = strings.EqualFold(ext, ".pem") || strings.EqualFold(ext, ".key")
+	}
+	return isFormat && Classify(dir) != WellKnownSecret
 }

@@ -70,6 +70,19 @@ type Config struct {
 	// is itself a P17 config file, so it too is Reject-by-default unless this
 	// same list names it.
 	AgentWritableConfig []string `json:"agentWritableConfig"`
+
+	// SecretPaths and NotSecretPaths are the USER-LEVEL layer of the P17
+	// secret/not-secret PATH-spec declarations (tc-o14i5.3.8, K8; consumed by
+	// internal/pathspec's secretspec.go, which owns the precedence rule: a
+	// secret declaration from any source wins over not-secret; not-secret
+	// overrides the built-in credential-FORMAT defaults only). Each entry is
+	// an absolute path/glob or a `~/`-prefixed pattern (same syntax as
+	// AgentWritableConfig); a pattern also covers everything beneath a
+	// matching directory. The repo-level layer is a repo's own
+	// `.ceta/secret-paths.json` (same two keys, repo-root-relative patterns
+	// also allowed).
+	SecretPaths    []string `json:"secretPaths"`
+	NotSecretPaths []string `json:"notSecretPaths"`
 }
 
 // DefaultPath returns the new engine's user-level config file location,

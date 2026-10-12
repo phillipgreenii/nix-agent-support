@@ -99,7 +99,7 @@ func TestIsSecret_AllArmsFoldCase(t *testing.T) {
 		// bounds: folding must not become substring matching...
 		{"bound: SECRETSAUCE is not a component", "SECRETSAUCE/config.yaml", false},
 		{"bound: MYSSH is not a component", "MYSSH/notes.txt", false},
-		{"bound: .SSHX is a different component", "/Users/u/.SSHX/id_rsa", false},
+		{"bound: .SSHX is a different component", "/Users/u/.SSHX/config", false},
 		// ...and must not drop the separator requirement (kubectl get SECRETS).
 		{"bound: bare SECRETS word without separator", "SECRETS", false},
 		{"bound: bare .SSH word without separator", ".SSH", false},
@@ -535,5 +535,36 @@ func TestIsSecret_HasSeparatorGateUnweakenedByPg2Ia640_1(t *testing.T) {
 		// stay NotSecret — Classify's per-component loop never runs the
 		// directory arm on it and no basename arm claims a multi-word string.
 		t.Error(`IsSecret("kubectl get secrets") = true, want false`)
+	}
+}
+
+// TestIsCredentialFormat pins the K8 (tc-o14i5.3.8) credential-FORMAT subset
+// of WellKnownSecret, and the built-in named stores the packet lists.
+func TestIsCredentialFormat(t *testing.T) {
+	cases := []struct {
+		path   string
+		format bool
+		kind   Kind
+	}{
+		{"/p/.envrc", true, WellKnownSecret},
+		{"/p/.env.local", true, WellKnownSecret},
+		{"/p/server.PEM", true, WellKnownSecret},
+		{"/p/.netrc", true, WellKnownSecret},
+		{"/p/.pgpass", true, WellKnownSecret},
+		{"/p/id_rsa", false, NotSecret},
+		{"/h/.ssh/config", false, WellKnownSecret},
+		{"/h/.git-credentials", false, WellKnownSecret},
+		{"/h/.config/beads/credentials", false, WellKnownSecret},
+		{"/p/credentials", false, NotSecret},
+		{"/run/vault-secrets/db", false, WellKnownSecret},
+		{"/p/my-secret-notes.txt", false, NotSecret},
+	}
+	for _, c := range cases {
+		if got := IsCredentialFormat(c.path); got != c.format {
+			t.Errorf("IsCredentialFormat(%q) = %v, want %v", c.path, got, c.format)
+		}
+		if got := Classify(c.path); got != c.kind {
+			t.Errorf("Classify(%q) = %v, want %v", c.path, got, c.kind)
+		}
 	}
 }
