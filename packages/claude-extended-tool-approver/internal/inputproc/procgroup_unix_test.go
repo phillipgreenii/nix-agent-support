@@ -24,7 +24,12 @@ import (
 // succeeds and returns nil, which the assertion also accepts, so this can only
 // become vacuous under load, never flaky.
 func TestKillProcessGroup_ExitedUnreapedGroup_IsProcessDone(t *testing.T) {
-	cmd := exec.Command("/usr/bin/true")
+	// Resolve via PATH: /usr/bin/true does not exist on NixOS or in the nix sandbox.
+	truePath, lerr := exec.LookPath("true")
+	if lerr != nil {
+		t.Skipf("no `true` executable on PATH: %v", lerr)
+	}
+	cmd := exec.Command(truePath)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start: %v", err)
