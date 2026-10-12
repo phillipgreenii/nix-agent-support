@@ -67,8 +67,13 @@ var nixShellSchema = CommandSchema{
 // sqlite3Schema: `sqlite3 [OPTIONS] [FILENAME [SQL...]]` (sqlite3 command-line
 // shell, https://sqlite.org/cli.html "Command-line options": `-init FILE`
 // "Read and process commands from FILE", `-cmd COMMAND` "run COMMAND before
-// reading stdin"). No sqlite3 binary exists on this host to capture --help
-// from, so the option list below is the documented one and is kept to the
+// reading stdin"). Verified 2026-10-12 (tc-9brrd) against a real SQLite 3.51.2
+// `sqlite3 -help` (pinned in internal/embeddedspecs/testdata/sqlite3-help.txt):
+// the original recall was wrong in two places - real help says `-init
+// FILENAME` (not FILE) and a single `-[no]header` line (not separate
+// `-header`/`-noheader`). Observed behavior also confirms -init and -cmd both
+// run `.shell`, an unknown option exits 1, and `-readonly` on a missing file
+// does not create it. The option list below is kept to the
 // flags the packet names plus a handful of boolean output/safety switches
 // from that same page.
 //
@@ -80,7 +85,7 @@ var nixShellSchema = CommandSchema{
 // abstains - only the flags' own effects are classified here.
 var sqlite3Schema = CommandSchema{
 	Name:       "sqlite3",
-	Provenance: "sqlite3 command-line shell documentation, https://sqlite.org/cli.html (options -init, -cmd, -readonly, -bail, -batch, -echo, -header, -noheader); no sqlite3 binary on this host to verify against, 2026-10-11",
+	Provenance: "sqlite3 -help output, verified against SQLite 3.51.2 2026-01-09 (nixpkgs#sqlite) on 2026-10-12 (tc-9brrd); https://sqlite.org/cli.html (options -init, -cmd, -readonly, -bail, -batch, -echo, -header, -noheader)",
 	Flags: map[string]FlagSpec{
 		"-init":     {Arity: ArityOne, Operand: ConfigSource},
 		"-cmd":      {Arity: ArityOne, Operand: ExecOpaque},

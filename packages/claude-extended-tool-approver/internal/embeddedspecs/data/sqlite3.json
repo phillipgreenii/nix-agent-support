@@ -4,19 +4,19 @@
   "name": "sqlite3",
   "command": {
     "name": "sqlite3",
-    "provenance": "sqlite3 command-line shell documentation, https://sqlite.org/cli.html (options -init, -cmd, -readonly, -bail, -batch, -echo, -header, -noheader); no sqlite3 binary on this host to verify against, 2026-10-11",
+    "provenance": "sqlite3 -help output, verified against SQLite 3.51.2 2026-01-09 (nixpkgs#sqlite) on 2026-10-12 (tc-9brrd); https://sqlite.org/cli.html (options -init, -cmd, -readonly, -bail, -batch, -echo, -header, -noheader)",
     "citations": {
       "provenance": {
-        "source": "sqlite3 command-line shell documentation, https://sqlite.org/cli.html (options -init, -cmd, -readonly, -bail, -batch, -echo, -header, -noheader); no sqlite3 binary on this host to verify against, 2026-10-11"
+        "source": "sqlite3 -help output, verified against SQLite 3.51.2 2026-01-09 (nixpkgs#sqlite) on 2026-10-12 (tc-9brrd); https://sqlite.org/cli.html (options -init, -cmd, -readonly, -bail, -batch, -echo, -header, -noheader)"
       },
       "stdin": {
-        "source": "sqlite3 command-line shell documentation, https://sqlite.org/cli.html (options -init, -cmd, -readonly, -bail, -batch, -echo, -header, -noheader); no sqlite3 binary on this host to verify against, 2026-10-11"
+        "source": "sqlite3 -help output, verified against SQLite 3.51.2 2026-01-09 (nixpkgs#sqlite) on 2026-10-12 (tc-9brrd); https://sqlite.org/cli.html (options -init, -cmd, -readonly, -bail, -batch, -echo, -header, -noheader)"
       },
       "stdout": {
-        "source": "sqlite3 command-line shell documentation, https://sqlite.org/cli.html (options -init, -cmd, -readonly, -bail, -batch, -echo, -header, -noheader); no sqlite3 binary on this host to verify against, 2026-10-11"
+        "source": "sqlite3 -help output, verified against SQLite 3.51.2 2026-01-09 (nixpkgs#sqlite) on 2026-10-12 (tc-9brrd); https://sqlite.org/cli.html (options -init, -cmd, -readonly, -bail, -batch, -echo, -header, -noheader)"
       },
       "unknownFlag": {
-        "source": "sqlite3 command-line shell documentation, https://sqlite.org/cli.html (options -init, -cmd, -readonly, -bail, -batch, -echo, -header, -noheader); no sqlite3 binary on this host to verify against, 2026-10-11"
+        "source": "sqlite3 -help output, verified against SQLite 3.51.2 2026-01-09 (nixpkgs#sqlite) on 2026-10-12 (tc-9brrd); https://sqlite.org/cli.html (options -init, -cmd, -readonly, -bail, -batch, -echo, -header, -noheader)"
       }
     },
     "flags": {
@@ -29,7 +29,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "sqlite3 -help (sqlite3 command-line shell; https://sqlite.org/cli.html, \"Command-line options\"); no sqlite3 binary on this host, text recalled from the documentation page: \"-bail stop after hitting an error\""
+          "source": "sqlite3 -help, SQLite 3.51.2 (verified 2026-10-12, tc-9brrd; https://sqlite.org/cli.html \"Command-line options\"): \"-bail stop after hitting an error\""
         }
       },
       "-batch": {
@@ -41,7 +41,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "sqlite3 -help (sqlite3 command-line shell; https://sqlite.org/cli.html, \"Command-line options\"); no sqlite3 binary on this host, text recalled from the documentation page: \"-batch force batch I/O\""
+          "source": "sqlite3 -help, SQLite 3.51.2 (verified 2026-10-12, tc-9brrd; https://sqlite.org/cli.html \"Command-line options\"): \"-batch force batch I/O\""
         }
       },
       "-cmd": {
@@ -53,7 +53,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "sqlite3 -help (sqlite3 command-line shell; https://sqlite.org/cli.html, \"Command-line options\"); no sqlite3 binary on this host, text recalled from the documentation page: \"-cmd COMMAND run \\\"COMMAND\\\" before reading stdin\""
+          "source": "sqlite3 -help, SQLite 3.51.2 (verified 2026-10-12, tc-9brrd; https://sqlite.org/cli.html \"Command-line options\"): \"-cmd COMMAND run \\\"COMMAND\\\" before reading stdin\""
         }
       },
       "-echo": {
@@ -65,7 +65,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "sqlite3 -help (sqlite3 command-line shell; https://sqlite.org/cli.html, \"Command-line options\"); no sqlite3 binary on this host, text recalled from the documentation page: \"-echo print inputs before execution\""
+          "source": "sqlite3 -help, SQLite 3.51.2 (verified 2026-10-12, tc-9brrd; https://sqlite.org/cli.html \"Command-line options\"): \"-echo print inputs before execution\""
         }
       },
       "-header": {
@@ -77,7 +77,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "sqlite3 -help (sqlite3 command-line shell; https://sqlite.org/cli.html, \"Command-line options\"); no sqlite3 binary on this host, text recalled from the documentation page: \"-header turn headers on\""
+          "source": "sqlite3 -help, SQLite 3.51.2 (verified 2026-10-12, tc-9brrd; https://sqlite.org/cli.html \"Command-line options\"): \"-[no]header turn headers on or off\""
         }
       },
       "-init": {
@@ -89,7 +89,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "sqlite3 -help (sqlite3 command-line shell; https://sqlite.org/cli.html, \"Command-line options\"); no sqlite3 binary on this host, text recalled from the documentation page: \"-init FILE read/process named file\""
+          "source": "sqlite3 -help, SQLite 3.51.2 (verified 2026-10-12, tc-9brrd; https://sqlite.org/cli.html \"Command-line options\"): \"-init FILENAME read/process named file\""
         }
       },
       "-noheader": {
@@ -101,7 +101,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "sqlite3 -help (sqlite3 command-line shell; https://sqlite.org/cli.html, \"Command-line options\"); no sqlite3 binary on this host, text recalled from the documentation page: \"-noheader turn headers off\""
+          "source": "sqlite3 -help, SQLite 3.51.2 (verified 2026-10-12, tc-9brrd; https://sqlite.org/cli.html \"Command-line options\"): \"-[no]header turn headers on or off\""
         }
       },
       "-readonly": {
@@ -113,7 +113,7 @@
           "kind": "none"
         },
         "citation": {
-          "source": "sqlite3 -help (sqlite3 command-line shell; https://sqlite.org/cli.html, \"Command-line options\"); no sqlite3 binary on this host, text recalled from the documentation page: \"-readonly open the database read-only\""
+          "source": "sqlite3 -help, SQLite 3.51.2 (verified 2026-10-12, tc-9brrd; https://sqlite.org/cli.html \"Command-line options\"): \"-readonly open the database read-only\""
         }
       }
     },
