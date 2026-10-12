@@ -34,7 +34,9 @@
 package claudecodeadapter
 
 import (
+	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmddesc"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/effectgraph"
@@ -196,6 +198,139 @@ func BuildFileToolGraph(input *hookio.HookInput) (structural, interpreted effect
 	return g, g, nil
 }
 
+// IsReadSearchTool reports whether toolName is one BuildReadToolGraph
+// handles (Read, Glob, Grep) — the read-only counterparts of the file-edit
+// tools above (Phase 2k, tc-o14i5.3.13).
+func IsReadSearchTool(toolName string) bool {
+	switch toolName {
+	case "Read", "Glob", "Grep":
+		return true
+	}
+	return false
+}
+
+// globMeta lists the characters that end a glob pattern's literal directory
+// prefix: the standard glob set `*`, `?`, `[`, `{` (Claude Code's Glob tool
+// documents shell-style globs such as "**/*.js" and "src/**/*.ts"). NOT
+// verified against a Claude Code binary (none available to this packet);
+// the set is the conservative superset, so an unlisted metacharacter could
+// only make the extracted prefix LONGER than the true literal prefix.
+const globMeta = "*?[{"
+
+// globLiteralPrefix returns the leading run of pattern's path components
+// that contain no glob metacharacter, rejoined with "/" (a leading "/" is
+// preserved; ".." components are kept verbatim so the policy layer's
+// symlink-aware resolution, not a lexical Clean here, decides where they
+// lead). dynamic is true when a glob component precedes a ".." component
+// (e.g. "*/../x"): the literal prefix then does not bound where the ".."
+// can lead, so the caller reports the path as unresolvable (P3).
+func globLiteralPrefix(pattern string) (prefix string, dynamic bool) {
+	sawGlob := false
+	var lit []string
+	for _, c := range strings.Split(pattern, "/") {
+		if strings.ContainsAny(c, globMeta) {
+			sawGlob = true
+			continue
+		}
+		if sawGlob && c == ".." {
+			dynamic = true
+		}
+		if !sawGlob {
+			lit = append(lit, c)
+		}
+	}
+	prefix = strings.Join(lit, "/")
+	if prefix == "" && strings.HasPrefix(pattern, "/") {
+		prefix = "/"
+	}
+	return prefix, dynamic
+}
+
+// readSearchPathEffect derives the single read-only path effect for a
+// Read/Glob/Grep call.
+//
+//   - Read: tool_input.file_path, exactly as Write/Edit.
+//   - Grep: tool_input.path, defaulting to the cwd (".", Source "implicit",
+//     mirroring cmddesc's find handling of an omitted start path); the Grep
+//     pattern is a regex over contents, not a path.
+//   - Glob: an absolute pattern IS the path (the search `path` is ignored
+//     for resolution); a relative pattern is rooted at tool_input.path
+//     (default "."). The glob's literal directory prefix is the path
+//     effect; ".." components are preserved for the K7 resolver (pathspec
+//     symlink/R2 boundary), and a glob-before-".." pattern is Dynamic
+//     (Unknown, hence Abstain).
+func readSearchPathEffect(input *hookio.HookInput) (cmddesc.Effect, error) {
+	e := cmddesc.Effect{Kind: cmddesc.EffectPath, Access: cmddesc.AccessRead}
+	switch input.ToolName {
+	case "Read":
+		p, err := input.FilePath()
+		if err != nil {
+			return e, err
+		}
+		e.Path, e.Source = p, "tool_input.file_path"
+	case "Grep":
+		p, err := input.SearchPath()
+		if err != nil {
+			return e, err
+		}
+		e.Path, e.Source = p, "tool_input.path"
+		if p == "" {
+			e.Path, e.Source = ".", "implicit"
+		}
+	case "Glob":
+		dir, err := input.SearchPath()
+		if err != nil {
+			return e, err
+		}
+		var ti hookio.SearchToolInput
+		if err := json.Unmarshal(input.ToolInput, &ti); err != nil {
+			return e, fmt.Errorf("parse Glob tool_input: %w", err)
+		}
+		prefix, dynamic := globLiteralPrefix(ti.Pattern)
+		e.Dynamic = dynamic
+		e.Source = "tool_input.pattern"
+		if strings.HasPrefix(ti.Pattern, "/") {
+			e.Path = prefix
+		} else {
+			if dir == "" {
+				dir = "."
+			}
+			e.Path = dir
+			if prefix != "" {
+				e.Path = strings.TrimSuffix(dir, "/") + "/" + prefix
+			}
+		}
+	default:
+		return e, fmt.Errorf("%s is not a read/search tool", input.ToolName)
+	}
+	return e, nil
+}
+
+// BuildReadToolGraph builds the one-node graph for a Read/Glob/Grep
+// HookInput: one command node with one AccessRead path effect (see
+// readSearchPathEffect) plus the File node and Reads edge. Structural and
+// interpreted graphs are the same value, as in BuildFileToolGraph.
+func BuildReadToolGraph(input *hookio.HookInput) (structural, interpreted effectgraph.Graph, err error) {
+	if !IsReadSearchTool(input.ToolName) {
+		return effectgraph.Graph{}, effectgraph.Graph{}, fmt.Errorf("claudecodeadapter: %s is not a read/search tool", input.ToolName)
+	}
+	e, err := readSearchPathEffect(input)
+	if err != nil {
+		return effectgraph.Graph{}, effectgraph.Graph{}, fmt.Errorf("claudecodeadapter: %w", err)
+	}
+	const commandID, fileID = "n0", "n1"
+	g := effectgraph.Graph{
+		Nodes: []effectgraph.Node{
+			{ID: commandID, Kind: effectgraph.NodeCommand, Label: input.ToolName + "(" + e.Path + ")", Effects: []cmddesc.Effect{e}},
+			{ID: fileID, Kind: effectgraph.NodeFile, Label: e.Path},
+		},
+		Edges: []effectgraph.Edge{
+			{From: commandID, To: fileID, Kind: effectgraph.EdgeReads, Label: e.Access.String()},
+		},
+	}
+	return g, g, nil
+}
+
 // Evaluate is the composition root: routes a Bash HookInput through
 // BuildBashRequest + effectpolicy.Evaluate (shell parse, unchanged spike
 // behaviour) and a Write/Edit/MultiEdit HookInput through
@@ -216,6 +351,13 @@ func Evaluate(input *hookio.HookInput, cfg RequestConfig, reg cmddesc.Registry, 
 		return effectpolicy.Evaluate(req, reg, policies, graphPolicies), nil
 	case IsFileEditTool(input.ToolName):
 		structural, interpreted, err := BuildFileToolGraph(input)
+		if err != nil {
+			return evalcontract.Response{}, err
+		}
+		pctx := effectpolicy.BuildPolicyContext(request(input, cfg))
+		return effectpolicy.EvaluateGraph(structural, interpreted, policies, graphPolicies, pctx), nil
+	case IsReadSearchTool(input.ToolName):
+		structural, interpreted, err := BuildReadToolGraph(input)
 		if err != nil {
 			return evalcontract.Response{}, err
 		}

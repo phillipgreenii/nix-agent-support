@@ -278,7 +278,7 @@ func TestEvaluate_Bash_RoutesThroughShellPath(t *testing.T) {
 }
 
 // TestEvaluate_UnsupportedTool_Errors: a tool neither Bash nor a file-edit
-// tool (e.g. Glob) is not modeled by this adapter and must error, not
+// tool (e.g. WebFetch) is not modeled by this adapter and must error, not
 // silently approve or abstain.
 func TestEvaluate_UnsupportedTool_Errors(t *testing.T) {
 	root := fixture(t)
@@ -286,7 +286,7 @@ func TestEvaluate_UnsupportedTool_Errors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	input := &hookio.HookInput{CWD: root, ToolName: "Glob", ToolInput: raw}
+	input := &hookio.HookInput{CWD: root, ToolName: "WebFetch", ToolInput: raw}
 	if _, err := Evaluate(input, RequestConfig{ProjectRoot: root}, cmddesc.DefaultRegistry(), effectpolicy.DefaultPolicies(), effectpolicy.DefaultGraphPolicies()); err == nil {
 		t.Fatal("expected an error for a tool this adapter does not model")
 	}
