@@ -169,6 +169,14 @@
           pg-connector = final.callPackage ./packages/pg-connector {
             inherit (goBuilders) mkGoApp;
           };
+          # pg-connector-github: the daemon-backed GitHub connector (program
+          # pg2-z5fax) — one more mkGoApp call over the SAME packages/pg-connector
+          # module (shared src + gomod2nixToml), from
+          # packages/pg-connector/pg-connector-github.nix. The old pr/ci GitHub
+          # backends below stay for rollback until Phase 6b.
+          pg-connector-github = final.callPackage ./packages/pg-connector/pg-connector-github.nix {
+            inherit (goBuilders) mkGoApp;
+          };
           # pg-connector-pr-github: the pr capability's Tier-2 GitHub backend
           # (bead pg2-2j5ac.4) — a second mkGoApp call over the SAME
           # packages/pg-connector module (shared src + gomod2nixToml) as the
@@ -5308,6 +5316,27 @@
                       and (.ops | index("capabilities")) != null
                     ' >/dev/null || {
                       echo "FAIL: pg-connector-pr-github capabilities response malformed: $resp" >&2
+                      exit 1
+                    }
+                    touch $out
+                  '';
+
+              # The daemon-backed GitHub connector (program pg2-z5fax): the same
+              # smoke as the pr check above, through the pr client mode. The
+              # capabilities answer is compiled in and needs no daemon, but the
+              # binary loads and validates --config first, so the golden example
+              # config is passed.
+              test-pg-connector-github-capabilities =
+                pkgs.runCommand "pg-connector-github-capabilities" { nativeBuildInputs = [ pkgs.jq ]; }
+                  ''
+                    resp=$(echo '{"op":"capabilities"}' | ${pkgs.pg-connector-github}/bin/pg-connector-github --config ${./packages/pg-connector/cmd/pg-connector-github/internal/config/testdata/example.json} pr)
+                    echo "$resp" | jq -e '
+                      .protocolVersion == 1
+                      and (.schemaVersions.pr | type) == "number"
+                      and (.ops | index("capabilities")) != null
+                      and (.ops | index("list")) != null
+                    ' >/dev/null || {
+                      echo "FAIL: pg-connector-github capabilities response malformed: $resp" >&2
                       exit 1
                     }
                     touch $out
@@ -11679,6 +11708,7 @@
               pa-monitor-decorator-scope
               pg-pr
               pg-connector
+              pg-connector-github
               pg-connector-pr-github
               pg-connector-ci-github-actions
               pg-connector-issue-beads

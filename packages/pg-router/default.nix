@@ -23,6 +23,7 @@
   # must also be on THIS wrapper's PATH. Each resolves automatically via
   # callPackage against the matching `final.pg-connector-*` overlay entry,
   # same as `pg-connector` above.
+  pg-connector-github,
   pg-connector-pr-github,
   pg-connector-ci-github-actions,
   pg-connector-issue-beads,
@@ -110,8 +111,10 @@ mkGoApp {
   #             `ps eww`, had ccpool/bd/pg-pr/jq but no pg-connector bin
   #             dir, so every producer tick for those sources failed with
   #             "exec: pg-connector: executable file not found in $PATH").
-  #   pg-connector-pr-github/-ci-github-actions/-issue-beads/-issue-jira/
-  #   -scm-git -> pg-connector's own Tier-2 backend binaries (ADR 0062),
+  #   pg-connector-github/-pr-github/-ci-github-actions/-issue-beads/
+  #   -issue-jira/-scm-git -> pg-connector's own Tier-2 backend binaries
+  #             (ADR 0062; pg-connector-github is the daemon-backed GitHub
+  #             connector's pr/ci client binary, program pg2-z5fax),
   #             which `pg-connector` itself execs by name (again ambient
   #             $PATH plugin discovery, again inheriting THIS wrapper's
   #             PATH) once a query actually reaches it. Even with the
@@ -143,6 +146,7 @@ mkGoApp {
         pg-pr
         jq
         pg-connector
+        pg-connector-github
         pg-connector-pr-github
         pg-connector-ci-github-actions
         pg-connector-issue-beads
