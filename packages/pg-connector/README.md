@@ -196,10 +196,14 @@ packages/pg-connector/
     scriptout/    the wire protocol itself (envelope, versioning, error taxonomy, serve loop)
     eventlog/     shared writer mechanics behind each backend's OWN event log (see below)
     connectord/   shared library for a daemon-backed connector; store/ is its SQLite store (WAL,
-                  versioned migrations, move-aside of a corrupt store, refusal of a newer one)
+                  versioned migrations, move-aside of a corrupt store, refusal of a newer one);
+                  governor/ is its budget governor (three buckets on one token, priority classes
+                  1 to 5, hard caps, background share, reserve, secondary-limit pauses, spend
+                  kept in the store's budget table so a restart keeps the hour in progress)
   cmd/
     pg-connector/                        umbrella; imports pkg/schema + pkg/provider + pkg/scriptout only
-    pg-connector-github/                 daemon-backed GitHub connector (serve, pr, ci modes); internal/config loads its rendered config
+    pg-connector-github/                 daemon-backed GitHub connector (serve, pr, ci modes); internal/config loads its rendered config;
+                                         internal/ratefeed feeds the governor (GraphQL rateLimit, `gh api --include` headers)
     pg-connector-pr-github/internal/     backend-private
     pg-connector-issue-beads/internal/
     pg-connector-ci-github-actions/internal/
