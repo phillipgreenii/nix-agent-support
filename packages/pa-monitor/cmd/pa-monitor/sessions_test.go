@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	claudetranscript "github.com/phillipgreenii/claude-transcript"
 	"github.com/phillipgreenii/pa-monitor/internal/config"
 	"github.com/phillipgreenii/pa-monitor/internal/core/account"
 	"github.com/phillipgreenii/pa-monitor/internal/core/usage"
@@ -35,8 +36,15 @@ func defaultPrices(t *testing.T) usage.PriceTable {
 
 func renderSessions(t *testing.T, since, before time.Time, maxChars int) []byte {
 	t.Helper()
+	return renderSessionsWith(t, since, before, maxChars, claudetranscript.SessionsOptions{})
+}
+
+// renderSessionsWith is renderSessions with explicit claude-transcript options
+// (the cache location and stats sink).
+func renderSessionsWith(t *testing.T, since, before time.Time, maxChars int, opts claudetranscript.SessionsOptions) []byte {
+	t.Helper()
 	var buf bytes.Buffer
-	if err := writeSessions(&buf, sessionsFixtureProjects, since, before, defaultPrices(t), maxChars); err != nil {
+	if err := writeSessions(&buf, sessionsFixtureProjects, since, before, defaultPrices(t), maxChars, opts); err != nil {
 		t.Fatalf("writeSessions: %v", err)
 	}
 	return buf.Bytes()
@@ -83,6 +91,52 @@ func TestSessionsCharacterization(t *testing.T) {
 	}
 	if !bytes.Equal(got, want) {
 		t.Errorf("output differs from %s (rerun with -update-sessions-golden after reviewing):\n--- got ---\n%s\n--- want ---\n%s", sessionsGoldenPath, got, want)
+	}
+}
+
+// The summary cache changes nothing in the output: a cold and a warm cached
+// render both match the golden file byte for byte, and the warm one reads no
+// transcript.
+func TestSessionsCachedRenderMatchesGolden(t *testing.T) {
+	want, err := os.ReadFile(sessionsGoldenPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache := t.TempDir()
+	for _, pass := range []string{"cold", "warm"} {
+		var st claudetranscript.SessionsStats
+		got := renderSessionsWith(t, time.Time{}, time.Time{}, 200, claudetranscript.SessionsOptions{CacheDir: cache, Stats: &st})
+		if !bytes.Equal(got, want) {
+			t.Errorf("%s cached output differs from %s:\n--- got ---\n%s\n--- want ---\n%s", pass, sessionsGoldenPath, got, want)
+		}
+		if pass == "cold" && (st.Parsed != st.Files || st.CacheWrites != 1) {
+			t.Errorf("cold stats = %+v, want every file parsed and one cache write", st)
+		}
+		if pass == "warm" && (st.Parsed != 0 || st.Reused != st.Files || st.CacheWrites != 0) {
+			t.Errorf("warm stats = %+v, want 0 parsed and no write", st)
+		}
+	}
+}
+
+func TestSessionsCacheDir(t *testing.T) {
+	env := func(v string) func(string) string {
+		return func(k string) string {
+			if k == "XDG_CACHE_HOME" {
+				return v
+			}
+			return ""
+		}
+	}
+	home := filepath.FromSlash("/h/me")
+	cases := []struct{ xdg, want string }{
+		{filepath.FromSlash("/var/cache-root"), filepath.FromSlash("/var/cache-root/pa-monitor")},
+		{"", filepath.FromSlash("/h/me/.cache/pa-monitor")},
+		{"relative/cache", filepath.FromSlash("/h/me/.cache/pa-monitor")},
+	}
+	for _, c := range cases {
+		if got := sessionsCacheDir(env(c.xdg), home); got != c.want {
+			t.Errorf("sessionsCacheDir(XDG_CACHE_HOME=%q) = %q, want %q", c.xdg, got, c.want)
+		}
 	}
 }
 
@@ -219,7 +273,7 @@ func TestTruncateRunes(t *testing.T) {
 
 func TestParseSessionsArgs(t *testing.T) {
 	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
-	since, before, err := parseSessionsArgs([]string{"--since", "7d", "--before", "2026-09-24T00:00:00Z", "--json"}, now)
+	since, before, stats, err := parseSessionsArgs([]string{"--since", "7d", "--before", "2026-09-24T00:00:00Z", "--json"}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,18 +283,24 @@ func TestParseSessionsArgs(t *testing.T) {
 	if want := time.Date(2026, 9, 24, 0, 0, 0, 0, time.UTC); !before.Equal(want) {
 		t.Errorf("before = %v, want %v", before, want)
 	}
-	since, before, err = parseSessionsArgs(nil, now)
-	if err != nil || !since.IsZero() || !before.IsZero() {
-		t.Errorf("no args: got (%v, %v, %v), want open bounds", since, before, err)
+	if stats {
+		t.Error("stats = true without --stats")
+	}
+	since, before, stats, err = parseSessionsArgs(nil, now)
+	if err != nil || !since.IsZero() || !before.IsZero() || stats {
+		t.Errorf("no args: got (%v, %v, %v, %v), want open bounds and no stats", since, before, stats, err)
+	}
+	if _, _, stats, err := parseSessionsArgs([]string{"--stats", "--since", "1d"}, now); err != nil || !stats {
+		t.Errorf("--stats: got (%v, %v), want stats", stats, err)
 	}
 	for _, bad := range [][]string{
 		{"--since", "not-a-time"}, {"--before", "nope"}, {"--since"}, {"--before"}, {"stray"},
 	} {
-		if _, _, err := parseSessionsArgs(bad, now); err == nil {
+		if _, _, _, err := parseSessionsArgs(bad, now); err == nil {
 			t.Errorf("parseSessionsArgs(%v) = nil error, want an error", bad)
 		}
 	}
-	if _, _, err := parseSessionsArgs([]string{"--since", "not-a-time"}, now); err == nil || !strings.Contains(err.Error(), "--since") {
+	if _, _, _, err := parseSessionsArgs([]string{"--since", "not-a-time"}, now); err == nil || !strings.Contains(err.Error(), "--since") {
 		t.Errorf("error %v should name --since", err)
 	}
 }
@@ -254,7 +314,8 @@ func TestSessionsExitCodeAndHelp(t *testing.T) {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}
 	home := t.TempDir()
-	env := append(os.Environ(), "HOME="+home, "XDG_CONFIG_HOME="+filepath.Join(home, ".config"))
+	env := append(os.Environ(), "HOME="+home, "XDG_CONFIG_HOME="+filepath.Join(home, ".config"),
+		"XDG_CACHE_HOME="+filepath.Join(home, ".cache"))
 
 	cmd := exec.Command(bin, "sessions", "--since", "not-a-time")
 	cmd.Env = env
@@ -279,6 +340,9 @@ func TestSessionsExitCodeAndHelp(t *testing.T) {
 	if strings.TrimSpace(string(out)) != `{"sessions":[]}` {
 		t.Errorf("empty home output = %s", out)
 	}
+	if _, err := os.Stat(filepath.Join(home, ".cache")); !os.IsNotExist(err) {
+		t.Errorf("an empty home must not create a cache (%v)", err)
+	}
 
 	cmd = exec.Command(bin, "--help")
 	cmd.Env = env
@@ -288,5 +352,65 @@ func TestSessionsExitCodeAndHelp(t *testing.T) {
 	}
 	if !strings.Contains(string(help), "\n  sessions\n") {
 		t.Errorf("--help does not list sessions:\n%s", help)
+	}
+
+	// A home holding the fixture tree: the first --stats run reads every
+	// transcript and writes the cache under XDG_CACHE_HOME/pa-monitor (never
+	// under the Claude home); the second reads none and prints the same JSON.
+	copyTree(t, sessionsFixtureProjects, filepath.Join(home, ".claude", "projects"))
+	var outs [2][]byte
+	var errs [2]string
+	for i := range outs {
+		cmd = exec.Command(bin, "sessions", "--json", "--stats")
+		cmd.Env = env
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		if outs[i], err = cmd.Output(); err != nil {
+			t.Fatalf("sessions --stats run %d: %v\n%s", i+1, err, stderr.String())
+		}
+		errs[i] = stderr.String()
+	}
+	if !bytes.Equal(outs[0], outs[1]) || len(decodeSessions(t, outs[0]).Sessions) == 0 {
+		t.Errorf("cold and warm output differ or are empty:\n%s\n%s", outs[0], outs[1])
+	}
+	if !strings.Contains(errs[0], " parsed=5 ") || !strings.Contains(errs[0], " cache_writes=1 ") {
+		t.Errorf("cold stats line %q, want parsed=5 and cache_writes=1", errs[0])
+	}
+	if !strings.Contains(errs[1], " parsed=0 ") || !strings.Contains(errs[1], " reused=5 ") || !strings.Contains(errs[1], " cache_writes=0 ") {
+		t.Errorf("warm stats line %q, want parsed=0 reused=5 cache_writes=0", errs[1])
+	}
+	caches, err := filepath.Glob(filepath.Join(home, ".cache", "pa-monitor", "sessions-*.cache"))
+	if err != nil || len(caches) != 1 {
+		t.Errorf("cache files under XDG_CACHE_HOME/pa-monitor = %v (%v), want exactly one", caches, err)
+	}
+	claudeEntries, err := os.ReadDir(filepath.Join(home, ".claude"))
+	if err != nil || len(claudeEntries) != 1 || claudeEntries[0].Name() != "projects" {
+		t.Errorf("the Claude home gained entries: %v (%v)", claudeEntries, err)
+	}
+}
+
+// copyTree copies the regular files under src into dst, creating directories.
+func copyTree(t *testing.T, src, dst string) {
+	t.Helper()
+	err := filepath.WalkDir(src, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, p)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, b, 0o644)
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }

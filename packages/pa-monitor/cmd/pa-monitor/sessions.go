@@ -1,7 +1,9 @@
 // sessions.go: the `sessions` subcommand — one JSON record per Claude Code
 // session, built from the transcript tree (claude-transcript's Sessions
 // rollup) rather than from daemon state or PID files. It therefore works when
-// the daemon is down and for ended sessions whose PID files are gone.
+// the daemon is down and for ended sessions whose PID files are gone. A
+// per-file summary cache (sessionsCacheDir) spares re-reading the transcripts
+// that did not change since the previous call; it never changes the output.
 //
 // Output is ONE JSON document, {"sessions": [...]}, records ordered by
 // started_at ascending. The connector backend decodes exactly this shape (see
@@ -57,36 +59,51 @@ type sessionsJSONDoc struct {
 
 // parseSessionsArgs parses `sessions`' own argv: an optional "--json" flag
 // (accepted but not required — sessions has no text mode, exactly like
-// search) and optional "--since <bound>"/"--before <bound>" value flags, in
-// any order. An absent bound is the zero time.Time (open on that side). now is
+// search), optional "--since <bound>"/"--before <bound>" value flags and an
+// optional "--stats" flag (one line of scan statistics on stderr), in any
+// order. An absent bound is the zero time.Time (open on that side). now is
 // injected for testability; production callers pass time.Now().UTC().
-func parseSessionsArgs(args []string, now time.Time) (since, before time.Time, err error) {
+func parseSessionsArgs(args []string, now time.Time) (since, before time.Time, stats bool, err error) {
 	rest, _ := stripJSONFlag(args)
 	for i := 0; i < len(rest); i++ {
 		switch rest[i] {
 		case "--since":
 			if i+1 >= len(rest) {
-				return time.Time{}, time.Time{}, errors.New("sessions: --since requires a value")
+				return time.Time{}, time.Time{}, false, errors.New("sessions: --since requires a value")
 			}
 			since, err = parseTimeBound(rest[i+1], now)
 			if err != nil {
-				return time.Time{}, time.Time{}, fmt.Errorf("sessions: --since: %w", err)
+				return time.Time{}, time.Time{}, false, fmt.Errorf("sessions: --since: %w", err)
 			}
 			i++
 		case "--before":
 			if i+1 >= len(rest) {
-				return time.Time{}, time.Time{}, errors.New("sessions: --before requires a value")
+				return time.Time{}, time.Time{}, false, errors.New("sessions: --before requires a value")
 			}
 			before, err = parseTimeBound(rest[i+1], now)
 			if err != nil {
-				return time.Time{}, time.Time{}, fmt.Errorf("sessions: --before: %w", err)
+				return time.Time{}, time.Time{}, false, fmt.Errorf("sessions: --before: %w", err)
 			}
 			i++
+		case "--stats":
+			stats = true
 		default:
-			return time.Time{}, time.Time{}, fmt.Errorf("sessions: unexpected argument %q", rest[i])
+			return time.Time{}, time.Time{}, false, fmt.Errorf("sessions: unexpected argument %q", rest[i])
 		}
 	}
-	return since, before, nil
+	return since, before, stats, nil
+}
+
+// sessionsCacheDir is where `sessions` keeps claude-transcript's per-file
+// summary cache: $XDG_CACHE_HOME/pa-monitor, or <home>/.cache/pa-monitor when
+// XDG_CACHE_HOME is unset or not absolute (the PR cache's convention). Either
+// lies outside the Claude home, which claude-transcript also enforces.
+func sessionsCacheDir(getenv func(string) string, home string) string {
+	base := getenv("XDG_CACHE_HOME")
+	if !filepath.IsAbs(base) {
+		base = filepath.Join(home, ".cache")
+	}
+	return filepath.Join(base, "pa-monitor")
 }
 
 // truncateRunes cuts s to at most max runes. When it cuts, the last rune of the
@@ -135,10 +152,11 @@ func sessionCost(prices usage.PriceTable, modelTokens map[string]claudetranscrip
 
 // writeSessions is the exit-free core of `sessions`: it walks projectsDir for
 // sessions whose first event is in [since, before) and writes the document to
-// w. An unreadable transcript's first prompt degrades to "" rather than
+// w. opts carries the summary cache location (empty: uncached) and the stats
+// sink. An unreadable transcript's first prompt degrades to "" rather than
 // failing the whole listing.
-func writeSessions(w io.Writer, projectsDir string, since, before time.Time, prices usage.PriceTable, promptMaxChars int) error {
-	recs, err := claudetranscript.Sessions(projectsDir, since, before)
+func writeSessions(w io.Writer, projectsDir string, since, before time.Time, prices usage.PriceTable, promptMaxChars int, opts claudetranscript.SessionsOptions) error {
+	recs, err := claudetranscript.SessionsWithOptions(projectsDir, since, before, opts)
 	if err != nil {
 		return err
 	}
@@ -174,10 +192,13 @@ func writeSessions(w io.Writer, projectsDir string, since, before time.Time, pri
 }
 
 // runSessions implements the `sessions` subcommand: `pa-monitor sessions
-// [--json] [--since <bound>] [--before <bound>]`. Exit codes follow search:
-// 3 for an argument error, 2 for a runtime error, 0 otherwise.
+// [--json] [--since <bound>] [--before <bound>] [--stats]`. Exit codes follow
+// search: 3 for an argument error, 2 for a runtime error, 0 otherwise. The
+// per-file summary cache lives in sessionsCacheDir; a cache problem never
+// fails the listing.
 func runSessions(args []string) {
-	since, before, err := parseSessionsArgs(args, time.Now().UTC())
+	start := time.Now()
+	since, before, wantStats, err := parseSessionsArgs(args, time.Now().UTC())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(3)
@@ -194,8 +215,14 @@ func runSessions(args []string) {
 	}
 	projectsDir := filepath.Join(home, ".claude", "projects")
 	prices := account.LoadAccount(cfg).PriceTable()
-	if err := writeSessions(os.Stdout, projectsDir, since, before, prices, cfg.FirstPromptMaxChars); err != nil {
+	var st claudetranscript.SessionsStats
+	opts := claudetranscript.SessionsOptions{CacheDir: sessionsCacheDir(os.Getenv, home), Stats: &st}
+	if err := writeSessions(os.Stdout, projectsDir, since, before, prices, cfg.FirstPromptMaxChars, opts); err != nil {
 		fmt.Fprintf(os.Stderr, "sessions: %v\n", err)
 		os.Exit(2)
+	}
+	if wantStats {
+		fmt.Fprintf(os.Stderr, "sessions: files=%d parsed=%d reused=%d cache_writes=%d cache_bytes=%d elapsed_ms=%d\n",
+			st.Files, st.Parsed, st.Reused, st.CacheWrites, st.CacheBytes, time.Since(start).Milliseconds())
 	}
 }

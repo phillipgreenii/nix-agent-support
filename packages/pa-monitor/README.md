@@ -355,6 +355,15 @@ A single-path `command` with no arguments and no `[decorator.env]` behaves exact
 | PID lock                          | same directory as the socket, file `daemon.pid`                                                      |
 | Runtime state (caffeinate toggle) | `$XDG_STATE_HOME/pa-monitor/runtime.json`                                                            |
 | Daemon stderr (LaunchAgent)       | `$XDG_STATE_HOME/pa-monitor/launchd-stderr.log`                                                      |
+| `sessions` summary cache          | `$XDG_CACHE_HOME/pa-monitor/sessions-<hash>.cache` (`~/.cache` when `XDG_CACHE_HOME` is unset)       |
+
+`pa-monitor sessions` keeps one summary per transcript file in that cache (claude-transcript's
+`SessionsWithOptions`), so a call re-reads only the transcripts whose size or modification time
+changed; every transcript still takes part in the resume/fork merge, so the output is the same as
+an uncached scan. A cold call checkpoints the cache every few seconds, so a call killed by a
+caller's deadline keeps most of what it read. The cache is disposable: deleting it only costs one
+full re-read, and a corrupt or outdated file is ignored and rebuilt. `sessions --stats` prints one
+line to stderr with the files listed, parsed and reused, the cache writes and the cache size.
 
 ## Profiling (pprof)
 

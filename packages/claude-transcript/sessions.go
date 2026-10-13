@@ -7,6 +7,7 @@ package claudetranscript
 import (
 	"encoding/json"
 	"hash/fnv"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -87,12 +88,82 @@ type SessionRecord struct {
 //
 // A file is scanned exactly once and never skipped on its modification time: a
 // resumed session's original file can be older than since while the session
-// still resolves through it.
+// still resolves through it. Message ids and event uuids are compared by their
+// 64-bit FNV-1a hashes.
+//
+// Sessions reads every file on every call; SessionsWithOptions can keep a
+// per-file summary cache so a call re-reads only the files that changed.
 func Sessions(projectsDir string, since, before time.Time) ([]SessionRecord, error) {
+	return SessionsWithOptions(projectsDir, since, before, SessionsOptions{})
+}
+
+// SessionsOptions tunes SessionsWithOptions. The zero value is the uncached
+// scan Sessions performs.
+type SessionsOptions struct {
+	// CacheDir, when non-empty, is a directory in which calls keep one summary
+	// per transcript file between calls (see SessionsWithOptions). The caller
+	// chooses it: this library assumes no location. It must lie outside the
+	// Claude home holding projectsDir (projectsDir's parent directory); a
+	// CacheDir inside it is ignored and the call runs uncached. It is created
+	// (mode 0700) when missing.
+	CacheDir string
+	// Stats, when non-nil, receives what the call did.
+	Stats *SessionsStats
+
+	// Test seams, settable only from this package's tests.
+	checkpointEvery time.Duration     // 0: defaultCheckpointEvery; negative: after every file read
+	onCheckpoint    func(entries int) // called after each checkpoint write
+}
+
+// SessionsStats reports one SessionsWithOptions call.
+type SessionsStats struct {
+	Files       int   // transcript files listed under projectsDir
+	Parsed      int   // files opened and read by this call
+	Reused      int   // files whose summary came from the cache, not read
+	CacheWrites int   // cache files written: checkpoints plus the final write
+	CacheBytes  int64 // size of the cache file last loaded or written; 0 when none
+}
+
+// SessionsWithOptions is Sessions with an optional persistent per-file summary
+// cache in opts.CacheDir. With a cache, every transcript is still listed and
+// stat'ed, but only a file whose size or modification time (in nanoseconds)
+// differs from its cached entry, or that the cache does not hold, is opened and
+// read; every file, read or cached, still takes part in the resume, compact and
+// fork merge, so the result equals what Sessions returns for the same tree. One
+// cache file serves one projectsDir, and its entries are keyed on the file's
+// path, size and mtime; entries for files that are gone are dropped the next
+// time the cache is written. A cached summary stays in use while a file's size
+// and mtime are unchanged, even if the file's permissions change in between.
+//
+// The cache is written atomically (a temporary file in CacheDir renamed over
+// the old one), so concurrent callers sharing a CacheDir never read a partial
+// file; the last writer wins and a lost write only costs re-reading. While it
+// is still reading files, a long call also writes checkpoints every few
+// seconds, so a call killed part-way leaves the files it finished for the next
+// call. A cache file that is missing, unreadable, truncated, corrupt, of another
+// format version or written for another projectsDir is ignored and rebuilt, and
+// a cache that cannot be written is skipped: no cache problem is ever an error.
+// A call over a missing or empty tree touches no cache.
+func SessionsWithOptions(projectsDir string, since, before time.Time, opts SessionsOptions) ([]SessionRecord, error) {
 	files := listTranscriptFiles(projectsDir)
-	sums := summarizeAll(files)
+	st := SessionsStats{Files: len(files)}
+	var sums []*fileSummary
+	if c := newSummaryCache(projectsDir, opts); c != nil && len(files) > 0 {
+		sums = c.summarize(files, &st)
+	} else {
+		sums = summarizeAll(files, &st)
+	}
+	if opts.Stats != nil {
+		*opts.Stats = st
+	}
+	return mergeSessions(sums, since, before), nil
+}
+
+// mergeSessions groups file summaries into sessions and returns the records
+// whose StartedAt is in [since, before), ordered as Sessions documents.
+func mergeSessions(sums []*fileSummary, since, before time.Time) []SessionRecord {
 	if len(sums) == 0 {
-		return nil, nil
+		return nil
 	}
 
 	// Union-find over files: shared canonical id or shared event uuid.
@@ -113,8 +184,12 @@ func Sessions(projectsDir string, since, before time.Time) ([]SessionRecord, err
 			parent[rb] = ra
 		}
 	}
-	byID := map[string]int{}
-	byUUID := map[uint64]int{}
+	nUUIDs := 0
+	for _, s := range sums {
+		nUUIDs += len(s.uuids)
+	}
+	byID := make(map[string]int, len(sums))
+	byUUID := make(map[uint64]int, nUUIDs)
 	for i, s := range sums {
 		if j, ok := byID[s.id]; ok {
 			union(i, j)
@@ -148,7 +223,7 @@ func Sessions(projectsDir string, since, before time.Time) ([]SessionRecord, err
 		out = append(out, rec)
 	}
 	if len(out) == 0 {
-		return nil, nil
+		return nil
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if !out[i].StartedAt.Equal(out[j].StartedAt) {
@@ -156,34 +231,29 @@ func Sessions(projectsDir string, since, before time.Time) ([]SessionRecord, err
 		}
 		return out[i].SessionID < out[j].SessionID
 	})
-	return out, nil
+	return out
 }
 
-// summarizeAll summarizes every file, each in its own single pass, across a
-// bounded worker pool (a real projects tree is many GiB of JSON, so the
-// per-file work is CPU-bound and independent). Results keep the input order, so
-// the outcome is deterministic; files that yield no summary are dropped.
-func summarizeAll(files []string) []*fileSummary {
+// summarizeAll reads and summarizes every file (no cache). Results keep the
+// input order, so the outcome is deterministic; files that yield no summary are
+// dropped.
+func summarizeAll(files []transcriptFile, st *SessionsStats) []*fileSummary {
 	results := make([]*fileSummary, len(files))
-	workers := min(runtime.GOMAXPROCS(0), len(files))
-	var wg sync.WaitGroup
-	next := make(chan int)
-	for range workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for i := range next {
-				if s, ok := summarizeTranscript(files[i]); ok {
-					results[i] = s
-				}
-			}
-		}()
+	idx := make([]int, len(files))
+	for i := range idx {
+		idx[i] = i
 	}
-	for i := range files {
-		next <- i
-	}
-	close(next)
-	wg.Wait()
+	parseFiles(files, idx, func(i int, p parsedFile) {
+		if p.read {
+			st.Parsed++
+		}
+		results[i] = p.sum
+	})
+	return compactSummaries(results)
+}
+
+// compactSummaries drops the nil entries, keeping the order.
+func compactSummaries(results []*fileSummary) []*fileSummary {
 	var sums []*fileSummary
 	for _, s := range results {
 		if s != nil {
@@ -193,14 +263,86 @@ func summarizeAll(files []string) []*fileSummary {
 	return sums
 }
 
+// parseFiles reads files[i] for every i in idx, each in its own single pass,
+// across a bounded worker pool (a real projects tree is many GiB of JSON, so the
+// per-file work is CPU-bound and independent), and hands each outcome to collect
+// on the calling goroutine, in completion order.
+func parseFiles(files []transcriptFile, idx []int, collect func(i int, p parsedFile)) {
+	workers := min(runtime.GOMAXPROCS(0), len(idx))
+	if workers == 0 {
+		return
+	}
+	type done struct {
+		i int
+		p parsedFile
+	}
+	next := make(chan int)
+	out := make(chan done, workers)
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range next {
+				out <- done{i, parseFile(files[i].path)}
+			}
+		}()
+	}
+	go func() {
+		for _, i := range idx {
+			next <- i
+		}
+		close(next)
+		wg.Wait()
+		close(out)
+	}()
+	for d := range out {
+		collect(d.i, d.p)
+	}
+}
+
+// fileKey identifies the content of a transcript file for the cache: an
+// append-only transcript changes size (and mtime) on every write.
+type fileKey struct{ size, mtimeNs int64 }
+
+// parsedFile is the outcome of reading one transcript file.
+type parsedFile struct {
+	read bool         // the file was opened and read
+	key  fileKey      // the size and mtime of the bytes read (valid when read)
+	sum  *fileSummary // nil when the file holds no dated event
+}
+
+// parseFile opens path once and summarizes exactly the bytes its descriptor's
+// size reported when opened, so the summary matches key even while the file is
+// being appended to (the bytes past key.size are read by a later call).
+func parseFile(path string) parsedFile {
+	f, err := os.Open(path)
+	if err != nil {
+		return parsedFile{}
+	}
+	defer func() { _ = f.Close() }()
+	fi, err := f.Stat()
+	if err != nil {
+		return parsedFile{}
+	}
+	key := fileKey{size: fi.Size(), mtimeNs: fi.ModTime().UnixNano()}
+	return parsedFile{read: true, key: key, sum: summarizeTranscript(path, io.LimitReader(f, key.size))}
+}
+
+// transcriptFile is one listed transcript.
+type transcriptFile struct {
+	path string // projectsDir joined with the slug and file name, as the caller spelled projectsDir
+	rel  string // "<slug>/<file>.jsonl", the cache's key within one projectsDir
+}
+
 // listTranscriptFiles returns every <projectsDir>/<slug>/<file>.jsonl path that
 // is a transcript (not a status sibling), in a deterministic order.
-func listTranscriptFiles(projectsDir string) []string {
+func listTranscriptFiles(projectsDir string) []transcriptFile {
 	slugs, err := os.ReadDir(projectsDir)
 	if err != nil {
 		return nil
 	}
-	var files []string
+	var files []transcriptFile
 	for _, slug := range slugs {
 		if !slug.IsDir() {
 			continue
@@ -214,7 +356,10 @@ func listTranscriptFiles(projectsDir string) []string {
 			if e.IsDir() || !isSessionTranscriptName(e.Name()) {
 				continue
 			}
-			files = append(files, filepath.Join(dir, e.Name()))
+			files = append(files, transcriptFile{
+				path: filepath.Join(dir, e.Name()),
+				rel:  slug.Name() + "/" + e.Name(),
+			})
 		}
 	}
 	return files
@@ -264,8 +409,15 @@ type noIDEvent struct {
 	sidechain bool
 }
 
+// msgEntry is one distinct assistant message id of a file.
+type msgEntry struct {
+	id uint64 // hashed message id
+	msgAgg
+}
+
 // fileSummary is everything the rollup needs from one transcript file, folded
-// during its single streaming pass.
+// during its single streaming pass. It is also what the cache stores per file
+// (sessions_cache.go encodes every field above the fold-time ones).
 type fileSummary struct {
 	path        string
 	id          string // canonical session id
@@ -273,38 +425,38 @@ type fileSummary struct {
 	cwd, branch string
 	model       string
 
-	uuids       []uint64 // every non-empty event uuid (hashed)
-	userUUIDs   []uint64 // uuids of user turns
-	userNoUUID  int      // user turns with no uuid
-	msgs        map[string]*msgAgg
-	noID        []noIDEvent
+	uuids      []uint64   // every non-empty event uuid (hashed), in file order
+	userUUIDs  []uint64   // uuids of user turns, in file order
+	userNoUUID int        // user turns with no uuid
+	msgs       []msgEntry // one per distinct message id, in first-seen order
+	noID       []noIDEvent
+
+	// Fold-time only: nil once the summary is complete.
+	msgIdx      map[uint64]int // msgs index by hashed message id
 	idFreq      map[string]int
 	fileNameID  string
 	hasDatedEvt bool
 }
 
+// hashUUID is the 64-bit FNV-1a hash used for event uuids and message ids. The
+// cache stores its values, so changing it requires a sessionsCacheVersion bump.
 func hashUUID(s string) uint64 {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(s))
 	return h.Sum64()
 }
 
-// summarizeTranscript streams path once. ok is false when the file is
-// unreadable or holds no dated event (such a file yields no record).
-func summarizeTranscript(path string) (*fileSummary, bool) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, false
-	}
-	defer func() { _ = f.Close() }()
-
+// summarizeTranscript streams r (the content of the file at path) once. It
+// returns nil when the content holds no dated event (such a file yields no
+// record).
+func summarizeTranscript(path string, r io.Reader) *fileSummary {
 	s := &fileSummary{
 		path:       path,
-		msgs:       map[string]*msgAgg{},
+		msgIdx:     map[uint64]int{},
 		idFreq:     map[string]int{},
 		fileNameID: strings.TrimSuffix(filepath.Base(path), ".jsonl"),
 	}
-	sc := newTranscriptScanner(f)
+	sc := newTranscriptScanner(r)
 	for sc.Scan() {
 		var ln sessionLine
 		if err := json.Unmarshal(sc.Bytes(), &ln); err != nil {
@@ -315,11 +467,11 @@ func summarizeTranscript(path string) (*fileSummary, bool) {
 	// A scanner error (e.g. a line over the ceiling) ends the scan; whatever was
 	// folded before it still stands.
 	if !s.hasDatedEvt {
-		return nil, false
+		return nil
 	}
 	s.id = canonicalID(s.idFreq, s.fileNameID)
-	s.idFreq = nil
-	return s, true
+	s.idFreq, s.msgIdx = nil, nil
+	return s
 }
 
 func canonicalID(freq map[string]int, fallback string) string {
@@ -392,11 +544,14 @@ func (s *fileSummary) fold(ln *sessionLine) {
 			s.noID = append(s.noID, noIDEvent{uuid: uh, hasUUID: hasUUID, model: model, tok: tok, sidechain: ln.IsSidechain})
 			return
 		}
-		m := s.msgs[id]
-		if m == nil {
-			m = &msgAgg{}
-			s.msgs[id] = m
+		h := hashUUID(id)
+		k, seen := s.msgIdx[h]
+		if !seen {
+			k = len(s.msgs)
+			s.msgs = append(s.msgs, msgEntry{id: h})
+			s.msgIdx[h] = k
 		}
+		m := &s.msgs[k].msgAgg
 		if model != "" {
 			m.model = model
 		}
@@ -454,7 +609,7 @@ func mergeSession(members []*fileSummary) SessionRecord {
 		return true
 	}
 
-	msgs := map[string]*msgAgg{}
+	msgs := map[uint64]*msgAgg{}
 	perModel := map[string]TokenTotals{}
 	for _, m := range members {
 		if m.first.Before(rec.StartedAt) {
@@ -478,11 +633,12 @@ func mergeSession(members []*fileSummary) SessionRecord {
 			}
 		}
 		rec.UserTurns += m.userNoUUID
-		for id, a := range m.msgs {
-			cur := msgs[id]
+		for _, e := range m.msgs {
+			a := &e.msgAgg
+			cur := msgs[e.id]
 			if cur == nil {
 				cur = &msgAgg{}
-				msgs[id] = cur
+				msgs[e.id] = cur
 			}
 			if a.model != "" {
 				cur.model = a.model
