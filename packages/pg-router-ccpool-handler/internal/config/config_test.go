@@ -128,6 +128,44 @@ func TestValidateQuietWindowOverride(t *testing.T) {
 	}
 }
 
+// bead pg2-zybju, INV-CCH-29: the needs_input stall bound. Default 15m (operator
+// ruling), 0 is the kill switch, anything under six polls (one minute at the 10s
+// default) or negative is a config error that names the key.
+func TestNeedsInputStall_defaultAndValidate(t *testing.T) {
+	if got := Default().NeedsInputStall; got != 15*time.Minute {
+		t.Fatalf("default NeedsInputStall = %v, want 15m", got)
+	}
+	c := Default() // poll 10s
+	for _, tc := range []struct {
+		name    string
+		stall   time.Duration
+		wantErr bool
+	}{
+		{"zero disables", 0, false},
+		{"negative rejected", -time.Minute, true},
+		{"under six polls rejected", 59 * time.Second, true},
+		{"exactly six polls accepted", time.Minute, false},
+		{"the default accepted", 15 * time.Minute, false},
+		{"longer accepted", 2 * time.Hour, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cc := c
+			cc.NeedsInputStall = tc.stall
+			err := cc.Validate()
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("Validate() with NeedsInputStall=%v err = %v, wantErr %v", tc.stall, err, tc.wantErr)
+			}
+			if err != nil && !strings.Contains(err.Error(), "needsInputStall") {
+				t.Errorf("the error must name the key, got %v", err)
+			}
+			// The per-role override is checked by the same rule.
+			if oerr := c.ValidateNeedsInputStall(tc.stall); (oerr != nil) != tc.wantErr {
+				t.Errorf("ValidateNeedsInputStall(%v) err = %v, wantErr %v", tc.stall, oerr, tc.wantErr)
+			}
+		})
+	}
+}
+
 // The default is unchanged by the override feature.
 func TestDefault_quietWindowStaysTwoMinutes(t *testing.T) {
 	if got := Default().WorktreeQuietWindow; got != 2*time.Minute {

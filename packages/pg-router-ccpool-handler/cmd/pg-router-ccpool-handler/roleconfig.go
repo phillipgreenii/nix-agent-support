@@ -91,6 +91,14 @@ type roleFile struct {
 		// (pollInterval, worktreeQuietMax) are checked at dispatch, where both
 		// are loaded (config.Config.ValidateQuietWindowOverride).
 		WorktreeQuietWindow string `json:"worktreeQuietWindow"`
+		// NeedsInputStall (bead pg2-zybju, INV-CCH-29): per-role override of the
+		// handler-wide needs_input stall bound, a time.ParseDuration string ("20m").
+		// It applies only to a drain role (completion close-or-release). Absent/""
+		// => no override (the handler default applies); an explicit zero or negative
+		// value is rejected (the handler-wide value 0 is the only kill switch). The
+		// lower bound that depends on the handler Config (pollInterval) is checked
+		// at dispatch, where both are loaded (config.Config.ValidateNeedsInputStall).
+		NeedsInputStall string `json:"needsInputStall"`
 		// ExtraAllowedTools (bead pg2-nk6th.5): per-role tool grants merged onto
 		// the handler-wide allowedTools for this role only; see
 		// roles.CCPoolConfig.ExtraAllowedTools. Absent/empty => no extra grants.
@@ -165,6 +173,16 @@ func loadRole(path string) (roles.Role, error) {
 				return roles.Role{}, fmt.Errorf("role config %s: worktreeQuietWindow %q must be > 0 (omit it to use the handler default)", path, rf.CCPool.WorktreeQuietWindow)
 			}
 		}
+		var needsInputStall time.Duration
+		if rf.CCPool.NeedsInputStall != "" {
+			needsInputStall, err = time.ParseDuration(rf.CCPool.NeedsInputStall)
+			if err != nil {
+				return roles.Role{}, fmt.Errorf("role config %s: parse needsInputStall %q: %w", path, rf.CCPool.NeedsInputStall, err)
+			}
+			if needsInputStall <= 0 {
+				return roles.Role{}, fmt.Errorf("role config %s: needsInputStall %q must be > 0 (omit it to use the handler default)", path, rf.CCPool.NeedsInputStall)
+			}
+		}
 		for i, g := range rf.CCPool.ExtraAllowedTools {
 			if strings.TrimSpace(g) == "" {
 				return roles.Role{}, fmt.Errorf("role config %s: extraAllowedTools[%d] is empty", path, i)
@@ -196,6 +214,7 @@ func loadRole(path string) (roles.Role, error) {
 
 			BudgetStopEscalateAfter: stopAfter,
 			WorktreeQuietWindow:     quietWindow,
+			NeedsInputStall:         needsInputStall,
 			ExtraAllowedTools:       rf.CCPool.ExtraAllowedTools,
 			Precheck:                rf.CCPool.Precheck,
 		}

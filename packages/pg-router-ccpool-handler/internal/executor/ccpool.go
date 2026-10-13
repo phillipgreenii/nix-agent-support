@@ -48,6 +48,12 @@ type ccpoolRun struct {
 	transcript string            // last-seen TranscriptPath of the dispatched session
 	exit       failsig.ExitFacts // last-observed ccpool session facts (state, liveness, close reason)
 	captured   *failsig.Result   // signature captured before teardown; first capture wins
+	// row/rowOK are the session row the most recent poll saw and whether it was
+	// present (guarded by sigMu, set by noteSession/noteAbsent): the needs_input
+	// stall bound (needsinput.go) reads the row waitDone's own poll already
+	// fetched, so it adds no ccpool call.
+	row   ccpool.Session
+	rowOK bool
 }
 
 // ErrPoolAtCapacity: the pool reported free == 0 — a healthy, expected
@@ -410,6 +416,19 @@ func (r *ccpoolRun) waitFailureResult(cc *roles.CCPoolConfig, beadID string, err
 		}
 		return failureAction(report.Unclaimed, beadID)
 	}
+	if errors.Is(err, ErrNeedsInputStalled) {
+		// The stall bound (INV-CCH-29) released the claim in one call (Unclaimed),
+		// added human with the release on the second consecutive strike (Escalated),
+		// or wrote nothing to the bead (no verb).
+		var ns *needsInputStalled
+		switch {
+		case errors.As(err, &ns) && ns.escalated:
+			return failureAction(report.Escalated, beadID)
+		case ns != nil && ns.released:
+			return failureAction(report.Unclaimed, beadID)
+		}
+		return report.Result{}
+	}
 	if errors.Is(err, ErrExternallyClosed) {
 		var ec *externallyClosed
 		if errors.As(err, &ec) && ec.escalated {
@@ -489,6 +508,8 @@ func (r *ccpoolRun) finishWait(ctx context.Context, cc *roles.CCPoolConfig, d Di
 			// worker claimed) resets the unclaimed-end strike count, which like
 			// pool-evicted below counts CONSECUTIVE strikes (INV-CCH-28). Best-effort.
 			_ = beads.RemoveLabel(ctx, r.deps.BD, d.Item.ID, unclaimedEndLabel)
+			// Likewise the needs_input stall strike count (INV-CCH-29).
+			_ = beads.RemoveLabel(ctx, r.deps.BD, d.Item.ID, drainStallLabel)
 		}
 		// A successful completion resets the eviction strike counter so
 		// escalateEviction's two-strike count stays CONSECUTIVE, not lifetime
@@ -738,6 +759,8 @@ func settledOutcome(werr error) string {
 		return "budget_stop"
 	case errors.Is(werr, ErrExternallyClosed):
 		return "externally_closed"
+	case errors.Is(werr, ErrNeedsInputStalled):
+		return "needs_input_stalled"
 	default:
 		return "failure"
 	}
@@ -1216,6 +1239,9 @@ func (r *ccpoolRun) waitDone(ctx context.Context, claimTerminal func() bool, d D
 	deadline := r.deps.clock().Add(maxWait)
 	var tr complete.Tracker
 	alertedNeedsInput := false // edge latch: fire the needs_input alert at most once
+	// The needs_input stall bound (INV-CCH-29): applies to a drain role only; a nil
+	// bound (every other role) leaves ADR 0037's rule untouched.
+	stall := r.newNeedsInputStall(d.Role.CCPool)
 	// check reads the bead (from the role's own tracker, pg2-2grpj) and reports
 	// whether the role's completion rule is satisfied; a failed read is
 	// "not done" (transient bd hiccup, matches bash bead_status 2>/dev/null).
@@ -1267,7 +1293,10 @@ func (r *ccpoolRun) waitDone(ctx context.Context, claimTerminal func() bool, d D
 		// not active AND its transcript and subagents are quiet; a bare idle (an
 		// orchestrator that ended its turn while an asynchronous subagent runs)
 		// keeps waiting. Every other mode treats !active as the end, as before.
-		if !r.active(ctx, name) && (!release || r.waitSessionQuiet(ctx, name, r.quietWindow(d.Role.CCPool))) {
+		// active is read once per poll, ahead of the end test, because the stall
+		// bound below reads the row that read observed.
+		isActive := r.active(ctx, name)
+		if !isActive && (!release || r.waitSessionQuiet(ctx, name, r.quietWindow(d.Role.CCPool))) {
 			// re-check-after-death: the bead may have closed as the session ended.
 			if done, _, _ = check(true); done {
 				if won() {
@@ -1359,6 +1388,12 @@ func (r *ccpoolRun) waitDone(ctx context.Context, claimTerminal func() bool, d D
 				return r.failDead(ctx, d, "session exited before completing")
 			}
 			return lose()
+		}
+		// The needs_input stall bound (INV-CCH-29): Escape, then close and release the
+		// claim, a drain session that has sat in needs_input past the bound. It ends
+		// the dispatch only when it clears the session.
+		if stop, err := r.stallStep(ctx, d, name, stall, won, lose); stop {
+			return err
 		}
 		if !r.deps.clock().Before(deadline) {
 			// final status check after the deadline.
@@ -1577,7 +1612,8 @@ func (r *ccpoolRun) escalateEviction(ctx context.Context, beadID string) bool {
 func (r *ccpoolRun) active(ctx context.Context, externalID string) bool {
 	sessions, err := r.deps.CC.List(ctx)
 	if err != nil {
-		return true // can't tell ⇒ assume active; the deadline still bounds us
+		r.clearRow() // an unreadable poll must not leave the previous poll's row for the stall bound
+		return true  // can't tell ⇒ assume active; the deadline still bounds us
 	}
 	for _, s := range sessions {
 		if s.ExternalID == externalID {

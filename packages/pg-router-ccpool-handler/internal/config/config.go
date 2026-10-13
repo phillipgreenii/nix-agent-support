@@ -77,6 +77,15 @@ type Config struct {
 	// LeaseTTLMinPolls x PollInterval so a few missed refreshes never expire a
 	// live handler's lease.
 	LeaseTTL time.Duration
+	// NeedsInputStall is the stall bound for an unattended drain session (a ccpool
+	// role whose completion is close-or-release, INV-CCH-29, bead pg2-zybju): how
+	// long the session may sit in needs_input before the handler clears it without
+	// a person (Escape, then close and release the claim). Default 15m; 0 disables
+	// the bound everywhere (the kill switch). A non-zero value is validated at load
+	// to be at least NeedsInputStallMinPolls x PollInterval. A role may override it
+	// for its own dispatches (roles.CCPoolConfig.NeedsInputStall). Every other role
+	// keeps ADR 0037's rule: a needs_input session is spared for a human.
+	NeedsInputStall time.Duration
 	// Effort/Model/PermissionMode/AllowedTools/Autonomous are forwarded
 	// verbatim to `ccpool new` (NewCLIRunner).
 	Effort         string
@@ -252,6 +261,9 @@ func (c Config) Validate() error {
 	if err := c.validateLease(); err != nil {
 		return err
 	}
+	if err := c.ValidateNeedsInputStall(c.NeedsInputStall); err != nil {
+		return fmt.Errorf("needsInputStall: %w", err)
+	}
 	return c.OriginProbe.Validate()
 }
 
@@ -377,6 +389,7 @@ func Default() Config {
 		MaxWait:             1800 * time.Second,
 		PollInterval:        10 * time.Second,
 		LeaseTTL:            2 * time.Minute,
+		NeedsInputStall:     DefaultNeedsInputStall,
 		WorktreeQuietWindow: 2 * time.Minute,
 		WorktreeQuietMax:    10 * time.Minute,
 		Effort:              "max",
@@ -403,6 +416,37 @@ func Default() Config {
 // accepts: the lease is refreshed once per poll, so a TTL below this many polls
 // could expire on a live handler after a couple of slow or failed refreshes.
 const LeaseTTLMinPolls = 10
+
+// DefaultNeedsInputStall is the default stall bound for an unattended drain
+// session parked in needs_input (operator ruling, Phillip, 2026-10-12, bead
+// pg2-zybju decision item 3: "N = 15 minutes unless the implementer finds reason
+// to differ"; none found: the six stalls seen so far lasted from 2.5 to about 80
+// minutes, and a person who is going to answer a dialog does so well inside 15).
+const DefaultNeedsInputStall = 15 * time.Minute
+
+// NeedsInputStallMinPolls is the smallest NeedsInputStall, in PollInterval
+// units, ValidateNeedsInputStall accepts. The stall check runs once per poll, so
+// a bound under a few polls could clear a session in the instant a hook edge is
+// late; six polls (one minute at the 10s default) is the floor.
+const NeedsInputStallMinPolls = 6
+
+// ValidateNeedsInputStall checks a needs_input stall bound (the handler-wide
+// Config.NeedsInputStall or a role's own override, INV-CCH-29) against this
+// Config. 0 is valid and means "disabled" (handler-wide) or "no override"
+// (per role). A negative value is an error, and so is a positive one under
+// NeedsInputStallMinPolls x PollInterval.
+func (c Config) ValidateNeedsInputStall(stall time.Duration) error {
+	if stall == 0 {
+		return nil
+	}
+	if stall < 0 {
+		return fmt.Errorf("%v: must be >= 0 (0 disables the bound)", stall)
+	}
+	if min := NeedsInputStallMinPolls * c.PollInterval; stall < min {
+		return fmt.Errorf("%v: must be >= %d x pollInterval (%v)", stall, NeedsInputStallMinPolls, min)
+	}
+	return nil
+}
 
 // QuietWindowOverrideMinPolls is the smallest per-role worktree quiet-window
 // override, in PollInterval units, ValidateQuietWindowOverride accepts. The

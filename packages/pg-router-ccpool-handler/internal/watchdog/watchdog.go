@@ -155,11 +155,32 @@ func (w *Watchdog) Run(ctx context.Context, sessionName, beadID string) error {
 		start = w.now()
 	}
 	highest := budget.None
+	// heldForDialog is set while a budget message is being held back because the
+	// session is in needs_input (so the suppression is logged once, not per poll).
+	heldForDialog := false
 	for {
 		snap, _ := w.Reader.Read(ctx, w.transcriptPath(ctx, sessionName))
 		elapsed := w.now().Sub(start)
 		_, level := w.Budget.Evaluate(snap, elapsed)
-		if level > highest {
+		if level == budget.Reminder && level > highest && w.sessionNeedsInput(ctx, sessionName) {
+			// A budget message is a pasted prompt followed by Enter. Into a session
+			// parked on a permission dialog that Enter ACCEPTS the dialog, an approval
+			// nobody read (observed 2026-10-13: a queued reminder approved a pending
+			// tool call 0.66 s after it was pasted; bead pg2-zybju, INV-CCH-29). So the
+			// reminder is never sent while the session is in needs_input: the level is
+			// not latched, and the next poll tries again once the session has left it
+			// (a person answered, or the stall bound cleared it). Skip rather than
+			// Escape-first: dismissing the dialog is the stall bound's decision, made
+			// once and only for a drain role (ADR 0083's Amendment), while a role that
+			// is not a drain role keeps its needs_input session for a human (ADR 0037).
+			if !heldForDialog {
+				heldForDialog = true
+				w.emit("warn", "reminder-suppressed",
+					"budget reminder held back: the session is in needs_input and a pasted prompt would approve its dialog",
+					map[string]any{"session": sessionName, "bead": beadID, "reason": "needs_input"})
+			}
+		} else if level > highest {
+			heldForDialog = false
 			highest = level
 			switch level {
 			case budget.Reminder:
@@ -173,7 +194,10 @@ func (w *Watchdog) Run(ctx context.Context, sessionName, beadID string) error {
 				}
 			case budget.Cancel:
 				_ = w.CC.Cancel(ctx, sessionName)
-				if w.firstTurnStarted(ctx, sessionName) {
+				// Cancel is an Escape burst: it dismisses the dialog and ccpool resets
+				// the row to ready. When it did not (still needs_input), the wrap-up
+				// message is held back for the same reason as the reminder above.
+				if w.firstTurnStarted(ctx, sessionName) && !w.sessionNeedsInput(ctx, sessionName) {
 					_ = w.CC.Send(ctx, sessionName, renderMsg(w.WrapUpMsg, beadID), ccpool.ModeQueue)
 				}
 				w.emit("warn", "cancel", "budget cancel threshold reached",
@@ -212,6 +236,24 @@ func (w *Watchdog) transcriptPath(ctx context.Context, externalID string) string
 		}
 	}
 	return ""
+}
+
+// sessionNeedsInput reports whether the session is parked in needs_input, so a
+// pasted prompt would land on a permission dialog. A list that cannot be read
+// counts as needs_input: holding a reminder back for a poll costs nothing (the
+// level is not latched), while pasting into an unknown state can approve a
+// dialog nobody read. An absent session is not needs_input.
+func (w *Watchdog) sessionNeedsInput(ctx context.Context, externalID string) bool {
+	sessions, err := w.CC.List(ctx)
+	if err != nil {
+		return true
+	}
+	for _, s := range sessions {
+		if s.ExternalID == externalID {
+			return s.State == ccpool.StateNeedsInput
+		}
+	}
+	return false
 }
 
 func (w *Watchdog) budgetError(snap usage.Snapshot, elapsed time.Duration, sessionName, beadID string) *BudgetError {

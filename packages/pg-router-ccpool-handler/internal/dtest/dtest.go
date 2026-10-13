@@ -70,6 +70,7 @@ type FakeCC struct {
 	SentText    []string // the nudge text of each Send, parallel to Sent
 	Closed      []string
 	ClosedPurge []bool
+	Cancelled   []string // every Cancel call (the Escape burst), in order; guarded by mu
 	SendErr     error
 	EnsureErr   error
 	CloseErr    error              // when set, every Close call is recorded and then returns it
@@ -124,7 +125,14 @@ func (f *FakeCC) Send(_ context.Context, externalID, text string, _ ccpool.SendM
 	f.SentText = append(f.SentText, text)
 	return f.SendErr
 }
-func (f *FakeCC) Cancel(_ context.Context, _ string) error { return nil }
+
+func (f *FakeCC) Cancel(_ context.Context, externalID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Cancelled = append(f.Cancelled, externalID)
+	return nil
+}
+
 func (f *FakeCC) Close(_ context.Context, externalID string, purge bool) error {
 	f.Closed = append(f.Closed, externalID)
 	f.ClosedPurge = append(f.ClosedPurge, purge)

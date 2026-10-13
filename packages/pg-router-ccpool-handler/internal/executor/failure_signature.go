@@ -35,10 +35,19 @@ func (r *ccpoolRun) noteSession(s ccpool.Session) {
 	if s.TranscriptPath != "" {
 		r.transcript = s.TranscriptPath
 	}
+	r.row, r.rowOK = s, true
 	r.exit = failsig.ExitFacts{
 		Observed: true, Present: true,
 		State: string(s.State), Live: s.Live, CloseReason: s.CloseReason,
 	}
+}
+
+// clearRow forgets the observed row (a poll that could not read the list), so
+// the needs_input stall bound never acts on a row from an earlier poll.
+func (r *ccpoolRun) clearRow() {
+	r.sigMu.Lock()
+	defer r.sigMu.Unlock()
+	r.row, r.rowOK = ccpool.Session{}, false
 }
 
 // noteAbsent records that the session was missing from the ccpool list. The
@@ -46,6 +55,7 @@ func (r *ccpoolRun) noteSession(s ccpool.Session) {
 func (r *ccpoolRun) noteAbsent() {
 	r.sigMu.Lock()
 	defer r.sigMu.Unlock()
+	r.row, r.rowOK = ccpool.Session{}, false
 	r.exit.Observed = true
 	r.exit.Present = false
 }
@@ -196,6 +206,11 @@ func (r *ccpoolRun) recordDispatchFailure(d DispatchContext, name string, werr e
 	// An unclaimed end or a peer-held bead (close-or-release, INV-CCH-28) is not a
 	// session failure: it has no failure signature, and waitDone already logged it.
 	if errors.Is(werr, ErrUnclaimedEnd) || errors.Is(werr, ErrPeerHeld) {
+		return
+	}
+	// A needs_input stall clear is its own event (needs_input_cleared) and has no
+	// failure signature of its own to classify.
+	if errors.Is(werr, ErrNeedsInputStalled) {
 		return
 	}
 	pool := "default"

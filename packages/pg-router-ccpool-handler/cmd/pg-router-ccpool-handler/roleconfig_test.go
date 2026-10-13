@@ -427,6 +427,73 @@ func TestLoadRole_worktreeQuietWindow(t *testing.T) {
 	}
 }
 
+// TestLoadRole_needsInputStall (bead pg2-zybju, INV-CCH-29): absent => 0 (no
+// override: the handler-wide bound applies), a duration string => that value, a
+// malformed, zero, or negative value is rejected. The handler-wide 0 is the only
+// kill switch, so a role cannot spell "off" with a zero.
+func TestLoadRole_needsInputStall(t *testing.T) {
+	mk := func(extra string) string {
+		return `{"name":"drain","type":"ccpool","ccpool":{"actor":"a","completion":"close-or-release","onFailure":"add-human","onDispatchFail":"leave","promptBody":"p"` + extra + `}}`
+	}
+	for _, tc := range []struct {
+		name, extra string
+		want        time.Duration
+		wantErr     bool
+	}{
+		{"absent is no override", "", 0, false},
+		{"empty string is no override", `,"needsInputStall":""`, 0, false},
+		{"20m", `,"needsInputStall":"20m"`, 20 * time.Minute, false},
+		{"1h30m", `,"needsInputStall":"1h30m"`, 90 * time.Minute, false},
+		{"malformed rejected", `,"needsInputStall":"soon"`, 0, true},
+		{"zero rejected", `,"needsInputStall":"0s"`, 0, true},
+		{"negative rejected", `,"needsInputStall":"-5m"`, 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			role, err := loadRole(mustWriteRoleFile(t, mk(tc.extra)))
+			if tc.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "needsInputStall") {
+					t.Fatalf("err = %v, want a needsInputStall error", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := role.CCPool.NeedsInputStall; got != tc.want {
+				t.Errorf("NeedsInputStall = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestLoadConfig_needsInputStall: the handler-wide bound is a nanosecond integer
+// like every other Config duration; absent keeps the 15m default, 0 disables, and
+// a value under the polling floor is rejected at load.
+func TestLoadConfig_needsInputStall(t *testing.T) {
+	write := func(body string) string {
+		p := filepath.Join(t.TempDir(), "config.json")
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	c, err := loadConfig(write(`{}`))
+	if err != nil || c.NeedsInputStall != 15*time.Minute {
+		t.Fatalf("absent: %v, %v", c.NeedsInputStall, err)
+	}
+	c, err = loadConfig(write(`{"NeedsInputStall":0}`))
+	if err != nil || c.NeedsInputStall != 0 {
+		t.Fatalf("zero must disable: %v, %v", c.NeedsInputStall, err)
+	}
+	c, err = loadConfig(write(`{"NeedsInputStall":1200000000000}`))
+	if err != nil || c.NeedsInputStall != 20*time.Minute {
+		t.Fatalf("20m in nanoseconds: %v, %v", c.NeedsInputStall, err)
+	}
+	if _, err = loadConfig(write(`{"NeedsInputStall":30000000000}`)); err == nil || !strings.Contains(err.Error(), "needsInputStall") {
+		t.Fatalf("30s is under six polls and must be rejected naming the key, got %v", err)
+	}
+}
+
 // TestLoadRole_extraAllowedTools (bead pg2-nk6th.5): absent/empty => no extra
 // grants; a list is carried through in order; a blank entry is rejected.
 func TestLoadRole_extraAllowedTools(t *testing.T) {

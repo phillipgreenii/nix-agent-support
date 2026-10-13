@@ -156,6 +156,10 @@ func runDispatch(args []string) int {
 			fmt.Fprintf(os.Stderr, "dispatch: role %s: %v\n", role.Name, err)
 			return conformance.ExitError
 		}
+		if err := cfg.ValidateNeedsInputStall(role.CCPool.NeedsInputStall); err != nil {
+			fmt.Fprintf(os.Stderr, "dispatch: role %s: needsInputStall: %v\n", role.Name, err)
+			return conformance.ExitError
+		}
 	}
 	overlayBudgetThresholds(role, cfg)
 

@@ -81,6 +81,14 @@ type CCPoolConfig struct {
 	// least config.QuietWindowOverrideMinPolls x PollInterval, and no more than
 	// WorktreeQuietMax.
 	WorktreeQuietWindow time.Duration
+	// NeedsInputStall (bead pg2-zybju, INV-CCH-29) overrides, for THIS role only,
+	// how long a drain session (Completion == CloseOrRelease; every other role is
+	// never subject to the stall bound) may sit in needs_input before the handler
+	// clears it without a person (config.Config.NeedsInputStall is the
+	// handler-wide default, 15m). 0 (an absent key) means "use the handler-wide
+	// value". Validated at dispatch against the loaded Config
+	// (config.Config.ValidateNeedsInputStall).
+	NeedsInputStall time.Duration
 	// ExtraAllowedTools (bead pg2-nk6th.5) are tool grants, in the same syntax
 	// as config.Config.AllowedTools (e.g. "Bash(gh pr create:*)"), merged onto
 	// the handler-wide AllowedTools for THIS role's dispatches only
