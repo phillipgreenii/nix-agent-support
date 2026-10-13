@@ -16,6 +16,14 @@ var builtinMigrations = []Migration{
 	{Version: 1, Name: "query, alias, entity, entity_group, budget", Apply: migrateV1},
 }
 
+// BuiltinMigrations returns a copy of the built-in ladder. A caller that wants
+// to wrap a step (a test that makes one step slow, to watch the daemon answer
+// "migrating:" meanwhile) passes the edited copy as Options.Migrations; the
+// steps' Version numbers must stay 1..n.
+func BuiltinMigrations() []Migration {
+	return append([]Migration(nil), builtinMigrations...)
+}
+
 // Times are INTEGER Unix milliseconds (NULL = unset). Booleans are INTEGER
 // 0/1. A group's `content` is an opaque BLOB owned by the group's Strategy.
 //

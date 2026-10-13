@@ -11,13 +11,12 @@
 // rendered config file (see internal/config); when absent,
 // PG_CONNECTOR_GITHUB_CONFIG is used. --version prints the stamped version.
 //
-// Every mode loads and validates the config first. serve runs the daemon's
-// process shell (state directory, lock, socket, drain on SIGTERM; see
-// pkg/connectord/proc) with a handler that answers nothing yet. pr and ci are
-// the client modes (internal/client): one scriptout request on stdin, one
-// response on stdout, forwarded to the daemon over its socket
-// (pkg/connectord/socket). The store, the ops and the daemon's request router
-// are wired in by later work.
+// Every mode loads and validates the config first. serve runs the daemon
+// (internal/serve): the process shell (state directory, lock, socket, drain on
+// SIGTERM; see pkg/connectord/proc), the store, the governor, the scheduler, the
+// request router and the Phase 2 ops. pr and ci are the client modes
+// (internal/client): one scriptout request on stdin, one response on stdout,
+// forwarded to the daemon over its socket (pkg/connectord/socket).
 package main
 
 import (

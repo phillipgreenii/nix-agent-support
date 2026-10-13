@@ -141,15 +141,20 @@ func TestRealServeLifecycle(t *testing.T) {
 		t.Errorf("socket: %v err %v, want a 0600 socket", fi, err)
 	}
 
-	// A client from the same uid is accepted (the handler answers nothing and
-	// the shell closes the connection).
+	// A client from the same uid is accepted and served: a malformed frame is
+	// answered invalid_argument (the assembled daemon's router, not a stub).
 	c, err := net.Dial("unix", socket)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = c.SetReadDeadline(time.Now().Add(5 * time.Second))
-	if _, err := c.Read(make([]byte, 1)); err == nil {
-		t.Error("the answers-nothing handler must close the connection without data")
+	_ = c.SetDeadline(time.Now().Add(10 * time.Second))
+	if _, err := c.Write([]byte("not json\n")); err != nil {
+		t.Fatal(err)
+	}
+	reply := make([]byte, 4096)
+	n, _ := c.Read(reply)
+	if !strings.Contains(string(reply[:n]), "invalid_argument") {
+		t.Errorf("a malformed frame must be answered invalid_argument, got %q", reply[:n])
 	}
 	c.Close()
 
@@ -172,13 +177,8 @@ func TestRealServeLifecycle(t *testing.T) {
 	}
 	third := startServe(t, cfg)
 	third.waitListening(t, socket)
-	// The child wrote the line before listening; its pipe is drained asynchronously.
-	for i := 0; i < 200 && !strings.Contains(third.stderr.String(), "stale_socket_removed"); i++ {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if !strings.Contains(third.stderr.String(), "stale_socket_removed") {
-		t.Errorf("a new serve must log removing the stale socket: %q", third.stderr.String())
-	}
+	// The line is in the daemon's structured log, written before it listens.
+	waitLogLine(t, state, "stale_socket_removed")
 
 	// SIGTERM drains: exit 0, lock released, socket gone, and a following serve
 	// starts cleanly.
@@ -188,9 +188,7 @@ func TestRealServeLifecycle(t *testing.T) {
 	if code := third.wait(t); code != 0 {
 		t.Errorf("SIGTERM exit = %d, want 0; stderr: %s", code, third.stderr.String())
 	}
-	if !strings.Contains(third.stderr.String(), "drain_done") {
-		t.Errorf("a drained serve must log drain_done: %q", third.stderr.String())
-	}
+	waitLogLine(t, state, "drain_done")
 	if _, err := os.Lstat(socket); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("the drained serve must remove its socket: %v", err)
 	}
@@ -232,7 +230,7 @@ func TestServeDrainsOnContextCancelInProcess(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	var stderr syncBuffer
 	done := make(chan int, 1)
-	go func() { done <- serve(ctx, cfg, &stderr) }()
+	go func() { done <- serveWith(ctx, cfg, &stderr) }()
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		if c, err := net.Dial("unix", cfg.SocketPath); err == nil {
@@ -248,6 +246,22 @@ func TestServeDrainsOnContextCancelInProcess(t *testing.T) {
 	if code := <-done; code != 0 {
 		t.Errorf("serve exit = %d, want 0; stderr: %s", code, stderr.String())
 	}
+}
+
+// waitLogLine waits until the daemon's structured log (daemon.log.jsonl in the
+// state directory) has a line for the named change.
+func waitLogLine(t *testing.T, stateDir, change string) {
+	t.Helper()
+	path := filepath.Join(stateDir, config.DaemonLogFileName)
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if raw, err := os.ReadFile(path); err == nil && strings.Contains(string(raw), `"change":"`+change+`"`) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	raw, _ := os.ReadFile(path)
+	t.Errorf("the structured log %s has no %s line:\n%s", path, change, raw)
 }
 
 // syncBuffer is a bytes.Buffer safe for a test to read while serve writes.
