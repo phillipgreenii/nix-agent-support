@@ -103,6 +103,12 @@ func evaluateLayoutConvention(moduleRoot string) ([]string, error) {
 			return err
 		}
 		if d.IsDir() {
+			// Third-party code is not this module's layout: inside the nix
+			// test sandbox (mkGoTest's goConfigHook) the module root holds a
+			// vendor/ tree, exactly as dependency_direction_test.go skips it.
+			if d.Name() == "vendor" && path != moduleRoot {
+				return fs.SkipDir
+			}
 			return nil
 		}
 		if !strings.HasSuffix(path, ".go") {

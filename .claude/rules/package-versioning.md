@@ -44,3 +44,10 @@ per-change or land-time gate; build the targeted check). Every Go module with te
 `*-go-tests` check in `flake.nix`; a new module without one has no nix-side test coverage. Opting a
 package back into `doCheck = true` MUST carry a comment stating why its `*-go-tests` check is not
 enough.
+
+**pg-connector platform gates**: `checks.<system>.pg-connector-go-tests` also carries the Linux
+cross-compile gate (`cmd/pg-connector/crosscompile_test.go`: `GOOS=linux CGO_ENABLED=0 go vet ./...`
+plus `go test -c` for every package, so a `_linux.go` file or `_linux_test.go` that stops compiling
+fails the gate on a darwin host; Linux-only tests are only compiled there, pg2-opk5g first runs them)
+and the `env -i` independence test (`cmd/pg-connector-github/envindependence_test.go`). The gate adds
+minutes to the check's run; `go test -short` skips the whole-module half.
