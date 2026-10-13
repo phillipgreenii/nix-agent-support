@@ -7193,6 +7193,22 @@
     "notes": "Instructed by claude-marketplace/pb (drain-beads.md POST-DEPLOY GATE (one --gate per repo))."
   },
   {
+    "case": "pb_plugin_pb_gate_attach_verified_child_body_file_acceptance",
+    "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pb gate attach-verified-child --impl pg2-abc12 --title \"verify x\" --gate repo-a=0123456 --body-file /tmp/pg2-abc12-checks.md --acceptance \"- x renders\" --actor \"sess-1-drain\""
+      }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "Instructed by claude-marketplace/pb (drain-one references/post-deploy-gate.md: the child's description file and acceptance criteria)."
+  },
+  {
     "case": "pb_plugin_pb_gate_create",
     "tags": ["pb-plugin-instructed", "pg2-cjfpy.1"],
     "tool_input": {
