@@ -114,8 +114,8 @@ ADR 0037's Decision items 3 and 6 (preservation is unbounded; only an operator m
 
 An unattended drain worker (ADR 0089) that raises a permission dialog nobody can answer parks in
 `needs_input` until a person attaches. Six such stalls were recorded between 2026-10-10 and
-2026-10-13, each holding the bead's claim and the pool's only slot, the longest for about 80
-minutes. The triggers differed (a read of a secret-looking path, a `PATH` replacement, a command
+2026-10-13 (five in drain sessions, one in a review session), each holding its bead's claim and its
+pool's slot, the longest for about 80 minutes. The triggers differed (a read of a secret-looking path, a `PATH` replacement, a command
 that is on the allow list), so a bound on the stall is the one remedy that covers all of them.
 
 Three facts shaped the design:

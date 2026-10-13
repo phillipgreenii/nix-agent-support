@@ -667,9 +667,9 @@ review`. The claim is still released (status open, assignee cleared) — the lab
   - **Not covered, accepted.** An orphan in `needs_input` (`INV-CCH-18`) is still left alone: its
     handler is gone, and the orphan reconcile runs only when its role next dispatches.
 
-  **Why.** Six drain sessions stalled on a permission dialog nobody could answer between
-  2026-10-10 and 2026-10-13, each for up to about 80 minutes, holding the bead's claim and the pool's
-  only slot. The bound is the one remedy that covers every trigger. It lives in the supervising
+  **Why.** Six sessions (five of them drain sessions) stalled on a permission dialog nobody could
+  answer between 2026-10-10 and 2026-10-13, the longest for about 80 minutes, each holding its bead's
+  claim and its pool's slot. The bound is the one remedy that covers every trigger. It lives in the supervising
   dispatch because that dispatch is the one holding the lane: no later dispatch runs while it is
   blocked. Bead `pg2-zybju`, `phillipgreenii-nix-agent-support` ADR 0083's Amendment of 2026-10-13
   (which amends ADR 0037).
