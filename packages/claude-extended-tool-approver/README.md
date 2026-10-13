@@ -30,6 +30,11 @@ identically — the router only changes who invokes ceta, never what ceta decide
 | PermissionDenied  | Resolve as denied — the call was actually declined            |
 | SessionEnd        | Resolve remaining pending ASKs as **unresolved** (not denied) |
 
+In an unattended session (permission mode `dontAsk`, or `CCPOOL_AUTONOMOUS=1` in the hook's
+environment) PreToolUse never emits `ask`: any verdict that would ask a human is emitted as `deny`
+with a reason that says what to do instead, because nobody can answer the dialog. Attended sessions
+are unchanged. See "Unattended sessions never ask" in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
 ## Decision Database
 
 Stored at `~/.local/share/claude-extended-tool-approver/asks.db` (or `$XDG_DATA_HOME/claude-extended-tool-approver/asks.db`).

@@ -273,7 +273,27 @@ func (e *Engine) recordRuleError(rule string, err error) {
 // all other tools use the first-match-wins Evaluate (EvaluateExpression is
 // Bash-only). All real-decision callers (the PreToolUse hook and offline replay)
 // MUST go through this so baselines match the live hook.
+//
+// It is also where an UNATTENDED session's Ask is turned into a Reject
+// (hookio.NeverAskWhenUnattended): a permission dialog in a session nobody is
+// watching stalls it until a person attaches, so the one place every folded verdict
+// passes is the one place that must never let an Ask out. Attended sessions are
+// untouched.
 func (e *Engine) EvaluateHook(input *hookio.HookInput) hookio.RuleResult {
+	verdict := e.evaluateHookVerdict(input)
+	final := hookio.NeverAskWhenUnattended(input, verdict)
+	if final.Decision != verdict.Decision {
+		// The rule trace above still reads "<rule> -> ask"; say here why the hook's
+		// stdout is a deny, so a reader of the hook's stderr (Claude Code records it
+		// in the transcript) is not left to work that out.
+		fmt.Fprintf(os.Stderr, "claude-extended-tool-approver: unattended session never asks: %s -> %s converted to %s\n",
+			verdict.Module, verdict.Decision, final.Decision)
+	}
+	return final
+}
+
+// evaluateHookVerdict is EvaluateHook's decision work, before the delivery policy.
+func (e *Engine) evaluateHookVerdict(input *hookio.HookInput) hookio.RuleResult {
 	if input.ToolName == "Bash" {
 		if cmd, err := input.BashCommand(); err == nil {
 			return e.EvaluateExpression(cmd, nil, input)

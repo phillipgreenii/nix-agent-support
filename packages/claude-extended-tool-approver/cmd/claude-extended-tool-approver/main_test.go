@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/asklog"
@@ -26,6 +27,7 @@ const tmpfsScratchRoot = "/dev/shm"
 // which now happens lazily in testBinary) would put I/O back on the build path
 // that main_integration_test.go's tag exists to clear.
 func TestMain(m *testing.M) {
+	scrubAmbientSessionEnv()
 	preferTmpfsScratch()
 
 	// Make every store THIS PROCESS opens non-durable. Creating one costs 11
@@ -68,6 +70,26 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 	_ = os.RemoveAll(testScratchDir)
 	os.Exit(code)
+}
+
+// ambientSessionEnvPrefixes are the variable families an agent session carries
+// that must never reach a test. This suite is run FROM INSIDE ccpool pool sessions,
+// whose environment holds CCPOOL_* (notably CCPOOL_AUTONOMOUS=1, which makes the hook
+// turn every Ask it would emit into a deny — hookio.AutonomousEnvVar) and BEADS_*
+// (the tracker location). Every exec'd binary below derives its environment from
+// os.Environ(), so scrubbing here makes the whole suite hermetic against the ambient
+// session; a test that needs one of them sets it explicitly with t.Setenv.
+var ambientSessionEnvPrefixes = []string{"CCPOOL_", "BEADS_"}
+
+func scrubAmbientSessionEnv() {
+	for _, kv := range os.Environ() {
+		name, _, _ := strings.Cut(kv, "=")
+		for _, prefix := range ambientSessionEnvPrefixes {
+			if strings.HasPrefix(name, prefix) {
+				_ = os.Unsetenv(name)
+			}
+		}
+	}
 }
 
 // preferTmpfsScratch points TMPDIR at an in-memory filesystem when one is

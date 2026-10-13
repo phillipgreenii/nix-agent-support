@@ -491,6 +491,17 @@ type HookInput struct {
 	// tool_response shape in references/database-schema.md.
 	ToolResponse json.RawMessage `json:"tool_response,omitempty"`
 
+	// Unattended is set by the hook entry point (main.go) when the process
+	// environment says this session is an autonomous worker with no human attached
+	// (AutonomousEnvVar). It is OUT-OF-BAND: `json:"-"` is load-bearing, because a
+	// hook payload must never be able to assert it, and offline replay (which never
+	// reads the environment) must stay deterministic. It is read ONLY by IsUnattended
+	// / NeverAskWhenUnattended at the engine.EvaluateHook facade — deliberately NOT
+	// threaded into the per-leaf synthetic inputs, because no rule may judge a call
+	// differently for an unattended session; the facade alone decides what to do with
+	// an Ask. See unattended.go.
+	Unattended bool `json:"-"`
+
 	// PathEval, when non-nil, overrides the rule-injected path evaluator for
 	// this input. Set by the docker rule when delegating inner expression
 	// evaluation to provide mount-aware container semantics. Not serialized.

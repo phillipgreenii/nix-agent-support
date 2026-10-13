@@ -131,6 +131,33 @@ The **decision ordering** is `Approve < NoOpinion < Ask < Reject`, and every fol
 decisive manufactures `NoOpinion` at exhaustion (ADR 0044's `ProvenanceExhaustion`) rather than
 defaulting to Approve.
 
+### Unattended sessions never ask
+
+A hook `Ask` opens a permission dialog even under permission mode `dontAsk`, and a dialog in a
+session nobody is watching (a ccpool pool worker) stalls it until a person attaches. Five real
+stalls in one day came from exactly that: a credential-path read (the `secrets` rule, `cat .envrc`,
+`git ls-files -- .env.yarn`) and a literal `PATH=` replacement (the `env-vars` rule). The policy
+lives at the one place every folded verdict passes, `engine.EvaluateHook`
+(`hookio.NeverAskWhenUnattended`, `internal/hookio/unattended.go`):
+
+- A session is **unattended** when the payload's `permission_mode` is `dontAsk`, or when the process
+  environment carries `CCPOOL_AUTONOMOUS=1` (injected by `ccpool new --autonomous`, read once in
+  `main.go` and carried into the engine as `HookInput.Unattended`, so offline replay never reads
+  the environment).
+- In an unattended session a final verdict of `Ask` MUST be emitted as `deny`. The reason MUST name
+  the rule that wanted a human, keep that rule's own words, and say what to do instead (for
+  `secrets`: do not read credential or environment files, do not search `/nix/store` for a
+  toolchain, report a tool missing from `PATH` as `stuck` naming it; for `env-vars`: prepend with
+  `PATH=/some/bin:$PATH` rather than replace). The reason MUST NOT assert what is installed or on
+  `PATH`: that is a fact of the session's launch configuration, which changes independently of
+  this code. The originating rule stays the verdict's `Module`.
+- Every other verdict (`allow`, `{}`, and a rule's own `deny`) MUST pass through unchanged, and an
+  attended session MUST get exactly the verdict it always got. Rules MUST NOT special-case the
+  session kind; they keep judging the call on its merits, and the facade alone decides what to do
+  with an `Ask`.
+- The conversion is a `deny`, not an abstain, because abstaining hands the call to Claude Code's own
+  allowlist, which can silently allow it (a worker's allowlist routinely carries `Bash(cat:*)`).
+
 ## Extension point 1: adding a rule module (code-level)
 
 A **rule module** governs a _class of tool calls by policy logic_ — reachable only by changing Go

@@ -160,6 +160,13 @@ func projectDirForDetect(input *hookio.HookInput) string {
 	return input.CWD
 }
 
+// unattendedFromEnv reports whether the launching session flagged itself as an
+// autonomous worker (hookio.AutonomousEnvVar=1, injected by `ccpool new
+// --autonomous` and inherited by every hook process the session spawns).
+func unattendedFromEnv() bool {
+	return os.Getenv(hookio.AutonomousEnvVar) == "1"
+}
+
 // The six handlePreToolUse/handlePermissionRequest/handlePostToolUse/
 // handlePermissionDenied/handleSessionEnd/handlePostToolUseFailure hook
 // handlers below are THE RECORDER (pg2-cbihz's audit of every
@@ -191,6 +198,12 @@ func handlePreToolUse(input *hookio.HookInput) {
 	} else {
 		eng = setup.NewEngineForCWD(input.CWD)
 	}
+	// An autonomous worker has no human to answer a permission dialog, so the engine
+	// turns any Ask into a deny with instructions (hookio.NeverAskWhenUnattended). The
+	// permission-mode half of that decision rides in the payload; this is the
+	// environment half, read here — the process's one entry point — so the engine
+	// itself never touches the environment and offline replay stays deterministic.
+	input.Unattended = unattendedFromEnv()
 	result := eng.EvaluateHook(input)
 
 	// updatedInput rewrites the Bash command through ceta's ORDERED
