@@ -9749,6 +9749,123 @@
                     touch $out
                   '';
 
+              # Guard for pg2-k881a: `pruneStaleScopeEntries` (default false) puts
+              # the opt-in env PREFIX `CLAUDE_SETTINGS_PRUNE_STALE_SCOPE=1` on every
+              # generated claude-settings-install-plugin call so the script prunes
+              # dead-path non-user-scope entries instead of only warning. The bats
+              # suite proves the SCRIPT prunes when the variable is set; this proves
+              # the module SETS it, on every call and only when enabled.
+              #
+              # TRAP: the generated activation already contains the bare variable
+              # NAME inside a comment, so a plain hasInfix on the name is always
+              # true. Every assertion here is on the exact `NAME=1` assignment form
+              # and on its position directly before the installer's store path.
+              test-claude-settings-activation-prune-stale-scope =
+                let
+                  hmLib = lib // {
+                    hm = (lib.hm or { }) // {
+                      dag = (lib.hm.dag or { }) // {
+                        entryAfter = _deps: text: text;
+                      };
+                    };
+                  };
+                  evalActivation =
+                    cfg:
+                    (lib.evalModules {
+                      specialArgs = {
+                        inherit pkgs inputs;
+                        lib = hmLib;
+                        mkBashBuildersFor =
+                          p:
+                          inputs.phillipgreenii-nix-base.lib.mkBashBuilders {
+                            pkgs = p;
+                            inherit self;
+                            inherit (p) lib;
+                          };
+                      };
+                      modules = [
+                        ./home/programs/claude-settings/default.nix
+                        (
+                          { lib, ... }:
+                          {
+                            options = {
+                              phillipgreenii.programs.claude-code.enable = lib.mkEnableOption "claude (stub)";
+                              home.activation = lib.mkOption {
+                                type = lib.types.attrsOf lib.types.anything;
+                                default = { };
+                              };
+                            };
+                          }
+                        )
+                        cfg
+                      ];
+                    }).config;
+
+                  # plugins AND claudeCodePackage are both required for the
+                  # per-plugin install calls (hasPlugins) to be generated at all.
+                  activationFor =
+                    extra:
+                    (evalActivation {
+                      phillipgreenii.programs.claude-code = {
+                        enable = true;
+                        settings = {
+                          claudeCodePackage = pkgs.writeShellScriptBin "claude" "exit 0";
+                          plugins = [
+                            "aa@m"
+                            "bb@m"
+                            "cc@m"
+                          ];
+                          enabledPlugins."bb@m" = true;
+                        }
+                        // extra;
+                      };
+                    }).home.activation.claude-settings;
+
+                  enabled = activationFor { pruneStaleScopeEntries = true; };
+                  disabled = activationFor { };
+                  explicitOff = activationFor { pruneStaleScopeEntries = false; };
+
+                  assignment = "CLAUDE_SETTINGS_PRUNE_STALE_SCOPE=1";
+                  # The env prefix, the escaped line continuation, then the
+                  # installer store path: i.e. the assignment is the first word of
+                  # the call itself, not merely somewhere in the text.
+                  prefixedCall = "${assignment} \\\n  /nix/store/";
+                  installCalls = a: lib.length (lib.splitString "/bin/claude-settings-install-plugin" a) - 1;
+                  prefixedCalls = a: lib.length (lib.splitString prefixedCall a) - 1;
+                in
+                # Sanity: the trap is real (the bare name is present even when the
+                # option is off), and there are exactly three install calls.
+                assert lib.hasInfix "CLAUDE_SETTINGS_PRUNE_STALE_SCOPE" disabled;
+                assert installCalls enabled == 3;
+                assert installCalls disabled == 3;
+                # Enabled: the prefix sits on EVERY install call.
+                assert prefixedCalls enabled == 3;
+                # Disabled (the default, and an explicit false): no assignment form
+                # anywhere, and no prefixed call.
+                assert !(lib.hasInfix assignment disabled);
+                assert prefixedCalls disabled == 0;
+                assert !(lib.hasInfix assignment explicitOff);
+                assert prefixedCalls explicitOff == 0;
+                # An env prefix, not a leaking `export` into later HM entries.
+                assert !(lib.hasInfix "export CLAUDE_SETTINGS_PRUNE_STALE_SCOPE" enabled);
+                # The continuation edit must still parse (a malformed continuation
+                # fails at someone's next apply, not at eval). `bash -n` parses
+                # without executing.
+                pkgs.runCommand "claude-settings-activation-prune-stale-scope-ok"
+                  {
+                    passAsFile = [
+                      "enabledActivation"
+                      "disabledActivation"
+                    ];
+                    enabledActivation = enabled;
+                    disabledActivation = disabled;
+                  }
+                  ''
+                    ${pkgs.bash}/bin/bash -n "$enabledActivationPath"
+                    ${pkgs.bash}/bin/bash -n "$disabledActivationPath"
+                    touch $out
+                  '';
+
               # Regression guard for pg2-64uu and pg2-e46e: promptCacheTtl writes
               # the correct mutually-exclusive prompt-cache env var into
               # settings.json's `.env` (docs: code.claude.com/docs/en/prompt-caching).

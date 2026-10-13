@@ -192,6 +192,33 @@ in
       description = "Map of plugin@marketplace to bool to merge into enabledPlugins";
     };
 
+    pruneStaleScopeEntries = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        When true, every activation prefixes
+        `CLAUDE_SETTINGS_PRUNE_STALE_SCOPE=1` onto each generated
+        `claude-settings-install-plugin` call, so that script REMOVES the
+        non-user-scope `installed_plugins.json` entries (project and local)
+        of every DECLARED plugin whose `projectPath` no longer exists. Such a
+        stale entry shadows the user-scope enable.
+
+        The default (`false`) keeps the deliberate warn-only behaviour: the
+        script prints a WARNING per stale entry and changes nothing. This is a
+        per-machine opt-in.
+
+        Low-harm caveat: an unmounted volume or an untraversable parent
+        directory also reads as "does not exist". Only the project/local
+        record is removed; the plugin stays installed at user scope and the
+        record can be re-added with `claude plugin install --scope project`.
+
+        The first apply after enabling prints a WARNING plus a "pruned" line
+        per entry, then goes quiet. Entries of plugins that are not in
+        `plugins` are not visited. The sibling
+        `CLAUDE_SETTINGS_PRUNE_STALE_MARKETPLACES` gate is unaffected.
+      '';
+    };
+
     showClearContextOnPlanAccept = lib.mkOption {
       type = lib.types.nullOr lib.types.bool;
       default = null;
@@ -598,16 +625,22 @@ in
               # multi-line `''…''`, so the generated shell kept shifting. The
               # arguments are shell-quoted here, once, at the point they are
               # built.
-              words = [
-                "${installPluginScript}/bin/claude-settings-install-plugin"
-                ''"$CLAUDE"''
-                ''"${plugin}"''
-                ''"$HOME/.claude/plugins/cache"''
-              ]
-              ++ lib.optionals (builtins.hasAttr plugin cfg.enabledPlugins) [
-                ''"$SETTINGS"''
-                ''"${lib.boolToString cfg.enabledPlugins.${plugin}}"''
-              ];
+              # An env PREFIX on the call (not an `export`): HM runs every
+              # activation entry in one shell, so an export would leak into
+              # later entries. pruneStaleScopeEntries opts in to the prune
+              # that the install script otherwise only warns about.
+              words =
+                lib.optional cfg.pruneStaleScopeEntries "CLAUDE_SETTINGS_PRUNE_STALE_SCOPE=1"
+                ++ [
+                  "${installPluginScript}/bin/claude-settings-install-plugin"
+                  ''"$CLAUDE"''
+                  ''"${plugin}"''
+                  ''"$HOME/.claude/plugins/cache"''
+                ]
+                ++ lib.optionals (builtins.hasAttr plugin cfg.enabledPlugins) [
+                  ''"$SETTINGS"''
+                  ''"${lib.boolToString cfg.enabledPlugins.${plugin}}"''
+                ];
             in
             lib.concatStringsSep " \\\n  " words
           ) cfg.plugins
