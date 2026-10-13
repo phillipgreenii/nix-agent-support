@@ -326,6 +326,18 @@
               }
             },
             "flags": {
+              "--acceptance": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pb gate attach-verified-child --help: \"--acceptance string   the child's acceptance criteria (default: derived from --title)\""
+                }
+              },
               "--actor": {
                 "arity": "one",
                 "operand": {
@@ -336,6 +348,18 @@
                 },
                 "citation": {
                   "source": "pb gate attach-verified-child --help: \"--actor string   bd actor id (required)\""
+                }
+              },
+              "--body-file": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "pb gate attach-verified-child --help: \"--body-file string   file holding the child's description, e.g. the concrete post-apply checks (default: derived from --impl)\""
                 }
               },
               "--gate": {

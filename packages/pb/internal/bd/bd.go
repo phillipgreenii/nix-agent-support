@@ -180,9 +180,63 @@ type readyEnvelope struct {
 	} `json:"data"`
 }
 
+// Bead is the part of `bd show --json` pb reads: the text fields and labels of
+// one bead.
+type Bead struct {
+	ID                 string   `json:"id"`
+	Title              string   `json:"title"`
+	Description        string   `json:"description"`
+	AcceptanceCriteria string   `json:"acceptance_criteria"`
+	Labels             []string `json:"labels"`
+}
+
+// ShowBead reads bead id from the DB at dir.
+func (c Client) ShowBead(ctx context.Context, dir, id string) (Bead, error) {
+	res, err := c.R.Run(ctx, "bd", []string{"-C", dir, "show", id, "--json"}, run.Options{Env: bdEnv()})
+	if err != nil {
+		return Bead{}, wrapErr(fmt.Sprintf("bd show %s", id), res, err)
+	}
+	return parseBead(res.Stdout, id)
+}
+
+// parseBead tolerates both shapes bd has emitted for `show --json`: the
+// envelope {"data":[{...}]} (bd 1.3.1 with BD_JSON_ENVELOPE=1) and
+// {"data":{...}}.
+func parseBead(out, id string) (Bead, error) {
+	var env beadCreateEnvelope
+	if err := json.Unmarshal([]byte(out), &env); err != nil {
+		return Bead{}, fmt.Errorf("parse bd show json: %w", err)
+	}
+	var one Bead
+	if err := json.Unmarshal(env.Data, &one); err == nil && one.ID != "" {
+		return one, nil
+	}
+	var many []Bead
+	if err := json.Unmarshal(env.Data, &many); err == nil {
+		if len(many) == 1 {
+			return many[0], nil
+		}
+		for _, b := range many {
+			if b.ID == id {
+				return b, nil
+			}
+		}
+	}
+	return Bead{}, fmt.Errorf("bd show returned no bead %q: %s", id, out)
+}
+
+// CreateOpts carries the optional content of a new bead. A zero field is
+// omitted from the bd call.
+type CreateOpts struct {
+	Labels      []string // --labels, comma-joined
+	Description string   // --description
+	Acceptance  string   // --acceptance
+}
+
 // CreateBead creates a bead titled title (born deferred until deferUntil when
-// non-empty, with deps such as "discovered-from:<id>") and returns the new id.
-func (c Client) CreateBead(ctx context.Context, dir, title, deferUntil, deps, actor string) (string, error) {
+// non-empty, with deps such as "discovered-from:<id>" and the content in o)
+// and returns the new id.
+func (c Client) CreateBead(ctx context.Context, dir, title, deferUntil, deps, actor string, o CreateOpts) (string, error) {
 	if err := ValidateTitle(title); err != nil {
 		return "", err
 	}
@@ -192,6 +246,15 @@ func (c Client) CreateBead(ctx context.Context, dir, title, deferUntil, deps, ac
 	}
 	if deps != "" {
 		args = append(args, "--deps", deps)
+	}
+	if len(o.Labels) > 0 {
+		args = append(args, "--labels", strings.Join(o.Labels, ","))
+	}
+	if o.Description != "" {
+		args = append(args, "--description", o.Description)
+	}
+	if o.Acceptance != "" {
+		args = append(args, "--acceptance", o.Acceptance)
 	}
 	args = append(args, "--actor", actor, "--json")
 	res, err := c.R.Run(ctx, "bd", args, run.Options{Env: bdEnv()})

@@ -17,15 +17,32 @@ pb gate attach-verified-child \
   --impl <impl-id> \
   --title "verify <thing> works after apply (<impl-id>): <short summary>" \
   --gate <repo-key>=<landed-sha> \
+  --body-file <checks.md> \
+  --acceptance "- <the observable result that proves it works>" \
   --actor "ID"
 # one --gate per changed repo; the child unblocks only when ALL are applied
 ```
 
+The call creates the child COMPLETE, so it needs no follow-up `bd update`: it
+carries the impl bead's repo and project labels (copied from the impl bead, minus
+its workflow-state labels such as `human` or `escalated`), the
+`has-acceptance-criteria` label a pool worker requires before it claims a bead, a
+description and acceptance criteria. It is still born deferred and held out of
+`bd ready` by the gates, so it becomes claimable only once they resolve.
+
+- `--body-file` is the description: the concrete post-apply checks. Write them to
+  a fresh scratch file BEFORE the call. An unreadable or empty file is refused
+  with exit `1` before anything is created.
+- `--acceptance` is the acceptance criteria, one `- ` line per observable result.
+- Omit either and `pb` derives it (the description from the impl bead's id and
+  title and the gated commits, the acceptance from `--title`). That is enough to
+  make the child claimable, but pass both whenever you have the concrete checks:
+  they belong in what `bd show <child>` prints, not only in a comment.
+
 `--title` MUST stay a SHORT summary: bd rejects a title over 500 characters
 (`title must be 500 characters or less`), and `pb` refuses it up front with exit
 `1` before creating anything. Put the long list of concrete post-apply checks in
-the child's description or a comment instead, after the call succeeds:
-`bd comment <child> --file <checks.md> --actor "ID"`.
+`--body-file`, not the title.
 
 Pin `<landed-sha>` to the sha the lander reported AND you verified in LAND's
 check — never HEAD, never a re-read of the shared primary branch (a peer may
@@ -48,8 +65,10 @@ have advanced either). Branch on the exit code:
   created), or a repo genuinely outside the workspace (take the FALLBACK below
   instead).
 - `1` with `500 characters` in the error → the `--title` was too long (nothing was
-  created): shorten it to a summary and re-run, moving the checks into a
-  `bd comment --file` on the child.
+  created): shorten it to a summary and re-run, moving the checks into
+  `--body-file`.
+- `1` with `--body-file` in the error → the file is missing, unreadable or empty
+  (nothing was created): fix it and re-run.
 - any other non-zero → transient-vs-genuine per the Rules; retry once, then
   STUCK.
 

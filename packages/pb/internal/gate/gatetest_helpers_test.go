@@ -81,7 +81,17 @@ func isolateBeadsEnv(t *testing.T) {
 		}
 		t.Setenv(k, dir)
 	}
-	for _, k := range []string{"BEADS_DIR", "WORKSPACE_ROOT", "ZR_MACHINE_SUPPORT_WORKSPACE_ROOT"} {
+	scrub := []string{"BEADS_DIR", "WORKSPACE_ROOT", "ZR_MACHINE_SUPPORT_WORKSPACE_ROOT"}
+	// Every other BEADS_* variable goes too (BEADS_DOLT_SERVER_HOST/PORT,
+	// BEADS_DOLT_SHARED_SERVER, BEADS_ACTOR, ...): the ambient environment of a
+	// drain session points bd at the live tracker, and any of these could do the
+	// same for the fixture.
+	for _, kv := range os.Environ() {
+		if k, _, _ := strings.Cut(kv, "="); strings.HasPrefix(k, "BEADS_") {
+			scrub = append(scrub, k)
+		}
+	}
+	for _, k := range scrub {
 		t.Setenv(k, "")    // register restore
 		_ = os.Unsetenv(k) // truly unset for the test duration
 	}
@@ -124,7 +134,14 @@ func runTool(t *testing.T, dir, name string, args ...string) string {
 
 func createDeferredBead(t *testing.T, ws, title string) string {
 	t.Helper()
-	out := runTool(t, ws, "bd", "create", title, "--defer", "2126-01-01", "--json")
+	return createBead(t, ws, title, "--defer", "2126-01-01")
+}
+
+// createBead creates a bead titled title with the extra bd create flags and
+// returns its id.
+func createBead(t *testing.T, ws, title string, extra ...string) string {
+	t.Helper()
+	out := runTool(t, ws, "bd", append([]string{"create", title}, append(extra, "--json")...)...)
 	var env struct {
 		Data struct {
 			ID string `json:"id"`

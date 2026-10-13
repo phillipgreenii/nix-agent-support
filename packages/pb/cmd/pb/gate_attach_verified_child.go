@@ -28,31 +28,67 @@ func parseGateSpecs(raw []string) ([]gate.GateSpec, error) {
 	return specs, nil
 }
 
-func newGateAttachVerifiedChildCmd() *cobra.Command {
-	var (
-		impl, title, actor, reason string
-		gates                      []string
-		asJSON                     bool
-	)
-	cmd := &cobra.Command{
-		Use:   "attach-verified-child",
-		Short: "Create a DEFERRED verification child of --impl, gate it on the landed commits, then un-defer",
-		Long: `Runs the deferred-first post-deploy gate sequence for a landed bead:
+// readBodyFile reads the child's description from path. An empty file is an
+// error rather than a silent fall back to the derived text: the caller named a
+// file and meant its content.
+func readBodyFile(path string) (string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("--body-file: %w", err)
+	}
+	if strings.TrimSpace(string(raw)) == "" {
+		return "", fmt.Errorf("--body-file %q is empty", path)
+	}
+	return string(raw), nil
+}
+
+// attachVerifiedChildLong is the command's long help. The label list is read
+// from gate.WorkflowStateLabels so the help cannot drift from the behaviour.
+func attachVerifiedChildLong() string {
+	return fmt.Sprintf(`Runs the deferred-first post-deploy gate sequence for a landed bead:
 create the verification child deferred, prove it is absent from bd ready,
 attach one pn:applied gate per --gate <repo-key>=<sha>, un-defer, re-prove
 absence, and comment the link on the implementation bead.
 
+The child is created complete, so no hand edit is needed before a drain worker
+can claim it once its gates resolve (it stays out of bd ready until then):
+  labels       the implementation bead's labels, which carry its repo and project
+               labels, except its workflow-state labels (%s);
+               has-acceptance-criteria is always set
+  description  --body-file's content; default: derived from the implementation
+               bead (its id and title) and the gated commits
+  acceptance   --acceptance; default: derived from --title
+
 --title is capped at 500 characters (bd's limit); a longer one is rejected with
 exit 1 before anything is created. Keep it a short summary and put the long
-check list in a bd comment on the child.
+check list in --body-file (or a bd comment on the child). An unreadable or empty
+--body-file is rejected with exit 1, also before anything is created.
 
 Exit codes: 0 fully gated; 1 generic failure; 3 gating incomplete and the
 child was LEFT DEFERRED (safe — route the impl bead to STUCK); 4 the child
-could not be proven un-workable (do NOT close the impl bead).`,
+could not be proven un-workable (do NOT close the impl bead).`, strings.Join(gate.WorkflowStateLabels, ", "))
+}
+
+func newGateAttachVerifiedChildCmd() *cobra.Command {
+	var (
+		impl, title, actor, reason, bodyFile, acceptance string
+		gates                                            []string
+		asJSON                                           bool
+	)
+	cmd := &cobra.Command{
+		Use:   "attach-verified-child",
+		Short: "Create a DEFERRED verification child of --impl, gate it on the landed commits, then un-defer",
+		Long:  attachVerifiedChildLong(),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			specs, err := parseGateSpecs(gates)
 			if err != nil {
 				return err
+			}
+			var description string
+			if bodyFile != "" {
+				if description, err = readBodyFile(bodyFile); err != nil {
+					return err
+				}
 			}
 			wd, err := os.Getwd()
 			if err != nil {
@@ -66,6 +102,7 @@ could not be proven un-workable (do NOT close the impl bead).`,
 			out, aerr := gate.Attach(context.Background(), d, gate.AttachParams{
 				WorkspaceDir: wd, ImplID: impl, Title: title,
 				Gates: specs, Actor: actor, Reason: reason,
+				Description: description, Acceptance: acceptance,
 			})
 			// Emit the result BEFORE exiting: on partial failure the child id and
 			// the gates already created are what the operator needs.
@@ -97,6 +134,8 @@ could not be proven un-workable (do NOT close the impl bead).`,
 	cmd.Flags().StringArrayVar(&gates, "gate", nil, "<repo-key>=<sha> to gate on; repeatable, one per changed repo (required)")
 	cmd.Flags().StringVar(&actor, "actor", "", "bd actor id (required)")
 	cmd.Flags().StringVar(&reason, "reason", "", `gate reason (default "post-deploy verify for <impl>")`)
+	cmd.Flags().StringVar(&bodyFile, "body-file", "", "file holding the child's description, e.g. the concrete post-apply checks (default: derived from --impl)")
+	cmd.Flags().StringVar(&acceptance, "acceptance", "", "the child's acceptance criteria (default: derived from --title)")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "JSON output")
 	_ = cmd.MarkFlagRequired("impl")
 	_ = cmd.MarkFlagRequired("title")

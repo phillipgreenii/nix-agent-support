@@ -37,6 +37,12 @@ import "strings"
 //     question pg2-cjfpy.2 owns for `bd` itself, and declaring it here would
 //     make pb's approval depend on that unlanded decision instead of on the
 //     R5 ruling above.
+//   - `pb gate attach-verified-child --body-file F` READS the file F and writes
+//     its text into the new bead's description. It is modeled as an inert
+//     literal, not a PathRead, for the same reason as the rest of this model: F
+//     is a scratch file the orchestrator wrote moments earlier (often outside
+//     the project root), so a path-read fact would abstain on every real
+//     invocation of the documented form. The read is stated here, not hidden.
 //   - `pb gate check` resolves (closes) or converts `pn:applied` gate beads
 //     whose change has been applied; with `--dry-run` it changes nothing.
 //
@@ -104,6 +110,7 @@ var pbSchema = CommandSchema{
 			"attach-verified-child": pbLeaf("gate attach-verified-child", map[string]FlagSpec{
 				"--impl": literal1, "--title": literal1, "--gate": literal1,
 				"--actor": literal1, "--reason": literal1, "--json": inert,
+				"--body-file": literal1, "--acceptance": literal1,
 			}),
 		}),
 	},

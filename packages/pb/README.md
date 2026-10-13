@@ -128,15 +128,32 @@ and ungated, closing the fleet-claim race where a peer agent claims the child an
 "verifies" code that was never applied.
 
 ```
-pb gate attach-verified-child --impl <beadid> --title <t> --gate <repo>=<sha> [--gate <repo>=<sha> ...] --actor <a> [--reason <r>] [--json]
+pb gate attach-verified-child --impl <beadid> --title <t> --gate <repo>=<sha> [--gate <repo>=<sha> ...] --actor <a> [--reason <r>] [--body-file <f>] [--acceptance <text>] [--json]
 ```
 
 - `--impl`, `--title`, `--gate` (repeatable — one per changed repo) and `--actor` are
   required. `--reason` defaults to `post-deploy verify for <impl>`.
 - `--title` MUST be at most 500 characters (bd's cap, counted in runes). A longer title is
   rejected with exit `1` before any `pn`/`bd` call, so nothing is created; keep the title a
-  short summary and put the long check list in a `bd comment --file` on the child. A `bd`
-  failure always carries bd's own message (bd reports `--json` errors on stdout).
+  short summary and put the long check list in `--body-file`. A `bd` failure always carries
+  bd's own message (bd reports `--json` errors on stdout).
+- The child is created **complete**, so a drain worker can claim it the moment its gates
+  resolve with no hand edit. It is still born deferred and held out of `bd ready` by the
+  gates exactly as before; only what `bd create` is given changed:
+  - **Labels** — the implementation bead's labels, which carry its repo label and project label
+    (the shared tracker has no other repo signal), minus its workflow-state labels, plus
+    `has-acceptance-criteria`. pb keeps no registry of repo or project labels, so it copies by
+    exclusion: `human`, `human-focus-required`, `needs-split-review`, `escalated`,
+    `refactor-campaign`, `worker-ready`, `mine`, `worktree-review`, `auto-session-wrapped`,
+    `docket`, `phase` and `phase-trigger` are never copied (a copied `human` or `escalated`
+    would park the child out of the drain queue for good). The list is
+    `gate.WorkflowStateLabels`, and `--help` prints it from there.
+  - **Description** — the content of `--body-file` (the concrete post-apply checks); without
+    it, derived from the implementation bead's id and title and the gated commits. An
+    unreadable or empty `--body-file` is rejected with exit `1` before anything is created.
+  - **Acceptance criteria** — `--acceptance`; without it, derived from `--title`.
+  - The implementation bead is read before the child exists, so an unreadable one is an exit `1`
+    with nothing created.
 - Human output: `child=<id> gates=<n>`. `--json` emits the `AttachResult` envelope
   (`child`, `gates`, `comment_failed`) instead.
 
@@ -152,6 +169,8 @@ pb gate attach-verified-child \
   --impl pg2-huyhg \
   --title "verify tldr wsplan renders after apply (pg2-huyhg): run tldr wsplan, compare against a known-good sibling page" \
   --gate phillipg-nix-repo-base=9167a60 \
+  --body-file /tmp/pg2-huyhg-checks.md \
+  --acceptance "- tldr wsplan renders the page, compared with a known-good sibling page" \
   --actor "$CLAUDE_SESSION_ID-drain"
 ```
 
@@ -378,4 +397,5 @@ Refresh third-party deps with `go mod tidy && nix run github:nix-community/gomod
 cd packages/pb
 go test ./...                       # unit tests (FakeRunner; real-git tests need git on PATH)
 go test -tags contract -p 1 ./...   # contract tests (real bd/git/pn; skip when absent)
+go test -tags integration ./internal/gate/   # real-bd fleet-race and attach-verified-child cases (isolated temp bd; skip when bd/git absent)
 ```

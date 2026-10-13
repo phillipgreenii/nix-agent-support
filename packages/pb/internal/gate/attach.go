@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/phillipgreenii/pb/internal/bd"
 )
@@ -35,6 +37,64 @@ type AttachParams struct {
 	Gates        []GateSpec
 	Actor        string
 	Reason       string
+	// Description and Acceptance are the child's description and acceptance
+	// criteria. A blank value is derived (childDescription, childAcceptance), so
+	// the child is always born with both and is claimable once its gates resolve.
+	Description string
+	Acceptance  string
+}
+
+// acceptanceLabel marks a bead the drain workers may claim. The child is always
+// created with acceptance criteria, so it always carries it.
+const acceptanceLabel = "has-acceptance-criteria"
+
+// WorkflowStateLabels are the labels that record where ONE bead stands in a
+// workflow. They describe the implementation bead, not the verification work,
+// and are never copied onto the child: a copied human or escalated label parks
+// the child out of the drain queue for good, and a copied docket label makes
+// plan-decompose treat a task as a docket epic. Everything else on the
+// implementation bead is scope (repo, project) or topic and is inherited; pb
+// keeps no registry of repo or project labels, which is why this is a deny-list.
+// Provenance: ADR 0089's opt-in precheck labels, claude-marketplace/pb/queues.json,
+// the beads-lifecycle skill and plan-decompose's audit-docket-label-leak.sh.
+// acceptanceLabel is not copied either: the child sets it from its own criteria.
+var WorkflowStateLabels = []string{
+	"human", "human-focus-required", "needs-split-review", "escalated", "refactor-campaign",
+	"worker-ready", "mine", "worktree-review", "auto-session-wrapped",
+	"docket", "phase", "phase-trigger",
+	acceptanceLabel,
+}
+
+// childLabels is the child's label set: the implementation bead's labels minus
+// WorkflowStateLabels, plus acceptanceLabel, sorted and de-duplicated.
+func childLabels(implLabels []string) []string {
+	out := []string{acceptanceLabel}
+	for _, l := range implLabels {
+		if l != "" && !slices.Contains(WorkflowStateLabels, l) {
+			out = append(out, l)
+		}
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
+// childDescription is the child's description when the caller gives none: what
+// it verifies, what holds it back, and where the context lives.
+func childDescription(impl bd.Bead, p AttachParams) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Post-deploy verification of %s: %s\n\n", p.ImplID, impl.Title)
+	b.WriteString("This bead stays out of `bd ready` until `pn workspace apply` has applied:\n")
+	for _, g := range p.Gates {
+		fmt.Fprintf(&b, "- %s=%s\n", g.Repo, g.Commit)
+	}
+	fmt.Fprintf(&b, "\n`bd show %s` has what changed (description, acceptance criteria, close reason). Verify it on the live machine as the title says.\n", p.ImplID)
+	return b.String()
+}
+
+// childAcceptance is the child's acceptance criteria when the caller gives none.
+func childAcceptance(p AttachParams) string {
+	return "- On the live machine, after the gating `pn workspace apply`: " + p.Title + "\n" +
+		"- The evidence (commands and their output) is recorded in a comment on this bead, which is then closed with the verdict; any finding becomes a follow-up bead."
 }
 
 type AttachResult struct {
@@ -47,7 +107,9 @@ type AttachResult struct {
 // DEFERRED, prove it is not workable, attach one pn:applied gate per GateSpec,
 // un-defer, prove the gates now hold it, and record the link on the impl bead.
 // The ordering closes the fleet-claim race: the child is never simultaneously
-// workable and ungated.
+// workable and ungated. The child is born with its labels (childLabels), a
+// description and acceptance criteria, so it needs no hand edit before a drain
+// worker can claim it once the gates resolve; none of that changes readiness.
 func Attach(ctx context.Context, d CreateDeps, p AttachParams) (AttachResult, error) {
 	// Before ANY external call: an over-long title would otherwise only fail at
 	// bd create, after pn/bd probes (pg2-cjakt).
@@ -73,9 +135,26 @@ func Attach(ctx context.Context, d CreateDeps, p AttachParams) (AttachResult, er
 	if err != nil {
 		return AttachResult{}, err
 	}
+	// Read the implementation bead BEFORE the child exists: a failure here, like a
+	// bad --gate repo above, is an exit-1 mistake with nothing to clean up.
+	impl, err := d.BD.ShowBead(ctx, dbDir, p.ImplID)
+	if err != nil {
+		return AttachResult{}, err
+	}
+	content := bd.CreateOpts{
+		Labels:      childLabels(impl.Labels),
+		Description: p.Description,
+		Acceptance:  p.Acceptance,
+	}
+	if strings.TrimSpace(content.Description) == "" {
+		content.Description = childDescription(impl, p)
+	}
+	if strings.TrimSpace(content.Acceptance) == "" {
+		content.Acceptance = childAcceptance(p)
+	}
 
 	childID, err := d.BD.CreateBead(ctx, dbDir, p.Title, childDeferUntil,
-		"discovered-from:"+p.ImplID, p.Actor)
+		"discovered-from:"+p.ImplID, p.Actor, content)
 	if err != nil {
 		return AttachResult{}, err
 	}

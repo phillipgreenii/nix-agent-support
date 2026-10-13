@@ -132,12 +132,75 @@ func TestCreateBead_argvAndID(t *testing.T) {
 	}, run.Result{Stdout: `{"data":{"id":"pg2-child"}}`}, nil)
 	c := Client{R: f}
 	id, err := c.CreateBead(context.Background(), "/db",
-		"verify x after apply (pg2-a)", "2126-01-01", "discovered-from:pg2-a", "sess-1")
+		"verify x after apply (pg2-a)", "2126-01-01", "discovered-from:pg2-a", "sess-1", CreateOpts{})
 	if err != nil {
 		t.Fatalf("CreateBead: %v", err)
 	}
 	if id != "pg2-child" {
 		t.Errorf("id = %q, want pg2-child", id)
+	}
+}
+
+// Labels, description and acceptance go between --deps and --actor, labels
+// comma-joined; a zero field adds no flag (the case above).
+func TestCreateBead_labelsDescriptionAcceptanceArgv(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("bd", []string{
+		"-C", "/db", "create", "verify x", "--defer", "2126-01-01", "--deps", "discovered-from:pg2-a",
+		"--labels", "agent-support,has-acceptance-criteria,pb",
+		"--description", "multi\nline body", "--acceptance", "- check one\n- check two",
+		"--actor", "sess-1", "--json",
+	}, run.Result{Stdout: `{"data":{"id":"pg2-child"}}`}, nil)
+	id, err := Client{R: f}.CreateBead(context.Background(), "/db", "verify x", "2126-01-01", "discovered-from:pg2-a", "sess-1",
+		CreateOpts{
+			Labels:      []string{"agent-support", "has-acceptance-criteria", "pb"},
+			Description: "multi\nline body",
+			Acceptance:  "- check one\n- check two",
+		})
+	if err != nil || id != "pg2-child" {
+		t.Fatalf("id, err = %q, %v; want pg2-child, nil", id, err)
+	}
+}
+
+func TestShowBead_parsesEnvelopeArray(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("bd", []string{"-C", "/db", "show", "pg2-a", "--json"}, run.Result{Stdout: `{"data":[{
+		"id":"pg2-a","title":"the title","description":"the body","acceptance_criteria":"- a\n- b",
+		"labels":["agent-support","pb","human"],"status":"open"}],"schema_version":1}`}, nil)
+	b, err := Client{R: f}.ShowBead(context.Background(), "/db", "pg2-a")
+	if err != nil {
+		t.Fatalf("ShowBead: %v", err)
+	}
+	if b.ID != "pg2-a" || b.Title != "the title" || b.Description != "the body" || b.AcceptanceCriteria != "- a\n- b" ||
+		!slices.Equal(b.Labels, []string{"agent-support", "pb", "human"}) {
+		t.Errorf("bead = %+v", b)
+	}
+	if !envHas(f.Calls()[0].Opts.Env, "BD_JSON_ENVELOPE=1") {
+		t.Errorf("BD_JSON_ENVELOPE=1 not set; env=%v", f.Calls()[0].Opts.Env)
+	}
+}
+
+// A bead with no labels reads null in bd's JSON, which must decode to no labels.
+func TestShowBead_acceptsObjectDataAndNullLabels(t *testing.T) {
+	f := run.NewFakeRunner()
+	f.AddResponse("bd", []string{"-C", "/db", "show", "pg2-a", "--json"},
+		run.Result{Stdout: `{"data":{"id":"pg2-a","title":"t","labels":null}}`}, nil)
+	b, err := Client{R: f}.ShowBead(context.Background(), "/db", "pg2-a")
+	if err != nil || b.ID != "pg2-a" || len(b.Labels) != 0 {
+		t.Fatalf("bead, err = %+v, %v", b, err)
+	}
+}
+
+func TestShowBead_noBeadErrors(t *testing.T) {
+	for name, stdout := range map[string]string{
+		"missing data": `{}`, "empty data": `{"data":[]}`, "not json": `oops`,
+		"other bead": `{"data":[{"id":"pg2-x"},{"id":"pg2-y"}]}`,
+	} {
+		f := run.NewFakeRunner()
+		f.AddResponse("bd", []string{"-C", "/db", "show", "pg2-a", "--json"}, run.Result{Stdout: stdout}, nil)
+		if _, err := (Client{R: f}).ShowBead(context.Background(), "/db", "pg2-a"); err == nil {
+			t.Errorf("%s: expected an error", name)
+		}
 	}
 }
 
@@ -147,7 +210,7 @@ func TestCreateBead_arrayEnvelope(t *testing.T) {
 		"-C", "/db", "create", "t", "--defer", "2126-01-01",
 		"--deps", "discovered-from:pg2-a", "--actor", "s", "--json",
 	}, run.Result{Stdout: `{"data":[{"id":"pg2-child"}]}`}, nil)
-	id, err := Client{R: f}.CreateBead(context.Background(), "/db", "t", "2126-01-01", "discovered-from:pg2-a", "s")
+	id, err := Client{R: f}.CreateBead(context.Background(), "/db", "t", "2126-01-01", "discovered-from:pg2-a", "s", CreateOpts{})
 	if err != nil || id != "pg2-child" {
 		t.Fatalf("id, err = %q, %v; want pg2-child, nil", id, err)
 	}
@@ -159,7 +222,7 @@ func TestCreateBead_noIDErrors(t *testing.T) {
 		"-C", "/db", "create", "t", "--defer", "2126-01-01",
 		"--deps", "discovered-from:pg2-a", "--actor", "s", "--json",
 	}, run.Result{Stdout: `{"data":{}}`}, nil)
-	if _, err := (Client{R: f}).CreateBead(context.Background(), "/db", "t", "2126-01-01", "discovered-from:pg2-a", "s"); err == nil {
+	if _, err := (Client{R: f}).CreateBead(context.Background(), "/db", "t", "2126-01-01", "discovered-from:pg2-a", "s", CreateOpts{}); err == nil {
 		t.Fatal("expected error when bd create returns no id")
 	}
 }
@@ -237,7 +300,7 @@ func TestCreateBead_surfacesBdJSONErrorFromStdout(t *testing.T) {
 	f.AddResponse("bd", []string{"-C", "/db", "create", "t", "--actor", "s", "--json"},
 		run.Result{Stdout: `{"error":"title must be 500 characters or less (got 660)"}`, ExitCode: 1},
 		errors.New("bd -C /db create t --actor s --json: exit 1: "))
-	_, err := (Client{R: f}).CreateBead(context.Background(), "/db", "t", "", "", "s")
+	_, err := (Client{R: f}).CreateBead(context.Background(), "/db", "t", "", "", "s", CreateOpts{})
 	if err == nil || !strings.Contains(err.Error(), "title must be 500 characters or less (got 660)") {
 		t.Fatalf("err = %v, want bd's own message", err)
 	}
@@ -248,7 +311,7 @@ func TestCreateBead_surfacesNonJSONStdout(t *testing.T) {
 	f.AddResponse("bd", []string{"-C", "/db", "create", "t", "--actor", "s", "--json"},
 		run.Result{Stdout: "Error: something plain\n", ExitCode: 1},
 		errors.New("bd create: exit 1: "))
-	_, err := (Client{R: f}).CreateBead(context.Background(), "/db", "t", "", "", "s")
+	_, err := (Client{R: f}).CreateBead(context.Background(), "/db", "t", "", "", "s", CreateOpts{})
 	if err == nil || !strings.Contains(err.Error(), "Error: something plain") {
 		t.Fatalf("err = %v, want the stdout text", err)
 	}
@@ -258,7 +321,7 @@ func TestCreateBead_emptyOutputStillSaysSomething(t *testing.T) {
 	f := run.NewFakeRunner()
 	f.AddResponse("bd", []string{"-C", "/db", "create", "t", "--actor", "s", "--json"},
 		run.Result{ExitCode: 1}, errors.New("bd create: exit 1: "))
-	_, err := (Client{R: f}).CreateBead(context.Background(), "/db", "t", "", "", "s")
+	_, err := (Client{R: f}).CreateBead(context.Background(), "/db", "t", "", "", "s", CreateOpts{})
 	if err == nil || !strings.Contains(err.Error(), "no output from bd") {
 		t.Fatalf("err = %v, want \"no output from bd\"", err)
 	}
@@ -273,7 +336,8 @@ func TestWrappedErrorsNeverEndEmpty_allBdCalls(t *testing.T) {
 		"await-id":     func(c Client) error { return c.SetAwaitID(ctx, "/db", "i", "a") },
 		"gate resolve": func(c Client) error { return c.ResolveGate(ctx, "/db", "i", "") },
 		"add-label":    func(c Client) error { return c.AddLabel(ctx, "/db", "i", "human") },
-		"create":       func(c Client) error { _, e := c.CreateBead(ctx, "/db", "t", "", "", "s"); return e },
+		"create":       func(c Client) error { _, e := c.CreateBead(ctx, "/db", "t", "", "", "s", CreateOpts{}); return e },
+		"show":         func(c Client) error { _, e := c.ShowBead(ctx, "/db", "i"); return e },
 		"ready":        func(c Client) error { _, e := c.ReadyIDs(ctx, "/db"); return e },
 		"update defer": func(c Client) error { return c.UpdateDefer(ctx, "/db", "i", "", "s") },
 		"comment":      func(c Client) error { return c.Comment(ctx, "/db", "i", "x", "s") },

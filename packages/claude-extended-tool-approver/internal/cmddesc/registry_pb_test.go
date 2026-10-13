@@ -29,6 +29,9 @@ func TestPbInterpretation(t *testing.T) {
 		"pb gate attach-verified-child --impl pg2-abc12 --title t --gate repo-a=0123abc --actor a-drain",
 		"pb gate attach-verified-child --impl pg2-abc12 --title t --gate repo-a=0123abc --gate repo-b=4567def --actor a-drain --json",
 		"pb gate attach-verified-child --impl pg2-abc12 --title t --gate repo-a=0123abc --actor a-drain --reason why",
+		// The child's description (read from a file) and acceptance criteria.
+		"pb gate attach-verified-child --impl pg2-abc12 --title t --gate repo-a=0123abc --body-file /tmp/checks.md --actor a-drain",
+		"pb gate attach-verified-child --impl pg2-abc12 --title t --gate repo-a=0123abc --body-file /tmp/checks.md --acceptance \"- it renders\" --actor a-drain --json",
 	}
 	insufficient := []string{
 		// No subcommand at all (a bare group): the generic subcommand
