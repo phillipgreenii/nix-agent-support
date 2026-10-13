@@ -14,8 +14,8 @@ module as an **implementer** of `INTF-HANDLER`/`INTF-SOURCE`.
 - **`INV-CCH-2`** — a handler session MUST tolerate a duplicate event and MUST support the
   deferred-ack reply form, matching `INTF-HANDLER`'s obligations on every implementer; this module
   states no exception of its own. Tolerating a duplicate never means adopting a finished session:
-  only a duplicate whose attempt is still in flight is absorbed, and every other dispatch runs in a
-  fresh session of its own (`INV-CCH-30`).
+  only the same event's turn still in progress is absorbed, and every other dispatch either runs
+  in a fresh session of its own or, while another attempt is in flight, declines (`INV-CCH-30`).
 - **`INV-CCH-3`** — a handler session's post-accept outcome (`retryable`, `resource-limit`,
   `critical`) MUST be surfaced only on this module's own logs/metrics or turned into a new event —
   never reported back to the core as anything but the opaque completion-outcome string
@@ -221,7 +221,7 @@ review`. The claim is still released (status open, assignee cleared) — the lab
     run. (d) A daemon restart MUST NOT kill the dispatch of a ccpool-backed role: the daemon does
     not cancel it and does not wait for it, so the handler keeps supervising its session (and
     refreshing the lease) across the restart. The unsettled offer is re-offered by the next
-    daemon. While the session's turn is still under way, that redelivered dispatch absorbs the
+    daemon. While the session's turn is still in progress, that redelivered dispatch absorbs the
     session (`INV-EVT-2`, `INV-CCH-2`, `INV-CCH-30`) rather than launching a second one; two
     handlers then watch one session, both finish idempotently, and the daemon that is running
     accounts the outcome once. What a redelivered dispatch does in every other case, including a
@@ -262,8 +262,9 @@ review`. The claim is still released (status open, assignee cleared) — the lab
   left open and the deferral is logged. A failed close MUST NOT change the dispatch's outcome; it
   is logged and the session is left to `ccpool`'s idle timeout. A settled session's row, whether
   this close reached it or not, MUST NOT be absorbed by a later dispatch, whatever its event id,
-  head or outcome, and whoever closed it: the later dispatch runs in a fresh session of its own
-  (`INV-CCH-30`). Operator ruling (Phillip, 2026-10-05, bead `pg2-58edz`), narrowing
+  head or outcome, and whoever closed it: while its handler still holds its lease a later dispatch
+  declines, and after that the later dispatch runs in a fresh session of its own (`INV-CCH-30`).
+  Operator ruling (Phillip, 2026-10-05, bead `pg2-58edz`), narrowing
   the purge-on-teardown of `phillipgreenii-nix-agent-support` ADR 0015 to a non-purge close; see
   ADR 0082. The earlier rule that a handler-closed settled row stayed a duplicate for a
   redelivery of the same event, narrowed in turn by the event id (`pg2-uprw5`), the item's pinned
@@ -303,7 +304,8 @@ review`. The claim is still released (status open, assignee cleared) — the lab
     supervised session gets (`INV-CCH-11`) and then remove the worktree under the same guards;
     under budget it MUST leave the session alone. A role with no time budget leaves such an
     orphan alone, and an over-budget orphan whose bead is already closed is left alone rather than
-    reopened.
+    reopened. A `starting` or `ready` orphan left alone here has no turn in progress, so the
+    dispatch then closes and replaces it as a leftover (`INV-CCH-30`).
   - **`needs_input`**: left alone (`phillipgreenii-nix-agent-support` ADR 0037); a SUPERVISED drain
     session is bounded by `INV-CCH-29`, an orphan is not.
     A dispatch that absorbs a session whose attempt is still in flight (`INV-CCH-30`, `INV-EVT-2`)
@@ -449,8 +451,8 @@ review`. The claim is still released (status open, assignee cleared) — the lab
     `blocks` dependency (`skipped-bead-blocked`; a worker that converts a bead into a prerequisite
     leaves exactly `open` plus a blocker edge). A bead that is `in_progress` and assigned to the
     role's own actor MUST NOT be declined, whatever else it carries: it is the live session of an
-    earlier dispatch, and the dispatch that follows a daemon restart absorbs it while its attempt is
-    still in flight (`INV-CCH-2`, `INV-CCH-14`, `INV-CCH-30`). An unreadable bead (no bead came
+    earlier dispatch, and the dispatch that follows a daemon restart absorbs it while its turn is
+    still in progress (`INV-CCH-2`, `INV-CCH-14`, `INV-CCH-30`). An unreadable bead (no bead came
     back) proceeds, and so does a deferral date
     that does not parse as a timestamp. A dependency counts only when it was read from the single-bead
     read; the list reads a source query uses carry a different dependency shape and are never used
@@ -671,77 +673,94 @@ review`. The claim is still released (status open, assignee cleared) — the lab
   ccpool-backed role MUST run in a **fresh session**: one it launches itself, with its own launch
   time, budget clock and supervision lease (`INV-CCH-18`). It MUST NOT adopt a session an earlier
   dispatch launched, except in the one case below, whatever the role's pool already holds for the
-  same bead and role. A fresh session is therefore launched for a new event; for a re-dispatch of
-  the same event at a new head (a re-review after the pull request's head advanced); for a
-  re-request after a hand-back, a release, a budget stop or a failure left the bead open; for a
-  reopened bead; and whenever the earlier session is **settled**, meaning it is no longer live, or
-  its turn has ended and no handler holds its lease any more, whoever closed its row and whether or
-  not anyone did. Reuse is the rare, enumerated exception, never a default narrowed by bounds.
-  Operator ruling (Phillip, 2026-10-12, recorded while unblocking bead `pg2-pq2ej`), verbatim: "in
-  docs, i think we need to update them such that re-using a ccpool session should not be the
-  default, for this very reason. so if there is new review, then there should be a new session.
-  re-using a session should be rare." Bead `pg2-yunrp`; see ADR 0094.
-  - **In flight.** An earlier session's attempt is **in flight** while the session is live and
-    either a turn is under way or paused for a person (`working`, `needs_input`), or a handler that
-    still holds the session's supervision lease is launching it (`starting`, `ready`) or settling
-    it (its turn has ended and that handler is still in its quiet wait, worktree removal or close,
-    `INV-CCH-15`, `INV-CCH-17`). One bead and role have at most one attempt in flight: while one
-    is, a dispatch MUST NOT launch a session beside it.
-  - **The one exception: absorb the same event's attempt.** A dispatch MUST **absorb** an earlier
-    session (wait on it as its own instead of launching one) when its attempt is in flight with its
-    turn not yet ended, it records this dispatch's own event id, and nobody has closed it or begun
-    to tear it down (`INV-CCH-20`). That is the redelivery of an event whose dispatch is still
-    running: the re-offer after a daemon restart that left the dispatch running (`INV-CCH-14`), a
-    crash-window redelivery (`INV-EVT-2`), or a redelivery that finds the session of a dead handler
-    still at work within its budget (`INV-CCH-18`). The head is deliberately not compared: a
-    dispatch re-reads its bead's head when it starts, so a redelivery after a head advance carries
-    the new head while the attempt it duplicates still works on the old one, and the source asks
-    again for the new head once that attempt ends. The absorbing dispatch takes the session's lock
-    and lease (`INV-CCH-18`), sends it nothing (it already has its prompt, or its launching handler
-    is about to send it), measures its budget from its original launch, and settles it like a
-    session of its own (`INV-CCH-17`).
-  - **Any other attempt in flight: decline.** An attempt in flight that the dispatch may not
-    absorb (one for another event, or for an event it cannot compare because either side records
-    no event id; one whose turn has ended while its handler is still settling it; one that someone
-    has closed while it still runs) MUST NOT be absorbed and MUST NOT get a second session beside
-    it. The dispatch declines with the pre-accept busy decline (`INV-CCH-6`), reason
-    `session-in-flight`, mutating nothing, so the core re-offers the event later, and the first
-    dispatch that finds the attempt no longer in flight launches a fresh session.
-  - **A launch nobody finished.** A session still `starting` or `ready` whose supervision lease has
-    expired was launched by a dispatch that is gone, and it never received a prompt. It is not in
-    flight and MUST NOT be handed this dispatch's prompt: the dispatch closes it, without purging,
-    and then launches its own session, so the leftover neither holds the pool's slot nor hands the
-    new attempt a budget clock that started at the earlier launch, in a worktree prepared for an
-    earlier item.
+  same bead and role. Once no earlier attempt of the same bead and role is in flight, a fresh
+  session is therefore launched for a new event; for a re-dispatch of the same event at a new head
+  (a re-review after the pull request's head advanced); for a re-request after a hand-back, a
+  release, a budget stop or a failure left the bead open; for a reopened bead; and whenever the
+  earlier session has **settled** (its turn has ended, or it is no longer live), whoever closed its
+  row and whether or not anyone did. Reuse is the rare, enumerated exception, never a default
+  narrowed by bounds. Operator ruling (Phillip, 2026-10-12, recorded while unblocking bead
+  `pg2-pq2ej`), verbatim: "in docs, i think we need to update them such that re-using a ccpool
+  session should not be the default, for this very reason. so if there is new review, then there
+  should be a new session. re-using a session should be rare." Bead `pg2-yunrp`; see ADR 0094.
+  - **In flight.** An earlier session of the same bead and role is **in flight** while its **turn
+    is in progress** (the session is live and `working` or `needs_input`: a turn under way, or one
+    paused for a person), or while a handler still holds its supervision lease, whatever its state
+    and whether or not it is still live: launching it, waiting on it, settling it (the quiet wait,
+    worktree removal and close of `INV-CCH-15` and `INV-CCH-17`) or handling its death. One bead and
+    role have at most one attempt in flight: while one is, a dispatch MUST NOT launch a session
+    beside it. Every session the pool holds for the bead and role counts, not only the first one
+    found, and a pool whose sessions cannot be read is treated as holding one in flight.
+  - **The one exception: absorb the same event's turn in progress.** A dispatch MUST **absorb** an
+    earlier session (wait on it as its own instead of launching one) when ALL of the following
+    hold: its turn is in progress; it records this dispatch's own event id; nobody has closed it or
+    begun to tear it down (`INV-CCH-20`); and its bead, as read at dispatch, is not already closed.
+    That is the redelivery of an event whose turn is still running: the re-offer after a daemon
+    restart that left the dispatch running (`INV-CCH-14`), a crash-window redelivery
+    (`INV-EVT-2`), or a redelivery that finds the session of a dead handler still at work
+    (`INV-CCH-18`). The head is deliberately not compared: a dispatch re-reads its bead's head when
+    it starts, so a redelivery after a head advance carries the new head while the turn it
+    duplicates still works on the old one, and the source asks again for the new head once that
+    attempt ends. The absorbing dispatch takes the session's lock and lease (`INV-CCH-18`), sends
+    it nothing, measures its budget from its original launch, and settles it like a session of its
+    own (`INV-CCH-17`).
+  - **Any other attempt in flight: decline.** A dispatch that finds an attempt in flight it may not
+    absorb (one still being launched; one whose turn has ended, or whose session has died, while its
+    handler still holds the lease; one for another event, or for an event it cannot compare because
+    either side records no event id; one that someone has closed while it still runs; one whose
+    bead is already closed; a pool it cannot read) MUST NOT absorb it and MUST NOT launch a session
+    beside it. It declines with the pre-accept busy decline (`INV-CCH-6`), reason
+    `session-in-flight`, mutating nothing. Like a full pool, this decline is routine backpressure,
+    not a failure, so the failure-rate alert MUST NOT count it. The core re-offers the event later,
+    and the first dispatch that finds no attempt in flight launches a fresh session.
+  - **A leftover nobody supervises.** A live session still `starting` or `ready` (no turn in
+    progress) whose supervision lease has expired has no handler and no turn: a launch whose handler
+    gave up or died before its prompt was taken, or a session a cancel left `ready` after its
+    handler had gone. It is not in flight and MUST NOT be handed this dispatch's prompt. The
+    dispatch closes it, without purging and under the same per-session lock an absorb takes
+    (`INV-CCH-18`), and then launches its own session, so the leftover neither holds the pool's slot
+    nor hands the new attempt a budget clock that started at the earlier launch, in a worktree
+    prepared for an earlier item. This close is the dispatch's own, apart from the settled-session
+    close of `INV-CCH-17`.
   - **Redelivered finished work.** A redelivery of an event whose attempt has already settled (the
     narrow crash window, or a daemon restart that lands just as the attempt settles) is a dispatch
     like any other. A role with a pre-launch check (`INV-CCH-22`) declines it at zero model cost
     when its bead is already done, and the dispatch-time reconcile (`INV-CCH-14`) usually purges
     the settled session of a closed bead before the dispatch looks for one.
 
-  **Not covered, accepted.** A role without a pre-launch check launches one fresh session for a
-  redelivered event whose bead is already closed; that was already the outcome whenever the
-  dispatch-time reconcile purged the settled session first, which is the usual case. A settled
-  session whose subagents are still writing is not in flight once its handler has gone, so in a
-  pool with a free slot a fresh session can start in the shared per-bead worktree before they stop
-  (a one-slot pool declines at capacity instead, `INV-CCH-6`).
+  **Not covered, accepted.**
+  - A role without a pre-launch check launches one fresh session for a dispatch whose bead is
+    already closed: a redelivered event, or an event that was declined while an earlier attempt ran
+    and closed the bead. That was already the outcome whenever the dispatch-time reconcile purged
+    the settled session first, which is the usual case.
+  - A declined event is re-offered only until it expires (`INV-EVT-4`): a born-expired event is
+    dropped at once and re-derived on its source's next query, and an event of another type can
+    expire while an attempt of the same bead and role stays in flight.
+  - A lease outlives a handler that returned early by whatever is left of it (for a launch that
+    failed, up to one launch wait plus one lease TTL), so a later dispatch declines for that long
+    before it closes and replaces the leftover.
+  - A session whose handler has gone while its subagents still write has settled and is not in
+    flight, so in a pool with a free slot a fresh session can start in the shared per-bead worktree
+    before they stop (a one-slot pool declines at capacity instead, `INV-CCH-6`).
+  - A redelivery that arrives while the earlier dispatch is still creating its session, before the
+    pool lists it, cannot see it; a pool with a free slot can then run two sessions for the bead and
+    role (ADR 0085).
 
   **Why.** A second session beside a running attempt would put two agents on one bead in one
   shared per-bead worktree, race the first for the claim, and take a second pool slot, so an
-  attempt in flight is waited on, never duplicated. Absorbing keeps the budget honest only while a
-  turn is under way: the time measured is then the attempt's real running time, and an attempt
-  already past its budget has been stopped by its own watchdog, or by the orphan reconcile before
-  this dispatch looks (`INV-CCH-18`). Neither reason holds for a settled session. Its turn is over,
-  so a fresh session duplicates no work in progress, and absorbing it starts the absorbing
-  dispatch's budget at the original launch: that is how a
-  re-review after a head advance was hard-stopped at once (`pg2-afre3`: 4065 seconds measured
-  against a 1500 second cap) and how a handed-back bead looped (`pg2-tc9c3`; `pg2-92rfu`: one row
-  closed 268 times). Nor can a dispatch tell a redelivery of a settled attempt from a new request
-  for the same bead: the event id is the same for every event of one type and bead, so each bound
-  added to that path (the event id, `pg2-uprw5`; the item's pinned head, `pg2-afre3`; the outcome
-  of the dispatch, `pg2-tc9c3`) left another case open. The ruling flips the default instead of
-  adding a fourth bound. Considered and rejected: keeping a settled session absorbable when it
-  served the same event at the same head and its dispatch completed the bead. The dispatch-time
-  reconcile already purges such a session first in the usual case, a pre-launch check answers the
-  redelivery at zero model cost, and keeping it would keep alive the one path behind every false
-  budget stop so far.
+  attempt in flight is waited on or declined, never duplicated. Absorbing is kept to a turn in
+  progress because only then is the budget it measures honest: the time measured is the attempt's
+  real running time, so a stop it triggers is the stop the attempt's own watchdog would have made.
+  Neither reason holds for a settled session. Its turn is over, so a fresh session duplicates no
+  work in progress, and absorbing it starts the absorbing dispatch's budget at the original launch:
+  that is how a re-review after a head advance was hard-stopped at once (`pg2-afre3`: 4065 seconds
+  measured against a 1500 second cap) and how a handed-back bead looped (`pg2-tc9c3`; `pg2-92rfu`:
+  one row closed 268 times). Nor can a dispatch tell a redelivery of a settled attempt
+  from a new request for the same bead: the event id is the same for every event of one type and
+  bead, so each bound added to that path (the event id, `pg2-uprw5`; the item's pinned head,
+  `pg2-afre3`; the outcome of the dispatch, `pg2-tc9c3`) left another case open. The ruling flips
+  the default instead of adding a fourth bound. Considered and rejected: keeping a settled session
+  absorbable when it served the same event at the same head and its dispatch completed the bead.
+  The dispatch-time reconcile already purges such a session first in the usual case, a pre-launch
+  check answers the redelivery at zero model cost, and keeping it would keep alive the one path
+  behind every false budget stop so far, here on a bead that is already done.

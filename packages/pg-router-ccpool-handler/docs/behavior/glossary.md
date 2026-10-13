@@ -35,15 +35,20 @@ Realization gaps for the build's one remaining residual.
   to a human (`INV-CCH-28`).
 - **Fresh session** — a session a dispatch launches for itself, with its own launch time, budget
   clock and supervision lease; every dispatch runs in one unless it absorbs (`INV-CCH-30`).
-- **In flight** — an earlier session's attempt that is not over: the session is live and a turn
-  is under way or paused for a person, or a handler that holds its lease is still launching or
-  settling it (`INV-CCH-30`).
-- **Settled session** — a session whose attempt is no longer in flight: it is gone, or its turn
-  has ended and no handler holds its lease. It is never absorbed, whoever closed it
-  (`INV-CCH-17`, `INV-CCH-30`).
-- **Absorb** — a dispatch waiting on an earlier session's attempt as its own instead of launching
-  a fresh session; allowed only for the same event's attempt, in flight with its turn under way,
-  and the one exception to a fresh session (`INV-CCH-30`).
+- **Turn in progress** — a live session that is `working` or `needs_input`: a turn under way, or
+  one paused for a person. The only state in which an earlier session can be absorbed
+  (`INV-CCH-30`).
+- **In flight** — an earlier session of the same bead and role that is not over: its turn is in
+  progress, or a handler still holds its supervision lease (launching it, waiting on it, settling
+  it or handling its death), whatever its state. While one is, no dispatch launches beside it
+  (`INV-CCH-30`).
+- **Settled session** — a session whose turn has ended, or that is no longer live. It is never
+  absorbed, whoever closed it: while its handler still holds its lease it is still in flight and a
+  later dispatch declines, and after that a later dispatch runs in a fresh session (`INV-CCH-17`,
+  `INV-CCH-30`).
+- **Absorb** — a dispatch waiting on an earlier session's turn in progress as its own instead of
+  launching a fresh session; allowed only for the same event, a session nobody has closed and a
+  bead not yet closed, and the one exception to a fresh session (`INV-CCH-30`).
 
 ## Source-side vocabulary
 

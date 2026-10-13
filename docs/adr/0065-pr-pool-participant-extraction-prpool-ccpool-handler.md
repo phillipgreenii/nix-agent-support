@@ -1,6 +1,6 @@
 # pg-router: participant extraction into `packages/pg-router-ccpool-handler` (Phase 5)
 
-**Status**: Accepted (operator review recorded 2026-09-10, bead `pg2-mf0dx`)
+**Status**: Accepted (operator review recorded 2026-09-10, bead `pg2-mf0dx`); the `INV-EVT-2` absorption it asks for is narrowed by 0094 (2026-10-13, bead `pg2-yunrp`)
 **Date**: 2026-09-10
 **Deciders**: drafted by an implementer agent under Task 5.0's derive-plan mandate; the
 command-executor open question (the Decision's "Open question resolved" section) is this ADR's own to make per that mandate's
@@ -298,6 +298,12 @@ this. The derived plan MUST include a task giving the extracted handler duplicat
 keyed on stable role/item identity (e.g. `Role.DisplayName`, which is already stable per bead
 rather than per attempt) before this row is deleted; deleting it as a side effect of the move
 without that logic would misrecord an unrealized gap as closed.
+
+> **Later note (2026-10-13, ADR 0094, bead `pg2-yunrp`):** the absorption this paragraph asks for
+> is narrowed by operator ruling. A redelivery is absorbed only while the earlier session's turn is
+> still in progress (no second session beside a running one); a redelivery of an attempt that has
+> already settled now runs in a fresh session, which this paragraph counted as the defect. See
+> `INV-CCH-30` in `packages/pg-router-ccpool-handler/docs/behavior/invariants.md`.
 
 ## Consequences
 

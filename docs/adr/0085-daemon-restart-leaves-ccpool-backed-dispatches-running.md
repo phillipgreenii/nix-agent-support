@@ -5,10 +5,11 @@
 **Deciders**: Phillip Green II
 
 > **Later note (2026-10-13, ADR 0094, bead `pg2-yunrp`):** the redelivered dispatch still absorbs
-> the live session while its turn is under way, which is the case this ADR is about. It no longer
-> absorbs a session whose turn has ended: while the old handler is still settling such a session
-> the redelivered dispatch declines (`session-in-flight`) and is re-offered, and once the session
-> has settled it runs in a fresh session like any other dispatch (`INV-CCH-30`).
+> the live session while its turn is in progress, which is the case this ADR is about. It no longer
+> absorbs a session the old handler is still launching, or one whose turn has ended: while the old
+> handler still holds the lease the redelivered dispatch declines (`session-in-flight`) and is
+> re-offered, and once the session has settled it runs in a fresh session like any other dispatch
+> (`INV-CCH-30`).
 
 ## Context
 

@@ -45,8 +45,10 @@ treatment of its own named boundaries (its `INTF-BRIDGE` — example only, not a
   and leaves a working session and its worktree untouched. It lists only the default pool; a
   session in a role's own pool is outside it.
   Each dispatch launches a fresh session of its own; it waits on an existing session instead only
-  when that session's attempt for the same event is still in flight with its turn under way, and it
-  never adopts a settled session (`INV-CCH-30`).
+  when that session's turn for the same event is still in progress, it declines while any other
+  attempt for the bead and role is in flight, it closes a leftover `starting` or `ready` session
+  that no handler supervises before launching, and it never adopts a settled session
+  (`INV-CCH-30`).
   When a dispatch reaches a terminal outcome, this module also closes (without purging) the one
   session it launched or absorbed, if it is settled and quiet (`INV-CCH-17`).
   While a dispatch runs, this module writes a supervision lease into the session's metadata

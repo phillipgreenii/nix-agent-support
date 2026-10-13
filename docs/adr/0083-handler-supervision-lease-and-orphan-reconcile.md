@@ -79,10 +79,11 @@ Operator ruling (Phillip, 2026-10-05, bead `pg2-g2u9m`): a supervision lease to 
    dispatch treats the row as abandoned and launches afresh instead of absorbing it (ADR 0082's
    rule that a handler-closed settled row is a duplicate applies to rows the handler closed after
    settling, not to rows it reclaimed). **Later note (2026-10-13, ADR 0094, bead `pg2-yunrp`):**
-   ADR 0082's settled-row rule is superseded, and a dispatch absorbs only the same event's attempt
-   still in flight with its turn under way. An orphan is therefore absorbed only while it is still
-   at work within its budget, and a reclaimed orphan, being closed, is never absorbed whether or not
-   it carries the stamp.
+   ADR 0082's settled-row rule is superseded, and a dispatch absorbs only the same event's turn
+   still in progress. An orphan is therefore absorbed only while its turn is in progress, and a
+   reclaimed orphan, being closed, is never absorbed whether or not it carries the stamp. An
+   under-budget `starting` or `ready` orphan that the reconcile leaves alone is then closed and
+   replaced by the dispatch as a leftover.
 6. **Observability.** The event log records `orphan_reclaimed` and `orphan_hard_stop` with session,
    bead, role, pool, state, lease expiry and launch time, and each is also an INFO log line.
 

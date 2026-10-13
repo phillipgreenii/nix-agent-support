@@ -285,6 +285,8 @@ the role's prompt only; that is an accepted limitation. The invariant is `INV-CC
   precheck's own-actor exception protects.
 - ADR 0082 (a gated dispatcher closes the sessions it settles): the incomplete marker on a settled
   row whose bead is still open, which a handed-back `close-or-release` row also carries.
+  (Superseded 2026-10-13 by ADR 0094: no settled row is absorbed, so the marker is no longer what
+  keeps a handed-back row from being re-adopted.)
 - ADR 0076 (agent claim identity and the per-session actor): the actor rule the worker's literal
   actor overrides, by operator ruling.
 - ADR 0046 (the `pn:applied` gate requires apply and lock): the post-deploy verification gate the

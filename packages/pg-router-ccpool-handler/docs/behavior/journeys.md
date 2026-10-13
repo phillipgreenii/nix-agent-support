@@ -61,9 +61,9 @@ Extensions:
   is now marked for a human, is no longer groomed, is deferred or is blocked
   (`skipped-bead-not-open`, `skipped-bead-claimed`, `skipped-bead-human`,
   `skipped-bead-not-groomed`, `skipped-bead-deferred`, `skipped-bead-blocked`); a bead that the
-  role's own actor already holds `in_progress` is never declined, because it is the live session a
-  restarted daemon is about to absorb (2k). It reads only, and any failure to read launches as
-  normal.
+  role's own actor already holds `in_progress` is never declined here, because it is the live
+  session of an earlier dispatch, which 2k absorbs while its turn is in progress. It reads only, and
+  any failure to read launches as normal.
 - 2i. A session dies unexplained before its bead completes (`INV-CCH-7`): this module also logs
   the pool's usage-limit reading once (`INV-CCH-26`), as evidence only; the failure is unchanged.
 - 2j. A drain session (completion `close-or-release`) raises a permission dialog nobody can answer
@@ -80,10 +80,11 @@ Extensions:
   `errored` one is closed (not purged), its bead claim released if the role's own actor still
   holds it, and its worktree removed; a `starting`, `ready` or `working` one past its time budget
   is hard-stopped as a supervised session would be (`INV-CCH-11`), then its worktree is removed;
-  an under-budget one, a `needs_input` one, and one with no lease are left alone. The freed pool
-  slot is then available to this very dispatch. If this dispatch is instead a redelivery of the
-  event an orphan still at work within its budget was launched for, it absorbs the orphan (2k): it
-  takes over the lease and keeps the orphan's original launch time as the start of its budget.
+  an under-budget one, a `needs_input` one, and one with no lease are left alone (an under-budget
+  `starting` or `ready` one is then closed and replaced, 2k). The freed pool slot is then
+  available to this very dispatch. If this dispatch is instead a redelivery of the event an orphan
+  still at work was launched for, it absorbs the orphan (2k): it takes over the lease and keeps the
+  orphan's original launch time as the start of its budget.
 - 2e. An earlier dispatch's handler died after it created the per-bead worktree but before the
   session existed (or a session was closed by `ccpool` before anyone reclaimed its worktree), so no
   session row leads to the worktree. Before checking capacity this module scans the worktree
@@ -112,16 +113,19 @@ Extensions:
   credential the handler lacks, a commit that cannot be found), the dispatch still proceeds and the
   prompt is told the pre-fetch did not succeed, so it does those steps itself.
 - 2k. The role's pool already holds a session for the same bead and role (`INV-CCH-30`). If that
-  session's attempt for this same event is still in flight with its turn under way (working,
-  paused for a person, or still being launched by a handler that holds its lease), this module
-  absorbs it: it waits on that session as its own, sends it nothing, and keeps its original launch
-  time as the start of its budget. This is the redelivery a daemon restart or a crash window
-  produces. If the attempt in flight is for another event, or its turn has ended while its handler
-  is still settling it, this module declines `busy` with reason `session-in-flight` and launches
-  nothing, so the core re-offers the event once that attempt is over. A launch nobody finished
-  (still `starting` or `ready`, its lease expired) is closed and replaced by this dispatch's own
-  session. Any other session is never reused, whoever closed it: a re-review after a head
-  advance, a re-request after a hand-back and a reopened bead each get a fresh session.
+  session's turn is in progress (working, or paused for a person) for this same event, nobody has
+  closed it or begun to tear it down, and its bead is not already closed, this module absorbs it:
+  it waits on that session as its own, sends it nothing, and keeps its original launch time as the
+  start of its budget. This is the redelivery a daemon restart or a crash window produces. Any
+  other attempt still in flight (one being launched; one whose turn has ended or whose session has
+  died while its handler still holds the lease; one for another event or with no event id to
+  compare; one closed while it still runs; one whose bead is already closed; or a pool that cannot
+  be read) makes this module decline `busy` with reason `session-in-flight` and launch nothing; the
+  core re-offers the event later, and a dispatch that finds no attempt in flight launches a fresh
+  session. A leftover nobody supervises (still `starting` or `ready`, its lease expired) is closed
+  and replaced by this dispatch's own session. Any other session is never reused, whoever closed
+  it: a re-review after a head advance, a re-request after a hand-back and a reopened bead each
+  get a fresh session.
 - 3d. The role's completion is `close-or-release` and its session has ended (`INV-CCH-28`): this
   module settles it as described in `USECASE-CCH-RELEASE-END`, which includes the case of a
   session that ended without ever claiming its bead.

@@ -9,8 +9,8 @@
 > re-using a ccpool session should not be the default, for this very reason. so if there is new
 > review, then there should be a new session. re-using a session should be rare." A dispatch now
 > runs in a fresh session, and a settled row, whoever closed it and whatever its event id, head or
-> outcome, is never absorbed; the only absorbed session is the same event's attempt still in flight
-> with its turn under way (`INV-CCH-30`). Items 1 to 3 (the guarded, best-effort non-purge close)
+> outcome, is never absorbed; the only absorbed session is the same event's turn still in progress
+> (`INV-CCH-30`). Items 1 to 3 (the guarded, best-effort non-purge close)
 > stand, and so does item 4's closing "Closed once" rule (a step that finds a row already closed
 > and gone does not close it again). The rest of item 4 is kept below, marked superseded, as the
 > record of what it replaced.
