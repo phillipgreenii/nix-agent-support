@@ -316,6 +316,151 @@ func TestSettleGraphQLBooksTheFoldedCostAndReading(t *testing.T) {
 	}
 }
 
+// The conversation page documents of internal/github select `rateLimit { cost }`
+// alone. Its cost is booked; its missing remaining must not become a reading of
+// zero, which would hold every class below the reserve until the window ends.
+func TestSettleGraphQLWithACostOnlySelectionBooksTheCostAndKeepsTheLastReading(t *testing.T) {
+	f, g, _, _, events := newFeed(t, nil, nil)
+	meta := Meta{Class: governor.ClassInteractive, Purpose: governor.PurposeInteractive, Group: "conversation", BatchSize: 1}
+	if err := g.Observe(governor.Reading{Bucket: governor.BucketGraphQL, Remaining: 3000, ResetAt: reset}); err != nil {
+		t.Fatal(err)
+	}
+	tk, err := g.Admit(governor.Request{Bucket: governor.BucketGraphQL, Class: meta.Class, Cost: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`{"data":{"rateLimit":{"cost":2},"repository":{"pullRequest":{"comments":{"nodes":[]}}}}}`)
+	if err := f.SettleGraphQL(tk, meta, body, nil); err != nil {
+		t.Fatal(err)
+	}
+	bs := bucketState(t, g, governor.BucketGraphQL)
+	if bs.Spent != 2 || bs.Remaining != 2998 || !bs.ResetAt.Equal(reset) || bs.InFlight != 0 {
+		t.Errorf("after a cost-only response: %+v, want spent 2 and the earlier reading (3000) less that spend", bs)
+	}
+	if len(*events) != 1 || (*events)[0].Cost != 2 || (*events)[0].Remaining != 2998 {
+		t.Errorf("events = %+v", *events)
+	}
+	// Nothing is held below the reserve: the next call is admitted.
+	if err := g.Check(governor.Request{Bucket: governor.BucketGraphQL, Class: governor.ClassInteractive, Cost: 1}); err != nil {
+		t.Errorf("a cost-only response held the bucket: %v", err)
+	}
+}
+
+func TestRateLimitErrorWithoutAVisibleStatusDoesNotClaimHTTP0(t *testing.T) {
+	unseen := (&RateLimitError{Secondary: true, RetryAfter: time.Minute}).Error()
+	if strings.Contains(unseen, "HTTP 0") || !strings.Contains(unseen, "secondary rate limit") || !strings.Contains(unseen, "1m0s") {
+		t.Errorf("message = %q", unseen)
+	}
+	seen := (&RateLimitError{StatusCode: 403, Secondary: true, RetryAfter: 45 * time.Second}).Error()
+	if !strings.Contains(seen, "HTTP 403") || !strings.Contains(seen, "45s") {
+		t.Errorf("message = %q", seen)
+	}
+}
+
+// stdinRunner is a Runner that also feeds stdin, recording what it was given.
+type stdinRunner struct {
+	fakeRunner
+	stdin [][]byte
+}
+
+func (s *stdinRunner) RunStdin(ctx context.Context, stdin []byte, args ...string) ([]byte, error) {
+	s.stdin = append(s.stdin, stdin)
+	return s.Run(ctx, args...)
+}
+
+func newStdinFeed(t *testing.T, out []byte, runErr error) (*Feed, *governor.Governor, *stdinRunner, *[]governor.SpendEvent) {
+	t.Helper()
+	clk := governor.NewManualClock(t0)
+	var events []governor.SpendEvent
+	g, err := governor.New(GovernorConfig(config.Defaults().Settings), governor.Options{
+		Clock: clk, OnSpend: func(e governor.SpendEvent) { events = append(events, e) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := &stdinRunner{fakeRunner: fakeRunner{out: out, err: runErr}}
+	return New(g, run, clk), g, run, &events
+}
+
+// A REST write with a JSON body (the create-pending-review call shape) goes
+// through gh api --include with its body on stdin, and is admitted and booked as
+// REST does.
+func TestRESTStdinRunsAWriteThroughGhAPIIncludeAndFeedsTheReading(t *testing.T) {
+	out := ghInclude("201 Created", rateHeaders("core", 5000, 4986, 14), `{"id":7,"node_id":"PRR_node","state":"PENDING"}`)
+	f, g, run, events := newStdinFeed(t, out, nil)
+	payload := []byte(`{"commit_id":"0123abc","body":"summary"}`)
+	resp, err := f.RESTStdin(context.Background(), RESTCall{
+		Meta: Meta{Class: governor.ClassInvalidated, Purpose: governor.PurposeWrite, Group: "pending", BatchSize: 1},
+		Args: []string{"repos/o/r/pulls/1/reviews", "--method", "POST", "--input", "-"},
+	}, payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(run.calls) != 1 || strings.Join(run.calls[0], " ") != "api --include repos/o/r/pulls/1/reviews --method POST --input -" {
+		t.Fatalf("gh calls = %v", run.calls)
+	}
+	if len(run.stdin) != 1 || string(run.stdin[0]) != string(payload) {
+		t.Errorf("stdin = %q, want the payload", run.stdin)
+	}
+	if resp.StatusCode != 201 || string(resp.Body) != `{"id":7,"node_id":"PRR_node","state":"PENDING"}` {
+		t.Errorf("response = %+v", resp)
+	}
+	bs := bucketState(t, g, governor.BucketRESTCore)
+	if bs.Spent != 1 || bs.Remaining != 4986 || bs.Limit != 5000 || bs.SpentByPurpose[governor.PurposeWrite] != 1 || bs.InFlight != 0 {
+		t.Errorf("rest_core state = %+v", bs)
+	}
+	want := governor.SpendEvent{
+		At: t0, Bucket: governor.BucketRESTCore, Class: governor.ClassInvalidated, Purpose: governor.PurposeWrite,
+		Group: "pending", BatchSize: 1, Cost: 1, Remaining: 4986, Outcome: OutcomeOK,
+	}
+	if len(*events) != 1 || (*events)[0] != want {
+		t.Errorf("spend events = %+v, want %+v", *events, want)
+	}
+}
+
+func TestRESTStdinOnARunnerWithoutStdinSaysSoAndAdmitsNothing(t *testing.T) {
+	out := ghInclude("200 OK", rateHeaders("core", 5000, 4000, 1000), "{}")
+	f, g, _, run, events := newFeed(t, out, nil) // fakeRunner: Run only
+	resp, err := f.RESTStdin(context.Background(), RESTCall{
+		Meta: Meta{Class: governor.ClassInteractive}, Args: []string{"repos/o/r/pulls/1/reviews", "--input", "-"},
+	}, []byte("{}"))
+	if !errors.Is(err, ErrNoStdinRunner) || resp != nil {
+		t.Fatalf("resp %+v err %v, want ErrNoStdinRunner", resp, err)
+	}
+	if !strings.Contains(err.Error(), "StdinRunner") {
+		t.Errorf("the error does not name the missing interface: %v", err)
+	}
+	if len(run.calls) != 0 || len(*events) != 0 {
+		t.Errorf("gh ran %d times, %d spend events", len(run.calls), len(*events))
+	}
+	if bs := bucketState(t, g, governor.BucketRESTCore); bs.Spent != 0 || bs.InFlight != 0 {
+		t.Errorf("rest_core = %+v: nothing may be reserved for a call that cannot run", bs)
+	}
+}
+
+func TestRESTStdinPausesTheBackgroundOnASecondaryLimitLikeREST(t *testing.T) {
+	headers := rateHeaders("core", 5000, 4900, 100, [2]string{"Retry-After", "30"})
+	out := ghInclude("403 Forbidden", headers, `{"message":"You have exceeded a secondary rate limit."}`)
+	authish := fmt.Errorf("gh api: (HTTP 403): %w", github.ErrGHAuthInvalid)
+	f, g, _, _ := newStdinFeed(t, out, authish)
+	resp, err := f.RESTStdin(context.Background(), RESTCall{
+		Meta: Meta{Class: governor.ClassInvalidated, Purpose: governor.PurposeWrite},
+		Args: []string{"repos/o/r/pulls/1/reviews", "--method", "POST", "--input", "-"},
+	}, []byte("{}"))
+	var rl *RateLimitError
+	if !errors.As(err, &rl) || !rl.Secondary || rl.RetryAfter != 30*time.Second || errors.Is(err, github.ErrGHAuthInvalid) {
+		t.Fatalf("err = %v, want a secondary *RateLimitError for 30s that is not an auth failure", err)
+	}
+	if resp == nil || resp.StatusCode != 403 {
+		t.Errorf("response %+v was not returned beside the error", resp)
+	}
+	for _, b := range governor.Buckets() {
+		if bs := bucketState(t, g, b); !bs.Paused || !bs.PausedUntil.Equal(t0.Add(30*time.Second)) {
+			t.Errorf("%s state = %+v", b, bs)
+		}
+	}
+}
+
 // A GraphQL read retried by github.Provider's own bounded retry takes the
 // governor's check before the retry, so a retry cannot spend past the limit.
 func TestRetryGuardStopsAGraphQLRetryTheGovernorWouldRefuse(t *testing.T) {

@@ -2,6 +2,7 @@ package ratefeed
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -16,7 +17,10 @@ import (
 // ---- GraphQL: the folded rateLimit selection ------------------------------------
 
 // GraphQLReading is what a GraphQL response carried about the rate limit: the
-// points the request spent, and the reading it took.
+// points the request spent, and the reading it took. A document that selects only
+// `rateLimit { cost }` (the conversation page documents of internal/github do)
+// carries no reading: Reading.Remaining is then -1, which the governor ignores,
+// so the cost is booked and the bucket's last real reading stays in force.
 type GraphQLReading struct {
 	Cost    int64
 	Reading governor.Reading
@@ -28,19 +32,38 @@ type GraphQLReading struct {
 //
 // The selection's wire shape is the one this binary's GraphQL documents already
 // carry (github.FoldedRateLimit decodes into the same struct they use); this
-// function only turns it into the governor's reading.
+// function only turns it into the governor's reading. A selection without
+// `remaining` is a cost and no reading, never a reading of zero: a zero would
+// hold every class below the reserve until the bucket's window ended.
 func ParseGraphQL(body []byte) (r GraphQLReading, found bool, err error) {
 	cost, remaining, resetAt, found, err := github.FoldedRateLimit(body)
 	if err != nil || !found {
 		return GraphQLReading{}, false, err
 	}
 	rd := governor.Reading{Bucket: governor.BucketGraphQL, Remaining: int64(remaining)}
+	if !selectsRemaining(body) {
+		rd.Remaining = -1
+	}
 	if resetAt != "" {
 		if t, perr := time.Parse(time.RFC3339, resetAt); perr == nil {
 			rd.ResetAt = t.UTC()
 		}
 	}
 	return GraphQLReading{Cost: int64(cost), Reading: rd}, true, nil
+}
+
+// selectsRemaining reports whether the rateLimit selection of body carries a
+// `remaining` member. github.FoldedRateLimit cannot say: it decodes an absent
+// member and a genuine zero alike to 0.
+func selectsRemaining(body []byte) bool {
+	var env struct {
+		Data struct {
+			RateLimit *struct {
+				Remaining *int64 `json:"remaining"`
+			} `json:"rateLimit"`
+		} `json:"data"`
+	}
+	return json.Unmarshal(body, &env) == nil && env.Data.RateLimit != nil && env.Data.RateLimit.Remaining != nil
 }
 
 // ---- REST: the output of `gh api --include` ---------------------------------------

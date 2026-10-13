@@ -14,6 +14,8 @@
 //     protected gh gateway as every other call (github.CLI, which takes the
 //     configured gh path and host), splits the response into status, headers
 //     and body (ParseResponse), and reads the headers (ParseHeaders).
+//     Feed.RESTStdin is the same call for a REST write that carries a JSON body
+//     on standard input (`--input -`).
 //
 // # What it does with them
 //
@@ -63,6 +65,21 @@ type Runner interface {
 }
 
 var _ Runner = (*github.CLI)(nil)
+
+// StdinRunner is a Runner that can also feed the gh child's standard input
+// (*github.CLI satisfies it). Feed.RESTStdin needs it for a REST write with a
+// JSON body. Runner itself stays Run-only on purpose: widening it would break
+// every existing fake and the detail fetcher's GH Runner, so Feed.RESTStdin
+// type-asserts this interface on the runner the Feed was built over.
+type StdinRunner interface {
+	RunStdin(ctx context.Context, stdin []byte, args ...string) ([]byte, error)
+}
+
+var _ StdinRunner = (*github.CLI)(nil)
+
+// ErrNoStdinRunner is what Feed.RESTStdin returns, before it admits anything,
+// when the runner the Feed was built over does not implement StdinRunner.
+var ErrNoStdinRunner = errors.New("ratefeed: the Feed's gh runner cannot feed standard input (it does not implement StdinRunner)")
 
 // Meta says what a call is for; the scheduler or query runner that makes it
 // supplies it.
@@ -168,9 +185,14 @@ type RateLimitError struct {
 	Resource   string
 }
 
-// Error describes the limit.
+// Error describes the limit. A StatusCode of zero means the answer's status was
+// not visible (a GraphQL or porcelain answer recognized by its text, where the
+// caller cannot see Retry-After either), so the message leaves it out.
 func (e *RateLimitError) Error() string {
 	if e.Secondary {
+		if e.StatusCode == 0 {
+			return fmt.Sprintf("github: secondary rate limit (HTTP status not visible): retry after %s", e.RetryAfter)
+		}
 		return fmt.Sprintf("github: secondary rate limit (HTTP %d): retry after %s", e.StatusCode, e.RetryAfter)
 	}
 	return fmt.Sprintf("github: primary rate limit exhausted (HTTP %d, resource %q): resets at %s",
@@ -186,13 +208,34 @@ func (e *RateLimitError) Error() string {
 // can still read an error status's body. A call that never reached GitHub
 // releases its reservation and spends nothing.
 func (f *Feed) REST(ctx context.Context, call RESTCall) (*Response, error) {
+	return f.rest(ctx, call, f.gh.Run)
+}
+
+// RESTStdin is REST for a call that feeds stdin to gh: a REST write with a JSON
+// body, `gh api --include <endpoint> --method POST --input -`. Admission, the
+// --include parsing, the spend and reading booked and the pause on a secondary
+// limit are REST's own (one shared body). The Feed's runner MUST implement
+// StdinRunner; when it does not, the error is ErrNoStdinRunner and nothing was
+// admitted or run.
+func (f *Feed) RESTStdin(ctx context.Context, call RESTCall, stdin []byte) (*Response, error) {
+	sr, ok := f.gh.(StdinRunner)
+	if !ok {
+		return nil, ErrNoStdinRunner
+	}
+	return f.rest(ctx, call, func(ctx context.Context, args ...string) ([]byte, error) {
+		return sr.RunStdin(ctx, stdin, args...)
+	})
+}
+
+// rest is the one body behind REST and RESTStdin; run is how gh is invoked.
+func (f *Feed) rest(ctx context.Context, call RESTCall, run func(ctx context.Context, args ...string) ([]byte, error)) (*Response, error) {
 	bucket := BucketFor(call.Args)
 	tk, err := f.gov.Admit(governor.Request{Bucket: bucket, Class: call.Class, Cost: 1})
 	if err != nil {
 		return nil, err
 	}
 	args := append([]string{"api", "--include"}, call.Args...)
-	out, runErr := f.gh.Run(ctx, args...)
+	out, runErr := run(ctx, args...)
 	resp, perr := ParseResponse(out)
 	if perr != nil {
 		tk.Release()

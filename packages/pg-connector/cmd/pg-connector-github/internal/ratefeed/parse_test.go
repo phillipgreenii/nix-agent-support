@@ -66,6 +66,11 @@ func TestParseGraphQLReadsTheFoldedRateLimitSelection(t *testing.T) {
 		{name: "a connection page", body: filesPage, found: true, cost: 2, remaining: 3985, wantReset: reset},
 		{name: "no resetAt reported", body: `{"data":{"rateLimit":{"cost":1,"remaining":10}}}`, found: true, cost: 1, remaining: 10},
 		{name: "an unparsable resetAt", body: `{"data":{"rateLimit":{"cost":1,"remaining":10,"resetAt":"soon"}}}`, found: true, cost: 1, remaining: 10},
+		// The conversation page documents select `rateLimit { cost }` alone: the
+		// cost is real, the absent remaining is NOT a reading of zero.
+		{name: "a cost-only selection", body: `{"data":{"rateLimit":{"cost":1},"repository":{}}}`, found: true, cost: 1, remaining: -1},
+		{name: "a cost and resetAt without remaining", body: `{"data":{"rateLimit":{"cost":2,"resetAt":"2026-10-12T12:30:00Z"}}}`, found: true, cost: 2, remaining: -1, wantReset: reset},
+		{name: "a genuine zero remaining", body: `{"data":{"rateLimit":{"cost":1,"remaining":0,"resetAt":"2026-10-12T12:30:00Z"}}}`, found: true, cost: 1, remaining: 0, wantReset: reset},
 		{name: "a document that did not select it", body: `{"data":{"viewer":{"login":"example-user"}}}`},
 		{name: "an error with null data", body: `{"data":null,"errors":[{"message":"boom"}]}`},
 		{name: "not JSON", body: `HTTP/2.0 502`, wantErrSubstrings: "parse graphql response"},
