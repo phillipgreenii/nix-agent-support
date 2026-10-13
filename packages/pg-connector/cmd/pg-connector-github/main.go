@@ -31,6 +31,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/client"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/logs"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/ops/status"
 )
 
@@ -185,6 +186,7 @@ func runClient(inst client.Instance, cfg *config.Config, stdin io.Reader, stdout
 		SupervisorLabel: cfg.SupervisorLabel,
 		ConfigPath:      cfg.Path,
 		Build:           Version,
+		ClientLog:       logs.NewClientLog(cfg.StateDir, Version),
 	}
 	if d, err := time.ParseDuration(clientBudgetOverride); err == nil && d > 0 {
 		o.Budget = d

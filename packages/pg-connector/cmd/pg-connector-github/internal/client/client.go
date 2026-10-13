@@ -26,6 +26,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/logs"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/proc"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/socket"
@@ -56,6 +57,12 @@ type Options struct {
 	// socket.ProtocolVersion.
 	Protocol int
 	Logger   connectord.Logger
+	// ClientLog, when non-nil, receives a kind=request row with outcome
+	// daemon_unreachable whenever Run answers unavailable because the daemon
+	// cannot be reached (the daemon cannot log that outage itself). The
+	// client log's own rotation (1 MiB, under an flock) is the logs
+	// package's.
+	ClientLog *logs.ClientLog
 }
 
 // BudgetFor is the budget the client gives a call to op: the backend deadline
@@ -101,6 +108,7 @@ func Run(ctx context.Context, o Options, stdin io.Reader, stdout io.Writer) int 
 	}
 	deadline := max(budget-margin, 0)
 
+	started := time.Now()
 	reply, err := sock.Call(ctx, o.Instance.Name, *req, budget, deadline)
 	var (
 		down     *socket.DaemonDownError
@@ -113,19 +121,28 @@ func Run(ctx context.Context, o Options, stdin io.Reader, stdout io.Writer) int 
 		return writeOpError(stdout, o.Instance, req.Op, scriptout.ErrVersionMismatch, mismatch.Error())
 	case errors.As(err, &down):
 		if op, ok := o.Instance.Ops[req.Op]; ok && op.Fallback != nil {
-			return runFallback(ctx, stdout, op, *req, down)
+			return runFallback(ctx, stdout, op, *req, down, func(msg string) {
+				o.ClientLog.DaemonUnreachable(o.Instance.Name, req.Op, started, msg)
+			})
 		}
+		o.ClientLog.DaemonUnreachable(o.Instance.Name, req.Op, started, down.Error())
 		return writeOpError(stdout, o.Instance, req.Op, scriptout.ErrUnavailable, down.Error())
 	default:
 		return writeOpError(stdout, o.Instance, req.Op, scriptout.ErrUnavailable, err.Error())
 	}
 }
 
-// runFallback answers from the op's local fallback.
-func runFallback(ctx context.Context, stdout io.Writer, op Op, req scriptout.Request, cause error) int {
+// runFallback answers from the op's local fallback. A fallback that itself
+// answers unavailable is the client answering unavailable for an unreachable
+// daemon, so onUnavailable (the client-log row) is called with its message; a
+// fallback that answers is not an outage the caller sees.
+func runFallback(ctx context.Context, stdout io.Writer, op Op, req scriptout.Request, cause error, onUnavailable func(msg string)) int {
 	result, err := op.Fallback(ctx, req, cause)
 	if err != nil {
 		resp := scriptout.ErrorResponse(err)
+		if resp.Error != nil && resp.Error.Code == "unavailable" {
+			onUnavailable(resp.Error.Message)
+		}
 		resp.SchemaVersion = op.SchemaVersion
 		return writeResponse(stdout, resp)
 	}

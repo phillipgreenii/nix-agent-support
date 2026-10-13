@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/logs"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/proc"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/router"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/socket"
@@ -290,5 +291,129 @@ func TestADaemonThatNeverAnswersIsUnavailableAtTheBudget(t *testing.T) {
 	}
 	if took := time.Since(start); took < 700*time.Millisecond || took > 3*time.Second {
 		t.Errorf("answered after %v, want about the 800ms budget", took)
+	}
+}
+
+// readRows decodes every line of a JSONL file.
+func readRows(t *testing.T, path string) []map[string]any {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rows []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		if line == "" {
+			continue
+		}
+		var m map[string]any
+		if err := json.Unmarshal([]byte(line), &m); err != nil {
+			t.Fatalf("bad line %q: %v", line, err)
+		}
+		rows = append(rows, m)
+	}
+	return rows
+}
+
+func TestUnavailableBecauseTheDaemonIsUnreachableAppendsADaemonUnreachableRow(t *testing.T) {
+	stateDir := shortTempDir(t)
+	missing := filepath.Join(stateDir, "nope")
+	for _, inst := range []Instance{PR(), CI()} {
+		o := opts(inst, missing)
+		o.ClientLog = logs.NewClientLog(stateDir, "build-1")
+		res := run(t, o, `{"op":"something_new"}`)
+		if e := errCode(t, res.out); e.Code != "unavailable" {
+			t.Fatalf("%s: %+v", inst.Name, e)
+		}
+	}
+	rows := readRows(t, logs.ClientLogPath(stateDir))
+	if len(rows) != 2 {
+		t.Fatalf("want one row per unavailable answer, got %d: %v", len(rows), rows)
+	}
+	for i, inst := range []string{"pr", "ci"} {
+		row := rows[i]
+		want := map[string]any{
+			"kind": "request", "outcome": "daemon_unreachable", "service": "pg-connector-github-client",
+			"op": "something_new", "instance": inst, "error_code": "unavailable", "level": "error", "version": "build-1",
+		}
+		for k, v := range want {
+			if row[k] != v {
+				t.Errorf("row %d: %s = %v, want %v", i, k, row[k], v)
+			}
+		}
+		if _, ok := row["served_from"]; ok {
+			t.Errorf("row %d: a client row names no served_from: %v", i, row)
+		}
+		if msg, _ := row["error"].(string); !strings.Contains(msg, missing) {
+			t.Errorf("row %d: error %q must name the socket path", i, msg)
+		}
+	}
+}
+
+func TestNoClientLogRowWhenTheDaemonAnswersOrACapabilityIsStatic(t *testing.T) {
+	stateDir := shortTempDir(t)
+	r := router.New(router.Options{})
+	r.Register("pr", "list", scriptout.OpHandler{SchemaVersion: 7, Handle: func(context.Context, json.RawMessage) (any, error) {
+		return map[string]any{}, nil
+	}})
+	o := opts(PR(), serveRouter(t, r))
+	o.ClientLog = logs.NewClientLog(stateDir, "build-1")
+	if res := run(t, o, `{"op":"list"}`); res.code != 0 {
+		t.Fatalf("list: %+v", res)
+	}
+	// The daemon's own error answers (unknown op) are not an unreachable daemon.
+	if res := run(t, o, `{"op":"nonexistent"}`); res.code == 0 {
+		t.Fatalf("nonexistent: %+v", res)
+	}
+	// capabilities never touches the daemon.
+	o.SocketPath = filepath.Join(stateDir, "nope")
+	if res := run(t, o, `{"op":"capabilities"}`); res.code != 0 {
+		t.Fatalf("capabilities: %+v", res)
+	}
+	if _, err := os.Stat(logs.ClientLogPath(stateDir)); !os.IsNotExist(err) {
+		t.Errorf("no client log row was due: %v", err)
+	}
+}
+
+func TestAFallbackAnswerWritesNoClientLogRow(t *testing.T) {
+	// The fallback answers; the client did not answer unavailable.
+	stateDir := shortTempDir(t)
+	inst := PR().WithFallback("status", func(context.Context, scriptout.Request, error) (any, error) {
+		return map[string]string{"state": "daemon_down"}, nil
+	})
+	o := opts(inst, filepath.Join(stateDir, "nope"))
+	o.ClientLog = logs.NewClientLog(stateDir, "build-1")
+	if res := run(t, o, `{"op":"status"}`); res.code != 0 {
+		t.Fatalf("%+v", res)
+	}
+	if _, err := os.Stat(logs.ClientLogPath(stateDir)); !os.IsNotExist(err) {
+		t.Errorf("a fallback answer is not an unavailable one: %v", err)
+	}
+}
+
+func TestAFallbackThatAnswersUnavailableAppendsARowButOtherFallbackErrorsDoNot(t *testing.T) {
+	stateDir := shortTempDir(t)
+	inst := PR().WithFallback("status", func(context.Context, scriptout.Request, error) (any, error) {
+		return nil, scriptout.WrapError(scriptout.ErrUnavailable, "no local view either")
+	}).WithFallback("explain", func(context.Context, scriptout.Request, error) (any, error) {
+		return nil, scriptout.WrapError(scriptout.ErrNotFound, "no such entity")
+	})
+	o := opts(inst, filepath.Join(stateDir, "nope"))
+	o.ClientLog = logs.NewClientLog(stateDir, "build-1")
+	run(t, o, `{"op":"explain"}`)
+	if _, err := os.Stat(logs.ClientLogPath(stateDir)); !os.IsNotExist(err) {
+		t.Fatalf("a not_found fallback answer is not an outage: %v", err)
+	}
+	run(t, o, `{"op":"status"}`)
+	rows := readRows(t, logs.ClientLogPath(stateDir))
+	if len(rows) != 1 || rows[0]["outcome"] != "daemon_unreachable" || rows[0]["op"] != "status" || !strings.Contains(rows[0]["error"].(string), "no local view either") {
+		t.Fatalf("rows: %v", rows)
+	}
+}
+
+func TestANilClientLogIsHarmless(t *testing.T) {
+	res := run(t, opts(PR(), filepath.Join(shortTempDir(t), "nope")), `{"op":"list"}`)
+	if e := errCode(t, res.out); e.Code != "unavailable" {
+		t.Fatalf("%+v", e)
 	}
 }
