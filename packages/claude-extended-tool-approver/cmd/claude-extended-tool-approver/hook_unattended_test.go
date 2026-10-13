@@ -1,10 +1,31 @@
 package main
 
 import (
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/hookio"
 )
+
+// TestSuiteIsHermeticAgainstTheAmbientSession pins TestMain's scrub. This suite runs
+// from inside ccpool pool sessions, whose environment holds CCPOOL_AUTONOMOUS=1 — a
+// value that turns every Ask this binary emits into a deny — and BEADS_*; every
+// exec'd binary in the package derives its environment from os.Environ(), so a
+// verdict could silently depend on the machine that happens to run the tests.
+func TestSuiteIsHermeticAgainstTheAmbientSession(t *testing.T) {
+	for _, kv := range os.Environ() {
+		name, _, _ := strings.Cut(kv, "=")
+		for _, prefix := range ambientSessionEnvPrefixes {
+			if strings.HasPrefix(name, prefix) {
+				t.Errorf("ambient %s survived TestMain's scrub; a test would inherit it", name)
+			}
+		}
+	}
+	if unattendedFromEnv() {
+		t.Errorf("%s is set in the test process, so the hook under test would treat every session as unattended", hookio.AutonomousEnvVar)
+	}
+}
 
 // unattendedFromEnv is the ONE place the process environment decides that a session
 // is an autonomous worker. It must honor exactly the value ccpool injects ("1"), so a
