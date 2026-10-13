@@ -177,6 +177,34 @@ func TestRule(t *testing.T) {
 		// did before this fix — this pins that pg2-e1163 does not leak into it.
 		{"git log --grep is a different subcommand, unaffected by the fix", bashInput(`git log --grep='\.pem|\.key'`), hookio.Ask},
 
+		// pg2-zybju: `git ls-files` only LISTS tracked names, so its pathspec
+		// operands are not files being read. The first row is the EXACT command a
+		// real review worker ran (an existence check whose output was empty); before
+		// this fix its `.env.yarn` pathspecs made the rule ask, which in an
+		// unattended session became a denial of a benign command.
+		{"git ls-files -- .env.yarn pathspecs are not a read", bashInput("git ls-files -- .env.yarn */.env.yarn"), hookio.NoOpinion},
+		{"git ls-files .envrc pathspec is not a read", bashInput("git ls-files .envrc"), hookio.NoOpinion},
+		{"git ls-files -o with a secret pathspec is not a read", bashInput("git ls-files -o -- secrets/.ssh/id_rsa"), hookio.NoOpinion},
+		{"git -C dir ls-files pathspec is not a read", bashInput("git -C /repo ls-files -- .env"), hookio.NoOpinion},
+		// What stays screened. The -C operand: git enters that directory.
+		{"git -C <secret dir> ls-files still Asks about the directory", bashInput("git -C ~/.ssh ls-files"), hookio.Ask},
+		// Options that make git OPEN a named file keep every operand screened, in
+		// every spelling git accepts, including unambiguous abbreviations.
+		{"git ls-files -X reads the file as exclude patterns", bashInput("git ls-files -X .envrc"), hookio.Ask},
+		{"git ls-files --exclude-from reads the file", bashInput("git ls-files --exclude-from=.envrc"), hookio.Ask},
+		{"git ls-files abbreviated --exclude-fr reads the file", bashInput("git ls-files --exclude-fr .envrc"), hookio.Ask},
+		{"git ls-files --exclude-per-directory reads files by name", bashInput("git ls-files --exclude-per-directory=.envrc"), hookio.Ask},
+		// Fail-safe: ANY --e... long option disables the carve-out (an extra prompt
+		// for the harmless --exclude-standard, never a missed read).
+		{"git ls-files --exclude-standard falls back to screening operands", bashInput("git ls-files -o --exclude-standard -- .env"), hookio.Ask},
+		// SCOPE BOUNDARY: subcommands that PRINT or STAGE content keep screening
+		// their operands, and so do name-only siblings with no measured false
+		// positive.
+		{"git diff -- .env prints content, still Asks", bashInput("git diff -- .env"), hookio.Ask},
+		{"git add .env stages content, still Asks", bashInput("git add .env"), hookio.Ask},
+		{"git log -p -- .env prints content, still Asks", bashInput("git log -p -- .env"), hookio.Ask},
+		{"git status -- .env is not covered by the ls-files carve-out", bashInput("git status -- .env"), hookio.Ask},
+
 		// ANTI-BYPASS GUARDS for the same carve-out. Each of these Asks TODAY and
 		// must keep Asking; between them they pin every boundary the carve-out
 		// claims (see cmdparse.SkipMessageArgs and secretCandidateArgs).

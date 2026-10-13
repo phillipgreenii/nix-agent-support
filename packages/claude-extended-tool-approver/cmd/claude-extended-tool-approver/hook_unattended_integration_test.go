@@ -139,10 +139,10 @@ const (
 // the hook — never an `ask` — and the reason tells the model what to do instead.
 func TestUnattendedHook_SecretPathReadIsADeterministicDeny(t *testing.T) {
 	cases := map[string]preToolUsePayload{
-		"cat .envrc":                        bashPayload(secretCWD, "dontAsk", envrcRead),
-		"cat .env.yarn":                     bashPayload(secretCWD, "dontAsk", "cat /srv/work/project/.env.yarn"),
-		"git ls-files with .env.yarn paths": bashPayload(secretCWD, "dontAsk", "git ls-files -- .env.yarn */.env.yarn | head"),
-		"Read tool on .envrc":               readToolPayload(secretCWD, "dontAsk", "/srv/work/project/.envrc"),
+		"cat .envrc":                   bashPayload(secretCWD, "dontAsk", envrcRead),
+		"cat .env.yarn":                bashPayload(secretCWD, "dontAsk", "cat /srv/work/project/.env.yarn"),
+		"git ls-files -X reads a file": bashPayload(secretCWD, "dontAsk", "git ls-files -X .envrc"),
+		"Read tool on .envrc":          readToolPayload(secretCWD, "dontAsk", "/srv/work/project/.envrc"),
 	}
 	for name, payload := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -160,6 +160,21 @@ func TestUnattendedHook_SecretPathReadIsADeterministicDeny(t *testing.T) {
 				t.Errorf("reason must not claim what is on PATH (false on the pool today):\n%s", reason)
 			}
 		})
+	}
+}
+
+// TestUnattendedHook_GitPathspecIsNotASecretRead: the existence check that a real
+// review worker ran (`git ls-files -- .env.yarn */.env.yarn`, output empty) names
+// secret-looking tokens, but they are pathspecs that `git ls-files` only matches
+// against tracked names — nothing is opened. It used to ask (and so, unattended, to
+// be denied); it must now pass untouched in BOTH kinds of session.
+func TestUnattendedHook_GitPathspecIsNotASecretRead(t *testing.T) {
+	const cmd = "git ls-files -- .env.yarn */.env.yarn | head"
+	for _, mode := range []string{"dontAsk", "default"} {
+		run := runPreToolUse(t, bashPayload(secretCWD, mode, cmd))
+		if got := run.decision(); got != "allow" {
+			t.Errorf("mode=%s: permissionDecision = %q, want allow (stdout: %s)", mode, got, run.stdout)
+		}
 	}
 }
 

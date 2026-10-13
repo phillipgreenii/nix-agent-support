@@ -902,6 +902,12 @@ func secretCandidateArgs(pc cmdparse.ParsedCommand) (args []string, malformed bo
 			if grepArgs, ok := gitGrepArgs(pc.Args); ok {
 				return cmdparse.SkipGrepPattern("grep", grepArgs)
 			}
+			// pg2-zybju: `git ls-files` only LISTS tracked names, so its pathspec
+			// operands are not files being read — see gitLsFilesDirs. Only the
+			// `-C <dir>` operands stay candidates.
+			if dirs, ok := gitLsFilesDirs(pc.Args); ok {
+				return dirs, false
+			}
 		}
 		return cmdparse.SkipMessageArgs(exe, pc.Args), false
 	case "bb":
@@ -955,6 +961,54 @@ func gitGrepArgs(args []string) (grepArgs []string, ok bool) {
 		return args[i+1:], true
 	}
 	return nil, false
+}
+
+// gitLsFilesDirs recognizes a `git [-C <dir>]... ls-files ...` invocation that only
+// LISTS names and returns the `-C` directory operands, the only arguments of such a
+// call that remain candidates. ok is false for every other shape, which keeps its
+// normal handling.
+//
+// WHY THE OPERANDS ARE NOT READS. `git ls-files [options] [--] [<pathspec>...]`
+// prints the names (and metadata: object ids, stages, eol info) of the tracked,
+// untracked or ignored files that MATCH its pathspecs. It never opens one or prints
+// its content, so `git ls-files -- .env.yarn */.env.yarn` is an existence check.
+// Treating `.env.yarn` as a secret READ made this rule ask about it, and in an
+// unattended session that Ask became a denial of a benign command (measured on a
+// real review worker, pg2-zybju).
+//
+// WHAT STAYS A CANDIDATE.
+//   - The `-C <dir>` operands: git enters that directory, and this rule has always
+//     screened it.
+//   - EVERYTHING, when any option could make git OPEN a named file: `-X <file>`,
+//     `--exclude-from=<file>` and `--exclude-per-directory=<name>` read the file as
+//     exclude patterns. git accepts any unambiguous abbreviation of a long option, so
+//     every `--e...` long option (which also covers the harmless `--exclude-standard`
+//     and `--eol`) and a glued `-X<file>` makes this return ok=false: an extra
+//     prompt, never a missed read.
+//
+// SCOPE. Only the literal `ls-files` subcommand, for the same reason gitGrepArgs is
+// scoped to `grep`: `git diff -- .env`, `git show`, `git log -p` and `git add` PRINT
+// or STAGE content, so their operands keep being screened. `git status` and
+// `git ls-tree` also list names only, but no false positive has been measured for
+// them, so they are left alone on purpose.
+func gitLsFilesDirs(args []string) (dirs []string, ok bool) {
+	i := 0
+	for i < len(args) && args[i] == "-C" {
+		if i+1 >= len(args) {
+			return nil, false // trailing bare -C, no operand: not a recognizable ls-files call
+		}
+		dirs = append(dirs, args[i+1])
+		i += 2
+	}
+	if i >= len(args) || args[i] != "ls-files" {
+		return nil, false
+	}
+	for _, a := range args[i+1:] {
+		if strings.HasPrefix(a, "-X") || strings.HasPrefix(a, "--e") {
+			return nil, false
+		}
+	}
+	return dirs, true
 }
 
 // jqFilterFromFile reports whether the jq filter is supplied via -f/--from-file

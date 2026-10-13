@@ -98,6 +98,26 @@ func TestEvaluateHook_AttendedSessionStillAsksOnASecretPath(t *testing.T) {
 	}
 }
 
+// The existence check a real review worker ran names secret-looking tokens that are
+// only PATHSPECS handed to `git ls-files`, which lists tracked names and opens
+// nothing. It must pass in both kinds of session; the same tokens given to an option
+// that makes git OPEN the file (`-X`) must still be screened.
+func TestEvaluateHook_GitLsFilesPathspecsAreNotSecretReads(t *testing.T) {
+	eng := buildFullEngine(unattendedProjectRoot, unattendedProjectRoot)
+	for _, mode := range []string{"dontAsk", "default"} {
+		got := eng.EvaluateHook(unattendedBashInput("git ls-files -- .env.yarn */.env.yarn | head", mode))
+		if got.Decision != hookio.Approve {
+			t.Errorf("mode=%s: ls-files existence check = %v (%s: %s), want Approve", mode, got.Decision, got.Module, got.Reason)
+		}
+	}
+
+	attended := eng.EvaluateHook(unattendedBashInput("git ls-files -X .envrc", "default"))
+	unattended := eng.EvaluateHook(unattendedBashInput("git ls-files -X .envrc", "dontAsk"))
+	if attended.Decision != hookio.Ask || unattended.Decision != hookio.Reject {
+		t.Errorf("git ls-files -X reads .envrc: attended = %v, unattended = %v, want Ask and Reject", attended.Decision, unattended.Decision)
+	}
+}
+
 // An Ask from a rule other than `secrets` is converted too: the policy lives at the
 // facade, not in the rule that happened to stall the first worker.
 func TestEvaluateHook_AnyAskProducingRuleBecomesADenyWhenUnattended(t *testing.T) {

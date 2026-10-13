@@ -157,6 +157,11 @@ lives at the one place every folded verdict passes, `engine.EvaluateHook`
   with an `Ask`.
 - The conversion is a `deny`, not an abstain, because abstaining hands the call to Claude Code's own
   allowlist, which can silently allow it (a worker's allowlist routinely carries `Bash(cat:*)`).
+- A denial is only as good as the Ask it converts, so false-positive Asks are fixed at their
+  source: the `secrets` rule does not treat the pathspec operands of `git ls-files` (which only
+  lists tracked names and opens nothing) as files being read (`secrets.gitLsFilesDirs`). Options
+  that make git open a named file (`-X`, `--exclude-from`, any `--e...` long option) keep every
+  operand screened.
 
 ## Extension point 1: adding a rule module (code-level)
 
