@@ -2303,6 +2303,11 @@
                             type = lib.types.str;
                             default = "/Users/tester";
                           };
+                          # pg-task-focus's SwiftBar plugin entry
+                          file = lib.mkOption {
+                            type = lib.types.attrsOf lib.types.anything;
+                            default = { };
+                          };
                         };
                         xdg = {
                           stateHome = lib.mkOption {
@@ -2316,6 +2321,11 @@
                         };
                         assertions = lib.mkOption {
                           type = lib.types.listOf lib.types.anything;
+                          default = [ ];
+                        };
+                        # written by the pg-connector module (the connector case)
+                        warnings = lib.mkOption {
+                          type = lib.types.listOf lib.types.str;
                           default = [ ];
                         };
                       };
@@ -7687,6 +7697,20 @@
                                 type = lib.types.attrsOf lib.types.anything;
                                 default = { };
                               };
+                              # The pg-connector module (loaded alongside pg-desk) reads the home
+                              # directory and writes warnings and assertions (home-manager declares all three).
+                              home.homeDirectory = lib.mkOption {
+                                type = lib.types.str;
+                                default = "/example/home";
+                              };
+                              warnings = lib.mkOption {
+                                type = lib.types.listOf lib.types.str;
+                                default = [ ];
+                              };
+                              assertions = lib.mkOption {
+                                type = lib.types.listOf lib.types.anything;
+                                default = [ ];
+                              };
                             };
                           }
                         )
@@ -10605,6 +10629,137 @@
                 assert builtins.length (failedAssertions darwinNoRegistry) == 1;
                 assert (settingsOf linux) == { };
                 pkgs.runCommand "pa-monitor-hm-launchd-ok" { } "touch $out";
+
+              # pg-connector-github's supervisor entry (docket pg2-z5fax, Phase 2): the
+              # HM module registers ONE launchd user agent for the daemon through
+              # phillipgreenii.programs.launchdServices.userAgents, with label
+              # com.phillipg.pg-connector-github-daemon, KeepAlive and RunAtLoad, and
+              # the default manageLogs; supervisor = "none" registers nothing and
+              # supervisor = "launchd" off darwin fails an assertion. Like
+              # test-pa-monitor-hm-launchd above (this flake has NO input on personal) the
+              # launchd option is a STUB with the field names and types of personal's
+              # launchd-service-submodule.nix (tests/launchd-registry-stub.nix). The eval
+              # cases live in tests/pg-connector-github-hm-launchd.nix; this check then
+              # RUNS the rendered entry's command for real: under env -i with working
+              # directory /, against a temp state directory and the counting fake gh
+              # (internal/serve/testdata/fake-gh.sh), it must start the real daemon,
+              # answer one list request through the client with the fixture rows, serve a
+              # second one without another gh call, and exit 0 on SIGTERM. Nothing is
+              # applied (no launchctl); the launchd registration itself is only proven at
+              # the terminal flake.
+              test-pg-connector-github-hm-launchd =
+                let
+                  r = import ./tests/pg-connector-github-hm-launchd.nix { inherit lib pkgs; };
+                  fakeGh = pkgs.runCommand "fake-gh" { } ''
+                    mkdir -p $out/bin
+                    cp ${./packages/pg-connector/cmd/pg-connector-github/internal/serve/testdata/fake-gh.sh} $out/bin/gh
+                    chmod +x $out/bin/gh
+                    patchShebangs $out/bin
+                  '';
+                  toolPath = lib.makeBinPath [
+                    pkgs.coreutils
+                    pkgs.gnused
+                    pkgs.bash
+                  ];
+                  binary = "${r.live.package}/bin/pg-connector-github";
+                in
+                pkgs.runCommand "pg-connector-github-hm-launchd"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.jq
+                      pkgs.coreutils
+                      pkgs.gnugrep
+                    ];
+                  }
+                  ''
+                    ${lib.optionalString (r.failures != [ ]) ''
+                      echo "pg-connector-github launchd eval cases failed: ${lib.concatStringsSep ", " r.failures}" >&2
+                      exit 1
+                    ''}
+                    work=$TMPDIR/w
+                    st=$work/state
+                    gh=$work/gh
+                    mkdir -p "$gh"
+
+                    # The rendered entry's command, exactly as the registration wraps it.
+                    printf '%s' ${lib.escapeShellArg r.live.scriptNoOs} > "$work/entry.sh"
+                    cfgpath=$(sed -n 's/^exec .* --config \([^ ]*\) serve$/\1/p' "$work/entry.sh")
+                    [ "$cfgpath" = "${r.live.configFile}" ] || { echo "entry does not carry the rendered config path: $(cat "$work/entry.sh")" >&2; exit 1; }
+                    grep -q '^exec ${binary} --config ' "$work/entry.sh" || { echo "entry does not exec the daemon binary" >&2; exit 1; }
+
+                    # Fixtures for the counting fake gh: two PRs behind every search.
+                    jq -n '{data:{rateLimit:{cost:1,remaining:4900,resetAt:"2999-01-01T00:00:00Z"},search:{issueCount:2,pageInfo:{hasNextPage:false,endCursor:""},nodes:[{id:"PR_node_a",number:3,repository:{nameWithOwner:"example-org/widget"}},{id:"PR_node_b",number:7,repository:{nameWithOwner:"example-org/gadget"}}]}}}' > "$gh/search.json"
+                    for spec in PR_node_a:example-org/widget:3 PR_node_b:example-org/gadget:7; do
+                      IFS=: read -r id repo n <<<"$spec"
+                      jq -n --arg id "$id" --arg repo "$repo" --argjson n "$n" '{id:$id,number:$n,title:("Example change "+($n|tostring)),url:("https://github.example.invalid/"+$repo+"/pull/"+($n|tostring)),state:"OPEN",body:"example body",isDraft:false,updatedAt:"2026-10-12T08:00:00Z",reviewDecision:"REVIEW_REQUIRED",mergeable:"MERGEABLE",author:{login:"fixture-author"},repository:{nameWithOwner:$repo},labels:{totalCount:1,nodes:[{name:"example"}]},comments:{totalCount:0},reviews:{totalCount:0},reviewThreads:{totalCount:0},headRefOid:("head-"+($n|tostring)),headRefName:("feature-"+($n|tostring)),baseRefName:"main",baseRefOid:"base-1",commits:{nodes:[{commit:{statusCheckRollup:{state:"SUCCESS"}}}]}}' > "$gh/node.$id.json"
+                    done
+
+                    # Only the five documented overrides redirect the daemon to the temp
+                    # state and the shim; the config (the rendered one) is untouched.
+                    envs=(
+                      PATH=${toolPath}
+                      FAKE_GH_DIR="$gh"
+                      PG_CONNECTOR_GITHUB_STATE_DIR="$st"
+                      PG_CONNECTOR_GITHUB_SOCKET="$st/sock"
+                      PG_CONNECTOR_GITHUB_GH=${fakeGh}/bin/gh
+                    )
+                    client() { env -i "''${envs[@]}" ${binary} --config "$cfgpath" pr; }
+
+                    ( cd / && exec env -i "''${envs[@]}" ${pkgs.bash}/bin/bash "$work/entry.sh" ) >"$work/daemon.out" 2>&1 &
+                    pid=$!
+
+                    resp=
+                    for _ in $(seq 1 150); do
+                      if ! kill -0 "$pid" 2>/dev/null; then
+                        echo "the rendered entry's command exited before answering:" >&2
+                        cat "$work/daemon.out" >&2
+                        exit 1
+                      fi
+                      resp=$(echo '{"op":"list","args":{"query":"mine"}}' | client 2>"$work/client.err") || true
+                      if echo "$resp" | jq -e '(.result.present_ids | length) == 2' >/dev/null 2>&1; then
+                        break
+                      fi
+                      resp=
+                      sleep 0.2
+                    done
+                    if [ -z "$resp" ]; then
+                      echo "no list answer from the rendered entry's daemon" >&2
+                      cat "$work/client.err" "$work/daemon.out" >&2
+                      kill "$pid" 2>/dev/null || true
+                      exit 1
+                    fi
+                    echo "$resp" | jq -e '
+                      .protocolVersion == 1
+                      and .result.present_ids == ["example-org/widget#3", "example-org/gadget#7"]
+                      and (.result.entities | map(.title) | sort) == ["Example change 3", "Example change 7"]
+                    ' >/dev/null || { echo "unexpected list answer: $resp" >&2; kill "$pid"; exit 1; }
+
+                    # The answer came from the origin, through the shim, with the configured host.
+                    grep -q 'search(' "$gh/calls.log" || { echo "the shim saw no search call" >&2; exit 1; }
+                    grep -q '^GH_HOST=github.example.invalid' "$gh/calls.log" || { echo "gh calls did not carry the configured host" >&2; cat "$gh/calls.log" >&2; exit 1; }
+
+                    # Let the daemon's own startup refresh finish, then a second list must be
+                    # served from the store: the counting shim sees no further call.
+                    prev=-1
+                    for _ in $(seq 1 60); do
+                      cur=$(wc -l < "$gh/calls.log")
+                      [ "$cur" = "$prev" ] && break
+                      prev=$cur
+                      sleep 1
+                    done
+                    before=$(wc -l < "$gh/calls.log")
+                    resp2=$(echo '{"op":"list","args":{"query":"mine"}}' | client)
+                    echo "$resp2" | jq -e '(.result.present_ids | length) == 2' >/dev/null || { echo "second list answer: $resp2" >&2; exit 1; }
+                    after=$(wc -l < "$gh/calls.log")
+                    [ "$before" = "$after" ] || { echo "second list called gh again ($before -> $after)" >&2; cat "$gh/calls.log" >&2; exit 1; }
+
+                    # SIGTERM drains and exits 0.
+                    kill -TERM "$pid"
+                    rc=0
+                    wait "$pid" || rc=$?
+                    [ "$rc" = 0 ] || { echo "SIGTERM exit = $rc" >&2; cat "$work/daemon.out" >&2; exit 1; }
+                    touch $out
+                  '';
 
               # pg2-klusl: every `*-go-tests` check goes through the load-bounded mkGoTest
               # wrapper in the overlay (`loadBoundedMkGoTest`). Pure eval guard that the

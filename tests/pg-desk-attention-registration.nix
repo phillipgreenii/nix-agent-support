@@ -36,6 +36,20 @@ let
                 type = lib.types.attrsOf lib.types.anything;
                 default = { };
               };
+              # The pg-connector module (loaded alongside pg-desk) reads the home
+              # directory and writes warnings and assertions (home-manager declares all three).
+              home.homeDirectory = lib.mkOption {
+                type = lib.types.str;
+                default = "/example/home";
+              };
+              warnings = lib.mkOption {
+                type = lib.types.listOf lib.types.str;
+                default = [ ];
+              };
+              assertions = lib.mkOption {
+                type = lib.types.listOf lib.types.anything;
+                default = [ ];
+              };
             };
           }
         )

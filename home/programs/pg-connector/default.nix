@@ -2,6 +2,7 @@
   config,
   lib,
   pkgs,
+  options,
   # Set by the nix-darwin / NixOS home-manager integration; null for a
   # standalone home-manager activation (no system scope to read from).
   osConfig ? null,
@@ -10,6 +11,16 @@
 let
   cfg = config.phillipgreenii.programs.pg-connector;
   gh = cfg.github;
+
+  # Whether the composing flake imports personal's home module, which declares
+  # the HM launchdServices registry (personal ADR 0055). Read from the module
+  # `options` argument, never from `config`/`pkgs` (using those to choose
+  # attribute NAMES is infinite recursion); see home/programs/pa-monitor for
+  # the full reasoning. A linux host may not import personal at all, so the
+  # entry below is only defined where the option exists.
+  hasLaunchdRegistry = options.phillipgreenii.programs ? launchdServices;
+  isDarwin = pkgs.stdenv.hostPlatform.isDarwin;
+  wantsLaunchd = gh.enable && gh.supervisor == "launchd";
 
   # ---- pg-connector-github (docket pg2-z5fax, Phase 2) ----------------------
   # The two OLD GitHub instance names. Option A of the design's Registration
@@ -827,6 +838,21 @@ in
         + "would keep the daemon running. Set github.allowUnsupervised = true to rewrite the registry anyway."
       );
 
+      # supervisor = "launchd" is a darwin-only construct: the HM registry the
+      # entry below goes through has no Linux counterpart until pg2-opk5g. Both
+      # failures are assertions (never a silent no-op), checked in this order so
+      # a Linux host is told the platform reason, not the missing-option one.
+      assertions = [
+        {
+          assertion = !wantsLaunchd || isDarwin;
+          message = "phillipgreenii.programs.pg-connector.github.supervisor = \"launchd\" is only supported on darwin: launchd does not exist on this host, and the systemd supervisor is planned work (pg2-opk5g). Set github.supervisor = \"none\" (and github.allowUnsupervised = true to rewrite the registry anyway) and start `pg-connector-github serve` by hand.";
+        }
+        {
+          assertion = !(wantsLaunchd && isDarwin) || hasLaunchdRegistry;
+          message = "phillipgreenii.programs.pg-connector.github.supervisor = \"launchd\" needs phillipgreenii.programs.launchdServices, which phillipgreenii-nix-personal's home module declares (personal ADR 0055); import it alongside this module.";
+        }
+      ];
+
       # No programs.tldr.customPages entry: unlike pg-pr's own module,
       # packages/pg-connector/default.nix's postInstall generates only a man
       # page + completions — it does not copy/generate a tldr page the way
@@ -844,6 +870,41 @@ in
       xdg.configFile."pg-pr/config.yaml".source =
         (pkgs.formats.yaml { }).generate "pg-pr-config.yaml"
           renderedConfig;
+    })
+
+    # The daemon's supervisor (docket pg2-z5fax, Phase 2): ONE HM launchd
+    # user-agent entry that starts `pg-connector-github --config <path> serve` at
+    # login and restarts it when it exits, with no logic of its own (the daemon
+    # does its own housekeeping). Registered through the HM-scoped registry
+    # (personal ADR 0055), gated on the option's DECLARATION at attribute level
+    # (optionalAttrs; a definition of an undeclared option errors even under
+    # mkIf false, and a Linux host may not import personal) and on the option
+    # VALUES at value level (mkIf). supervisor = "launchd" without the registry
+    # or off darwin is an assertion above, not a silent no-op; supervisor =
+    # "none" registers nothing.
+    #
+    # An apply that changes the binary or the config restarts the agent: the
+    # script embeds the package's store path and the rendered config's store
+    # path, so either change changes the wrapper's store-path hash that the
+    # registration embeds. manageLogs and logCollection stay at their defaults:
+    # stdout and stderr go to launchd-stdout.log / launchd-stderr.log beside the
+    # daemon's own logs, and the daemon rotates its own event and structured
+    # logs.
+    (lib.optionalAttrs hasLaunchdRegistry {
+      phillipgreenii.programs.launchdServices.userAgents.pg-connector-github-daemon =
+        lib.mkIf (cfg.enable && wantsLaunchd && isDarwin)
+          {
+            label = "com.phillipg.pg-connector-github-daemon";
+            script = ''
+              exec ${gh.package}/bin/pg-connector-github --config ${gh.configFile} serve
+            '';
+            runAtLoad = true;
+            keepAlive = true;
+            serviceConfig = {
+              StandardOutPath = "${stateDir}/launchd-stdout.log";
+              StandardErrorPath = "${stateDir}/launchd-stderr.log";
+            };
+          };
     })
   ];
 }

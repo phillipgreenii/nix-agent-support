@@ -11,16 +11,24 @@
 # registration (base_url, real queries) lives in the consuming machine flake.
 { lib, pkgs }:
 let
-  # evaluate: the whole evaluated module set, for a scenario's cfg and an
-  # osConfig (null models a standalone home-manager activation).
-  evaluate =
+  # evaluateWith: the whole evaluated module set, for a scenario's cfg and an
+  # osConfig (null models a standalone home-manager activation). `pkgs'` lets a
+  # scenario present another platform (the launchd cases of
+  # tests/pg-connector-github-hm-launchd.nix), and `declareLaunchd = false`
+  # models a host that does not import personal's home module.
+  evaluateWith =
+    {
+      pkgs' ? pkgs,
+      declareLaunchd ? true,
+    }:
     cfg: osConfig:
     lib.evalModules {
       # home-manager always passes osConfig (null for a standalone activation),
       # so the stub does too; the module cannot rely on its `? null` default
       # under a bare lib.evalModules.
       specialArgs = {
-        inherit pkgs lib osConfig;
+        pkgs = pkgs';
+        inherit lib osConfig;
       };
       modules = [
         ../home/programs/pg-connector/default.nix
@@ -47,6 +55,12 @@ let
                 type = lib.types.listOf lib.types.str;
                 default = [ ];
               };
+              # Also declared by home-manager: the module asserts that
+              # supervisor = "launchd" is possible on this host.
+              assertions = lib.mkOption {
+                type = lib.types.listOf lib.types.anything;
+                default = [ ];
+              };
             };
           }
         )
@@ -55,8 +69,12 @@ let
             enable = true;
           };
         }
-      ];
+      ]
+      # personal's HM launchdServices option, stubbed (this flake has no input
+      # on personal; see tests/launchd-registry-stub.nix).
+      ++ lib.optional declareLaunchd ./launchd-registry-stub.nix;
     };
+  evaluate = evaluateWith { };
 
   render = cfg: (evaluate cfg null).config.xdg.configFile."pg-pr/config.yaml".source;
 
@@ -405,6 +423,16 @@ let
   renders = cfg: (builtins.tryEval (builtins.deepSeq (render cfg).drvPath true)).success;
 in
 {
+  # The scenario builders, for tests/pg-connector-github-hm-launchd.nix.
+  harness = {
+    inherit
+      evaluateWith
+      githubRegistry
+      githubOn
+      osWithObs
+      ghOpts
+      ;
+  };
   # github.enable = false renders the legacy golden byte for byte.
   legacyGithubDisabled = render (legacy // { github.enable = false; });
   # The pg-connector-github cases: name -> bool, and the failing names.

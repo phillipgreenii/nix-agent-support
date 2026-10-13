@@ -126,6 +126,22 @@ run the CLI with `--client swiftbar` (the CLI's `--client` flag / `PG_TASK_FOCUS
 daemon's per-client metrics see the plugin. Tests: `test-pg-task-focus-swiftbar` (bats),
 `test-pg-task-focus-swiftbar-plugin` (wrapper) and `test-pg-task-focus-swiftbar-hm-render`.
 
+### pg-connector-github daemon (`phillipgreenii.programs.pg-connector.github`)
+
+The third HM-scoped launchd agent (docket `pg2-z5fax`, Phase 2): `home/programs/pg-connector`
+registers `phillipgreenii.programs.launchdServices.userAgents.pg-connector-github-daemon` (label
+`com.phillipg.pg-connector-github-daemon`, KeepAlive, RunAtLoad, default `manageLogs`) whose whole
+command is `exec <pkg>/bin/pg-connector-github --config <rendered config store path> serve`, so a
+changed binary or config changes the wrapper hash and restarts the agent. The same stubbing rules
+apply; the stub is the shared `tests/launchd-registry-stub.nix`, and `test-pg-connector-github-hm-launchd`
+(`tests/pg-connector-github-hm-launchd.nix`) checks the entry, the `supervisor = "none"` and non-darwin
+cases (an assertion, not a silent no-op), then runs the rendered command under `env -i` against a fake
+`gh`. Any eval test that loads the pg-connector module with `enable = true` MUST stub `assertions`,
+`warnings` and `home.homeDirectory`. The attribute-level gate is the option's DECLARATION
+(`options.phillipgreenii.programs ? launchdServices`, as pa-monitor and pg-task-focus do), not
+`pkgs.stdenv.hostPlatform.isDarwin`: `pkgs` can be a `_module.args` value, and choosing attribute
+names from it is infinite recursion; the platform gates the entry's VALUE (`mkIf`) and the assertion.
+
 ## Status Line (`home/programs/claude-status-line`)
 
 Full contract (part-script protocol, ordering convention, glyph/width/locale mechanics) moved to
