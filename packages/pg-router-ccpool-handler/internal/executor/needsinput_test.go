@@ -399,41 +399,58 @@ func TestStall_fullTimeline_escapeThenCloseAndSingleCallRelease(t *testing.T) {
 
 // A session that leaves needs_input resets the timer: the bound counts from the
 // RE-entry, not from the first entry.
+//
+// Two variants: the working phase writes to the transcript (the liveness guard
+// would restart the clock by itself), and it does not (only the state edge can
+// reset it), so the state reset is exercised on its own.
 func TestStall_recoveryInBetweenResetsTheTimer(t *testing.T) {
-	rig := newStallRig(t, releaseRole(config.Default()), nil)
-	first := stallT0.Add(time.Minute)
-	back := stallT0.Add(10 * time.Minute) // answered and working again at 12:10:00
-	again := stallT0.Add(12 * time.Minute)
-	rig.cc.script = func(now time.Time, row *ccpool.Session) {
-		switch {
-		case now.Before(first):
-		case now.Before(back):
-			if row.State != ccpool.StateNeedsInput {
-				enterNeedsInput(now, row)
-			}
-			rig.lastWrite = first.Add(-5 * time.Second)
-		case now.Before(again):
-			row.State = ccpool.StateWorking
-			rig.lastWrite = now // it is working: it writes
-		default:
-			if row.State != ccpool.StateNeedsInput && row.State != ccpool.StateReady {
-				enterNeedsInput(now, row)
-				rig.lastWrite = now.Add(-5 * time.Second)
-			}
+	for _, writes := range []bool{true, false} {
+		name := "working phase writes"
+		if !writes {
+			name = "working phase silent"
 		}
-	}
-	// 12:16:00 would be 15m after the FIRST entry: nothing may happen then.
-	rig.onTick = func(now time.Time) {
-		if now.Before(again.Add(15*time.Minute)) && len(rig.cc.callNames()) != 0 {
-			t.Fatalf("acted at %s, before 15m of needs_input since the re-entry at %s: %v",
-				now.Format(time.TimeOnly), again.Format(time.TimeOnly), rig.cc.callNames())
-		}
-	}
-	err := rig.run(stallT0.Add(3 * time.Hour))
-	mustStalled(t, err)
-	esc, _ := rig.cc.firstCall("cancel")
-	if want := again.Add(15 * time.Minute); !esc.at.Equal(want) {
-		t.Errorf("Escape at %s, want %s (15m after the re-entry)", esc.at.Format(time.TimeOnly), want.Format(time.TimeOnly))
+		t.Run(name, func(t *testing.T) {
+			rig := newStallRig(t, releaseRole(config.Default()), nil)
+			first := stallT0.Add(time.Minute)
+			back := stallT0.Add(10 * time.Minute) // answered and working again at 12:10:00
+			again := stallT0.Add(12 * time.Minute)
+			lastBeforeDialog := first.Add(-5 * time.Second)
+			rig.cc.script = func(now time.Time, row *ccpool.Session) {
+				switch {
+				case now.Before(first):
+				case now.Before(back):
+					if row.State != ccpool.StateNeedsInput {
+						enterNeedsInput(now, row)
+					}
+					rig.lastWrite = lastBeforeDialog
+				case now.Before(again):
+					row.State = ccpool.StateWorking
+					if writes {
+						rig.lastWrite = now // it is working: it writes
+					}
+				default:
+					if row.State != ccpool.StateNeedsInput && row.State != ccpool.StateReady {
+						enterNeedsInput(now, row)
+						if writes {
+							rig.lastWrite = now.Add(-5 * time.Second)
+						}
+					}
+				}
+			}
+			// 12:16:00 would be 15m after the FIRST entry: nothing may happen then.
+			rig.onTick = func(now time.Time) {
+				if now.Before(again.Add(15*time.Minute)) && len(rig.cc.callNames()) != 0 {
+					t.Fatalf("acted at %s, before 15m of needs_input since the re-entry at %s: %v",
+						now.Format(time.TimeOnly), again.Format(time.TimeOnly), rig.cc.callNames())
+				}
+			}
+			err := rig.run(stallT0.Add(3 * time.Hour))
+			mustStalled(t, err)
+			esc, _ := rig.cc.firstCall("cancel")
+			if want := again.Add(15 * time.Minute); !esc.at.Equal(want) {
+				t.Errorf("Escape at %s, want %s (15m after the re-entry)", esc.at.Format(time.TimeOnly), want.Format(time.TimeOnly))
+			}
+		})
 	}
 }
 
