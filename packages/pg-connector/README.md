@@ -203,7 +203,9 @@ packages/pg-connector/
   cmd/
     pg-connector/                        umbrella; imports pkg/schema + pkg/provider + pkg/scriptout only
     pg-connector-github/                 daemon-backed GitHub connector (serve, pr, ci modes); internal/config loads its rendered config;
-                                         internal/ratefeed feeds the governor (GraphQL rateLimit, `gh api --include` headers)
+                                         internal/ratefeed feeds the governor (GraphQL rateLimit, `gh api --include` headers);
+                                         internal/serve assembles the daemon (startup order, ops table, origin gateway)
+                                         and internal/servetest runs the real binary against a counting fake gh in tests
     pg-connector-pr-github/internal/     backend-private
     pg-connector-issue-beads/internal/
     pg-connector-ci-github-actions/internal/

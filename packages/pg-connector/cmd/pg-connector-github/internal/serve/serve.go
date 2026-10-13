@@ -48,6 +48,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"path/filepath"
 	"slices"
 	"sync"
@@ -99,6 +100,15 @@ type Options struct {
 	Stderr io.Writer
 	// Hooks are the timing seams of a test build; the zero value is production.
 	Hooks Hooks
+
+	// PeerUID and OwnUID override the process shell's peer-credential call and
+	// the daemon's own uid, and OnReady is called with the router once the gate
+	// has opened. They are seams for an in-process test (a peer with another
+	// uid cannot be made by a test that is not root; the registered op table is
+	// read from the router); the binary leaves them nil.
+	PeerUID func(net.Conn) (uint32, error)
+	OwnUID  func() uint32
+	OnReady func(rt *router.Router)
 }
 
 // Run runs the daemon until ctx ends and returns the process exit code.
@@ -116,6 +126,8 @@ func Run(ctx context.Context, o Options) int {
 		SocketPath: cfg.SocketPath,
 		LockPath:   lockPath,
 		Logger:     log,
+		PeerUID:    o.PeerUID,
+		OwnUID:     o.OwnUID,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "pg-connector-github serve: %v\n", err)
@@ -379,6 +391,9 @@ func (d *daemon) start(ctx context.Context) error {
 	}
 	d.rt.SetMigrating(false, "")
 	d.log.DaemonStarted(cfg.StateDir, cfg.SocketPath, cfg.Hash)
+	if d.o.OnReady != nil {
+		d.o.OnReady(d.rt)
+	}
 	return nil
 }
 

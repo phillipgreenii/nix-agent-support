@@ -212,15 +212,28 @@ func (s *Shim) CountKind(kind string) int {
 
 // WaitQuiet waits until the shim has recorded no new call for quiet (the daemon
 // has caught up with whatever work it started), and returns how many calls it
-// has recorded; it fails the test if that does not happen within max.
-func (s *Shim) WaitQuiet(t testing.TB, quiet, max time.Duration) int {
+// has recorded; it fails the test if that does not happen within max. Without
+// kinds every origin call counts; with kinds only the calls of those kinds do
+// (a test whose daemon polls the viewer on a short interval waits on "search"
+// and "nodes").
+func (s *Shim) WaitQuiet(t testing.TB, quiet, max time.Duration, kinds ...string) int {
 	t.Helper()
+	count := func() int {
+		if len(kinds) == 0 {
+			return len(s.OriginCalls())
+		}
+		n := 0
+		for _, k := range kinds {
+			n += s.CountKind(k)
+		}
+		return n
+	}
 	deadline := time.Now().Add(max)
-	last := len(s.Calls())
+	last := count()
 	since := time.Now()
 	for time.Now().Before(deadline) {
 		time.Sleep(25 * time.Millisecond)
-		n := len(s.Calls())
+		n := count()
 		if n != last {
 			last, since = n, time.Now()
 			continue

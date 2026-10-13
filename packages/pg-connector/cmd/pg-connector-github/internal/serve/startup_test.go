@@ -130,3 +130,48 @@ func TestServeRefusesASecondInstance(t *testing.T) {
 		t.Errorf("the first daemon stopped answering: %+v", resp.Error)
 	}
 }
+
+// indexOf is the position of the first line for change, or -1.
+func indexOf(lines []map[string]any, change string) int {
+	for i, l := range lines {
+		if l["change"] == change {
+			return i
+		}
+	}
+	return -1
+}
+
+func TestServeStartupOrderIsObservableInTheLog(t *testing.T) {
+	d := servetest.NewDaemon(t, servetest.Options{Before: seed})
+	d.Start(t)
+
+	// First start on an empty state directory: the shell (lock, socket) comes
+	// first, then the store, then the gate opens.
+	lines := d.DaemonLog(t)
+	shell, migrated, started := indexOf(lines, "shell_started"), indexOf(lines, "store_migrated"), indexOf(lines, "daemon_started")
+	if !(0 <= shell && shell < migrated && migrated < started) {
+		t.Errorf("order: shell_started %d, store_migrated %d, daemon_started %d", shell, migrated, started)
+	}
+	// The viewer was resolved before the gate opened: by the time the daemon
+	// answers, the lookup is on the shim's log.
+	if d.Shim.CountKind("viewer") != 1 {
+		t.Errorf("the viewer must be resolved during startup, viewer calls = %d", d.Shim.CountKind("viewer"))
+	}
+
+	// A crash leaves a socket behind; the next start removes it under the lock,
+	// before it listens, and opens the store without migrating again.
+	d.Kill(t)
+	d.Start(t)
+	lines = d.DaemonLog(t)
+	var after []map[string]any
+	for i := started + 1; i < len(lines); i++ {
+		after = append(after, lines[i])
+	}
+	stale, shell2, started2 := indexOf(after, "stale_socket_removed"), indexOf(after, "shell_started"), indexOf(after, "daemon_started")
+	if !(0 <= stale && stale < shell2 && shell2 < started2) {
+		t.Errorf("restart order: stale_socket_removed %d, shell_started %d, daemon_started %d", stale, shell2, started2)
+	}
+	if indexOf(after, "store_migrated") >= 0 {
+		t.Error("a store at the current schema must not be migrated again")
+	}
+}

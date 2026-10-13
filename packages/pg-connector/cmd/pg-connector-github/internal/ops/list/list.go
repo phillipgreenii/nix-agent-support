@@ -206,7 +206,7 @@ func (h *handler) handle(ctx context.Context, raw json.RawMessage) (any, error) 
 			if _, fetched := srv.fetchedIDs[id]; fetched {
 				continue
 			}
-			if err := h.cfg.Summaries.Access(ctx, id); err != nil && !errors.Is(err, summary.ErrUnknownEntity) {
+			if err := h.cfg.Summaries.Access(context.WithoutCancel(ctx), id); err != nil && !errors.Is(err, summary.ErrUnknownEntity) {
 				return nil, scriptout.WrapError(scriptout.ErrUnavailable, fmt.Sprintf("record access of %s: %v", id, err))
 			}
 		}
@@ -428,6 +428,10 @@ func (h *handler) summaries(ctx context.Context, ids []string, force bool, srv *
 
 // group reads the stored summary group of an id (a node id or owner/repo#n).
 func (h *handler) group(ctx context.Context, id string) (store.GroupRow, bool, error) {
+	// A stored read is local and quick, and the answer at the caller's deadline
+	// is made of exactly such reads: they must not fail because the deadline
+	// that ended the wait for the origin has passed.
+	ctx = context.WithoutCancel(ctx)
 	node := id
 	if strings.Contains(id, "#") {
 		ref, err := entity.ParseRef(id)

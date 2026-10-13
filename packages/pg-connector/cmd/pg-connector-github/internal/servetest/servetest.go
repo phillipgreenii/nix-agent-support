@@ -35,6 +35,7 @@ import (
 
 	_ "modernc.org/sqlite" // read-only store inspection
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/socket"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
@@ -596,4 +597,28 @@ func (s *safeBuffer) String() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.b.String()
+}
+
+// LoadConfig loads the rendered config the way the binary does (no environment
+// overrides), for an in-process test that runs serve.Run itself.
+func (d *Daemon) LoadConfig(t *testing.T) *config.Config {
+	t.Helper()
+	cfg, err := config.Load(d.ConfigPath, func(string) string { return "" })
+	if err != nil {
+		t.Fatalf("servetest: load the rendered config: %v", err)
+	}
+	return cfg
+}
+
+// WritableStore opens the store file read-write with plain SQL, for a test that
+// edits it while the daemon is stopped (for example to age its due times).
+func (d *Daemon) WritableStore(t *testing.T) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("sqlite", "file:"+d.StorePath()+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = db.Close() })
+	return db
 }
