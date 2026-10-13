@@ -172,7 +172,10 @@ existing fingerprint match):
   NOT escalate; a backlog that stops draining while sweeps keep enqueueing stacks bursts on the
   residual and does escalate on the second tick. Known blind spot: a flat, non-draining backlog
   of routine-burst size with no further enqueues is not distinguishable by peak-phase samples;
-  the Grafana queue-stalled / queue-depth-growing rules cover that case.
+  the Grafana queue-stalled / queue-depth-growing rules cover that case. (Since 2026-10-12
+  `pg-router-queue-stalled` means a backlog with nothing processing it, a dispatch that is in
+  flight counts as processing however long it runs, and `pg-router-queue-slow-growth` covers a
+  backlog that grows under a working consumer; pg-router `DEC-OBS-10`.)
 
 A probe MUST run this check via `pg-connector issue list --query escalated-work --backend
 pg-connector-issue-beads` (with `PG_CONNECTOR_ISSUE_BEADS_DIR` set), never `bd search`/`bd list`

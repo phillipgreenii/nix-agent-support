@@ -362,3 +362,53 @@ id, bead or session as a label. The oldest-age gauge is a scan of the retained e
 `event_type`; wait is `started_at - enqueued_at`, run is `duration_ms`. The histograms give the same
 split as a rate: `sum(rate(pg_router_queue_wait_seconds_sum[1h])) by (role, type)` over the matching
 `run` sum.
+
+### `DEC-OBS-10` — a queue alert reads the lane's own state: a backlog with nothing processing it, and arrivals against completions <!-- uuid: e1c7a3f4-92b6-4d58-8a1e-6f0d3b7c2a95 -->
+
+**Decided** (operator ruling, 2026-10-12; bead `pg2-53n39`, split out of the alert record `pg2-nz9ph`).
+The `pg-router-queue-stalled` alert judged a lane by completions: depth of 10 or more for 30 minutes
+with no accepted dispatch for 30 minutes, held for 30 more. A dispatch settles (and
+`pg_router_throughput_total` advances) only when it ends, so any healthy dispatch of an hour or more paged
+it: on 2026-10-12 the 63.7 minute `drain.pg2` dispatch did, and 4 of the last 12 drain dispatches ran that
+long. The operator replaced the premise: alert when the queue is above 0 and nothing is being processed,
+or when consumption stays far below generation.
+
+- **Idle with a backlog (`pg-router-queue-stalled`).** A type pages when its depth held above 0 on every
+  scrape of a 10 minute window, the role bound to it had no dispatch in flight on any scrape of the window
+  (`listener_in_flight`, `DEC-OBS-9`) **and** completed none (the throughput counter did not advance in
+  it), and that held for 5 minutes. The second clause exists because a role whose dispatches last seconds
+  is in flight on about 3 percent of 30 second scrapes even while it drains a backlog; a dispatch that
+  settled inside the window is processing. A dispatch that is running is processing however long it runs.
+  Any gate (`SYSTEM_PAUSE` included) holds every listener but its owner, so the rule is suppressed from the
+  first scrape of a gate until 10 minutes after it ends; a long hold is `pg-router-gate-held`'s page. The
+  depth gauge carries `type` and the in-flight gauge `role`, and the binding is configuration, so the join
+  is an explicit table in the rule, one clause per role of the daemon config. The rule needs 18 of 20
+  scrapes, which is also its wake grace: a laptop sleep leaves no samples and the condition cannot hold
+  again until 10 minutes after the wake (`pg2-9uvm5` owns the dedicated host-awake signal; it will add one
+  `unless` clause and change nothing else). The helper `role` label is dropped, so the alert keeps its
+  labels and an open bead for its fingerprint keeps matching.
+- **Slow growth (`pg-router-queue-slow-growth`).** A type pages when `increase(enqueued_total[6h])` is
+  above 1.5 times `increase(throughput_total[6h])` (or there are arrivals and no completions series), at
+  least 6 arrived, and a backlog of 5 or more did not drain once in the last hour (108 of the hour's 120
+  scrapes present, which is also its wake grace), held for 30 minutes. A counter pair was chosen over
+  `predict_linear` on the depth gauge, which has no series while a type is drained and has multi-hour holes
+  across every laptop sleep; the counters compare the two rates directly and `increase()` is exact across a
+  sleep because nothing arrives or completes while the host is asleep.
+- **`enqueued`** — a new counter per `type`: events admitted to the queue. A duplicate id, a restored
+  event, a refused admission and the Gate Registry's own records are not arrivals; a fresh event that
+  reuses a retired id is. The queue retires events unaccepted and the source re-emits them (2026-10-13
+  00:18Z to 00:24Z: about 17 such pairs), which this counts as arrivals; the depth floor keeps that churn
+  alone from paging a type that holds no backlog.
+
+**Evidence.** The recorded `drain.pg2` lane of 2026-10-12, reconstructed from the queue log
+(`internal/alertrules/testdata/drain_pg2_2026-10-12.txt`), replays through both rules in
+`queue_stalled_test.go` and `queue_slow_growth_test.go`: the old expression pages at 18:48Z, as the alert
+record says, and the new one never evaluates true during the dispatch; it pages once for a real stretch of
+30 minutes (23:03:11Z to 23:33:06Z) in which the lane sat idle with about 20 events queued and the host
+awake; the slow-growth rule pages for the 12:00Z to 19:40Z case (11 arrivals, 5 completions). The recorded
+`pr.changed` buildup of 2026-09-30 pages as two idle-with-backlog stretches the old rule could not see, and
+the absorbed `issue.changed` surge of 2026-10-01 pages nothing. `grafana/alerting/rule-tests/` runs the same
+expressions under `promtool`.
+
+**Not covered, by the ruling.** A wedged session that still counts as in flight (the ccpool session rules,
+`pool-full-idle` and `needs_input`, own it); a type missing from the rule's role table.
