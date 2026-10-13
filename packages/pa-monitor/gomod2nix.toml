@@ -77,6 +77,7 @@ cachePackages = [
   'golang.org/x/net/http2/hpack',
   'golang.org/x/net/idna',
   'golang.org/x/net/trace',
+  'golang.org/x/sys/cpu',
   'golang.org/x/sys/unix',
   'golang.org/x/text/secure/bidirule',
   'golang.org/x/text/transform',
@@ -275,8 +276,8 @@ cachePackages = [
     hash = 'sha256-Q8VG+Tvb9/dr6p/wLbHwe4Myk8e+dtbVSlgoCfE6t3M='
 
   [mod.'github.com/phillipgreenii/x']
-    version = 'v0.0.0-20261010082857-b127f475ba6a'
-    hash = 'sha256-QCMP9ymkV2B9KpBt1s9B/xXtzrZ8Zr+z5Elfs0H8UPY='
+    version = 'v0.0.0-20261012201341-92b5729d7f1b'
+    hash = 'sha256-o9Y3Sw3yQJrJijNVWk6LW98NmoufqEwkt/RbSnYC5m8='
 
   [mod.'github.com/remyoudompheng/bigfft']
     version = 'v0.0.0-20230129092748-24d4a6f8daec'
@@ -351,11 +352,11 @@ cachePackages = [
     hash = 'sha256-gykmMKFe61Tc4tblLPd3IyMKCqL0MSTQpgb6yE5EnDA='
 
   [mod.'google.golang.org/genproto/googleapis/api']
-    version = 'v0.0.0-20261005182115-fad411399dd8'
-    hash = 'sha256-jtbB8oFEPwjQVEBBFSwdUkgfXkT9+0aGu0VVF+RXHLE='
+    version = 'v0.0.0-20261012220534-4341edf3f941'
+    hash = 'sha256-MlST4MvkHobgSWbCS3GCUaffvSnPXIQC+UMMsDuOGZs='
 
   [mod.'google.golang.org/genproto/googleapis/rpc']
-    version = 'v0.0.0-20261005182115-fad411399dd8'
+    version = 'v0.0.0-20261012220534-4341edf3f941'
     hash = 'sha256-qBJJ3Go2HqyEE+jp6FMafhXbMBbA/PIXvbdROnLPAYA='
 
   [mod.'google.golang.org/grpc']
@@ -367,8 +368,8 @@ cachePackages = [
     hash = 'sha256-MKd0AdkWEe2A79mGPzOY5I76nMqTsGJKQNPJOKyOwkQ='
 
   [mod.'modernc.org/libc']
-    version = 'v1.77.1'
-    hash = 'sha256-XH7HBvMVe0lsBw0W+lkcRkItPL4//7c0p9RurXDcwqg='
+    version = 'v1.78.0'
+    hash = 'sha256-3Q33tXjmrJoV7SF77qFyunwWVnC2WT7p3zRFamsHMUw='
 
   [mod.'modernc.org/mathutil']
     version = 'v1.7.1'
