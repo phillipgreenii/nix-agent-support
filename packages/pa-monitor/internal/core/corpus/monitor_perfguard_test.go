@@ -10,7 +10,7 @@ import (
 )
 
 // TestScan_SteadyStateNoRework is the phase-1a perf guard. On an UNCHANGED
-// corpus, a second Scan must do no re-work: no title re-probe (write-once cache),
+// corpus, a second Scan must do no re-work: no title re-probe (unchanged size, no open),
 // no transcript re-parse (cache_hit), no subagent file re-read (unchanged
 // (size,mtime)), and each active session's subagents dir ReadDir'd EXACTLY ONCE
 // — the pg2-fvuk1 requirement (today's poller ReadDirs it twice: maxActivity +
@@ -53,7 +53,7 @@ func TestScan_SteadyStateNoRework(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := m.TitleProbesLastScan(); got != 0 {
-		t.Errorf("TitleProbesLastScan = %d, want 0 (write-once title cache)", got)
+		t.Errorf("TitleProbesLastScan = %d, want 0 (unchanged files are not re-opened)", got)
 	}
 	if got := m.TranscriptScansLastScan(); got != 0 {
 		t.Errorf("TranscriptScansLastScan = %d, want 0 (all cache_hit)", got)

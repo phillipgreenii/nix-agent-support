@@ -186,7 +186,7 @@ func TestTitleCache_NotReprobedOnMtimeBump(t *testing.T) {
 	if opensAfterFirst == 0 {
 		t.Fatalf("expected the titled file to be opened once on first resolve")
 	}
-	// Bump mtime WITHOUT changing size/content; a write-once title must not be re-probed.
+	// Bump mtime WITHOUT changing size/content; an unchanged file must not be re-opened.
 	if err := os.Chtimes(titled, time.Unix(5000, 0), time.Unix(5000, 0)); err != nil {
 		t.Fatalf("chtimes: %v", err)
 	}
@@ -195,5 +195,148 @@ func TestTitleCache_NotReprobedOnMtimeBump(t *testing.T) {
 	}
 	if tc.opens != opensAfterFirst {
 		t.Fatalf("title re-probed after mtime bump: opens %d -> %d (want no change)", opensAfterFirst, tc.opens)
+	}
+}
+
+// appendTranscript appends raw bytes to path (no newline added).
+func appendTranscript(t *testing.T, path, raw string) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatalf("open %s: %v", path, err)
+	}
+	defer func() { _ = f.Close() }()
+	if _, err := f.WriteString(raw); err != nil {
+		t.Fatalf("append %s: %v", path, err)
+	}
+}
+
+// A title can change: Claude Code appends a new custom-title record. The cache
+// keeps tailing, so the file resolves by its CURRENT (latest) title.
+func TestTitleCache_TitleChangeIsPickedUp(t *testing.T) {
+	home := t.TempDir()
+	cwd := "/tmp/proj"
+	dir := projectDir(t, home, cwd)
+	renamed := writeTranscript(t, dir, "a.jsonl", time.Unix(1000, 0), append(fillerLines(5), titleLine("Alpha"))...)
+	other := writeTranscript(t, dir, "other.jsonl", time.Unix(2000, 0), fillerLines(3)...)
+
+	tc := newTitleCache()
+	if got, _, ok := tc.resolve(home, &session.Session{Cwd: cwd, Name: "Alpha", SessionID: "zz"}); !ok || got != renamed {
+		t.Fatalf("before rename: resolve(Alpha) = (%q, ok=%v), want %q", got, ok, renamed)
+	}
+
+	appendTranscript(t, renamed, titleLine("Beta")+"\n")
+	if err := os.Chtimes(renamed, time.Unix(3000, 0), time.Unix(3000, 0)); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+	// other is now the newest file, so a miss on a's title falls back to it.
+	if err := os.Chtimes(other, time.Unix(4000, 0), time.Unix(4000, 0)); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+
+	if got, _, ok := tc.resolve(home, &session.Session{Cwd: cwd, Name: "Beta", SessionID: "zz"}); !ok || got != renamed {
+		t.Fatalf("after rename: resolve(Beta) = (%q, ok=%v), want %q (latest title wins)", got, ok, renamed)
+	}
+	if got, _, ok := tc.resolve(home, &session.Session{Cwd: cwd, Name: "Alpha", SessionID: "zz"}); !ok || got != other {
+		t.Fatalf("after rename: resolve(Alpha) = (%q, ok=%v), want fallback %q (old title must not match)", got, ok, other)
+	}
+}
+
+// A growing file is read only from where the previous probe stopped, whether or
+// not it carries a title yet.
+func TestTitleCache_GrowthReadsOnlyAppendedBytes(t *testing.T) {
+	home := t.TempDir()
+	cwd := "/tmp/proj"
+	dir := projectDir(t, home, cwd)
+	path := writeTranscript(t, dir, "a.jsonl", time.Unix(1000, 0), fillerLines(500)...)
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+
+	s := &session.Session{Cwd: cwd, Name: "Alpha", SessionID: "a"}
+	tc := newTitleCache()
+	tc.resolve(home, s)
+	if tc.bytes != fi.Size() {
+		t.Fatalf("first probe read %d bytes, want the whole file (%d)", tc.bytes, fi.Size())
+	}
+
+	appended := fillerLines(1)[0] + "\n"
+	appendTranscript(t, path, appended)
+	before := tc.bytes
+	tc.resolve(home, s)
+	if got := tc.bytes - before; got != int64(len(appended)) {
+		t.Fatalf("growth probe read %d bytes, want only the appended %d", got, len(appended))
+	}
+}
+
+// Only lines that mention custom-title are JSON-decoded; every other line is
+// skipped by a byte scan.
+func TestTitleCache_DecodesOnlyCandidateLines(t *testing.T) {
+	home := t.TempDir()
+	cwd := "/tmp/proj"
+	dir := projectDir(t, home, cwd)
+	mention := `{"type":"user","message":{"role":"user","content":"what is a custom-title record?"}}`
+	lines := append(fillerLines(500), titleLine("Alpha"), mention)
+	writeTranscript(t, dir, "a.jsonl", time.Unix(1000, 0), lines...)
+
+	tc := newTitleCache()
+	tc.resolve(home, &session.Session{Cwd: cwd, Name: "Alpha", SessionID: "a"})
+	if tc.decodes != 2 {
+		t.Fatalf("decoded %d lines, want 2 (the title record and the line mentioning it)", tc.decodes)
+	}
+}
+
+// A file rewritten in place (truncated, same inode) is re-read from the start.
+func TestTitleCache_RewrittenFileIsRescanned(t *testing.T) {
+	home := t.TempDir()
+	cwd := "/tmp/proj"
+	dir := projectDir(t, home, cwd)
+	path := writeTranscript(t, dir, "a.jsonl", time.Unix(1000, 0), append(fillerLines(20), titleLine("Alpha"))...)
+	other := writeTranscript(t, dir, "other.jsonl", time.Unix(2000, 0), fillerLines(3)...)
+
+	tc := newTitleCache()
+	if got, _, ok := tc.resolve(home, &session.Session{Cwd: cwd, Name: "Alpha", SessionID: "zz"}); !ok || got != path {
+		t.Fatalf("resolve(Alpha) = (%q, ok=%v), want %q", got, ok, path)
+	}
+
+	if err := os.WriteFile(path, []byte(titleLine("Gamma")+"\n"), 0o600); err != nil {
+		t.Fatalf("rewrite: %v", err)
+	}
+	// The rewrite stamped a with the current time; make other newer so a title miss falls back to it.
+	future := time.Now().Add(time.Hour)
+	if err := os.Chtimes(other, future, future); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+	if got, _, ok := tc.resolve(home, &session.Session{Cwd: cwd, Name: "Gamma", SessionID: "zz"}); !ok || got != path {
+		t.Fatalf("after rewrite: resolve(Gamma) = (%q, ok=%v), want %q", got, ok, path)
+	}
+	if got, _, ok := tc.resolve(home, &session.Session{Cwd: cwd, Name: "Alpha", SessionID: "zz"}); !ok || got != other {
+		t.Fatalf("after rewrite: resolve(Alpha) = (%q, ok=%v), want fallback %q (old title gone)", got, ok, other)
+	}
+}
+
+// A half-written final line is not consumed; the completed line is read once.
+func TestTitleCache_PartialTrailingLineWaitsForNewline(t *testing.T) {
+	home := t.TempDir()
+	cwd := "/tmp/proj"
+	dir := projectDir(t, home, cwd)
+	path := writeTranscript(t, dir, "a.jsonl", time.Unix(1000, 0), fillerLines(3)...)
+	other := writeTranscript(t, dir, "other.jsonl", time.Unix(2000, 0), fillerLines(3)...)
+
+	tc := newTitleCache()
+	appendTranscript(t, path, `{"type":"custom-title","customTitle":"Al`)
+	// The append stamped a with the current time; make other newer so a title miss falls back to it.
+	future := time.Now().Add(time.Hour)
+	if err := os.Chtimes(other, future, future); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+	if got, _, ok := tc.resolve(home, &session.Session{Cwd: cwd, Name: "Alpha", SessionID: "zz"}); !ok || got != other {
+		t.Fatalf("partial line: resolve(Alpha) = (%q, ok=%v), want fallback %q", got, ok, other)
+	}
+
+	appendTranscript(t, path, `pha"}`+"\n")
+	if got, _, ok := tc.resolve(home, &session.Session{Cwd: cwd, Name: "Alpha", SessionID: "zz"}); !ok || got != path {
+		t.Fatalf("completed line: resolve(Alpha) = (%q, ok=%v), want %q", got, ok, path)
 	}
 }

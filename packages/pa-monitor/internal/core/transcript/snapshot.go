@@ -1,9 +1,7 @@
 package transcript
 
 import (
-	"bufio"
 	"encoding/json"
-	"io"
 	"maps"
 	"os"
 	"strings"
@@ -383,43 +381,13 @@ func (st *scanState) finalize() Snapshot {
 	return snap
 }
 
-// foldReader feeds complete newline-terminated lines from r into st, returning
-// the number of bytes consumed (including the terminating newlines). A trailing
-// segment with no newline is left unconsumed so a half-written final line is
-// reprocessed once completed. A single line exceeding maxTranscriptLine is an
-// error, matching Scan's historical limit.
-func (st *scanState) foldReader(r io.Reader) (int64, error) {
-	br := bufio.NewReaderSize(r, 64*1024)
-	var consumed int64
-	for {
-		line, err := br.ReadBytes('\n')
-		if n := len(line); n > 0 && line[n-1] == '\n' {
-			if n > maxTranscriptLine {
-				return consumed, bufio.ErrTooLong
-			}
-			consumed += int64(n)
-			st.feed(line[:n-1])
-		} else if n > maxTranscriptLine {
-			return consumed, bufio.ErrTooLong
-		}
-		if err != nil {
-			if err == io.EOF {
-				return consumed, nil
-			}
-			return consumed, err
-		}
-	}
-}
-
 // Accumulator carries incremental scan state for one transcript file across
-// polls: the folded scanState, the byte offset just past the last complete line
-// consumed, and the file identity used to detect rotation/rewrite. Treat it as
-// opaque; obtain one from ScanIncremental and pass it back on the next call.
+// polls: the folded scanState and the TailCursor (offset and file identity) that
+// resumes the read. Treat it as opaque; obtain one from ScanIncremental and pass
+// it back on the next call.
 type Accumulator struct {
-	st     scanState
-	offset int64
-	info   os.FileInfo
-	ready  bool
+	st  scanState
+	cur *TailCursor // nil until a scan of the file has completed
 }
 
 func newAccumulator() *Accumulator {
@@ -475,59 +443,24 @@ func Scan(path string) (Snapshot, error) {
 // newline). A missing file yields a zero Snapshot, a fresh accumulator, a full
 // ScanStats, and no error (matching Scan).
 func ScanIncremental(path string, prev *Accumulator) (Snapshot, *Accumulator, ScanStats, error) {
-	f, err := os.Open(path)
+	acc := prev
+	var prevCur *TailCursor
+	if acc != nil {
+		prevCur = acc.cur
+	}
+	cur, n, fresh, err := TailLines(path, prevCur,
+		func() { acc = newAccumulator() },
+		func(line []byte) { acc.st.feed(line) })
 	if err != nil {
 		if os.IsNotExist(err) {
 			return Snapshot{}, newAccumulator(), ScanStats{Mode: ScanModeFull}, nil
 		}
 		return Snapshot{}, nil, ScanStats{}, err
 	}
-	defer func() { _ = f.Close() }()
-
-	info, err := f.Stat()
-	if err != nil {
-		return Snapshot{}, nil, ScanStats{}, err
-	}
-
-	acc := prev
-	fresh := acc == nil || !acc.ready
-	if !fresh {
-		switch {
-		case acc.info == nil || !os.SameFile(acc.info, info):
-			fresh = true // rotated / replaced (new inode)
-		case info.Size() < acc.offset:
-			fresh = true // truncated below what we consumed
-		case acc.offset > 0 && !newlineAt(f, acc.offset-1):
-			fresh = true // rewritten in place — prefix no longer matches
-		}
-	}
-	if fresh {
-		acc = newAccumulator()
-	}
-
-	if _, err := f.Seek(acc.offset, io.SeekStart); err != nil {
-		return Snapshot{}, nil, ScanStats{}, err
-	}
-	n, err := acc.st.foldReader(f)
-	if err != nil {
-		return Snapshot{}, nil, ScanStats{}, err
-	}
-	acc.offset += n
-	acc.info = info
-	acc.ready = true
+	acc.cur = cur
 	mode := ScanModeIncremental
 	if fresh {
 		mode = ScanModeFull
 	}
 	return acc.st.finalize(), acc, ScanStats{BytesFolded: n, Mode: mode}, nil
-}
-
-// newlineAt reports whether the byte at pos is '\n', without disturbing f's
-// current read offset (uses ReadAt).
-func newlineAt(f *os.File, pos int64) bool {
-	var b [1]byte
-	if _, err := f.ReadAt(b[:], pos); err != nil {
-		return false
-	}
-	return b[0] == '\n'
 }

@@ -11,7 +11,7 @@ import (
 
 // Monitor is the single owner of corpus discovery, transcript resolution, and
 // per-file tailing. One Scan per tick joins the session registry with the project
-// transcripts, resolves each session's transcript once (write-once title cache),
+// transcripts, resolves each session's transcript once (offset-tailed title cache),
 // tails the transcript + subagent files each active session needs, AND walks the
 // in-window transcript + status-sibling supersets so the UsagePricing and Limits
 // observers are fed from the SAME single decode — feeding the registered observers

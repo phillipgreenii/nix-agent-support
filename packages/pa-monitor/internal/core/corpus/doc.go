@@ -1,7 +1,7 @@
 // Package corpus owns the reactive read of the Claude Code corpus: it joins the
 // two on-disk trees (~/.claude/sessions/*.json, PID-keyed, via session.Discoverer
 // and ~/.claude/projects/<slug>/*.jsonl, cwd-keyed), resolves each session's
-// transcript once (via a write-once title cache, not a per-tick re-probe), and
+// transcript once (via an offset-tailed title cache, not a per-tick re-probe), and
 // tails each relevant file at most once per Scan — feeding criteria-gated
 // observers that maintain projections.
 //

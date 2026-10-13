@@ -1,7 +1,7 @@
 package corpus
 
 import (
-	"bufio"
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -9,72 +9,75 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pa-monitor/internal/core/session"
+	"github.com/phillipgreenii/pa-monitor/internal/core/transcript"
 )
 
-// titleScanLineCap is a defensive bound on the custom-title probe. It replaces
-// the dead titleScanLines=200 cap in session.transcriptHasTitle: custom-title now
-// lands at lines ~490-1100, so 200 never matched. The probe stops at the first
-// custom-title record anyway; the cap only guards a pathological title-less file.
-const titleScanLineCap = 20000
+// customTitleMarker is the byte string every custom-title record contains. A line
+// without it cannot be one, so the probe skips JSON-decoding it.
+var customTitleMarker = []byte("custom-title")
 
 type titleEntry struct {
-	title       string
-	found       bool
-	scannedSize int64
+	title       string                 // the file's current (latest) custom-title; "" if none
+	cur         *transcript.TailCursor // resume point of the offset read; nil forces a read from the start
+	scannedSize int64                  // file size when last probed; an unchanged size needs no open
 }
 
-// titleCache resolves transcripts and memoizes each file's custom-title
-// WRITE-ONCE by path. A title never changes once written, so once found it is
-// cached permanently and survives mtime bumps — otherwise the active transcript
-// (whose mtime advances every tick) would be re-scanned to line ~500 every tick,
-// a replay of the very hotspot this removes.
+// titleCache resolves transcripts and tracks each file's CURRENT custom-title by
+// path. A title can change (Claude Code appends a new custom-title record), so
+// every file keeps being tailed: a probe reads only the bytes appended since the
+// last one (transcript.TailLines, the same offset read the transcript fold uses),
+// JSON-decodes only lines mentioning custom-title, and the last such record wins.
+// A file whose size is unchanged is not opened at all, so the active transcript
+// (whose mtime advances every tick) costs one read of its newly appended bytes.
 type titleCache struct {
 	entries map[string]titleEntry
-	opens   int // test-only: count of file-content opens for title probing
+	opens   int   // test-only: count of file-content opens for title probing
+	bytes   int64 // test-only: bytes consumed from files for title probing
+	decodes int   // test-only: count of json.Unmarshal calls for title probing
 }
 
 func newTitleCache() *titleCache { return &titleCache{entries: map[string]titleEntry{}} }
 
-// customTitle returns path's custom-title ("" if none). Cached titles are
-// returned without reopening; an "absent" result is re-probed only when the file
-// has grown (size differs) — a title could appear as an initially-short file
-// grows. size comes from the caller's ReadDir entry, so this adds no stat.
+// customTitle returns path's current custom-title ("" if none). It reopens the
+// file only when its size differs from the last probe. size comes from the
+// caller's ReadDir entry, so this adds no stat.
 func (h *titleCache) customTitle(path string, size int64) string {
-	if e, ok := h.entries[path]; ok {
-		if e.found {
-			return e.title
-		}
-		if e.scannedSize == size {
-			return ""
-		}
+	e, ok := h.entries[path]
+	if ok && e.scannedSize == size {
+		return e.title
 	}
-	title := h.scanTitle(path)
-	h.entries[path] = titleEntry{title: title, found: title != "", scannedSize: size}
-	return title
+	e = h.probe(path, e)
+	e.scannedSize = size
+	h.entries[path] = e
+	return e.title
 }
 
-func (h *titleCache) scanTitle(path string) string {
-	f, err := os.Open(path)
-	if err != nil {
-		return ""
+// probe reads the bytes of path appended since prev's cursor and folds any
+// custom-title records into the returned entry. On a read error the title found
+// so far is kept and the cursor is dropped, so the next growth re-reads the file.
+func (h *titleCache) probe(path string, prev titleEntry) titleEntry {
+	e := prev
+	cur, n, _, err := transcript.TailLines(path, prev.cur,
+		func() { e.title = "" },
+		func(line []byte) {
+			if !bytes.Contains(line, customTitleMarker) {
+				return
+			}
+			h.decodes++
+			var rec struct {
+				Type        string `json:"type"`
+				CustomTitle string `json:"customTitle"`
+			}
+			if json.Unmarshal(line, &rec) == nil && rec.Type == "custom-title" {
+				e.title = rec.CustomTitle
+			}
+		})
+	if err == nil {
+		h.opens++
 	}
-	defer func() { _ = f.Close() }()
-	h.opens++
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 1<<16), 16*1024*1024)
-	for lines := 0; scanner.Scan() && lines < titleScanLineCap; lines++ {
-		var rec struct {
-			Type        string `json:"type"`
-			CustomTitle string `json:"customTitle"`
-		}
-		if json.Unmarshal(scanner.Bytes(), &rec) != nil {
-			continue
-		}
-		if rec.Type == "custom-title" {
-			return rec.CustomTitle
-		}
-	}
-	return ""
+	h.bytes += n
+	e.cur = cur
+	return e
 }
 
 type cand struct {
