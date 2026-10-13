@@ -840,7 +840,7 @@
       "gridPos": {
         "x": 0,
         "y": 34,
-        "w": 12,
+        "w": 8,
         "h": 7
       },
       "targets": [
@@ -882,9 +882,9 @@
         "uid": "prometheus"
       },
       "gridPos": {
-        "x": 12,
+        "x": 8,
         "y": 34,
-        "w": 12,
+        "w": 8,
         "h": 7
       },
       "targets": [
@@ -1239,6 +1239,38 @@
         "defaults": {
           "unit": "dateTimeAsLocal"
         },
+        "overrides": []
+      }
+    },
+    {
+      "id": 33,
+      "type": "timeseries",
+      "title": "Restarts in the last 30 minutes",
+      "description": "Distinct process starts seen as changes in the start timestamp; the restart-loop alert fires at 3 or more.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 34,
+        "w": 8,
+        "h": 7
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "changes(pg_task_focus_start_timestamp_seconds[30m])",
+          "editorMode": "code",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
         "overrides": []
       }
     }

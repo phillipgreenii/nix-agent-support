@@ -35,6 +35,7 @@ groups:
           severity: critical
         annotations:
           __dashboardUid__: pg-task-focus
+          __panelId__: "2"
           summary: "pg-task-focus has not answered a scrape for over 5 minutes"
           description: 'up{job="pg-task-focus"} has been 0, or has gone missing, for over 5 minutes: the daemon is down, refusing to start (a corrupt log, an unknown event version, a second daemon holding the lock, a bad configuration, or an active profile the configuration no longer defines) or its listener is not on the scraped port. Read the last Error line of the launchd log under ~/.local/state/pg-task-focus/, run `pg-task-focus check` and `pg-task-focus config check`, then restart com.phillipg.pg-task-focus. A daemon that refuses to start never serves /metrics, so this rule, not the restart-loop rule, is the one that sees it.'
         data:
@@ -75,6 +76,7 @@ groups:
           severity: critical
         annotations:
           __dashboardUid__: pg-task-focus
+          __panelId__: "3"
           summary: "pg-task-focus has not finished replaying the log for over 2 minutes"
           description: "pg_task_focus_ready has been 0 for over 2 minutes: the replay of events.jsonl is stuck or very slow, or the first store writability check keeps failing. Check pg_task_focus_replay_duration_seconds from earlier starts, the data directory's free space and permissions, and /readyz for the failing check."
         data:
@@ -115,6 +117,7 @@ groups:
           severity: critical
         annotations:
           __dashboardUid__: pg-task-focus
+          __panelId__: "4"
           summary: "pg-task-focus cannot write to its data directory"
           description: "The writability probe (create and remove a temp file, open events.jsonl for append) has failed for over 2 minutes. Mutations will fail until it clears. Check that the disk is not full and the data directory is still there and owned by the user."
         data:
@@ -155,6 +158,7 @@ groups:
           severity: critical
         annotations:
           __dashboardUid__: pg-task-focus
+          __panelId__: "5"
           summary: "pg-task-focus entered read-only mode: restart it to recover"
           description: "A failed append could not be rolled back or its fsync failed, so the store refuses every mutation until the process restarts and runs crash recovery (reads keep working). Every client shows READ-ONLY with the reason. Restart com.phillipg.pg-task-focus; a mutation that answered 503 has an unknown outcome, so retry it with the same id."
         data:
@@ -195,6 +199,7 @@ groups:
           severity: critical
         annotations:
           __dashboardUid__: pg-task-focus
+          __panelId__: "13"
           summary: "pg-task-focus failed to append an event in the last 10 minutes"
           description: "pg_task_focus_append_failures_total{stage} increased: stage write means the write failed, fsync that the sync failed, project that the events are durable but the new state could not be adopted. Look at the Error log lines for the cause; a write failure that rolled back leaves the store writable, the others make it read-only (see the store read-only rule)."
         data:
@@ -235,6 +240,7 @@ groups:
           severity: warning
         annotations:
           __dashboardUid__: pg-task-focus
+          __panelId__: "6"
           summary: "pg-task-focus has been running on an older configuration for 10+ minutes"
           description: "The last SIGHUP reload was refused (a bad document, or one that removes the active profile) and the previous configuration is still in force. Run `pg-task-focus config check` on the rendered file for the problems and their paths; /healthz config.reload_error names them by path only."
         data:
@@ -275,6 +281,7 @@ groups:
           severity: critical
         annotations:
           __dashboardUid__: pg-task-focus
+          __panelId__: "33"
           summary: "pg-task-focus restarted 3 or more times in 30 minutes"
           description: "The daemon runs and then crashes (a daemon that refuses to start is the daemon-down rule's). Look at the Error and panic lines in the launchd log just before each restart."
         data:
@@ -315,6 +322,7 @@ groups:
           severity: warning
         annotations:
           __dashboardUid__: pg-task-focus
+          __panelId__: "19"
           summary: "pg-task-focus trimmed a torn tail or an uncommitted batch at its last start"
           description: "A crash left an unacknowledged final line or batch, and startup recovery copied those bytes to a sidecar (events.jsonl.recovered-<UTC stamp>-<n> beside the log) and truncated the log to its last committed record. Nothing acknowledged was lost; inspect the sidecar if you doubt it. Clears an hour after the start."
         data:
@@ -355,6 +363,7 @@ groups:
           severity: warning
         annotations:
           __dashboardUid__: pg-task-focus
+          __panelId__: "21"
           summary: "pg-task-focus could not play an overtime sound or send its notification"
           description: "Playback or notification failed in the last hour (it never affects the cycle). Check that the configured sound names exist in /System/Library/Sounds, /Library/Sounds or ~/Library/Sounds, that afplay and osascript run for this user, and that notifications are allowed."
         data:
@@ -395,6 +404,7 @@ groups:
           severity: info
         annotations:
           __dashboardUid__: pg-task-focus
+          __panelId__: "15"
           summary: "the last pg-task-focus startup replay took more than 5 seconds"
           description: "A sizing flag, not a fault: every start replays the whole log and every mutation validates by replaying it. When this stays high, a snapshot (not designed yet) is worth a bead."
         data:
@@ -435,6 +445,7 @@ groups:
           severity: warning
         annotations:
           __dashboardUid__: pg-task-focus
+          __panelId__: "25"
           summary: "a pg-task-focus cycle has been over its planned time for more than an hour"
           description: "A running cycle is more than 3600 seconds past its planned end; the reminder sound has been repeating. Stop it (`pg-task-focus cycle stop`), or end it at the time you really stopped with --at."
         data:

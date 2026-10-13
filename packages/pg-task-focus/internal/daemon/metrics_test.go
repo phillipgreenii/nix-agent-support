@@ -4,6 +4,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -442,6 +443,102 @@ func TestAlertRulesReadRealMetrics(t *testing.T) {
 	// up{job="pg-task-focus"} is the scrape job the darwin module registers as metricsTargets.pg-task-focus.
 	if !strings.Contains(string(raw), `up{job="pg-task-focus"}`) {
 		t.Error("the daemon-down rule does not read up{job=\"pg-task-focus\"}")
+	}
+}
+
+// Grafana refuses to provision a rule that carries only one of __dashboardUid__ and
+// __panelId__ ("both annotations ... must be specified"), and one bad rule file stops the
+// whole Grafana service from starting (pg2-swxeh). So every rule carries both or neither,
+// and when it carries both they must name a real panel that shows the rule's own metric.
+func TestAlertRulesDashboardAnnotationsPaired(t *testing.T) {
+	rawRules, err := os.ReadFile("../../grafana/alerting/alerts.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rules struct {
+		Groups []struct {
+			Rules []struct {
+				UID         string `yaml:"uid"`
+				Annotations map[string]string
+				Data        []struct {
+					RefID string `yaml:"refId"`
+					Model struct {
+						Expr string `yaml:"expr"`
+					}
+				}
+			}
+		}
+	}
+	if err := yaml.Unmarshal(rawRules, &rules); err != nil {
+		t.Fatal(err)
+	}
+	rawDash, err := os.ReadFile("../../grafana/pg-task-focus.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dash struct {
+		UID    string
+		Panels []struct {
+			ID      int
+			Type    string
+			Targets []struct{ Expr string }
+		}
+	}
+	if err := yamlJSON(rawDash, &dash); err != nil {
+		t.Fatal(err)
+	}
+	panelExprs := map[string]string{}
+	for _, p := range dash.Panels {
+		if p.Type == "row" {
+			continue
+		}
+		var all []string
+		for _, tg := range p.Targets {
+			all = append(all, tg.Expr)
+		}
+		panelExprs[strconv.Itoa(p.ID)] = strings.Join(all, "\n")
+	}
+	n := 0
+	for _, g := range rules.Groups {
+		for _, r := range g.Rules {
+			n++
+			uid, hasUID := r.Annotations["__dashboardUid__"]
+			pid, hasPanel := r.Annotations["__panelId__"]
+			if hasUID != hasPanel {
+				t.Errorf("rule %s has __dashboardUid__=%v and __panelId__=%v: Grafana needs both or neither", r.UID, hasUID, hasPanel)
+				continue
+			}
+			if !hasUID {
+				continue
+			}
+			if uid != dash.UID {
+				t.Errorf("rule %s __dashboardUid__ %q, want the dashboard's uid %q", r.UID, uid, dash.UID)
+			}
+			exprs, ok := panelExprs[pid]
+			if !ok {
+				t.Errorf("rule %s __panelId__ %q is not a panel of the dashboard", r.UID, pid)
+				continue
+			}
+			for _, d := range r.Data {
+				if d.RefID != "A" {
+					continue
+				}
+				// The rule's subject is the first metric it reads (a secondary one, such as the start
+				// time that bounds the startup-recovery window, need not be on the panel).
+				subject := metricName.FindString(d.Model.Expr)
+				if subject == "" && strings.Contains(d.Model.Expr, `up{job="pg-task-focus"}`) {
+					subject = `up{job="pg-task-focus"}`
+				}
+				if subject == "" {
+					t.Errorf("rule %s reads no metric this test recognizes", r.UID)
+				} else if !strings.Contains(exprs, subject) {
+					t.Errorf("rule %s points at panel %s, which does not show %s", r.UID, pid, subject)
+				}
+			}
+		}
+	}
+	if n == 0 {
+		t.Error("no alert rules parsed")
 	}
 }
 
