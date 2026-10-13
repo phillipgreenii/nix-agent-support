@@ -117,9 +117,20 @@ func (r *Runner) RunStdin(ctx context.Context, stdin []byte, args ...string) ([]
 // invoker runs gh through the Inner with the arguments it is given.
 type invoker func(ctx context.Context, args ...string) ([]byte, error)
 
+// viaFeedKey marks the context of a call the Feed is running on the Runner's
+// behalf. A Feed built over the Runner itself would call back into it (admitting
+// the same call again, forever); the marker turns that wiring mistake into an
+// error instead of a stack overflow.
+type viaFeedKey struct{}
+
+var errFeedOverRunner = errors.New("metered: the Feed runs gh through the Runner itself; build the Feed over the raw Inner (the one the Runner runs)")
+
 func (r *Runner) run(ctx context.Context, stdin []byte, withStdin bool, args []string) ([]byte, error) {
 	if r == nil || r.Inner == nil || r.Governor == nil || r.Feed == nil {
 		return nil, errors.New("metered: a Runner needs an Inner, a Governor and a Feed")
+	}
+	if ctx.Value(viaFeedKey{}) != nil {
+		return nil, errFeedOverRunner
 	}
 	call := CallFrom(ctx)
 	rt := routeFor(args)
@@ -164,6 +175,7 @@ func (r *Runner) graphQL(ctx context.Context, call ratefeed.Meta, rt route, invo
 // gets the body only; a status of 400 or more returns its body beside the error.
 func (r *Runner) rest(ctx context.Context, call ratefeed.Meta, rt route, stdin []byte, withStdin bool) ([]byte, error) {
 	rc := ratefeed.RESTCall{Meta: call, Args: rt.restArgs}
+	ctx = context.WithValue(ctx, viaFeedKey{}, true)
 	var (
 		resp *ratefeed.Response
 		err  error

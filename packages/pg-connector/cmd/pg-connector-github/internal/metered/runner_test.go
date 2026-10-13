@@ -675,6 +675,36 @@ func TestAFailureThatReachedGitHubStillBooksTheEstimate(t *testing.T) {
 	}
 }
 
+// The Feed MUST be built over the raw Inner. One built over the Runner itself
+// would admit every REST call again from inside its own admission, forever; the
+// Runner turns that wiring mistake into an error and gives the reservation back.
+func TestAFeedBuiltOverTheRunnerItselfFailsInsteadOfRecursing(t *testing.T) {
+	h := newHarness(t, nil)
+	loop := &Runner{Inner: h.inner, Governor: h.gov}
+	loop.Feed = ratefeed.New(h.gov, loop, h.clock)
+	calls := map[string]func() error{
+		"Run": func() error {
+			_, err := loop.Run(context.Background(), "api", "repos/o/r")
+			return err
+		},
+		"RunStdin": func() error {
+			_, err := loop.RunStdin(context.Background(), []byte("{}"), "api", "repos/o/r/pulls/1/reviews", "--input", "-")
+			return err
+		},
+	}
+	for name, call := range calls {
+		if err := call(); !errors.Is(err, errFeedOverRunner) {
+			t.Errorf("%s: err = %v, want the Feed-over-Runner error", name, err)
+		}
+	}
+	if h.inner.count() != 0 || len(h.events) != 0 {
+		t.Errorf("gh ran %d times, %d spend events", h.inner.count(), len(h.events))
+	}
+	if bs := h.bucket(governor.BucketRESTCore); bs.Spent != 0 || bs.InFlight != 0 {
+		t.Errorf("rest_core = %+v: the reservation must be given back", bs)
+	}
+}
+
 func TestARunnerWithoutItsPartsFailsInsteadOfPanicking(t *testing.T) {
 	h := newHarness(t, nil)
 	for name, r := range map[string]*Runner{

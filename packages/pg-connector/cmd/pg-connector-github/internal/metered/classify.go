@@ -55,6 +55,11 @@ func IsRateLimit(err error) bool {
 // its text can carry rate-limit words and it MUST NOT extend a pause); an error
 // that is, or wraps, a *ratefeed.RateLimitError already (the Feed paused for it);
 // and any error whose text is not a rate-limit answer, an HTTP 403 included.
+//
+// The text judged is the error's whole message, which for an exec failure begins
+// with the gh command line: the rule of the Provider's own isRateLimitText, kept
+// so both read the same answers. A call whose own arguments say "rate limit" (a
+// search phrase) and that fails for another reason is therefore misread.
 func Classify(gov *governor.Governor, fallback time.Duration, err error) error {
 	if err == nil || isRefusal(err) {
 		return err
