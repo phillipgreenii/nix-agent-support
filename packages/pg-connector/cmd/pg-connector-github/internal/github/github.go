@@ -1101,6 +1101,12 @@ func statusStateToChecksRollup(state string) string {
 	}
 }
 
+// ChecksRollupFor is statusStateToChecksRollup for the daemon's own list: it
+// maps a head commit's statusCheckRollup.state, as the stored summary keeps it
+// ("" for a commit with no checks), onto schema.PR.ChecksRollup, so the daemon
+// and the batched search agree on the value.
+func ChecksRollupFor(state string) string { return statusStateToChecksRollup(state) }
+
 func (n ghBatchedSearchNode) toAPI() api.PR {
 	out := api.PR{
 		Repo:         n.Repository.NameWithOwner,

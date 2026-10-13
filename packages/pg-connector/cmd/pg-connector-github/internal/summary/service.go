@@ -37,6 +37,11 @@ type ServiceStore interface {
 	ListGroups(ctx context.Context, kind, id string) ([]store.GroupRow, error)
 	ListQueries(ctx context.Context, configuredOnly bool) ([]store.QueryRow, error)
 	DeleteEntity(ctx context.Context, kind, id string) error
+	// TouchEntity and EnsureEntity change only the columns they own, so a read
+	// of the row followed by a write of it cannot overwrite what a concurrent
+	// refresh stored meanwhile (the carried-forward mergeable value).
+	TouchEntity(ctx context.Context, kind, id string, at time.Time) error
+	EnsureEntity(ctx context.Context, kind, id string) error
 }
 
 var _ ServiceStore = (*store.Store)(nil)
@@ -224,15 +229,11 @@ func (s *Service) Access(ctx context.Context, id string) error {
 // recordAccess sets last_access = now and the keep-alive flag, creating the
 // entity row when there is none.
 func (s *Service) recordAccess(ctx context.Context, node string) (store.EntityRow, error) {
-	row, ok, err := s.cfg.Store.GetEntity(ctx, entity.KindPR, node)
-	if err != nil {
+	if err := s.cfg.Store.TouchEntity(ctx, entity.KindPR, node, s.now()); err != nil {
 		return store.EntityRow{}, err
 	}
-	if !ok {
-		row = store.EntityRow{Kind: entity.KindPR, ID: node}
-	}
-	row.LastAccess, row.KeepAlive = s.now(), true
-	return row, s.cfg.Store.PutEntity(ctx, row)
+	row, _, err := s.cfg.Store.GetEntity(ctx, entity.KindPR, node)
+	return row, err
 }
 
 // queueCycle queues the background refresh of an accessed entity: due when its
@@ -271,14 +272,12 @@ func (s *Service) Track(ctx context.Context, refs []string) (unresolved []string
 		if err != nil {
 			return unresolved, err
 		}
-		row, ok, err := s.cfg.Store.GetEntity(ctx, entity.KindPR, node)
-		if err != nil {
+		if err := s.cfg.Store.EnsureEntity(ctx, entity.KindPR, node); err != nil {
 			return unresolved, err
 		}
-		if !ok {
-			if err := s.cfg.Store.PutEntity(ctx, store.EntityRow{Kind: entity.KindPR, ID: node}); err != nil {
-				return unresolved, err
-			}
+		row, _, err := s.cfg.Store.GetEntity(ctx, entity.KindPR, node)
+		if err != nil {
+			return unresolved, err
 		}
 		// A task already queued keeps its Due; a fresh summary is not refetched
 		// (the executor skips a task whose group is inside fresh_until).
@@ -337,6 +336,17 @@ type InteractiveResult struct {
 // (inside expiry) or answers unavailable for a result that is not Fresh. Each id
 // is also recorded as an access.
 func (s *Service) Interactive(ctx context.Context, ids []string) []InteractiveResult {
+	return s.interactive(ctx, ids, false)
+}
+
+// InteractiveFresh is Interactive for a caller that asked for fresh: true: every
+// id goes to the origin, including one whose summary is still inside fresh_until
+// (still single-flight with any caller already fetching it).
+func (s *Service) InteractiveFresh(ctx context.Context, ids []string) []InteractiveResult {
+	return s.interactive(ctx, ids, true)
+}
+
+func (s *Service) interactive(ctx context.Context, ids []string, force bool) []InteractiveResult {
 	out := make([]InteractiveResult, len(ids))
 	flights := make([]*scheduler.Flight, len(ids))
 	for i, id := range ids {
@@ -357,7 +367,7 @@ func (s *Service) Interactive(ctx context.Context, ids []string) []InteractiveRe
 			out[i].Err = err
 			continue
 		}
-		if ok && g.FreshUntil.After(s.now()) {
+		if ok && !force && g.FreshUntil.After(s.now()) {
 			out[i].Fresh = true
 			out[i].Err = s.queueCycle(ctx, row)
 			continue

@@ -316,3 +316,45 @@ func TestAliasByRefFold(t *testing.T) {
 		t.Error("AliasByRefFold matched a different number")
 	}
 }
+
+func TestTouchAndEnsureEntityChangeOnlyTheirOwnColumns(t *testing.T) {
+	ctx := context.Background()
+	s, _ := mustOpen(t, dbPath(t), fastOpts())
+	at := time.Date(2026, 10, 12, 9, 0, 0, 0, time.UTC)
+
+	// Touch creates a kept-alive row with the access time.
+	if err := s.TouchEntity(ctx, "pr", "N1", at); err != nil {
+		t.Fatal(err)
+	}
+	e, ok, _ := s.GetEntity(ctx, "pr", "N1")
+	if !ok || !e.LastAccess.Equal(at) || !e.KeepAlive || e.Version != 0 || e.LastKnownMergeable != "" {
+		t.Errorf("touched new row = %+v", e)
+	}
+
+	// On an existing row it moves last_access and keep_alive only.
+	tomb := at.Add(-time.Hour)
+	if err := s.PutEntity(ctx, EntityRow{Kind: "pr", ID: "N2", Version: 5, LastKnownMergeable: "CONFLICTING", TombstonedAt: tomb}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.TouchEntity(ctx, "pr", "N2", at); err != nil {
+		t.Fatal(err)
+	}
+	e, _, _ = s.GetEntity(ctx, "pr", "N2")
+	if e.Version != 5 || e.LastKnownMergeable != "CONFLICTING" || !e.TombstonedAt.Equal(tomb) || !e.LastAccess.Equal(at) || !e.KeepAlive {
+		t.Errorf("touched existing row = %+v, want only last_access and keep_alive changed", e)
+	}
+
+	// Ensure creates an empty row once and never overwrites.
+	if err := s.EnsureEntity(ctx, "pr", "N3"); err != nil {
+		t.Fatal(err)
+	}
+	if e, ok, _ := s.GetEntity(ctx, "pr", "N3"); !ok || e.KeepAlive || !e.LastAccess.IsZero() {
+		t.Errorf("ensured row = %+v ok=%v", e, ok)
+	}
+	if err := s.EnsureEntity(ctx, "pr", "N2"); err != nil {
+		t.Fatal(err)
+	}
+	if e, _, _ := s.GetEntity(ctx, "pr", "N2"); e.Version != 5 || e.LastKnownMergeable != "CONFLICTING" || !e.KeepAlive {
+		t.Errorf("EnsureEntity changed an existing row: %+v", e)
+	}
+}

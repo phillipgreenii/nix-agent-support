@@ -1,0 +1,61 @@
+{
+  "data": {
+    "rateLimit": {
+      "cost": 1,
+      "remaining": 4900,
+      "resetAt": "2026-10-12T10:00:00Z"
+    },
+    "search": {
+      "pageInfo": { "hasNextPage": false, "endCursor": "" },
+      "nodes": [
+        {
+          "id": "PR_a",
+          "number": 3,
+          "title": "Add the widget",
+          "url": "https://github.example/acme-org/widget/pull/3",
+          "state": "OPEN",
+          "body": "body text",
+          "isDraft": false,
+          "updatedAt": "2026-10-12T08:00:00Z",
+          "reviewDecision": "REVIEW_REQUIRED",
+          "mergeable": "MERGEABLE",
+          "author": { "login": "phillipgreenii" },
+          "repository": { "nameWithOwner": "Acme-Org/Widget" },
+          "labels": {
+            "totalCount": 2,
+            "nodes": [{ "name": "zeta" }, { "name": "alpha" }]
+          },
+          "comments": { "totalCount": 4 },
+          "reviews": { "totalCount": 1 },
+          "reviewThreads": { "totalCount": 2 },
+          "headRefOid": "head-1",
+          "commits": {
+            "nodes": [
+              { "commit": { "statusCheckRollup": { "state": "SUCCESS" } } }
+            ]
+          }
+        },
+        {
+          "id": "PR_b",
+          "number": 7,
+          "title": "Fix the gadget",
+          "url": "https://github.example/acme-org/gadget/pull/7",
+          "state": "OPEN",
+          "body": "",
+          "isDraft": true,
+          "updatedAt": "2026-10-11T08:00:00Z",
+          "reviewDecision": "",
+          "mergeable": "UNKNOWN",
+          "author": null,
+          "repository": { "nameWithOwner": "acme-org/gadget" },
+          "labels": { "totalCount": 0, "nodes": [] },
+          "comments": { "totalCount": 0 },
+          "reviews": { "totalCount": 0 },
+          "reviewThreads": { "totalCount": 0 },
+          "headRefOid": "head-2",
+          "commits": { "nodes": [{ "commit": { "statusCheckRollup": null } }] }
+        }
+      ]
+    }
+  }
+}

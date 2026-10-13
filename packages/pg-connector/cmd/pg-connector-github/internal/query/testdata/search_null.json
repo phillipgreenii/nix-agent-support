@@ -1,0 +1,4 @@
+{
+  "data": { "search": null },
+  "errors": [{ "type": "SOMETHING", "message": "search is unavailable" }]
+}

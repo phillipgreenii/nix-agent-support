@@ -1,0 +1,20 @@
+{
+  "data": {
+    "rateLimit": {
+      "cost": 1,
+      "remaining": 4900,
+      "resetAt": "2026-10-12T10:00:00Z"
+    },
+    "search": {
+      "issueCount": 1500,
+      "pageInfo": { "hasNextPage": false, "endCursor": "" },
+      "nodes": [
+        {
+          "id": "PR_a",
+          "number": 3,
+          "repository": { "nameWithOwner": "Acme-Org/Widget" }
+        }
+      ]
+    }
+  }
+}

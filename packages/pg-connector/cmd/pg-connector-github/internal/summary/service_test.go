@@ -318,6 +318,27 @@ func TestInteractiveOfAFreshSummaryCostsNothing(t *testing.T) {
 	}
 }
 
+func TestInteractiveFreshFetchesEvenWhenTheSummaryIsInsideFreshUntil(t *testing.T) {
+	r := newRig(t, rigOpts{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go r.sched.Run(ctx)
+	r.putEntity(t, "e", time.Time{})
+	r.putGroup(t, "e", GroupName, t0, t0.Add(time.Minute))
+
+	if got := r.svc.Interactive(ctx, []string{"e"}); !got[0].Fresh || len(r.fetch.callList()) != 0 {
+		t.Fatalf("control: Interactive of a fresh summary fetched (%+v, %d calls)", got[0], len(r.fetch.callList()))
+	}
+	got := r.svc.InteractiveFresh(ctx, []string{"e"})
+	if got[0].Err != nil || !got[0].Fresh {
+		t.Fatalf("result = %+v", got[0])
+	}
+	calls := r.fetch.callList()
+	if len(calls) != 1 || len(calls[0].ids) != 1 || calls[0].ids[0] != "e" || calls[0].class != governor.ClassInteractive {
+		t.Errorf("calls = %+v, want one interactive fetch of e", calls)
+	}
+}
+
 func TestInteractiveFailureAndRefusalAreReported(t *testing.T) {
 	r := newRig(t, rigOpts{})
 	ctx := context.Background()

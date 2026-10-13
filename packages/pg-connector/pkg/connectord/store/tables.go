@@ -228,6 +228,36 @@ ON CONFLICT (kind, id) DO UPDATE SET
 	return nil
 }
 
+// TouchEntity records an access to (kind, id): last_access = at and keep_alive
+// = true, creating the row when there is none. It changes no other column, in
+// one statement, so a concurrent writer of another column (the summary's
+// last_known_mergeable) is never overwritten by a stale copy of the row, which
+// a read-modify-write PutEntity can do.
+func (s *Store) TouchEntity(ctx context.Context, kind, id string, at time.Time) error {
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO entity (kind, id, version, last_access, keep_alive, last_known_mergeable, tombstoned_at)
+VALUES (?, ?, 0, ?, 1, '', NULL)
+ON CONFLICT (kind, id) DO UPDATE SET last_access = excluded.last_access, keep_alive = 1`,
+		kind, id, msOrNull(at))
+	if err != nil {
+		return fmt.Errorf("store: touch entity %s/%s: %w", kind, id, err)
+	}
+	return nil
+}
+
+// EnsureEntity creates an empty row for (kind, id) when there is none and
+// leaves an existing row exactly as it is.
+func (s *Store) EnsureEntity(ctx context.Context, kind, id string) error {
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO entity (kind, id, version, last_access, keep_alive, last_known_mergeable, tombstoned_at)
+VALUES (?, ?, 0, NULL, 0, '', NULL)
+ON CONFLICT (kind, id) DO NOTHING`, kind, id)
+	if err != nil {
+		return fmt.Errorf("store: ensure entity %s/%s: %w", kind, id, err)
+	}
+	return nil
+}
+
 const entityCols = `kind, id, version, last_access, keep_alive, last_known_mergeable, tombstoned_at`
 
 func scanEntity(sc interface{ Scan(...any) error }) (EntityRow, error) {
