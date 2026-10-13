@@ -529,7 +529,7 @@ groups:
                     type: gt
                     params: [0]
 
-      - uid: pg-desk-focus-divergence-removed-claimable
+      - uid: pg-desk-focus-divergence-rm-claimable
         title: pg-desk focus - a removed item's bead is still claimable
         condition: C
         for: 1h

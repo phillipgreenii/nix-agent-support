@@ -98,7 +98,7 @@ var focusRules = []focusRule{
 		},
 	},
 	{
-		uid:       "pg-desk-focus-divergence-removed-claimable",
+		uid:       "pg-desk-focus-divergence-rm-claimable",
 		expr:      `max(pg_desk_focus_divergence{kind="removed_bead_open_unclaimed"})`,
 		forText:   "1h",
 		forDur:    time.Hour,
@@ -206,7 +206,7 @@ func (r focusRule) hot() []focusSample {
 		return []focusSample{{map[string]string{"reason": "unminted"}, 1801}}
 	case "pg-desk-focus-divergence-selected-held":
 		return []focusSample{{map[string]string{"kind": "selected_bead_held"}, 1}}
-	case "pg-desk-focus-divergence-removed-claimable":
+	case "pg-desk-focus-divergence-rm-claimable":
 		return []focusSample{{map[string]string{"kind": "removed_bead_open_unclaimed"}, 1}}
 	case "pg-desk-focus-annotation-divergence":
 		return []focusSample{{map[string]string{"kind": "annotation_without_row"}, 1}}
@@ -232,7 +232,7 @@ func (r focusRule) cold() []focusSample {
 		}
 	case "pg-desk-focus-divergence-selected-held":
 		return []focusSample{{map[string]string{"kind": "selected_bead_held"}, 0}, {map[string]string{"kind": "stale_period"}, 3}}
-	case "pg-desk-focus-divergence-removed-claimable":
+	case "pg-desk-focus-divergence-rm-claimable":
 		// removed_bead_claimed is a different, legitimate kind.
 		return []focusSample{{map[string]string{"kind": "removed_bead_open_unclaimed"}, 0}, {map[string]string{"kind": "removed_bead_claimed"}, 2}}
 	case "pg-desk-focus-annotation-divergence":
