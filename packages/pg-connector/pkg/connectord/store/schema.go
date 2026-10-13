@@ -7,13 +7,14 @@ import (
 
 // SchemaVersion is the newest schema version this binary knows. A store
 // above it is refused (ErrSchemaNewer); a store below it is migrated up.
-const SchemaVersion = 1
+const SchemaVersion = 2
 
 // builtinMigrations is the ladder; len(builtinMigrations) == SchemaVersion
 // (asserted by a test). A migration, once shipped, MUST NOT change: add a
 // new step and a fixture store for the version it produces under testdata/.
 var builtinMigrations = []Migration{
 	{Version: 1, Name: "query, alias, entity, entity_group, budget", Apply: migrateV1},
+	{Version: 2, Name: "job", Apply: migrateV2},
 }
 
 // BuiltinMigrations returns a copy of the built-in ladder. A caller that wants
@@ -27,8 +28,9 @@ func BuiltinMigrations() []Migration {
 // Times are INTEGER Unix milliseconds (NULL = unset). Booleans are INTEGER
 // 0/1. A group's `content` is an opaque BLOB owned by the group's Strategy.
 //
-// The tables pending_change, change_log, consumer and job are NOT part of
-// version 1; they arrive by later migrations.
+// Version 1 holds the five tables below. The job table arrives with version 2
+// (schemaV2); pending_change, change_log and consumer arrive by later
+// migrations.
 const schemaV1 = `
 CREATE TABLE query (
     key             TEXT    NOT NULL PRIMARY KEY,
@@ -92,6 +94,31 @@ func migrateV1(tx *sql.Tx, report func(string)) error {
 	report("creating the version 1 tables")
 	if _, err := tx.Exec(schemaV1); err != nil {
 		return fmt.Errorf("create version 1 schema: %w", err)
+	}
+	return nil
+}
+
+// schemaV2 adds the job table: the CI jobs of one run attempt, cached by
+// (run_id, attempt). A completed attempt's jobs never change, so a row is
+// written once and read on every later refresh of the run's group. run_id is
+// TEXT because a CI run id is a decimal string on the wire; jobs is a JSON list
+// of {id, name, status, conclusion, url} (see JobResult); fetched_at is Unix
+// milliseconds, indexed so pruning old rows does not scan the table.
+const schemaV2 = `
+CREATE TABLE job (
+    run_id     TEXT    NOT NULL,
+    attempt    INTEGER NOT NULL,
+    jobs       TEXT    NOT NULL DEFAULT '[]',
+    fetched_at INTEGER NOT NULL,
+    PRIMARY KEY (run_id, attempt)
+);
+CREATE INDEX job_fetched_at ON job (fetched_at);
+`
+
+func migrateV2(tx *sql.Tx, report func(string)) error {
+	report("creating the job table")
+	if _, err := tx.Exec(schemaV2); err != nil {
+		return fmt.Errorf("create version 2 schema: %w", err)
 	}
 	return nil
 }

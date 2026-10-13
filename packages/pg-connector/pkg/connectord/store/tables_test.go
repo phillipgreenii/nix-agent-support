@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -16,13 +18,21 @@ import (
 //
 //	PG_CONNECTOR_STORE_UPDATE_FIXTURES=1 go test ./pkg/connectord/store -run TestGenerateFixture
 //
-// and commit the result. A shipped fixture MUST NOT be regenerated: a new
-// schema version adds a new vN.sqlite3 instead.
+// and commit the result. The generator writes the fixture of the CURRENT
+// SchemaVersion and refuses to overwrite one that exists: a shipped fixture
+// MUST NOT be regenerated, a new schema version adds a new vN.sqlite3 instead.
+// A migration that adds a table adds that table's sample row to the seed below.
 const updateFixturesEnv = "PG_CONNECTOR_STORE_UPDATE_FIXTURES"
 
 func TestGenerateFixture(t *testing.T) {
 	if os.Getenv(updateFixturesEnv) == "" {
-		t.Skip("set " + updateFixturesEnv + "=1 to regenerate the current version's fixture")
+		t.Skip("set " + updateFixturesEnv + "=1 to generate the current version's fixture")
+	}
+	target := filepath.Join("testdata", fmt.Sprintf("v%d.sqlite3", SchemaVersion))
+	if _, err := os.Stat(target); err == nil {
+		t.Fatalf("%s exists: a shipped fixture MUST NOT be regenerated (a new schema version adds a new vN.sqlite3)", target)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		t.Fatal(err)
 	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "gen.db")
@@ -37,6 +47,10 @@ func TestGenerateFixture(t *testing.T) {
 		   1760003600000, '', 2, 'head-sha', 'base-sha')`,
 		`INSERT INTO budget (bucket, at, remaining, reset_at, spent, purpose)
 		 VALUES ('graphql', 1760000000000, 4900, 1760003600000, 100, 'background')`,
+		// The job table (version 2); fixtureJobs below is what GetJobs must read
+		// this row as.
+		`INSERT INTO job (run_id, attempt, jobs, fetched_at)
+		 VALUES ('1001', 2, '[{"id":"2001","name":"build","status":"completed","conclusion":"success","url":"https://example.invalid/org/repo/actions/runs/1001/job/2001"},{"id":"2002","name":"test","status":"completed","conclusion":"failure"}]', 1760000000000)`,
 	} {
 		if _, err := s.DB().Exec(q); err != nil {
 			t.Fatal(err)
@@ -55,13 +69,50 @@ func TestGenerateFixture(t *testing.T) {
 	if err := os.MkdirAll("testdata", 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join("testdata", "v1.sqlite3"), b, 0o644); err != nil {
+	if err := os.WriteFile(target, b, 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
 
-// assertFixtureData checks the sample rows of the version 1 fixture through
-// the typed accessors.
+// jobTableVersion is the schema version that added the job table.
+const jobTableVersion = 2
+
+// fixtureJobs is the job row the generator seeds into every fixture from
+// version jobTableVersion on.
+func fixtureJobs() JobRow {
+	return JobRow{
+		RunID: "1001", Attempt: 2,
+		Jobs: []JobResult{
+			{
+				ID: "2001", Name: "build", Status: "completed", Conclusion: "success",
+				URL: "https://example.invalid/org/repo/actions/runs/1001/job/2001",
+			},
+			{ID: "2002", Name: "test", Status: "completed", Conclusion: "failure"},
+		},
+		FetchedAt: time.UnixMilli(1760000000000).UTC(),
+	}
+}
+
+// assertFixtureJobs checks the job table of a store opened from the fixture of
+// schema version fixtureVersion: from version jobTableVersion on, the fixture's
+// sample row; before that, the empty table the migration created.
+func assertFixtureJobs(t *testing.T, ctx context.Context, s *Store, fixtureVersion int) {
+	t.Helper()
+	want := fixtureJobs()
+	got, ok, err := s.GetJobs(ctx, want.RunID, want.Attempt)
+	switch {
+	case err != nil:
+		t.Errorf("GetJobs: %v", err)
+	case fixtureVersion < jobTableVersion && ok:
+		t.Errorf("a version %d fixture has no job rows, but the migrated store returned %+v", fixtureVersion, got)
+	case fixtureVersion >= jobTableVersion && (!ok || !sameJobRow(got, want)):
+		t.Errorf("job row = %+v ok=%v, want %+v", got, ok, want)
+	}
+}
+
+// assertFixtureData checks the sample rows of the version 1 tables through the
+// typed accessors. Every fixture carries them (a later fixture seeds the same
+// rows, then its own).
 func assertFixtureData(t *testing.T, ctx context.Context, s *Store) {
 	t.Helper()
 	q, ok, err := s.GetQuery(ctx, "open-prs:org/repo")

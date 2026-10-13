@@ -28,6 +28,10 @@ func dbPath(t *testing.T) string {
 	return filepath.Join(t.TempDir(), "sub", "store.db")
 }
 
+// currentTables is the table set of the current schema version, sorted as
+// tableNames returns it. A migration that adds a table changes this list.
+var currentTables = []string{"alias", "budget", "entity", "entity_group", "job", "query"}
+
 func mustOpen(t *testing.T, path string, opts Options) (*Store, Result) {
 	t.Helper()
 	s, res, err := Open(path, opts)
@@ -117,24 +121,34 @@ func TestValidateLadderRejectsGapsAndNilApply(t *testing.T) {
 	}
 }
 
-func TestOpenEmptyCreatesVersion1Schema(t *testing.T) {
+// TestOpenEmptyCreatesCurrentSchema describes schema version 2: the five version
+// 1 tables plus job. A migration that bumps the version updates this test, its
+// table list and its column lists with it.
+func TestOpenEmptyCreatesCurrentSchema(t *testing.T) {
+	const wantVersion = 2
+	if SchemaVersion != wantVersion {
+		t.Fatalf("SchemaVersion = %d, this test describes version %d", SchemaVersion, wantVersion)
+	}
 	path := dbPath(t)
 	s, res := mustOpen(t, path, fastOpts())
 
-	if res.Outcome != OutcomeMigrated || res.FromVersion != 0 || res.ToVersion != SchemaVersion {
-		t.Fatalf("result = %+v, want migrated 0 -> %d", res, SchemaVersion)
+	if res.Outcome != OutcomeMigrated || res.FromVersion != 0 || res.ToVersion != wantVersion {
+		t.Fatalf("result = %+v, want migrated 0 -> %d", res, wantVersion)
 	}
-	if s.Version() != SchemaVersion || s.Path() != path {
+	if s.Version() != wantVersion || s.Path() != path {
 		t.Errorf("Version/Path = %d %q", s.Version(), s.Path())
 	}
-
-	want := []string{"alias", "budget", "entity", "entity_group", "query"}
-	if got := tableNames(t, s); !slices.Equal(got, want) {
-		t.Errorf("tables = %v, want exactly %v", got, want)
+	var userVersion int
+	if err := s.DB().QueryRow(`PRAGMA user_version`).Scan(&userVersion); err != nil || userVersion != wantVersion {
+		t.Errorf("user_version = %d err=%v, want %d", userVersion, err, wantVersion)
 	}
-	for _, absent := range []string{"pending_change", "change_log", "consumer", "job"} {
+
+	if got := tableNames(t, s); !slices.Equal(got, currentTables) {
+		t.Errorf("tables = %v, want exactly %v", got, currentTables)
+	}
+	for _, absent := range []string{"pending_change", "change_log", "consumer"} {
 		if slices.Contains(tableNames(t, s), absent) {
-			t.Errorf("table %s must not exist in schema version 1", absent)
+			t.Errorf("table %s must not exist in schema version 2", absent)
 		}
 	}
 
@@ -150,6 +164,7 @@ func TestOpenEmptyCreatesVersion1Schema(t *testing.T) {
 			"max_age_at", "last_error", "generation", "fetched_for_head", "fetched_for_base",
 		},
 		"budget": {"bucket", "at", "remaining", "reset_at", "spent", "purpose"},
+		"job":    {"run_id", "attempt", "jobs", "fetched_at"},
 	}
 	for table, cols := range wantCols {
 		got := columnNames(t, s, table)
@@ -256,13 +271,14 @@ func TestOpenFromEachFixture(t *testing.T) {
 				t.Fatalf("result = %+v, want %v from %d to %d", res, want, v, SchemaVersion)
 			}
 			assertFixtureData(t, ctx, s)
+			assertFixtureJobs(t, ctx, s, v)
 		})
 	}
 }
 
 // TestUpMigrationFromFixtureKeepsData climbs from the version 1 fixture
-// through a longer test ladder and checks the old data survived and the
-// new step ran exactly once.
+// through the shipped ladder plus one test-only scratch step and checks the old
+// data survived, the shipped job step ran, and the scratch step ran exactly once.
 func TestUpMigrationFromFixtureKeepsData(t *testing.T) {
 	fx, ok := fixtures(t)[1]
 	if !ok {
@@ -271,9 +287,12 @@ func TestUpMigrationFromFixtureKeepsData(t *testing.T) {
 	path := dbPath(t)
 	copyFile(t, fx, path)
 
+	// The scratch step is defined here and never shipped: it sits one past the
+	// shipped ladder (version 3 while the ladder ends at the job step, 2).
+	scratch := SchemaVersion + 1
 	ran := 0
 	ladder := append(slices.Clone(builtinMigrations), Migration{
-		Version: 2, Name: "add scratch table",
+		Version: scratch, Name: "add scratch table",
 		Apply: func(tx *sql.Tx, report func(string)) error {
 			ran++
 			_, err := tx.Exec(`CREATE TABLE scratch (x INTEGER)`)
@@ -283,16 +302,19 @@ func TestUpMigrationFromFixtureKeepsData(t *testing.T) {
 	opts := fastOpts()
 	opts.Migrations = ladder
 	s, res := mustOpen(t, path, opts)
-	if res.Outcome != OutcomeMigrated || res.FromVersion != 1 || res.ToVersion != 2 || ran != 1 {
-		t.Fatalf("result = %+v ran=%d, want migrated 1 -> 2 with one step", res, ran)
+	if res.Outcome != OutcomeMigrated || res.FromVersion != 1 || res.ToVersion != scratch || ran != 1 {
+		t.Fatalf("result = %+v ran=%d, want migrated 1 -> %d with one scratch step", res, ran, scratch)
 	}
 	assertFixtureData(t, context.Background(), s)
+	if !slices.Contains(tableNames(t, s), "job") {
+		t.Error("the shipped job step did not run on the way up")
+	}
 	if !slices.Contains(tableNames(t, s), "scratch") {
-		t.Error("step 2 did not create its table")
+		t.Errorf("step %d did not create its table", scratch)
 	}
 	var v int
-	if err := s.DB().QueryRow(`PRAGMA user_version`).Scan(&v); err != nil || v != 2 {
-		t.Errorf("user_version = %d err=%v, want 2", v, err)
+	if err := s.DB().QueryRow(`PRAGMA user_version`).Scan(&v); err != nil || v != scratch {
+		t.Errorf("user_version = %d err=%v, want %d", v, err, scratch)
 	}
 
 	// Re-run: nothing more to apply.
@@ -306,64 +328,70 @@ func TestUpMigrationFromFixtureKeepsData(t *testing.T) {
 	}
 }
 
+// A store one version past the binary's (the next step a later migration adds)
+// is refused exactly like one far past it: ErrSchemaNewer, the file untouched.
 func TestNewerSchemaRefusedAndFileUntouched(t *testing.T) {
-	path := dbPath(t)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	raw, err := sql.Open("sqlite", "file:"+path+"?_pragma=journal_mode(WAL)")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, q := range []string{
-		`CREATE TABLE future (x TEXT)`,
-		`INSERT INTO future VALUES ('from the newer binary')`,
-		fmt.Sprintf(`PRAGMA user_version = %d`, SchemaVersion+5),
-	} {
-		if _, err := raw.Exec(q); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := raw.Close(); err != nil {
-		t.Fatal(err)
-	}
+	for _, found := range []int{SchemaVersion + 1, SchemaVersion + 5} {
+		t.Run(fmt.Sprintf("found_%d", found), func(t *testing.T) {
+			path := dbPath(t)
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			raw, err := sql.Open("sqlite", "file:"+path+"?_pragma=journal_mode(WAL)")
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, q := range []string{
+				`CREATE TABLE future (x TEXT)`,
+				`INSERT INTO future VALUES ('from the newer binary')`,
+				fmt.Sprintf(`PRAGMA user_version = %d`, found),
+			} {
+				if _, err := raw.Exec(q); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := raw.Close(); err != nil {
+				t.Fatal(err)
+			}
 
-	before, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	statBefore, _ := os.Stat(path)
-	namesBefore := dirNames(t, filepath.Dir(path))
+			before, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			statBefore, _ := os.Stat(path)
+			namesBefore := dirNames(t, filepath.Dir(path))
 
-	s, res, err := Open(path, fastOpts())
-	if s != nil {
-		_ = s.Close()
-		t.Fatal("Open returned a store for a newer schema")
-	}
-	if !errors.Is(err, ErrSchemaNewer) {
-		t.Fatalf("err = %v, want ErrSchemaNewer", err)
-	}
-	var typed *SchemaNewerError
-	if !errors.As(err, &typed) || typed.Found != SchemaVersion+5 || typed.Supported != SchemaVersion || typed.Path != path {
-		t.Errorf("typed error = %+v", typed)
-	}
-	if res.Outcome != OutcomeRefusedNewer || res.MovedAsideTo != "" {
-		t.Errorf("result = %+v, want refused_newer and no move", res)
-	}
+			s, res, err := Open(path, fastOpts())
+			if s != nil {
+				_ = s.Close()
+				t.Fatal("Open returned a store for a newer schema")
+			}
+			if !errors.Is(err, ErrSchemaNewer) {
+				t.Fatalf("err = %v, want ErrSchemaNewer", err)
+			}
+			var typed *SchemaNewerError
+			if !errors.As(err, &typed) || typed.Found != found || typed.Supported != SchemaVersion || typed.Path != path {
+				t.Errorf("typed error = %+v", typed)
+			}
+			if res.Outcome != OutcomeRefusedNewer || res.MovedAsideTo != "" {
+				t.Errorf("result = %+v, want refused_newer and no move", res)
+			}
 
-	after, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(before, after) {
-		t.Error("the refused store's bytes changed")
-	}
-	statAfter, _ := os.Stat(path)
-	if !statAfter.ModTime().Equal(statBefore.ModTime()) {
-		t.Error("the refused store's mtime changed")
-	}
-	if got := dirNames(t, filepath.Dir(path)); !slices.Equal(got, namesBefore) {
-		t.Errorf("directory changed: %v -> %v (a move-aside or sidecar appeared)", namesBefore, got)
+			after, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(before, after) {
+				t.Error("the refused store's bytes changed")
+			}
+			statAfter, _ := os.Stat(path)
+			if !statAfter.ModTime().Equal(statBefore.ModTime()) {
+				t.Error("the refused store's mtime changed")
+			}
+			if got := dirNames(t, filepath.Dir(path)); !slices.Equal(got, namesBefore) {
+				t.Errorf("directory changed: %v -> %v (a move-aside or sidecar appeared)", namesBefore, got)
+			}
+		})
 	}
 }
 
@@ -396,8 +424,8 @@ func TestCorruptGarbageIsMovedAside(t *testing.T) {
 	if res.ToVersion != SchemaVersion || s.Version() != SchemaVersion {
 		t.Errorf("fresh store at version %d", s.Version())
 	}
-	if got := tableNames(t, s); len(got) != 5 {
-		t.Errorf("fresh store tables = %v", got)
+	if got := tableNames(t, s); !slices.Equal(got, currentTables) {
+		t.Errorf("fresh store tables = %v, want %v", got, currentTables)
 	}
 }
 
@@ -453,8 +481,11 @@ func TestFailedMigrationMovesStoreAside(t *testing.T) {
 	}
 
 	failures := 0
+	// The failing step sits one past the shipped ladder; the store written
+	// above is at the shipped top, SchemaVersion.
+	failing := SchemaVersion + 1
 	ladder := append(slices.Clone(builtinMigrations), Migration{
-		Version: 2, Name: "fails halfway once",
+		Version: failing, Name: "fails halfway once",
 		Apply: func(tx *sql.Tx, report func(string)) error {
 			if _, err := tx.Exec(`CREATE TABLE half_done (x INTEGER)`); err != nil {
 				return err
@@ -476,8 +507,8 @@ func TestFailedMigrationMovesStoreAside(t *testing.T) {
 	if res.Cause == nil || !strings.Contains(res.Cause.Error(), "boom midway") || !errors.Is(res.Cause, errMigrationFailed) {
 		t.Errorf("cause = %v", res.Cause)
 	}
-	if res.FromVersion != 0 || res.ToVersion != 2 || s.Version() != 2 {
-		t.Errorf("fresh store: result %+v version %d", res, s.Version())
+	if res.FromVersion != 0 || res.ToVersion != failing || s.Version() != failing {
+		t.Errorf("fresh store: result %+v version %d, want %d", res, s.Version(), failing)
 	}
 	// The fresh store has no old rows ...
 	if _, ok, _ := s.AliasByNodeID(context.Background(), "N1"); ok {
@@ -494,8 +525,8 @@ func TestFailedMigrationMovesStoreAside(t *testing.T) {
 	if err := old.QueryRow(`SELECT count(*) FROM alias`).Scan(&n); err != nil || n != 1 {
 		t.Errorf("moved-aside alias rows = %d err=%v", n, err)
 	}
-	if err := old.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil || v != 1 {
-		t.Errorf("moved-aside user_version = %d err=%v, want 1", v, err)
+	if err := old.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil || v != SchemaVersion {
+		t.Errorf("moved-aside user_version = %d err=%v, want %d", v, err, SchemaVersion)
 	}
 	var half int
 	if err := old.QueryRow(`SELECT count(*) FROM sqlite_master WHERE name = 'half_done'`).Scan(&half); err != nil || half != 0 {
