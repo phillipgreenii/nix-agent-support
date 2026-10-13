@@ -572,12 +572,27 @@ Config (its opaque `backends.pg-connector-activity-git` block):
 | `repo_search_paths` | list of directories scanned exactly one level deep: an entry whose `.git` is a directory (a clone) or a file (a submodule or worktree checkout sitting directly under the search path) is a repo; nothing deeper is visited (activity-collector's proven rule) |
 | `include_merges`    | bool, default false                                                                                                                                                                                                                                            |
 
-Behavior: per repo, `git -C <repo> log --since=<since> --until=<before> --author=<email>...
+Behavior: per repo, `git -C <repo> log --branches --since=<since minus margin> --author=<email>...
 --no-merges --pretty=format:<record>` with an environment reduced to `PATH` and `HOME` so an
 inherited `GIT_DIR` from a hook parent cannot redirect the read (activity-collector's `gitEnv`,
-which cites `pg2-67h4y`). The range bounds the walk, so the unbounded-first-fetch problem revision 3
-flagged does not arise: a backfill of a long range is the caller's explicit choice and is still
-bounded by that range.
+which cites `pg2-67h4y`). The range is decided on AUTHOR date, and git's `--since`/`--until` filter
+on COMMITTER date, so the implementation deviates from a literal `--since=<since> --until=<before>`
+(`pg2-vfmp7.9.2`, `pg2-cqqcq`):
+
+- There is no `--until`: a commit amended or rebased after `before` keeps its in-range author date
+  and is still found.
+- `--since` is a committer-date floor, `since` minus a 14-day margin (`commitDateMargin`), not
+  `since` itself. It bounds the walk to the window plus the margin; unbounded, the walk of a large
+  monorepo clone cost about 10 s of CPU and starved the 60 s `list_activity` budget. git stops
+  walking a path at the first commit older than the floor, so the margin keeps two clock-skew
+  shapes: a committer date earlier than its in-range author date, and a commit reachable only
+  through a descendant with an older committer date (out-of-order dates). Skew beyond the margin is
+  the accepted loss.
+- The backend then keeps exactly the commits whose parsed author date is in `[since, before)` and
+  whose author email exactly matches an `author_emails` entry (`--author` is a substring match).
+- An omitted `since` passes no floor and walks the whole history, the caller's explicit choice. A
+  backfill of a long range is bounded by its own `since` minus the margin, so the
+  unbounded-first-fetch problem revision 3 flagged does not arise.
 
 Item shape: `kind: "commit"`, `entity_type: "commit"`, `entity_id: "<repo_ident>@<sha>"`,
 `occurred_at` = author date, `summary` = subject line, labels `repo:<repo_ident>` and

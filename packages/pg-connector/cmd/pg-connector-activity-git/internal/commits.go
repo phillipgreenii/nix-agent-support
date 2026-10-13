@@ -3,13 +3,23 @@
 // activity item per commit.
 //
 // Range semantics. The acceptance range is [since, before) on AUTHOR date.
-// git log's own --since/--until filter on COMMITTER date, so this collector
-// passes neither: a commit amended or rebased after before, or one whose
-// committer date predates since, must still be found. The final inclusion
-// decision is made here on the parsed author date. Likewise git's --author is
-// a substring match, so the exact author email is re-checked against the
-// configured addresses. With since omitted the walk covers the whole history,
-// which is the caller's explicit choice.
+// git log's own --since/--until filter on COMMITTER date, so the final
+// inclusion decision is made here on the parsed author date, and git is only
+// asked to bound the walk. It gets no --until, ever: a commit amended or
+// rebased after before keeps its in-range author date and must still be
+// found. It gets --since only as a committer-date FLOOR, since minus
+// commitDateMargin, never since itself: the floor makes the walk cost
+// O(window) instead of O(history) (unbounded, a large monorepo clone's walk
+// took about 10s of CPU and starved the 60s list_activity budget). git stops
+// walking a path at the first commit whose committer date is older than the
+// floor, so the margin is what keeps two clock-skew shapes in the result: a
+// commit whose committer date predates its in-range author date, and a commit
+// reachable only through a descendant whose committer date is older than its
+// own (out-of-order committer dates). Skew beyond the margin is the accepted
+// loss. With since omitted no floor is passed and the walk covers the whole
+// history, which is the caller's explicit choice. Likewise git's --author is a
+// substring match, so the exact author email is re-checked against the
+// configured addresses.
 package internal
 
 import (
@@ -32,7 +42,33 @@ const (
 	// author email, parent shas, subject, body (the body is last: it is
 	// free text spanning lines).
 	logFormat = "--pretty=format:%x1e%H%x1f%aI%x1f%ae%x1f%P%x1f%s%x1f%b"
+
+	// commitDateMargin widens the committer-date floor passed to git log as
+	// --since: the floor is since minus this margin (see the range semantics
+	// in this file's header). It covers the out-of-order committer date the
+	// author-date fixture pins (11.6 days before since) with room to spare.
+	commitDateMargin = 14 * 24 * time.Hour
+	// gitDateLayout is git's strict ISO 8601 (the %cI layout, numeric
+	// offset), which git's date parser reads exactly.
+	gitDateLayout = "2006-01-02T15:04:05-07:00"
 )
+
+// sinceFloorArg returns the --since argument that bounds the walk for since:
+// the committer-date floor since minus commitDateMargin, in UTC. ok is false
+// when no floor may be passed: a zero since (open-ended, the caller's
+// explicit choice), or a floor outside the years git's date parser reads
+// exactly (1970-2099), where git would silently guess a different date
+// instead of failing.
+func sinceFloorArg(since time.Time) (arg string, ok bool) {
+	if since.IsZero() {
+		return "", false
+	}
+	floor := since.Add(-commitDateMargin).UTC()
+	if y := floor.Year(); y < 1970 || y > 2099 {
+		return "", false
+	}
+	return "--since=" + floor.Format(gitDateLayout), true
+}
 
 // logSkip records one skipped configured path: exactly one line, naming the
 // path and why, on this backend's own stderr (never fatal, no wire carrier).
@@ -96,6 +132,9 @@ func (b *Backend) collectRepoCommits(ctx context.Context, repo string, includeMe
 	args := []string{"log", "--branches", "--fixed-strings", "--regexp-ignore-case"}
 	if !includeMerges {
 		args = append(args, "--no-merges")
+	}
+	if floor, ok := sinceFloorArg(since); ok {
+		args = append(args, floor)
 	}
 	for _, e := range emails {
 		args = append(args, "--author="+e)

@@ -107,14 +107,64 @@ func TestCollect_ExactEmailAndRangeDecidedHere(t *testing.T) {
 	}
 
 	joined := strings.Join(logArgs, " ")
-	for _, bad := range []string{"--since", "--until", "--all", "--after", "--before"} {
+	for _, bad := range []string{"--until", "--before", "--after", "--all"} {
 		if strings.Contains(joined, bad) {
-			t.Errorf("log args %q must not contain %s (git filters those on committer date)", joined, bad)
+			t.Errorf("log args %q must not contain %s (git filters those on committer date; the range end is decided on author date)", joined, bad)
 		}
 	}
-	for _, want := range []string{"--branches", "--no-merges", "--author=me@example.test"} {
+	// The walk is bounded by ONE committer-date floor: since (2026-09-01Z)
+	// minus the 14-day margin, never since itself.
+	if n := strings.Count(joined, "--since"); n != 1 {
+		t.Errorf("log args %q carry %d --since flags, want exactly one", joined, n)
+	}
+	for _, want := range []string{"--branches", "--no-merges", "--author=me@example.test", "--since=2026-08-18T00:00:00+00:00"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("log args %q missing %s", joined, want)
+		}
+	}
+}
+
+func TestSinceFloorArg(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		since time.Time
+		want  string // empty: no floor, the walk stays unbounded
+	}{
+		{"zero since is open-ended", time.Time{}, ""},
+		{"since minus 14 days, rendered in UTC", time.Date(2026, 9, 1, 2, 0, 0, 0, time.FixedZone("plus2", 2*3600)), "--since=2026-08-18T00:00:00+00:00"},
+		{"seconds are kept", time.Date(2026, 10, 10, 20, 34, 33, 0, time.UTC), "--since=2026-09-26T20:34:33+00:00"},
+		{"a floor before 1970 is not passed", time.Date(1970, 1, 10, 0, 0, 0, 0, time.UTC), ""},
+		{"the earliest floor git reads exactly", time.Date(1970, 1, 15, 0, 0, 0, 0, time.UTC), "--since=1970-01-01T00:00:00+00:00"},
+		{"a floor after 2099 is not passed", time.Date(2100, 1, 20, 0, 0, 0, 0, time.UTC), ""},
+	} {
+		got, ok := sinceFloorArg(tc.since)
+		if got != tc.want || ok != (tc.want != "") {
+			t.Errorf("%s: sinceFloorArg(%v) = %q, %v; want %q", tc.name, tc.since, got, ok, tc.want)
+		}
+	}
+}
+
+func TestCollect_ZeroSincePassesNoFloor(t *testing.T) {
+	dir := t.TempDir()
+	var logArgs []string
+	r := &fakeRunner{run: func(_ string, args ...string) (string, error) {
+		if args[0] == "log" {
+			logArgs = args
+		}
+		return "", nil
+	}}
+	b := New(Options{Stderr: &bytes.Buffer{}, Runner: r})
+	if _, _, err := b.collectCommits(context.Background(),
+		Config{RepoPaths: []string{dir}}, []string{"me@example.test"}, time.Time{}, rangeBefore); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(logArgs, " ")
+	if !strings.Contains(joined, "--branches") {
+		t.Fatalf("the commit log was not read: %q", joined)
+	}
+	for _, bad := range []string{"--since", "--until"} {
+		if strings.Contains(joined, bad) {
+			t.Errorf("log args %q must not contain %s when since is zero (open-ended)", joined, bad)
 		}
 	}
 }

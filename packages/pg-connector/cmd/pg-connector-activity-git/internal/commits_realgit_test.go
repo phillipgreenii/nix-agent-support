@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -139,6 +140,9 @@ func (f *gitFixture) commit(dir, email, authorDate, committerDate, subject strin
 //	c-author-before-since   me, author before since, committer inside range     out (in with since omitted)
 //	d-committer-after       me, author in range, committer after before          in
 //	e-committer-before      me, author in range, committer before since         in
+//	                        (11.6 days before since, inside the --since margin,
+//	                        and older than its parent's: everything above it is
+//	                        reachable only through it)
 //	f-author-after-before   me, author after before                              out
 //	side-commit             me, on a merged side branch                          in
 //	m1-main-commit          me, on main alongside the side branch                in
@@ -244,6 +248,52 @@ func TestListActivity_RealRepo_SinceOmittedAndIncludeMerges(t *testing.T) {
 	want = []string{"a-in-range", "d-committer-after", "e-committer-before", "m1-main-commit", "merge-side", "side-commit", "t-topic-only"}
 	if got := subjects(res.Items); !reflect.DeepEqual(got, want) {
 		t.Errorf("include_merges: subjects = %v, want %v", got, want)
+	}
+}
+
+// rawGitDate renders t in git's internal "@<unix> <offset>" date format. The
+// margin fixture pins commit dates in it, not in the ISO layout the --since
+// floor uses, so a misparse of the floor's layout cannot cancel out.
+func rawGitDate(t time.Time) string {
+	return fmt.Sprintf("@%d +0000", t.Unix())
+}
+
+// TestListActivity_RealRepo_SinceFloorMargin pins the committer-date floor
+// (--since = since minus commitDateMargin) on a real repository: one linear
+// history on main, oldest first. Every commit but the head is authored inside
+// [since, before), so only git's walk (committer dates) can drop one:
+//
+//	beyond-margin   committer one second before the floor                 out (the accepted loss)
+//	at-floor        committer exactly at the floor                        in (the floor is inclusive)
+//	behind-skew     committer in range; reachable only through the next   in (not pruned)
+//	in-margin-skew  committer inside the margin: before since, and older  in
+//	                than its parent's (out-of-order committer dates)
+//	late            committer after before (an amended or rebased commit) in (no --until)
+//	head-at-before  author date at before (exclusive)                     out
+func TestListActivity_RealRepo_SinceFloorMargin(t *testing.T) {
+	f := newGitFixture(t)
+	repo := f.newRepo()
+	floor := rangeSince.Add(-commitDateMargin)
+	in := func(h int) string { return rawGitDate(rangeSince.Add(time.Duration(h) * time.Hour)) }
+	f.commit(repo, meEmail, in(1), rawGitDate(floor.Add(-time.Second)), "beyond-margin")
+	f.commit(repo, meEmail, in(2), rawGitDate(floor), "at-floor")
+	f.commit(repo, meEmail, in(3), in(5), "behind-skew")
+	f.commit(repo, meEmail, in(4), rawGitDate(rangeSince.Add(-commitDateMargin/2)), "in-margin-skew")
+	f.commit(repo, meEmail, in(6), rawGitDate(rangeBefore.Add(10*24*time.Hour)), "late")
+	f.commit(repo, meEmail, rawGitDate(rangeBefore), rawGitDate(rangeBefore), "head-at-before")
+	cfg := Config{AuthorEmails: []string{meEmail}, RepoPaths: []string{repo}}
+
+	res := listWith(t, realBackend(&bytes.Buffer{}), cfg, rangeSince, rangeBefore)
+	want := []string{"at-floor", "behind-skew", "in-margin-skew", "late"}
+	if got := subjects(res.Items); !reflect.DeepEqual(got, want) {
+		t.Errorf("with since: subjects = %v, want %v", got, want)
+	}
+
+	// A zero since passes no floor: the beyond-margin commit is read again.
+	res = listWith(t, realBackend(&bytes.Buffer{}), cfg, time.Time{}, rangeBefore)
+	want = []string{"at-floor", "behind-skew", "beyond-margin", "in-margin-skew", "late"}
+	if got := subjects(res.Items); !reflect.DeepEqual(got, want) {
+		t.Errorf("since omitted: subjects = %v, want %v", got, want)
 	}
 }
 
