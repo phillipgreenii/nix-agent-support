@@ -1,0 +1,124 @@
+{
+  "health": "healthy",
+  "source": "daemon",
+  "version": "26.10.12.00001+abcd1234",
+  "build_id": "26.10.12.00001+abcd1234",
+  "started_at": "2026-10-12T05:59:35Z",
+  "uptime_seconds": 10825,
+  "state_dir": "/state",
+  "socket": "/state/sock",
+  "store": {
+    "path": "/state/store.sqlite",
+    "present": false,
+    "size_bytes": 0,
+    "age_seconds": 0
+  },
+  "logs": {
+    "events": "/state/events.jsonl",
+    "daemon": "/state/daemon.log.jsonl",
+    "client": "/state/client.log.jsonl"
+  },
+  "supervisor": {
+    "kind": "launchd",
+    "label": "com.example.pg-connector-github-daemon",
+    "state": "running"
+  },
+  "instances": [
+    {
+      "name": "pg-connector-pr-github",
+      "instance": "pr"
+    },
+    {
+      "name": "pg-connector-ci-github-actions",
+      "instance": "ci"
+    }
+  ],
+  "budget": [
+    {
+      "bucket": "graphql",
+      "cap": 4000,
+      "background_cap": 2800,
+      "reserve": 200,
+      "window_seconds": 3600,
+      "spent": 310,
+      "background_spent": 120,
+      "in_flight": 5,
+      "remaining": 3600,
+      "limit": 5000,
+      "reset_at": "2026-10-12T09:40:00Z",
+      "paused": false
+    },
+    {
+      "bucket": "rest_core",
+      "cap": 3000,
+      "background_cap": 2100,
+      "reserve": 100,
+      "window_seconds": 3600,
+      "spent": 40,
+      "background_spent": 10,
+      "in_flight": 0,
+      "paused": false
+    },
+    {
+      "bucket": "rest_search",
+      "cap": 25,
+      "background_cap": 15,
+      "reserve": 5,
+      "window_seconds": 60,
+      "spent": 2,
+      "background_spent": 1,
+      "in_flight": 0,
+      "paused": false
+    }
+  ],
+  "queue": {
+    "running": 1,
+    "classes": [
+      {
+        "class": 1,
+        "name": "interactive",
+        "depth": 0,
+        "oldest_overdue_seconds": 0
+      },
+      {
+        "class": 2,
+        "name": "invalidated",
+        "depth": 0,
+        "oldest_overdue_seconds": 0
+      },
+      {
+        "class": 3,
+        "name": "query",
+        "depth": 4,
+        "oldest_overdue_seconds": 90
+      },
+      {
+        "class": 4,
+        "name": "keepalive",
+        "depth": 12,
+        "oldest_overdue_seconds": 0
+      },
+      {
+        "class": 5,
+        "name": "fill",
+        "depth": 30,
+        "oldest_overdue_seconds": 0
+      }
+    ]
+  },
+  "queries": [
+    {
+      "name": "mine",
+      "last_success_at": "2026-10-12T08:58:00Z"
+    },
+    {
+      "name": "team",
+      "last_success_at": "2026-10-12T08:55:00Z"
+    }
+  ],
+  "auth": {
+    "state": "OK",
+    "viewer": "phillipgreenii",
+    "unauthenticated": false
+  }
+}

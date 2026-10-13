@@ -4,6 +4,8 @@
 //	pg-connector-github [--config <path>] serve   the daemon
 //	pg-connector-github [--config <path>] pr      client mode for the pr instance
 //	pg-connector-github [--config <path>] ci      client mode for the ci instance
+//	pg-connector-github [--config <path>] status [--json]
+//	                                              the health report; exit 0 healthy, 2 degraded, 3 down
 //
 // --config is a global flag (accepted before or after the mode word) naming the
 // rendered config file (see internal/config); when absent,
@@ -29,6 +31,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/client"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/ops/status"
 )
 
 // Version is stamped at build time (mkGoApp's versionPath, `main.Version`,
@@ -59,6 +62,8 @@ const (
 	modeServe = "serve"
 	modePR    = "pr"
 	modeCI    = "ci"
+	// modeStatus is the operator-facing health report (internal/ops/status).
+	modeStatus = "status"
 )
 
 func main() {
@@ -110,12 +115,14 @@ func parseArgs(args []string) (options, error) {
 }
 
 const usage = `usage: pg-connector-github [--config <path>] <serve|pr|ci>
+       pg-connector-github [--config <path>] status [--json]
        pg-connector-github --version
 
 modes:
   serve   run the daemon
   pr      client mode, pr instance
   ci      client mode, ci instance
+  status  the health report (exit 0 healthy, 2 degraded, 3 down); --json for the document
 
 --config <path> names the rendered config file; PG_CONNECTOR_GITHUB_CONFIG is
 used only when the flag is absent.
@@ -138,7 +145,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 		return exitOK
 	}
 	switch o.mode {
-	case modeServe, modePR, modeCI:
+	case modeServe, modePR, modeCI, modeStatus:
 	case "":
 		fmt.Fprintf(stderr, "pg-connector-github: a mode is required\n\n%s", usage)
 		return exitUsage
@@ -157,18 +164,21 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(s
 
 // runMode dispatches to the selected mode: serve runs the process shell, pr and
 // ci run the client mode of their instance.
-func runMode(mode string, _ []string, cfg *config.Config, stdin io.Reader, stdout, stderr io.Writer) int {
+func runMode(mode string, modeArgs []string, cfg *config.Config, stdin io.Reader, stdout, stderr io.Writer) int {
 	switch mode {
 	case modePR:
 		return runClient(client.PR(), cfg, stdin, stdout)
 	case modeCI:
 		return runClient(client.CI(), cfg, stdin, stdout)
+	case modeStatus:
+		return runStatus(modeArgs, cfg, stdout, stderr)
 	}
 	return runServe(cfg, stderr)
 }
 
 // runClient answers one scriptout request for the instance.
 func runClient(inst client.Instance, cfg *config.Config, stdin io.Reader, stdout io.Writer) int {
+	inst = inst.WithFallback(status.OpName, status.Fallback(status.StaticFromConfig(cfg, Version), nil))
 	o := client.Options{
 		Instance:        inst,
 		SocketPath:      cfg.SocketPath,

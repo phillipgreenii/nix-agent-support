@@ -1,0 +1,35 @@
+{
+  "health": "down",
+  "reasons": ["the daemon is not reachable on socket /state/sock"],
+  "source": "local",
+  "version": "26.10.12.00001+abcd1234",
+  "build_id": "26.10.12.00001+abcd1234",
+  "state_dir": "/state",
+  "socket": "/state/sock",
+  "store": {
+    "path": "/state/store.sqlite",
+    "present": false,
+    "size_bytes": 0,
+    "age_seconds": 0
+  },
+  "logs": {
+    "events": "/state/events.jsonl",
+    "daemon": "/state/daemon.log.jsonl",
+    "client": "/state/client.log.jsonl"
+  },
+  "supervisor": {
+    "kind": "launchd",
+    "label": "com.example.pg-connector-github-daemon",
+    "state": "registered"
+  },
+  "instances": [
+    {
+      "name": "pg-connector-pr-github",
+      "instance": "pr"
+    },
+    {
+      "name": "pg-connector-ci-github-actions",
+      "instance": "ci"
+    }
+  ]
+}

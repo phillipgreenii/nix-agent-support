@@ -35,6 +35,20 @@ type Instance struct {
 	SchemaVersions map[string]int
 }
 
+// WithFallback returns a copy of i whose op has fb as its local fallback (the
+// op is listed when it was not). The fallback needs the loaded config's paths,
+// which the compiled-in table does not have, so the binary registers it here
+// after loading the config.
+func (i Instance) WithFallback(op string, fb Fallback) Instance {
+	ops := make(map[string]Op, len(i.Ops)+1)
+	maps.Copy(ops, i.Ops)
+	o := ops[op]
+	o.Fallback = fb
+	ops[op] = o
+	i.Ops = ops
+	return i
+}
+
 // OpNames returns the instance's listed ops, sorted, capabilities included.
 func (i Instance) OpNames() []string {
 	names := make([]string, 0, len(i.Ops)+1)
