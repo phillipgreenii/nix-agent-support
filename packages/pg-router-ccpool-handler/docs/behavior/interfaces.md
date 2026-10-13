@@ -44,6 +44,9 @@ treatment of its own named boundaries (its `INTF-BRIDGE` — example only, not a
   sessions closable for another reason (turn ended, or `needs_input` with its bead already closed)
   and leaves a working session and its worktree untouched. It lists only the default pool; a
   session in a role's own pool is outside it.
+  Each dispatch launches a fresh session of its own; it waits on an existing session instead only
+  when that session's attempt for the same event is still in flight with its turn under way, and it
+  never adopts a settled session (`INV-CCH-30`).
   When a dispatch reaches a terminal outcome, this module also closes (without purging) the one
   session it launched or absorbed, if it is settled and quiet (`INV-CCH-17`).
   While a dispatch runs, this module writes a supervision lease into the session's metadata
@@ -58,8 +61,8 @@ treatment of its own named boundaries (its `INTF-BRIDGE` — example only, not a
   closes it without purging, removes the worktree and its anchor branch, and only then purges the
   record, so a removal interrupted midway leaves a record the next reconcile of the same pool
   retries (one per dispatch; for the default pool, the shutdown sweep too) rather than a worktree
-  no record leads to. While such a teardown is unfinished, the record is never treated as a
-  duplicate to absorb. This marking is a `ccpool` metadata write, never a `ccpool` label.
+  no record leads to. While such a teardown is unfinished, the record is never absorbed
+  (`INV-CCH-30`). This marking is a `ccpool` metadata write, never a `ccpool` label.
   A role configured to pre-fetch also runs `git` in the per-bead worktree before the session
   launches (`INV-CCH-21`): it resolves or fetches one commit from the configured remote, checks it
   out detached, and writes two files under an ignored directory of the worktree.

@@ -230,6 +230,7 @@ release into `human`.
   interval: a `human` label, a future deferral date or an open blocker marks it as a release.
 - A handed-back bead leaves its settled row non-absorbable, so a same-event re-request does not
   re-adopt it, and the orphan reconcile treats the mode as one that claims its bead (ADR 0083).
+  (Later note, 2026-10-13, ADR 0094: no settled row is absorbed any more, handed back or not.)
 
 The invariant is `INV-CCH-28`, and the journey is `USECASE-CCH-RELEASE-END`.
 

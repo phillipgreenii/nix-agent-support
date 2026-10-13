@@ -13,7 +13,8 @@ Realization gaps; these are the stories Task 5.2 onward realizes.
   a bare configured command), so pg-router itself never needs to know how to drive an agent.
   _(→ `USECASE-CCH-DISPATCH`; `INV-CCH-2`, `INV-CCH-3`, `INV-CCH-4`, `INV-CCH-5`,
   `INV-CCH-9`, `INV-CCH-10`, `INV-CCH-14`, `INV-CCH-15`, `INV-CCH-17`, `INV-CCH-18`, `INV-CCH-19`,
-  `INV-CCH-20`, `INV-CCH-21`, `INV-CCH-22`, `INV-CCH-23`, `INV-CCH-24`, `INV-CCH-25`, `INV-CCH-26`, `INV-CCH-27`, `INV-CCH-28`.)_
+  `INV-CCH-20`, `INV-CCH-21`, `INV-CCH-22`, `INV-CCH-23`, `INV-CCH-24`, `INV-CCH-25`, `INV-CCH-26`, `INV-CCH-27`, `INV-CCH-28`,
+  `INV-CCH-29`, `INV-CCH-30`.)_
 - **`STORY-CCH-QUERY`** <!-- uuid: 661a1b2c-4243-42b3-8fcc-607e8ec7e4af --> — As pg-router's core, I
   want a registered source to query beads for events on my behalf, so pg-router itself never needs
   to know beads' query language. _(→ `USECASE-CCH-QUERY`; `INV-CCH-1`, `INV-CCH-4`, `INV-CCH-5`.)_
@@ -26,11 +27,12 @@ Realization gaps; these are the stories Task 5.2 onward realizes.
 **Level:** user-goal.
 **Preconditions:** this module is registered with a reachable core (`phillipgreenii-nix-agent-support`
 ADR 0036 — this module never starts a core).
-_Requires:_ `INTF-HANDLER`, `INV-CCH-2`, `INV-CCH-3`, `INV-CCH-14`, `INV-CCH-15`, `INV-CCH-17`, `INV-CCH-18`, `INV-CCH-19`, `INV-CCH-20`, `INV-CCH-21`, `INV-CCH-22`, `INV-CCH-23`, `INV-CCH-24`, `INV-CCH-25`, `INV-CCH-26`, `INV-CCH-27`, `INV-CCH-28`.
+_Requires:_ `INTF-HANDLER`, `INV-CCH-2`, `INV-CCH-3`, `INV-CCH-6`, `INV-CCH-14`, `INV-CCH-15`, `INV-CCH-17`, `INV-CCH-18`, `INV-CCH-19`, `INV-CCH-20`, `INV-CCH-21`, `INV-CCH-22`, `INV-CCH-23`, `INV-CCH-24`, `INV-CCH-25`, `INV-CCH-26`, `INV-CCH-27`, `INV-CCH-28`, `INV-CCH-29`, `INV-CCH-30`.
 _Includes:_ `INTF-CCH-CCPOOL` or a configured command, per the role's own backing kind; `USECASE-CCH-RELEASE-END` for a role whose completion is `close-or-release`.
 
 1. The core dispatches one event under one tracking id to a bound role.
-2. This module starts (or continues) a handler session: a ccpool-backed role drives `ccpool`; a
+2. This module starts a fresh handler session of its own (`INV-CCH-30`; extension 2k is the one
+   case that waits on an existing session instead): a ccpool-backed role drives `ccpool`; a
    command-backed role execs its configured argv.
    2d. A ccpool-backed role starts with the handler-wide tool grants plus its own extra grants, if
    it sets any, and no other role gets them (`INV-CCH-25`).
@@ -60,7 +62,7 @@ Extensions:
   (`skipped-bead-not-open`, `skipped-bead-claimed`, `skipped-bead-human`,
   `skipped-bead-not-groomed`, `skipped-bead-deferred`, `skipped-bead-blocked`); a bead that the
   role's own actor already holds `in_progress` is never declined, because it is the live session a
-  restarted daemon is about to absorb. It reads only, and any failure to read launches as
+  restarted daemon is about to absorb (2k). It reads only, and any failure to read launches as
   normal.
 - 2i. A session dies unexplained before its bead completes (`INV-CCH-7`): this module also logs
   the pool's usage-limit reading once (`INV-CCH-26`), as evidence only; the failure is unchanged.
@@ -79,9 +81,9 @@ Extensions:
   holds it, and its worktree removed; a `starting`, `ready` or `working` one past its time budget
   is hard-stopped as a supervised session would be (`INV-CCH-11`), then its worktree is removed;
   an under-budget one, a `needs_input` one, and one with no lease are left alone. The freed pool
-  slot is then available to this very dispatch. If this dispatch is instead a redelivery that
-  absorbs an orphan still within its budget, it takes over the lease and keeps the orphan's
-  original launch time as the start of its budget.
+  slot is then available to this very dispatch. If this dispatch is instead a redelivery of the
+  event an orphan still at work within its budget was launched for, it absorbs the orphan (2k): it
+  takes over the lease and keeps the orphan's original launch time as the start of its budget.
 - 2e. An earlier dispatch's handler died after it created the per-bead worktree but before the
   session existed (or a session was closed by `ccpool` before anyone reclaimed its worktree), so no
   session row leads to the worktree. Before checking capacity this module scans the worktree
@@ -100,7 +102,7 @@ Extensions:
   already gone or git no longer knows it, deletes the husk and prunes), and then purges the
   record. If another live session still uses the worktree (`INV-CCH-15`), the record is purged and
   the worktree is left for that session. A failed retry leaves the record for the next dispatch.
-  Until then the record is neither absorbed as a settled duplicate nor reclaimed as an orphan.
+  Until then the record is never absorbed (`INV-CCH-30`) and never reclaimed as an orphan.
 - 2g. A role with worktree isolation is configured to pre-fetch (`INV-CCH-21`), as a review of a
   pull request is: after the per-bead worktree exists and before the session launches, this module
   makes the item's commit local (fetching it only when it is not), checks the worktree out at it,
@@ -109,6 +111,17 @@ Extensions:
   and neither the time nor a pool slot is spent on it. If any step fails (an origin that needs a
   credential the handler lacks, a commit that cannot be found), the dispatch still proceeds and the
   prompt is told the pre-fetch did not succeed, so it does those steps itself.
+- 2k. The role's pool already holds a session for the same bead and role (`INV-CCH-30`). If that
+  session's attempt for this same event is still in flight with its turn under way (working,
+  paused for a person, or still being launched by a handler that holds its lease), this module
+  absorbs it: it waits on that session as its own, sends it nothing, and keeps its original launch
+  time as the start of its budget. This is the redelivery a daemon restart or a crash window
+  produces. If the attempt in flight is for another event, or its turn has ended while its handler
+  is still settling it, this module declines `busy` with reason `session-in-flight` and launches
+  nothing, so the core re-offers the event once that attempt is over. A launch nobody finished
+  (still `starting` or `ready`, its lease expired) is closed and replaced by this dispatch's own
+  session. Any other session is never reused, whoever closed it: a re-review after a head
+  advance, a re-request after a hand-back and a reopened bead each get a fresh session.
 - 3d. The role's completion is `close-or-release` and its session has ended (`INV-CCH-28`): this
   module settles it as described in `USECASE-CCH-RELEASE-END`, which includes the case of a
   session that ended without ever claiming its bead.
@@ -126,7 +139,7 @@ Extensions:
 **Primary actor:** `ACTOR-CCH-CORE`.
 **Level:** subfunction (the settle step of `USECASE-CCH-DISPATCH`, for a role whose completion is `close-or-release`).
 **Preconditions:** a dispatch has started a session for a bead and is waiting for it.
-_Requires:_ `INV-CCH-28`, `INV-CCH-7`, `INV-CCH-15`, `INV-CCH-17`, `INV-CCH-23`.
+_Requires:_ `INV-CCH-28`, `INV-CCH-7`, `INV-CCH-15`, `INV-CCH-17`, `INV-CCH-23`, `INV-CCH-30`.
 _Includes:_ `INTF-CCH-CCPOOL`, `INTF-CCH-BEADS`.
 
 1. The handler keeps reading the bead while the session runs, and remembers the first time it
@@ -143,7 +156,8 @@ Extensions:
 
 - 4a. The bead is held by an actor other than the role's own (a peer won the claim): the handler
   writes nothing to the bead, counts no strike and reports no verb. The dispatch returns without
-  an error, and the settled session's row is marked incomplete so it is not absorbed again.
+  an error; like every settled session, this one is never absorbed by a later dispatch
+  (`INV-CCH-30`).
 - 4b. The session ended and the bead is still `open`, unassigned, not `human`, not deferred and
   without blocker, and the latch was never set (the worker never claimed it): the handler counts
   a strike through the label `drain-unclaimed-end`. The first strike leaves the bead as it is and

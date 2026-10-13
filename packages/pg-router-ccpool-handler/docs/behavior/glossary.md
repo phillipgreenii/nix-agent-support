@@ -33,6 +33,17 @@ Realization gaps for the build's one remaining residual.
 - **Unclaimed end** — a session that ended, for a `close-or-release` role, without ever claiming
   its bead and without leaving a mark that it gave the bead back; two in a row escalate the bead
   to a human (`INV-CCH-28`).
+- **Fresh session** — a session a dispatch launches for itself, with its own launch time, budget
+  clock and supervision lease; every dispatch runs in one unless it absorbs (`INV-CCH-30`).
+- **In flight** — an earlier session's attempt that is not over: the session is live and a turn
+  is under way or paused for a person, or a handler that holds its lease is still launching or
+  settling it (`INV-CCH-30`).
+- **Settled session** — a session whose attempt is no longer in flight: it is gone, or its turn
+  has ended and no handler holds its lease. It is never absorbed, whoever closed it
+  (`INV-CCH-17`, `INV-CCH-30`).
+- **Absorb** — a dispatch waiting on an earlier session's attempt as its own instead of launching
+  a fresh session; allowed only for the same event's attempt, in flight with its turn under way,
+  and the one exception to a fresh session (`INV-CCH-30`).
 
 ## Source-side vocabulary
 

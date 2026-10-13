@@ -1,8 +1,19 @@
 # A gated dispatcher closes the sessions it settles
 
-**Status**: Accepted (amends 0072); item 4 bounded by an event-id check (2026-10-06, bead `pg2-uprw5`) a pinned-head check (2026-10-07, bead `pg2-afre3`) and an outcome check (2026-10-08, bead `pg2-tc9c3`)
+**Status**: Accepted (amends 0072); item 4 superseded by 0094 (2026-10-13, bead `pg2-yunrp`): a settled row is never absorbed. Item 4 had been bounded by an event-id check (2026-10-06, bead `pg2-uprw5`), a pinned-head check (2026-10-07, bead `pg2-afre3`) and an outcome check (2026-10-08, bead `pg2-tc9c3`)
 **Date**: 2026-10-05
 **Deciders**: Phillip Green II
+
+> **Later note (2026-10-13, ADR 0094, bead `pg2-yunrp`):** Decision item 4 no longer holds. Operator
+> ruling (Phillip, 2026-10-12), verbatim: "in docs, i think we need to update them such that
+> re-using a ccpool session should not be the default, for this very reason. so if there is new
+> review, then there should be a new session. re-using a session should be rare." A dispatch now
+> runs in a fresh session, and a settled row, whoever closed it and whatever its event id, head or
+> outcome, is never absorbed; the only absorbed session is the same event's attempt still in flight
+> with its turn under way (`INV-CCH-30`). Items 1 to 3 (the guarded, best-effort non-purge close)
+> stand, and so does item 4's closing "Closed once" rule (a step that finds a row already closed
+> and gone does not close it again). The rest of item 4 is kept below, marked superseded, as the
+> record of what it replaced.
 
 ## Context
 
@@ -39,7 +50,9 @@ The dispatch-time reconcile does not help: it closes only sessions whose bead is
 3. **A close failure is best effort.** It is logged at WARN and never changes the dispatch
    result; the session is left to `idle_ttl`. A deferred close (subagents active) is logged at
    INFO and likewise left to `idle_ttl`.
-4. **A handler-closed settled row is still a duplicate.** Because the first dispatch now stamps
+4. **SUPERSEDED by ADR 0094 (2026-10-13): a settled row is never absorbed. Historical text
+   follows; only its closing "Closed once" rule still stands.** ~~**A handler-closed settled row
+   is still a duplicate.**~~ Because the first dispatch now stamps
    `handler` on its own settled row, duplicate absorption (`INV-EVT-2`) treats a row with close
    reason `handler` in state `idle` or `errored` as a settled duplicate to absorb, instead of
    launching a second session for an already-settled bead. Rows closed with `idle_ttl`,
@@ -102,7 +115,7 @@ The dispatch-time reconcile does not help: it closes only sessions whose bead is
   matched the redelivery check by name and was absorbed rather than relaunched, for as long as the
   row existed. Item 4 is now bounded by the event id, so only a redelivery of the same event is
   absorbed. An unclosed settled row (a failed or deferred close) is still matched by name alone,
-  as before.
+  as before. Superseded 2026-10-13 by ADR 0094: no settled row is absorbed, closed or unclosed.
 - Orphaned sessions whose handler died (daemon restart, crash) are not covered here; they need a
   supervision step in the reconcile. Later note (2026-10-06): ADR 0083 adds that step, a
   supervision lease the handler keeps fresh and a role-scoped orphan reconcile that acts on an
