@@ -1,0 +1,313 @@
+# promtool unit tests for the pg-router-queue-stalled alert (operator ruling 2026-10-12: "fire if
+# queue > 0 and nothing is being processed"). Run by the flake check test-pg-router-alert-rules,
+# which generates rules.yml next to this file: the Grafana rule's refId A wrapped as
+# `alert: <uid>` with `expr: (<A>) > 0`, the rule's `for: 5m` and labels, plus a recording rule
+# `wrapped:<uid with _>` over the same expression.
+#
+# What this proves that the Go replay (internal/alertrules/queue_stalled_test.go) cannot: the
+# PromQL itself, i.e. the type-to-role label_replace join, the in-flight comparison, the
+# presence guard, the gate exclusion and the label set of the alert, evaluated by the real
+# engine. The Go tests model the same expression and replay a recorded lane through it.
+#
+# Time model: the router is scraped every 30s, so every series has a 30s interval; rules
+# evaluate every minute. The window is 10m and needs 18 scrapes, so a backlog that has been
+# idle since the start of the series first satisfies the condition at 9m (18 scrapes), the
+# alert is Pending from there and fires after `for: 5m`, at 14m: not firing at 12m, firing at
+# 20m. pg_router_listener_in_flight{role} is present on every scrape (0 or 1);
+# pg_router_queue_depth{type} exists only while the type is non-empty and
+# pg_router_gates_active{type} only while a gate is in force.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: an idle lane with a backlog fires after the window plus for, labelled with its type
+    interval: 30s
+    input_series:
+      - series: pg_router_queue_depth{type="drain.pg2",job="pg-router"}
+        values: "3x240"
+      - series: pg_router_listener_in_flight{role="drain-pg2",job="pg-router"}
+        values: "0x240"
+    promql_expr_test:
+      # The helper role label is dropped again, so the alert keeps the labels of the rule it
+      # replaced (and its open bead keeps matching).
+      - expr: wrapped:pg_router_queue_stalled
+        eval_time: 12m
+        exp_samples:
+          - labels: 'wrapped:pg_router_queue_stalled{job="pg-router", type="drain.pg2"}'
+            value: 3
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: pg-router-queue-stalled
+        exp_alerts:
+          - exp_labels:
+              type: drain.pg2
+              job: pg-router
+              severity: warning
+
+  - name: a dispatch in flight is not a stall, however long it runs and however deep the backlog
+    interval: 30s
+    input_series:
+      # The 2026-10-12 shape: depth 12, the role in flight for the whole hour.
+      - series: pg_router_queue_depth{type="drain.pg2",job="pg-router"}
+        values: "12x240"
+      - series: pg_router_listener_in_flight{role="drain-pg2",job="pg-router"}
+        values: "1x240"
+    promql_expr_test:
+      - expr: count(wrapped:pg_router_queue_stalled)
+        eval_time: 60m
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []
+
+  - name: a dispatch in flight for part of the window is enough, a 150s hand-off is not a stall
+    interval: 30s
+    input_series:
+      - series: pg_router_queue_depth{type="drain.pg2",job="pg-router"}
+        values: "12x240"
+      # In flight 20m, idle 150s (5 scrapes), repeated.
+      - series: pg_router_listener_in_flight{role="drain-pg2",job="pg-router"}
+        values: "1x40 0x5 1x40 0x5 1x40 0x5 1x40 0x5 1x40 0x5 1x40"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []
+      - eval_time: 100m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []
+
+  - name: a pace-limited fast role that is never caught in flight is not idle while its dispatches keep settling
+    interval: 30s
+    input_series:
+      - series: pg_router_queue_depth{type="issue.changed",job="pg-router"}
+        values: "15x240"
+      - series: pg_router_listener_in_flight{role="desk-issue",job="pg-router"}
+        values: "0x240"
+      # One 1s dispatch settles a minute for the first hour (the counter advances 1 a minute),
+      # then the counter stops: the consumer has gone silent with a backlog.
+      - series: pg_router_throughput_total{type="issue.changed",role="desk-issue",job="pg-router"}
+        values: "0+0.5x120 60x120"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []
+      - eval_time: 65m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []
+      # The last increase is at 60m; the window is clear of it from 70m and fires 5m later.
+      - eval_time: 72m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []
+      - eval_time: 80m
+        alertname: pg-router-queue-stalled
+        exp_alerts:
+          - exp_labels:
+              type: issue.changed
+              job: pg-router
+              severity: warning
+
+  - name: the join is by the bound role, so a busy neighbour does not excuse an idle lane
+    interval: 30s
+    input_series:
+      # drain.pg2 is idle with a backlog while the drain-zr lane next to it is busy with its own.
+      - series: pg_router_queue_depth{type="drain.pg2",job="pg-router"}
+        values: "3x240"
+      - series: pg_router_queue_depth{type="drain.zr",job="pg-router"}
+        values: "5x240"
+      - series: pg_router_listener_in_flight{role="drain-pg2",job="pg-router"}
+        values: "0x240"
+      - series: pg_router_listener_in_flight{role="drain-zr",job="pg-router"}
+        values: "1x240"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: pg-router-queue-stalled
+        exp_alerts:
+          - exp_labels:
+              type: drain.pg2
+              job: pg-router
+              severity: warning
+
+  - name: desk-pr binds two types, so it covers both of them whether busy or idle
+    interval: 30s
+    input_series:
+      - series: pg_router_queue_depth{type="pr.changed",job="pg-router"}
+        values: "5x240"
+      - series: pg_router_queue_depth{type="pr.reconcile",job="pg-router"}
+        values: "30x240"
+      # Busy for the first 30m, idle afterwards.
+      - series: pg_router_listener_in_flight{role="desk-pr",job="pg-router"}
+        values: "1x60 0x180"
+    alert_rule_test:
+      # Busy with one type (or the other): neither waiting type is stalled.
+      - eval_time: 28m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []
+      # Idle since 30m: both types page, each under its own type label.
+      - eval_time: 50m
+        alertname: pg-router-queue-stalled
+        exp_alerts:
+          - exp_labels:
+              type: pr.changed
+              job: pg-router
+              severity: warning
+          - exp_labels:
+              type: pr.reconcile
+              job: pg-router
+              severity: warning
+
+  - name: every role of the daemon config maps to the type it binds (idle with a backlog)
+    interval: 30s
+    input_series:
+      - series: pg_router_queue_depth{type="review.ready"}
+        values: "2x240"
+      - series: pg_router_listener_in_flight{role="review"}
+        values: "0x240"
+      - series: pg_router_queue_depth{type="issue.changed"}
+        values: "2x240"
+      - series: pg_router_listener_in_flight{role="desk-issue"}
+        values: "0x240"
+      - series: pg_router_queue_depth{type="desk.heartbeat"}
+        values: "2x240"
+      - series: pg_router_listener_in_flight{role="desk-heartbeat"}
+        values: "0x240"
+      - series: pg_router_queue_depth{type="escalated.pg2"}
+        values: "2x240"
+      - series: pg_router_listener_in_flight{role="pg2-escalation-triager"}
+        values: "0x240"
+      - series: pg_router_queue_depth{type="split-review.pg2"}
+        values: "2x240"
+      - series: pg_router_listener_in_flight{role="pg2-split-triager"}
+        values: "0x240"
+      - series: pg_router_queue_depth{type="disk.check"}
+        values: "2x240"
+      - series: pg_router_listener_in_flight{role="disk-watchdog"}
+        values: "0x240"
+    promql_expr_test:
+      - expr: count(wrapped:pg_router_queue_stalled)
+        eval_time: 20m
+        exp_samples:
+          - labels: "{}"
+            value: 6
+
+  - name: a type the table does not know is not covered, and neither is a role that is not bound
+    interval: 30s
+    input_series:
+      - series: pg_router_queue_depth{type="custom.thing",job="pg-router"}
+        values: "5x240"
+      - series: pg_router_listener_in_flight{role="custom",job="pg-router"}
+        values: "0x240"
+      # Anchoring: a type that merely extends a bound one maps to nothing.
+      - series: pg_router_queue_depth{type="drain.pg2.extra",job="pg-router"}
+        values: "5x240"
+      - series: pg_router_listener_in_flight{role="drain-pg2",job="pg-router"}
+        values: "0x240"
+    promql_expr_test:
+      - expr: count(wrapped:pg_router_queue_stalled)
+        eval_time: 20m
+        exp_samples: []
+
+  - name: any gate in force suppresses every type, and the rule fires normally once the gate is gone
+    interval: 30s
+    input_series:
+      - series: pg_router_queue_depth{type="drain.pg2",job="pg-router"}
+        values: "3x240"
+      - series: pg_router_listener_in_flight{role="drain-pg2",job="pg-router"}
+        values: "0x240"
+      # SYSTEM_PAUSE for the first 30m (60 scrapes), then cleared (no series).
+      - series: pg_router_gates_active{type="SYSTEM_PAUSE",job="pg-router"}
+        values: "1x60 _x180"
+    alert_rule_test:
+      # Idle with a backlog the whole time, but the gate is in the window until 40m.
+      - eval_time: 25m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []
+      - eval_time: 38m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []
+      # The condition holds again from 40m and fires after `for` (45m).
+      - eval_time: 43m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []
+      - eval_time: 50m
+        alertname: pg-router-queue-stalled
+        exp_alerts:
+          - exp_labels:
+              type: drain.pg2
+              job: pg-router
+              severity: warning
+
+  - name: a sleep leaves a gap, and the presence guard needs 10 minutes of fresh scrapes after the wake
+    interval: 30s
+    input_series:
+      # 10m of idle backlog, a 3h gap (the host asleep: no scrapes), then the same idle backlog.
+      - series: pg_router_queue_depth{type="drain.pg2",job="pg-router"}
+        values: "3x20 _x360 3x120"
+      - series: pg_router_listener_in_flight{role="drain-pg2",job="pg-router"}
+        values: "0x20 _x360 0x120"
+    alert_rule_test:
+      # Before the sleep the alert never got through `for` (the series ends after 10m).
+      - eval_time: 14m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []
+      # Just after the wake (190m): too few fresh scrapes for the condition to hold.
+      - eval_time: 195m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []
+      # Condition from 199m, Pending until `for` has elapsed at 204m.
+      - eval_time: 202m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []
+      - eval_time: 210m
+        alertname: pg-router-queue-stalled
+        exp_alerts:
+          - exp_labels:
+              type: drain.pg2
+              job: pg-router
+              severity: warning
+
+  - name: a type that blips into the queue for a scrape and drains again is not a backlog
+    interval: 30s
+    input_series:
+      # One scrape of depth 12 every 10 minutes: the gauge has no series in between.
+      - series: pg_router_queue_depth{type="drain.pg2",job="pg-router"}
+        values: "12 _x19 12 _x19 12 _x19 12 _x19 12 _x19 12 _x19 12 _x19 12 _x19"
+      - series: pg_router_listener_in_flight{role="drain-pg2",job="pg-router"}
+        values: "0x160"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []
+
+  - name: a lane that was idle and then resumes stops being a stall, and the alert resolves after keepFiringFor
+    interval: 30s
+    input_series:
+      - series: pg_router_queue_depth{type="drain.pg2",job="pg-router"}
+        values: "3x240"
+      # Idle for the first 30m, then a dispatch in flight.
+      - series: pg_router_listener_in_flight{role="drain-pg2",job="pg-router"}
+        values: "0x60 1x180"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: pg-router-queue-stalled
+        exp_alerts:
+          - exp_labels:
+              type: drain.pg2
+              job: pg-router
+              severity: warning
+      # The in-flight scrape at 30m is in the window until 40m, so the condition is false from
+      # 30m on; the alert stays resolved (promtool has no keepFiringFor).
+      - eval_time: 45m
+        alertname: pg-router-queue-stalled
+        exp_alerts: []

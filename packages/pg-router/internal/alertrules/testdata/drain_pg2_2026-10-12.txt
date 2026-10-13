@@ -1,0 +1,163 @@
+# Queue-lane history for the drain.pg2 type and its drain-pg2 role, 2026-10-12 08:32Z .. 2026-10-13 03:40Z, for the
+# pg-router-queue-stalled and pg-router-queue-slow-growth replays (see ../queue_stalled_test.go and
+# ../queue_slow_growth_test.go).
+#
+# REAL RECORDING, reconstructed from the pg-router durable queue log (~/.local/state/pg-router/queue.jsonl); no
+# synthesis. The series Prometheus held for this lane are all functions of these records: pg_router_queue_depth{type}
+# is the count of retained events, pg_router_listener_in_flight{role} is 1 while an offer is outstanding, and
+# pg_router_throughput_total{type} advances once per accepted dispatch. Only timestamps are kept (UTC, to the second):
+# event ids, bead titles and payloads are dropped, and no event is identified.
+#
+# Record kinds, one per line (the S records first, then every other record in time order):
+#   E <t>          an event was admitted (enqueue record; for a compacted event, the archive record's enqueue
+#                  instant). Arrivals: what the new pg_router_enqueued_total counts (its history before the
+#                  counter existed is exactly these records).
+#   X <t>          an event left the queue (evict record, or the archive record's evictedAt): retired after being
+#                  accepted, or retired unaccepted by the queue's own sweep (reason "retired"). Depth falls by one.
+#   D <start> <t>  one dispatch: the offer went in flight at <start> (accept record startedAt) and settled at <t>
+#                  (accept record at), which is also when pg_router_throughput_total advanced. The router holds one
+#                  offer per role (INV-CONC-1), so these never overlap. A handler error still settles as an accept.
+#   S <from> <to>  the host was asleep: no router activity and therefore no Prometheus scrape in [from, to). These
+#                  are the three >= 100 minute gaps in the router event log (~/.local/state/pg-router/events.jsonl)
+#                  of that day, the same ones the sleep-aware metrics bead records (03:30Z-07:21Z, 08:28Z-12:20Z,
+#                  13:36Z-16:30Z; the first is before this file's first record, so only the other two appear).
+#                  Short dark wakes inside a sleep are not modelled (fewer samples, never more).
+#
+# Facts a replay can be checked against (all read from the same records):
+#   * the 63.7 minute healthy dispatch is D 17:47:55 18:53:11 (router duration 63.7 min), with depth >= 10 throughout;
+#     the completion-based rule it paged under (depth >= 10 for 30m, no accept for 30m, for 30m) started firing at
+#     18:48:00Z, which the replay of the old expression reproduces.
+#   * 12:00Z-19:40Z: 11 arrivals and 5 accepts (ratio 2.2, +0.78 per hour), depth 5 -> 11.
+#   * the dispatch D 12:20:03 17:10:05 spans the 13:36Z-16:30Z sleep.
+#   * the bursts of X and E records at 00:18Z-00:24Z on 10-13 are the queue retiring queued events unaccepted and the
+#     source re-emitting them (churn): they are real arrivals as far as the queue counts them.
+S 2026-10-12T08:28:57Z 2026-10-12T12:20:07Z
+S 2026-10-12T13:36:32Z 2026-10-12T16:30:53Z
+E 2026-10-12T08:32:00Z
+E 2026-10-12T08:32:00Z
+E 2026-10-12T08:32:00Z
+E 2026-10-12T08:32:00Z
+E 2026-10-12T08:32:00Z
+D 2026-10-12T12:20:03Z 2026-10-12T17:10:05Z
+E 2026-10-12T12:35:27Z
+E 2026-10-12T15:54:45Z
+E 2026-10-12T15:54:45Z
+E 2026-10-12T16:32:18Z
+E 2026-10-12T17:07:04Z
+X 2026-10-12T17:10:51Z
+D 2026-10-12T17:10:51Z 2026-10-12T17:47:43Z
+E 2026-10-12T17:13:32Z
+E 2026-10-12T17:42:54Z
+E 2026-10-12T17:45:32Z
+X 2026-10-12T17:47:55Z
+D 2026-10-12T17:47:55Z 2026-10-12T18:53:11Z
+E 2026-10-12T17:49:39Z
+E 2026-10-12T18:35:14Z
+E 2026-10-12T18:51:10Z
+X 2026-10-12T18:53:17Z
+D 2026-10-12T18:53:17Z 2026-10-12T19:03:45Z
+X 2026-10-12T19:03:45Z
+D 2026-10-12T19:03:45Z 2026-10-12T19:14:25Z
+X 2026-10-12T19:14:30Z
+D 2026-10-12T19:14:30Z 2026-10-12T19:59:51Z
+E 2026-10-12T19:55:26Z
+E 2026-10-12T19:55:26Z
+X 2026-10-12T20:00:07Z
+D 2026-10-12T20:00:07Z 2026-10-12T20:09:13Z
+X 2026-10-12T20:09:35Z
+D 2026-10-12T20:09:35Z 2026-10-12T20:30:51Z
+X 2026-10-12T20:30:56Z
+D 2026-10-12T20:30:56Z 2026-10-12T21:13:16Z
+E 2026-10-12T21:08:45Z
+X 2026-10-12T21:13:20Z
+D 2026-10-12T21:13:20Z 2026-10-12T21:50:56Z
+E 2026-10-12T21:39:46Z
+E 2026-10-12T21:41:56Z
+X 2026-10-12T21:52:00Z
+X 2026-10-12T21:53:26Z
+D 2026-10-12T21:53:26Z 2026-10-12T23:03:11Z
+E 2026-10-12T22:07:43Z
+E 2026-10-12T22:12:01Z
+E 2026-10-12T22:24:15Z
+E 2026-10-12T22:24:15Z
+E 2026-10-12T22:38:59Z
+E 2026-10-12T22:38:59Z
+E 2026-10-12T22:38:59Z
+E 2026-10-12T22:53:39Z
+E 2026-10-12T22:53:39Z
+E 2026-10-12T23:00:31Z
+E 2026-10-12T23:01:35Z
+X 2026-10-12T23:03:27Z
+X 2026-10-12T23:03:43Z
+D 2026-10-12T23:33:06Z 2026-10-13T00:18:03Z
+E 2026-10-12T23:35:33Z
+E 2026-10-12T23:52:38Z
+E 2026-10-13T00:09:41Z
+E 2026-10-13T00:09:41Z
+E 2026-10-13T00:09:41Z
+E 2026-10-13T00:09:41Z
+E 2026-10-13T00:11:12Z
+E 2026-10-13T00:11:12Z
+E 2026-10-13T00:12:49Z
+X 2026-10-13T00:18:13Z
+X 2026-10-13T00:18:18Z
+X 2026-10-13T00:18:31Z
+X 2026-10-13T00:18:43Z
+E 2026-10-13T00:18:47Z
+X 2026-10-13T00:18:47Z
+X 2026-10-13T00:19:01Z
+X 2026-10-13T00:19:06Z
+X 2026-10-13T00:19:22Z
+X 2026-10-13T00:19:26Z
+X 2026-10-13T00:19:41Z
+X 2026-10-13T00:19:54Z
+E 2026-10-13T00:19:56Z
+E 2026-10-13T00:19:56Z
+E 2026-10-13T00:19:56Z
+E 2026-10-13T00:19:56Z
+E 2026-10-13T00:19:56Z
+X 2026-10-13T00:19:56Z
+E 2026-10-13T00:19:56Z
+E 2026-10-13T00:19:56Z
+X 2026-10-13T00:20:41Z
+X 2026-10-13T00:20:50Z
+X 2026-10-13T00:21:03Z
+X 2026-10-13T00:21:07Z
+X 2026-10-13T00:21:20Z
+X 2026-10-13T00:21:26Z
+X 2026-10-13T00:21:39Z
+X 2026-10-13T00:21:50Z
+X 2026-10-13T00:21:55Z
+X 2026-10-13T00:22:47Z
+E 2026-10-13T00:22:48Z
+E 2026-10-13T00:22:48Z
+E 2026-10-13T00:22:48Z
+E 2026-10-13T00:22:48Z
+E 2026-10-13T00:22:48Z
+E 2026-10-13T00:22:48Z
+X 2026-10-13T00:22:53Z
+X 2026-10-13T00:22:56Z
+X 2026-10-13T00:23:10Z
+X 2026-10-13T00:23:19Z
+X 2026-10-13T00:23:30Z
+X 2026-10-13T00:23:36Z
+X 2026-10-13T00:23:51Z
+E 2026-10-13T00:23:56Z
+E 2026-10-13T00:23:56Z
+E 2026-10-13T00:23:56Z
+E 2026-10-13T00:23:56Z
+X 2026-10-13T00:23:56Z
+E 2026-10-13T00:23:56Z
+E 2026-10-13T00:23:56Z
+E 2026-10-13T00:23:56Z
+E 2026-10-13T00:23:56Z
+X 2026-10-13T00:24:06Z
+X 2026-10-13T00:24:20Z
+X 2026-10-13T00:31:13Z
+E 2026-10-13T00:48:58Z
+E 2026-10-13T00:48:58Z
+E 2026-10-13T00:48:58Z
+X 2026-10-13T01:30:57Z
+E 2026-10-13T01:46:55Z
+E 2026-10-13T01:46:55Z
+E 2026-10-13T03:37:10Z

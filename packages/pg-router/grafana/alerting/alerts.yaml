@@ -184,11 +184,12 @@ groups:
       # measured pre-sweep depths) and TestReconcileRecordedEpisodeDoesNotAlertOrPend
       # (the pg2-0594o 4-minute samples, which alert under c2e2fb21) in
       # internal/alertrules/queue_depth_growing_test.go. Known gap (pg2-nw41e R2
-      # SHOULD), now addressed by the SEPARATE rule pg-router-queue-stalled
-      # below (pg2-o6z19) rather than by loosening this one: a standing flat
-      # backlog (pr.changed 43 -> 56 over 25m) rises < 25/h, and a stalled
-      # bounded type needs a different signal (dispatch progress), not a looser
-      # slope guard. This rule's expression is UNCHANGED by pg2-o6z19.
+      # SHOULD), addressed by SEPARATE rules rather than by loosening this one: a
+      # standing flat backlog (pr.changed 43 -> 56 over 25m) rises < 25/h, a
+      # backlog that nothing is processing is pg-router-queue-stalled (below) and
+      # a backlog that grows slowly under a working consumer is
+      # pg-router-queue-slow-growth (below, a rate over 6h). This rule's
+      # expression is UNCHANGED by both.
       - uid: pg-router-queue-depth-growing
         title: pg-router queue depth is growing (by type)
         condition: C
@@ -229,113 +230,193 @@ groups:
                     type: gt
                     params: [0]
 
-      # Stalled consumer (per type), pg2-o6z19 / pg2-n1pm4 / pg2-p93c0: a type
-      # that sat at depth >= 10 for 30 minutes while pg_router_throughput_total
-      # (counter, `type` label; Emitter.OnAccept increments it once per accepted
-      # delivery, internal/metrics/metrics.go) did not advance for that type.
-      # This measures dispatch PROGRESS, not depth trend, so it separates the
-      # absorbed bursts (12:49Z and 13:49Z on 2026-09-30: cleared in 30-40m,
-      # dispatching throughout) from the 14:19Z-17:29Z pr.changed stall (depth
-      # ~55, no counted dispatches) and from the 20:43Z ~16-deep nearly-flat
-      # episode (a dispatch lands within every 30m). The healthy pr.reconcile
-      # sawtooth, the 2026-10-01 issue.changed surge and review.ready under the
-      # max_sessions=1 backpressure (pg2-mr0sl; depth 1-4, below the floor) never
-      # satisfy it. Replay of the recorded series: testdata/*.csv and
-      # internal/alertrules/queue_depth_growing_test.go.
+      # Queue stalled (per type): a backlog with nothing processing it. Operator
+      # ruling 2026-10-12 (Phillip), which replaced the completion-based form this
+      # rule had (pg2-o6z19 / pg2-n1pm4 / pg2-p93c0): "fire if queue > 0 and nothing
+      # is being processed". A type has a backlog when pg_router_queue_depth{type}
+      # stayed above 0 on every scrape of a 10 minute window. Nothing is processing
+      # it when pg_router_listener_in_flight{role} (1 while that role has a dispatch
+      # outstanding, never more than one per role, INV-CONC-1) read 0 on every scrape
+      # of the same window for the role bound to the type. Progress is read from the
+      # lane's own state, not from how rarely a dispatch completes: a dispatch is in
+      # flight for as long as it runs, so one dispatch of an hour or two (the drain
+      # lanes' budget allows 2h) never trips this rule, however few events it
+      # completes. The rule this replaced judged a lane only by completions and paged
+      # on any healthy dispatch of about an hour while depth was 10 or more (the
+      # drain.pg2 dispatch of 2026-10-12 17:47:55Z to 18:53:11Z, 63.7 minutes, paged at
+      # 18:48Z; 4 of the last 12 drain-pg2 dispatches ran that long).
       #
-      # Decision (pg2-o6z19), NEW rule instead of retuning
-      # pg-router-queue-depth-growing: the growth rule still has a job (a
-      # consumer that IS dispatching but slower than arrivals: TestSustainedGrowth*),
-      # its fingerprint labels (rule uid, alertname, severity, type) stay
-      # untouched, and a retune would have forced a different expression under the
-      # same uid and discarded the growth coverage and its replay tests. The two
-      # rules' fingerprints differ by rule uid, so each pages and escalates
-      # separately. A stalled consumer with a growing queue MAY fire both.
+      # Short dispatches. A role whose dispatches last a second or two (desk-issue
+      # runs 0.4 to 7 s) is in flight on about 3% of 30s scrapes even while it drains
+      # a backlog, so "in flight on no scrape of the window" alone would read a busy,
+      # pace-limited consumer as idle. The in-flight test is therefore paired with
+      # `unless on(type) (increase(pg_router_throughput_total[10m]) > 0)`: a dispatch
+      # that settled inside the window is processing too. Nothing is processing a
+      # type only when no dispatch is outstanding AND none completed for 10 minutes.
       #
-      # Differences from the expression pg2-n1pm4 suggested:
-      #   - count_over_time(...[30m]) >= 54 is KEPT (that bead proposed dropping
-      #     it). The gauge observes only types present in the queue (pg2-xepg6), so
-      #     a type that drained has NO series and min_over_time sees only the few
-      #     remaining samples: one stray sample of 12 would satisfy >= 10. The
-      #     presence guard is what makes "held >= 10 for 30m" true.
-      #   - `unless on(type) (... > 0)` matches on `type` only (the left side
-      #     keeps instance/job/otel_scope_name, so the alert's fingerprint labels
-      #     are the same shape as the growth rule's). A type with NO throughput
-      #     series at all (OTel counters are created lazily on first increment) has
-      #     nothing to match, so it is treated as stalled, which is right.
+      # Window and hold. 10m window with at least 18 of its 20 scrapes (30s scrape
+      # interval, the 10% slack of the other rules), `for: 5m`: a lane pages after
+      # about 15 minutes idle. A healthy lane starts its next dispatch 0 to 150
+      # seconds after one settles (ten of the eleven hand-offs of 2026-10-12), so 10m
+      # is four times the worst of those; the eleventh, 23:03:11Z to 23:33:06Z, was 30
+      # minutes with about 20 events queued and the host awake, which is exactly what
+      # this rule pages. keepFiringFor 10m holds the alert across a lane that restarts
+      # briefly and stalls again.
       #
-      # Former limitation, FIXED (pg2-0efop): before that fix,
-      # pg_router_throughput_total only counted events whose OnEnqueue this daemon
-      # process saw. eventqueue.Queue.replay() restored the durable queue on start
-      # without telling the Observer, so Emitter.OnAccept found no pending entry for
-      # restored events and silently skipped them. A type with a backlog >= 10
-      # therefore read "zero throughput" after every daemon restart until the
-      # restored events drained, even though the consumer was working. The recorded
-      # 2026-09-30 14:19Z-17:29Z "stall" was partly this artifact (restarts at
-      # 14:49:52Z and 16:17:51Z; the queue log shows pr.changed accepts continuing
-      # at a reduced rate from 15:00Z).
-      # The fix: replay() now calls the optional eventqueue.RestoreObserver once
-      # per retained event, and Emitter.OnRestore seeds the pending correlation
-      # (type and the ORIGINAL enqueue instant) without counting an enqueue, so
-      # restored accepts DO count in pg_router_throughput_total and dispatch
-      # latency. Verified live 2026-10-01 (pg2-t0l6b): two daemon restarts on the
-      # fixed build with non-empty durable queues (75 and 61 events) -- throughput
-      # matched the queue.jsonl accepts for the restored events (e.g. 56 of 56
-      # pr.reconcile), and this rule's expression did NOT match after either
-      # restart, with backlogs of 52+16 and 57 (both >= the 10 floor). The only
-      # matches seen were on the pre-fix build and shorter than `for: 30m`. The
-      # alertrules model test keeps the pre-fix 2026-09-30 series as a recorded
-      # replay. Residual: the emitter's correlation map is capped (4096 entries,
-      # oldest evicted first), so a restored backlog larger than that cap is not
-      # fully counted; this was not exercised live.
+      # Sleep and restart (pg2-9uvm5). The presence guard is the wake grace: a laptop
+      # sleep leaves no samples, so after a wake the guard is false until 18 fresh
+      # scrapes exist and `for` has to be earned again, instead of a Pending state from
+      # before the sleep carrying across the gap. A daemon restart does the same. The
+      # dedicated host-awake signal belongs to pg2-9uvm5; when it lands this rule needs
+      # one more `unless` clause on that signal and nothing else changes.
       #
-      # Known gap (pg2-o6z19 R1, partially met): a periodic type whose troughs
-      # rise cycle over cycle while the consumer keeps dispatching never goes a
-      # whole 30m without a dispatch, so this rule cannot see it; it alerts only
-      # when the rise coincides with 30m of dispatch silence. Closing that needs a
-      # separate "backlog not draining" signal (not built: a never-below-N-for-2h
-      # form fires on healthy slow pr.reconcile cycles).
+      # Gates. A gate (any TYPE, SYSTEM_PAUSE included) halts every listener except its
+      # owner, so an idle lane with a backlog is expected while one is in force:
+      # `unless on() (max(last_over_time(pg_router_gates_active[10m])) > 0)` drops every
+      # series from the first scrape of a gate until 10 minutes after it ends (the
+      # window). A gate held for long is pg-router-gate-held's job. pg_router_gate_blocked
+      # would only narrow the exclusion to the blocked role and gates are global, so it
+      # is not used.
       #
-      # for/keepFiringFor 30m: the condition already needs 30m of silence, so `for`
-      # adds another 30m before paging (an episode alerts >= 60m after the last
-      # dispatch), and keepFiringFor holds the alert through a
-      # dribble of one dispatch every ~30m that would otherwise flap it.
-      # keepFiringFor is camelCase on purpose: file provisioning ignores the
-      # snake_case spelling (AlertRuleExport; see hostmetrics.nix in
-      # phillipgreenii-nix-support-apps).
+      # Type to role. The depth gauge carries `type` and the in-flight gauge `role`;
+      # the binding between them is configuration, not a metric, so the join is the
+      # explicit label_replace table below, one clause per role of the daemon config
+      # (the same shape as the pool mapping of pg-router-pool-full-idle, and without
+      # capture-group references so nothing in the provisioning layer can expand them).
+      # A type missing from the table is NOT covered. A new role MUST be added to the
+      # table, to the type-to-role cases in rule-tests/pg-router-queue-stalled.test.yaml
+      # and to stalledRoles in internal/alertrules/queue_stalled_test.go. `max without
+      # (role)` drops the helper label again, so the alert keeps the labels of the rule
+      # it replaced (rule uid, alertname, severity, type, instance, job,
+      # otel_scope_name) and an open bead for that fingerprint keeps matching.
       #
-      # pg2-p93c0 decision: pg-router-backlog-growing is DELETED, not retuned to
-      # a total-queue stall form. A whole-system stall (nothing dispatching at
-      # all) surfaces here per type as soon as any type holds >= 10: desk.heartbeat
-      # alone is enqueued about once a minute and passes the floor in ~10m
-      # (TestWholeSystemStallSurfacesViaHeartbeat), and a dead daemon is the
-      # liveness rule's job. What an aggregate stall rule would add is only
-      # many types each below 10 whose sum passes 10, which is queue noise by the
-      # floor's own definition. The delta(backlog) form paged on every absorbed
-      # ramp (12h of data: swings from single digits to ~135, never unbounded).
+      # Not covered, by ruling: a wedged session that still counts as in flight (the
+      # ccpool session rules own it, pool-full-idle and needs_input) and a backlog that
+      # grows under a consumer that IS working (pg-router-queue-slow-growth, below).
+      # Replay of the recorded lane: testdata/drain_pg2_2026-10-12.txt and
+      # internal/alertrules/queue_stalled_test.go.
+      #
+      # pg2-p93c0 decision, still in force: pg-router-backlog-growing stays DELETED
+      # rather than retuned to a total-queue form. Under this rule a whole-system stall
+      # (nothing dispatching at all) pages per type as soon as any type holds a backlog
+      # (desk.heartbeat alone is enqueued about once a minute and is idle-with-backlog
+      # within 10 minutes), and the old aggregate paged on every absorbed ramp (12h of
+      # data: swings from single digits to about 135, never unbounded).
       - uid: pg-router-queue-stalled
         title: pg-router queue is stalled (by type)
         condition: C
-        for: 30m
-        keepFiringFor: 30m
+        for: 5m
+        keepFiringFor: 10m
         noDataState: OK
         execErrState: Error
         labels:
           severity: warning
         annotations:
-          summary: "pg-router queue for type {{ $labels.type }} is stalled: depth held at 10 or more with no dispatches"
-          description: "pg_router_queue_depth for type {{ $labels.type }} stayed at 10 or more (and the type never drained) across a 30 minute window in which pg_router_throughput_total for that type did not advance, and the condition held for another 30 minutes -- the consumer for this event type is not making counted progress. Check `pg-router status` and the role that binds this type. Events restored from the durable queue after a daemon restart are counted in the throughput metric (pg2-0efop), so a restart alone is not expected to trigger this alert; if it fires shortly after a restart, compare the queue log before acting."
+          summary: "pg-router queue for type {{ $labels.type }} has a backlog but nothing is processing it"
+          description: "pg_router_queue_depth for type {{ $labels.type }} stayed above 0 on every scrape of a 10 minute window while the role bound to that type had no dispatch in flight on any scrape of it (pg_router_listener_in_flight) and completed none, and that held for another 5 minutes -- events are waiting and the consumer is idle. Check `pg-router status` for the role that binds this type: a decline backoff (a ccpool pool at capacity or at its usage limit, an unavailable handler), a handler that fails at launch, or a role that is disabled or excluded. A dispatch that is running, however long, is not stalled and does not fire this. A pg-router pause or any other gate suppresses it (pg-router-gate-held covers a long hold), and so does a laptop sleep or a daemon restart, which need 10 minutes of fresh scrapes before the condition can hold."
         data:
           - refId: A
             relativeTimeRange:
-              from: 1800
+              from: 600
               to: 0
             datasourceUid: prometheus
             model:
               refId: A
               editorMode: code
               instant: true
-              expr: min_over_time(pg_router_queue_depth[30m]) >= 10 and count_over_time(pg_router_queue_depth[30m]) >= 54 unless on(type) (sum by (type) (increase(pg_router_throughput_total[30m])) > 0)
+              expr: max without (role) (label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(label_replace(min_over_time(pg_router_queue_depth[10m]) > 0 and count_over_time(pg_router_queue_depth[10m]) >= 18, "role", "drain-zr", "type", "drain[.]zr"), "role", "drain-pg2", "type", "drain[.]pg2"), "role", "review", "type", "review[.]ready"), "role", "feedback", "type", "feedback[.]ready"), "role", "worker", "type", "work[.]ready"), "role", "desk-pr", "type", "pr[.](changed|reconcile)"), "role", "desk-issue", "type", "issue[.]changed"), "role", "desk-thread", "type", "thread[.]changed"), "role", "desk-heartbeat", "type", "desk[.]heartbeat"), "role", "desk-reconcile", "type", "desk[.]reconcile"), "role", "pg-router-probe", "type", "pg-router-probe[.]tick"), "role", "ccpool-probe", "type", "ccpool-probe[.]tick"), "role", "disk-watchdog", "type", "disk[.]check"), "role", "pg2-escalation-triager", "type", "escalated[.]pg2"), "role", "zr-escalation-triager", "type", "escalated[.]zr"), "role", "pg2-split-triager", "type", "split-review[.]pg2") and on(role) (max by (role) (max_over_time(pg_router_listener_in_flight[10m])) == 0) unless on(type) (sum by (type) (increase(pg_router_throughput_total[10m])) > 0)) unless on() (max(last_over_time(pg_router_gates_active[10m])) > 0)
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+
+      # Queue slow growth (per type): arrivals outpace completions. Operator ruling
+      # 2026-10-12 (Phillip): "perhaps items are being pulled off and processing
+      # correctly, but the rate of consumption is much lower than the rate of
+      # generation, that is a problem". pg-router-queue-stalled cannot see it (the
+      # consumer is working) and pg-router-queue-depth-growing needs a rise of 25 in an
+      # hour; this rule watches the RATE over a long window:
+      #   sum by (type) (increase(pg_router_enqueued_total[6h]))
+      #     > 1.5 * sum by (type) (increase(pg_router_throughput_total[6h]))
+      # pg_router_enqueued_total (internal/metrics, added with this rule) counts events
+      # admitted to the queue, per type; pg_router_throughput_total counts dispatches
+      # that settled, per type and role. A type with arrivals and no throughput series
+      # at all in the window counts as growing too (the `unless on(type)` branch): a
+      # consumer that never completes anything is the extreme of a slow one, and it
+      # also covers a lane wedged in flight, which the stalled rule accepts as a gap.
+      #
+      # Constants (pinned and replayed in internal/alertrules/queue_slow_growth_test.go):
+      #   - 6h window, ratio above 1.5: the reference case, 2026-10-12 12:00Z to 19:40Z,
+      #     11 arrivals and 5 completions (ratio 2.2, +0.78 an hour, depth 5 to 11), is
+      #     caught; a lane that keeps up reads about 1 (the pr.reconcile sweep enqueues
+      #     and completes the same ~70 every 30 minutes), and 1.5 leaves room for the
+      #     handful of events that are always in flight at a window edge.
+      #   - at least 6 arrivals in the window: with fewer, one slow dispatch flips the
+      #     ratio.
+      #   - a depth floor: min_over_time(pg_router_queue_depth[1h]) >= 5 on at least 108
+      #     of the hour's 120 scrapes, i.e. a backlog of 5 or more that did not drain
+      #     once in the last hour and was present throughout. An absorbed burst (the
+      #     2026-10-01 issue.changed surge drained within the hour) and a type that is
+      #     enqueued and never held cannot page, and the gauge's absent-when-drained
+      #     samples (pg2-xepg6) cannot fake a floor. The same guard is the wake grace
+      #     (pg2-9uvm5): after a laptop sleep the hour needs 108 fresh scrapes before the
+      #     condition can hold, and increase() itself is exact across a sleep because
+      #     nothing arrives or completes while the host is asleep.
+      #   - `for: 30m`, keepFiringFor 1h: a 6h ratio moves slowly and flaps around its
+      #     threshold as events age out of the window.
+      #
+      # Counter versus predict_linear/deriv on pg_router_queue_depth (the bead's fallback):
+      # a regression over the depth gauge reads a series that is ABSENT whenever the type
+      # drained (pg2-xepg6) and has multi-hour holes across every laptop sleep, so its
+      # slope over 6h is dominated by which samples happen to exist; the two counters
+      # compare the two rates directly and a lane that completes 5 of 11 reads 2.2
+      # whatever the depth did meanwhile. The cost is one counter in pg-router.
+      #
+      # Known limits. increase() takes a new series' first sample as its baseline, so the
+      # first arrival of a type after a daemon restart is not counted (as in
+      # pg-router-budget-stops; with the 6 arrivals floor it can only delay, never fake, a
+      # page). The counter has no history: for 6 hours after it first ships the arrivals
+      # cover less than the window, which under-reads the ratio (quiet, never noisy). An
+      # event the queue retires unaccepted and the source then re-emits is a second
+      # arrival, as the queue counts it (2026-10-13 00:18Z to 00:24Z: ~17 such pairs); the
+      # depth floor keeps that churn alone from paging a type that is not holding a
+      # backlog. Static-safe annotations, like the other registered rules.
+      - uid: pg-router-queue-slow-growth
+        title: pg-router queue is slowly growing (arrivals outpace completions, by type)
+        condition: C
+        for: 30m
+        keepFiringFor: 1h
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "pg-router type {{ $labels.type }} receives events faster than it completes them"
+          description: "Over the last 6 hours more than 1.5 times as many events of type {{ $labels.type }} were enqueued (increase of pg_router_enqueued_total) as were completed (increase of pg_router_throughput_total), at least 6 arrived, and a backlog of 5 or more has not drained once in the last hour -- the consumer is working but is not keeping up, so the queue keeps lengthening. This is the rate-based signal for a queue that is processing correctly yet falling behind (the lane's single consumer or its pool is too slow for the arrival rate); it is not an idle-consumer alert (that is pg-router-queue-stalled) and not a fast buildup (that is pg-router-queue-depth-growing). Check `pg-router status` for the role that binds this type, compare the arrival and completion rates on the pg-router dashboard, and decide whether the lane needs more capacity, fewer arrivals or a smaller backlog. A laptop sleep needs an hour of fresh scrapes before this can fire again."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 21600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: true
+              expr: (sum by (type) (increase(pg_router_enqueued_total[6h])) > 1.5 * sum by (type) (increase(pg_router_throughput_total[6h])) or sum by (type) (increase(pg_router_enqueued_total[6h])) unless on(type) sum by (type) (increase(pg_router_throughput_total[6h]))) and on(type) sum by (type) (increase(pg_router_enqueued_total[6h])) >= 6 and on(type) min_over_time(pg_router_queue_depth[1h]) >= 5 and on(type) count_over_time(pg_router_queue_depth[1h]) >= 108
           - refId: B
             datasourceUid: __expr__
             model:
@@ -872,10 +953,13 @@ groups:
       # anything: every slot is held by a session whose turn ended (idle) or that
       # errored, so dispatches for that role are declined at-capacity indefinitely.
       # Nothing else alerts on it: pg-router-failure-rate excludes
-      # reason=~at-capacity by design (pg2-v3qn6), and pg-router-queue-stalled needs
-      # a queue depth of 10+ for 30m while review.ready events are born-expired
+      # reason=~at-capacity by design (pg2-v3qn6), and the stalled rule at the time
+      # needed a queue depth of 10+ while review.ready events are born-expired
       # (depth stayed 1-3 in the 2026-10-05 stall: review pool held by an idle
-      # session, 74 at-capacity declines 16:17-16:52Z, no alert).
+      # session, 74 at-capacity declines 16:17-16:52Z, no alert). The stalled rule
+      # now has no depth floor (pg-router-queue-stalled: any backlog with the role
+      # not in flight), so a stall like that one can also page there; this rule
+      # stays the precise diagnosis (the pool, and why its slots are held).
       #
       # Four clauses, all joined on the ccpool `pool` label:
       #   - demand (LEFT-hand side, so the alert value is the decline count > 0 and
@@ -1045,11 +1129,13 @@ groups:
       # is deliberately not a label). So the hold duration cannot be read from the
       # metric; it is expressed by `for: 30m`. A gate's lease is renewed by its
       # owner (the disk watchdog every 5 minutes), so a healthy transient gate
-      # (a short pause, a watchdog blip) clears in minutes; 30m matches
-      # pg-router-queue-stalled, is far below the 4.3h incident, and keeps a
+      # (a short pause, a watchdog blip) clears in minutes; 30m is far below the
+      # 4.3h incident and keeps a
       # routine `pg-router pause` / `resume` from alerting. Every TYPE counts,
       # SYSTEM_PAUSE included: a pause forgotten for 30 minutes stalls routing
-      # exactly as a watchdog gate does.
+      # exactly as a watchdog gate does. While a gate is in force
+      # pg-router-queue-stalled is suppressed (an idle lane with a backlog is
+      # expected under a gate), so this rule is what pages a gate that stays.
       #
       # last_over_time over 10m bridges the gap a daemon restart leaves (the lease
       # of the incident gate lapsed for about 6 minutes while the daemon was down,

@@ -107,6 +107,16 @@ const (
 	// RecordThroughput's doc for why this task builds and exposes it without
 	// also wiring a live production call site.
 	MetricThroughput = "pg_router_throughput"
+	// MetricEnqueued counts events admitted to the queue, per type: the ARRIVAL
+	// half of the arrivals-versus-completions comparison the
+	// pg-router-queue-slow-growth alert makes against MetricThroughput (the
+	// completion half; both are exposed as <name>_total). It is fed from OnEnqueue
+	// only: a re-emit dropped as a duplicate (OnDeduped), a refused admission
+	// (MetricEnqueueRejected), an event restored by a daemon restart (OnRestore)
+	// and the Gate Registry's own routable records (control-plane notifications,
+	// not work) are NOT arrivals. A fresh event that reuses the id of a retired one
+	// IS an arrival, exactly as the queue treats it.
+	MetricEnqueued = "pg_router_enqueued"
 	// MetricBacklog is a scalar sum(DepthByType()) across every type — distinct
 	// from the existing per-type MetricQueueDepth gauge (Task 3.3 binding
 	// decision).
@@ -375,6 +385,7 @@ type Emitter struct {
 	unconsumed      metric.Int64Counter
 	unknownType     metric.Int64Counter
 	throughput      metric.Int64Counter
+	enqueued        metric.Int64Counter
 	sourceFailures  metric.Int64Counter
 	deduped         metric.Int64Counter
 	enqueueRejected metric.Int64Counter
@@ -570,6 +581,14 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 		MetricThroughput,
 		metric.WithUnit("{event}"),
 		metric.WithDescription("events dispatched and accepted, per type (STORY-OBS-1)"),
+	)
+	if err != nil {
+		return nil, err
+	}
+	enqueued, err := m.Int64Counter(
+		MetricEnqueued,
+		metric.WithUnit("{event}"),
+		metric.WithDescription("events admitted to the queue (arrivals), per type; the counterpart of the throughput counter's completions"),
 	)
 	if err != nil {
 		return nil, err
@@ -803,6 +822,7 @@ func New(mp metric.MeterProvider, depthFn func() map[string]int, opts ...Option)
 	e.unconsumed = unconsumed
 	e.unknownType = unknownType
 	e.throughput = throughput
+	e.enqueued = enqueued
 	e.sourceFailures = sourceFailures
 	e.deduped = deduped
 	e.enqueueRejected = enqueueRejected
@@ -919,8 +939,17 @@ func (e *Emitter) OnGateDrop(evtType, listenerID, gateType string) {
 // position stays where it was first inserted, which only affects WHEN it
 // might later be evicted, never correctness (a miss is the tolerated
 // imperfection OnAccept's own doc describes).
+//
+// It also counts the arrival in MetricEnqueued (per type), except for the Gate
+// Registry's routable records (eventqueue.IsGateEvent): those are control-plane
+// notifications, not work, and counting them would make a pause look like
+// arrivals nothing completes. OnRestore deliberately does NOT count: a restored
+// event was already counted by the process that enqueued it.
 func (e *Emitter) OnEnqueue(evt eventqueue.Event) {
 	e.seedPending(evt)
+	if !eventqueue.IsGateEvent(evt.Type) {
+		e.enqueued.Add(context.Background(), 1, metric.WithAttributes(attribute.String("type", evt.Type)))
+	}
 }
 
 // OnRestore implements eventqueue.RestoreObserver (bead pg2-0efop): it seeds

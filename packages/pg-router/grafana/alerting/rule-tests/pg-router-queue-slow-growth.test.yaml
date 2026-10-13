@@ -1,0 +1,181 @@
+# promtool unit tests for the pg-router-queue-slow-growth alert (operator ruling 2026-10-12: "the
+# rate of consumption is much lower than the rate of generation, that is a problem"). Run by the
+# flake check test-pg-router-alert-rules, which generates rules.yml next to this file: the
+# Grafana rule's refId A wrapped as `alert: <uid>` with `expr: (<A>) > 0`, the rule's
+# `for: 30m` and labels, plus a recording rule `wrapped:<uid with _>` over the same expression.
+#
+# What this proves that the Go replay (internal/alertrules/queue_slow_growth_test.go) cannot:
+# the PromQL itself (the ratio, its `unless on(type)` branch for a type with no completions
+# series, the arrivals floor, the depth floor and the presence guard) evaluated by the real
+# engine. The Go tests model the same expression and replay the recorded 2026-10-12 lane.
+#
+# Time model: 30s scrapes, so counters advance per 30s sample: `0+0.025x…` is 3 events an
+# hour, `0+0.0125x…` 1.5 an hour. The windows are 6h (counters) and 1h (depth floor, 108 of
+# its 120 scrapes), the arrivals floor is 6, and `for` is 30m. The counters start at 0 at the
+# start of each series, so the 6h increase is the whole history until 6h have passed:
+# 3 an hour reaches the floor of 6 arrivals at 2h, and the alert fires 30m after that.
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: arrivals at twice the completion rate with a held backlog fire after the floor plus for
+    interval: 30s
+    input_series:
+      - series: pg_router_enqueued_total{type="drain.pg2",job="pg-router"}
+        values: "0+0.025x1440"
+      - series: pg_router_throughput_total{type="drain.pg2",role="drain-pg2",job="pg-router"}
+        values: "0+0.0125x1440"
+      - series: pg_router_queue_depth{type="drain.pg2",job="pg-router"}
+        values: "8x1440"
+    alert_rule_test:
+      - eval_time: 1h
+        alertname: pg-router-queue-slow-growth
+        exp_alerts: []
+      # Pending since about 2h, not yet through `for`.
+      - eval_time: 2h15m
+        alertname: pg-router-queue-slow-growth
+        exp_alerts: []
+      - eval_time: 4h
+        alertname: pg-router-queue-slow-growth
+        exp_alerts:
+          - exp_labels:
+              type: drain.pg2
+              severity: warning
+
+  - name: a lane that keeps up (arrivals equal completions) never fires, whatever its backlog
+    interval: 30s
+    input_series:
+      - series: pg_router_enqueued_total{type="drain.pg2",job="pg-router"}
+        values: "0+0.025x1440"
+      - series: pg_router_throughput_total{type="drain.pg2",role="drain-pg2",job="pg-router"}
+        values: "0+0.025x1440"
+      - series: pg_router_queue_depth{type="drain.pg2",job="pg-router"}
+        values: "8x1440"
+    promql_expr_test:
+      - expr: count(wrapped:pg_router_queue_slow_growth)
+        eval_time: 8h
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 8h
+        alertname: pg-router-queue-slow-growth
+        exp_alerts: []
+
+  - name: a ratio of 1.39, under the 1.5 bar, does not fire
+    interval: 30s
+    input_series:
+      - series: pg_router_enqueued_total{type="drain.pg2",job="pg-router"}
+        values: "0+0.025x1440"
+      - series: pg_router_throughput_total{type="drain.pg2",role="drain-pg2",job="pg-router"}
+        values: "0+0.018x1440"
+      - series: pg_router_queue_depth{type="drain.pg2",job="pg-router"}
+        values: "8x1440"
+    alert_rule_test:
+      - eval_time: 8h
+        alertname: pg-router-queue-slow-growth
+        exp_alerts: []
+
+  - name: a backlog under the floor of 5 does not fire even at twice the completion rate
+    interval: 30s
+    input_series:
+      - series: pg_router_enqueued_total{type="drain.pg2",job="pg-router"}
+        values: "0+0.025x1440"
+      - series: pg_router_throughput_total{type="drain.pg2",role="drain-pg2",job="pg-router"}
+        values: "0+0.0125x1440"
+      - series: pg_router_queue_depth{type="drain.pg2",job="pg-router"}
+        values: "3x1440"
+    alert_rule_test:
+      - eval_time: 8h
+        alertname: pg-router-queue-slow-growth
+        exp_alerts: []
+
+  - name: fewer than 6 arrivals in the window never fires, whatever the ratio
+    interval: 30s
+    input_series:
+      # 0.002 per scrape is 1.44 events per 6h, with no completions at all.
+      - series: pg_router_enqueued_total{type="drain.pg2",job="pg-router"}
+        values: "0+0.002x1440"
+      - series: pg_router_queue_depth{type="drain.pg2",job="pg-router"}
+        values: "8x1440"
+    alert_rule_test:
+      - eval_time: 8h
+        alertname: pg-router-queue-slow-growth
+        exp_alerts: []
+
+  - name: arrivals with no completions series at all fire (a consumer that never completes anything)
+    interval: 30s
+    input_series:
+      - series: pg_router_enqueued_total{type="drain.pg2",job="pg-router"}
+        values: "0+0.025x1440"
+      - series: pg_router_queue_depth{type="drain.pg2",job="pg-router"}
+        values: "8x1440"
+    alert_rule_test:
+      - eval_time: 4h
+        alertname: pg-router-queue-slow-growth
+        exp_alerts:
+          - exp_labels:
+              type: drain.pg2
+              severity: warning
+
+  - name: only the growing type fires, a neighbour that keeps up stays quiet
+    interval: 30s
+    input_series:
+      - series: pg_router_enqueued_total{type="drain.pg2",job="pg-router"}
+        values: "0+0.025x1440"
+      - series: pg_router_throughput_total{type="drain.pg2",role="drain-pg2",job="pg-router"}
+        values: "0+0.0125x1440"
+      - series: pg_router_queue_depth{type="drain.pg2",job="pg-router"}
+        values: "8x1440"
+      - series: pg_router_enqueued_total{type="pr.changed",job="pg-router"}
+        values: "0+0.1x1440"
+      - series: pg_router_throughput_total{type="pr.changed",role="desk-pr",job="pg-router"}
+        values: "0+0.1x1440"
+      - series: pg_router_queue_depth{type="pr.changed",job="pg-router"}
+        values: "20x1440"
+    alert_rule_test:
+      - eval_time: 4h
+        alertname: pg-router-queue-slow-growth
+        exp_alerts:
+          - exp_labels:
+              type: drain.pg2
+              severity: warning
+
+  - name: a laptop sleep needs an hour of fresh scrapes before the condition can hold again
+    interval: 30s
+    input_series:
+      # 3h of the lane growing at twice the completion rate (the alert fires at 2h30m), a 3h
+      # sleep with no scrapes at all, then the same lane again. The depth floor needs 108 of the
+      # last hour's 120 scrapes, so nothing fires for the first 54 minutes after the wake
+      # (6h54m), and `for` then holds the alert in Pending for 30 more minutes.
+      - series: pg_router_enqueued_total{type="drain.pg2",job="pg-router"}
+        values: "0+0.025x360 _x360 9.5+0.025x720"
+      - series: pg_router_throughput_total{type="drain.pg2",role="drain-pg2",job="pg-router"}
+        values: "0+0.0125x360 _x360 4.75+0.0125x720"
+      - series: pg_router_queue_depth{type="drain.pg2",job="pg-router"}
+        values: "8x360 _x360 8x720"
+    alert_rule_test:
+      - eval_time: 2h45m
+        alertname: pg-router-queue-slow-growth
+        exp_alerts:
+          - exp_labels:
+              type: drain.pg2
+              severity: warning
+      # Asleep: the series are stale and the alert has resolved.
+      - eval_time: 4h30m
+        alertname: pg-router-queue-slow-growth
+        exp_alerts: []
+      # Just after the wake: too few fresh scrapes.
+      - eval_time: 6h20m
+        alertname: pg-router-queue-slow-growth
+        exp_alerts: []
+      # Condition from about 6h55m, still Pending at 7h20m.
+      - eval_time: 7h20m
+        alertname: pg-router-queue-slow-growth
+        exp_alerts: []
+      - eval_time: 8h
+        alertname: pg-router-queue-slow-growth
+        exp_alerts:
+          - exp_labels:
+              type: drain.pg2
+              severity: warning
