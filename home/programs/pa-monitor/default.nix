@@ -202,7 +202,9 @@ in
     # bridge), and the helper embeds PG_LAUNCHD_WRAPPER = wrapper.outPath so a
     # pa-monitor change restarts the agent. HM's own activation health check
     # (home.activation.launchdServicesHealthCheck) polls it after
-    # setupLaunchAgents and aborts the rebuild on failure.
+    # setupLaunchAgents and, if it is not running, warns in an N-of-M summary
+    # while activation continues (personal ADR 0057; the support-apps
+    # launchd-health exporter alerts if it stays down).
     #
     # Presence gate: see hasLaunchdRegistry above (optionalAttrs on the option's
     # declaration, never on config). daemon.enable and the platform gate the
