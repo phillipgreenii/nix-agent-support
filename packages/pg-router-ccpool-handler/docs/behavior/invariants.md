@@ -308,7 +308,7 @@ review`. The claim is still released (status open, assignee cleared) — the lab
     dispatch then closes and replaces it as a leftover (`INV-CCH-30`).
   - **`needs_input`**: left alone (`phillipgreenii-nix-agent-support` ADR 0037); a SUPERVISED drain
     session is bounded by `INV-CCH-29`, an orphan is not.
-    A dispatch that absorbs a session whose attempt is still in flight (`INV-CCH-30`, `INV-EVT-2`)
+    A dispatch that absorbs a session whose turn is still in progress (`INV-CCH-30`, `INV-EVT-2`)
     MUST take the same per-session lock and refresh the lease before it starts waiting, and MUST
     measure that session's budget from its original launch time, so absorbing an orphan still at
     work within its budget never grants it a fresh budget. A session reclaimed as an orphan is

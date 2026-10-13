@@ -83,8 +83,8 @@ Extensions:
   an under-budget one, a `needs_input` one, and one with no lease are left alone (an under-budget
   `starting` or `ready` one is then closed and replaced, 2k). The freed pool slot is then
   available to this very dispatch. If this dispatch is instead a redelivery of the event an orphan
-  still at work was launched for, it absorbs the orphan (2k): it takes over the lease and keeps the
-  orphan's original launch time as the start of its budget.
+  was launched for, and the orphan's turn is still in progress, it absorbs the orphan (2k): it
+  takes over the lease and keeps the orphan's original launch time as the start of its budget.
 - 2e. An earlier dispatch's handler died after it created the per-bead worktree but before the
   session existed (or a session was closed by `ccpool` before anyone reclaimed its worktree), so no
   session row leads to the worktree. Before checking capacity this module scans the worktree

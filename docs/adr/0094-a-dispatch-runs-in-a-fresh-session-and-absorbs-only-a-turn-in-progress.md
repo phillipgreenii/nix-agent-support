@@ -1,4 +1,4 @@
-# A dispatch runs in a fresh session and absorbs only an attempt still in flight
+# A dispatch runs in a fresh session and absorbs only the same event's turn in progress
 
 **Status**: Accepted (supersedes 0082's Decision item 4; amends 0083's Decision item 5 and 0085's answer to question 3; narrows 0065's `INV-EVT-2` closure; resolves `pg2-yunrp`)
 **Date**: 2026-10-13
@@ -80,9 +80,10 @@ The rule is `INV-CCH-30` in `packages/pg-router-ccpool-handler/docs/behavior/inv
    code-alignment bead `pg2-qaeb8` removes what the flipped default makes redundant rather than adding
    another bound, and adds a hermetic test against the real ccpool for each case above.
 7. **Behavior docs change in the same change.** `INV-CCH-30` is new; `INV-CCH-2`, `INV-CCH-14`,
-   `INV-CCH-17`, `INV-CCH-18`, `INV-CCH-20`, `INV-CCH-21`, `INV-CCH-22`, `INV-CCH-26`, `INV-CCH-28`
-   and `INV-CCH-29`, the `INTF-CCH-CCPOOL` crossing, the dispatch and release use cases and the
-   glossary now cite it, and the set's realization-gap register carries the rows `pg2-qaeb8` closes.
+   `INV-CCH-17`, `INV-CCH-18`, `INV-CCH-20`, `INV-CCH-22`, `INV-CCH-28` and `INV-CCH-29`, the
+   `INTF-CCH-CCPOOL` crossing, the dispatch and release use cases and the glossary now cite it;
+   `INV-CCH-21` and `INV-CCH-26` drop their mentions of an absorbed duplicate and of the incomplete
+   marker; and the set's realization-gap register carries the rows `pg2-qaeb8` closes.
 
 ## Consequences
 
