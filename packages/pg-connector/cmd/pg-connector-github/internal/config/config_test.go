@@ -135,6 +135,16 @@ func TestGoldenExampleLoadsAtDefaults(t *testing.T) {
 	if cfg.Path != "testdata/example.json" {
 		t.Errorf("Path = %q", cfg.Path)
 	}
+	// The example documents the optional keys at their defaults, so it names
+	// pr.posted_state_dir, whose default ("" is unset) the sidecar resolver
+	// replaces with the daemon's environment.
+	raw, err := os.ReadFile("testdata/example.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"posted_state_dir": ""`) || cfg.PR.PostedStateDir != "" {
+		t.Errorf("golden must write pr.posted_state_dir at its default (unset): value %q", cfg.PR.PostedStateDir)
+	}
 }
 
 func TestFileOverrides(t *testing.T) {
@@ -380,6 +390,63 @@ func TestCISectionTakesNoKeys(t *testing.T) {
 	cfg, err := Load(write(t, `{"state_dir":"/tmp/s","pr":{"queries":{"mine":"q"}}}`), noEnv)
 	if err != nil || !cfg.HasQuery("mine") || cfg.HasQuery("nope") {
 		t.Errorf("HasQuery: %v %v", err, cfg)
+	}
+}
+
+func TestPostedStateDirSetting(t *testing.T) {
+	const dir = "/var/example/pg-posted"
+	cfg, err := Load(write(t, minimal), noEnv)
+	if err != nil || cfg.PR.PostedStateDir != "" {
+		t.Fatalf("unset must stay empty: %v %q", err, cfg.PR.PostedStateDir)
+	}
+	cfg, err = Load(write(t, `{"state_dir":"/tmp/s","pr":{"posted_state_dir":"`+dir+`"}}`), noEnv)
+	if err != nil || cfg.PR.PostedStateDir != dir {
+		t.Fatalf("an absolute value must load: %v %q", err, cfg.PR.PostedStateDir)
+	}
+	// It sits beside the queries and leaves them alone.
+	cfg, err = Load(write(t, `{"state_dir":"/tmp/s","pr":{"queries":{"mine":"q"},"posted_state_dir":"`+dir+`"}}`), noEnv)
+	if err != nil || !cfg.HasQuery("mine") || cfg.PR.PostedStateDir != dir {
+		t.Fatalf("queries and posted_state_dir together: %v %+v", err, cfg.PR)
+	}
+	// The loader renders the file only: the daemon's environment is the
+	// sidecar resolver's business, never a value this field takes.
+	env := envOf(map[string]string{"PG_CONNECTOR_PR_GITHUB_STATE_DIR": "/e/state", "XDG_STATE_HOME": "/e/xdg", "HOME": "/e/home"})
+	cfg, err = Load(write(t, minimal), env)
+	if err != nil || cfg.PR.PostedStateDir != "" {
+		t.Fatalf("the environment must not fill the setting: %v %q", err, cfg.PR.PostedStateDir)
+	}
+}
+
+func TestRelativePostedStateDirRejectedByName(t *testing.T) {
+	for _, dir := range []string{"state/posted", "./posted", "../posted", "~/posted", "posted"} {
+		_, err := Load(write(t, `{"state_dir":"/tmp/s","pr":{"posted_state_dir":"`+dir+`"}}`), noEnv)
+		if err == nil {
+			t.Errorf("%q: a relative path must be rejected", dir)
+			continue
+		}
+		for _, want := range []string{SettingPostedStateDir, "absolute", dir} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("%q: error %q must contain %q", dir, err, want)
+			}
+		}
+	}
+	if SettingPostedStateDir != "pr.posted_state_dir" {
+		t.Errorf("setting name = %q", SettingPostedStateDir)
+	}
+}
+
+func TestPostedStateDirLivesOnlyUnderPR(t *testing.T) {
+	// The strict decoder accepts the key under pr and nowhere else, and a
+	// misspelling is named, not ignored.
+	for name, tc := range map[string]struct{ body, key string }{
+		"top level":  {`{"state_dir":"/tmp/s","posted_state_dir":"/x"}`, "posted_state_dir"},
+		"ci section": {`{"state_dir":"/tmp/s","ci":{"posted_state_dir":"/x"}}`, "posted_state_dir"},
+		"misspelled": {`{"state_dir":"/tmp/s","pr":{"posted_state_dirr":"/x"}}`, "posted_state_dirr"},
+	} {
+		_, err := Load(write(t, tc.body), noEnv)
+		if err == nil || !strings.Contains(err.Error(), "unknown key") || !strings.Contains(err.Error(), `"`+tc.key+`"`) {
+			t.Errorf("%s: want an unknown-key error naming %q, got %v", name, tc.key, err)
+		}
 	}
 }
 

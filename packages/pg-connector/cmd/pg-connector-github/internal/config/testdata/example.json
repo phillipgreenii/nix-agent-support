@@ -12,7 +12,8 @@
         "is:pr is:open review-requested:@me",
         "is:pr is:open assignee:@me"
       ]
-    }
+    },
+    "posted_state_dir": ""
   },
   "ci": {},
   "query_ttl": { "mine": "60s", "team": "120s" },

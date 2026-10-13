@@ -27,11 +27,22 @@
 // under a supervisor (working directory /) would differ.
 //
 // Queries (named, in their native syntax; none is built in, the deployment
-// supplies them):
+// supplies them) and the location of the posted-review sidecar:
 //
-//	"pr":  {"queries": {"<name>": "<query>" | ["<query>", ...]}}
+//	"pr":  {"queries": {"<name>": "<query>" | ["<query>", ...]},
+//	        "posted_state_dir": "<absolute path>"}
 //	"ci":  {}     reserved, takes no keys: CI runs have no queries of their own,
 //	              so a ci --query resolves against the "pr" queries
+//
+// "pr.posted_state_dir" is optional. It names the sidecar's STATE HOME, the
+// parent of its posted/ and locks/ directories, which is the old
+// pg-connector-pr-github backend's own state home: the daemon keeps that
+// backend's sidecar files and flock where they are, so a rollback to the old
+// binary sees every review posted since cutover. Unset (absent, null or "")
+// means the daemon derives the home from its OWN process environment at start,
+// the way the old backend did (see package sidecar). While it is unset the key
+// does not enter the config hash, so the hash of every file rendered before the
+// key existed is unchanged.
 //
 // Settings: every row of the design's "Defaults" table is a top-level key with
 // the table's snake_case name. Durations are strings ("60s", "10m", "24h",
@@ -54,6 +65,11 @@
 // setting is file-only, so a load with an empty environment (env -i) succeeds.
 // The daemon-side loader never reads a client's per-call environment: callers
 // pass the daemon's own getenv.
+//
+// The one other environment read is not a setting of this file: while
+// pr.posted_state_dir is unset, package sidecar reads the old backend's own
+// PG_CONNECTOR_PR_GITHUB_STATE_DIR, XDG_STATE_HOME and HOME, again through the
+// daemon's own getenv, so that the sidecar stays at its current path.
 //
 // # Config hash
 //
@@ -126,6 +142,10 @@ type Settings struct {
 	RESTSearchPerMinute  int     `json:"rest_search_per_minute"`
 }
 
+// SettingPostedStateDir is the dotted name of PRSection.PostedStateDir, the
+// spelling error messages use for it.
+const SettingPostedStateDir = "pr.posted_state_dir"
+
 // PRSection is the "pr" block, the settings of the pr instance.
 type PRSection struct {
 	// Queries maps a caller-facing query name to its native-syntax
@@ -133,6 +153,14 @@ type PRSection struct {
 	// instance resolves a query name against these too, because CI runs have
 	// no queries of their own.
 	Queries map[string]schema.QueryExpr `json:"queries,omitempty"`
+
+	// PostedStateDir is the posted-review sidecar's STATE HOME, the parent of
+	// its posted/ and locks/ directories. It is optional and, when set, an
+	// absolute path; empty means unset, and package sidecar then derives the
+	// home from the daemon's own environment the way the old backend did.
+	// omitempty keeps an unset value out of the hashed encoding, so the hash
+	// of a file that never named the key is the same as before the key existed.
+	PostedStateDir string `json:"posted_state_dir,omitempty"`
 }
 
 // CISection is the "ci" block. The ci instance has no settings of its own, so
@@ -364,6 +392,13 @@ func (c *Config) validate() error {
 	}
 	if !filepath.IsAbs(c.SocketPath) {
 		return fmt.Errorf("socket_path must be an absolute path, got %q", c.SocketPath)
+	}
+	// Optional: only a value that is set has to be absolute. A relative path
+	// would resolve against whatever directory started the process, so the
+	// sidecar would land elsewhere under a supervisor (working directory /)
+	// than under a shell, and a rollback to the old backend would not find it.
+	if d := c.PR.PostedStateDir; d != "" && !filepath.IsAbs(d) {
+		return fmt.Errorf("%s must be an absolute path, got %q", SettingPostedStateDir, d)
 	}
 	for name, d := range map[string]Duration{
 		"adhoc_query_ttl": c.AdhocQueryTTL, "summary_ttl": c.SummaryTTL,
