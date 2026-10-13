@@ -948,6 +948,57 @@
           require_serial = true;
         };
 
+        # pg2-o0z8u: pg-desk's depth-first closure (pg2-seeo8, pg2-ubvmh) is
+        # deterministic code whose correctness hinges on a real tool's
+        # semantics (bd >= 1.3.1 refuses to close a parent with an open
+        # child), so its regression guard runs against a REAL bd in a
+        # throwaway embedded store (global rule V-3): the `contract`-tagged
+        # `TestClosure_RealBD_*` tests in packages/pg-desk/internal/sync. No
+        # default check runs the `contract` tag (`run-unit-tests` is unit only
+        # and pg-desk has no hermetic nix tier for it: the sandbox has no bd),
+        # so, like `ceta-agreement-test` above, this path-scoped hook is what
+        # puts the suite under the commit-time and `pg-hooks run pre-land`
+        # runs. Scope: pg-desk's sync package and the pg-connector code its
+        # closure execs (the umbrella plus the issue-beads backend, which the
+        # test builds from source). Cost is the point (three real `bd init`s,
+        # about a minute and a half), paid only on diffs touching these paths.
+        # A missing `bd` or `go` is a LOUD failure, never a skip: an
+        # absence-keyed skip would let a PATH breakage no-op the only gate.
+        pg-desk-closure-contract-test = {
+          enable = true;
+          name = "pg-desk-closure-contract-test";
+          description = "pg-desk closure: run the contract-tagged real-bd depth-first closure tests (pg2-o0z8u)";
+          entry = "${
+            pkgs.writeShellApplication {
+              name = "pg-desk-closure-contract-test-hook";
+              runtimeInputs = [ pkgs.git ];
+              text = ''
+                # No bd in the nix build sandbox (and no network/module cache):
+                # this runs on the operator's machine via pg-hooks only.
+                if [ -n "''${IN_NIX_BUILD:-}" ] || [ -n "''${NIX_BUILD_TOP:-}" ]; then
+                  echo "pg-desk-closure-contract-test: inside the nix build sandbox; skipping (needs a real bd)" >&2
+                  exit 0
+                fi
+
+                for tool in go bd; do
+                  if ! command -v "$tool" >/dev/null 2>&1; then
+                    echo "pg-desk-closure-contract-test: $tool not found on PATH -- enter the devShell or install it before committing. Do NOT bypass with --no-verify." >&2
+                    exit 1
+                  fi
+                done
+
+                top="$(git rev-parse --show-toplevel)"
+                cd "$top/packages/pg-desk"
+                exec nice -n 10 go test -p 4 -count=1 -tags contract -timeout 10m -run '^TestClosure_RealBD_' ./internal/sync/
+              '';
+            }
+          }/bin/pg-desk-closure-contract-test-hook";
+          language = "system";
+          files = "^packages/(pg-desk/(internal/sync/|go\\.(mod|sum)$)|pg-connector/(cmd/pg-connector/|cmd/pg-connector-issue-beads/|pkg/))";
+          pass_filenames = false;
+          require_serial = true;
+        };
+
         # pg2-m146l: prevent main's own history from being rewritten via a
         # direct `git rebase` again. Operator decision 2026-09-07 (bead
         # pg2-m146l comments): main's local reflog showed
