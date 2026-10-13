@@ -1,0 +1,29 @@
+{
+  "data": {
+    "rateLimit": {
+      "cost": 1,
+      "remaining": 4899,
+      "resetAt": "2026-10-12T10:00:00Z"
+    },
+    "nodes": [
+      null,
+      {
+        "id": "PR_live",
+        "mergeStateStatus": "CLEAN",
+        "merged": false,
+        "additions": 1,
+        "deletions": 1,
+        "changedFiles": 1,
+        "reviewRequests": { "nodes": [] }
+      },
+      {}
+    ]
+  },
+  "errors": [
+    {
+      "type": "NOT_FOUND",
+      "path": ["nodes", 0],
+      "message": "Could not resolve to a node with the global id of 'PR_deleted'"
+    }
+  ]
+}

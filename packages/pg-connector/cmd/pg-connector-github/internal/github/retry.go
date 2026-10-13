@@ -340,3 +340,13 @@ func validJSONStream(raw []byte, allowEmpty bool) bool {
 		}
 	}
 }
+
+// IsTransient reports whether err is a passing fault worth retrying (see
+// isTransientGHError): the classification the daemon's fetchers use when they
+// retry a call themselves, each attempt admitted by the governor again.
+func IsTransient(ctx context.Context, err error) bool { return isTransientGHError(ctx, err) }
+
+// ErrorText is the text of a failed gh call to classify: gh's stderr for a
+// non-zero exit (never the command line, which can carry a whole GraphQL
+// query), else the whole message.
+func ErrorText(err error) string { return failureText(err) }

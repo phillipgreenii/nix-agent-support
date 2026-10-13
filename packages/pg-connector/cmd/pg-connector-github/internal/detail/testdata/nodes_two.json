@@ -1,0 +1,36 @@
+{
+  "data": {
+    "rateLimit": {
+      "cost": 1,
+      "remaining": 4900,
+      "resetAt": "2026-10-12T10:00:00Z"
+    },
+    "nodes": [
+      {
+        "id": "PR_a",
+        "mergeStateStatus": "BLOCKED",
+        "merged": false,
+        "additions": 12,
+        "deletions": 3,
+        "changedFiles": 2,
+        "reviewRequests": {
+          "nodes": [
+            { "requestedReviewer": { "login": "phillipgreenii" } },
+            { "requestedReviewer": { "slug": "widget-reviewers" } },
+            { "requestedReviewer": { "login": "review-bot" } },
+            { "requestedReviewer": null }
+          ]
+        }
+      },
+      {
+        "id": "PR_b",
+        "mergeStateStatus": "UNKNOWN",
+        "merged": true,
+        "additions": 0,
+        "deletions": 0,
+        "changedFiles": 0,
+        "reviewRequests": { "nodes": [] }
+      }
+    ]
+  }
+}

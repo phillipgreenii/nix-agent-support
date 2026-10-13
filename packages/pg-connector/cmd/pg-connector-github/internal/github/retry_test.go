@@ -469,3 +469,21 @@ func TestIsTransientGHError(t *testing.T) {
 		t.Error("nil error classified transient")
 	}
 }
+
+func TestIsTransientAndErrorText(t *testing.T) {
+	ge := &ghExecError{msg: "gh api graphql -F query=HTTP 504: exit 1: gh: HTTP 503", stderr: "gh: HTTP 503", err: errors.New("exit 1")}
+	if !IsTransient(context.Background(), ge) {
+		t.Error("an HTTP 503 is not transient")
+	}
+	if got := ErrorText(ge); got != "gh: HTTP 503" {
+		t.Errorf("ErrorText = %q, want gh's stderr only", got)
+	}
+	if got := ErrorText(errors.New("plain")); got != "plain" {
+		t.Errorf("ErrorText = %q", got)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if IsTransient(ctx, ge) {
+		t.Error("a cancelled context is transient")
+	}
+}
