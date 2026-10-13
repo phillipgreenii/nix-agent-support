@@ -27,7 +27,7 @@ Realization gaps; these are the stories Task 5.2 onward realizes.
 **Level:** user-goal.
 **Preconditions:** this module is registered with a reachable core (`phillipgreenii-nix-agent-support`
 ADR 0036 — this module never starts a core).
-_Requires:_ `INTF-HANDLER`, `INV-CCH-2`, `INV-CCH-3`, `INV-CCH-6`, `INV-CCH-14`, `INV-CCH-15`, `INV-CCH-17`, `INV-CCH-18`, `INV-CCH-19`, `INV-CCH-20`, `INV-CCH-21`, `INV-CCH-22`, `INV-CCH-23`, `INV-CCH-24`, `INV-CCH-25`, `INV-CCH-26`, `INV-CCH-27`, `INV-CCH-28`, `INV-CCH-29`, `INV-CCH-30`.
+_Requires:_ `INTF-HANDLER`, `INV-CCH-2`, `INV-CCH-3`, `INV-CCH-6`, `INV-CCH-11`, `INV-CCH-12`, `INV-CCH-14`, `INV-CCH-15`, `INV-CCH-17`, `INV-CCH-18`, `INV-CCH-19`, `INV-CCH-20`, `INV-CCH-21`, `INV-CCH-22`, `INV-CCH-23`, `INV-CCH-24`, `INV-CCH-25`, `INV-CCH-26`, `INV-CCH-27`, `INV-CCH-28`, `INV-CCH-29`, `INV-CCH-30`.
 _Includes:_ `INTF-CCH-CCPOOL` or a configured command, per the role's own backing kind; `USECASE-CCH-RELEASE-END` for a role whose completion is `close-or-release`.
 
 1. The core dispatches one event under one tracking id to a bound role.
@@ -79,7 +79,7 @@ Extensions:
   capacity this module handles each such orphan of its own role (`INV-CCH-18`). An `idle` or
   `errored` one is closed (not purged), its bead claim released if the role's own actor still
   holds it, and its worktree removed; a `starting`, `ready` or `working` one past its time budget
-  is hard-stopped as a supervised session would be (`INV-CCH-11`), then its worktree is removed;
+  is hard-stopped as a supervised session would be (`INV-CCH-11`, `INV-CCH-12`), then its worktree is removed;
   an under-budget one, a `needs_input` one, and one with no lease are left alone (an under-budget
   `starting` or `ready` one is then closed and replaced, 2k). The freed pool slot is then
   available to this very dispatch. If this dispatch is instead a redelivery of the event an orphan
