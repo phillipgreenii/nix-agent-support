@@ -87,19 +87,38 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// registeredRuleUIDs are the Grafana rule UIDs this probe is scoped to
-// [design: Contract's "Grafana's alerting API" bullet]. Overridable via
-// --rule-uid so tests/fixtures never depend on a real Grafana deployment
-// having rules by these exact names. pg2-p93c0 deleted pg-router-backlog-growing;
-// pg2-o6z19 added pg-router-queue-stalled in its place (grafana/alerting/alerts.yaml
-// in packages/pg-router). pg2-irowq split the budget-exceeded cause out of
-// pg-router-failure-rate into pg-router-budget-stops (pg2-6k0l9 registered it
-// here). pg2-fy2pm registered pg-router-upstream-killed (the sustained-only rule
-// for killed gh calls, >= 10 in 30m, excluded from pg-router-failure-rate) so a
-// persistent GitHub outage still escalates through this path, as the original
-// pg-router-failure-rate page did (pg2-m6ei2). pg-router-triager-failures (pg2-u2yub) is deliberately NOT registered:
-// the probe files escalated beads/dispatches triagers, so probing triager
-// failures could feed a loop (operator decision pending).
+// registeredRuleUIDs are the Grafana rule UIDs this probe is scoped to when run
+// is given no --rule-uid [design: Contract's "Grafana's alerting API" bullet].
+// The rules live in grafana/alerting/alerts.yaml in packages/pg-router. The full
+// set, in registration order:
+//
+//   - pg-router-liveness-down: the daemon stopped ticking or its metrics
+//     endpoint is gone.
+//   - pg-router-queue-stalled: a type holds a backlog and nothing processes it.
+//     pg2-o6z19 added it in place of pg-router-backlog-growing, which pg2-p93c0
+//     deleted.
+//   - pg-router-queue-depth-growing: a type's queue builds up fast.
+//   - pg-router-failure-rate: the residual failure rate, by class and role.
+//   - pg-router-budget-stops: repeated session-budget hard stops, split out of
+//     pg-router-failure-rate by pg2-irowq (pg2-6k0l9 registered it).
+//   - pg-router-upstream-killed: the sustained-only rule for killed gh calls
+//     (>= 10 in 30m), excluded from pg-router-failure-rate, so a persistent
+//     GitHub outage still escalates through this path, as the original
+//     pg-router-failure-rate page did (pg2-m6ei2; pg2-fy2pm registered it).
+//   - pg-router-queue-slow-growth: a type's arrivals outpace its completions
+//     over 6h while its consumer IS working, which pg-router-queue-stalled
+//     cannot see (pg2-53n39 added it, pg2-fp65l registered it). The rule
+//     carries no escalation label, so its bead goes to the triager.
+//
+// pg-router-triager-failures (pg2-u2yub) is deliberately NOT registered: the
+// probe files escalated beads/dispatches triagers, so probing triager failures
+// could feed a loop (operator decision pending).
+//
+// Overridable via --rule-uid so tests/fixtures never depend on a real Grafana
+// deployment having rules by these exact names. Passing any --rule-uid
+// replaces this whole list rather than adding to it, so a deployment that
+// passes its own list (the consuming flake's pg-router-probe role does) scans
+// a uid added here only once its own list carries it too.
 var registeredRuleUIDs = []string{
 	"pg-router-liveness-down",
 	"pg-router-queue-stalled",
@@ -107,6 +126,7 @@ var registeredRuleUIDs = []string{
 	"pg-router-failure-rate",
 	"pg-router-budget-stops",
 	"pg-router-upstream-killed",
+	"pg-router-queue-slow-growth",
 }
 
 func defaultSnapshotPath() string {

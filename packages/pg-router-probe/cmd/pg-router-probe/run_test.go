@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -339,8 +340,10 @@ func TestParseBacklog(t *testing.T) {
 	}
 }
 
-// pg2-p93c0 / pg2-o6z19: the probe watches the rule that replaced the deleted
-// aggregate backlog rule, so a stalled queue still reaches the escalation flow.
+// The full registered set, in order (registeredRuleUIDs' comment says why each
+// uid is in it). pg2-p93c0 / pg2-o6z19: the probe watches the rule that
+// replaced the deleted aggregate backlog rule, so a stalled queue still reaches
+// the escalation flow. pg2-fp65l: and the slow-growth rule beside it.
 func TestRegisteredRuleUIDsTrackAlertRules(t *testing.T) {
 	want := []string{
 		"pg-router-liveness-down",
@@ -349,9 +352,75 @@ func TestRegisteredRuleUIDsTrackAlertRules(t *testing.T) {
 		"pg-router-failure-rate",
 		"pg-router-budget-stops",
 		"pg-router-upstream-killed",
+		"pg-router-queue-slow-growth",
 	}
 	if strings.Join(registeredRuleUIDs, ",") != strings.Join(want, ",") {
 		t.Fatalf("registeredRuleUIDs = %v, want %v", registeredRuleUIDs, want)
+	}
+}
+
+// pg2-fp65l: a firing pg-router-queue-slow-growth instance (the per-type rule
+// pg2-53n39 added) becomes a bead through the default registered set. The real
+// Grafana fetch passes it, and the probe files one bead labeled "escalated"
+// only, for the triager, keyed by the alert's fingerprint. A rule set without
+// the uid, which is what a deployment's own --rule-uid list that omits it
+// scans, files nothing.
+func TestRegisteredRuleUIDsFileQueueSlowGrowthBead(t *testing.T) {
+	srv := newAlertServer(t, `[{"labels":{"__alert_rule_uid__":"pg-router-queue-slow-growth","severity":"warning","type":"drain.pg2"},"startsAt":"2026-10-05T09:00:00Z","status":{"state":"active"}}]`)
+	defer srv.Close()
+	const wantFP = "pg-router-queue-slow-growth|__alert_rule_uid__=pg-router-queue-slow-growth,severity=warning,type=drain.pg2"
+	without := slices.DeleteFunc(slices.Clone(registeredRuleUIDs), func(uid string) bool {
+		return uid == "pg-router-queue-slow-growth"
+	})
+
+	for _, tc := range []struct {
+		name     string
+		ruleUIDs []string
+		creates  int
+	}{
+		{"default registered set", registeredRuleUIDs, 1},
+		{"set without the uid", without, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := episodeOpts(t)
+			opts.grafanaURL = srv.URL
+			opts.ruleUIDs = tc.ruleUIDs
+			spy := &spyDeps{fetchAlertsFn: defaultRunDeps("").fetchAlerts}
+			if err := tick(t, opts, spy, t0); err != nil {
+				t.Fatal(err)
+			}
+			if len(spy.created) != tc.creates {
+				t.Fatalf("created %d beads, want %d: %+v", len(spy.created), tc.creates, spy.created)
+			}
+			if tc.creates == 0 {
+				return
+			}
+			if got := spy.created[0].labels; !slices.Equal(got, []string{"escalated"}) {
+				t.Errorf("labels = %v, want [escalated]: the rule carries no escalation label", got)
+			}
+			if got := spy.created[0].metadata[metaFingerprint]; got != wantFP {
+				t.Errorf("fingerprint = %q, want %q", got, wantFP)
+			}
+		})
+	}
+}
+
+// The run verb scans registeredRuleUIDs when given no --rule-uid, and any
+// --rule-uid replaces that whole default rather than adding to it. A
+// deployment that passes its own list therefore scans a uid registered here
+// only once its own list carries it too (pg2-fp65l).
+func TestRunCmdRuleUIDFlagReplacesDefaults(t *testing.T) {
+	cmd := newRunCmd()
+	got, err := cmd.Flags().GetStringSlice("rule-uid")
+	if err != nil || !slices.Equal(got, registeredRuleUIDs) {
+		t.Fatalf("default --rule-uid = %v (err %v), want registeredRuleUIDs %v", got, err, registeredRuleUIDs)
+	}
+	if err := cmd.ParseFlags([]string{"--rule-uid", "pg-router-liveness-down"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err = cmd.Flags().GetStringSlice("rule-uid")
+	if err != nil || !slices.Equal(got, []string{"pg-router-liveness-down"}) {
+		t.Fatalf("--rule-uid pg-router-liveness-down gave %v (err %v), want only that uid", got, err)
 	}
 }
 
