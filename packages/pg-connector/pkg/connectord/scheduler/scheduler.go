@@ -186,8 +186,10 @@ type Scheduler struct {
 	execs   map[string]Executor
 	queue   map[key]*entry
 	running map[key]*Flight
-	seq     uint64
-	active  int
+	// runClass is the class each running task was dispatched as, for Inspect.
+	runClass map[key]governor.Class
+	seq      uint64
+	active   int
 	// hold maps a bucket and a foreground flag to the time before which the
 	// class group makes no further attempt, set by a governor refusal.
 	holdFG, holdBG map[governor.Bucket]time.Time
@@ -220,7 +222,8 @@ func New(opt Options) *Scheduler {
 	return &Scheduler{
 		opt: opt, clock: opt.Clock,
 		execs: map[string]Executor{}, queue: map[key]*entry{}, running: map[key]*Flight{},
-		holdFG: map[governor.Bucket]time.Time{}, holdBG: map[governor.Bucket]time.Time{},
+		runClass: map[key]governor.Class{},
+		holdFG:   map[governor.Bucket]time.Time{}, holdBG: map[governor.Bucket]time.Time{},
 		wake: make(chan struct{}, 1),
 	}
 }
@@ -434,6 +437,39 @@ func (s *Scheduler) Position(entity, group string) (int, bool) {
 		}
 	}
 	return rank, true
+}
+
+// Inspect reports the class of the task of (entity, group): the BEST (lowest)
+// class among the queued task and the running one, and whether a task is queued
+// and whether one is running. class is zero when neither exists. A caller that
+// must not downgrade or postpone urgent work (class 1 or 2) checks it first.
+func (s *Scheduler) Inspect(entity, group string) (class governor.Class, queued, running bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	k := key{entity, group}
+	if e, ok := s.queue[k]; ok {
+		class, queued = e.Class, true
+	}
+	if _, ok := s.running[k]; ok {
+		running = true
+		if rc := s.runClass[k]; class == 0 || rc < class {
+			class = rc
+		}
+	}
+	return class, queued, running
+}
+
+// InspectQueued reports the class of the QUEUED task of (entity, group) alone,
+// ignoring a running one: what an executor needs to decide whether the next
+// cycle it is about to book would replace urgent queued work.
+func (s *Scheduler) InspectQueued(entity, group string) (class governor.Class, queued bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e, ok := s.queue[key{entity, group}]
+	if !ok {
+		return 0, false
+	}
+	return e.Class, true
 }
 
 // Queued reports whether a task for (entity, group) is queued.

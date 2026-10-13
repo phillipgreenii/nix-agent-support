@@ -535,3 +535,68 @@ func TestRunDispatchesOnTheSystemClockAndStopsOnCancel(t *testing.T) {
 		t.Fatal("Run did not stop")
 	}
 }
+
+func TestInspectReportsTheBestClassOfTheQueuedAndTheRunningTask(t *testing.T) {
+	release := make(chan struct{})
+	entered := make(chan struct{})
+	e := &fakeExec{max: 1}
+	e.fn = func(items []Item) []Result {
+		close(entered)
+		<-release
+		return make([]Result, len(items))
+	}
+	s, _ := newSched(t, Options{Workers: 2}, e)
+	if c, q, r := s.Inspect("e", "g"); c != 0 || q || r {
+		t.Fatalf("Inspect of nothing = %v %v %v", c, q, r)
+	}
+	mustSubmit(t, s, task("e", governor.ClassKeepAlive, t0))
+	if c, q, r := s.Inspect("e", "g"); c != governor.ClassKeepAlive || !q || r {
+		t.Fatalf("queued class 4: Inspect = %v %v %v", c, q, r)
+	}
+	if c, q := s.InspectQueued("e", "g"); c != governor.ClassKeepAlive || !q {
+		t.Fatalf("InspectQueued = %v %v", c, q)
+	}
+	s.Step(context.Background())
+	<-entered
+	if c, q, r := s.Inspect("e", "g"); c != governor.ClassKeepAlive || q || !r {
+		t.Fatalf("running class 4: Inspect = %v %v %v", c, q, r)
+	}
+	if _, q := s.InspectQueued("e", "g"); q {
+		t.Fatal("InspectQueued must ignore the running task")
+	}
+	// A second task queued for the pair while one runs: the best class wins.
+	mustSubmit(t, s, task("e", governor.ClassInvalidated, t0))
+	if c, q, r := s.Inspect("e", "g"); c != governor.ClassInvalidated || !q || !r {
+		t.Fatalf("queued class 2 over running class 4: Inspect = %v %v %v", c, q, r)
+	}
+	close(release)
+	s.Wait()
+	if c, q, r := s.Inspect("e", "g"); c != governor.ClassInvalidated || !q || r {
+		t.Fatalf("after the run the class 2 task remains: Inspect = %v %v %v", c, q, r)
+	}
+}
+
+func TestInspectOfARunningClass1TaskBeatsAQueuedBackgroundTask(t *testing.T) {
+	release := make(chan struct{})
+	entered := make(chan struct{})
+	e := &fakeExec{max: 1}
+	e.fn = func(items []Item) []Result {
+		close(entered)
+		<-release
+		return make([]Result, len(items))
+	}
+	s, _ := newSched(t, Options{Workers: 2}, e)
+	f, _ := s.SubmitInteractive(Task{Kind: "k", Entity: "e", Group: "g"})
+	s.Step(context.Background())
+	<-entered
+	mustSubmit(t, s, task("e", governor.ClassQuery, t0)) // queued for after the run
+	if c, q, r := s.Inspect("e", "g"); c != governor.ClassInteractive || !q || !r {
+		t.Fatalf("Inspect = %v %v %v, want class 1 queued and running", c, q, r)
+	}
+	if c, q := s.InspectQueued("e", "g"); c != governor.ClassQuery || !q {
+		t.Fatalf("InspectQueued = %v %v, want the class 3 task alone", c, q)
+	}
+	close(release)
+	s.Wait()
+	<-f.Done()
+}

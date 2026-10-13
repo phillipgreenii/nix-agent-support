@@ -119,6 +119,7 @@ func (s *Scheduler) nextBatch(now time.Time) *batch {
 			}
 			f.start(now)
 			s.running[e.key()] = f
+			s.runClass[e.key()] = e.Class
 			b.items = append(b.items, Item{Task: e.Task, Role: roles[i]})
 			b.flights = append(b.flights, f)
 			bs.Items = append(bs.Items, BatchItem{Entity: e.Entity, Group: e.Group, Class: e.Class, Role: roles[i]})
@@ -239,6 +240,7 @@ func (s *Scheduler) finish(b *batch, res []Result) {
 	for i, it := range b.items {
 		k := it.Task.key()
 		delete(s.running, k)
+		delete(s.runClass, k)
 		r := res[i]
 		var refusal *governor.Refusal
 		switch {
