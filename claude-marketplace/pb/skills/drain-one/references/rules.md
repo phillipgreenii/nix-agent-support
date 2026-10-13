@@ -14,9 +14,12 @@ Read in full BEFORE step 4 (DELEGATE) of `SKILL.md`. These are the per-bead rule
   command never has. This is orthogonal to, and MUST NOT be confused with, a
   DISPATCHED subagent's own backgrounded Bash/Monitor calls (e.g. an
   implementer's backgrounded `nix build .#checks.<system>.<name>`) — the
-  notification-resumes-you mechanism applies only to YOU, the top-level orchestrator, waiting on your own Agent-tool dispatch;
-  a subagent gets no such notification for its own child and MUST block on it
-  itself via `Monitor` in the same turn (see step 4's worked example).
+  notification-resumes-you mechanism covers an agent waiting on its own Agent-tool dispatch, which
+  for the implementation and lander subagents you dispatch means YOU, the top-level orchestrator;
+  a subagent gets no such notification for its own backgrounded Bash/Monitor work and MUST block
+  on that itself via `Monitor` in the same turn (see step 4's worked example). A subagent that
+  dispatches Agent children of its own (e.g. the plan-decompose decomposer agents) is the
+  exception: it waits for them by ending its turn, and each child's hand-back resumes it.
 - All changes start in a worktree/workforest keyed to the bead id — never a
   primary branch.
 - Land-then-teardown is ORDERED for a workforest set: every member repo MUST land

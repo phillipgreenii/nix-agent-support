@@ -106,15 +106,22 @@ Read in full when step 4 of `SKILL.md` applies. Moved verbatim from /drain-beads
      worktree/repo on its own initiative — if verifying a live-host fact seems
      necessary, say so in the report and let the orchestrator decide whether to
      authorize it, rather than doing it unilaterally (bead `tc-h6ty`); report
-     fully in ONE turn (no waiting/monitoring across turns).
+     fully in ONE turn (no waiting/monitoring across turns). This covers
+     backgrounded shell commands; an agent that dispatches Agent children (e.g.
+     the plan-decompose decomposer agents) waits for them by ending its turn,
+     and a brief MUST NOT tell it otherwise.
    - **if it backgrounds a command, IT must stay in its own execution — keep
      calling tools — until that command resolves, using a `Monitor` call with
      an until-loop to detect completion; it MUST NOT send a final response
      that stops short of that and says something like "I'll wait for the
-     Monitor notification to arrive."** A dispatched (non-top-level) agent's
+     Monitor notification to arrive."** This rule covers backgrounded shell
+     commands; an agent that dispatches Agent children (e.g. the plan-decompose
+     decomposer agents) waits for them by ending its turn, and a brief MUST NOT
+     tell it otherwise. A dispatched (non-top-level) agent's
      own invocation is a bounded request/response: the moment it stops calling
-     tools and returns final text, that invocation is OVER, permanently — there
-     is no later resumption, unlike the top-level orchestrating session, whose
+     tools and returns final text with no Agent children of its own still
+     running, that invocation is OVER, permanently — there is no later
+     resumption, unlike the top-level orchestrating session, whose
      own turn genuinely does end and get resumed by a task-notification. A
      `Monitor` call with an until-loop returns an immediate "started, you'll be
      notified" acknowledgment (it does NOT hand back the result inline) — the
@@ -212,7 +219,10 @@ Read in full when step 4 of `SKILL.md` applies. Moved verbatim from /drain-beads
    heuristic pattern-match, not an exhaustive enumeration — e.g. "I'll wait",
    "once it resolves", "when the notification arrives", "I'll resume once",
    "I'll continue once", or similar phrasing suggesting the agent ended its turn
-   expecting an external notification rather than continuing to call tools. A
+   expecting an external notification rather than continuing to call tools. This
+   check covers backgrounded shell commands; an agent that dispatches Agent
+   children (e.g. the plan-decompose decomposer agents) waits for them by ending
+   its turn, and a brief MUST NOT tell it otherwise. A
    match MUST NOT be treated as final: immediately (same turn, before doing
    anything else with the report) resend a correction via `SendMessage` to that
    SAME agent, addressed by its id/name, telling it there is no notification

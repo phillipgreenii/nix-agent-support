@@ -79,10 +79,18 @@ it by searching disk is both slower and redundant.
   for a human.
 - Your brief MUST state absolute repo roots; pass them through to every sub-dispatch.
 - Sub-dispatches (cold-reader, semantic post-checker) go through the Agent tool ONLY — never a
-  headless CLI subprocess, never backgrounded, never polled. An Agent call's result comes back
-  like any other tool result: issue the call and use what it returns. If you find yourself
-  writing a wait loop, a "check again" step, or reaching for `claude -p`, stop — that is the
-  sign the dispatch should have been an Agent call instead.
+  headless CLI subprocess such as `claude -p`.
+- **Waiting for sub-agents.** If an Agent call's result says "Async agent launched", the child
+  runs in the background and its report arrives later as a message from it. To wait, end your
+  turn while at least one child is still running; each child's report resumes you, and your own
+  dispatcher is not notified while you have children running. You MUST NOT poll for a child: no
+  sleep or `timeout … tail -f /dev/null` waits, no loops over its output or transcript file, no
+  `Monitor`. Dispatch independent children in one turn. When resumed while other children of the
+  same round are still running and there is nothing to act on yet, end the turn again with one
+  line and no tool calls; act on the round once every report is in. Never end a turn to wait
+  when no child is running. This overrides brief wording such as "never end your turn" or "keep
+  calling tools", which is about backgrounded shell commands, not Agent children. Your run ends
+  when you hand back your final report.
 
 ## Fixed sub-dispatch templates
 
