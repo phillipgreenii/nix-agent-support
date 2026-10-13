@@ -95,24 +95,13 @@ it by searching disk is both slower and redundant.
 ## Fixed sub-dispatch templates
 
 Use these verbatim prompt shapes so runs are comparable. Both sub-agents are READ-ONLY and MUST
-report fully in one turn (no waiting, no Monitor, no further sub-agents) — state that
-constraint in the prompt itself, since a fresh sub-agent has no other way to know it.
+report fully in one turn (no waiting, no Monitor, no further sub-agents). The cold-reader agent
+file states that itself; for the post-checker, state the constraint in the prompt itself, since
+a fresh sub-agent has no other way to know it.
 
-**Cold-reader** (one Agent call per packet; `model: haiku`; no `subagent_type` — a fresh,
-context-free agent is the point, and it needs no repo access since the packet text is inline).
-Dispatch every packet's cold-read as parallel Agent calls in a SINGLE assistant turn (one turn,
-N calls) — never one packet at a time, and never re-dispatch a packet that was not edited since
-its last cold-read:
-
-> You are simulating an implementer with NO other context. Below is the complete text of one
-> work packet. Answer strictly: (1) `executable: yes|no` — could you complete this work from
-> this text plus the files it names? (2) `missing:` — every piece of information you would
-> need but do not have (contracts, paths, commands, expected results, definitions). (3)
-> `unpinned-assumptions:` — any assumption you had to make about a sibling packet's
-> Consumes/Produces shape that this text does not pin down explicitly (not the design, not a
-> predecessor's Produces). Do not read any file or issue; judge the text alone. Report all
-> three answers in this one turn.
-> [packet content]
+**Cold-reader**: dispatched exactly as SKILL.md step 6 states (`plan-decompose:cold-reader`,
+prompt = the packet's body-file and acceptance-file paths only); its instructions live in
+`agents/cold-reader.md`.
 
 **Semantic post-checker** (one Agent call per fix round; `subagent_type:
 "plan-decompose:semantic-post-checker"`, `model: sonnet` — that agent is read-only by tool

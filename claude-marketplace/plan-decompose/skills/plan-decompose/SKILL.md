@@ -284,14 +284,21 @@ deduplication.
    packets that step 3 did not fold raises a hoisting flag (advisory, reported, never
    blocking). Failures loop to step 3 (content-only; `pd_curated_rev` is write-once — see
    step 3).
-6. **Cold-read check** (one cheap-model agent per packet, read-only): input is the packet
-   content ONLY; output `executable: yes|no` + `missing:` list, plus any assumption the
-   reader had to make about a sibling packet's Consumes/Produces shape that is not pinned by
-   the design or a predecessor's Produces. Dispatch one round's cold-reads as multiple Agent
-   tool_use blocks in a SINGLE turn — never one dispatch-and-wait per turn. Any packet EDITED
-   after its cold-read MUST be cold-read again AND re-sized — an editor holding the full
-   design cannot certify self-containment. This edit is content-only, per step 3;
-   `pd_curated_rev` is write-once and stays untouched.
+6. **Cold-read check** (one cheap-model agent per packet, read-only): input is the packet's
+   stored text only, delivered by file path; output `executable: yes|no` + `missing:` list,
+   plus any assumption the reader had to make about a sibling packet's Consumes/Produces shape
+   that is not pinned by the design or a predecessor's Produces. Dispatch each packet as an
+   Agent call with `subagent_type: "plan-decompose:cold-reader"` (`model` only when the brief
+   overrides the haiku tier) and a prompt of ONLY two paths: the packet's body file and
+   acceptance file — the same files passed to `create-packet.sh` (`--body-file`,
+   `--acceptance-file`) or to the fix-loop `bd update` (criteria passed inline are first
+   written to an acceptance file), so the reader judges the stored text;
+   never paste packet text into the prompt (the reader's own agent file carries its
+   instructions). Dispatch one round's cold-reads as multiple Agent tool_use blocks in a SINGLE
+   turn — never one dispatch-and-wait per turn — and never re-read a packet not edited since
+   its last cold-read. Any packet EDITED after its cold-read MUST be cold-read again AND
+   re-sized — an editor holding the full design cannot certify self-containment. This edit is
+   content-only, per step 3; `pd_curated_rev` is write-once and stays untouched.
 7. **Semantic post-check** (one mid-model fresh-eyes agent, read-only; the one role that
    reads the full design AND all packets): (a) coverage both directions — every design
    element lands in a packet or is recorded via `write-report` as deliberately not
