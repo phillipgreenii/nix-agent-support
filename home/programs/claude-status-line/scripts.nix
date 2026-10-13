@@ -169,6 +169,14 @@ let
   contextPart = pkgs.writeShellScript "claude-sl-context" ''
     ${ansiColors}
     [ -n "$CLAUDE_SL_CONTEXT_USED_PCT" ] || exit 1
+    # Right after a compaction Claude reports a literal 0% (not null) with no input tokens yet,
+    # while exceeds_200k_tokens is still the stale cached true. Show a dim placeholder and NO
+    # alert until the next API response repopulates the numbers. The check lives here because
+    # the empty-string guard above does not catch the non-empty string "0".
+    if [ "$CLAUDE_SL_CONTEXT_SETTLING" = "true" ]; then
+      printf "''${DIM}${glyphCtx}...''${RESET}"
+      exit 0
+    fi
     used_int=''${CLAUDE_SL_CONTEXT_USED_PCT%.*}
     if [ "$used_int" -ge 75 ] 2>/dev/null; then
       ctx_color="''${RED}"
@@ -369,6 +377,7 @@ let
       export CLAUDE_SL_VERSION
       export CLAUDE_SL_MODEL
       export CLAUDE_SL_CONTEXT_USED_PCT
+      export CLAUDE_SL_CONTEXT_SETTLING
       export CLAUDE_SL_EXCEEDS_200K
       export CLAUDE_SL_REPO_OWNER
       export CLAUDE_SL_REPO_NAME
@@ -399,6 +408,7 @@ let
         @sh "CLAUDE_SL_VERSION=\(.version // "")",
         @sh "CLAUDE_SL_MODEL=\(.model.display_name // "")",
         @sh "CLAUDE_SL_CONTEXT_USED_PCT=\(.context_window.used_percentage // "")",
+        @sh "CLAUDE_SL_CONTEXT_SETTLING=\((.context_window.used_percentage == 0 and (((.context_window.current_usage | type) != "object") or (((.context_window.current_usage.input_tokens // 0) + (.context_window.current_usage.cache_creation_input_tokens // 0) + (.context_window.current_usage.cache_read_input_tokens // 0)) == 0))) | tostring)",
         @sh "CLAUDE_SL_EXCEEDS_200K=\(.exceeds_200k_tokens // false | tostring)",
         @sh "CLAUDE_SL_REPO_OWNER=\(.workspace.repo.owner // "")",
         @sh "CLAUDE_SL_REPO_NAME=\(.workspace.repo.name // "")",

@@ -229,6 +229,114 @@ strip_ansi() {
   nerd_off || [[ "$stripped" != *"$GLYPH_CTX"* ]]
 }
 
+# Context "settling" state (bead pg2-thkh0.2): right after a compaction Claude reports a literal
+# used_percentage of 0 with no input tokens yet, while exceeds_200k_tokens is still the stale
+# cached true. The context part prints a dim placeholder and NO alert instead of "0%" + alert.
+
+@test "context shows dim placeholder and no alert when usage is zero (all-zero current_usage)" {
+  J='{"session_id":"s1","version":"1.0.0","exceeds_200k_tokens":true,"workspace":{"current_dir":"/tmp/potato"},"model":{"display_name":"Opus"},"context_window":{"used_percentage":0,"current_usage":{"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}'
+  run bash -c "echo '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  if nerd_on; then
+    [[ "$stripped" == *"$GLYPH_CTX ..."* ]]
+    [[ "$stripped" != *"$GLYPH_ALERT"* ]]
+  else
+    [[ "$stripped" == *"ctx:..."* ]]
+  fi
+  [[ "$stripped" != *"0%"* ]]
+  [[ "$stripped" != *"(!)"* ]]
+  # dim styling via the named dim key, directly before the placeholder
+  if nerd_on; then
+    [[ "$output" == *$'\033[2m'"$GLYPH_CTX ..."* ]]
+  else
+    [[ "$output" == *$'\033[2m'"ctx:..."* ]]
+  fi
+}
+
+@test "context shows placeholder and no alert when used_percentage 0 and current_usage absent" {
+  J='{"session_id":"s1","version":"1.0.0","exceeds_200k_tokens":true,"workspace":{"current_dir":"/tmp/potato"},"model":{"display_name":"Opus"},"context_window":{"used_percentage":0}}'
+  run bash -c "echo '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  if nerd_on; then
+    [[ "$stripped" == *"$GLYPH_CTX ..."* ]]
+    [[ "$stripped" != *"$GLYPH_ALERT"* ]]
+  else
+    [[ "$stripped" == *"ctx:..."* ]]
+  fi
+  [[ "$stripped" != *"0%"* ]]
+  [[ "$stripped" != *"(!)"* ]]
+}
+
+@test "context shows placeholder when used_percentage 0 and current_usage null" {
+  J='{"session_id":"s1","version":"1.0.0","workspace":{"current_dir":"/tmp/potato"},"model":{"display_name":"Opus"},"context_window":{"used_percentage":0,"current_usage":null}}'
+  run bash -c "echo '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  if nerd_on; then
+    [[ "$stripped" == *"$GLYPH_CTX ..."* ]]
+  else
+    [[ "$stripped" == *"ctx:..."* ]]
+  fi
+  [[ "$stripped" != *"0%"* ]]
+}
+
+@test "context keeps alert when exceeds_200k_tokens true and usage is nonzero" {
+  J='{"session_id":"s1","version":"1.0.0","exceeds_200k_tokens":true,"workspace":{"current_dir":"/tmp/potato"},"model":{"display_name":"Opus"},"context_window":{"used_percentage":12,"current_usage":{"input_tokens":1200,"output_tokens":50,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}'
+  run bash -c "echo '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" != *"..."* ]]
+  if nerd_on; then
+    [[ "$stripped" == *"12% $GLYPH_ALERT"* ]]
+  else
+    [[ "$stripped" == *"ctx:12%(!)"* ]]
+  fi
+}
+
+@test "context shows 0% (not the placeholder) when used_percentage 0 but current_usage is small and nonzero" {
+  # A 1M window rounds a small nonzero usage to 0%; the alert is NOT inferred away.
+  J='{"session_id":"s1","version":"1.0.0","exceeds_200k_tokens":true,"workspace":{"current_dir":"/tmp/potato"},"model":{"display_name":"Opus"},"context_window":{"used_percentage":0,"current_usage":{"input_tokens":3,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}'
+  run bash -c "echo '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" != *"..."* ]]
+  if nerd_on; then
+    [[ "$stripped" == *"$GLYPH_CTX 0% $GLYPH_ALERT"* ]]
+  else
+    [[ "$stripped" == *"ctx:0%(!)"* ]]
+  fi
+}
+
+@test "context shows 0% when used_percentage 0 and only cache_read_input_tokens is nonzero" {
+  J='{"session_id":"s1","version":"1.0.0","workspace":{"current_dir":"/tmp/potato"},"model":{"display_name":"Opus"},"context_window":{"used_percentage":0,"current_usage":{"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":5}}}'
+  run bash -c "echo '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" != *"..."* ]]
+  [[ "$stripped" == *"0%"* ]]
+}
+
+@test "context shows percentage when used_percentage nonzero and current_usage is empty object" {
+  J='{"session_id":"s1","version":"1.0.0","workspace":{"current_dir":"/tmp/potato"},"model":{"display_name":"Opus"},"context_window":{"used_percentage":25,"current_usage":{}}}'
+  run bash -c "echo '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" == *"25%"* ]]
+  [[ "$stripped" != *"..."* ]]
+}
+
+@test "context segment still hidden when used_percentage and current_usage are both null" {
+  J='{"session_id":"s1","version":"1.0.0","exceeds_200k_tokens":true,"workspace":{"current_dir":"/tmp/potato"},"model":{"display_name":"Opus"},"context_window":{"used_percentage":null,"current_usage":null}}'
+  run bash -c "echo '$J' | claude-status-line"
+  [ "$status" -eq 0 ]
+  stripped=$(strip_ansi "$output")
+  [[ "$stripped" != *"%"* ]]
+  [[ "$stripped" != *"..."* ]]
+  nerd_off || [[ "$stripped" != *"$GLYPH_CTX"* ]]
+}
+
 # =====================================================================================
 # Session segments (name is its own segment; id is ALWAYS its own segment)
 # =====================================================================================
