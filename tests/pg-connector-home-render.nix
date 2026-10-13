@@ -11,37 +11,54 @@
 # registration (base_url, real queries) lives in the consuming machine flake.
 { lib, pkgs }:
 let
-  render =
-    cfg:
-    let
-      evaluated = lib.evalModules {
-        specialArgs = { inherit pkgs lib; };
-        modules = [
-          ../home/programs/pg-connector/default.nix
-          (
-            { lib, ... }:
-            {
-              options = {
-                home.packages = lib.mkOption {
-                  type = lib.types.listOf lib.types.anything;
-                  default = [ ];
-                };
-                xdg.configFile = lib.mkOption {
-                  type = lib.types.attrsOf lib.types.anything;
-                  default = { };
-                };
-              };
-            }
-          )
+  # evaluate: the whole evaluated module set, for a scenario's cfg and an
+  # osConfig (null models a standalone home-manager activation).
+  evaluate =
+    cfg: osConfig:
+    lib.evalModules {
+      # home-manager always passes osConfig (null for a standalone activation),
+      # so the stub does too; the module cannot rely on its `? null` default
+      # under a bare lib.evalModules.
+      specialArgs = {
+        inherit pkgs lib osConfig;
+      };
+      modules = [
+        ../home/programs/pg-connector/default.nix
+        (
+          { lib, ... }:
           {
-            phillipgreenii.programs.pg-connector = cfg // {
-              enable = true;
+            options = {
+              home.packages = lib.mkOption {
+                type = lib.types.listOf lib.types.anything;
+                default = [ ];
+              };
+              xdg.configFile = lib.mkOption {
+                type = lib.types.attrsOf lib.types.anything;
+                default = { };
+              };
+              # Declared by home-manager itself: the module reads the home
+              # directory for the daemon's absolute state path and appends to
+              # warnings when the registry rewrite is withheld.
+              home.homeDirectory = lib.mkOption {
+                type = lib.types.str;
+                default = "/example/home";
+              };
+              warnings = lib.mkOption {
+                type = lib.types.listOf lib.types.str;
+                default = [ ];
+              };
             };
           }
-        ];
-      };
-    in
-    evaluated.config.xdg.configFile."pg-pr/config.yaml".source;
+        )
+        {
+          phillipgreenii.programs.pg-connector = cfg // {
+            enable = true;
+          };
+        }
+      ];
+    };
+
+  render = cfg: (evaluate cfg null).config.xdg.configFile."pg-pr/config.yaml".source;
 
   # Every pre-alert capability and key the module still renders. The deadline
   # keys (`attention.perBackend.<name>.threshold`/`exclude`) are not among
@@ -179,11 +196,230 @@ let
     };
   };
 
+  # ---- pg-connector-github (docket pg2-z5fax, Phase 2) ----------------------
+  # One registration of the two old GitHub instance names in EVERY registry
+  # list, plus an unrelated plain-string name next to them. EXAMPLE values only.
+  githubRegistry = {
+    connector = {
+      pr = [ "pg-connector-pr-github" ];
+      ci = [ "pg-connector-ci-github-actions" ];
+    };
+    search.sources = [ "pg-connector-pr-github" ];
+    activity.sources = [ "pg-connector-pr-github" ];
+    attention.sources = [
+      "pg-connector-issue-beads"
+      "pg-connector-pr-github"
+    ];
+    backends."pg-connector-pr-github" = {
+      queries = {
+        mine = "is:pr is:open author:@me";
+        team = [
+          "is:pr is:open review-requested:@me"
+          "is:pr is:open assignee:@me"
+        ];
+      };
+      rate_reserve_points = 500;
+    };
+    backends."pg-connector-ci-github-actions".example_key = "example-value";
+  };
+  githubOn = {
+    enable = true;
+    host = "github.example.invalid";
+    supervisor = "launchd";
+  };
+  # A system scope whose observability stack answers mkEmitterEnv.
+  osWithObs = {
+    phillipgreenii.observability.mkEmitterEnv = _: {
+      OTEL_EXPORTER_OTLP_ENDPOINT = "http://otel.example.invalid:4317";
+    };
+  };
+
+  ghCase = github: osConfig: evaluate (githubRegistry // { inherit github; }) osConfig;
+  ghEnabled = ghCase githubOn osWithObs;
+  ghEnabledNoOs = ghCase githubOn null;
+  ghEnabledEmptyOs = ghCase githubOn { };
+  # Supervisor none and no allowUnsupervised: binary and config, no rewrite.
+  ghUnsupervised = ghCase (
+    githubOn
+    // {
+      supervisor = "none";
+    }
+  ) osWithObs;
+  ghUnsupervisedAllowed = ghCase (
+    githubOn
+    // {
+      supervisor = "none";
+      allowUnsupervised = true;
+    }
+  ) osWithObs;
+  ghDisabled = ghCase { enable = false; } osWithObs;
+  # No github.* attribute at all: today's configuration.
+  ghAbsent = evaluate githubRegistry null;
+
+  rc = e: e.config.phillipgreenii.programs.pg-connector.renderedConfig;
+  ghOpts = e: e.config.phillipgreenii.programs.pg-connector.github;
+  pkgNames = e: map (p: p.name or (toString p)) e.config.home.packages;
+  installsDaemon = e: builtins.elem (ghOpts e).package.name (pkgNames e);
+  entry = name: kind: e: {
+    inherit name;
+    command = [
+      "pg-connector-github"
+      "--config"
+      (toString (ghOpts e).configFile)
+      kind
+    ];
+  };
+  prEntry = entry "pg-connector-pr-github" "pr";
+  ciEntry = entry "pg-connector-ci-github-actions" "ci";
+  # The argv of every occurrence of the two old names in a rendered registry.
+  occurrences =
+    r:
+    builtins.filter
+      (
+        x:
+        builtins.isAttrs x
+        && (x.name == "pg-connector-pr-github" || x.name == "pg-connector-ci-github-actions")
+      )
+      (
+        r.connector.pr or [ ]
+        ++ r.connector.ci or [ ]
+        ++ r.search.sources or [ ]
+        ++ r.activity.sources or [ ]
+        ++ r.attention.sources or [ ]
+      );
+  oldRegistry = {
+    connector = {
+      pr = [ "pg-connector-pr-github" ];
+      ci = [ "pg-connector-ci-github-actions" ];
+    };
+    search.sources = [ "pg-connector-pr-github" ];
+    activity.sources = [ "pg-connector-pr-github" ];
+    attention.sources = [
+      "pg-connector-issue-beads"
+      "pg-connector-pr-github"
+    ];
+  };
+  registryOf = r: {
+    inherit (r)
+      connector
+      search
+      activity
+      attention
+      ;
+  };
+  noStamp =
+    e:
+    !(builtins.any (n: (rc e).backends.${n} ? config_hash || (rc e).backends.${n} ? config_path) [
+      "pg-connector-pr-github"
+      "pg-connector-ci-github-actions"
+    ]);
+  stamped =
+    e:
+    builtins.all
+      (
+        n:
+        (rc e).backends.${n}.config_hash == (ghOpts e).configHash
+        && (rc e).backends.${n}.config_path == toString (ghOpts e).configFile
+      )
+      [
+        "pg-connector-pr-github"
+        "pg-connector-ci-github-actions"
+      ];
+
+  githubCases = {
+    # github.enable = false (and no github.* at all): the registry, the
+    # installed packages and the blocks are exactly today's.
+    disabledRegistryUnchanged = registryOf (rc ghDisabled) == oldRegistry;
+    absentRegistryUnchanged = registryOf (rc ghAbsent) == oldRegistry;
+    disabledPackagesIdentical =
+      map (p: p.drvPath) ghDisabled.config.home.packages
+      == map (p: p.drvPath) ghAbsent.config.home.packages
+      && !(installsDaemon ghDisabled);
+    disabledRenderedIdentical = rc ghDisabled == rc ghAbsent;
+    disabledNoStampNoWarning = noStamp ghDisabled && ghDisabled.config.warnings == [ ];
+
+    # Enabled under launchd: every occurrence of both old names in every list
+    # carries the argv form with ONE --config path, the names are unchanged.
+    enabledPr = (rc ghEnabled).connector.pr == [ (prEntry ghEnabled) ];
+    enabledCi = (rc ghEnabled).connector.ci == [ (ciEntry ghEnabled) ];
+    enabledSearch = (rc ghEnabled).search.sources == [ (prEntry ghEnabled) ];
+    enabledActivity = (rc ghEnabled).activity.sources == [ (prEntry ghEnabled) ];
+    enabledAttention =
+      (rc ghEnabled).attention.sources == [
+        "pg-connector-issue-beads"
+        (prEntry ghEnabled)
+      ];
+    enabledOccurrenceCount = builtins.length (occurrences (rc ghEnabled)) == 5;
+    enabledOneConfigPath =
+      builtins.length (lib.unique (map (x: builtins.elemAt x.command 2) (occurrences (rc ghEnabled))))
+      == 1;
+    enabledPathIsStorePath = lib.hasPrefix builtins.storeDir (toString (ghOpts ghEnabled).configFile);
+    enabledStamped = stamped ghEnabled;
+    enabledInstallsDaemon = installsDaemon ghEnabled;
+    enabledNoWarning = ghEnabled.config.warnings == [ ];
+    # the old backends stay installed (rollback)
+    enabledKeepsOldPackages =
+      builtins.elem pkgs.pg-connector-pr-github.name (pkgNames ghEnabled)
+      && builtins.elem pkgs.pg-connector-ci-github-actions.name (pkgNames ghEnabled);
+    # the queries and the other block keys survive the stamp
+    enabledBlockKeepsKeys =
+      (rc ghEnabled).backends."pg-connector-pr-github".queries.mine == "is:pr is:open author:@me"
+      && (rc ghEnabled).backends."pg-connector-ci-github-actions".example_key == "example-value";
+
+    # supervisor = none, no allowUnsupervised: binary and config installed,
+    # old backends kept exactly, no stamp, and the evaluation warning.
+    unsupervisedInstalls = installsDaemon ghUnsupervised;
+    unsupervisedKeepsRegistry = registryOf (rc ghUnsupervised) == oldRegistry;
+    unsupervisedNoStamp = noStamp ghUnsupervised;
+    unsupervisedWarns =
+      builtins.length ghUnsupervised.config.warnings == 1
+      && lib.hasInfix "allowUnsupervised" (builtins.head ghUnsupervised.config.warnings);
+    unsupervisedHasConfigPath = lib.hasPrefix builtins.storeDir (
+      toString (ghOpts ghUnsupervised).configFile
+    );
+    # ... and allowUnsupervised rewrites it anyway.
+    allowedRewrites =
+      (rc ghUnsupervisedAllowed).connector.pr == [ (prEntry ghUnsupervisedAllowed) ]
+      && (rc ghUnsupervisedAllowed).connector.ci == [ (ciEntry ghUnsupervisedAllowed) ]
+      && builtins.length (occurrences (rc ghUnsupervisedAllowed)) == 5
+      && stamped ghUnsupervisedAllowed;
+    allowedNoWarning = ghUnsupervisedAllowed.config.warnings == [ ];
+
+    # An absent or observability-less system scope renders (no endpoint) and
+    # does not fail evaluation.
+    nullOsConfigRenders = (rc ghEnabledNoOs).connector.pr == [ (prEntry ghEnabledNoOs) ];
+    emptyOsConfigRenders = (rc ghEnabledEmptyOs).connector.pr == [ (prEntry ghEnabledEmptyOs) ];
+    # The stamp (hash and path) follows the content: an OTel endpoint is part of
+    # the daemon config, so it changes both.
+    configFollowsContent =
+      (ghOpts ghEnabled).configHash != (ghOpts ghEnabledNoOs).configHash
+      && (ghOpts ghEnabled).configFile != (ghOpts ghEnabledNoOs).configFile;
+    # The unsupervised registry rewrite does not depend on the supervisor: the
+    # same settings give the same config path.
+    configIndependentOfSupervisor =
+      (ghOpts ghEnabled).configFile == (ghOpts ghUnsupervisedAllowed).configFile;
+  };
+
   # A malformed instance (missing command, or an empty one) must FAIL
   # evaluation, never render a half-entry the registry would reject later.
   renders = cfg: (builtins.tryEval (builtins.deepSeq (render cfg).drvPath true)).success;
 in
 {
+  # github.enable = false renders the legacy golden byte for byte.
+  legacyGithubDisabled = render (legacy // { github.enable = false; });
+  # The pg-connector-github cases: name -> bool, and the failing names.
+  inherit githubCases;
+  githubFailures = builtins.attrNames (lib.filterAttrs (_: ok: !ok) githubCases);
+  # Rendered daemon configs (store paths) and the values the shell side of the
+  # check compares them against.
+  github = {
+    enabled = (ghOpts ghEnabled).configFile;
+    enabledHash = (ghOpts ghEnabled).configHash;
+    enabledNoOs = (ghOpts ghEnabledNoOs).configFile;
+    enabledRegistry = render (githubRegistry // { github = githubOn; });
+    package = pkgs.pg-connector-github;
+    ghPath = lib.getExe pkgs.gh;
+  };
   # Instances in every registration, alongside plain strings.
   instances = render instancesExample;
   # Beads attention_labels render per instance next to the registrations.

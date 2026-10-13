@@ -2,10 +2,107 @@
   config,
   lib,
   pkgs,
+  # Set by the nix-darwin / NixOS home-manager integration; null for a
+  # standalone home-manager activation (no system scope to read from).
+  osConfig ? null,
   ...
 }:
 let
   cfg = config.phillipgreenii.programs.pg-connector;
+  gh = cfg.github;
+
+  # ---- pg-connector-github (docket pg2-z5fax, Phase 2) ----------------------
+  # The two OLD GitHub instance names. Option A of the design's Registration
+  # rule keeps them: every `--backend` pin, `sources[]` row, ledger key and
+  # `backends.<name>` block stays valid, while the command behind each name
+  # becomes the daemon's client mode (`pr` or `ci`).
+  githubInstances = {
+    "pg-connector-pr-github" = "pr";
+    "pg-connector-ci-github-actions" = "ci";
+  };
+
+  # The registry is rewritten only when the daemon will actually be supervised
+  # (or the operator opted out of that safety with allowUnsupervised), so a
+  # shared home-manager config that sets `enable = true` cannot turn a host with
+  # no supervisor into a client with no daemon.
+  rewriteRegistry = gh.enable && (gh.supervisor != "none" || gh.allowUnsupervised);
+
+  # OTel settings come from the system-scope observability stack, read
+  # null-safely (same convention as home/programs/pa-monitor): an absent
+  # osConfig, an absent `phillipgreenii.observability`, or a stack without
+  # `mkEmitterEnv` all mean "no OTel endpoint" and never fail evaluation.
+  obs = if osConfig == null then { } else osConfig.phillipgreenii.observability or { };
+  emitterEnv =
+    if obs ? mkEmitterEnv then
+      obs.mkEmitterEnv {
+        serviceName = "pg-connector-github";
+        protocol = "grpc";
+      }
+    else
+      { };
+
+  # The `pr` and `ci` settings come from the SAME backends.<name> options that
+  # render the umbrella's blocks (one place to declare queries). The daemon's
+  # config accepts only `queries` under `pr` and nothing under `ci`, so a
+  # backends block is never copied verbatim; `rate_reserve_points` is a
+  # top-level daemon key.
+  prBlock = cfg.backends."pg-connector-pr-github" or { };
+  stateDir = "${config.home.homeDirectory}/.local/state/pg-connector-github";
+
+  # Everything except the stamp: the hash is taken over this body, so the same
+  # settings always give the same hash and a changed setting changes it.
+  githubConfigBody =
+    gh.settings
+    // lib.filterAttrs (_: v: v != null) {
+      inherit (gh) host;
+      gh_path = lib.getExe pkgs.gh;
+      state_dir = stateDir;
+      socket_path = "${stateDir}/sock";
+      supervisor_label = "com.phillipg.pg-connector-github-daemon";
+      otel_endpoint = emitterEnv.OTEL_EXPORTER_OTLP_ENDPOINT or null;
+      graphql_points_per_hour = gh.graphqlPointsPerHour;
+      rate_reserve_points = prBlock.rate_reserve_points or null;
+      pr = lib.optionalAttrs (prBlock ? queries) { inherit (prBlock) queries; };
+      ci = { };
+    };
+  githubConfigHash = builtins.hashString "sha256" (builtins.toJSON githubConfigBody);
+  githubConfigFile = pkgs.writeText "pg-connector-github-config.json" (
+    builtins.toJSON (githubConfigBody // { config_hash = githubConfigHash; })
+  );
+
+  # The two fields the daemon's config package documents, stamped into every
+  # umbrella-side block for the two instances so a stale registry fails loudly.
+  githubStamp = {
+    config_hash = githubConfigHash;
+    config_path = toString githubConfigFile;
+  };
+
+  # THE one place the argv is built, and the one place a registration is
+  # rewritten: every registry list renders through renderEntries below, so the
+  # lists cannot diverge (the registry rejects one name with two commands).
+  githubArgv = kind: [
+    "pg-connector-github"
+    "--config"
+    (toString githubConfigFile)
+    kind
+  ];
+  rewriteGithubEntry =
+    entry:
+    let
+      name = if builtins.isString entry then entry else entry.name;
+      base =
+        if builtins.isString entry then
+          {
+            inherit name;
+            previousNames = [ ];
+          }
+        else
+          entry;
+    in
+    if rewriteRegistry && githubInstances ? ${name} then
+      base // { command = githubArgv githubInstances.${name}; }
+    else
+      entry;
 
   # A registration (bead pg2-91y12, ADR 0062 amendment, INV-REG-4): either a
   # plain string (a bare binary name on PATH, name = binary, exactly as
@@ -55,11 +152,11 @@ let
   renderEntries =
     v:
     if builtins.isList v then
-      map renderEntry v
+      map (e: renderEntry (rewriteGithubEntry e)) v
     else if v == null then
       null
     else
-      renderEntry v;
+      renderEntry (rewriteGithubEntry v);
 
   # connector.<type> as pg-connector's own registry.go actually requires it:
   # pr/issue/ci MUST be either a non-empty list or ABSENT entirely
@@ -179,6 +276,7 @@ let
         inherit name;
         value =
           (cfg.backends.${name} or { })
+          // lib.optionalAttrs (rewriteRegistry && githubInstances ? ${name}) githubStamp
           // alertBackendExtra (
             cfg.alertBackends.${name} or {
               queries = { };
@@ -196,6 +294,7 @@ let
           lib.attrNames cfg.backends
           ++ lib.attrNames cfg.alertBackends
           ++ lib.attrNames cfg.attention.perBackend
+          ++ lib.optionals rewriteRegistry (lib.attrNames githubInstances)
         )
       )
   );
@@ -541,6 +640,105 @@ in
       '';
     };
 
+    # pg-connector-github (docket pg2-z5fax, Phase 2): the daemon-backed GitHub
+    # connector. Off by default; with it off the module renders and installs
+    # exactly what it did before this option set existed.
+    github = {
+      enable = lib.mkEnableOption ''
+        pg-connector-github: installs the binary, renders the daemon config,
+        registers the supervisor entry, and rewrites the registry so the
+        `pg-connector-pr-github` and `pg-connector-ci-github-actions` instance
+        names run the daemon's client mode (see `supervisor` and
+        `allowUnsupervised` for when the registry is rewritten)
+      '';
+
+      package = lib.mkPackageOption pkgs "pg-connector-github" { };
+
+      supervisor = lib.mkOption {
+        type = lib.types.enum [
+          "launchd"
+          "none"
+        ];
+        default = if pkgs.stdenv.hostPlatform.isDarwin then "launchd" else "none";
+        defaultText = lib.literalExpression ''if pkgs.stdenv.hostPlatform.isDarwin then "launchd" else "none"'';
+        description = ''
+          How the daemon is kept running. `launchd` adds the home-manager
+          launchd user-agent entry; `none` registers no service and the
+          operator MAY run `serve` by hand. With `none` and no
+          `allowUnsupervised`, the registry is NOT rewritten and the old
+          backends stay registered (an evaluation warning says so).
+        '';
+      };
+
+      allowUnsupervised = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = "With `supervisor = \"none\"`, permit the registry rewrite anyway.";
+      };
+
+      host = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "github.example.com";
+        description = ''
+          The GitHub host, passed to every `gh` call as `GH_HOST`. `null` (the
+          default) renders no key, so the daemon's compiled-in default applies.
+          The module hardcodes no host, organisation, team or user.
+        '';
+      };
+
+      graphqlPointsPerHour = lib.mkOption {
+        type = lib.types.ints.positive;
+        default = 1500;
+        description = ''
+          The daemon's GraphQL points-per-hour cap. 1500 is the shadow-run
+          value; the cutover work raises it to 4000.
+        '';
+      };
+
+      settings = lib.mkOption {
+        type = lib.types.attrsOf lib.types.anything;
+        default = { };
+        example = {
+          summary_ttl = "90s";
+          workers = 2;
+        };
+        description = ''
+          The daemon's own settings, merged into the top level of the rendered
+          config file (the snake_case keys of the daemon's defaults table; an
+          unknown key fails the daemon's load, naming it). The keys this module
+          derives itself (host, paths, label, OTel endpoint, the points cap,
+          `rate_reserve_points`, `pr`, `ci` and the stamp) win over a same-named
+          entry here.
+        '';
+      };
+
+      configFile = lib.mkOption {
+        type = lib.types.path;
+        readOnly = true;
+        internal = true;
+        description = ''
+          The rendered daemon config, a nix store path (so a config change
+          changes the path). Read by the supervisor entry's wrapper and embedded
+          in every rewritten registry argv as `--config <path>`.
+        '';
+      };
+
+      configHash = lib.mkOption {
+        type = lib.types.str;
+        readOnly = true;
+        internal = true;
+        description = "The config hash stamped into the daemon config and every umbrella block.";
+      };
+    };
+
+    renderedConfig = lib.mkOption {
+      type = lib.types.attrsOf lib.types.anything;
+      readOnly = true;
+      internal = true;
+      description = "The complete attrset rendered into the shared config file (before YAML generation); exposed for the rendering tests.";
+    };
+
     extraConfig = lib.mkOption {
       type = lib.types.attrsOf lib.types.anything;
       default = { };
@@ -556,73 +754,96 @@ in
     };
   };
 
-  config = lib.mkIf cfg.enable {
-    # cfg.package (the Tier-1 umbrella binary) dispatches to its Tier-2
-    # capability backends by execing a bare binary name found on $PATH —
-    # packages/pg-connector/pkg/scriptout/exec.go's runInvoke resolves the
-    # binary named in the connector.<type> registry
-    # (packages/pg-connector/cmd/pg-connector/registry.go) with no compiled-in
-    # linkage between the binaries. All the backends therefore MUST ship
-    # alongside cfg.package whenever this module is enabled, or dispatch to
-    # that capability fails at runtime with "executable file not found in
-    # $PATH". None of the seven has an independent CLI identity of its own
-    # (each package's own meta.description says so — they speak only the
-    # scriptout wire protocol) or a tldr page, so — unlike cfg.package — they
-    # are not exposed as separate mkPackageOption overrides here; they are
-    # read straight from pkgs, matching flake.nix's own package-attr names.
-    # pg-connector-issue-jira joined the other four here (pg2-2j5ac.28.5):
-    # the module previously omitted it entirely, alongside ZR's own
-    # connector.issue registry. pg-connector-thread-slack joins in turn
-    # (bead pg2-2j5ac.40.3): without this, the binary is never actually
-    # installed even though its nix output exists. pg-connector-calendar-
-    # osx-bridge joins in turn (docket pg2-o2dmu): installed
-    # unconditionally, independent of whether connector.calendar is itself
-    # populated -- mirrors every other Tier-2 backend's own
-    # always-installed convention. pg-connector-agentsession-pa-monitor
-    # joins in turn (docket pg2-eezd1): also always-installed, independent
-    # of whether connector.agentsession is itself populated -- it answers
-    # the attention and search capabilities too, not only agentsession.
-    # pg-connector-alert-grafana joins last (bead pg2-rejc3): also
-    # always-installed, independent of whether connector.alert is itself
-    # populated -- it answers the attention capability too.
-    # pg-connector-mail-osx-bridge joins last (docket pg2-qc5uc): also
-    # always-installed, independent of whether connector.mail is itself
-    # populated -- it answers the attention and search capabilities too.
-    # pg-connector-calendar-task-focus joins (bead pg2-t7me1.4): also
-    # always-installed, independent of whether connector.calendar or
-    # attention.sources name it -- it answers the attention capability too.
-    home.packages = [
-      cfg.package
-      pkgs.pg-connector-pr-github
-      pkgs.pg-connector-ci-github-actions
-      pkgs.pg-connector-issue-beads
-      pkgs.pg-connector-issue-jira
-      pkgs.pg-connector-scm-git
-      pkgs.pg-connector-activity-git
-      pkgs.pg-connector-thread-slack
-      pkgs.pg-connector-calendar-osx-bridge
-      pkgs.pg-connector-calendar-task-focus
-      pkgs.pg-connector-agentsession-pa-monitor
-      pkgs.pg-connector-alert-grafana
-      pkgs.pg-connector-mail-osx-bridge
-    ];
+  config = lib.mkMerge [
+    {
+      phillipgreenii.programs.pg-connector = {
+        inherit renderedConfig;
+        github = {
+          configFile = githubConfigFile;
+          configHash = githubConfigHash;
+        };
+      };
+    }
+    (lib.mkIf cfg.enable {
+      # cfg.package (the Tier-1 umbrella binary) dispatches to its Tier-2
+      # capability backends by execing a bare binary name found on $PATH —
+      # packages/pg-connector/pkg/scriptout/exec.go's runInvoke resolves the
+      # binary named in the connector.<type> registry
+      # (packages/pg-connector/cmd/pg-connector/registry.go) with no compiled-in
+      # linkage between the binaries. All the backends therefore MUST ship
+      # alongside cfg.package whenever this module is enabled, or dispatch to
+      # that capability fails at runtime with "executable file not found in
+      # $PATH". None of the seven has an independent CLI identity of its own
+      # (each package's own meta.description says so — they speak only the
+      # scriptout wire protocol) or a tldr page, so — unlike cfg.package — they
+      # are not exposed as separate mkPackageOption overrides here; they are
+      # read straight from pkgs, matching flake.nix's own package-attr names.
+      # pg-connector-issue-jira joined the other four here (pg2-2j5ac.28.5):
+      # the module previously omitted it entirely, alongside ZR's own
+      # connector.issue registry. pg-connector-thread-slack joins in turn
+      # (bead pg2-2j5ac.40.3): without this, the binary is never actually
+      # installed even though its nix output exists. pg-connector-calendar-
+      # osx-bridge joins in turn (docket pg2-o2dmu): installed
+      # unconditionally, independent of whether connector.calendar is itself
+      # populated -- mirrors every other Tier-2 backend's own
+      # always-installed convention. pg-connector-agentsession-pa-monitor
+      # joins in turn (docket pg2-eezd1): also always-installed, independent
+      # of whether connector.agentsession is itself populated -- it answers
+      # the attention and search capabilities too, not only agentsession.
+      # pg-connector-alert-grafana joins last (bead pg2-rejc3): also
+      # always-installed, independent of whether connector.alert is itself
+      # populated -- it answers the attention capability too.
+      # pg-connector-mail-osx-bridge joins last (docket pg2-qc5uc): also
+      # always-installed, independent of whether connector.mail is itself
+      # populated -- it answers the attention and search capabilities too.
+      # pg-connector-calendar-task-focus joins (bead pg2-t7me1.4): also
+      # always-installed, independent of whether connector.calendar or
+      # attention.sources name it -- it answers the attention capability too.
+      home.packages = [
+        cfg.package
+        pkgs.pg-connector-pr-github
+        pkgs.pg-connector-ci-github-actions
+        pkgs.pg-connector-issue-beads
+        pkgs.pg-connector-issue-jira
+        pkgs.pg-connector-scm-git
+        pkgs.pg-connector-activity-git
+        pkgs.pg-connector-thread-slack
+        pkgs.pg-connector-calendar-osx-bridge
+        pkgs.pg-connector-calendar-task-focus
+        pkgs.pg-connector-agentsession-pa-monitor
+        pkgs.pg-connector-alert-grafana
+        pkgs.pg-connector-mail-osx-bridge
+      ]
+      ++ lib.optional gh.enable gh.package;
 
-    # No programs.tldr.customPages entry: unlike pg-pr's own module,
-    # packages/pg-connector/default.nix's postInstall generates only a man
-    # page + completions — it does not copy/generate a tldr page the way
-    # packages/pg-pr/default.nix does from its own committed pg-pr.md — so
-    # there is nothing at ${cfg.package}/share/tldr/pages.common/pg-connector.md
-    # to reference yet.
+      # With github.enable but no supervisor and no allowUnsupervised the binary
+      # and config are installed but the registry is left alone; say why, so a
+      # shared home-manager config that sets enable = true on a Linux host is not
+      # silently a no-op.
+      warnings = lib.optional (gh.enable && !rewriteRegistry) (
+        "phillipgreenii.programs.pg-connector.github.enable is set with supervisor = \"none\" and allowUnsupervised = false: "
+        + "the pg-connector-github binary and config are installed, but the registry is NOT rewritten and the old "
+        + "pg-connector-pr-github and pg-connector-ci-github-actions backends stay registered, because nothing on this host "
+        + "would keep the daemon running. Set github.allowUnsupervised = true to rewrite the registry anyway."
+      );
 
-    # The shared config file (pg2-2j5ac.28.5): the path stays "pg-pr/config.yaml"
-    # deliberately -- registry.go's own resolution order ($PG_PR_CONFIG ->
-    # $XDG_CONFIG_HOME/pg-pr/config.yaml -> ~/.config/pg-pr/config.yaml) is
-    # unchanged from pg-pr's own, and pg-pr's decode at the top level is
-    # unknown-fields-tolerant, so this module owning the write is safe for a
-    # host that also enables phillipgreenii.programs.pg-pr (whose own module
-    # renders no config file of its own today).
-    xdg.configFile."pg-pr/config.yaml".source =
-      (pkgs.formats.yaml { }).generate "pg-pr-config.yaml"
-        renderedConfig;
-  };
+      # No programs.tldr.customPages entry: unlike pg-pr's own module,
+      # packages/pg-connector/default.nix's postInstall generates only a man
+      # page + completions — it does not copy/generate a tldr page the way
+      # packages/pg-pr/default.nix does from its own committed pg-pr.md — so
+      # there is nothing at ${cfg.package}/share/tldr/pages.common/pg-connector.md
+      # to reference yet.
+
+      # The shared config file (pg2-2j5ac.28.5): the path stays "pg-pr/config.yaml"
+      # deliberately -- registry.go's own resolution order ($PG_PR_CONFIG ->
+      # $XDG_CONFIG_HOME/pg-pr/config.yaml -> ~/.config/pg-pr/config.yaml) is
+      # unchanged from pg-pr's own, and pg-pr's decode at the top level is
+      # unknown-fields-tolerant, so this module owning the write is safe for a
+      # host that also enables phillipgreenii.programs.pg-pr (whose own module
+      # renders no config file of its own today).
+      xdg.configFile."pg-pr/config.yaml".source =
+        (pkgs.formats.yaml { }).generate "pg-pr-config.yaml"
+          renderedConfig;
+    })
+  ];
 }

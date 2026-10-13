@@ -10965,55 +10965,112 @@
                   rendered = import ./tests/pg-connector-home-render.nix { inherit lib pkgs; };
                   fixtures = ./tests/fixtures/pg-connector-home;
                 in
-                pkgs.runCommand "pg-connector-home-rendering" { nativeBuildInputs = [ pkgs.yq-go ]; } ''
-                  norm() { yq -o=json -I=0 'sort_keys(..)' "$1"; }
-                  same() {
-                    if [ "$(norm "$1")" != "$(norm "$2")" ]; then
-                      echo "rendered config differs from golden: $1 vs $2" >&2
-                      diff -u <(yq -P 'sort_keys(..)' "$1") <(yq -P 'sort_keys(..)' "$2") >&2 || true
-                      exit 1
-                    fi
+                pkgs.runCommand "pg-connector-home-rendering"
+                  {
+                    nativeBuildInputs = [
+                      pkgs.yq-go
+                      pkgs.jq
+                    ];
                   }
-                  same ${fixtures + "/legacy.yaml"} ${rendered.legacy}
-                  # explicit connector.alert = [ ] is omitted like thread/calendar
-                  same ${fixtures + "/legacy.yaml"} ${rendered.legacyEmptyAlert}
-                  same ${fixtures + "/alert-grafana.yaml"} ${rendered.alertGrafana}
-                  same ${fixtures + "/legacy-plus-alert.yaml"} ${rendered.legacyPlusAlert}
-                  # mail (docket pg2-qc5uc): the option renders, and an explicit
-                  # connector.mail = [ ] is omitted exactly like alert/thread
-                  same ${fixtures + "/mail.yaml"} ${rendered.mail}
-                  same ${fixtures + "/legacy.yaml"} ${rendered.legacyEmptyMail}
-                  # activity (docket pg2-vfmp7.1): renders, and an explicit empty
-                  # activity.sources omits the whole activity: mapping
-                  same ${fixtures + "/activity.yaml"} ${rendered.activity}
-                  same ${fixtures + "/legacy.yaml"} ${rendered.legacyEmptyActivity}
-                  # registry instances (bead pg2-91y12, INV-REG-4): string and
-                  # {name, command} entries render in every registration, and a
-                  # malformed instance fails evaluation
-                  same ${fixtures + "/instances.yaml"} ${rendered.instances}
-                  same ${fixtures + "/scm-instance.yaml"} ${rendered.scmInstance}
-                  # beads attention (bead pg2-wyeq4): attentionLabels renders as
-                  # backends.<instance>.attention_labels per instance, and an
-                  # unset one renders no key
-                  same ${fixtures + "/beads-attention.yaml"} ${rendered.beadsAttention}
-                  same ${fixtures + "/beads-attention-unset.yaml"} ${rendered.beadsAttentionUnset}
-                  # the SAME golden is the Go registry's parse fixture, so the
-                  # Nix-rendered output, the golden and the Go parser are tied
-                  # together (compared semantically, like every other golden
-                  # here, so a prettier reindent of either copy cannot trip it)
-                  same ${fixtures + "/instances.yaml"} ${./packages/pg-connector/cmd/pg-connector/testdata/registry-instances.yaml}
-                  ${lib.optionalString (!rendered.malformedInstancesRejected) ''
-                    echo "a malformed pg-connector instance still evaluates" >&2
-                    exit 1
-                  ''}
-                  # the retired attention.perBackend deadline options (threshold,
-                  # exclude) are rejected at evaluation, not silently ignored
-                  ${lib.optionalString (!rendered.retiredDeadlineOptionsRejected) ''
-                    echo "retired attention.perBackend deadline option still evaluates" >&2
-                    exit 1
-                  ''}
-                  touch $out
-                '';
+                  ''
+                    norm() { yq -o=json -I=0 'sort_keys(..)' "$1"; }
+                    same() {
+                      if [ "$(norm "$1")" != "$(norm "$2")" ]; then
+                        echo "rendered config differs from golden: $1 vs $2" >&2
+                        diff -u <(yq -P 'sort_keys(..)' "$1") <(yq -P 'sort_keys(..)' "$2") >&2 || true
+                        exit 1
+                      fi
+                    }
+                    same ${fixtures + "/legacy.yaml"} ${rendered.legacy}
+                    # explicit connector.alert = [ ] is omitted like thread/calendar
+                    same ${fixtures + "/legacy.yaml"} ${rendered.legacyEmptyAlert}
+                    same ${fixtures + "/alert-grafana.yaml"} ${rendered.alertGrafana}
+                    same ${fixtures + "/legacy-plus-alert.yaml"} ${rendered.legacyPlusAlert}
+                    # mail (docket pg2-qc5uc): the option renders, and an explicit
+                    # connector.mail = [ ] is omitted exactly like alert/thread
+                    same ${fixtures + "/mail.yaml"} ${rendered.mail}
+                    same ${fixtures + "/legacy.yaml"} ${rendered.legacyEmptyMail}
+                    # activity (docket pg2-vfmp7.1): renders, and an explicit empty
+                    # activity.sources omits the whole activity: mapping
+                    same ${fixtures + "/activity.yaml"} ${rendered.activity}
+                    same ${fixtures + "/legacy.yaml"} ${rendered.legacyEmptyActivity}
+                    # registry instances (bead pg2-91y12, INV-REG-4): string and
+                    # {name, command} entries render in every registration, and a
+                    # malformed instance fails evaluation
+                    same ${fixtures + "/instances.yaml"} ${rendered.instances}
+                    same ${fixtures + "/scm-instance.yaml"} ${rendered.scmInstance}
+                    # beads attention (bead pg2-wyeq4): attentionLabels renders as
+                    # backends.<instance>.attention_labels per instance, and an
+                    # unset one renders no key
+                    same ${fixtures + "/beads-attention.yaml"} ${rendered.beadsAttention}
+                    same ${fixtures + "/beads-attention-unset.yaml"} ${rendered.beadsAttentionUnset}
+                    # the SAME golden is the Go registry's parse fixture, so the
+                    # Nix-rendered output, the golden and the Go parser are tied
+                    # together (compared semantically, like every other golden
+                    # here, so a prettier reindent of either copy cannot trip it)
+                    same ${fixtures + "/instances.yaml"} ${./packages/pg-connector/cmd/pg-connector/testdata/registry-instances.yaml}
+                    ${lib.optionalString (!rendered.malformedInstancesRejected) ''
+                      echo "a malformed pg-connector instance still evaluates" >&2
+                      exit 1
+                    ''}
+                    # the retired attention.perBackend deadline options (threshold,
+                    # exclude) are rejected at evaluation, not silently ignored
+                    ${lib.optionalString (!rendered.retiredDeadlineOptionsRejected) ''
+                      echo "retired attention.perBackend deadline option still evaluates" >&2
+                      exit 1
+                    ''}
+                    # pg-connector-github (docket pg2-z5fax): github.enable = false
+                    # renders the legacy golden byte for byte
+                    same ${fixtures + "/legacy.yaml"} ${rendered.legacyGithubDisabled}
+                    # the eval-level cases (registry rewrite, stamp, packages,
+                    # warning, allowUnsupervised, null osConfig); a failure names
+                    # every failing case
+                    ${lib.optionalString (rendered.githubFailures != [ ]) ''
+                      echo "pg-connector-github render cases failed: ${lib.concatStringsSep ", " rendered.githubFailures}" >&2
+                      exit 1
+                    ''}
+                    # the rendered daemon config: absolute state paths, the host,
+                    # the gh path, the label, the cap, the OTel endpoint read from
+                    # the system scope, the queries from the backends block, and
+                    # the stamped hash the umbrella blocks carry
+                    jq -e --arg gh "${rendered.github.ghPath}" --arg hash "${rendered.github.enabledHash}" '
+                      .host == "github.example.invalid"
+                      and .gh_path == $gh
+                      and .state_dir == "/example/home/.local/state/pg-connector-github"
+                      and .socket_path == "/example/home/.local/state/pg-connector-github/sock"
+                      and .supervisor_label == "com.phillipg.pg-connector-github-daemon"
+                      and .graphql_points_per_hour == 1500
+                      and .otel_endpoint == "http://otel.example.invalid:4317"
+                      and .rate_reserve_points == 500
+                      and .pr.queries.mine == "is:pr is:open author:@me"
+                      and (.pr.queries.team | length) == 2
+                      and .ci == {}
+                      and .config_hash == $hash
+                    ' ${rendered.github.enabled} >/dev/null
+                    # an absent system scope renders no OTel endpoint
+                    jq -e 'has("otel_endpoint") | not' ${rendered.github.enabledNoOs} >/dev/null
+                    # the same registry text, as the umbrella reads it, carries the
+                    # SAME --config path in every occurrence and the stamp in both blocks
+                    yq -e '
+                      ([.connector.pr[0], .connector.ci[0], .search.sources[0], .activity.sources[0], .attention.sources[1]]
+                        | map(.command[2]) | unique | length) == 1
+                    ' ${rendered.github.enabledRegistry} >/dev/null
+                    yq -e '.backends."pg-connector-pr-github".config_hash == .backends."pg-connector-ci-github-actions".config_hash' ${rendered.github.enabledRegistry} >/dev/null
+                    # live trigger of the rendered wiring: run each rewritten argv the
+                    # way the umbrella would, with the real daemon binary, and
+                    # require the answer a real client mode gives
+                    export PATH=${rendered.github.package}/bin:$PATH
+                    for kind in pr ci; do
+                      argv=$(yq -o=json -I=0 ".connector.$kind[0].command" ${rendered.github.enabledRegistry})
+                      mapfile -t cmd < <(echo "$argv" | jq -r '.[]')
+                      resp=$(echo '{"op":"capabilities"}' | "''${cmd[@]}")
+                      echo "$resp" | jq -e '.protocolVersion == 1 and (.ops | index("capabilities") != null)' >/dev/null || {
+                        echo "rendered $kind argv did not answer capabilities: $resp" >&2
+                        exit 1
+                      }
+                    done
+                    touch $out
+                  '';
 
               # home/programs/pg-desk's `attentionPlugin` option (bead
               # pg2-5l0x4.5): enabling it installs pg-desk-attention and appends
