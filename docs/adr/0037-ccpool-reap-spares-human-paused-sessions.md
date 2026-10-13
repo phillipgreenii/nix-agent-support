@@ -8,6 +8,13 @@
 > "preserved sessions still count toward the cap" and the Context claim that the cap "cannot starve
 > new work" are superseded: capacity now counts non-preserved rows only, cap eviction spares `working`
 > rows, and the cap is consulted as an admission gate. Preservation itself is unchanged.
+>
+> **Later note (2026-10-13, the Amendment of that date in ADR 0083, bead `pg2-zybju`):** Decision
+> items 3 and 6 ("preservation is unbounded"; "the only way a `needs_input` session leaves the pool
+> is explicit operator action") no longer hold for an UNATTENDED DRAIN session. ccpool's reaper still
+> spares every `needs_input` row, but `pg-router-ccpool-handler`'s supervising dispatch now clears a
+> drain session that has sat in `needs_input` past a bound (default 15 minutes): Escape, then close
+> it and release its bead claim. Every other session keeps the rule this ADR sets.
 
 ## Context
 

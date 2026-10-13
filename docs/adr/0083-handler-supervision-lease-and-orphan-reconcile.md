@@ -1,8 +1,14 @@
 # A handler's supervision lease, and an orphan reconcile that acts on it
 
-**Status**: Accepted (amends 0072 and 0082)
+**Status**: Accepted (amends 0072 and 0082); amended 2026-10-13 by bead `pg2-zybju`: a drain session stuck in `needs_input` is cleared after a bound (see the Amendment at the end)
 **Date**: 2026-10-06
 **Deciders**: Phillip Green II
+
+> **Later note (2026-10-13, this ADR's Amendment, bead `pg2-zybju`):** Decision item 3's bullet
+> "`needs_input`: unchanged (ADR 0037)" no longer holds for a SUPERVISED drain session. The
+> dispatch that supervises it clears a drain session that has sat in `needs_input` past a bound
+> (default 15 minutes): Escape, then close and release its claim. The orphan reconcile itself still
+> leaves a `needs_input` orphan alone.
 
 ## Context
 
@@ -57,7 +63,8 @@ Operator ruling (Phillip, 2026-10-05, bead `pg2-g2u9m`): a supervision lease to 
      budget, run the same hard stop as a supervised session (the exported
      `watchdog.HardStop`), then remove the worktree under the same guards. Under budget, or a role
      with no time budget, leave it alone. A bead already closed is not reopened.
-   - `needs_input`: unchanged (ADR 0037).
+   - `needs_input`: unchanged (ADR 0037). A SUPERVISED drain session is bounded by the Amendment of
+     2026-10-13 below; an orphan is not.
 4. **Mutual exclusion is the handler's own flock**, not `ccpool`'s: `ccpool`'s per-session lock has
    no CLI, and `ccpool meta set` is an unconditional upsert, so the lease cannot serve as a
    compare-and-set. The reconcile takes a non-blocking exclusive `flock` on
@@ -92,3 +99,117 @@ Operator ruling (Phillip, 2026-10-05, bead `pg2-g2u9m`): a supervision lease to 
 - Rejected: fixing the pre-shutdown sweep's pool coverage. It would add a per-pool sweep that still
   cannot cover a crash outside shutdown.
 - Rejected: a `ccpool`-side compare-and-set. See decision item 4.
+
+## Amendment 2026-10-13: a drain session stuck in needs_input is cleared after a bound
+
+**Deciders**: Phillip Green II (operator ruling, 2026-10-12, bead `pg2-zybju`: the handler clears a
+drain session left in `needs_input` beyond N minutes, "send Escape; if still stuck, close the
+session and release the bead claim in ONE call"; "N = 15 minutes unless the implementer finds reason
+to differ", and the operator accepted that recommendation without choosing another N). This amends
+ADR 0037's Decision items 3 and 6 (preservation is unbounded; only an operator moves a
+`needs_input` session out of the pool) for one class of session, and this ADR's Decision item 3
+(`needs_input`: unchanged). The rule is `INV-CCH-29` in the handler's behavior docs.
+
+### Context
+
+An unattended drain worker (ADR 0089) that raises a permission dialog nobody can answer parks in
+`needs_input` until a person attaches. Six such stalls were recorded between 2026-10-10 and
+2026-10-13, each holding the bead's claim and the pool's only slot, the longest for about 80
+minutes. The triggers differed (a read of a secret-looking path, a `PATH` replacement, a command
+that is on the allow list), so a bound on the stall is the one remedy that covers all of them.
+
+Three facts shaped the design:
+
+- The wedged dispatch is the one holding the lane. A drain pool has one slot and one in-flight
+  dispatch per tracker, so no later dispatch of the role runs while this one is blocked, and a bound
+  that waits for the next dispatch's reconcile can never fire. The bound lives in the SUPERVISING
+  dispatch's wait loop, which is alive and polling throughout.
+- ccpool leaves `needs_input` only at the next `Stop`: no hook edge fires when a dialog is
+  answered. A session whose dialog a person answered, or whose blocked subagent its orchestrator
+  stopped, still reads `needs_input` while it works, and a drain orchestrator's turn can last hours.
+  A bound keyed on the state alone would Escape, and then kill, a healthy session.
+- A budget reminder is a pasted prompt followed by Enter, and Enter on a pending dialog accepts it.
+  One was observed approving a pending tool call 0.66 seconds after it was pasted, an approval nobody
+  read.
+
+### Decision
+
+1. **Scope.** The bound applies to a drain role only: a ccpool role whose completion is
+   `close-or-release` (`INV-CCH-28`). Every other role, and every session of the shared default
+   pool, keeps ADR 0037's rule: a `needs_input` session MUST be spared for a human. ccpool's reaper
+   is unchanged and still spares every `needs_input` row; the bound is the handler's.
+2. **The clock counts QUIET `needs_input`** and runs on the dispatch's own poll (`pollInterval`,
+   default 10 seconds) from the injected clock. It starts when the session is first seen in
+   `needs_input`, or at the row's `last_activity_at` when that is older and the transcript can be
+   observed, so a handler restart that absorbs the session (ADR 0085) does not grant a fresh bound.
+   It restarts at the newest write to the session's transcript or its subagents' transcripts,
+   because a session blocked on a dialog writes nothing and a healthy one writes on every tool call.
+   A poll that sees any other state ends the episode and resets the clock. A transcript that cannot
+   be observed is no evidence of life and does not delay the bound.
+3. **The bound is 15 minutes.** The handler config key is `needsInputStall` (a nanosecond integer
+   like its other durations; `0` disables the bound everywhere; a value under six polls is a config
+   error naming the key). A role MAY override it for its own dispatches with `needsInputStall` in
+   its role file (a duration string, greater than zero).
+4. **Escape, then close.** At the bound the handler sends Escape through `ccpool cancel` (an Escape
+   burst and a confirmed-static pane, which also resets the row to `ready`). If the transcript then
+   stays quiet for a GRACE, one worktree quiet window (default 2 minutes, never under two polls),
+   the session is stuck for good: the handler closes it (non-purge, reason `handler`, so the row and
+   the transcript stay) and releases the claim. The bounded gap is the grace, and from the first
+   `needs_input` poll to the close the worst case is the bound plus the grace plus one poll: 17
+   minutes 10 seconds by default. A write after the Escape means the session reacted to it, and ends
+   the episode instead: nothing is closed.
+5. **The release is guarded and is ONE bd call.** The handler reads the bead first; if it cannot,
+   it changes nothing and retries on the next poll, because closing the session over an unreadable
+   claim would strand the claim. It then closes the session and only then releases, so no other
+   worker takes a bead whose session is still live. It MUST release only a bead that is
+   `in_progress` and assigned to the role's own actor, with the single call
+   `bd update <id> --status=open --assignee=` (status and assignee together, never two calls). A
+   bead that is closed is left to the completion check. A bead held by anyone else, or already open
+   and unassigned, is never written
+   to (the stalled session is still closed, to free its slot), and a peer-held bead ends the
+   dispatch with no verb, like any ended session of a peer's bead (`INV-CCH-28`). A close that fails
+   leaves the claim alone and ends the dispatch with an error.
+6. **Two strikes.** The first stall of a bead adds the label `drain-needs-input-stall` and a comment
+   saying why the claim was released. The second consecutive stall of the same bead adds `human` in
+   the SAME call as the release, so a bead that wedges every worker stops being re-offered, as
+   `pool-evicted` and `drain-unclaimed-end` already do for their causes. A completed dispatch removes
+   the label.
+7. **Surfacing.** The handler event log records `needs_input_escape` and `needs_input_cleared`
+   (session, bead, role, pool, seconds quiet, the bound, and for the clear whether the claim was
+   released and whether `human` was added), beside the existing `needs_input` alert. The handler
+   files no escalation bead of its own for a stuck session: the one `ccpool-probe` files is left to
+   its normal triage, and a cleared session is no longer stuck. Nothing here creates a second one.
+8. **The budget watchdog never pastes into a `needs_input` session.** Its reminder is held back
+   while the row reads `needs_input`, or cannot be read: the level is not latched, so the reminder is
+   sent on the first poll after the session leaves `needs_input`, and the hold is logged once as
+   `reminder-suppressed` with reason `needs_input`. The wrap-up message that follows the 90% cancel
+   is held the same way when the cancel left the row in `needs_input`. Skipping was chosen over
+   sending Escape first because dismissing a dialog is a decision that belongs to one place, the
+   bound above and only for a drain role. A reminder that dismissed dialogs would do it at an
+   arbitrary budget percentage and for every role, which would contradict ADR 0037 for the sessions
+   that still have a human to wait for.
+
+### Consequences
+
+- A drain session blocked on a dialog is cleared without a person in 17 minutes 10 seconds at the
+  longest by default, and its bead returns to the pool unclaimed, so the lane works the next bead.
+  A bead that stalls twice in a row stops being offered.
+- The bound is a bound on silence, not proof of a dialog. A session that sits silent in a foreground
+  command longer than the bound while its row reads `needs_input` is Escaped, and later closed. The
+  quiet-transcript rule narrows that and cannot close it; the remedy for a role that runs long
+  foreground commands is a longer role-level `needsInputStall`.
+- Known limitation: the orphan reconcile still leaves a `needs_input` orphan alone (its handler died
+  and its lease expired), and it runs only when its role next dispatches. Such a session is bounded
+  by an operator, or by ccpool's `dead_needs_input_ttl` once its pane is gone (ADR 0086). A daemon
+  restart does not make a session an orphan (ADR 0085), so this is the rare case.
+- The cleared row keeps its last observed state (ADR 0015), so the dispatch-time worktree cleanup
+  treats it as still parked and leaves its per-bead worktree for the bead's next dispatch to reuse.
+- Rejected: running the bound from a next-dispatch hook or the orphan reconcile. The wedged dispatch
+  holds the lane, so neither runs while the session is stuck.
+- Rejected: Escape-first for the budget watchdog, for the reason in item 8.
+- Rejected: re-prompting the session after the Escape. The bound exists to free the lane and the
+  claim, not to coax a worker that stopped on a dialog nobody can read.
+- Rejected: a bound in ccpool's reaper. ccpool tracks session facts and knows nothing of bead claims
+  (ADR 0015), so it could close the session but not release the claim in the same breath.
+- Not changed: ADR 0037's rule for every session that is not a drain session, and the dead
+  `needs_input` row backstop of ADR 0086.

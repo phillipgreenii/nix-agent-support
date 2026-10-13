@@ -64,6 +64,14 @@ Extensions:
   normal.
 - 2i. A session dies unexplained before its bead completes (`INV-CCH-7`): this module also logs
   the pool's usage-limit reading once (`INV-CCH-26`), as evidence only; the failure is unchanged.
+- 2j. A drain session (completion `close-or-release`) raises a permission dialog nobody can answer
+  and sits in `needs_input` (`INV-CCH-29`). After 15 minutes without a write to its transcript, its
+  own dispatch sends Escape; if it is still silent one quiet window later, the dispatch closes it
+  (not purged) and releases the claim in one call, only when the bead is still held by the role's
+  own actor. A bead that stalls twice in a row also gets `human`. Two events record it. A session
+  that left `needs_input` in between, or kept writing, is not touched, and a session of any other
+  role is never cleared this way. Meanwhile the budget watchdog holds its reminder back, because
+  the Enter after a paste would accept the dialog.
 - 2d. An earlier dispatch's handler died (it crashed or was killed; a daemon restart alone no
   longer kills it, `INV-CCH-14`) and left its session unsupervised: its lease has expired. Before checking
   capacity this module handles each such orphan of its own role (`INV-CCH-18`). An `idle` or

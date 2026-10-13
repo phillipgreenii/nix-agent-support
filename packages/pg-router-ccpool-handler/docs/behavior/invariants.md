@@ -211,7 +211,7 @@ review`. The claim is still released (status open, assignee cleared) — the lab
     own pool, purges it, worktree included, once its turn has ended (`idle` or `needs_input`) and
     its bead is closed; the next shutdown sweep does too, but only for a session in the default
     pool. This is the only bound for a session parked in `needs_input` with an open bead, which
-    waits for a person by design. (b) `ccpool`'s own reaper closes any live session that is not in
+    waits for a person by design (a drain session, supervised, is also bounded by `INV-CCH-29`). (b) `ccpool`'s own reaper closes any live session that is not in
     `needs_input` once its last activity is older than `idle_ttl`, and evicts `idle`/`errored`
     sessions over `max_sessions` (never `starting`/`ready`/`working`); both stamp a close reason
     (`phillipgreenii-nix-agent-support` ADR 0072). (c) Spared sessions still count toward
@@ -314,7 +314,8 @@ review`. The claim is still released (status open, assignee cleared) — the lab
     under budget it MUST leave the session alone. A role with no time budget leaves such an
     orphan alone, and an over-budget orphan whose bead is already closed is left alone rather than
     reopened.
-  - **`needs_input`**: left alone (`phillipgreenii-nix-agent-support` ADR 0037).
+  - **`needs_input`**: left alone (`phillipgreenii-nix-agent-support` ADR 0037); a SUPERVISED drain
+    session is bounded by `INV-CCH-29`, an orphan is not.
     A dispatch that absorbs an existing session as a duplicate (`INV-EVT-2`) MUST take the same
     per-session lock and refresh the lease before it starts waiting, and MUST measure that session's
     budget from its original launch time, so absorbing an under-budget orphan never grants it a fresh
@@ -627,3 +628,48 @@ review`. The claim is still released (status open, assignee cleared) — the lab
   notion of a bead that was never claimed, so a drain worker that could not claim its bead looked
   like a success to it; and its latch would have made the handler add `human` to a bead a peer
   holds. Bead `pg2-nk6th.3`, plan `2026-10-08-drain-worker-roles` section A2.
+
+- **`INV-CCH-29`** — a drain session MUST NOT stay parked in `needs_input` without a person
+  indefinitely. A drain role is a ccpool role whose completion is `close-or-release`
+  (`INV-CCH-28`); every other role is outside this invariant, and its `needs_input` session stays
+  preserved for a human (`phillipgreenii-nix-agent-support` ADR 0037, `INV-CCH-14`). The dispatch
+  that supervises a drain session MUST clear it, without a person, once it has sat in QUIET
+  `needs_input` for the stall bound: 15 minutes by default, the handler config key `needsInputStall`
+  (`0` disables it), which a role MAY override with its own `needsInputStall`.
+  - **Quiet.** The clock starts when the session is first seen in `needs_input` (or at its
+    `last_activity_at` when that is older and its transcript can be observed, so absorbing the
+    session after a handler restart does not grant a fresh bound) and restarts at the newest write
+    to its transcript or its subagents' transcripts. A poll that sees any other state resets it.
+    ccpool leaves `needs_input` only at the next stop, so a session whose dialog was answered still
+    reads `needs_input` while it works; the write test is what keeps a healthy session from being
+    cleared. A transcript that cannot be observed does not delay the bound.
+  - **Escape, then close.** At the bound the handler MUST send Escape (`ccpool cancel`). If the
+    transcript then stays quiet for one worktree quiet window (`INV-CCH-23`, never under two polls)
+    it MUST close the session (not purged, reason `handler`) and release the claim; a write after
+    the Escape ends the episode and nothing is closed. The whole clear is bounded by the stall
+    bound plus one quiet window plus one poll (17 minutes 10 seconds by default).
+  - **The release** is ONE bd call, `bd update <id> --status=open --assignee=`, and only for a bead
+    that is `in_progress` under the role's own actor, read first: an unreadable bead changes nothing
+    and is retried on the next poll. The session is closed before the claim is released. A bead that
+    is closed, held by anyone else, or already open and unassigned is never written to (the session
+    is still closed, and a peer-held bead ends the dispatch with no verb, as in `INV-CCH-28`).
+  - **Two strikes.** The first stall of a bead adds the label `drain-needs-input-stall` and a
+    comment; the second consecutive one adds `human` in the same call as the release; a completed
+    dispatch removes the label. The dispatch reports unclaimed on the first strike and escalated on
+    the second, and writes no `dispatch_result` failure record: the event below is its record.
+  - **Surfacing.** The event log records `needs_input_escape` and `needs_input_cleared`, one each per
+    clear, beside the `needs_input` alert. The handler files no escalation bead for a stuck session.
+  - **The budget watchdog** MUST NOT paste its reminder into a session that is in `needs_input`, or
+    whose state cannot be read: the Enter after a paste accepts a pending permission dialog. The
+    reminder is not latched, so it is sent after the session leaves `needs_input`; the hold is
+    logged once (`reminder-suppressed`, reason `needs_input`). The wrap-up that follows the 90%
+    cancel is held the same way when the cancel left the session in `needs_input`.
+  - **Not covered, accepted.** An orphan in `needs_input` (`INV-CCH-18`) is still left alone: its
+    handler is gone, and the orphan reconcile runs only when its role next dispatches.
+
+  **Why.** Six drain sessions stalled on a permission dialog nobody could answer between
+  2026-10-10 and 2026-10-13, each for up to about 80 minutes, holding the bead's claim and the pool's
+  only slot. The bound is the one remedy that covers every trigger. It lives in the supervising
+  dispatch because that dispatch is the one holding the lane: no later dispatch runs while it is
+  blocked. Bead `pg2-zybju`, `phillipgreenii-nix-agent-support` ADR 0083's Amendment of 2026-10-13
+  (which amends ADR 0037).
