@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/servetest"
 )
 
 const golden = "internal/config/testdata/example.json"
@@ -27,6 +28,7 @@ func TestMain(m *testing.M) {
 	}
 	code := m.Run()
 	removeBuilds()
+	servetest.RemoveBuilds()
 	os.Exit(code)
 }
 
