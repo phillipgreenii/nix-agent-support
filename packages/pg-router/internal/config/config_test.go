@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -49,7 +50,53 @@ func (s stubLocator) Locate(name string) error {
 
 func TestMain(m *testing.M) {
 	defaultLocator = prefixLocator{}
+	unsetRouterEnv()
 	os.Exit(m.Run())
+}
+
+// unsetRouterEnv removes every PG_ROUTER_* variable from this test process
+// before any test runs, so no test sees the pg-router deployment of whoever
+// runs `go test` (bead pg2-pjqk3). Load() overlays PG_ROUTER_* onto Default(),
+// and drain and pool sessions export several of them. The one that broke a
+// test was PG_ROUTER_CONFIG, which names the live daemon's config file: Load()
+// takes it over the git-common-dir read-through, so
+// TestLoad_worktreeReadsThroughToCanonicalConfigViaGitCommonDir loaded the
+// daemon's config instead of its fixture's. A test that needs a variable sets
+// it with t.Setenv, whose cleanup restores this unset state.
+//
+// The variables are unset, not set to "": envStr reads them with
+// os.LookupEnv, so an empty PG_ROUTER_CONFIG still overrides the read-through
+// (Load() then looks for a config file at the path "").
+func unsetRouterEnv() {
+	for _, kv := range os.Environ() {
+		if name, _, _ := strings.Cut(kv, "="); strings.HasPrefix(name, "PG_ROUTER_") {
+			_ = os.Unsetenv(name)
+		}
+	}
+}
+
+// TestPackageTestsPassWithRouterEnvExported is the regression guard for
+// unsetRouterEnv. It re-runs this test binary with the PG_ROUTER_* variables a
+// drain session exports, set to arbitrary non-empty values, and requires every
+// other test in the package to pass. A child process is needed because the
+// variables must already be exported when TestMain runs, as they are for the
+// commit-time hook of a drain session; a t.Setenv here would come too late.
+func TestPackageTestsPassWithRouterEnvExported(t *testing.T) {
+	cmd := exec.CommandContext(t.Context(), os.Args[0], // #nosec G204 -- re-executes this test binary
+		"-test.skip=^"+t.Name()+"$", fmt.Sprintf("-test.short=%t", testing.Short()))
+	cmd.Env = append(
+		os.Environ(),
+		"PG_ROUTER_CONFIG=/nonexistent/pg2-pjqk3/config.toml",
+		"PG_ROUTER_HANDLER_COMMAND=/nonexistent/pg2-pjqk3/handler",
+		"PG_ROUTER_HANDLER_COMMAND_DIR=/nonexistent/pg2-pjqk3/roles",
+		"PG_ROUTER_CCPOOL_HANDLER_CONFIG=/nonexistent/pg2-pjqk3/launch.json",
+		"PG_ROUTER_REPO_ROOT=/nonexistent/pg2-pjqk3/repo",
+		"PG_ROUTER_BEADS_PREFIX=arbitrary",
+		"PG_ROUTER_METRICS_ADDR=invalid-host:invalid-port",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("this package's tests fail when the caller exports PG_ROUTER_* variables: %v\n%s", err, out)
+	}
 }
 
 // --- wiring fixtures (INV-WORKFLOW-1 / USECASE-VALIDATE-CONFIG) ---
