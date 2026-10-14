@@ -112,6 +112,10 @@ func retryWindow() time.Duration { return budget() / 2 }
 // before the last wait is cut to the window's end, and logs whole milliseconds.
 const retryWindowSlack = 100 * time.Millisecond
 
+// retryAnswerSlack is how far past the retry window the client's last connect
+// may land: the final attempt is made at the window's end.
+const retryAnswerSlack = 250 * time.Millisecond
+
 // clientLogDuration returns the duration_ms of the want-th client-log row (the
 // kind=request, daemon_unreachable row the client appends when it answers
 // unavailable), after checking there are exactly want rows. It is measured
@@ -189,6 +193,20 @@ type daemonOpts struct {
 	protocol int
 	peerUID  func(net.Conn) (uint32, error)
 	ownUID   func() uint32
+	// onCall, when set, sees every call the daemon dispatches, as the client
+	// framed it (its stated deadline included), before the router answers.
+	onCall func(router.Call)
+}
+
+// recordingDispatcher passes each call to seen, then to the router.
+type recordingDispatcher struct {
+	next socket.Dispatcher
+	seen func(router.Call)
+}
+
+func (d recordingDispatcher) Dispatch(ctx context.Context, c router.Call) scriptout.Response {
+	d.seen(c)
+	return d.next.Dispatch(ctx, c)
 }
 
 // startDaemonAt serves a router with a "list" op (and nothing else) on
@@ -209,7 +227,11 @@ func startDaemonAt(t *testing.T, stateDir, socketPath string, o daemonOpts) *dae
 	d := &daemon{router: r, cancel: cancel, done: make(chan struct{})}
 	go func() {
 		defer close(d.done)
-		_ = srv.Serve(ctx, socket.Handler(r, socket.ServerConfig{Build: "test-daemon", Protocol: o.protocol}), nil)
+		var dispatcher socket.Dispatcher = r
+		if o.onCall != nil {
+			dispatcher = recordingDispatcher{next: r, seen: o.onCall}
+		}
+		_ = srv.Serve(ctx, socket.Handler(dispatcher, socket.ServerConfig{Build: "test-daemon", Protocol: o.protocol}), nil)
 	}()
 	t.Cleanup(func() { cancel(); <-d.done })
 	return d
@@ -368,25 +390,26 @@ func TestClientBinaryRestartWindowIsRetriedInsideTheDeadline(t *testing.T) {
 	bin := fastClient(t)
 	cfg, state, sock := clientSetup(t)
 
-	type outcome struct {
-		res clientResult
-		at  time.Duration
-	}
-	got := make(chan outcome, 1)
-	start := time.Now()
-	go func() {
-		res := runClientBinary(t, bin, cfg, "pr", listRequest)
-		got <- outcome{res, time.Since(start)}
-	}()
+	// The daemon reports the deadline the client stated: the client's
+	// deadline (budget less ForwardMargin) taken down by the time it spent
+	// connecting, measured on the client's own clock from the start of its
+	// call. So it excludes process start-up and host load before main. (A
+	// client that only starts after the daemon is up connects at once and
+	// proves nothing about the retry; that errs towards passing, never
+	// towards a host-load failure.)
+	stated := make(chan time.Duration, 1)
+	got := make(chan clientResult, 1)
+	go func() { got <- runClientBinary(t, bin, cfg, "pr", listRequest) }()
 	time.Sleep(500 * time.Millisecond) // the supervisor brings the daemon back
-	startDaemonAt(t, state, sock, daemonOpts{})
+	startDaemonAt(t, state, sock, daemonOpts{onCall: func(c router.Call) { stated <- c.Deadline }})
 
-	o := <-got
-	if o.res.code != 0 || !strings.Contains(o.res.stdout, `"result"`) {
-		t.Fatalf("the retry must reach a daemon that starts 500ms after the call: exit %d %s", o.res.code, o.res.stdout)
+	res := <-got
+	if res.code != 0 || !strings.Contains(res.stdout, `"result"`) {
+		t.Fatalf("the retry must reach a daemon that starts 500ms after the call: exit %d %s", res.code, res.stdout)
 	}
-	if o.at > 2*time.Second {
-		t.Errorf("answered after %v, inside half the %s budget", o.at, fastBudget)
+	connecting := budget() - client.ForwardMargin - <-stated
+	if connecting > retryWindow()+retryAnswerSlack {
+		t.Errorf("the client spent %v connecting, want it inside the %v retry window (half the %v budget)", connecting, retryWindow(), budget())
 	}
 }
 
@@ -396,14 +419,13 @@ func TestClientBinarySocketPathOverThePlatformLimitIsRefused(t *testing.T) {
 	long := filepath.Join(stateDir, strings.Repeat("d", proc.MaxSocketPathBytes()), "sock")
 	cfg := writeServeConfig(t, stateDir, long)
 
-	start := time.Now()
 	res := runClientBinary(t, bin, cfg, "pr", listRequest)
 	e := res.errorBody(t)
 	if e.Code != "unavailable" || res.code != exitUnavailable || !strings.Contains(e.Message, long) || !strings.Contains(e.Message, "sun_path") {
 		t.Errorf("%+v exit %d: the over-long path is refused and named", e, res.code)
 	}
-	if time.Since(start) > 2*time.Second {
-		t.Errorf("an over-long path is final, not retried (took %v)", time.Since(start))
+	if took := clientLogDuration(t, stateDir, 1); took >= retryWindow()-retryWindowSlack {
+		t.Errorf("an over-long path is final, not retried (the client spent %v, a retry waits the %v window)", took, retryWindow())
 	}
 }
 
@@ -417,14 +439,13 @@ func TestClientBinarySocketPermissionIsFinal(t *testing.T) {
 	if err := os.Chmod(sock, 0); err != nil {
 		t.Fatal(err)
 	}
-	start := time.Now()
 	res := runClientBinary(t, bin, cfg, "pr", listRequest)
 	e := res.errorBody(t)
 	if e.Code != "unavailable" || res.code != exitUnavailable || !strings.Contains(e.Message, sock) {
 		t.Errorf("%+v exit %d", e, res.code)
 	}
-	if time.Since(start) > 2*time.Second {
-		t.Errorf("a permission refusal is not retried (took %v)", time.Since(start))
+	if took := clientLogDuration(t, state, 1); took >= retryWindow()-retryWindowSlack {
+		t.Errorf("a permission refusal is not retried (the client spent %v, a retry waits the %v window)", took, retryWindow())
 	}
 }
 
