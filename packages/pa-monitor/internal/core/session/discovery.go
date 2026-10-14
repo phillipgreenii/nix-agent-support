@@ -59,6 +59,12 @@ func (d *Discoverer) Discover() ([]*Session, error) {
 		if d.PidAlive != nil {
 			alive = d.PidAlive(r.PID)
 		}
+		// PID-reuse guard: a live PID whose process started at a different time
+		// than the row's procStart is an unrelated process, not this session.
+		// Fails open for rows without procStart / unreadable start times.
+		if alive && !ct.ProcStartMatches(r) {
+			alive = false
+		}
 		readEnv := d.ReadEnv
 		if readEnv == nil {
 			readEnv = func(_ string, pid int) (map[string]string, error) { return ReadProcessEnv(pid) }

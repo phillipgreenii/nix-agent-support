@@ -1,6 +1,7 @@
 package session
 
 import (
+	"fmt"
 	"os"
 	"testing"
 )
@@ -128,5 +129,34 @@ func TestDiscover_EmptyEnvOnReaderFailure(t *testing.T) {
 	}
 	if len(got[0].Env) != 0 {
 		t.Errorf("expected empty env on reader failure, got %+v", got[0].Env)
+	}
+}
+
+func TestDiscoverRejectsReusedPidWithMismatchingProcStart(t *testing.T) {
+	dir := t.TempDir()
+	// The test process's own PID is alive, but a row whose procStart is years
+	// off belongs to a dead session whose PID was recycled.
+	pid := os.Getpid()
+	mustWrite(t, dir, "reused.json", fmt.Sprintf(`{"pid":%d,"sessionId":"reused","cwd":"/p","procStart":"Mon Jan  1 00:00:00 2001"}`, pid))
+	mustWrite(t, dir, "legacy.json", fmt.Sprintf(`{"pid":%d,"sessionId":"legacy","cwd":"/p"}`, pid))
+
+	d := Discoverer{
+		SessionsDir: dir,
+		PidAlive:    DefaultPidAlive,
+		ReadEnv:     func(string, int) (map[string]string, error) { return nil, nil },
+	}
+	out, err := d.Discover()
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	byID := map[string]*Session{}
+	for _, s := range out {
+		byID[s.SessionID] = s
+	}
+	if byID["reused"] == nil || byID["reused"].PidAlive {
+		t.Errorf("reused: want present with PidAlive=false, got %+v", byID["reused"])
+	}
+	if byID["legacy"] == nil || !byID["legacy"].PidAlive {
+		t.Errorf("legacy (no procStart): want PidAlive=true (PID-only fallback), got %+v", byID["legacy"])
 	}
 }

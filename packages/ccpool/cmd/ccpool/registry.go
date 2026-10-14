@@ -22,7 +22,7 @@ const registryWaitingFreshWindow = 5 * time.Minute
 // ccpool sessions are keyed by ClaudeSessionID; the per-process Claude registry
 // is keyed by PID (~/.claude/sessions/<pid>.json) with a sessionId field — so
 // the join is: sweep the dir, match reg.SessionID == claudeSessionID. The match
-// is PID-GATED (PidAlive) before the verdict is trusted: a "busy" row can
+// is liveness-gated (SessionAlive: PID alive and procStart matching) before the verdict is trusted: a "busy" row can
 // survive a crash (the file lingers until GC), so a dead pid reports
 // (zero, false). awaitingInput and lastActivity come from the transcript (both
 // error-tolerant). A missing dir, no match, or a dead pid all return
@@ -46,8 +46,8 @@ func registryVerdict(sessionsDir, claudeSessionID, transcriptPath string, freshW
 		if reg.SessionID != claudeSessionID {
 			continue
 		}
-		if !ct.PidAlive(reg.PID) {
-			return ct.ActivityVerdict{}, false // stale row from a dead/crashed pid
+		if !ct.SessionAlive(reg) {
+			return ct.ActivityVerdict{}, false // stale row from a dead/crashed pid (or a reused pid: procStart mismatch)
 		}
 		awaitingInput := false
 		if transcriptPath != "" {

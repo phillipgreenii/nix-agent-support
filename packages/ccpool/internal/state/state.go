@@ -273,7 +273,7 @@ func Classify(in Inputs) Result {
 //     a status query.
 //   - registry wraps the cmd layer's registry lookup: it sweeps the Claude
 //     session registry (~/.claude/sessions), matches the row by
-//     ClaudeSessionID, PID-gates the match (PidAlive), and returns
+//     ClaudeSessionID, liveness-gates the match (SessionAlive), and returns
 //     ClassifyActivity's verdict plus a "found a live row" bool. A missing dir,
 //     no match, or a dead pid yields (zero verdict, false) — Classify then
 //     ignores it and uses the pane+row precedence. Resolved whenever the

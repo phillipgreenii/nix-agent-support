@@ -16,7 +16,10 @@ import (
 // Caveats (observed against the local corpus, document for consumers):
 //   - The registry is keyed by PID, so a "busy" row can survive a crash (the
 //     process is gone but the file lingers until GC). ALWAYS pid-gate the row
-//     before trusting "busy" — see PidAlive / ClassifyActivity's contract.
+//     before trusting "busy" — see SessionAlive (PID alive AND procStart
+//     matches the live process) / ClassifyActivity's contract. A bare PidAlive
+//     is not enough: the OS may reuse the PID of a dead session's process for
+//     an unrelated one while the stale file lingers.
 //   - Status "waiting" goes stale: a "permission prompt" wait was observed stuck
 //     for 16+ hours after the human moved on (the transcript kept advancing).
 //     Cross-check freshness against transcript message activity before trusting
@@ -28,6 +31,10 @@ import (
 //     added in CC 2.1.162); it is frequently absent (JSON null) for "waiting".
 //     Unknown values are kept verbatim rather than rejected.
 //   - Name and WaitingFor are JSON null when unset; they decode to "".
+//   - ProcStart is the process start time Claude Code recorded (a ctime-style
+//     UTC string, e.g. "Wed Oct 14 07:51:50 2026", identical to
+//     `TZ=UTC ps -o lstart= -p <pid>`). Zero when the field is absent (older
+//     registries) or unparseable; then liveness falls back to PID-only.
 type RegistrySession struct {
 	PID             int
 	SessionID       string
@@ -39,10 +46,11 @@ type RegistrySession struct {
 	Status          string
 	WaitingFor      string
 	StatusUpdatedAt time.Time
+	ProcStart       time.Time
 }
 
 // rawRegistrySession mirrors the on-disk JSON. Epoch fields are ms-since-epoch.
-// Unknown extra fields (procStart, version, peerProtocol, updatedAt, …) are
+// Unknown extra fields (version, peerProtocol, updatedAt, …) are
 // ignored. status/waitingFor are kept as raw strings so unexpected values are
 // surfaced rather than dropped.
 type rawRegistrySession struct {
@@ -56,6 +64,7 @@ type rawRegistrySession struct {
 	Status          string `json:"status"`          // busy | idle | waiting (raw)
 	WaitingFor      string `json:"waitingFor"`      // e.g. "permission prompt" (raw, may be absent)
 	StatusUpdatedAt int64  `json:"statusUpdatedAt"` // ms epoch
+	ProcStart       string `json:"procStart"`       // ctime-style UTC, e.g. "Wed Oct 14 07:51:50 2026"
 }
 
 func (r rawRegistrySession) toSession() RegistrySession {
@@ -74,6 +83,9 @@ func (r rawRegistrySession) toSession() RegistrySession {
 	}
 	if r.StatusUpdatedAt != 0 {
 		s.StatusUpdatedAt = time.UnixMilli(r.StatusUpdatedAt)
+	}
+	if t, ok := parseProcStart(r.ProcStart); ok {
+		s.ProcStart = t
 	}
 	return s
 }
@@ -101,7 +113,7 @@ func ReadSessionFile(path string) (RegistrySession, error) {
 // error. Directories and non-.json entries are ignored.
 //
 // The returned rows are NOT pid-gated; callers must reject stale "busy" rows
-// from dead PIDs themselves (see PidAlive).
+// from dead PIDs (or reused PIDs) themselves (see SessionAlive).
 func ReadSessionRegistry(sessionsDir string) ([]RegistrySession, error) {
 	entries, err := os.ReadDir(sessionsDir)
 	if err != nil {
@@ -207,7 +219,7 @@ type ActivityVerdict struct {
 //     This is a library mechanism; the policy value is the caller's to pick.
 //
 // Pid-liveness is the CALLER's responsibility: pass an already-gated row (e.g.
-// gate on PidAlive before calling). ClassifyActivity itself stays pure so it is
+// gate on SessionAlive before calling). ClassifyActivity itself stays pure so it is
 // unit-testable and shared. "busy" is trusted here and never demoted on
 // transcript staleness — a busy main transcript is expected to be stale while a
 // subagent runs, and demoting it reintroduces the incident bug.
@@ -255,7 +267,9 @@ func waitReason(reg RegistrySession, awaitingInput, waitingFresh bool) string {
 // convenience helper for consumers that need to pid-gate registry rows before
 // calling ClassifyActivity (which is pure and does not gate). A non-positive pid
 // is never alive. pa-monitor already has its own DefaultPidAlive; this exists so
-// other consumers (e.g. ccpool) do not have to reimplement it.
+// other consumers (e.g. ccpool) do not have to reimplement it. It cannot
+// detect PID reuse; for a registry row use SessionAlive, which also compares
+// the row's procStart with the live process's start time.
 func PidAlive(pid int) bool {
 	if pid <= 0 {
 		return false

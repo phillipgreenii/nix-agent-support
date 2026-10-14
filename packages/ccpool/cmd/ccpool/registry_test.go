@@ -73,3 +73,17 @@ func TestRegistryVerdict_missingDirIsNotFound(t *testing.T) {
 		t.Error("found = true, want false (missing sessions dir)")
 	}
 }
+
+func TestRegistryVerdict_reusedPidProcStartMismatchIsNotFound(t *testing.T) {
+	dir := t.TempDir()
+	// The test process's own pid is alive, but the row claims it started in
+	// 2001: a recycled pid, not the session that wrote the row.
+	body := `{"pid":` + itoa(os.Getpid()) + `,"sessionId":"MY-SESSION","status":"busy","procStart":"Mon Jan  1 00:00:00 2001"}`
+	if err := os.WriteFile(filepath.Join(dir, itoa(os.Getpid())+".json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, found := registryVerdict(dir, "MY-SESSION", "", registryWaitingFreshWindow)
+	if found {
+		t.Error("found = true, want false (alive pid whose procStart does not match)")
+	}
+}
