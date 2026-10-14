@@ -96,8 +96,8 @@ executed as one bead per step:
   (Recommended), Phase-split-reviewer, Sanity-check fallback").
 - P5 is ordered after P4: both edit SKILL.md step 3 and the anatomy, so P5 runs on P4's text.
 - P8 is narrowed to the post-apply re-measure (`pg2-8k0fo`): each step runs its own hooks and
-  its own read-only diff review and lands on its own, so the "per commit" and "one review over
-  the final diff" bullets under P8 below are carried by every step bead instead.
+  its own read-only diff review and lands on its own, so there is no separate validate-and-land
+  step (see P8 below).
 
 ## Steps and order
 
@@ -347,12 +347,12 @@ denied or stalls.
   assemble-packet, update-packet).
 - SKILL.md provenance line names the ADR.
 
-### P8 — Validate and land (S)
+### P8 — Re-measure after apply (S; narrowed in revision 5)
 
-- Per commit: `git add -A`; `nix fmt -- <changed files>`; `pg-hooks fix`; `pg-hooks run
-pre-commit <changed files>` (bats via `run-unit-tests`). Before landing: `pg-hooks run
-pre-land`; land via `integrate-branch:integrate-branch`.
-- One read-only review subagent over the final diff (Read/Grep/Glob).
+- Per-step validation moved into every step bead (P1–P7): each runs `git add -A`; `nix fmt --
+<changed files>`; `pg-hooks fix`; `pg-hooks run pre-commit <changed files>` (bats via
+  `run-unit-tests`), one read-only review subagent over its own diff, and lands on its own
+  (`pg-hooks run pre-land`; `integrate-branch:integrate-branch`).
 - Skills are store-served: live only after the operator's next `pn workspace apply` (not run by
   the agent). One `pn:applied`-gated follow-up bead: measure the next decomposition runs with
   the method above (wall time, wait overshoot, sub-dispatch writing time, cold-read `no` rate)

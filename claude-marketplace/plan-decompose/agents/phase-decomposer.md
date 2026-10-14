@@ -60,7 +60,7 @@ has no other way to know it.
 **phase-plan-verifier** (one Agent call per verify; `subagent_type:
 "plan-decompose:phase-plan-verifier"`, `model: sonnet` — state the model explicitly at the call
 site, matching the existing precedent in `plan-decompose:plan-decompose`'s "Sub-dispatch
-templates" (its semantic-post-checker dispatch):
+templates" (its semantic-post-checker dispatch)):
 
 > All five required inputs, in this order: (1) the phase bead's own id; (2) the trigger bead's
 > own id; (3) the phase bead's current design text; (4) the ids of the upstream phases this

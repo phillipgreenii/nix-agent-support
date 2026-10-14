@@ -105,10 +105,13 @@ VERIFIED CURRENT against; `pd_curated_session` is the decomposer's session id.
 - Within `decompose` it is WRITE-ONCE per packet: `create-packet` (mode `decompose` step 3) stamps
   it to the docket's `pd_rev` AT THAT MOMENT and nothing else in `decompose` ever rewrites it. A
   step 5/6/7 fix-loop pass revising an already-created packet's content is a content-only edit
-  (the binding's "Revising an already-created packet's content"), never `create-packet` again,
-  never a re-stamp, and never any `write-metadata` touch to `pd_curated_rev`: a fix-loop pass is
-  not a curation revision, however many rounds run.
-- ONLY mode `reconcile` changes it again: for AFFECTED packets at re-curation (its step 3, which
+  (the binding's "Revising an already-created packet's content"). It MUST NOT call
+  `create-packet` again (that would create a duplicate packet), MUST NOT re-stamp, and MUST NOT
+  make any `write-metadata` touch to `pd_curated_rev`: a fix-loop pass is not a curation
+  revision, however many rounds run.
+- ONLY mode `reconcile` changes it again, and only because `pd_rev` itself bumped or, in a stamp
+  catch-up, because an earlier reconcile left the packet behind: for AFFECTED packets at
+  re-curation (its step 3, which
   HOLDS them until its step 5 releases them), and for UNAFFECTED packets after the affectedness
   check (its step 5, which runs only once the reconcile completes — an aborted or interrupted
   reconcile restamps no unaffected packet). So after a COMPLETED reconcile every non-closed
@@ -228,7 +231,7 @@ deduplication.
    into THIS docket, which is already fully released for its own scope. Mirrors
    `epic-decompose`'s `<program-epic>#phase<n>` minting, scoped to one docket's leftover slice
    instead of a whole program epic's phase split. Either `released` or `released:partial`,
-   with the text DIFFERING from the stored design ⇒ mode `reconcile` (reconcile step 2
+   with the text DIFFERING from the stored design ⇒ mode `reconcile` (see "Other modes"; reconcile step 2
    re-evaluates and may change which of the two literals the docket ends up at, restored in
    its step 6 — and an aborted reconcile, per its step 4, restores neither); any other
    `pd_phase` ⇒ RESUME from that phase — and if the design ALSO changed since, re-run the
