@@ -71,7 +71,7 @@ sequenceDiagram
     Hook->>Eng: build engine for this CWD, register RuleChain
     Eng->>Eng: EvaluateHook (Bash: split+fold; else: first-match-wins)
     Eng-->>Hook: RuleResult{Decision, Reason, Module, Trace}
-    Hook->>DB: RecordPreToolDecision (ask/deny only)
+    Hook->>DB: RecordPreToolDecision (every verdict)
     alt router enabled
         Hook-->>Router: {} (no opinion) | {decision:"allow"} | {decision:"ask"} | {decision:"deny", reason}
         Router-->>CC: same response, unwrapped
@@ -105,8 +105,9 @@ sequenceDiagram
 5. **The verdict is serialized** and returned to Claude Code: `NoOpinion` emits `{}` (Claude Code
    decides on its own, per its normal permission settings); `Ask`/`Reject` emit a decision plus a
    human-readable reason; a plain Approve short-circuits Claude Code's own prompt.
-6. **Ask/Reject decisions are logged** to the SQLite ask-log (`~/.local/share/claude-extended-tool-approver/asks.db`)
-   as `pending`. Four other hook events (`PermissionRequest`, `PostToolUse`, `PermissionDenied`,
+6. **Every verdict is logged** to the SQLite ask-log (`~/.local/share/claude-extended-tool-approver/asks.db`),
+   not only Ask/Reject: `allow`, `ask` and `abstain` rows start as `pending`, while a `deny` (Reject)
+   row is written already resolved as `rejected`. Four other hook events (`PermissionRequest`, `PostToolUse`, `PermissionDenied`,
    `SessionEnd`) resolve that row's eventual `outcome` (`approved`/`denied`/`unresolved`) — see the
    README's "Decision Database" section for the full outcome-provenance table; this document is
    about how the _decision_ is reached, not how it is later graded.

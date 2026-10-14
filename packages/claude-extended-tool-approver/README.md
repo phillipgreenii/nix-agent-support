@@ -4,7 +4,7 @@ Claude Code extended tool approval with rule-based permission evaluation and dec
 
 ## What it does
 
-Evaluates tool invocations against an ordered chain of rule modules (envvars, git, pathsafety, etc.), returning APPROVE, ASK, DENY, or NO-OPINION (serialized as `abstain`, and emitted as `{}` so Claude Code decides). Logs all ASK and DENY decisions plus their outcomes to a SQLite database.
+Evaluates tool invocations against an ordered chain of rule modules (envvars, git, pathsafety, etc.), returning APPROVE, ASK, DENY, or NO-OPINION (serialized as `abstain`, and emitted as `{}` so Claude Code decides). Logs every PreToolUse verdict (`allow`, `ask`, `deny` and `abstain`) plus its outcome to a SQLite database.
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the design patterns behind the engine, the full lifecycle of one decision, and the two ways to extend policy (a new rule module vs. a `rules.json` data change). This README is the operational reference; that document is the architectural one.
 
@@ -24,11 +24,11 @@ identically — the router only changes who invokes ceta, never what ceta decide
 
 | Event             | Purpose                                                       |
 | ----------------- | ------------------------------------------------------------- |
-| PreToolUse        | Rule engine evaluation + log ask/deny decisions               |
+| PreToolUse        | Rule engine evaluation + log every verdict                    |
 | PermissionRequest | Log all permission dialogs (including built-in ASKs)          |
-| PostToolUse       | Resolve pending ASKs as approved                              |
+| PostToolUse       | Resolve the pending row as approved                           |
 | PermissionDenied  | Resolve as denied — the call was actually declined            |
-| SessionEnd        | Resolve remaining pending ASKs as **unresolved** (not denied) |
+| SessionEnd        | Resolve remaining pending rows as **unresolved** (not denied) |
 
 In an unattended session (permission mode `dontAsk`, or `CCPOOL_AUTONOMOUS=1` in the hook's
 environment) PreToolUse never emits `ask`: any verdict that would ask a human is emitted as `deny`
@@ -38,6 +38,24 @@ are unchanged. See "Unattended sessions never ask" in [`docs/ARCHITECTURE.md`](d
 ## Decision Database
 
 Stored at `~/.local/share/claude-extended-tool-approver/asks.db` (or `$XDG_DATA_HOME/claude-extended-tool-approver/asks.db`).
+
+### What is logged
+
+Every PreToolUse call that reaches the hook gets one `tool_decisions` row, whatever the verdict
+(`RecordPreToolDecision` applies no filter on the decision). The verdict is stored in
+`hook_decision` as `allow` (Approve), `ask`, `deny` (Reject) or `abstain` (NoOpinion). The row's
+starting `outcome` depends on the verdict:
+
+- `deny` is written already resolved, as `rejected`: the hook refused the call itself and nobody
+  was asked.
+- `allow`, `ask` and `abstain` are written as `pending`. Later hook events then resolve the row:
+  PostToolUse as `approved`, PermissionDenied as `denied`, and the SessionEnd sweep as
+  `unresolved` for any row still `pending`.
+
+Rows with a NULL `hook_decision` come from the PermissionRequest hook, which records a built-in
+permission dialog that had no PreToolUse row to attach to. Per-rule `trace` entries are written to
+`decision_trace_entries` for any verdict that carries a trace. The only time nothing is logged is
+when the store cannot be opened (the hook then logs the error to stderr and still decides).
 
 ### Outcome values
 
