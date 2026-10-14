@@ -360,7 +360,7 @@ func TestPluginToolSchemasFailClosed(t *testing.T) {
 // is insufficient.
 func TestPluginToolSpotChecks(t *testing.T) {
 	sufficient := []string{
-		"bgcheck flake-check", "bgcheck", "integrate-branch-support --facts", "integrate-branch-support --prek-branch-diff",
+		"bgcheck flake-check", "bgcheck", "bgwait flake-check", "bgwait --timeout 120 flake-check", "bgwait -n 40 flake-check", "integrate-branch-support --facts", "integrate-branch-support --prek-branch-diff",
 		"wtdone feature --cc /repo", "session-mode start wrap-up-session", "session-mode set-status finished --handoff-bead pg2-abc",
 		"session-mode show", "handoff-create --attended --session-id s --title t --body-file b.md",
 		"pg-go-mutate ./internal/collect --workers 1", "pg-ccaudit query top-signatures --since 2026-07-22 --until 2026-07-30",

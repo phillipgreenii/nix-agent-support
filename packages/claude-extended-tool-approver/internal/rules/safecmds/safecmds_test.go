@@ -221,6 +221,32 @@ func TestSafecmds_Bgcheck_Approve(t *testing.T) {
 	}
 }
 
+// TestSafecmds_Bgwait_Approve pins bgwait's membership in the alwaysSafe set
+// (pg2-027m0): the blocking, read-only sibling of bgcheck, approved wherever
+// bgcheck is.
+func TestSafecmds_Bgwait_Approve(t *testing.T) {
+	t.Parallel()
+	pe := patheval.New("/home/user/project")
+	r := New(pe)
+	commands := []string{
+		"bgwait NAME",
+		"bgwait --timeout 120 NAME",
+		"bgwait -t 60 -n 40 NAME",
+		"bgwait --dir /tmp/x NAME",
+	}
+	for _, cmd := range commands {
+		input := &hookio.HookInput{
+			ToolName:  "Bash",
+			CWD:       "/home/user/project",
+			ToolInput: mustJSON(map[string]string{"command": cmd}),
+		}
+		got := hookio.Verdict(r.Evaluate(input))
+		if got.Decision != hookio.Approve {
+			t.Errorf("cmd %q: got %s (%s), want approve (bgwait is alwaysSafe)", cmd, got.Decision, got.Reason)
+		}
+	}
+}
+
 // TestSafecmds_Set_Approve pins `set`'s membership in the alwaysSafe set
 // (pg2-uejmb, root-caused from a real corpus row where a `set -e` preamble
 // leaf had no rule claim it, dragging an otherwise-safe compound command to

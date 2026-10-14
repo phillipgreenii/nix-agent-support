@@ -53,7 +53,7 @@ most non-`present` states by design, so read the state, not the exit code. Never
   avoid a failed-commit + restage round trip.
 - `missing`/`broken`/`unreachable`/`relocated`: the commit-time stubs print one `pg-hooks:` notice
   and exit 0, so the commit gate is NOT in force; say so in the report. The notice names the exact
-  rebuild command; a rebuild is a nix build, so run it through `bgrun` and check with `bgcheck`.
+  rebuild command; a rebuild is a nix build, so run it through `bgrun` and wait for it with `bgwait` (never poll `bgcheck` in a loop).
   Never link, copy or regenerate a hook config to make hooks run.
 - Exit `127` or no `state=` line: `pg-hooks` is not installed; report
   `pg-hooks not installed on this machine; ask the operator to run pn workspace apply` and fall back

@@ -5665,6 +5665,34 @@
     "notes": "pg2-cjfpy.2: a command form the integrate-branch plugin instructs an agent to run (placeholders literalized). Operator ruling (Phillip, 2026-10-04, parent epic pg2-cjfpy): any command a skill instructs is autoapproved."
   },
   {
+    "case": "plugin_pb_bgwait_flake_check_approve",
+    "tags": ["plugin-instructed", "pg2-027m0", "pb"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bgwait flake-check" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-027m0: bgwait is the blocking sibling of bgcheck (read-only, no inner command) and the pb drain guidance instructs agents to wait with it; approved wherever bgcheck is."
+  },
+  {
+    "case": "plugin_pb_bgwait_timeout_approve",
+    "tags": ["plugin-instructed", "pg2-027m0", "pb"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": { "command": "bgwait --timeout 480 flake-check" }
+    },
+    "cwd_path_state": { "cwd": "/repo", "project_root": "/repo" },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-027m0: bgwait is the blocking sibling of bgcheck (read-only, no inner command) and the pb drain guidance instructs agents to wait with it; approved wherever bgcheck is."
+  },
+  {
     "case": "plugin_pg_ccaudit_git_diff_no_ext_diff_approve",
     "tags": ["plugin-instructed", "cjfpy2", "pg-ccaudit"],
     "tool_input": {

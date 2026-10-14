@@ -1,7 +1,7 @@
 package cmddesc
 
 // pg2-cjfpy.2: the CLIs the agent-support marketplace plugins' skills,
-// commands and agents instruct (bgcheck — bgrun is unwrapped by cmdparse — integrate-branch-support,
+// commands and agents instruct (bgcheck, bgwait — bgrun is unwrapped by cmdparse — integrate-branch-support,
 // wtdone, handoff-create, session-mode, pg-go-mutate, pg-ccaudit, pg-wi-flow,
 // pg-hooks, prek, bats, gh, pn workspace, claude-extended-tool-approver, the
 // plugins' own helper scripts) plus the ancillary read-only tools those
@@ -50,6 +50,27 @@ var bgcheckSchema = CommandSchema{
 	Name:       "bgcheck",
 	Provenance: "bgcheck --help (bg-tools; 'Strictly read-only (ps + tail)'), this host 2026-10-05",
 	Flags: map[string]FlagSpec{
+		"-n": literal1, "--lines": literal1,
+		"-d": {Arity: ArityOne, Operand: PathRead}, "--dir": {Arity: ArityOne, Operand: PathRead},
+		"-h": inert, "--help": inert, "-v": inert, "--version": inert,
+	},
+	Positionals:  PositionalSpec{Rest: Literal},
+	Stdin:        StdinNever,
+	Stdout:       StdoutContent,
+	UnknownFlag:  UnknownFlagInsufficient,
+	EndOfOptions: true,
+}
+
+// bgwaitSchema: `bgwait [OPTIONS] NAME` — the blocking sibling of bgcheck
+// (pg2-027m0): it waits for the job's exit record (or the timeout), then
+// prints bgcheck's report once. Like bgcheck it reads only the job's own state
+// directory and never runs an inner command; output includes the log tail, so
+// it is content.
+var bgwaitSchema = CommandSchema{
+	Name:       "bgwait",
+	Provenance: "bgwait --help (bg-tools; 'Block until a background job finishes, then report it once'), this host 2026-10-14",
+	Flags: map[string]FlagSpec{
+		"-t": literal1, "--timeout": literal1,
 		"-n": literal1, "--lines": literal1,
 		"-d": {Arity: ArityOne, Operand: PathRead}, "--dir": {Arity: ArityOne, Operand: PathRead},
 		"-h": inert, "--help": inert, "-v": inert, "--version": inert,
@@ -1107,7 +1128,7 @@ func nixFlakeLockWriter(name string) CommandSchema {
 // pluginToolSchemas lists every schema this file adds to DefaultRegistry().
 func pluginToolSchemas() []CommandSchema {
 	out := []CommandSchema{
-		bgcheckSchema, integrateBranchSupportSchema, wtdoneSchema,
+		bgcheckSchema, bgwaitSchema, integrateBranchSupportSchema, wtdoneSchema,
 		handoffCreateSchema, sessionModeSchema, pgGoMutateSchema, pgCcauditSchema,
 		pgWiFlowSchema, pgHooksSchema, prekSchema, batsSchema, ghSchema,
 		cetaSchema, rgSchema, fdSchema, duSchema, lsofSchema, launchctlSchema, manSchema,

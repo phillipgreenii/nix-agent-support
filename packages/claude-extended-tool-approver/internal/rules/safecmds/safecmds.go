@@ -109,6 +109,13 @@ var alwaysSafe = map[string]bool{
 	// cmdparse layer instead of living here — see commandRunnerPrefixes), it
 	// never runs an inner command, so an unconditional Approve is safe.
 	"bgcheck": true,
+	// bgwait (pg2-027m0): the blocking sibling of bgcheck. It polls the same
+	// job state (pid liveness + the NAME.exit record) on a sleep loop capped
+	// below the foreground Bash limit, then prints bgcheck's report once. Like
+	// bgcheck it never runs an inner command and writes nothing, so an
+	// unconditional Approve is safe; it exists so an agent waits ONCE instead
+	// of repeating bgcheck.
+	"bgwait": true,
 	// session-mode / wtdone (pg2-hel4i): this repo's own worktree/session-
 	// lifecycle CLIs (packages/session-mode, packages/wtdone). Neither basename
 	// was recognized by any rule module, so every invocation fell through to

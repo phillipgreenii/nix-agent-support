@@ -39,9 +39,11 @@ otherwise.
    until this one thing finishes." **You are a dispatched (non-top-level) agent: no
    task-notification ever resumes THIS invocation when that backgrounded command finishes —
    that mechanism only resumes the top-level session that dispatched YOU, when its own dispatch
-   of you completes.** So stay in this same invocation and keep calling tools — poll the
-   backgrounded job yourself (e.g. a short foreground `Bash` check, repeated) — until it
-   actually resolves. Never end your turn with something like "I'll wait for it to finish" or
+   of you completes.** So stay in this same invocation and keep calling tools until the
+   backgrounded job actually resolves: launch it with `bgrun NAME -- CMD` and wait with
+   `bgwait NAME` (one blocking call, at most 540 seconds; exit 2 means still running, so call
+   it again). Never poll with repeated `bgcheck`, `sleep` or `date` calls (call `bgcheck` at
+   most once between `bgwait` calls): each poll re-sends your whole context. Never end your turn with something like "I'll wait for it to finish" or
    "I'll check back once the notification arrives": either phrasing is a permanent no-op, not a
    pause, because this invocation gets no second turn. Only as a genuine last resort — you are
    forced to end your turn for some other reason before the command resolves — does a status

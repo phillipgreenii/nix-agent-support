@@ -4366,8 +4366,8 @@
                       pkgs.fd
                       pkgs.lsof
                       pkgs.prek
-                      # This repo's own CLIs (overlay attrs; bgcheck ships in bg-tools):
-                      pkgs.bg-tools # bgcheck
+                      # This repo's own CLIs (overlay attrs; bgcheck and bgwait ship in bg-tools):
+                      pkgs.bg-tools # bgcheck, bgwait
                       pkgs.integrate-branch-support
                       pkgs.wtdone
                       pkgs.handoff-create
@@ -12291,7 +12291,7 @@
               inherit pkgs;
               bashBuilders = pkgs._agentSupportBashBuilders;
             }).checks
-            # test-bg-tools-lib / test-bgrun / test-bgcheck (bead pg2-r17gf).
+            # test-bg-tools-lib / test-bgrun / test-bgcheck / test-bgwait (bead pg2-r17gf).
             # Same one-line idiom as git-tools above: without this the suite
             # ran in no gate at all.
             // (import ./packages/bg-tools {

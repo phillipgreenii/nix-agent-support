@@ -115,7 +115,8 @@ Read in full when step 6 of `SKILL.md` applies. Moved verbatim from /drain-beads
    - the lander is itself a dispatched (non-top-level) subagent, so if any step
      it invokes backgrounds a command (e.g. a long hook run in
      `ff-merge-to-main`'s FF-1b), IT must block on that command itself in
-     THIS SAME turn via a `Monitor` until-loop call, exactly the pattern given in the
+     THIS SAME turn via a `Monitor` until-loop call (or, for a `bgrun` job, `bgwait NAME`;
+     never a `bgcheck`/`sleep`/`date` poll loop), exactly the pattern given in the
      DELEGATE step above — there is no external notification for its own
      backgrounded work either;
    - return a structured report: `outcome` (`landed` | `pr-opened` |

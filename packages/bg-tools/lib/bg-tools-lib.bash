@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 
-# Shared state conventions for bgrun/bgcheck. A "job" is NAME plus four files in
+# Shared state conventions for bgrun/bgcheck/bgwait. A "job" is NAME plus four files in
 # the state directory: NAME.log (combined output), NAME.pid (launcher subshell),
 # NAME.exit (the payload's TRUE exit code, written by the launcher's wrapper),
 # NAME.meta (command, cwd, start time). The exit file is the only trustworthy

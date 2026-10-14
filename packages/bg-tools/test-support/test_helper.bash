@@ -35,7 +35,7 @@ resolve_lib() {
 }
 
 # Replicates the builder's composition: library sourced ahead of the .sh.
-# $1 = script name (bgrun | bgcheck); creates $TEST_DIR/run_<name>.
+# $1 = script name (bgrun | bgcheck | bgwait); creates $TEST_DIR/run_<name>.
 create_cmd_wrapper() {
   local name="$1"
   cat >"$TEST_DIR/run_${name}" <<WRAPPER
