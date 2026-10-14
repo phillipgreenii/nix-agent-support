@@ -18,6 +18,7 @@ import (
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/dtest"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/eventlog"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/item"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/parknote"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/report"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/roles"
 )
@@ -620,8 +621,13 @@ func TestStall_secondConsecutiveStallAddsHumanInOneCall(t *testing.T) {
 		t.Fatalf("second strike must release and escalate: %+v", ns)
 	}
 	w := rig.bd.writes()
-	if len(w) != 2 || w[0] != releaseHumanBd || !strings.HasPrefix(w[1], "comment zr-d ") {
-		t.Fatalf("bd writes = %q, want one human+release call, then the comment", w)
+	if len(w) != 2 || w[1] != releaseHumanBd || !strings.HasPrefix(w[0], "comment zr-d "+parknote.Marker) {
+		t.Fatalf("bd writes = %q, want the park note, then ONE human+release call", w)
+	}
+	for _, want := range []string{"needs_input stall bound", "No person-question was identified", "Session: ", "role drain"} {
+		if !strings.Contains(w[0], want) {
+			t.Errorf("the park note must contain %q; got %q", want, w[0])
+		}
 	}
 	if v := verbOf(rig.e.waitFailureResult(rig.d.Role.CCPool, relBead, err)); v != report.Escalated {
 		t.Errorf("verb = %q, want %q", v, report.Escalated)

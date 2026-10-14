@@ -2,6 +2,8 @@ package beads
 
 import (
 	"context"
+	"errors"
+	"slices"
 	"testing"
 	"time"
 )
@@ -138,17 +140,63 @@ func TestAddHuman_argv(t *testing.T) {
 	}
 }
 
-func TestAddHumanAndUnclaim_singleUpdateArgv(t *testing.T) {
+func TestAddHumanAndUnclaim_commentThenOneUpdate(t *testing.T) {
 	fr := &fakeRunner{}
-	if err := AddHumanAndUnclaim(context.Background(), fr, "zr-1"); err != nil {
+	if err := AddHumanAndUnclaim(context.Background(), fr, "zr-1", "why it was parked"); err != nil {
 		t.Fatal(err)
 	}
-	if len(fr.args) != 1 {
-		t.Fatalf("must be ONE bd call, got %d: %v", len(fr.args), fr.args)
+	if len(fr.args) != 2 {
+		t.Fatalf("must be a comment then ONE update, got %d calls: %v", len(fr.args), fr.args)
+	}
+	if want := []string{"comment", "zr-1", "why it was parked"}; joinArgs(fr.args[0]) != joinArgs(want) {
+		t.Errorf("first call = %v, want %v (the note is written BEFORE the label)", fr.args[0], want)
 	}
 	want := []string{"update", "zr-1", "--add-label", "human", "--status=open", "--assignee="}
-	if joinArgs(fr.args[0]) != joinArgs(want) {
-		t.Errorf("argv = %v, want %v", fr.args[0], want)
+	if joinArgs(fr.args[1]) != joinArgs(want) {
+		t.Errorf("argv = %v, want %v", fr.args[1], want)
+	}
+}
+
+func TestAddHumanAndUnclaim_emptyNoteUsesDefault(t *testing.T) {
+	fr := &fakeRunner{}
+	if err := AddHumanAndUnclaim(context.Background(), fr, "zr-1", "  "); err != nil {
+		t.Fatal(err)
+	}
+	if len(fr.args) != 2 || fr.args[0][0] != "comment" || fr.args[0][2] != DefaultParkNote {
+		t.Fatalf("an empty note must fall back to DefaultParkNote, got %v", fr.args)
+	}
+}
+
+// failVerbRunner fails every call whose first arg is verb.
+type failVerbRunner struct {
+	verb  string
+	calls []string
+}
+
+func (f *failVerbRunner) Run(_ context.Context, args ...string) (string, error) {
+	f.calls = append(f.calls, args[0])
+	if args[0] == f.verb {
+		return "", errors.New("bd hiccup")
+	}
+	return "", nil
+}
+
+// The pg2-0fsuu invariant: a failed comment never keeps the label and release
+// from being written.
+func TestAddHumanAndUnclaim_commentFailureStillParksAndReleases(t *testing.T) {
+	fr := &failVerbRunner{verb: "comment"}
+	if err := AddHumanAndUnclaim(context.Background(), fr, "zr-1", "note"); err != nil {
+		t.Fatalf("a failed comment must not fail the park: %v", err)
+	}
+	if !slices.Equal(fr.calls, []string{"comment", "update"}) {
+		t.Fatalf("calls = %v, want comment then update", fr.calls)
+	}
+}
+
+func TestAddHumanAndUnclaim_updateFailureIsReturned(t *testing.T) {
+	fr := &failVerbRunner{verb: "update"}
+	if err := AddHumanAndUnclaim(context.Background(), fr, "zr-1", "note"); err == nil {
+		t.Fatal("a failed update must be returned")
 	}
 }
 

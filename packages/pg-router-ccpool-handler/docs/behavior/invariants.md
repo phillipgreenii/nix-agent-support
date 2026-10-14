@@ -51,7 +51,14 @@ module as an **implementer** of `INTF-HANDLER`/`INTF-SOURCE`.
   update that applies it (so `add-human` adds `human` and releases in one write), and the dispatch
   MUST report the unclaim verb (alongside the escalation verb for `add-human`): a bead is never
   left `in_progress` under a session that no longer exists. The `human` label policy is unchanged.
-  Bead `pg2-0fsuu`.
+  Bead `pg2-0fsuu`. Every write that parks a bead as `human` this way (this death under `add-human`,
+  and the second consecutive stall of `INV-CCH-29`) MUST first write one park comment on the bead
+  through the same bd runner: the trigger (with the close reason and exit facts the handler holds,
+  or the stall bound), the session and role, the bead's drain worktree and branch with whether it
+  has commits ahead of the primary branch (discovery is best effort and bounded; it MUST NOT block
+  or fail the park), and a statement that no person-question was identified, so the bead is
+  resume-or-land work and not a decision. A failed comment write MUST NOT stop the label-and-release
+  update. Bead `pg2-78mxs`.
 - **`INV-CCH-8`** — when preparing per-bead isolation (`git worktree add`) fails because the
   filesystem has run out of room, the handler MUST NOT treat it as a per-bead launch failure
   (no `pool-launch-fail`/`human` escalation) — a full disk is a transient, system-wide

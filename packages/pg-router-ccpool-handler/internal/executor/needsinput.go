@@ -277,8 +277,16 @@ func (r *ccpoolRun) stallClear(ctx context.Context, d DispatchContext, name stri
 	switch {
 	case mine:
 		if iss.HasLabel(drainStallLabel) {
-			// Second consecutive stall of this bead: human and the release in ONE call.
-			err = beads.AddHumanAndUnclaim(ctx, r.deps.BD, beadID)
+			// Second consecutive stall of this bead: human and the release in ONE call,
+			// preceded by the park note (bead pg2-78mxs): nothing here is a question
+			// for a person, and the note names the drain worktree the session left.
+			note := r.parkNote(ctx, d, name,
+				fmt.Sprintf("needs_input stall bound hit twice in a row (bound %s)", st.bound),
+				[]string{
+					fmt.Sprintf("the session sat in needs_input for %s without a person (a permission dialog nobody can answer in an unattended session)", quiet.Round(time.Second)),
+					"the handler sent Escape, then closed the session; the bead already carried " + drainStallLabel + " from the previous stall",
+				})
+			err = beads.AddHumanAndUnclaim(ctx, r.deps.BD, beadID, note)
 			res.escalated = err == nil
 		} else {
 			err = beads.Unclaim(ctx, r.deps.BD, beadID)
@@ -288,14 +296,12 @@ func (r *ccpoolRun) stallClear(ctx context.Context, d DispatchContext, name stri
 				"session", name, "bead", beadID, "err", err)
 		}
 		res.released = err == nil
-		if res.released {
+		if res.released && !res.escalated {
 			_ = beads.Comment(ctx, r.deps.BD, beadID, fmt.Sprintf(
 				"released: session %s sat in needs_input for %s without a person (a permission dialog nobody can answer in an unattended session); the handler sent Escape, then closed the session (needs_input stall bound %s)",
 				name, quiet.Round(time.Second), st.bound,
 			))
-			if !res.escalated {
-				_ = beads.AddLabel(ctx, r.deps.BD, beadID, drainStallLabel)
-			}
+			_ = beads.AddLabel(ctx, r.deps.BD, beadID, drainStallLabel)
 		}
 	case iss.Assignee != "" && iss.Assignee != cc.Actor:
 		slog.Info("stall bound: session closed; the bead is held by another actor: no write",

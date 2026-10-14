@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -185,15 +187,35 @@ func AddHuman(ctx context.Context, r Runner, id string) error {
 	return nil
 }
 
+// DefaultParkNote is the comment AddHumanAndUnclaim writes when its caller
+// supplied none, so no park of a bead as human is ever silent.
+const DefaultParkNote = "Handler park note: this bead was parked as human by the pg-router-ccpool-handler, not by a person; " +
+	"no person-question was identified. This is resume-or-land work, not a decision."
+
 // AddHumanAndUnclaim flags a bead for a human AND releases its claim in ONE
 // write: `bd update <id> --add-label human --status=open --assignee=`. For a
 // session that is gone: the human label keeps the bead out of every retry
 // queue, and the cleared assignee keeps it from staying in_progress under a
 // session that no longer exists (pg2-0fsuu). One call, so a bd hiccup cannot
 // land the label without the release or the reverse.
-func AddHumanAndUnclaim(ctx context.Context, r Runner, id string) error {
+//
+// The park note (why the bead was parked, where its drain worktree is) is
+// written first, through the same runner, as a bd comment, so the moment the
+// label makes the bead visible to the human queue the explanation is already
+// on it (bead pg2-78mxs). An empty note is replaced by DefaultParkNote: the
+// park is never silent. A comment that fails is logged and does NOT stop the
+// label-and-release update, which is the pg2-0fsuu invariant; a failed update
+// is logged too and returned.
+func AddHumanAndUnclaim(ctx context.Context, r Runner, id, note string) error {
+	if strings.TrimSpace(note) == "" {
+		note = DefaultParkNote
+	}
+	if err := Comment(ctx, r, id, note); err != nil {
+		slog.Error("park note not written; parking the bead anyway", "bead", id, "err", err)
+	}
 	_, err := r.Run(ctx, "update", id, "--add-label", "human", "--status=open", "--assignee=")
 	if err != nil {
+		slog.Error("park: add human and release failed; the bead keeps its claim", "bead", id, "err", err)
 		return fmt.Errorf("add-human-and-unclaim %s: %w", id, err)
 	}
 	return nil

@@ -4,15 +4,12 @@ package watchdog
 
 import (
 	"context"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/beads"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/ccpool"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/dtest"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/usage"
 )
 
@@ -29,7 +26,7 @@ import (
 // that is still in progress IS released) keeps the guard from passing by the
 // release being dead code.
 //
-// Hermetic store: each test runs `bd init` in its own t.TempDir() and asserts
+// Hermetic store (dtest.NewRealBD): each test runs `bd init` in its own t.TempDir() and asserts
 // .beads/metadata.json says "dolt_mode": "embedded", i.e. a private on-disk
 // engine owned by that directory. The environment handed to bd drops every
 // BEADS_*, BD_* and WORKSPACE_ROOT variable (so nothing can point at this
@@ -44,53 +41,16 @@ import (
 //
 //	nice -n 10 go test -p 4 -count=1 -tags contract -timeout 10m -run RealBD ./internal/watchdog/
 
-// realBDDeadline is a hang guard for real bd runs under heavy host load, not
-// a performance assertion.
-const realBDDeadline = 3 * time.Minute
-
 // realBDActor is the identity both the worker's claim/close and the watchdog's
 // own runner use, mirroring production where the handler's runner carries the
 // role's ccpool actor (beads.CLIRunner.Actor).
 const realBDActor = "sx246-actor"
 
-func hermeticBDEnv() []string {
-	var env []string
-	for _, kv := range os.Environ() {
-		if strings.HasPrefix(kv, "BEADS_") || strings.HasPrefix(kv, "BD_") || strings.HasPrefix(kv, "WORKSPACE_ROOT=") {
-			continue
-		}
-		env = append(env, kv)
-	}
-	return append(
-		env,
-		"BEADS_DOLT_AUTO_START=0",
-		"BD_NON_INTERACTIVE=1",
-		"BD_JSON_ENVELOPE=1",
-	)
-}
-
 // newRealBD returns a context and a runner rooted at a fresh private embedded
-// bd store.
+// bd store (the hermetic setup is shared: dtest.NewRealBD).
 func newRealBD(t *testing.T) (context.Context, *beads.CLIRunner) {
 	t.Helper()
-	if _, err := exec.LookPath("bd"); err != nil {
-		t.Skip("bd not on PATH")
-	}
-	dir := t.TempDir()
-	r := &beads.CLIRunner{Dir: dir, Env: hermeticBDEnv(), Actor: realBDActor}
-	ctx, cancel := context.WithTimeout(context.Background(), realBDDeadline)
-	t.Cleanup(cancel)
-	if out, err := r.Run(ctx, "init", "--prefix", "sx", "--non-interactive", "-q", "--skip-agents", "--skip-hooks"); err != nil {
-		t.Fatalf("bd init: %v\n%s", err, out)
-	}
-	meta, err := os.ReadFile(filepath.Join(dir, ".beads", "metadata.json"))
-	if err != nil {
-		t.Fatalf("read bd metadata: %v", err)
-	}
-	if !strings.Contains(string(meta), `"dolt_mode": "embedded"`) {
-		t.Fatalf("bd init did not produce a private embedded store, refusing to continue:\n%s", meta)
-	}
-	return ctx, r
+	return dtest.NewRealBD(t, realBDActor)
 }
 
 // claimedBead creates a bead and claims it as the worker, as a dispatch does.

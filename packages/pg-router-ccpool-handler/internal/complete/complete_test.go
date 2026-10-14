@@ -62,17 +62,17 @@ func TestOnFailure_unclaimNeverAddsHuman(t *testing.T) {
 // but the claim is always released, in the SAME single update (pg2-0fsuu).
 func TestOnDeath_addHumanReleasesClaimInOneUpdate(t *testing.T) {
 	fr := &recRunner{}
-	if err := OnDeath(context.Background(), fr, roles.AddHuman, "zr-w1"); err != nil {
+	if err := OnDeath(context.Background(), fr, roles.AddHuman, "zr-w1", "park note"); err != nil {
 		t.Fatal(err)
 	}
-	if len(fr.calls) != 1 || fr.calls[0] != "update zr-w1 --add-label human --status=open --assignee=" {
-		t.Errorf("add-human death must add human AND release the claim in one update; calls=%v", fr.calls)
+	if len(fr.calls) != 2 || fr.calls[0] != "comment zr-w1 park note" || fr.calls[1] != "update zr-w1 --add-label human --status=open --assignee=" {
+		t.Errorf("add-human death must write the park note, then add human AND release the claim in one update; calls=%v", fr.calls)
 	}
 }
 
 func TestOnDeath_unclaimNeverAddsHuman(t *testing.T) {
 	fr := &recRunner{}
-	if err := OnDeath(context.Background(), fr, roles.Unclaim, "zr-c1"); err != nil {
+	if err := OnDeath(context.Background(), fr, roles.Unclaim, "zr-c1", "park note"); err != nil {
 		t.Fatal(err)
 	}
 	if len(fr.calls) != 1 || fr.calls[0] != "update zr-c1 --status=open --assignee=" {

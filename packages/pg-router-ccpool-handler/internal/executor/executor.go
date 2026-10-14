@@ -15,6 +15,7 @@ import (
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/config"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/eventlog"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/item"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/parknote"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/query"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/report"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/roles"
@@ -90,6 +91,9 @@ type Deps struct {
 	// pg2-5x29j). nil => ConnectorReader over Cmd (nil Cmd => OSCommander).
 	// Tests substitute a fake so they never run pg-connector.
 	PR PRReader
+	// ParkGit is the git seam the park note's worktree and branch discovery
+	// uses (bead pg2-78mxs); nil => parknote.OSGit (hermetic, bounded).
+	ParkGit parknote.Git
 }
 
 func (d Deps) git() watchdog.GitRunner {

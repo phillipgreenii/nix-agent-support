@@ -23,6 +23,7 @@ import (
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/dtest"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/eventlog"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/item"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/parknote"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/prompt"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/report"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/roles"
@@ -524,9 +525,10 @@ func TestWaitDone_deathByCloseReason(t *testing.T) {
 		{"cap_eviction", "cap_eviction", true, false, true},
 		{"idle_ttl", "idle_ttl", true, false, true},
 		{"operator", "operator", true, false, true},
-		{"handler is not external", "handler", false, true, false},
-		{"unstamped death", "", false, true, false},
-		{"absent row", "absent", false, true, false},
+		// A human death writes the park note (pg2-78mxs) before the update.
+		{"handler is not external", "handler", false, true, true},
+		{"unstamped death", "", false, true, true},
+		{"absent row", "absent", false, true, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -554,6 +556,12 @@ func TestWaitDone_deathByCloseReason(t *testing.T) {
 			}
 			if got := len(bd.Comments) > 0; got != tc.wantComment {
 				t.Errorf("comment = %v, want %v; comments=%v", got, tc.wantComment, bd.Comments)
+			}
+			if tc.wantHuman {
+				if len(bd.Comments) != 1 || !strings.Contains(bd.Comments[0], parknote.Marker) ||
+					!strings.Contains(bd.Comments[0], "No person-question was identified") {
+					t.Errorf("a human death must write exactly one park note; comments=%v", bd.Comments)
+				}
 			}
 		})
 	}

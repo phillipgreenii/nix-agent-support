@@ -1013,10 +1013,17 @@
         # (about half a minute), paid only on diffs touching the watchdog or
         # the beads client it drives. A missing `bd` or `go` is a LOUD
         # failure, never a skip.
+        #
+        # pg2-78mxs: the same hook also runs the `TestPark_RealBD_*` tests in
+        # internal/executor (the handler parks a bead as human with a park
+        # note, then label+release, on a session death and on the second
+        # needs_input stall), so its file filter also covers the executor,
+        # complete, parknote and dtest packages (four more `bd init`s, about a
+        # minute).
         pg-router-ccpool-handler-bd-contract-test = {
           enable = true;
           name = "pg-router-ccpool-handler-bd-contract-test";
-          description = "pg-router-ccpool-handler watchdog: run the contract-tagged real-bd hard-stop tests (pg2-sx246)";
+          description = "pg-router-ccpool-handler: run the contract-tagged real-bd hard-stop and park-note tests (pg2-sx246, pg2-78mxs)";
           entry = "${
             pkgs.writeShellApplication {
               name = "pg-router-ccpool-handler-bd-contract-test-hook";
@@ -1038,12 +1045,12 @@
 
                 top="$(git rev-parse --show-toplevel)"
                 cd "$top/packages/pg-router-ccpool-handler"
-                exec nice -n 10 go test -p 4 -count=1 -tags contract -timeout 10m -run '^TestTerminal_RealBD_' ./internal/watchdog/
+                exec nice -n 10 go test -p 4 -count=1 -tags contract -timeout 10m -run '^Test(Terminal|Park)_RealBD_' ./internal/watchdog/ ./internal/executor/
               '';
             }
           }/bin/pg-router-ccpool-handler-bd-contract-test-hook";
           language = "system";
-          files = "^packages/pg-router-ccpool-handler/(internal/(watchdog|beads)/|go\\.(mod|sum)$)";
+          files = "^packages/pg-router-ccpool-handler/(internal/(watchdog|beads|executor|complete|parknote|dtest)/|go\\.(mod|sum)$)";
           pass_filenames = false;
           require_serial = true;
         };

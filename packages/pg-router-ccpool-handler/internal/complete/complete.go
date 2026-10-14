@@ -192,14 +192,15 @@ func OnFailure(ctx context.Context, br beads.Runner, action roles.FailureAction,
 // deliberately omits for a session that may still be alive.
 //   - add-human: add the `human` label AND clear the claim (status open,
 //     assignee cleared) in a single update, so the bead is never left
-//     in_progress under a dead session (pg2-0fsuu).
+//     in_progress under a dead session (pg2-0fsuu). parkNote is written as a
+//     comment first (beads.AddHumanAndUnclaim); it is unused for unclaim.
 //   - unclaim:   status=open, assignee cleared (identical to OnFailure).
 //
 // The human label (not the claim) is what stops a blind retry of a bead whose
 // dead worker may have left a half-built worktree.
-func OnDeath(ctx context.Context, br beads.Runner, action roles.FailureAction, beadID string) error {
+func OnDeath(ctx context.Context, br beads.Runner, action roles.FailureAction, beadID, parkNote string) error {
 	if action == roles.AddHuman {
-		return beads.AddHumanAndUnclaim(ctx, br, beadID)
+		return beads.AddHumanAndUnclaim(ctx, br, beadID, parkNote)
 	}
 	return beads.Unclaim(ctx, br, beadID)
 }

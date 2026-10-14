@@ -1455,7 +1455,7 @@ func (r *ccpoolRun) waitDone(ctx context.Context, claimTerminal func() bool, d D
 					_ = r.deps.CC.Close(ctx, name, false)
 				}
 				r.logUsageLimitOnDeath(ctx, name, d.Item.ID)
-				return r.failDead(ctx, d, "session exited before completing")
+				return r.failDead(ctx, d, name, "session exited before completing")
 			}
 			return lose()
 		}
@@ -1506,8 +1506,16 @@ func (r *ccpoolRun) fail(ctx context.Context, d DispatchContext, reason string) 
 // claim is released in the same single update (complete.OnDeath), so the bead
 // is never left in_progress under a session that no longer exists (pg2-0fsuu).
 // The error text is the same as fail's.
-func (r *ccpoolRun) failDead(ctx context.Context, d DispatchContext, reason string) error {
-	_ = complete.OnDeath(ctx, r.deps.BD, d.Role.CCPool.OnFailure, d.Item.ID)
+//
+// An add-human death writes the park note (bead pg2-78mxs, parknote.go) before
+// the label-and-release update: the bead is parked as human with nothing for a
+// person to decide, and the note says so and names the drain worktree.
+func (r *ccpoolRun) failDead(ctx context.Context, d DispatchContext, name, reason string) error {
+	note := ""
+	if d.Role.CCPool.OnFailure == roles.AddHuman {
+		note = r.parkNote(ctx, d, name, "session died before completing ("+reason+")", r.deathDetail())
+	}
+	_ = complete.OnDeath(ctx, r.deps.BD, d.Role.CCPool.OnFailure, d.Item.ID, note)
 	return &sessionDied{beadID: d.Item.ID, reason: reason}
 }
 
