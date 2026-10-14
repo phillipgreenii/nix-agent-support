@@ -105,6 +105,30 @@ func WriteText(w io.Writer, r Report) error {
 			line("  detail: %s", r.Auth.Detail)
 		}
 	}
+	if c := r.Changes; c != nil {
+		line("changes:")
+		line("  head_seq: %d", c.HeadSeq)
+		line("  oldest_seq: %d", c.OldestSeq)
+		window := ""
+		if r.UptimeSeconds != nil && time.Duration(*r.UptimeSeconds)*time.Second < settleWindow {
+			window = " (since start)"
+		}
+		line("  settle_timeouts_last_hour: %d%s", c.SettleTimeoutsLastHour, window)
+		line("  settle_failures_last_hour: %d%s", c.SettleFailuresLastHour, window)
+		if len(c.PendingRows) > 0 {
+			line("  pending_rows:")
+			for _, p := range c.PendingRows {
+				line("    %s: awaited=%s detected_at=%s deadline=%s", p.ID, strings.Join(p.Awaited, ","), ts(&p.DetectedAt), ts(&p.Deadline))
+			}
+		}
+		if len(c.Consumers) > 0 {
+			line("  consumers:")
+			for _, k := range c.Consumers {
+				line("    consumer=%s kind=%s query=%s: acked_seq=%d lag_rows=%d oldest_unacked_age_seconds=%d seen_at=%s",
+					k.Consumer, k.Kind, k.Query, k.AckedSeq, k.LagRows, k.OldestUnackedAgeSeconds, ts(&k.SeenAt))
+			}
+		}
+	}
 	_, err := io.WriteString(w, b.String())
 	return err
 }

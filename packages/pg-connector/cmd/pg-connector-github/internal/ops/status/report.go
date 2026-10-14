@@ -8,9 +8,8 @@
 // (Render) is a rendering of the same values, so the two never disagree. The
 // field names are the contract; testdata/status_daemon.golden.json and
 // testdata/status_local.golden.json are the golden documents. Later phases
-// ADD fields (the change-log head seq, pending settle rows and the settle
-// timeouts of the last hour, per-consumer positions); an existing field is
-// never renamed or removed, and every added one is omitted when empty.
+// ADD fields; an existing field is never renamed or removed, and every added
+// one is omitted when empty.
 //
 //	health           "healthy", "degraded" or "down"; the exit code follows it
 //	                 (0, 2, 3; INV-EXIT-1)
@@ -49,6 +48,11 @@
 //	auth             {state, detail, viewer, unauthenticated}: the auth_status
 //	                 answer, the cached viewer login and whether GitHub rejects
 //	                 the token (daemon only)
+//	changes          the change engine's section (daemon only, absent when the
+//	                 engine has nothing to report): the change-log head and
+//	                 oldest sequence numbers, the pending settle rows, the
+//	                 settle timeouts and failures of the last hour and each
+//	                 consumer's position; see Changes
 //
 // # What makes the report degraded
 //
@@ -62,7 +66,10 @@
 //   - the daemon answered, but with an error (for example it is migrating).
 //
 // A build-id difference, a queue that is overdue and a missing store file do
-// not make it degraded: they are reported, not judged.
+// not make it degraded: they are reported, not judged, and so is everything in
+// the changes section. When the change source fails the section is left out
+// and one line naming the failure is added to reasons WITHOUT changing the
+// verdict (so a healthy report can carry a reason).
 package status
 
 import (
@@ -148,6 +155,7 @@ type Report struct {
 	Queue   *Queue   `json:"queue,omitempty"`
 	Queries []Query  `json:"queries,omitempty"`
 	Auth    *Auth    `json:"auth,omitempty"`
+	Changes *Changes `json:"changes,omitempty"`
 }
 
 // Time is a UTC instant that marshals as RFC 3339 with whole seconds.

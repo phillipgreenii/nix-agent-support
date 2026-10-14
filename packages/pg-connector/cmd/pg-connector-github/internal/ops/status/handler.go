@@ -58,6 +58,9 @@ type Config struct {
 	Scheduler Scheduler
 	Queries   Queries
 	Identity  Identity
+	// Changes, when set, adds the change engine's section to the report (see
+	// ChangeSource); nil leaves it out.
+	Changes ChangeSource
 	// Started is when the daemon started.
 	Started time.Time
 	// Clock is the time source; nil means the system clock.
@@ -152,6 +155,18 @@ func (b *Builder) Build(ctx context.Context) (Report, error) {
 	r.Auth = &Auth{State: string(as.State), Detail: as.Detail, Viewer: snap.Login, Unauthenticated: snap.Unauthenticated}
 
 	assess(&r)
+
+	// The change section is reported, not judged: it is added after the verdict,
+	// and a source that fails costs the section and one reason line, never the
+	// verdict.
+	if b.cfg.Changes != nil {
+		c, err := buildChanges(ctx, b.cfg.Changes)
+		if err != nil {
+			r.Reasons = append(r.Reasons, "changes unavailable: "+err.Error())
+		} else {
+			r.Changes = c
+		}
+	}
 	return r, nil
 }
 

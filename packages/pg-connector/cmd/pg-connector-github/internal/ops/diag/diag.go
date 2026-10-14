@@ -12,7 +12,7 @@
 //     with a per-group verdict; ExplainHandlers builds it.
 //
 // The pending settle row, the awaited groups and the last change rows of explain
-// belong to the change engine and are not carried here.
+// come from the explain package's ChangeReader, passed through Deps.Changes.
 //
 // # Wire shape
 //
@@ -131,6 +131,10 @@ type Deps struct {
 	Rules *groups.Rules
 	Jobs  explain.JobReader
 	Clock governor.Clock
+	// Changes is explain's change reader (see explain.Config.Changes): when set
+	// the answer carries the pending settle row and the last change rows. It may
+	// be nil.
+	Changes explain.ChangeReader
 }
 
 // wireErr maps the engine's and the resolver's errors onto the closed taxonomy.

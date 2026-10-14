@@ -14,9 +14,17 @@
 // the group has a hard age), last_error, the head and base the group was
 // fetched for, whether it is still fresh at the time of the answer, and its
 // queue position (1 is next in line among the queued tasks of its class;
-// absent when the group has no queued task). The fields are additive: later
-// phases add the pending settle rows, the settle deadline and the last change
-// rows, and the groups they bring.
+// absent when the group has no queued task). The fields are additive.
+//
+// # The change engine's part
+//
+// When the handler is given a ChangeReader (Config.Changes) the answer also
+// carries pending_settle, the pull request's pending settle row (the groups it
+// awaits with their since times, the deadline and the kinds so far; absent when
+// it has no pending row), and last_changes, the newest change rows of the pull
+// request (seq, version, kinds, origin, time; newest first, at most five;
+// absent when none). A handler built without a ChangeReader answers the earlier
+// document.
 //
 // # Verdicts
 //
@@ -111,6 +119,8 @@ type Config struct {
 	Rules *groups.Rules
 	// Jobs, when set, adds the number of cached job rows to the runs group.
 	Jobs JobReader
+	// Changes, when set, adds pending_settle and last_changes (see ChangeReader).
+	Changes ChangeReader
 }
 
 // Result is the answer.
@@ -129,6 +139,11 @@ type Result struct {
 
 	Groups []Group `json:"groups"`
 	Note   string  `json:"note,omitempty"`
+
+	// PendingSettle and LastChanges are the change engine's part (see
+	// ChangeReader).
+	PendingSettle *PendingSettle `json:"pending_settle,omitempty"`
+	LastChanges   []ChangeRef    `json:"last_changes,omitempty"`
 }
 
 // Group is one stored group of the entity.
@@ -244,6 +259,9 @@ func (h *handler) handle(ctx context.Context, raw json.RawMessage) (any, error) 
 	sort.SliceStable(res.Groups, func(i, j int) bool { return groupRank(res.Groups[i].Group) < groupRank(res.Groups[j].Group) })
 	if !hasRuns && h.instance == "ci" {
 		res.Note = "no CI group is stored for this pull request yet"
+	}
+	if err := h.fillChanges(ctx, &res, nodeID, ref); err != nil {
+		return nil, err
 	}
 	return res, nil
 }
