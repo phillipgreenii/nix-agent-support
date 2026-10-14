@@ -86,7 +86,24 @@ func (s *Shim) FailBatch(kind string, status int) {
 func (s *Shim) Block(kind string, n int) {
 	s.t.Helper()
 	s.Remove("release." + kind)
+	s.Remove("held." + kind)
 	s.Set("block."+kind, fmt.Sprint(n))
+}
+
+// Held counts the calls of kind that Block has caught and that are holding now
+// (or were, until Release). A call that has merely been logged is not held yet:
+// the fake gh classifies it, claims a Block slot and only then records it here,
+// so a test that must act while a call is held waits on Held, not CountKind.
+func (s *Shim) Held(kind string) int {
+	s.t.Helper()
+	raw, err := os.ReadFile(filepath.Join(s.Dir, "held."+kind))
+	if os.IsNotExist(err) {
+		return 0
+	}
+	if err != nil {
+		s.t.Fatal(err)
+	}
+	return strings.Count(string(raw), "\n")
 }
 
 // Release lets the calls Block holds, and the ones that arrive later, go.

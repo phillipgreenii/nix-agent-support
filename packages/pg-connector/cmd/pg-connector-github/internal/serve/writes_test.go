@@ -509,11 +509,13 @@ func TestWrites_ARefreshStartedBeforeAWriteNeitherOverwritesItNorSurvivesIt(t *t
 	d.Shim.WaitQuiet(t, 500*time.Millisecond, 30*time.Second)
 
 	// A refresh of the pending group starts and is held at the host: it has read
-	// the state with no pending review.
+	// the state with no pending review. The test waits for the call to be
+	// HOLDING, not merely logged: the write's own pending lookups use the same
+	// request kind, and one that reached the fake gh first would take the held
+	// slot and block the write itself.
 	d.Shim.Block("pending", 1)
-	mark := d.Shim.CountKind("pending")
 	callOK(t, d, "pr", "refresh", map[string]any{"id": prW.Ref(), "groups": []string{"pending"}})
-	until(t, 15*time.Second, "the refresh to reach the host", func() bool { return d.Shim.CountKind("pending") == mark+1 })
+	until(t, 15*time.Second, "the refresh to be held at the host", func() bool { return d.Shim.Held("pending") == 1 })
 
 	// The write runs meanwhile (its own lookups are not held) and lands.
 	res := decode[pr.ReviewSubmitResult](t, callOK(t, d, "pr", "review_submit", submitArgs()))

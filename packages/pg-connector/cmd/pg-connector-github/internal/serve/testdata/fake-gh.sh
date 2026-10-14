@@ -52,7 +52,10 @@
 #   block.K              hold the next N calls of the kind (N is the file's content,
 #                        default 1) after their answer is decided and before it is
 #                        sent, until release.K exists (at most 60 s); the answer is
-#                        the one the fixtures gave when the call arrived
+#                        the one the fixtures gave when the call arrived. Claiming a
+#                        slot is atomic, so exactly N calls are held however many
+#                        arrive together; each held call appends a line to held.K
+#                        the moment it is holding
 #   after.K              lines "<src> <dst>": once a call of kind K has been
 #                        answered, copy fixture <src> over <dst>, so a write
 #                        changes what the next read sees
@@ -332,12 +335,27 @@ if [ "${#ids[@]}" -gt 1 ]; then
 fi
 
 # block_wait: hold this call if a block names its kind (see the header).
+#
+# Claiming a slot (read the count, write it back down) is a critical section:
+# two calls of one kind can be in flight together (a refresh and a write both
+# reading the pending review), and an unguarded read-then-remove lets both read
+# "1" and both be held, so a call the test meant to run through waits for a
+# release that only comes after it. mkdir is the atomic lock. A held call is
+# recorded in held.K (one line each) once it is actually holding, so a test can
+# wait for that instead of for the call to merely have been logged.
 block_wait() {
-  local f="$dir/block.$kind" n waited=0
+  local f="$dir/block.$kind" lock="$dir/block.$kind.lock" n waited=0 held=no
   [ -f "$f" ] || return 0
-  n=$(tr -d '\n' <"$f")
-  case "$n" in '' | *[!0-9]*) n=1 ;; esac
-  if [ "$n" -le 1 ]; then rm -f "$f"; else echo $((n - 1)) >"$f"; fi
+  until mkdir "$lock" 2>/dev/null; do sleep 0.01; done
+  if [ -f "$f" ]; then
+    n=$(tr -d '\n' <"$f")
+    case "$n" in '' | *[!0-9]*) n=1 ;; esac
+    if [ "$n" -le 1 ]; then rm -f "$f"; else echo $((n - 1)) >"$f"; fi
+    held=yes
+  fi
+  rmdir "$lock"
+  [ "$held" = yes ] || return 0
+  echo "$$" >>"$dir/held.$kind"
   while [ ! -f "$dir/release.$kind" ] && [ "$waited" -lt 1200 ]; do
     sleep 0.05
     waited=$((waited + 1))
