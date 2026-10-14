@@ -379,6 +379,12 @@ func buildDeps(cfg config.Config, role roles.Role) executor.Deps {
 	// here scopes the grants to this role's runner (and its Deps.Cfg) only.
 	if role.CCPool != nil {
 		cfg.AllowedTools = config.MergeAllowedTools(cfg.AllowedTools, role.CCPool.ExtraAllowedTools)
+		// Per-role effort (bead pg2-svkob, INV-CCH-31): a non-empty role value
+		// replaces the handler-wide launch-config effort for this role's runner
+		// (and its Deps.Cfg) only; "" leaves it unchanged.
+		if role.CCPool.Effort != "" {
+			cfg.Effort = role.CCPool.Effort
+		}
 	}
 	cc := ccpool.NewCLIRunner(cfg)
 	if role.CCPool != nil && role.CCPool.PoolDir != "" {

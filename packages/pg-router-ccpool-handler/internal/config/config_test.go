@@ -236,3 +236,19 @@ func TestSplitAllowedTools(t *testing.T) {
 		t.Errorf("SplitAllowedTools(\"\") = %q, want none", got)
 	}
 }
+
+// TestValidateEffortOverride (bead pg2-svkob, INV-CCH-31): a role's effort
+// override is empty or one of the claude --effort levels, and nothing else.
+func TestValidateEffortOverride(t *testing.T) {
+	for _, ok := range []string{"", "low", "medium", "high", "xhigh", "max"} {
+		if err := ValidateEffortOverride(ok); err != nil {
+			t.Errorf("ValidateEffortOverride(%q) = %v, want nil", ok, err)
+		}
+	}
+	for _, bad := range []string{"ultra", "High", " high", "none", "0"} {
+		err := ValidateEffortOverride(bad)
+		if err == nil || !strings.Contains(err.Error(), bad) {
+			t.Errorf("ValidateEffortOverride(%q) = %v, want an error naming it", bad, err)
+		}
+	}
+}

@@ -439,6 +439,12 @@ let
             # 2m default applies, unchanged behavior).
             inherit (roleCfg.ccpool) worktreeQuietWindow;
           }
+          // lib.optionalAttrs (roleCfg.ccpool.effort != null) {
+            # effort (bead pg2-svkob, INV-CCH-31): omitted when null, so a role that
+            # never sets it decodes to "no override" (the launch-config effort
+            # applies, unchanged behavior).
+            inherit (roleCfg.ccpool) effort;
+          }
           // lib.optionalAttrs (roleCfg.ccpool.precheck != null) {
             # precheck (bead pg2-nk6th.3): omitted when null, so a role that never
             # opts in decodes to "" (the historical behavior). The role file is
@@ -796,6 +802,28 @@ let
                   wait bound (10m). A shorter window frees the slot sooner but risks
                   mistaking a silent-but-running subagent for a finished one, so set it
                   only on a role with few subagents (review).
+                '';
+              };
+              effort = lib.mkOption {
+                type = lib.types.nullOr (
+                  lib.types.enum [
+                    "low"
+                    "medium"
+                    "high"
+                    "xhigh"
+                    "max"
+                  ]
+                );
+                default = null;
+                example = "high";
+                description = ''
+                  Per-role override of the claude `--effort` level
+                  (`roles.CCPoolConfig.Effort`, bead pg2-svkob, INV-CCH-31) for this
+                  role's launched sessions only. `null` (the default) keeps the
+                  launch-config `effort` (`"max"` by default), unchanged. The handler
+                  reads role files at start, so a change needs an apply AND a handler
+                  restart, and a session already running keeps the effort it started
+                  with. Does not touch `model`.
                 '';
               };
               isolation = lib.mkOption {

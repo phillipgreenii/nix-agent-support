@@ -811,3 +811,19 @@ review`. The claim is still released (status open, assignee cleared) — the lab
   The dispatch-time reconcile already purges such a session first in the usual case, a pre-launch
   check answers the redelivery at zero model cost, and keeping it would keep alive the one path
   behind every false budget stop so far, here on a bead that is already done.
+
+- **`INV-CCH-31`** <!-- uuid: 3b342787-b7d7-48f3-81f6-1a80c3130958 --> — a role MAY override the claude `--effort` level its own
+  launched sessions run at, and a role that does not set the override MUST behave exactly as
+  before: the handler-wide launch-config effort (`max` by default) applies. The override MUST be
+  empty (no override) or one of the levels `claude --help` lists for `--effort` (`low`,
+  `medium`, `high`, `xhigh`, `max`); a role config that says otherwise MUST be rejected at
+  load, before any session is launched. The override replaces only the effort of that role's own
+  dispatches; it MUST NOT change the model or any other role's effort, and the handler-wide value
+  stays the default for every other role. A change takes effect for sessions launched after the
+  handler has restarted: a running session keeps the effort it started with. **Why.** Effort was a
+  single handler-wide value, so every role launched at `max`, and a role that needs less (the
+  drain roles, measured 2026-10-14 at about 23 percent of drain spend in output tokens) could be
+  lowered only by lowering every role. **Not decided here.** Whether a subagent a session starts
+  follows the session's effort: nothing in this module or the roles' configuration sets a subagent
+  effort, so a subagent most likely follows the session flag, but that is a property of claude and
+  is confirmed from a subagent transcript after a change, not assumed.

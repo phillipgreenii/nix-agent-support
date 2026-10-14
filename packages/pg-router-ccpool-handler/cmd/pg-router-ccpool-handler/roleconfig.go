@@ -103,6 +103,10 @@ type roleFile struct {
 		// the handler-wide allowedTools for this role only; see
 		// roles.CCPoolConfig.ExtraAllowedTools. Absent/empty => no extra grants.
 		ExtraAllowedTools []string `json:"extraAllowedTools"`
+		// Effort (bead pg2-svkob, INV-CCH-31): per-role override of the handler-wide
+		// claude --effort; see roles.CCPoolConfig.Effort. Absent/"" => no override;
+		// anything else must be one of config.ValidEfforts (rejected at load).
+		Effort string `json:"effort"`
 		// Precheck (bead pg2-nk6th.3, INV-CCH-22): opts the role in to a dispatch
 		// precheck, "review", "ready" or "triage"; see roles.CCPoolConfig.Precheck. Absent
 		// or "" => the historical behavior.
@@ -188,6 +192,9 @@ func loadRole(path string) (roles.Role, error) {
 				return roles.Role{}, fmt.Errorf("role config %s: extraAllowedTools[%d] is empty", path, i)
 			}
 		}
+		if err := config.ValidateEffortOverride(rf.CCPool.Effort); err != nil {
+			return roles.Role{}, fmt.Errorf("role config %s: %w", path, err)
+		}
 		// isolation.prefetch (bead pg2-hh32y) checks a commit out inside the
 		// worktree this handler created, so it is valid ONLY with the
 		// worktree strategy, and its templates must parse.
@@ -216,6 +223,7 @@ func loadRole(path string) (roles.Role, error) {
 			WorktreeQuietWindow:     quietWindow,
 			NeedsInputStall:         needsInputStall,
 			ExtraAllowedTools:       rf.CCPool.ExtraAllowedTools,
+			Effort:                  rf.CCPool.Effort,
 			Precheck:                rf.CCPool.Precheck,
 		}
 	case "command":

@@ -246,3 +246,34 @@ func TestBuildDeps_mergesRoleExtraAllowedTools(t *testing.T) {
 		t.Errorf("command role AllowedTools = %q, want %q", got, cfg.AllowedTools)
 	}
 }
+
+// TestBuildDeps_roleEffortOverridesHandlerEffort (bead pg2-svkob, INV-CCH-31)
+// proves buildDeps replaces the handler-wide launch-config Effort with a
+// ccpool role's own Effort for that role's runner (and its Deps.Cfg) only: a
+// sibling role with no Effort, a command role, and the caller's cfg keep the
+// handler-wide value.
+func TestBuildDeps_roleEffortOverridesHandlerEffort(t *testing.T) {
+	cfg := config.Default()
+	if cfg.Effort != "max" {
+		t.Fatalf("precondition: handler-wide default Effort = %q, want max", cfg.Effort)
+	}
+	drain := roles.Role{Name: "drain-zr", CCPool: &roles.CCPoolConfig{Effort: "high"}}
+	plain := roles.Role{Name: "review", CCPool: &roles.CCPoolConfig{}}
+
+	drainDeps := buildDeps(cfg, drain)
+	if got := drainDeps.CC.(*ccpool.CLIRunner).Effort; got != "high" {
+		t.Errorf("drain runner Effort = %q, want the role override high", got)
+	}
+	if drainDeps.Cfg.Effort != "high" {
+		t.Errorf("drain Deps.Cfg.Effort = %q, want high", drainDeps.Cfg.Effort)
+	}
+	if got := buildDeps(cfg, plain).CC.(*ccpool.CLIRunner).Effort; got != "max" {
+		t.Errorf("role without an effort override Effort = %q, want the handler-wide max unchanged", got)
+	}
+	if got := buildDeps(cfg, roles.Role{Name: "cmd", Type: "command"}).CC.(*ccpool.CLIRunner).Effort; got != "max" {
+		t.Errorf("command role Effort = %q, want max", got)
+	}
+	if cfg.Effort != "max" {
+		t.Errorf("caller cfg.Effort mutated to %q", cfg.Effort)
+	}
+}

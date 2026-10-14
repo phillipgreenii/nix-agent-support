@@ -575,3 +575,44 @@ func TestLoadRole_precheckAndCloseOrRelease(t *testing.T) {
 		})
 	}
 }
+
+// TestLoadRole_effort (bead pg2-svkob, INV-CCH-31): absent/empty => no
+// override; each claude --effort level loads; anything else is rejected at
+// load, naming the key and the valid levels, so a typo cannot survive until
+// claude itself fails to start.
+func TestLoadRole_effort(t *testing.T) {
+	mk := func(extra string) string {
+		return `{"name":"zr-drain","type":"ccpool","ccpool":{"actor":"a","completion":"close-or-release","onFailure":"unclaim","onDispatchFail":"unclaim","promptBody":"p"` + extra + `}}`
+	}
+	for _, tc := range []struct {
+		name, extra, want string
+		wantErr           bool
+	}{
+		{"absent", "", "", false},
+		{"empty string", `,"effort":""`, "", false},
+		{"low", `,"effort":"low"`, "low", false},
+		{"medium", `,"effort":"medium"`, "medium", false},
+		{"high", `,"effort":"high"`, "high", false},
+		{"xhigh", `,"effort":"xhigh"`, "xhigh", false},
+		{"max", `,"effort":"max"`, "max", false},
+		{"unknown level rejected", `,"effort":"ultra"`, "", true},
+		{"wrong case rejected", `,"effort":"High"`, "", true},
+		{"whitespace rejected", `,"effort":" high"`, "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			role, err := loadRole(mustWriteRoleFile(t, mk(tc.extra)))
+			if tc.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "effort") || !strings.Contains(err.Error(), "xhigh") {
+					t.Fatalf("err = %v, want an effort error listing the valid levels", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := role.CCPool.Effort; got != tc.want {
+				t.Errorf("Effort = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

@@ -6727,6 +6727,9 @@
                           onDispatchFail = "leave";
                           promptBody = "drain prompt";
                           precheck = "ready";
+                          # effort (bead pg2-svkob): a per-role claude --effort
+                          # override renders into this role's own JSON only.
+                          effort = "high";
                         };
                       };
                       # triage (bead pg2-p9lcg): the close-or-triage completion
@@ -7199,6 +7202,15 @@
                         # JSON; a role that never sets it carries no such key.
                         [ "$(jq -c .ccpool.extraAllowedTools "$roleWithOwnPoolHandlerDir/review.json")" = '["Skill","Bash(gh pr create:*)"]' ]
                         jq -e '.ccpool | has("extraAllowedTools") | not' "$handlerCommandDir/feedback.json" >/dev/null
+
+                        # effort (bead pg2-svkob, INV-CCH-31): a role that sets it
+                        # renders it into its own JSON; a role that never sets it
+                        # carries no such key, and the launch config's effort is
+                        # unchanged.
+                        [ "$(jq -r .ccpool.effort "$roleWithOwnPoolHandlerDir/drain.json")" = high ]
+                        jq -e '.ccpool | has("effort") | not' "$roleWithOwnPoolHandlerDir/review.json" >/dev/null
+                        jq -e '.ccpool | has("effort") | not' "$handlerCommandDir/feedback.json" >/dev/null
+                        [ "$(jq -r .effort "$defaultLaunchConfigFile")" = max ]
 
                         # close-or-release + precheck (bead pg2-nk6th.3): the role file
                         # is rendered from an explicit field list, so an option not

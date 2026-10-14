@@ -247,6 +247,28 @@ var validPermissionModes = map[string]bool{
 	"bypassPermissions": true,
 }
 
+// ValidEfforts lists the claude --effort levels a role's per-role effort
+// override (roles.CCPoolConfig.Effort, bead pg2-svkob) may carry; they are the
+// values `claude --help` lists for --effort. Duplicated here, like
+// validPermissionModes, because this module does not import claude's or
+// ccpool's own enums.
+var ValidEfforts = []string{"low", "medium", "high", "xhigh", "max"}
+
+// ValidateEffortOverride checks a role's effort override: "" (no override, the
+// handler-wide Effort applies) or one of ValidEfforts. An invalid value would
+// otherwise surface only when claude starts, as a failed launch.
+func ValidateEffortOverride(effort string) error {
+	if effort == "" {
+		return nil
+	}
+	for _, v := range ValidEfforts {
+		if effort == v {
+			return nil
+		}
+	}
+	return fmt.Errorf("effort %q: not one of %s (omit it to use the handler default)", effort, strings.Join(ValidEfforts, ", "))
+}
+
 // Validate rejects a Config whose PermissionMode is not one of the claude
 // --permission-mode values this module knows how to forward. Docket
 // pg2-oju6w Task 5.7: this is the real enum check pg-router's own Config used

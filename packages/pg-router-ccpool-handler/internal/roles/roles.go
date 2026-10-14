@@ -98,6 +98,13 @@ type CCPoolConfig struct {
 	// `git push`) belongs here, never in the handler-wide list, which would
 	// widen every role.
 	ExtraAllowedTools []string
+	// Effort (bead pg2-svkob, INV-CCH-31) overrides, for THIS role's dispatches
+	// only, the handler-wide launch-config effort (config.Config.Effort, "max" by
+	// default), which is what `ccpool new --effort` and so `claude --effort`
+	// receive (applied in buildDeps). "" (an absent key) keeps the handler-wide
+	// value, so a role that never sets it is unchanged. Validated at load: empty
+	// or one of config.ValidEfforts.
+	Effort string
 	// Precheck (bead pg2-nk6th.3, INV-CCH-22) opts this role in to a dispatch
 	// precheck; the zero value leaves the historical behavior (the role named
 	// "review" runs the review precheck, every other role none).
