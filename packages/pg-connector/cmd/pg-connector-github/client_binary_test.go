@@ -18,6 +18,7 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/client"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/config"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/logs"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/proc"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/router"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/socket"
@@ -92,6 +93,52 @@ const fastBudget = "3s"
 
 func fastClient(t *testing.T) string {
 	return buildClient(t, "-X main.clientBudgetOverride="+fastBudget)
+}
+
+// budget is fastBudget as a duration; the client retries a refused connection
+// for half of it and never longer than all of it.
+func budget() time.Duration {
+	d, err := time.ParseDuration(fastBudget)
+	if err != nil {
+		panic(err)
+	}
+	return d
+}
+
+func retryWindow() time.Duration { return budget() / 2 }
+
+// retryWindowSlack is what the client's own measured retry time may fall
+// short of the window: it reads the clock at the top of its loop, a hair
+// before the last wait is cut to the window's end, and logs whole milliseconds.
+const retryWindowSlack = 100 * time.Millisecond
+
+// clientLogDuration returns the duration_ms of the want-th client-log row (the
+// kind=request, daemon_unreachable row the client appends when it answers
+// unavailable), after checking there are exactly want rows. It is measured
+// inside the client from the start of its call, so unlike the test's own wall
+// clock it excludes exec and scheduling delay before the client's main runs.
+func clientLogDuration(t *testing.T, stateDir string, want int) time.Duration {
+	t.Helper()
+	raw, err := os.ReadFile(logs.ClientLogPath(stateDir))
+	if err != nil {
+		t.Fatalf("the client log is the observable of how long the client retried: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(lines) != want {
+		t.Fatalf("client log has %d rows, want %d: %s", len(lines), want, raw)
+	}
+	var row struct {
+		Kind       string `json:"kind"`
+		Outcome    string `json:"outcome"`
+		DurationMS int64  `json:"duration_ms"`
+	}
+	if err := json.Unmarshal([]byte(lines[want-1]), &row); err != nil {
+		t.Fatalf("client log row %d: %v: %s", want, err, lines[want-1])
+	}
+	if row.Kind != logs.KindRequest || row.Outcome != logs.OutcomeDaemonUnreachable {
+		t.Fatalf("client log row %d is not a daemon_unreachable request: %s", want, lines[want-1])
+	}
+	return time.Duration(row.DurationMS) * time.Millisecond
 }
 
 type clientResult struct {
@@ -179,11 +226,10 @@ const listRequest = `{"op":"list","args":{"query":"mine"}}`
 
 func TestClientBinaryDaemonAbsent(t *testing.T) {
 	bin := fastClient(t)
-	cfg, _, sock := clientSetup(t)
+	cfg, stateDir, sock := clientSetup(t)
 	hint := proc.RestartHint(config.DefaultSupervisorLabel, cfg)
 
-	for _, req := range []string{listRequest, `{"op":"show","args":{"id":"x"}}`, `{"op":"changes"}`, `{"op":"auth_status"}`} {
-		start := time.Now()
+	for i, req := range []string{listRequest, `{"op":"show","args":{"id":"x"}}`, `{"op":"changes"}`, `{"op":"auth_status"}`} {
 		res := runClientBinary(t, bin, cfg, "pr", req)
 		e := res.errorBody(t)
 		if e.Code != "unavailable" || res.code != exitUnavailable {
@@ -197,9 +243,11 @@ func TestClientBinaryDaemonAbsent(t *testing.T) {
 		if strings.Contains(res.stdout, "served_from") || strings.Contains(res.stdout, "cache") {
 			t.Errorf("%s: a down daemon never answers from a cache: %s", req, res.stdout)
 		}
-		// It retried (about half the 3 s budget), and no longer.
-		if took := time.Since(start); took < time.Second || took > 4*time.Second {
-			t.Errorf("%s: took %v, want about half the %s budget", req, took, fastBudget)
+		// It retried for the retry window (half the budget), and no longer than
+		// the budget. The time is the client's own, from its client-log row, so
+		// process start-up and host load before main do not count.
+		if took := clientLogDuration(t, stateDir, i+1); took < retryWindow()-retryWindowSlack || took >= budget() {
+			t.Errorf("%s: retried for %v, want the %v retry window (half the %v budget) and under the budget", req, took, retryWindow(), budget())
 		}
 	}
 }
@@ -210,7 +258,12 @@ func TestClientBinaryCapabilitiesWithoutTheDaemon(t *testing.T) {
 	for mode, inst := range map[string]client.Instance{"pr": client.PR(), "ci": client.CI()} {
 		start := time.Now()
 		res := runClientBinary(t, bin, cfg, mode, `{"op":"capabilities"}`)
-		if res.code != 0 || time.Since(start) > 3*time.Second {
+		// A forwarded call to the absent daemon would retry for half the op's
+		// production budget and then answer unavailable; so answering at all
+		// (exit 0) is the proof, and waiting out that retry window first
+		// would be the regression. The ceiling is that window, not a guess at
+		// host speed: nothing short of waiting reaches it.
+		if res.code != 0 || time.Since(start) > client.BudgetFor(scriptout.OpCapabilities)/2 {
 			t.Fatalf("%s: exit %d after %v: %s %s", mode, res.code, time.Since(start), res.stdout, res.stderr)
 		}
 		var caps scriptout.CapabilitiesResponse
