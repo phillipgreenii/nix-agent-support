@@ -57,6 +57,13 @@ pa-monitor already holds the authoritative reading (ADR 0021): the status-line's
   bounded by `timeout`). The monitor's `status --json` also queries per-session detail it does not
   need for this; accepted for now, and a lighter dedicated read is the follow-up if admission
   latency matters.
+- The monitor MUST serve `rate_limits` whenever it holds a reading, not only while a cost block is
+  active. The block is hour-floored while the server window is not (a window resetting at 08:30Z
+  outlives the 03:00-08:00Z block), and an account at its limit cannot spend to start the next
+  block. Serving the reading only through the block made `status --json` drop `rate_limits` for the
+  last half hour of each limited window, the gate read "unknown", failed open (decision 4), and
+  admitted ten sessions on 2026-10-14 08:00-08:30Z (bead `pg2-ip6r5`). The monitor now overlays its
+  live reading on the served state.
 - A reading is only as fresh as the newest session that rendered a status line. A stale 100% whose
   reset is still in the future stays true (usage only rises within a window), and one whose reset has
   passed stops blocking by itself, so staleness cannot wedge the gate past the reset.

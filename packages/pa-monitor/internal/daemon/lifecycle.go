@@ -301,6 +301,13 @@ func RunWith(ctx context.Context, opts RunOptions) error {
 	if q, ok := opts.Poller.(prByDirQuerier); ok {
 		state.setPRByDirSource(q)
 	}
+	// Wire the live rate_limits source so the served tree carries the status-line
+	// reading even when no active block row exists (pg2-ip6r5). Same optional
+	// delivery as prByDir: a bare test fake without MonitorLimits leaves the
+	// served tree on the DB values only.
+	if q, ok := opts.Poller.(limitsQuerier); ok {
+		state.setLimitsSource(q)
+	}
 
 	// bridgeReg is the single bridge.Registry instance shared by the gRPC
 	// server (BridgeChannel attaches live bridge streams to it), the

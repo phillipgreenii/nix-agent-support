@@ -86,6 +86,12 @@ and never 1970, and the whole `rate_limits` key is omitted when neither window i
 contract `ccpool`'s usage gate binds (it refuses work while a window is at its limit and its reset is
 still in the future), so a field rename here is a breaking change for it.
 
+`rate_limits` is served whenever the daemon holds a reading, independent of `active_block`. The
+5-hour cost block is hour-floored (for example 03:00-08:00Z) while the server's window is anchored
+at the account's own instant (reset 08:30Z), and an account at its limit cannot spend to start the
+next block, so for the last part of a limited window there is no `active_block` yet `rate_limits`
+MUST still report the window. Dropping it there makes ccpool's gate fail open (bead `pg2-ip6r5`).
+
 `caffeinate` and `auto_resume` carry the two operator toggles (additive keys; no existing key
 changed):
 

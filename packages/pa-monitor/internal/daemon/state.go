@@ -31,6 +31,17 @@ type prByDirQuerier interface {
 	MonitorPRByDir() map[string]*session.PRInfo
 }
 
+// limitsQuerier reports the live account-global rate_limits reading at snapshot
+// time. The served tree is re-materialised from the DB, where the reading rides
+// only on the persisted ACTIVE BLOCK row. That block is an hour-floored cost block
+// that can end (or not yet exist) while the server's usage window is still at its
+// limit, so snapshot() overlays this live reading and the served rate_limits does
+// not depend on a block existing. The poller satisfies it via MonitorLimits (an
+// atomic Load of the producer-owned DerivedState.Limits).
+type limitsQuerier interface {
+	MonitorLimits() *Limits
+}
+
 // sharedState holds the daemon's current view of the world. The tick
 // loop writes; the gRPC handlers read. All read access to tree state goes
 // through snapshot() which materialises from the DB via ReadService.
@@ -50,6 +61,7 @@ type sharedState struct {
 	nudger                   *nudger.Nudger
 	nudgerForPending         pendingNudgeQuerier // used by snapshot() to annotate pending nudge state
 	prByDir                  prByDirQuerier      // used by snapshot() to re-annotate dir.PRInfo by cwd (F1)
+	limits                   limitsQuerier       // used by snapshot() to overlay the live rate_limits reading independent of the active block
 	watermarks               *WatermarkStore
 	autoResumeDelay          time.Duration // static config: how long to wait before auto-nudging
 
@@ -96,6 +108,14 @@ func (s *sharedState) setPRByDirSource(q prByDirQuerier) {
 	s.mu.Unlock()
 }
 
+// setLimitsSource wires in the live rate_limits source snapshot() overlays onto
+// the DB-materialised tree.
+func (s *sharedState) setLimitsSource(q limitsQuerier) {
+	s.mu.Lock()
+	s.limits = q
+	s.mu.Unlock()
+}
+
 // snapshot materialises the current aggregate.Tree from the DB via ReadService.
 // Returns nil when ReadService is not yet wired (daemon not fully started).
 func (s *sharedState) snapshot() *aggregate.Tree {
@@ -103,6 +123,7 @@ func (s *sharedState) snapshot() *aggregate.Tree {
 	rs := s.readService
 	pq := s.nudgerForPending
 	prSrc := s.prByDir
+	limSrc := s.limits
 	s.mu.RUnlock()
 
 	if rs == nil {
@@ -117,6 +138,16 @@ func (s *sharedState) snapshot() *aggregate.Tree {
 		return nil
 	}
 	tree := convertStateToAggregateTree(st)
+	// Overlay the live rate_limits reading. The persisted block carries it only
+	// while a cost block is active; the server's window outlives that block (the
+	// hour-floored block ends up to 30 minutes before a :30-anchored window
+	// resets, and an account at its limit cannot spend to start the next one), so
+	// without this overlay `status --json` drops rate_limits and ccpool's usage
+	// gate fails open inside a window that is still at its limit (pg2-ip6r5).
+	// A nil reading leaves the DB values untouched (applyLimits).
+	if limSrc != nil && tree != nil {
+		applyLimits(tree, limSrc.MonitorLimits())
+	}
 	// Re-annotate PRInfo by cwd from the live producer map (F1). PRInfo is NOT
 	// persisted (no PR columns), so convertDirectory left dir.PRInfo nil; the
 	// served tree would otherwise never carry a PR and the TUI would show
