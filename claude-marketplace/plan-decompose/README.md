@@ -46,8 +46,9 @@ Agents (`agents/`):
   for its Agent children by ending its turn (ADR 0098).
 - `cold-reader` — context-free, read-only (`Read` only, haiku) check that one packet is
   executable from its stored body and acceptance files, named by path in its dispatch.
-- `semantic-post-checker`, `phase-split-reviewer`, `phase-plan-verifier` — read-only reviewers;
-  the first two take file paths, `phase-plan-verifier` takes the design text inline.
+- `semantic-post-checker`, `phase-split-reviewer` — read-only reviewers that take file paths.
+- `phase-plan-verifier` — checks a phase's design against landed upstream state; it can edit the
+  phase design or file an escalation bead, and takes the design text inline.
 - `packet-implementer` — works one claimed packet.
 
 Scripts (`scripts/`, resolved from the skill's base directory):
