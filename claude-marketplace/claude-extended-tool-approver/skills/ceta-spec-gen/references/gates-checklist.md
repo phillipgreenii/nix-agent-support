@@ -143,6 +143,24 @@ packets' own changes; it applies to a FUTURE change that alters what gets approv
 `EffectPolicy` judgment, a widened allowlist, etc.), at which point the change's author
 attaches Phase 2's P15 report (once tc-o14i5.3.10 lands) as part of landing that change.
 
+**Update (pg2-19hdz, 2026-10-14): the tooling has landed** (commit `171eaa4f7`). A P15 report is a
+`P15Report` built by a generator function in `internal/effectpolicy/p15report.go`
+(`GenerateGitPushP15`, `GenerateHeldFormsP15`, `GenerateZRWriteFormsP15`). It probes EVERY spec flag
+of the changed command, plus the positional and combination shapes the change names, through the real
+engine (`Evaluate` with the default registry and policies), and renders the "Facts that feed an
+approve path" list. It is pinned by a `TestP15Report...` test that also asserts the shapes that MUST
+NOT approve, and its golden is committed under `internal/effectpolicy/testdata/p15/<form>.md`.
+
+- Run or regenerate one: `go test ./internal/effectpolicy -run TestP15ReportZRWriteForms -update`
+  (swap in the test name; without `-update` the test fails on any drift).
+- Attach a report for a new form: add a generator (and a test) next to the existing ones, include a
+  probe for each flag the schema leaves UNMODELED that would widen what is approved (a base retarget,
+  a file or stdin body, an upload, another repository, a secret path, a runtime-expanded operand),
+  and commit the generated `.md` golden with the change.
+- A new remote operation needs one `case` in `RemoteMutation.Judge` (`internal/effectpolicy/policy.go`)
+  scoped to its resource by data, plus the schema's implicit effect; pg2-19hdz's `pr-edit` and
+  `stack-unstack` operations are the worked example.
+
 ## Provenance
 
 Compiled by tc-o14i5.4.4 ("Phase 3.4: Skill evaluation"), 2026-09-29. See the evaluation

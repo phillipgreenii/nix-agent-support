@@ -9393,11 +9393,11 @@
     "settings": {},
     "rules_config": {},
     "expected_verdict": "not-approve",
-    "notes": "pg2-maars: instructed by the gh-stack plugin but held (NOT approve) until the draft default of the PRs it creates is documented nowhere and it edits existing PR bases (needs a PR-write judgment); pinned so the R4 cutover replay cannot approve it by accident."
+    "notes": "pg2-maars, re-checked on pg2-19hdz: instructed by the gh-stack plugin but still held (NOT approve). The extension documents --open as 'mark new and existing PRs as ready for review' but nowhere says whether the PRs link creates are drafts without it, and the unattended hook denies even gh stack link --help, so the default is unverified; it also edits existing PR bases. Pinned so the R4 cutover replay cannot approve it by accident."
   },
   {
-    "case": "zr_plugin_d_held_gs_unstack",
-    "tags": ["zr-plugin", "pg2-maars", "gh-stack"],
+    "case": "zr_plugin_d_gs_unstack",
+    "tags": ["zr-plugin", "pg2-19hdz", "gh-stack"],
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
@@ -9411,12 +9411,12 @@
     "mode": "default",
     "settings": {},
     "rules_config": {},
-    "expected_verdict": "not-approve",
-    "notes": "pg2-maars: instructed by the gh-stack plugin but held (NOT approve) until remote stack deletion needs a new policy judgment (gate 5, tc-o14i5.3.10); pinned so the R4 cutover replay cannot approve it by accident."
+    "expected_verdict": "approve",
+    "notes": "pg2-19hdz (class D, operator ruling 2026-10-04/05 on pg2-cjfpy and pg2-maars; gate 5 P15 report internal/effectpolicy/testdata/p15/gh-stack-unstack.md): instructed by the gh-stack plugin; graded APPROVE by the new stack-unstack remote operation (dissolves the stack grouping on GitHub; the PRs and branches stay). Replaces the pg2-maars not-approve pin."
   },
   {
-    "case": "zr_plugin_d_held_gs_unstack_n",
-    "tags": ["zr-plugin", "pg2-maars", "gh-stack"],
+    "case": "zr_plugin_d_gs_unstack_n",
+    "tags": ["zr-plugin", "pg2-19hdz", "gh-stack"],
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
@@ -9430,8 +9430,27 @@
     "mode": "default",
     "settings": {},
     "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-19hdz (class D, operator ruling 2026-10-04/05 on pg2-cjfpy and pg2-maars; gate 5 P15 report internal/effectpolicy/testdata/p15/gh-stack-unstack.md): instructed by the gh-stack plugin; graded APPROVE by the new stack-unstack remote operation (a numbered stack is unstacked through the GitHub API). Replaces the pg2-maars not-approve pin."
+  },
+  {
+    "case": "zr_plugin_d_held_gs_delete_alias",
+    "tags": ["zr-plugin", "pg2-19hdz", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack delete"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
     "expected_verdict": "not-approve",
-    "notes": "pg2-maars: instructed by the gh-stack plugin but held (NOT approve) until remote stack deletion needs a new policy judgment (gate 5, tc-o14i5.3.10); pinned so the R4 cutover replay cannot approve it by accident."
+    "notes": "pg2-19hdz: the delete alias of gh stack unstack is not instructed by any plugin and is not modeled (NOT approve); pinned so the R4 cutover replay cannot approve it by accident."
   },
   {
     "case": "zr_plugin_d_held_gs_push_url",
@@ -9453,8 +9472,8 @@
     "notes": "pg2-maars: instructed by the gh-stack plugin but held (NOT approve) until a URL remote is not a plain configured remote name (R6); pinned so the R4 cutover replay cannot approve it by accident."
   },
   {
-    "case": "zr_plugin_d_held_gh_pr_edit",
-    "tags": ["zr-plugin", "pg2-maars", "gh-stack"],
+    "case": "zr_plugin_d_gh_pr_edit",
+    "tags": ["zr-plugin", "pg2-19hdz", "gh-stack"],
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
@@ -9468,16 +9487,35 @@
     "mode": "default",
     "settings": {},
     "rules_config": {},
-    "expected_verdict": "not-approve",
-    "notes": "pg2-maars: instructed by the zr-refactor plugin but held (NOT approve) until a PR metadata write needs a new policy judgment (gate 5, tc-o14i5.3.10); pinned so the R4 cutover replay cannot approve it by accident."
+    "expected_verdict": "approve",
+    "notes": "pg2-19hdz (class D, operator ruling 2026-10-04/05 on pg2-cjfpy and pg2-maars; gate 5 P15 report internal/effectpolicy/testdata/p15/gh-pr-edit.md): instructed by the zr-refactor plugin (rc-publish's assignee step); graded APPROVE by the new pr-edit remote operation on the github resource. Replaces the pg2-maars not-approve pin."
   },
   {
-    "case": "zr_plugin_d_held_pjira_comment",
-    "tags": ["zr-plugin", "pg2-maars", "pjira"],
+    "case": "zr_plugin_d_gh_pr_edit_title_body",
+    "tags": ["zr-plugin", "pg2-19hdz", "gh-stack"],
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "pjira comment FINDEV-123 hi"
+        "command": "gh pr edit 12 --title \"New title\" --body \"New body\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-19hdz (class D, gate 5 P15 report internal/effectpolicy/testdata/p15/gh-pr-edit.md): the gh-stack skill says to use gh pr edit to modify PR title and body after creation; graded APPROVE by the pr-edit remote operation."
+  },
+  {
+    "case": "zr_plugin_d_held_gh_pr_edit_base",
+    "tags": ["zr-plugin", "pg2-19hdz", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh pr edit 12 --base main"
       }
     },
     "cwd_path_state": {
@@ -9488,15 +9526,15 @@
     "settings": {},
     "rules_config": {},
     "expected_verdict": "not-approve",
-    "notes": "pg2-maars: instructed by the daily-focus plugin but held (NOT approve) until a Jira write needs a new policy judgment (gate 5, tc-o14i5.3.10); pinned so the R4 cutover replay cannot approve it by accident."
+    "notes": "pg2-19hdz: --base retargets an existing PR and is not instructed by any plugin, so it is not modeled (NOT approve); pinned so the R4 cutover replay cannot approve it by accident."
   },
   {
-    "case": "zr_plugin_d_held_pjira_create",
-    "tags": ["zr-plugin", "pg2-maars", "pjira"],
+    "case": "zr_plugin_d_held_gh_pr_edit_body_file",
+    "tags": ["zr-plugin", "pg2-19hdz", "gh-stack"],
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "pjira create --project FINDEV"
+        "command": "gh pr edit 12 --body-file body.md"
       }
     },
     "cwd_path_state": {
@@ -9507,15 +9545,72 @@
     "settings": {},
     "rules_config": {},
     "expected_verdict": "not-approve",
-    "notes": "pg2-maars: instructed by the daily-focus plugin but held (NOT approve) until a Jira write needs a new policy judgment (gate 5, tc-o14i5.3.10); pinned so the R4 cutover replay cannot approve it by accident."
+    "notes": "pg2-19hdz: --body-file (a file or stdin becomes the PR text) is not instructed by any plugin, so it is not modeled (NOT approve); pinned so the R4 cutover replay cannot approve it by accident."
   },
   {
-    "case": "zr_plugin_d_held_pjira_transition",
-    "tags": ["zr-plugin", "pg2-maars", "pjira"],
+    "case": "zr_plugin_d_pjira_comment",
+    "tags": ["zr-plugin", "pg2-19hdz", "pjira"],
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "pjira transition FINDEV-123 Done"
+        "command": "pjira comment ABC-123 hi"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-19hdz (class D, operator ruling 2026-10-04/05 on pg2-cjfpy and pg2-maars; gate 5 P15 report internal/effectpolicy/testdata/p15/pjira-writes.md): instructed by the daily-focus plugin (its close command has the operator approve each drafted comment in the conversation first); graded APPROVE by tracker-write widened to the jira resource. Replaces the pg2-maars not-approve pin."
+  },
+  {
+    "case": "zr_plugin_d_pjira_create",
+    "tags": ["zr-plugin", "pg2-19hdz", "pjira"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pjira create --project ABC --type Task --summary \"a summary\""
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-19hdz (class D, operator ruling 2026-10-04/05 on pg2-cjfpy and pg2-maars; gate 5 P15 report internal/effectpolicy/testdata/p15/pjira-writes.md): graded APPROVE by tracker-write widened to the jira resource. Replaces the pg2-maars not-approve pin."
+  },
+  {
+    "case": "zr_plugin_d_pjira_transition",
+    "tags": ["zr-plugin", "pg2-19hdz", "pjira"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pjira transition ABC-123 Done"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-19hdz (class D, operator ruling 2026-10-04/05 on pg2-cjfpy and pg2-maars; gate 5 P15 report internal/effectpolicy/testdata/p15/pjira-writes.md): graded APPROVE by tracker-write widened to the jira resource. Replaces the pg2-maars not-approve pin."
+  },
+  {
+    "case": "zr_plugin_d_held_pjira_delete",
+    "tags": ["zr-plugin", "pg2-19hdz", "pjira"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "pjira delete ABC-123"
       }
     },
     "cwd_path_state": {
@@ -9526,15 +9621,15 @@
     "settings": {},
     "rules_config": {},
     "expected_verdict": "not-approve",
-    "notes": "pg2-maars: instructed by the daily-focus plugin but held (NOT approve) until a Jira write needs a new policy judgment (gate 5, tc-o14i5.3.10); pinned so the R4 cutover replay cannot approve it by accident."
+    "notes": "pg2-19hdz: only comment, create and transition are Jira writes the plugins use; any other pjira verb is unmodeled (NOT approve); pinned so the R4 cutover replay cannot approve it by accident."
   },
   {
-    "case": "zr_plugin_d_held_rc_publish",
-    "tags": ["zr-plugin", "pg2-maars", "zr-refactor"],
+    "case": "zr_plugin_d_rc_publish",
+    "tags": ["zr-plugin", "pg2-19hdz", "zr-refactor"],
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
-        "command": "rc-publish /wt feature/foo 'title' /abs/body.md"
+        "command": "rc-publish . feature/foo 'title' body.md"
       }
     },
     "cwd_path_state": {
@@ -9544,8 +9639,8 @@
     "mode": "default",
     "settings": {},
     "rules_config": {},
-    "expected_verdict": "not-approve",
-    "notes": "pg2-maars: instructed by the zr-refactor plugin but held (NOT approve) until its PR assignee edit is a PR metadata write needing a new policy judgment (gate 5, tc-o14i5.3.10); pinned so the R4 cutover replay cannot approve it by accident."
+    "expected_verdict": "approve",
+    "notes": "pg2-19hdz (class D, operator ruling 2026-10-04/05 on pg2-cjfpy and pg2-maars; gate 5 P15 report internal/effectpolicy/testdata/p15/rc-publish.md): instructed by the zr-refactor plugin; graded APPROVE: push-lease on the plain remote origin, a draft PR creation and the pr-edit assignee step, all existing or newly judged remote operations. Replaces the pg2-maars not-approve pin."
   },
   {
     "case": "zr_plugin_d_held_rc_validate",
@@ -9564,7 +9659,7 @@
     "settings": {},
     "rules_config": {},
     "expected_verdict": "not-approve",
-    "notes": "pg2-maars: instructed by the zr-refactor plugin but held (NOT approve) until its caller-supplied gate command needs a child-command interpreter; pinned so the R4 cutover replay cannot approve it by accident."
+    "notes": "pg2-maars, re-checked on pg2-19hdz: instructed by the zr-refactor plugin but still held (NOT approve). Its caller-supplied gate command needs a child-command interpreter that rebases the child's cwd onto the worktree, and a realistic Gradle gate (./gradlew) would still abstain as 'no schema for gradlew', so the form was dropped rather than half-built; pinned so the R4 cutover replay cannot approve it by accident."
   },
   {
     "case": "slsc0_readlink_f_installed_drain_beads",

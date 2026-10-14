@@ -914,6 +914,25 @@ func (NetworkAccess) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) 
 //     2026-10-05, pg2-xu7sz). Plain `gh pr ready` (marks it ready) stays
 //     "mutate" and Abstains (pg2-psiqh).
 //
+//   - "pr-edit": `gh pr edit` — Permitted on the "github" resource: a PR
+//     METADATA write (the assignee, title or body of a pull request that
+//     already exists). It neither creates a PR nor moves any ref, and
+//     nothing in the modeled flag set changes the PR's base branch or marks
+//     it ready (both stay unmodeled, so they abstain). Operator ruling
+//     (Phillip, 2026-10-04 on pg2-cjfpy, "any command which is supposed to
+//     work as part of a skill should be autoapproved", applied to the class
+//     D forms on pg2-maars 2026-10-05; gate 5 / P15 report
+//     testdata/p15/gh-pr-edit.md, pg2-19hdz). Instructed by zr-refactor's
+//     rc-publish (`--add-assignee @me`) and the gh-stack skill (title/body).
+//
+//   - "stack-unstack": `gh stack unstack` without --local — Permitted on the
+//     "github" resource: it dissolves the stack GROUPING on GitHub (the
+//     extension's own help: GitHub decides which PRs can be unstacked, and
+//     PRs queued for merge or with auto-merge enabled are left stacked); the
+//     PRs and their branches are not deleted or closed. With --local the
+//     effect is retargeted to "read" (nothing remote is touched). Same
+//     provenance as "pr-edit" (P15 report testdata/p15/gh-stack-unstack.md).
+//
 //   - "fetch": `git fetch <remote>` — Permitted for a plain configured
 //     remote NAME (no scheme, no path separator, not option-shaped): objects
 //     flow INTO this clone's own refs/object store and no modeled flag runs a
@@ -931,11 +950,18 @@ func (NetworkAccess) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) 
 //     on plugins in any repo of this workspace"; every first-party skill,
 //     command and agent instructs exactly these bd forms, and the approval
 //     history is unanimous (the old engine's bd rule approved them). The
-//     Permitted verdict is scoped to Resource "beads" by DATA: a
-//     tracker-write aimed at any other resource is not covered by that
-//     ruling and fails closed to Unknown. The destructive/bulk bd verbs and
-//     the Dolt lifecycle/VCS verbs are deliberately NOT tracker-write
-//     (cmddesc.bdSubcommands); they keep "mutate"/"dolt-server".
+//     Permitted verdict is scoped to the resources named below ("beads" and
+//     "jira") by DATA: a tracker-write aimed at any other resource is not
+//     covered by that ruling and fails closed to Unknown. The destructive/bulk bd verbs
+//     and the Dolt lifecycle/VCS verbs are deliberately NOT tracker-write
+//     (cmddesc.bdSubcommands); they keep "mutate"/"dolt-server". The "jira"
+//     resource joined "beads" for `pjira comment|create|transition` (the
+//     class D forms of pg2-maars, widened on pg2-19hdz; P15 report
+//     testdata/p15/pjira-writes.md): the daily-focus close command drafts a
+//     Jira progress comment and gets the operator's explicit approval IN THE
+//     CONVERSATION before posting it, so that human gate is the skill's own
+//     step, not a tool-permission prompt, and approving the posting command
+//     does not remove it.
 //
 //   - "mutate": a write needing explicit consent — Unknown, never
 //     Permitted here ("mutate" is bd's non-bookkeeping write verbs, slice
@@ -1048,16 +1074,29 @@ func (RemoteMutation) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool)
 			return Finding{Verdict: Permitted, Reason: "converting a pull request back to a draft (gh pr ready --undo; operator ruling 2026-10-05, pg2-xu7sz)"}, true
 		}
 		return Finding{Verdict: Unknown, Reason: "pr-ready-undo is only covered for the github resource"}, true
+	case "pr-edit":
+		if e.Resource == "github" {
+			return Finding{Verdict: Permitted, Reason: "pull request metadata write (gh pr edit; skill-instructed, operator ruling 2026-10-04 on pg2-cjfpy, pg2-19hdz)"}, true
+		}
+		return Finding{Verdict: Unknown, Reason: "pr-edit is only covered for the github resource"}, true
+	case "stack-unstack":
+		if e.Resource == "github" {
+			return Finding{Verdict: Permitted, Reason: "dissolving a stack grouping on GitHub (gh stack unstack; the PRs and branches stay; skill-instructed, operator ruling 2026-10-04 on pg2-cjfpy, pg2-19hdz)"}, true
+		}
+		return Finding{Verdict: Unknown, Reason: "stack-unstack is only covered for the github resource"}, true
 	case "fetch":
 		if isPlainRemoteName(e.Resource) {
 			return Finding{Verdict: Permitted, Reason: "fetch from a named git remote only brings objects into this clone's own refs"}, true
 		}
 		return Finding{Verdict: Unknown, Reason: "fetch source is not a plain configured remote name"}, true
 	case "tracker-write":
-		if e.Resource == "beads" {
+		switch e.Resource {
+		case "beads":
 			return Finding{Verdict: Permitted, Reason: "issue-tracker bookkeeping write on the beads database (skill-instructed; operator ruling 2026-10-04, pg2-cjfpy)"}, true
+		case "jira":
+			return Finding{Verdict: Permitted, Reason: "issue-tracker write on Jira (pjira comment|create|transition; skill-instructed, operator ruling 2026-10-04 on pg2-cjfpy, pg2-19hdz)"}, true
 		}
-		return Finding{Verdict: Unknown, Reason: "tracker-write is only covered for the beads resource"}, true
+		return Finding{Verdict: Unknown, Reason: "tracker-write is only covered for the beads and jira resources"}, true
 	case "mutate":
 		return Finding{Verdict: Unknown, Reason: "remote resource mutation requires consent"}, true
 	case "force-push":

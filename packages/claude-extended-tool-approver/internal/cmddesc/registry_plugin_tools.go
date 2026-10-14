@@ -581,6 +581,36 @@ var ghPrReadySchema = CommandSchema{
 	EndOfOptions:    true,
 }
 
+// ghPrEditSchema: `gh pr edit [<number> | <url> | <branch>] [flags]`, the PR
+// METADATA write (pg2-19hdz, the class D form pg2-maars held for gate 5; P15
+// report internal/effectpolicy/testdata/p15/gh-pr-edit.md). Operator ruling
+// (Phillip, 2026-10-04 on pg2-cjfpy, applied to the class D forms 2026-10-05):
+// a command a skill instructs is auto-approved. The instructed shapes are
+// zr-refactor's rc-publish (`gh pr edit <n> --add-assignee @me`) and the
+// gh-stack skill's "use `gh pr edit` to modify PR title and body", so ONLY
+// those three flags are modeled; the implicit "pr-edit" operation on the
+// "github" resource is what effectpolicy.RemoteMutation Permits. Every other
+// flag of the verb stays unmodeled and abstains: `--base` (retargets the PR),
+// `--body-file` (a file or stdin becomes the PR text), the reviewer, label,
+// project and milestone flags, and `-R/--repo` (another repository; the
+// instructed forms always edit the current checkout's PR).
+var ghPrEditSchema = CommandSchema{
+	Name:       "edit",
+	Provenance: "gh pr edit --help text embedded in gh 2.102.0 (read from the binary), this host 2026-10-14",
+	Flags: map[string]FlagSpec{
+		"--add-assignee": literal1,
+		"-t":             {Arity: ArityOne, Operand: Message}, "--title": {Arity: ArityOne, Operand: Message},
+		"-b": {Arity: ArityOne, Operand: Message}, "--body": {Arity: ArityOne, Operand: Message},
+		"--help": inert,
+	},
+	Positionals:     PositionalSpec{Rest: Literal},
+	ImplicitEffects: []ImplicitEffect{{Role: Remote("pr-edit"), Target: "github"}},
+	Stdin:           StdinNever,
+	Stdout:          StdoutMetadata,
+	UnknownFlag:     UnknownFlagInsufficient,
+	EndOfOptions:    true,
+}
+
 // ghSchema is the ONE registered `gh` schema. It holds pg2-cjfpy.2's `gh pr
 // view|list|status|diff|checks|create` and, folded in from
 // registry_ziprecruiter.go (pg2-cjfpy.4), `gh auth status`, `gh extension
@@ -616,6 +646,7 @@ var ghSchema = CommandSchema{
 				"checks": ghPrReadSchema("checks", []string{"--json", "-q", "--jq", "-t", "--template"}, []string{"--required"}),
 				"create": ghPrCreateSchema,
 				"ready":  ghPrReadySchema,
+				"edit":   ghPrEditSchema,
 			},
 		},
 		"auth":      zrGhSubcommands["auth"],

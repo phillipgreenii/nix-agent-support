@@ -106,6 +106,8 @@ var ExternalFlake = map[string]bool{
 	"rc-claim":       true,
 	"rc-fp":          true,
 	"rc-park":        true,
+	// pg2-19hdz: the zr-refactor publish script, a class D form of the same plugin.
+	"rc-publish": true,
 }
 
 // IsExempt reports whether name is exempt from capture/compare on goos:

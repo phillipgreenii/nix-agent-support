@@ -100,6 +100,22 @@ func TestZiprecruiterPluginCommands(t *testing.T) {
 		"rc-park pg2-abc 'stuck on a merge conflict' --fingerprint a.kt:x --actor sess-1-rc",
 		"rc-park pg2-abc 'unpushed work' --fingerprint a.kt:x --unpushed --isolation 'wt feature/x' --actor sess-1-rc",
 		"rc-fp pg2-app a.kt:x 'fixed in abc123' --actor sess-1-rc",
+		// pg2-19hdz: the class D forms that needed a NEW effectpolicy judgment
+		// (gate 5; the P15 reports are pinned under testdata/p15/): the PR
+		// metadata write (pr-edit), the stack-grouping delete (stack-unstack),
+		// tracker-write widened to the jira resource, and rc-publish, which
+		// bundles push-lease on origin, a draft PR creation and the PR edit.
+		"gh pr edit 12 --add-assignee @me",
+		"gh pr edit --add-assignee @me",
+		`gh pr edit 12 --title "New title" --body "New body"`,
+		"gh pr edit https://github.com/o/r/pull/12 --add-assignee @me",
+		"gh stack unstack",
+		"gh stack unstack 7",
+		"gh stack unstack --local 7",
+		"pjira comment ABC-123 'progress update'",
+		"pjira create --project ABC --type Task --summary 'a summary' --description 'a description'",
+		"pjira transition ABC-123 Done",
+		"rc-publish . feature/foo 'a title' body.md",
 	}
 	for _, cmd := range approve {
 		t.Run("approve/"+cmd, func(t *testing.T) {
@@ -123,20 +139,33 @@ func TestZiprecruiterPluginCommands(t *testing.T) {
 	})
 
 	abstain := []string{
-		// Still need a NEW effectpolicy judgment (Jira write, PR metadata
-		// write, stack-object delete), an undocumented draft default, or a
-		// child-command interpreter: held for the gate-5 ruling (pg2-maars).
+		// Still held: an undocumented draft default (gh stack link), a
+		// child-command interpreter plus an approvable gate (rc-validate: a
+		// realistic Gradle gate has no schema, so it cannot approve), and the
+		// plain forms the schemas leave unapproved.
 		"gh stack link branch-a branch-b",
-		"gh stack unstack",
-		"gh stack unstack 7",
 		"gh stack submit",
 		"gh stack push --remote https://example.com/x.git",
-		"gh pr edit 12 --add-assignee @me",
-		"pjira comment FINDEV-123 hi",
-		"pjira create --project FINDEV",
-		"pjira transition FINDEV-123 Done",
-		"rc-publish . feature/foo title body.md",
 		"rc-validate . proj --lock-wait 600 --run-timeout 1800 -- ./gradlew test",
+		"./gradlew test",
+		"gradle build",
+		// pg2-19hdz: the landed write forms approve only the instructed shape.
+		"gh pr edit 12 --base main",
+		"gh pr edit 12 --body-file body.md",
+		"gh pr edit 12 --add-reviewer someone",
+		"gh pr edit 12 --add-label bug",
+		"gh pr edit 12 --attach ./shot.png",
+		"gh pr edit -R other/repo 12 --add-assignee @me",
+		"gh pr edit 12 --add-assignee=@me --draft",
+		"gh stack delete",
+		"gh stack unstack --open",
+		"pjira comment ABC-123",
+		"pjira comment --config pjira.toml ABC-123 'progress update'",
+		"pjira transition ABC-123",
+		"pjira create --bogus x",
+		"pjira delete ABC-123",
+		"rc-publish . feature/foo 'a title'",
+		"rc-publish . feature/foo 'a title' body.md --force",
 		// Class D shapes the scripts do not instruct.
 		"df-wire pg2-abc --force",
 		"rc-claim rc:foo rc-fix --bogus --actor sess-1-rc",

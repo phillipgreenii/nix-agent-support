@@ -160,6 +160,208 @@
         "unknownFlag": "insufficient",
         "endOfOptions": true
       },
+      "comment": {
+        "name": "comment",
+        "provenance": "pjira comment --help (the verb's command definition in pjira's own source, phillipg-nix-repo-base modules/jira/cmd/pjira/main.go; this host 2026-10-14)",
+        "citations": {
+          "provenance": {
+            "source": "pjira comment --help: \"Add a plain-text comment to an issue (ADF-encoded); writes {key,id} JSON\""
+          },
+          "stdin": {
+            "source": "pjira comment --help: \"Usage: pjira comment <KEY> <BODY> [flags]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+          },
+          "stdout": {
+            "source": "pjira comment --help: \"Add a plain-text comment to an issue (ADF-encoded); writes {key,id} JSON\" (stdout classification taken from this description of what the command prints: the {key,...} JSON it writes)"
+          },
+          "unknownFlag": {
+            "source": "pjira comment --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies; the Global Flag --config (the config TOML that carries the Jira base URL and credential source) is deliberately not modeled on a write"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pjira comment --help: \"-h, --help help for comment\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pjira comment --help: \"-h, --help help for comment\""
+            }
+          }
+        },
+        "positionals": {
+          "leading": [
+            {
+              "kind": "literal"
+            },
+            {
+              "kind": "message"
+            }
+          ],
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pjira comment --help: \"Usage: pjira comment <KEY> <BODY> [flags]\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "tracker-write"
+            },
+            "target": "jira",
+            "citation": {
+              "source": "pjira comment --help: \"Add a plain-text comment to an issue (ADF-encoded); writes {key,id} JSON\" (the effect declared here is what this command does, per this description)"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "metadata",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "create": {
+        "name": "create",
+        "provenance": "pjira create --help (the verb's command definition in pjira's own source, phillipg-nix-repo-base modules/jira/cmd/pjira/main.go; this host 2026-10-14)",
+        "citations": {
+          "provenance": {
+            "source": "pjira create --help: \"Create a new issue; writes {key,url} JSON\""
+          },
+          "stdin": {
+            "source": "pjira create --help: \"Usage: pjira create [flags]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+          },
+          "stdout": {
+            "source": "pjira create --help: \"Create a new issue; writes {key,url} JSON\" (stdout classification taken from this description of what the command prints: the {key,...} JSON it writes)"
+          },
+          "unknownFlag": {
+            "source": "pjira create --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies; the Global Flag --config (the config TOML that carries the Jira base URL and credential source) is deliberately not modeled on a write"
+          }
+        },
+        "flags": {
+          "--description": {
+            "arity": "one",
+            "operand": {
+              "kind": "message"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pjira create --help: \"--description string issue description, plain text (encoded to ADF)\""
+            }
+          },
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pjira create --help: \"-h, --help help for create\""
+            }
+          },
+          "--project": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pjira create --help: \"--project string project key (required)\""
+            }
+          },
+          "--summary": {
+            "arity": "one",
+            "operand": {
+              "kind": "message"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pjira create --help: \"--summary string issue summary (required)\""
+            }
+          },
+          "--type": {
+            "arity": "one",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pjira create --help: \"--type string issue type name (required)\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pjira create --help: \"-h, --help help for create\""
+            }
+          }
+        },
+        "positionals": {
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pjira create --help: \"Usage: pjira create [flags]\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "tracker-write"
+            },
+            "target": "jira",
+            "citation": {
+              "source": "pjira create --help: \"Create a new issue; writes {key,url} JSON\" (the effect declared here is what this command does, per this description)"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "metadata",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
       "issue": {
         "name": "issue",
         "provenance": "pjira issue --help (this host 2026-10-05)",
@@ -392,6 +594,87 @@
         ],
         "stdin": "never",
         "stdout": "content",
+        "unknownFlag": "insufficient",
+        "endOfOptions": true
+      },
+      "transition": {
+        "name": "transition",
+        "provenance": "pjira transition --help (the verb's command definition in pjira's own source, phillipg-nix-repo-base modules/jira/cmd/pjira/main.go; this host 2026-10-14)",
+        "citations": {
+          "provenance": {
+            "source": "pjira transition --help: \"Transition an issue to a target workflow state; writes {key,to} JSON\""
+          },
+          "stdin": {
+            "source": "pjira transition --help: \"Usage: pjira transition <KEY> <TO> [flags]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+          },
+          "stdout": {
+            "source": "pjira transition --help: \"Transition an issue to a target workflow state; writes {key,to} JSON\" (stdout classification taken from this description of what the command prints: the {key,...} JSON it writes)"
+          },
+          "unknownFlag": {
+            "source": "pjira transition --help: full option listing reviewed; the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies; the Global Flag --config (the config TOML that carries the Jira base URL and credential source) is deliberately not modeled on a write"
+          }
+        },
+        "flags": {
+          "--help": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pjira transition --help: \"-h, --help help for transition\""
+            }
+          },
+          "-h": {
+            "arity": "none",
+            "operand": {
+              "kind": "literal"
+            },
+            "transform": {
+              "kind": "none"
+            },
+            "citation": {
+              "source": "pjira transition --help: \"-h, --help help for transition\""
+            }
+          }
+        },
+        "positionals": {
+          "leading": [
+            {
+              "kind": "literal"
+            },
+            {
+              "kind": "literal"
+            }
+          ],
+          "rest": {
+            "kind": "literal"
+          },
+          "restOverride": {
+            "role": {
+              "kind": "literal"
+            }
+          },
+          "citation": {
+            "source": "pjira transition --help: \"Usage: pjira transition <KEY> <TO> [flags]\""
+          }
+        },
+        "implicitEffects": [
+          {
+            "role": {
+              "kind": "remote",
+              "operation": "tracker-write"
+            },
+            "target": "jira",
+            "citation": {
+              "source": "pjira transition --help: \"Transition an issue to a target workflow state; writes {key,to} JSON\" (the effect declared here is what this command does, per this description)"
+            }
+          }
+        ],
+        "stdin": "never",
+        "stdout": "metadata",
         "unknownFlag": "insufficient",
         "endOfOptions": true
       }

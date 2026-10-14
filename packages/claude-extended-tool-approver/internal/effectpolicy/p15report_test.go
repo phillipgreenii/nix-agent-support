@@ -41,6 +41,95 @@ func TestP15ReportGitPush(t *testing.T) {
 	compareGolden(t, filepath.Join("testdata", "p15", "git-push.md"), md)
 }
 
+// TestP15ReportZRWriteForms pins the committed P15 approve-reachability
+// reports for the class D ZR plugin write forms pg2-19hdz landed (gate 5 of
+// the operator rulings on pg2-maars, 2026-10-05): `gh pr edit`, `gh stack
+// unstack`, `pjira comment|create|transition` and `rc-publish`. Per report it
+// asserts the instructed shapes feed an approve path and that every shape the
+// schemas deliberately leave unmodeled (a base retarget, a body from a file or
+// stdin, an upload, another repository, a secret path, a runtime-expanded
+// operand) does NOT.
+func TestP15ReportZRWriteForms(t *testing.T) {
+	root, _ := fixture(t)
+	reports, err := GenerateZRWriteFormsP15(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPermitted := map[string][]string{
+		"gh-pr-edit": {
+			"gh pr edit 12 --add-assignee @me",
+			"gh pr edit --add-assignee @me",
+			`gh pr edit 12 --title "T" --body "B"`,
+			"gh pr edit https://github.com/o/r/pull/12 --add-assignee @me",
+		},
+		"gh-stack-unstack": {"gh stack unstack", "gh stack unstack 7", "gh stack unstack --local 7"},
+		"pjira-writes": {
+			"pjira comment ABC-123 'progress update'",
+			"pjira transition ABC-123 Done",
+			"pjira create --project ABC --type Task --summary s --description d",
+		},
+		"rc-publish": {"rc-publish . feature/foo 'a title' body.md"},
+	}
+	mustNotPermit := map[string][]string{
+		"gh-pr-edit": {
+			"gh pr edit 12 --base main", "gh pr edit 12 -B main",
+			"gh pr edit 12 --body-file body.md", "gh pr edit 12 --body-file ~/.ssh/id_rsa", "gh pr edit 12 --body-file -", "gh pr edit 12 -F body.md",
+			"gh pr edit 12 --attach ./shot.png", "gh pr edit 12 --add-reviewer someone",
+			"gh pr edit 12 --repo other/repo --add-assignee @me", "gh pr edit -R other/repo 12 --add-assignee @me",
+			`gh pr edit 12 --body "$(cat ~/.ssh/id_rsa)"`, "gh pr edit 12 --draft",
+		},
+		"gh-stack-unstack": {
+			"gh stack delete", "gh stack unstack --open", "gh stack unstack --remote origin",
+			"gh stack unstack --local=false", "gh stack link branch-a branch-b", "gh stack merge --yes",
+		},
+		"pjira-writes": {
+			"pjira comment ABC-123", "pjira transition ABC-123",
+			"pjira delete ABC-123", "pjira assign ABC-123 me", "pjira edit ABC-123",
+			`pjira comment ABC-123 "$(cat ~/.ssh/id_rsa)"`, "cat ~/.ssh/id_rsa | pjira comment ABC-123 -",
+			"pjira comment --config ~/.ssh/id_rsa ABC-123 hi",
+			"pjira comment --config ~/.config/pjira/config.toml ABC-123 hi",
+			"pjira create --config pjira.toml --project ABC --type Task --summary s",
+		},
+		"rc-publish": {
+			"rc-publish . feature/foo 'a title' ~/.ssh/id_rsa",
+			`rc-publish "$WT" feature/foo 'a title' body.md`, `rc-publish . "$B" 'a title' body.md`,
+			`rc-publish . feature/foo 'a title' "$BODY"`,
+			"rc-publish . feature/foo 'a title'",
+			"rc-publish --force . feature/foo 'a title' body.md", "rc-publish . feature/foo 'a title' body.md --draft",
+		},
+	}
+	if len(reports) != len(ZRWriteFormReports) {
+		t.Fatalf("reports = %d, want %d (%v)", len(reports), len(ZRWriteFormReports), ZRWriteFormReports)
+	}
+	for _, key := range ZRWriteFormReports {
+		t.Run(key, func(t *testing.T) {
+			rep, ok := reports[key]
+			if !ok {
+				t.Fatalf("no report for %s", key)
+			}
+			permitted := map[string]bool{}
+			for _, e := range rep.PermittedEntries() {
+				permitted[e.Probe] = true
+			}
+			for _, want := range wantPermitted[key] {
+				if !permitted[want] {
+					t.Errorf("P15 report does not list %q as feeding a Permitted path", want)
+				}
+			}
+			for _, mustNot := range mustNotPermit[key] {
+				if permitted[mustNot] {
+					t.Errorf("P15 report lists %q as Permitted; it must not approve", mustNot)
+				}
+			}
+			md := rep.Markdown()
+			if strings.Contains(md, root) {
+				t.Error("report leaks the fixture root")
+			}
+			compareGolden(t, filepath.Join("testdata", "p15", key+".md"), md)
+		})
+	}
+}
+
 // TestP15ReportHeldForms pins the committed P15 approve-reachability report
 // for pg2-xu7sz (gate 5 of the operator rulings, Phillip, 2026-10-05): the
 // three forms the rulings approve -- `gh pr ready --undo`, `git branch -D`,

@@ -288,6 +288,8 @@ func TestRegistryNames(t *testing.T) {
 		want,
 		"df-close-focus", "df-deferred", "df-pull", "df-wire", "lat-wire", "rc-claim", "rc-fp", "rc-park",
 	)
+	// pg2-19hdz: the class D publish script that needed a new policy judgment.
+	want = append(want, "rc-publish")
 	// pg2-dbrsg: the shell builtins skills' control-flow statements use.
 	want = append(want, "exit", "pwd", "read", "shift")
 	// pg2-slsc0: the read-only probes the pb plugin instructs

@@ -1166,6 +1166,127 @@
             "unknownFlag": "insufficient",
             "endOfOptions": true
           },
+          "edit": {
+            "name": "edit",
+            "provenance": "gh pr edit --help text embedded in gh 2.102.0 (read from the binary), this host 2026-10-14",
+            "citations": {
+              "provenance": {
+                "source": "gh pr edit --help: \"Edit a pull request.\" (the help text embedded in the gh 2.102.0 binary; a live gh pr edit --help is denied to an unattended session, so it was read from the binary)"
+              },
+              "stdin": {
+                "source": "gh pr edit --help: \"Usage: gh pr edit [<number> | <url> | <branch>] [flags]\" (no explicit stdin wording for the modeled flags; the only flag that reads standard input, --body-file -, is not modeled; classified \"never\" from the documented operand/argument shape in this synopsis)"
+              },
+              "stdout": {
+                "source": "gh pr edit --help: \"Edit a pull request.\" and \"the pull request's URL is still printed to stdout\" (stdout classification taken from this description of what the command prints)"
+              },
+              "unknownFlag": {
+                "source": "gh pr edit --help: full option listing reviewed (--add-assignee, --add-label, --add-project, --add-reviewer, --attach, --base, --body, --body-file, --milestone, --remove-assignee, --remove-label, --remove-milestone, --remove-project, --remove-reviewer, --title); the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies, and the flags that would widen what is approved (--base, --body-file, --attach, reviewers, labels, projects, milestones, --repo) are deliberately not modeled"
+              }
+            },
+            "flags": {
+              "--add-assignee": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr edit --help: \"--add-assignee login Add assigned users by their login. Use \"@me\" to assign yourself, or \"@copilot\" to assign Copilot.\""
+                }
+              },
+              "--body": {
+                "arity": "one",
+                "operand": {
+                  "kind": "message"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr edit --help: \"-b, --body string Set the new body.\""
+                }
+              },
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr edit --help: \"--help Show help for command\""
+                }
+              },
+              "--title": {
+                "arity": "one",
+                "operand": {
+                  "kind": "message"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr edit --help: \"-t, --title string Set the new title.\""
+                }
+              },
+              "-b": {
+                "arity": "one",
+                "operand": {
+                  "kind": "message"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr edit --help: \"-b, --body string Set the new body.\""
+                }
+              },
+              "-t": {
+                "arity": "one",
+                "operand": {
+                  "kind": "message"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh pr edit --help: \"-t, --title string Set the new title.\""
+                }
+              }
+            },
+            "positionals": {
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "gh pr edit --help: \"Usage: gh pr edit [<number> | <url> | <branch>] [flags]\" and \"Without an argument, the pull request that belongs to the current branch is selected.\""
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "pr-edit"
+                },
+                "target": "github",
+                "citation": {
+                  "source": "gh pr edit --help: \"Edit a pull request.\" (the effect declared here is what this command does, per this description: it updates the title, body or assignees of an existing pull request on GitHub)"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
           "list": {
             "name": "list",
             "provenance": "gh pr list --help, this host 2026-10-05",
@@ -3162,7 +3283,7 @@
                 },
                 "transform": {
                   "kind": "retarget-remote",
-                  "from": "mutate",
+                  "from": "stack-unstack",
                   "to": "read"
                 },
                 "citation": {
@@ -3208,11 +3329,11 @@
               {
                 "role": {
                   "kind": "remote",
-                  "operation": "mutate"
+                  "operation": "stack-unstack"
                 },
                 "target": "github",
                 "citation": {
-                  "source": "gh stack unstack --help: \"Use --local to only remove local tracking without touching remote (GitHub).\" (the effect declared here is what this command does, per this description)"
+                  "source": "gh stack unstack --help: \"Remove a stack from local tracking and unstack it on GitHub.\" and \"Use --local to only remove local tracking without touching remote (GitHub).\" (the effect declared here is what this command does, per this description; GitHub decides which pull requests can be unstacked and the PRs and branches themselves are not deleted)"
                 }
               }
             ],

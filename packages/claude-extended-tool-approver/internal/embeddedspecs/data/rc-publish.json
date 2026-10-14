@@ -1,0 +1,122 @@
+{
+  "version": "v1",
+  "kind": "command",
+  "name": "rc-publish",
+  "command": {
+    "name": "rc-publish",
+    "provenance": "rc-publish --help (Publish a campaign app branch: push, ensure draft PR, WIP-pin (verified), this host 2026-10-05)",
+    "citations": {
+      "provenance": {
+        "source": "rc-publish --help: \"rc-publish: Publish a campaign app branch: push, ensure draft PR, WIP-pin (verified).\""
+      },
+      "stdin": {
+        "source": "rc-publish --help: \"Usage: rc-publish <wt> <branch> <title> <abs-body-file>\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+      },
+      "stdout": {
+        "source": "rc-publish --help: \"rc-publish: Publish a campaign app branch: push, ensure draft PR, WIP-pin (verified).\" (stdout classification taken from the script's final line, `pr: <number> <url>`, which only names the PR it published)"
+      },
+      "unknownFlag": {
+        "source": "rc-publish --help: full option listing reviewed (the script documents no flags besides -h/--help); the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies"
+      }
+    },
+    "flags": {
+      "--help": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rc-publish --help: the script prints this help text and exits 0 when its first argument is -h or --help (\"Exit: 0 ok\")"
+        }
+      },
+      "-h": {
+        "arity": "none",
+        "operand": {
+          "kind": "literal"
+        },
+        "transform": {
+          "kind": "none"
+        },
+        "citation": {
+          "source": "rc-publish --help: the script prints this help text and exits 0 when its first argument is -h or --help (\"Exit: 0 ok\")"
+        }
+      }
+    },
+    "positionals": {
+      "leading": [
+        {
+          "kind": "path-modify"
+        },
+        {
+          "kind": "literal"
+        },
+        {
+          "kind": "message"
+        },
+        {
+          "kind": "path-read"
+        }
+      ],
+      "rest": {
+        "kind": "literal"
+      },
+      "restOverride": {
+        "role": {
+          "kind": "literal"
+        }
+      },
+      "citation": {
+        "source": "rc-publish --help: \"Usage: rc-publish <wt> <branch> <title> <abs-body-file>\" (<wt> is the worktree a rejected push rebases in place, so it is a path-modify; <abs-body-file> is read as the PR body, so it is a path-read)"
+      }
+    },
+    "implicitEffects": [
+      {
+        "role": {
+          "kind": "remote",
+          "operation": "push-lease"
+        },
+        "target": "origin",
+        "citation": {
+          "source": "rc-publish --help: \"Publish a campaign app branch: push, ensure draft PR, WIP-pin (verified).\" and \"push rejected twice, rebase conflict\" (the effect declared here is what this command does, per this description: a git push --force-with-lease to the plain remote origin)"
+        }
+      },
+      {
+        "role": {
+          "kind": "remote",
+          "operation": "read"
+        },
+        "target": "github",
+        "citation": {
+          "source": "rc-publish --help: \"ensure draft PR\" (the effect declared here is what this command does, per this description: it looks the branch's existing PR up before creating one)"
+        }
+      },
+      {
+        "role": {
+          "kind": "remote",
+          "operation": "pr-create-draft"
+        },
+        "target": "github",
+        "citation": {
+          "source": "rc-publish --help: \"ensure draft PR\" (the effect declared here is what this command does, per this description: it creates the PR as a draft when none exists)"
+        }
+      },
+      {
+        "role": {
+          "kind": "remote",
+          "operation": "pr-edit"
+        },
+        "target": "github",
+        "citation": {
+          "source": "rc-publish --help: \"4 push rejected twice, rebase conflict, WIP read-back failed, or assignee failed\" (the effect declared here is what this command does, per this description: it edits the PR's assignee)"
+        }
+      }
+    ],
+    "stdin": "never",
+    "stdout": "metadata",
+    "unknownFlag": "insufficient",
+    "endOfOptions": true
+  }
+}

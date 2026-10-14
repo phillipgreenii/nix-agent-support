@@ -37,39 +37,46 @@ func TestZiprecruiterSchemasAreFailClosedData(t *testing.T) {
 	}
 }
 
-// TestZiprecruiterUnlandedVerbsAreAbsent pins the verbs that still need a NEW
-// effectpolicy judgment, a child-command interpreter, or collide with an
-// explicit REJECT/ABSTAIN ruling: they MUST stay unmodeled (so they abstain)
-// until the operator rules (gate 5: the P15 approve-reachability tooling,
-// tc-o14i5.3.10). Adding one is a policy change, not a schema fact. pg2-maars
-// landed the class D forms that reach APPROVE with the existing operations
-// (see TestZiprecruiterClassDLandedForms).
+// TestZiprecruiterUnlandedVerbsAreAbsent pins the verbs that are still NOT
+// modeled: they MUST stay unmodeled (so they abstain) until the open question
+// each one carries is answered. Adding one is a policy change, not a schema
+// fact. pg2-maars landed the class D forms that reach APPROVE with the
+// existing operations and pg2-19hdz landed the ones that needed a NEW
+// effectpolicy judgment (see TestZiprecruiterClassDLandedForms); what is left:
+//   - `gh stack link`: nothing documents the draft default of the PRs it
+//     creates (its --open flag "marks new and existing PRs as ready for
+//     review"), and it also edits existing PR bases;
+//   - `gh stack merge`, `gh stack modify`: ruling collisions / not instructed;
+//   - `rc-validate`: its caller-supplied gate command (after `--`) needs a
+//     child-command interpreter that rebases the child's cwd onto <wt>, and a
+//     realistic Gradle gate cannot reach approve even then (no `gradlew`
+//     schema), so the form is dropped rather than half-built.
 func TestZiprecruiterUnlandedVerbsAreAbsent(t *testing.T) {
 	gh, _ := DefaultRegistry().Lookup("gh")
 	stack, ok := gh.Subcommands["stack"]
 	if !ok {
 		t.Fatal("gh stack not registered")
 	}
-	for _, verb := range []string{"link", "merge", "modify"} {
+	for _, verb := range []string{"link", "merge", "modify", "delete"} {
 		if _, present := stack.Subcommands[verb]; present {
-			t.Errorf("gh stack %s must stay unmodeled (policy change / ruling collision / undocumented draft default)", verb)
+			t.Errorf("gh stack %s must stay unmodeled (undocumented draft default / ruling collision / not instructed alias)", verb)
 		}
 	}
 	if _, present := gh.Subcommands["extension"].Subcommands["install"]; present {
 		t.Error("gh extension install must stay unmodeled (installs third-party code)")
 	}
-	if _, present := gh.Subcommands["pr"].Subcommands["edit"]; present {
-		t.Error("gh pr edit is a PR metadata write needing a new policy judgment and must stay unmodeled")
-	}
-	pjira, _ := DefaultRegistry().Lookup("pjira")
-	for _, verb := range []string{"comment", "create", "transition"} {
-		if _, present := pjira.Subcommands[verb]; present {
-			t.Errorf("pjira %s is a Jira write and must stay unmodeled", verb)
+	for _, name := range []string{"rc-validate"} {
+		if _, registered := DefaultRegistry().Lookup(name); registered {
+			t.Errorf("%s needs a child-command interpreter and an approvable gate command, and must stay unmodeled", name)
 		}
 	}
-	for _, name := range []string{"rc-publish", "rc-validate"} {
-		if _, registered := DefaultRegistry().Lookup(name); registered {
-			t.Errorf("%s needs a new policy judgment / child-command interpreter and must stay unmodeled", name)
+	// The flags of the landed write verbs that would widen what they approve
+	// stay unmodeled: gh pr edit's --base/--body-file/--attach/-R and the
+	// reviewer, label, project and milestone flags.
+	edit := gh.Subcommands["pr"].Subcommands["edit"]
+	for _, flag := range []string{"--base", "-B", "--body-file", "-F", "--attach", "--repo", "-R", "--add-reviewer", "--add-label", "--add-project", "--milestone", "--remove-assignee"} {
+		if _, present := edit.Flags[flag]; present {
+			t.Errorf("gh pr edit %s must stay unmodeled (widens what the PR metadata write approves)", flag)
 		}
 	}
 }
@@ -127,14 +134,74 @@ func TestZiprecruiterClassDLandedForms(t *testing.T) {
 	if !hasEffect(submit, "mutate", "github") || submit.Flags["--auto"].Transform.To != "pr-create-draft" {
 		t.Error("gh stack submit: --auto must be what retargets the github mutate effect to pr-create-draft")
 	}
+	// pg2-19hdz: without --local the verb dissolves the stack grouping on
+	// GitHub (the "stack-unstack" operation); --local is what retargets it to
+	// a read.
 	unstack := stack.Subcommands["unstack"]
-	if !hasEffect(unstack, "mutate", "github") || unstack.Flags["--local"].Transform.Kind != TransformRetargetRemote {
-		t.Error("gh stack unstack: --local must be what retargets the github mutate effect away")
+	if !hasEffect(unstack, "stack-unstack", "github") || hasEffect(unstack, "mutate", "github") {
+		t.Error("gh stack unstack: the github effect must be the stack-unstack operation, never a plain mutate")
+	}
+	if local := unstack.Flags["--local"].Transform; local.Kind != TransformRetargetRemote || local.From != "stack-unstack" || local.To != "read" {
+		t.Errorf("gh stack unstack: --local must retarget stack-unstack to read, got %+v", local)
 	}
 	for _, verb := range []string{"submit", "sync", "push", "unstack"} {
 		if _, ok := stack.Subcommands[verb].Flags["--open"]; ok {
 			t.Errorf("gh stack %s: --open (marks PRs ready, pg2-psiqh Abstain) must stay unmodeled", verb)
 		}
+	}
+}
+
+// TestZiprecruiterPolicyJudgedWriteForms pins the shape of the write forms
+// pg2-19hdz landed once the P15 tooling existed: each carries its NEW
+// operation (or the widened tracker-write resource) as a load-bearing
+// implicit effect, so none can silently become a pure read, and the read
+// verbs of pjira stay reads.
+func TestZiprecruiterPolicyJudgedWriteForms(t *testing.T) {
+	reg := DefaultRegistry()
+	effects := func(s CommandSchema) map[string]bool {
+		out := map[string]bool{}
+		for _, ie := range s.ImplicitEffects {
+			if ie.Role.Kind == KindRemote {
+				out[ie.Role.Operation+" "+ie.Target] = true
+			}
+		}
+		return out
+	}
+	gh, _ := reg.Lookup("gh")
+	if got := effects(gh.Subcommands["pr"].Subcommands["edit"]); len(got) != 1 || !got["pr-edit github"] {
+		t.Errorf("gh pr edit: implicit remote effects = %v, want exactly {pr-edit github}", got)
+	}
+	pjira, _ := reg.Lookup("pjira")
+	for _, verb := range []string{"comment", "create", "transition"} {
+		if got := effects(pjira.Subcommands[verb]); len(got) != 1 || !got["tracker-write jira"] {
+			t.Errorf("pjira %s: implicit remote effects = %v, want exactly {tracker-write jira}", verb, got)
+		}
+		// --config names the TOML with the Jira base URL and credential source:
+		// the read verbs keep it, a write must not (no plugin passes it).
+		if _, ok := pjira.Subcommands[verb].Flags["--config"]; ok {
+			t.Errorf("pjira %s: --config must stay unmodeled on a write verb", verb)
+		}
+	}
+	for _, verb := range []string{"issue", "search", "auth-status"} {
+		if _, ok := pjira.Subcommands[verb].Flags["--config"]; !ok {
+			t.Errorf("pjira %s: the read verbs keep --config", verb)
+		}
+	}
+	for _, verb := range []string{"issue", "search", "auth-status"} {
+		if got := effects(pjira.Subcommands[verb]); len(got) != 1 || !got["read jira"] {
+			t.Errorf("pjira %s: implicit remote effects = %v, want exactly {read jira}", verb, got)
+		}
+	}
+	publish, ok := reg.Lookup("rc-publish")
+	if !ok {
+		t.Fatal("rc-publish not registered")
+	}
+	want := map[string]bool{"push-lease origin": true, "read github": true, "pr-create-draft github": true, "pr-edit github": true}
+	if got := effects(publish); !reflect.DeepEqual(got, want) {
+		t.Errorf("rc-publish: implicit remote effects = %v, want %v", got, want)
+	}
+	if len(publish.Flags) != 2 {
+		t.Errorf("rc-publish takes no flags besides -h/--help, got %v", publish.Flags)
 	}
 }
 
@@ -163,7 +230,7 @@ func TestGhSchemaIsSingleAndFoldsBothSiblings(t *testing.T) {
 		t.Fatal("gh not registered")
 	}
 	for path, sub := range map[string][]string{
-		"pr":        {"view", "list", "status", "diff", "checks", "create"},
+		"pr":        {"view", "list", "status", "diff", "checks", "create", "ready", "edit"},
 		"auth":      {"status"},
 		"extension": {"list"},
 		"stack":     {"view", "up", "down", "top", "bottom", "trunk", "init", "add", "rebase", "checkout", "push", "submit", "sync", "unstack"},

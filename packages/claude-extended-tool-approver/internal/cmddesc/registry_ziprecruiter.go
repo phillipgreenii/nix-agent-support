@@ -25,15 +25,24 @@ package cmddesc
 // (push-lease, pr-create-draft, tracker-write on beads): `gh stack push`,
 // `gh stack submit --auto`, `gh stack sync`, `gh stack unstack --local`,
 // df-close-focus, df-wire, df-deferred write|read, df-pull, lat-wire,
-// rc-claim, rc-park and rc-fp. Still held, because honest modeling needs a
-// NEW remote operation (a policy judgment, not a schema fact), is listed in
-// TestZiprecruiterUnlandedVerbsAreAbsent: `gh pr edit` and `rc-publish` (a PR
-// metadata write), `pjira comment|create|transition` (a Jira write; the
-// tracker-write verdict is scoped to the beads resource by DATA),
-// `gh stack unstack` without --local (deletes the stack object on GitHub),
-// `gh stack link` (the draft-default of the PRs it creates is not documented)
-// and `rc-validate` (its caller-supplied gate command needs a child-command
-// interpreter that rebases the child's working directory onto <wt>).
+// rc-claim, rc-park and rc-fp. The tooling landed (tc-o14i5.3.10, commit
+// 171eaa4f7: internal/effectpolicy/p15report.go) and pg2-19hdz landed the held
+// forms that needed a NEW effectpolicy judgment, each with a P15 report
+// pinned under internal/effectpolicy/testdata/p15/: `gh pr edit` (the new
+// "pr-edit" remote operation), `rc-publish` (push-lease on origin,
+// pr-create-draft and pr-edit on github), `pjira comment|create|transition`
+// (tracker-write widened from the beads resource to also cover "jira") and
+// `gh stack unstack` without --local (the new "stack-unstack" operation).
+// Still held, listed in TestZiprecruiterUnlandedVerbsAreAbsent:
+// `gh stack link` (its help documents --open as "mark new and existing PRs as
+// ready for review" but nowhere says whether the PRs it creates are drafts
+// without it, and the unattended hook denies even `gh stack link --help`, so
+// the default is unverified) and `rc-validate` (its caller-supplied gate
+// command needs a child-command interpreter that rebases the child's working
+// directory onto <wt>, and a realistic Gradle gate such as `./gradlew test`
+// still cannot reach approve even then: no `gradlew` schema exists, so the
+// child abstains as "no schema for gradlew"; adding one is its own approval
+// decision, not a fact of rc-validate).
 // Forms that collide with an explicit REJECT/ABSTAIN ruling are not
 // overridden: `gh stack merge` (mirrors `gh pr merge`, Reject),
 // `gh stack submit|link --open` (marks PRs ready, the `gh pr ready` Abstain
@@ -63,6 +72,17 @@ package cmddesc
 //     "mutate" and abstains. The stack object GitHub keeps for those PRs, and
 //     the base-branch fix-ups on them, are the PR flow's own bookkeeping, not
 //     a separate write kind.
+//   - `gh stack unstack` without --local dissolves the stack GROUPING on
+//     GitHub (the PRs and branches stay): Remote("stack-unstack") on
+//     "github", which RemoteMutation Permits (pg2-19hdz); --local retargets
+//     it to "read".
+//   - A Jira write (`pjira comment|create|transition`) is Remote(
+//     "tracker-write") on "jira": the same operation bd carries on "beads",
+//     which RemoteMutation now Permits for both resources by DATA (pg2-19hdz).
+//   - A PR metadata write (`gh pr edit`) is Remote("pr-edit") on "github"
+//     (Permitted, pg2-19hdz). `rc-publish` bundles the pieces it performs: a
+//     push-lease on the plain remote "origin", a draft PR creation and the
+//     PR assignee edit, plus the reads that find an existing PR.
 //   - A first-party script that writes only its OWN state (rc-sentinel's
 //     $RC_STATE_DIR sentinels, df-survey's manifest under $TMPDIR, pg-desk's
 //     triage-board annotation) declares no path effect for it, the same
@@ -89,6 +109,11 @@ var (
 	zrWritesBeads = ImplicitEffect{Role: Remote("tracker-write"), Target: "beads"}
 	zrReadsGitHub = zrRemoteRead("github")
 	zrReadsJira   = zrRemoteRead("jira")
+	// zrWritesJira is a write to Jira (a comment, an issue, a workflow
+	// transition): the same Remote("tracker-write") operation bd carries on
+	// "beads", aimed at the "jira" resource (pg2-19hdz widened
+	// effectpolicy.RemoteMutation's tracker-write to cover both by data).
+	zrWritesJira = ImplicitEffect{Role: Remote("tracker-write"), Target: "jira"}
 )
 
 // zrCheckoutMutation is the implicit local access class of a verb that moves
@@ -132,7 +157,7 @@ func ziprecruiterToolSchemas() []CommandSchema {
 		zrLatSurveySchema,
 		zrRcProbeSchema, zrRcSentinelSchema, zrRcPreflightSchema, zrRcBranchSchema,
 		zrDfCloseFocusSchema, zrDfWireSchema, zrDfDeferredSchema, zrDfPullSchema, zrLatWireSchema,
-		zrRcClaimSchema, zrRcParkSchema, zrRcFpSchema,
+		zrRcClaimSchema, zrRcParkSchema, zrRcFpSchema, zrRcPublishSchema,
 		zrDfSchema, zrCutSchema,
 	}
 }
@@ -173,9 +198,10 @@ func zrGhStackLeaf(verb string, flags map[string]FlagSpec, pos PositionalSpec, s
 //     interactive TUI (the skill forbids it); that is a hang, not an effect,
 //     so it is not modeled. `add` takes -m/-A/-u for the stage-and-commit
 //     shortcut, the same access class as `git add` + `git commit`. `push`, `submit --auto`, `sync` and
-//     `unstack --local` (pg2-maars) follow the effect model above. ABSENT
-//     (abstain): link, merge, modify, `submit` without --auto, `--open`, and
-//     `unstack` without --local.
+//     `unstack` (pg2-maars; pg2-19hdz added `unstack` without --local) follow
+//     the effect model above. ABSENT (abstain): link (its draft default is
+//     unverified, see the header), merge, modify, `submit` without --auto,
+//     `--open`, and the `delete` alias of `unstack`.
 var zrGhSubcommands = map[string]CommandSchema{
 	"auth": {
 		Name:         "auth",
@@ -280,16 +306,22 @@ var zrGhSubcommands = map[string]CommandSchema{
 				zrFlags(zrStackRemoteFlag, map[string]FlagSpec{"--prune": inert}),
 				PositionalSpec{}, StdoutMetadata,
 				append([]ImplicitEffect{zrPushDefaultRemote, zrReadsGitHub}, zrCheckoutMutation...)...),
-			// `gh stack unstack --local [<n>]`: "Only remove local tracking
-			// without touching remote". Without --local the verb deletes the
-			// stack object on GitHub: the implicit "mutate" stays and abstains.
+			// `gh stack unstack [--local] [<n>]`: "Remove a stack from local
+			// tracking and unstack it on GitHub"; "Use --local to only remove
+			// local tracking without touching remote (GitHub)"; "GitHub
+			// decides which pull requests can be unstacked: PRs that are
+			// queued for merge or have auto-merge enabled are left stacked".
+			// Without --local the verb dissolves the stack grouping on GitHub
+			// (the PRs and their branches stay): the implicit "stack-unstack"
+			// operation, which RemoteMutation Permits (pg2-19hdz). --local
+			// retargets it to a read. The `delete` alias is not modeled.
 			"unstack": zrGhStackLeaf("unstack",
 				map[string]FlagSpec{
-					"--local": {Transform: EffectTransform{Kind: TransformRetargetRemote, From: "mutate", To: "read"}},
+					"--local": {Transform: EffectTransform{Kind: TransformRetargetRemote, From: "stack-unstack", To: "read"}},
 				},
 				PositionalSpec{Rest: Literal}, StdoutMetadata,
 				ImplicitEffect{Role: PathModify, Target: ".git"},
-				ImplicitEffect{Role: Remote("mutate"), Target: "github"}),
+				ImplicitEffect{Role: Remote("stack-unstack"), Target: "github"}),
 		},
 	},
 }
@@ -316,11 +348,34 @@ func zrPjiraLeaf(verb string, flags map[string]FlagSpec, pos PositionalSpec, std
 	}
 }
 
-// zrPjiraSchema: only the READ verbs -- `issue <KEY>`, `search --jql ...`,
+// zrPjiraWriteLeaf builds one WRITE verb of the Jira CLI (pg2-19hdz): the
+// read leaf's fail-closed flag policy, with the tracker-write effect on the
+// "jira" resource instead of a read. The persistent --config flag is NOT
+// modeled on a write: it names the TOML that holds the Jira base URL and the
+// credential source, so a config the agent wrote could aim a write (and the
+// token) at another host, and no plugin passes it on a write (the read verbs
+// keep it). The verbs print a small {key,id|url|to} JSON of what they wrote:
+// metadata.
+func zrPjiraWriteLeaf(verb string, flags map[string]FlagSpec, pos PositionalSpec) CommandSchema {
+	s := zrPjiraLeaf(verb, flags, pos, StdoutMetadata)
+	delete(s.Flags, "--config")
+	s.Provenance = "pjira " + verb + " --help (the verb's command definition in pjira's own source, phillipg-nix-repo-base modules/jira/cmd/pjira/main.go; this host 2026-10-14)"
+	s.ImplicitEffects = []ImplicitEffect{zrWritesJira}
+	return s
+}
+
+// zrPjiraSchema: the READ verbs -- `issue <KEY>`, `search --jql ...`,
 // `auth-status` (zr-refactor status.md: "look it up with the pjira CLI";
-// df-survey's Jira survey). `comment`, `create` and `transition` are Jira
-// WRITES and are deliberately absent (daily-focus close.md gates each posted
-// comment behind an explicit per-comment operator approval).
+// df-survey's Jira survey) -- and, since pg2-19hdz, the three WRITE verbs
+// `comment <KEY> <BODY>`, `create --project P --type T --summary S
+// [--description D]` and `transition <KEY> <TO>` (pjira --help: "Add a
+// plain-text comment to an issue", "Create a new issue", "Transition an issue
+// to a target workflow state"). The writes are Remote("tracker-write") on
+// "jira", which effectpolicy.RemoteMutation Permits (P15 report
+// internal/effectpolicy/testdata/p15/pjira-writes.md). daily-focus close.md
+// still has the operator approve each drafted comment IN THE CONVERSATION
+// before the comment is posted: that human step is the skill's own, and
+// approving the posting command does not replace it.
 var zrPjiraSchema = CommandSchema{
 	Name:       "pjira",
 	Provenance: "pjira --help (Generic Atlassian Jira access tool, this host 2026-10-05)",
@@ -338,6 +393,15 @@ var zrPjiraSchema = CommandSchema{
 			"--jql": literal1, "--limit": literal1,
 		}, PositionalSpec{}, StdoutContent),
 		"auth-status": zrPjiraLeaf("auth-status", nil, PositionalSpec{}, StdoutMetadata),
+		"comment": zrPjiraWriteLeaf("comment", nil,
+			PositionalSpec{Leading: []OperandRole{Literal, Message}}),
+		"create": zrPjiraWriteLeaf("create", map[string]FlagSpec{
+			"--project": literal1, "--type": literal1,
+			"--summary":     {Arity: ArityOne, Operand: Message},
+			"--description": {Arity: ArityOne, Operand: Message},
+		}, PositionalSpec{}),
+		"transition": zrPjiraWriteLeaf("transition", nil,
+			PositionalSpec{Leading: []OperandRole{Literal, Literal}}),
 	},
 }
 
@@ -677,6 +741,27 @@ var zrRcFpSchema = zrScript("rc-fp",
 	map[string]FlagSpec{"--actor": literal1},
 	PositionalSpec{Leading: []OperandRole{Literal, Literal, Message}}, StdinNever, StdoutMetadata,
 	zrWritesBeads)
+
+// rc-publish <wt> <branch> <title> <abs-body-file> (pg2-19hdz): "Publish a
+// campaign app branch: push, ensure draft PR, WIP-pin (verified)". The script
+// runs, in order: `git -C <wt> push -u --force-with-lease origin <branch>`
+// (a push-lease on the plain remote "origin"; after a rejected push a fetch
+// and a rebase onto origin/<branch> rewrite the worktree, so <wt> is a
+// PathModify exactly like rc-branch's); a read of the existing PR for the
+// branch (`pg-connector pr list`, then `gh pr list`: reads of GitHub); the
+// draft PR creation when none exists (pr-create-draft: it is "ensure draft
+// PR", never a ready PR); `pg-desk wip on|show` (the local triage board, no
+// effect); and `gh pr edit <n> --add-assignee @me` (pr-edit). <abs-body-file>
+// is the PR body: a path read, so a secret path is refused by the path
+// policy. The script takes no flags besides -h/--help.
+var zrRcPublishSchema = zrScript("rc-publish",
+	"Publish a campaign app branch: push, ensure draft PR, WIP-pin (verified)",
+	nil,
+	PositionalSpec{Leading: []OperandRole{PathModify, Literal, Message, PathRead}}, StdinNever, StdoutMetadata,
+	ImplicitEffect{Role: Remote("push-lease"), Target: "origin"},
+	zrReadsGitHub,
+	ImplicitEffect{Role: Remote("pr-create-draft"), Target: "github"},
+	ImplicitEffect{Role: Remote("pr-edit"), Target: "github"})
 
 // ---- df ---------------------------------------------------------------------
 
