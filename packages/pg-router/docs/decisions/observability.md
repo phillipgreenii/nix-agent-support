@@ -488,11 +488,13 @@ or when consumption stays far below generation.
   zero as well, so enqueues less retirements is the change in the backlog plus the completions and the rule
   reads "the backlog grew by more than half of what was completed", with the same ratio and floors as
   before and no change to a lane that never retires anything unaccepted (an absent retirements series reads
-  as 0). On the recorded storm that ends the condition at about 21:10Z, when the retirements have caught up
-  with the re-emissions (the storm also retired and did not re-emit the stale part of the standing backlog,
-  depth 35 to 22), and the alert resolves an hour later; the verification's estimate, which counts each
-  distinct bead once, would hold the condition to about 23:22Z. Net arrivals in the 6 hours to 22:42Z read
-  7, where the verification counted at most 8 new beads. **Chosen over** a depth-trend guard (the same
+  as 0). An event that was retired and is not yet re-emitted reads as missing from the backlog: while a
+  decline storm lasts the re-emissions trail the retirements by 13 to 16 events (enqueues less retirements
+  over the recorded storm: -16 at 21:30Z, -13 at 22:00Z, the depth falling from 35 to 22) and catch up after
+  it (+3 at 22:40Z). On the recorded storm that ends the condition at about 21:10Z, once the retirements run
+  ahead, and the alert resolves an hour later; the verification's estimate, which counts each distinct bead
+  once, would hold the condition to about 23:22Z. Net arrivals in the 6 hours to 22:42Z read 7, where the
+  verification counted at most 8 new beads. **Chosen over** a depth-trend guard (the same
   quantity from the gauge, which has no series while a type is drained, holes across every sleep, and
   noise of a few events either way) and over counting an event id once in the daemon, which is the exact
   count but needs the queue to remember a retired id past its sweep (an id memory in `eventqueue`, a new

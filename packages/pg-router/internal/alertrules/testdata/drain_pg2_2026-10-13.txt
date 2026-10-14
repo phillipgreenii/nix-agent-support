@@ -36,9 +36,12 @@
 #     lane held 19 to 24 events throughout.
 #   * 22 arrivals and 4 recorded accepts from 14:52Z to 20:52Z (depth 19 -> 35, 3 of the retirements in the whole window
 #     are before the storm); from 20:54Z every decline retires an event unaccepted (a U) and the source re-emits it (an E):
-#     302 declines, 302 U and about 300 E in the storm.
+#     302 declines, 302 U and about 305 E by 22:40Z. The re-emissions trail the retirements by 13 to 16 events while the
+#     storm lasts (E less U over the storm reads -16 at 21:30Z and -13 at 22:00Z: events out of the queue and not yet
+#     back, which is the depth falling from 35 to 22) and catch up after it (+3 at 22:40Z).
 #   * the 6 hours to 22:42Z hold 312 E and 305 U (the verification: 312 enqueues of 27 distinct beads, at most 8 of them
-#     new, against 13 completions): 7 net arrivals, below the 13 completions.
+#     new, against 13 completions): 7 net arrivals, below the 15 settled dispatches this file holds for those 6 hours
+#     (the verification read 13 from the counter, which restarted at 19:43Z).
 #   * the Prometheus samples of pg_router_listener_in_flight{role="drain-pg2"} that read 1 inside the storm (the scrapes
 #     are on :14 and :44 of every minute) were 21:15:44Z, 21:16:14Z, 21:21:14Z, 21:29:14Z and 21:33:44Z. Each has an R
 #     record 0, 1 or 2 seconds after it, and the offsets of the model above reproduce all five.

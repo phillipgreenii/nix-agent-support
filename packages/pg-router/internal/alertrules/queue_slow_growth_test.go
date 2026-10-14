@@ -142,6 +142,11 @@ func TestSlowGrowthRecordedDayPages(t *testing.T) {
 	if arrivals != 11 || completions != 5 {
 		t.Fatalf("the reference window holds %d arrivals and %d completions, the alert record says 11 and 5", arrivals, completions)
 	}
+	// It pages for growth, not churn (pg2-9nfla): nothing was retired unaccepted in the
+	// 6 hours to 19:40Z, so the net and the gross counts are the same 11 and 5 ...
+	if _, retired, _ := windowCounts(l, hi); retired != 0 {
+		t.Fatalf("%d events were retired unaccepted in the 6 hours to %s; the reference case is meant to hold none", retired, hi.Format("15:04"))
+	}
 
 	m := replayGrowth(l, series, awakeIn(l), from, laneEnd)
 	wake := parseUTC("2026-10-12T16:30:53Z")
@@ -161,6 +166,13 @@ func TestSlowGrowthRecordedDayPages(t *testing.T) {
 	// it), so the alert is firing again at the end of the recording.
 	if !m[parseUTC("2026-10-13T00:20:00Z")].firing {
 		t.Error("not firing at 00:20Z on 10-13, with the backlog still growing")
+	}
+	// ... and at 00:20Z the 00:18Z-00:24Z churn burst (30 events retired unaccepted and
+	// re-emitted) nets out, yet the distinct arrivals of the evening still outpace the
+	// completions, so the page does not depend on counting the burst.
+	enq, retired, done := windowCounts(l, parseUTC("2026-10-13T00:20:00Z"))
+	if retired == 0 || float64(enq-retired) <= growthRatio*float64(done) {
+		t.Errorf("at 00:20Z %d enqueues less %d retired are %d net arrivals against %d completions: want the burst netted out and the ratio still above %.1f", enq, retired, enq-retired, done, growthRatio)
 	}
 }
 
@@ -349,11 +361,12 @@ func TestSlowGrowthDeclineStormChurnIsNotArrivals(t *testing.T) {
 	// the change in the backlog plus the completions, so the condition is "the backlog
 	// grew by more than half of what was completed in the window": it holds while the
 	// onset's 22 arrivals are still in the window and the storm has only started to
-	// retire the stale part of the standing backlog (depth 35 to 25 by 21:10Z), and ends
-	// when the retirements have caught up with the re-emissions (net 5 at 21:20Z, under
-	// the floor of 6), more than an hour before the 11 dispatches of 22:02Z-22:29Z lift
-	// the completions. Counting each distinct bead once would hold it to about 23:22Z
-	// (the verification's estimate), but that takes an event id the counters do not have.
+	// retire events (depth 35 to 25 by 21:10Z), and ends once the retirements run ahead
+	// of the re-emissions (events retired and not yet back: 13 to 16 while the storm
+	// lasts, net 5 at 21:20Z, under the floor of 6), more than an hour before the 11
+	// dispatches of 22:02Z-22:29Z lift the completions. Counting each distinct bead once
+	// would hold it to about 23:22Z (the verification's estimate), but that takes an event
+	// id the counters do not have.
 	for _, hm := range []string{"20:56", "21:00", "21:10"} {
 		if !net[parseUTC("2026-10-13T"+hm+":00Z")].cond {
 			t.Errorf("net of retirements the condition is false at %s, while the onset's arrivals outpace the completions", hm)

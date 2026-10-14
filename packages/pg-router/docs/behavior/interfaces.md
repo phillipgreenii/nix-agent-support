@@ -547,7 +547,9 @@ sequenceDiagram
   **throughput** is a counter per `type` **and** `role` (the accepting handler role); **enqueued** is
   a counter per `type`: the events admitted to the queue (a duplicate id, a restored event, a refused
   admission and the Gate Registry's own records are not arrivals), the arrivals that throughput's
-  completions are weighed against (`DEC-OBS-10`); **dispatch
+  completions are weighed against, less the events the queue retired without any handler accepting
+  them (**unconsumed_expired**), so an event that was retired and re-emitted counts once
+  (`DEC-OBS-10`); **dispatch
   latency** is a histogram, in milliseconds from the event's enqueue to its accept, per `outcome`,
   `role` **and** entity `type`, with the bucket boundaries 100, 250, 500, 1000, 2500, 5000, 10000, 30000, 60000,
   120000, 300000, 600000, 1200000, 1800000 and 3600000 (an event re-offered for longer than an hour

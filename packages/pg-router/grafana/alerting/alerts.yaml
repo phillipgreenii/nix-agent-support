@@ -414,13 +414,16 @@ groups:
       # completions (every event leaves by an accept or a retirement), so the rule now
       # reads "the backlog grew by more than half of what the consumer completed in the
       # window", from two exact counters rather than the depth gauge (absent while a
-      # type is drained, holes across every sleep). It therefore also reads the storm's
-      # sweep of the stale part of the standing backlog (depth 35 to 22, retired and not
-      # re-emitted) as a shrinking backlog: on the recorded storm the condition ends about
-      # 21:10Z, when the retirements have caught up with the re-emissions, and the alert
-      # resolves an hour later, where counting each distinct bead once (the verification's
-      # estimate) would hold the condition to about 23:22Z. That count needs an event id
-      # the counters do not carry. Replay of the recorded storm and of the 2026-10-12 slow
+      # type is drained, holes across every sleep). It therefore also reads an event that
+      # was retired and is not yet re-emitted as missing from the backlog: while a decline
+      # storm lasts the re-emissions trail the retirements by 13 to 16 events (enqueues less
+      # retirements over the recorded storm: -16 at 21:30Z, -13 at 22:00Z, which is the
+      # depth falling from 35 to 22) and catch up after it (+3 at 22:40Z). On the recorded
+      # storm the condition therefore ends about 21:10Z, once the retirements run ahead, and
+      # the alert resolves an hour later, where counting each distinct bead once (the
+      # verification's estimate) would hold the condition to about 23:22Z. That count
+      # needs an event id the counters do not carry. Replay of the recorded storm and of
+      # the 2026-10-12 slow
       # growth: internal/alertrules/testdata/drain_pg2_2026-10-13.txt,
       # drain_pg2_2026-10-12.txt and queue_slow_growth_test.go. Chosen over a daemon
       # change that counts an event id once: the queue keeps no memory of a retired id
