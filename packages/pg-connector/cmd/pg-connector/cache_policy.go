@@ -353,3 +353,22 @@ func cacheWriteFor(content json.RawMessage) (cacheWrite, bool) {
 	}
 	return cacheWrite{id: meta.ID, content: content, asOf: asOf}, true
 }
+
+// putLiveEntities writes every live-listed entity in raws to (entityType,
+// backend)'s cache at summary level with ONE load, evict and save (bead
+// pg2-z0qfu). It is the batch form of calling putLiveEntity once per entity,
+// which re-read and re-wrote the whole cache file for each entity and made a
+// poll's CPU grow with listed-entities x cache-size. An entity with no id or
+// no parsable as_of is skipped, exactly as putLiveEntity skips it.
+func putLiveEntities(ctx context.Context, reg *Registry, entityType, backend string, raws []json.RawMessage) {
+	if backend == "" {
+		return
+	}
+	writes := make([]cacheWrite, 0, len(raws))
+	for _, raw := range raws {
+		if w, ok := cacheWriteFor(raw); ok {
+			writes = append(writes, w)
+		}
+	}
+	putEntitiesCacheLevel(ctx, reg, entityType, backend, writes, CacheLevelSummary)
+}

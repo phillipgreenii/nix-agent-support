@@ -38,6 +38,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -183,9 +184,15 @@ func loadCache(key CacheKey) (*Cache, error) {
 	return &c, nil
 }
 
+// cacheSaves counts saveCache calls in this process. It exists so a test can
+// pin that a listing is written back with ONE save rather than one per entity
+// (bead pg2-z0qfu); nothing in production reads it.
+var cacheSaves atomic.Int64
+
 // saveCache writes c for key via flock-on-sibling-lock-file plus
 // temp-file-and-rename, mirroring saveLedger exactly.
 func saveCache(key CacheKey, c *Cache) error {
+	cacheSaves.Add(1)
 	path, err := cachePath(key)
 	if err != nil {
 		return err

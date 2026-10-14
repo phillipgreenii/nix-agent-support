@@ -431,13 +431,19 @@ func fanOutIssueList(ctx context.Context, reg *Registry, backends []string, quer
 			}
 		}
 		out.Sources = append(out.Sources, SourceResult{Source: b, Status: SourceSucceeded, Count: len(result.PresentIDs)})
+		// One load/evict/save for the whole listing, not one per entity: the
+		// per-entity write re-read and re-wrote the entire cache file for each
+		// of the n entities (bead pg2-z0qfu: ~3 CPU-s for a 150-issue poll,
+		// against ~0.2 CPU-s for bd plus the backend).
+		raws := make([]json.RawMessage, 0, len(result.Entities))
 		for _, entity := range result.Entities {
 			raw, err := json.Marshal(entity)
 			if err != nil {
 				continue
 			}
-			putLiveEntity(ctx, reg, "issue", b, raw)
+			raws = append(raws, raw)
 		}
+		putLiveEntities(ctx, reg, "issue", b, raws)
 	}
 	return out
 }

@@ -974,3 +974,51 @@ func TestIssueChildren_OtherErrorShortCircuits(t *testing.T) {
 		t.Fatalf("code = %d, stdout=%s; want the first backend's unavailable error and no children", code, stdout)
 	}
 }
+
+// TestRun_IssueList_WritesTheListingBackWithOneCacheSave pins the poll-cost
+// fix of bead pg2-z0qfu. `issue list` writes every listed entity through to
+// the umbrella entity cache; it used to do so one entity at a time, and each
+// write re-read and re-wrote the WHOLE cache file, so a 150-issue poll cost
+// about 3 CPU-s while bd plus the backend cost about 0.2. The listing is now
+// written back with one load, evict and save. The negative control is the old
+// per-entity loop: it makes this test fail with one save per entity.
+func TestRun_IssueList_WritesTheListingBackWithOneCacheSave(t *testing.T) {
+	const backend = "backend-issue-list-batch"
+	const n = 40
+	asOf := time.Now().UTC().Format(time.RFC3339)
+	entities := make([]string, 0, n)
+	ids := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		id := fmt.Sprintf("issue-%02d", i)
+		ids = append(ids, fmt.Sprintf("%q", id))
+		entities = append(entities, fmt.Sprintf(`{"id":%q,"title":"t","state":"open","as_of":%q,"stale":false}`, id, asOf))
+	}
+	writeOpAwareFakeBackend(t, backend, map[string]string{
+		"list": fmt.Sprintf(`{"protocolVersion":1,"schemaVersion":1,"result":{"entities":[%s],"present_ids":[%s],"cursor":null,"truncated":false}}`,
+			strings.Join(entities, ","), strings.Join(ids, ",")),
+	}, `{}`)
+	writeIssueConfigFor(t, backend)
+
+	before := cacheSaves.Load()
+	stdout, _, code := executePr(t, []string{"issue", "list", "--query", "mine"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	if got := cacheSaves.Load() - before; got != 1 {
+		t.Fatalf("a %d-entity listing made %d cache saves, want exactly 1 (one load/evict/save per listing, not per entity)", n, got)
+	}
+
+	// The batch must still cache every listed entity.
+	c, err := loadCache(CacheKey{Type: "issue", Backend: backend})
+	if err != nil {
+		t.Fatalf("loadCache: %v", err)
+	}
+	if len(c.Entries) != n {
+		t.Fatalf("cache holds %d entries, want all %d listed entities", len(c.Entries), n)
+	}
+	for _, id := range []string{"issue-00", "issue-39"} {
+		if _, ok := c.Entries[id]; !ok {
+			t.Fatalf("cache is missing listed entity %s", id)
+		}
+	}
+}
