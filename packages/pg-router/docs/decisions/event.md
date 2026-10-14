@@ -243,6 +243,13 @@ flowchart LR
 - **Residual.** The hole is now the boot plus the `postStartup` hooks. Boot was measured at 6.25 s; the
   hooks are not measured (the ccpool handler's own `postStartup` does no work beyond starting its
   process, but a process start under a host load average of 195 is not free).
+- **A scrape before the queue exists is not a reading at all.** `bootCore` registers the gauge
+  callbacks before it constructs the queue, so a collect in between calls them with a nil queue. A
+  probe on 2026-10-14 (a manual reader collecting in a loop while `bootCore` ran, 300 boots at most)
+  panicked in the depth callback (`DepthByType`); how the live exporter's collector goroutine treats
+  that panic is not verified. The window is the startup compaction (6.03 s on 2026-10-12). It is a
+  separate defect with its own fix, callbacks that tolerate a queue that does not exist yet, and not
+  part of this decision.
 - **Test.** `TestRunLongRunning_restartReoffersTheSurvivingDispatchBeforeTheFirstProducerTick` restarts
   a daemon over a surviving dispatch with a first producer tick that never ends and asserts the
   re-offer and the gauge; `TestRunLongRunning_noStartupDispatchPassOnceShutdownWasRequested` pins the
