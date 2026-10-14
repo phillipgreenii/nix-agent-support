@@ -122,13 +122,22 @@ show_empty() {
   [ ! -e "$CALL_LOG" ]
 }
 
-@test "--help exits 0 and prints usage, even after other flags" {
+@test "--help exits 0 and prints usage" {
   run "$SCRIPT" --help
   [ "$status" -eq 0 ]
   [[ "$output" == *"Usage:"* ]]
   [[ "$output" == *"update-packet.sh"* ]]
   run "$SCRIPT" -h
   [ "$status" -eq 0 ]
+  [[ "$output" == *"Usage:"* ]]
+}
+
+@test "--help after other (valid) flags still exits 0 with usage and makes no bd call" {
+  mock_bd
+  run "$SCRIPT" --id xyz-1.5 --body-file "$BODY_FILE" --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Usage:"* ]]
+  [ ! -e "$CALL_LOG" ]
 }
 
 @test "missing --id is a usage error" {
@@ -284,4 +293,76 @@ MOCK
   run "$SCRIPT" --id xyz-1.5 --body-file "$BODY_FILE"
   [ "$status" -eq 1 ]
   [[ "$output" == *"bd not found on PATH"* ]]
+}
+
+# --- review follow-ups -------------------------------------------------------
+
+# A PATH whose awk always fails: the guard must not fail open.
+failing_awk() {
+  printf '#!/usr/bin/env bash\nexit 2\n' >"$MOCK_BIN/awk"
+  chmod +x "$MOCK_BIN/awk"
+}
+
+@test "an awk failure never passes the guard: hard error, no bd update" {
+  mock_bd
+  show_envelope "criteria text"
+  failing_awk
+  printf 'obj\n- [ ] a\n- [ ] b\n' >"$BODY_FILE"
+  run "$SCRIPT" --id xyz-1.5 --body-file "$BODY_FILE" --acceptance-file "$ACCEPT_FILE"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"acceptance guard"* ]]
+  [ ! -e "$CALL_LOG" ]
+}
+
+@test "an awk failure also stops the stored-acceptance path before bd update" {
+  mock_bd
+  show_envelope "criteria text"
+  failing_awk
+  run "$SCRIPT" --id xyz-1.5 --body-file "$BODY_FILE"
+  [ "$status" -eq 1 ]
+  run grep -q '^update ' "$CALL_LOG"
+  [ "$status" -eq 1 ]
+}
+
+@test "an --id starting with '-' is a usage error even with --acceptance-file" {
+  mock_bd
+  run "$SCRIPT" --id --set-metadata --body-file "$BODY_FILE" --acceptance-file "$ACCEPT_FILE"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"--id must not start with '-'"* ]]
+  [ ! -e "$CALL_LOG" ]
+}
+
+@test "an empty --acceptance-file is a usage error (it would clear the stored acceptance)" {
+  mock_bd
+  : >"$ACCEPT_FILE"
+  run "$SCRIPT" --id xyz-1.5 --body-file "$BODY_FILE" --acceptance-file "$ACCEPT_FILE"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"--acceptance-file is empty"* ]]
+  [ ! -e "$CALL_LOG" ]
+}
+
+@test "a whitespace-only --acceptance-file is a usage error" {
+  mock_bd
+  printf '  \n\n' >"$ACCEPT_FILE"
+  run "$SCRIPT" --id xyz-1.5 --body-file "$BODY_FILE" --acceptance-file "$ACCEPT_FILE"
+  [ "$status" -eq 2 ]
+  [ ! -e "$CALL_LOG" ]
+}
+
+@test "generic acceptance lines (fences, rules) are not matched: only one real line shared passes" {
+  mock_bd
+  printf 'obj\n```\n---\nreal criterion\n```\n---\n' >"$BODY_FILE"
+  printf -- '```\n---\n- [ ] real criterion\n- [ ] another real criterion\n```\n---\n' >"$ACCEPT_FILE"
+  run "$SCRIPT" --id xyz-1.5 --body-file "$BODY_FILE" --acceptance-file "$ACCEPT_FILE"
+  [ "$status" -eq 0 ]
+  grep -q '^update ' "$CALL_LOG"
+}
+
+@test "generic lines do not count toward the 2-line threshold, real lines still do" {
+  mock_bd
+  printf 'obj\n```\nreal one\nreal two\n' >"$BODY_FILE"
+  printf -- '```\n---\nreal one\nreal two\n' >"$ACCEPT_FILE"
+  run "$SCRIPT" --id xyz-1.5 --body-file "$BODY_FILE" --acceptance-file "$ACCEPT_FILE"
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"2 acceptance lines"* ]]
 }

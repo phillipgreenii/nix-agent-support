@@ -320,9 +320,10 @@ deduplication.
    dedup check finds no match, and stamps `pd_curated_rev` to the docket's CURRENT `pd_rev` (read
    once, not re-read per packet); the stamp rule is "Curation stamp" under Metadata keys. A
    RE-ENTRY into this step from step 5's, step 6's, or step 7's loop-back revises an
-   ALREADY-CREATED packet's CONTENT only, written with `scripts/update-packet.sh --id <packet>
---body-file <assembled body> [--acceptance-file <file>]` (never a raw `bd update`, never
-   `create-packet.sh` again; the binding's "Revising an already-created packet's content"). Record the PLANNED ORDERING (blocked-by pairs implied by Consumes/Produces) in the
+   ALREADY-CREATED packet's CONTENT only, written with `scripts/update-packet.sh` (`--id
+<packet> --body-file <assembled body> [--acceptance-file <file>]`; never a raw `bd update`,
+   never `create-packet.sh` again; the binding's "Revising an already-created packet's
+   content"). Record the PLANNED ORDERING (blocked-by pairs implied by Consumes/Produces) in the
    decomposition-report draft as you go — the draft is your working state (in-context or a
    scratch file); it becomes durable only via `write-report`, and the abort path writes its
    current content. Boundary rule: split only where a reviewer could reject one half while
@@ -472,8 +473,8 @@ it by searching disk is both slower and redundant.
   ALWAYS pass `--actor <your-session-id>[-<role>]` (your own explicit agent identity, the same one
   you claim with): the script forwards it to both its `bd create` and `bd defer`, so packets are
   attributed to you and not to the operator's git `user.name`.
-- `scripts/update-packet.sh --id <packet> --body-file <file> [--acceptance-file <file>] [--actor
-<id>]` — the ONLY way to rewrite the content of an already-created packet (the binding's
+- `scripts/update-packet.sh` (`--id <packet> --body-file <file> [--acceptance-file <file>]
+[--actor <id>]`) — the ONLY way to rewrite the content of an already-created packet (the binding's
   "Revising an already-created packet's content"; mode `reconcile`'s re-curation content write):
   one `bd update <id> --body-file <file>` (plus `--acceptance` when `--acceptance-file` is given),
   behind the same acceptance guard as `create-packet.sh`, run against the given acceptance file or,

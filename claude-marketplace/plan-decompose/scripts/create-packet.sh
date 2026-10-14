@@ -168,7 +168,13 @@ if [[ -n $ACCEPTANCE_FILE ]]; then
   ACCEPTANCE="$(cat "$ACCEPTANCE_FILE")"
 fi
 
-acceptance_guard_check "$BODY_FILE" "$ACCEPTANCE" || exit 3
+rc=0
+acceptance_guard_check "$BODY_FILE" "$ACCEPTANCE" || rc=$?
+case $rc in
+0) ;;
+3) exit 3 ;;
+*) die "acceptance guard could not run (status $rc); refusing to proceed" ;;
+esac
 
 command -v bd >/dev/null 2>&1 || die "bd not found on PATH"
 

@@ -9,7 +9,10 @@
 # decomposer.
 #
 # acceptance_guard_check <body-file> <acceptance-text>
-#   Returns 0 when the body is clean. Returns 3 after printing, to stderr, a
+#   Returns 0 when the body is clean. Returns 1 when the check itself could not
+#   run (awk missing or failing, body unreadable): it NEVER passes in that case,
+#   and callers MUST treat any status other than 0 and 3 as a hard error.
+#   Returns 3 after printing, to stderr, a
 #   message that quotes the first matches when EITHER
 #     1. the body has an "Acceptance criteria" heading (an ATX "#" heading, a
 #        numbered and/or bold/emphasised line, optionally ending in ":")
@@ -18,14 +21,18 @@
 #        Both sides are compared after stripping a leading "- [ ] " (or "[ ] ",
 #        also "[x]") and surrounding whitespace; blank lines never count. A
 #        single matching line (an AC restating a verbatim Binding decision, say)
-#        passes.
+#        passes. Acceptance lines with no alphanumeric character (code fences,
+#        "---" rules) are generic and never enter the match set.
 #   An empty <acceptance-text> disables rule 2 only; rule 1 still applies.
 #
 # A library: no shebang, no strict-mode line, no top-level code.
 
 acceptance_guard_check() {
   local body_file="$1" acceptance="${2-}" report
-  report="$(
+  # The assignment is tested directly: callers run this under `|| ...`, which
+  # disables errexit inside the function, so an awk failure must be caught here
+  # or the guard would silently pass.
+  if ! report="$(
     ACCEPTANCE_TEXT="$acceptance" awk '
       function norm(s) {
         sub(/\r$/, "", s)
@@ -51,7 +58,7 @@ acceptance_guard_check() {
         n = split(ENVIRON["ACCEPTANCE_TEXT"], lines, "\n")
         for (i = 1; i <= n; i++) {
           k = norm(lines[i])
-          if (k != "") ac[k] = 1
+          if (k ~ /[[:alnum:]]/) ac[k] = 1
         }
       }
       {
@@ -83,7 +90,10 @@ acceptance_guard_check() {
         }
       }
     ' "$body_file"
-  )"
+  )"; then
+    echo "acceptance guard: could not check $body_file (awk failed or is missing)" >&2
+    return 1
+  fi
   if [[ -n $report ]]; then
     {
       echo "acceptance guard: the packet body repeats its acceptance criteria."

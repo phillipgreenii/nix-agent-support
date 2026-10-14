@@ -261,8 +261,45 @@ MOCK
 }
 
 @test "guard: the guard runs before the bd-on-PATH check" {
-  PATH="/usr/bin:/bin"
+  # A PATH with awk (the guard needs it) but without bd.
+  mkdir "$TEST_DIR/tools"
+  ln -s "$(command -v awk)" "$TEST_DIR/tools/awk"
+  PATH="$TEST_DIR/tools:/usr/bin:/bin"
   printf -- '- [ ] a\n- [ ] b\n' >"$BODY_FILE"
   run "$SCRIPT" --parent xyz-1 --title "a packet" --body-file "$BODY_FILE" --acceptance "$(printf -- '- [ ] a\n- [ ] b')"
   [ "$status" -eq 3 ]
+}
+
+@test "guard: an awk failure never passes the guard: hard error, no bd call" {
+  mock_bd "xyz-1.30"
+  printf '#!/usr/bin/env bash\nexit 2\n' >"$MOCK_BIN/awk"
+  chmod +x "$MOCK_BIN/awk"
+  printf -- '- [ ] a\n- [ ] b\n' >"$BODY_FILE"
+  run "$SCRIPT" --parent xyz-1 --title "a packet" --body-file "$BODY_FILE" --acceptance "$(printf -- '- [ ] a\n- [ ] b')"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"acceptance guard"* ]]
+  [ ! -e "$CALL_LOG" ]
+}
+
+@test "guard: awk missing from PATH never passes the guard" {
+  mock_bd "xyz-1.31"
+  # Only bash-adjacent basics and the mock bd: a tools dir WITHOUT awk.
+  mkdir "$TEST_DIR/tools"
+  for t in dirname cat; do ln -s "$(command -v $t)" "$TEST_DIR/tools/$t"; done
+  ln -s "$(command -v bash)" "$TEST_DIR/tools/bash"
+  saved_path="$PATH"
+  PATH="$MOCK_BIN:$TEST_DIR/tools"
+  run "$BASH" "$SCRIPT" --parent xyz-1 --title "a packet" --body-file "$BODY_FILE" --acceptance "criteria"
+  PATH="$saved_path"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"acceptance guard"* ]]
+  [ ! -e "$CALL_LOG" ]
+}
+
+@test "guard: generic acceptance lines (fences, rules) shared with the body do not refuse" {
+  mock_bd "xyz-1.32"
+  printf 'obj\n```\n---\nreal criterion\n```\n---\n' >"$BODY_FILE"
+  run "$SCRIPT" --parent xyz-1 --title "a packet" --body-file "$BODY_FILE" --acceptance "$(printf -- '```\n---\n- [ ] real criterion\n- [ ] another real criterion\n```\n---')"
+  [ "$status" -eq 0 ]
+  [ "$output" = "xyz-1.32" ]
 }

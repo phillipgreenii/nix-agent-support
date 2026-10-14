@@ -99,6 +99,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n $ID ]] || die "--id is required" 2
+[[ $ID != -* ]] || die "--id must not start with '-' (it would reach bd update as a flag): $ID" 2
 [[ -n $BODY_FILE ]] || die "--body-file is required" 2
 [[ -f $BODY_FILE ]] || die "--body-file not found: $BODY_FILE" 2
 if [[ -n $ACCEPTANCE_FILE ]]; then
@@ -111,6 +112,8 @@ command -v jq >/dev/null 2>&1 || die "jq not found on PATH"
 ACCEPTANCE=""
 if [[ -n $ACCEPTANCE_FILE ]]; then
   ACCEPTANCE="$(cat "$ACCEPTANCE_FILE")"
+  [[ -n ${ACCEPTANCE//[[:space:]]/} ]] ||
+    die "--acceptance-file is empty (it would clear the stored acceptance): $ACCEPTANCE_FILE" 2
   GUARD_ACCEPTANCE="$ACCEPTANCE"
 else
   # The stored acceptance. bd show --json wraps in an envelope ({"data": ...})
@@ -124,7 +127,13 @@ else
   )" || die "could not read the stored acceptance of $ID from bd show --json"
 fi
 
-acceptance_guard_check "$BODY_FILE" "$GUARD_ACCEPTANCE" || exit 3
+rc=0
+acceptance_guard_check "$BODY_FILE" "$GUARD_ACCEPTANCE" || rc=$?
+case $rc in
+0) ;;
+3) exit 3 ;;
+*) die "acceptance guard could not run (status $rc); refusing to proceed" ;;
+esac
 
 ARGS=(update "$ID" --body-file "$BODY_FILE")
 [[ -n $ACCEPTANCE_FILE ]] && ARGS+=(--acceptance "$ACCEPTANCE")
