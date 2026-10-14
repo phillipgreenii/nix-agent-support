@@ -84,9 +84,11 @@ var workKinds = []string{
 	"runs", "jobs", "rerun", "create_review", "search_prs", "run_view", "other",
 }
 
-// quiet waits until the daemon has made every call of its work it is going to
-// make, and returns how many origin calls the shim has recorded in all (the
-// index a later originSince starts from).
+// quiet waits until the daemon has made no call of its work for a second, and
+// returns how many origin calls the shim has recorded in all (the index a later
+// originSince starts from). Silence alone does not say the daemon is done (see
+// awaitFirstSightingFetches); a caller that needs the first-sighting fetches
+// stored waits for them first, as settle does.
 func quiet(t *testing.T, d *servetest.Daemon) int {
 	t.Helper()
 	d.Shim.WaitQuiet(t, time.Second, 30*time.Second, workKinds...)
@@ -95,13 +97,15 @@ func quiet(t *testing.T, d *servetest.Daemon) int {
 
 // settle lists the two configured queries (which fills the summary group of the
 // three fixture PRs and books the first-sighting detail, conversation and runs
-// fetches) and waits until the daemon has made every call of its work it is
-// going to make. It returns the number of origin calls recorded.
+// fetches), waits until every first-sighting group of the three fixture PRs is
+// stored and then until the daemon has made every call of its work it is going
+// to make. It returns the number of origin calls recorded.
 func settle(t *testing.T, d *servetest.Daemon) int {
 	t.Helper()
 	for _, q := range []string{servetest.QueryMine, servetest.QueryTeam} {
 		mustList(t, d, q, nil)
 	}
+	awaitFirstSightingFetches(t, d, 3)
 	return quiet(t, d)
 }
 

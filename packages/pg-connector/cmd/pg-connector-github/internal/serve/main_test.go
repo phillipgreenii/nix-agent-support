@@ -104,6 +104,6 @@ func awaitFirstSightingFetches(t *testing.T, d *servetest.Daemon, prs int) {
 		var n int
 		err := db.QueryRow(`SELECT COUNT(*) FROM entity_group WHERE kind = 'pr' AND fetched_at IS NOT NULL AND group_name IN (?, ?, ?, ?)`,
 			firstSightingGroups[0], firstSightingGroups[1], firstSightingGroups[2], firstSightingGroups[3]).Scan(&n)
-		return err == nil && n == prs*len(firstSightingGroups)
+		return err == nil && n >= prs*len(firstSightingGroups)
 	})
 }
