@@ -27,6 +27,10 @@ const (
 	MetricQueueOldestOverdue  = "pg_connector_github.queue.oldest_overdue_seconds"
 	MetricRequestDuration     = "pg_connector_github.request.duration"
 	MetricBatchIDs            = "pg_connector_github.batch.ids"
+	MetricRevalidation        = "pg_connector_github.revalidation"
+	MetricGroupStaleness      = "pg_connector_github.group.staleness_seconds"
+	MetricStoreBytes          = "pg_connector_github.store.bytes"
+	MetricStoreEvictions      = "pg_connector_github.store.evictions"
 	meterName                 = "pg-connector-github"
 	spanRequest               = "pg_connector_github.request"
 	spanOriginCall            = "pg_connector_github.origin_call"
@@ -47,6 +51,7 @@ const (
 	keyOp         = "op"
 	keyServedFrom = "served_from"
 	keyRole       = "role"
+	keyResult     = "result"
 )
 
 // Options configure a Telemetry.
@@ -72,6 +77,11 @@ type Options struct {
 	// the ones nobody registered, but the label would still carry the name).
 	KnownOp func(instance, op string) bool
 
+	// StorePath is the SQLite store file (<state dir>/config.StoreFileName).
+	// When set, store.bytes is polled as the size of that file plus its -wal and
+	// -shm siblings; empty leaves the gauge unreported.
+	StorePath string
+
 	// Now is the clock the request duration and the spans use; nil means
 	// time.Now.
 	Now func() time.Time
@@ -92,6 +102,11 @@ type Telemetry struct {
 	spent     metric.Int64Counter
 	duration  metric.Float64Histogram
 	batchIDs  metric.Int64Histogram
+
+	revalidation metric.Int64Counter
+	staleness    metric.Float64Histogram
+	storeBytes   metric.Int64ObservableGauge
+	evictions    metric.Int64Counter
 
 	registration metric.Registration
 }
@@ -154,7 +169,29 @@ func New(opts Options) (*Telemetry, error) {
 		return nil, err
 	}
 
-	t.registration, err = m.RegisterCallback(t.observe, t.up, t.remaining, t.paused, t.depth, t.overdue)
+	if t.revalidation, err = m.Int64Counter(MetricRevalidation,
+		metric.WithDescription("Group revalidations by group and outcome: extended, repulled or forced_by_max_age"),
+		metric.WithUnit("{revalidation}")); err != nil {
+		return nil, err
+	}
+	if t.staleness, err = m.Float64Histogram(MetricGroupStaleness,
+		metric.WithDescription("How far past fresh_until the served group data is, per answered request; zero when fresh"),
+		metric.WithUnit("s"),
+		metric.WithExplicitBucketBoundaries(0, 1, 5, 15, 30, 60, 120, 300, 900, 1800, 3600, 7200, 21600, 86400)); err != nil {
+		return nil, err
+	}
+	if t.storeBytes, err = m.Int64ObservableGauge(MetricStoreBytes,
+		metric.WithDescription("Size of the store file plus its WAL and shared-memory files"),
+		metric.WithUnit("By")); err != nil {
+		return nil, err
+	}
+	if t.evictions, err = m.Int64Counter(MetricStoreEvictions,
+		metric.WithDescription("Rows the expiry sweep evicted from the store"),
+		metric.WithUnit("{row}")); err != nil {
+		return nil, err
+	}
+
+	t.registration, err = m.RegisterCallback(t.observe, t.up, t.remaining, t.paused, t.depth, t.overdue, t.storeBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -168,6 +205,9 @@ func (t *Telemetry) Close() error { return t.registration.Unregister() }
 // scheduler's state at collection time.
 func (t *Telemetry) observe(_ context.Context, o metric.Observer) error {
 	o.ObserveInt64(t.up, 1)
+	if t.opts.StorePath != "" {
+		o.ObserveInt64(t.storeBytes, storeSize(t.opts.StorePath))
+	}
 
 	if t.opts.Governor != nil {
 		for _, b := range t.opts.Governor().Buckets {
