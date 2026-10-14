@@ -38,6 +38,32 @@ flowchart TD
     P --> G
 ```
 
+## Components
+
+Agents (`agents/`):
+
+- `plan-decomposer`, `phase-decomposer`, `epic-decomposer` — the three orchestrators; each waits
+  for its Agent children by ending its turn (ADR 0098).
+- `cold-reader` — context-free, read-only (`Read` only, haiku) check that one packet is
+  executable from its stored body and acceptance files, named by path in its dispatch.
+- `semantic-post-checker`, `phase-split-reviewer`, `phase-plan-verifier` — read-only reviewers;
+  the first two take file paths, `phase-plan-verifier` takes the design text inline.
+- `packet-implementer` — works one claimed packet.
+
+Scripts (`scripts/`, resolved from the skill's base directory):
+
+- `assemble-packet.sh` — expands `@@file`, `@@design-section` and `@@design-table-row`
+  directives in a packet draft into the assembled body, copying exact excerpts by command.
+- `create-packet.sh` — creates one held packet (`--body-file`, `--acceptance-file`).
+- `update-packet.sh` — the only way to rewrite an existing packet's content; it never touches
+  metadata.
+- `lib/acceptance-guard.bash` — the shared guard behind both scripts: refuses a body that repeats
+  its acceptance criteria.
+- `chunk-for-bd-field.sh`, `audit-docket-label-leak.sh` — chunking and a read-only label audit.
+
+Decisions: ADR 0098 (`docs/adr/0098-plan-decompose-waits-by-ending-the-turn-and-hands-sub-agents-files-not-text.md`
+in this repository).
+
 ## Glossary
 
 - **Program epic** — the bead holding a design too large for one `plan-decompose` pass; the
