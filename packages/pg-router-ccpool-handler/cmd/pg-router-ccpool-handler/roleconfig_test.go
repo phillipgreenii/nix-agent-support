@@ -550,6 +550,7 @@ func TestLoadRole_precheckAndCloseOrRelease(t *testing.T) {
 		{"absent", "close-or-release", "", roles.PrecheckNone, ""},
 		{"ready", "close-or-release", `,"precheck":"ready"`, roles.PrecheckReady, ""},
 		{"review", "close-or-handback", `,"precheck":"review"`, roles.PrecheckReview, ""},
+		{"triage", "close-or-triage", `,"precheck":"triage"`, roles.PrecheckTriage, ""},
 		{"empty", "close-only", `,"precheck":""`, roles.PrecheckNone, ""},
 		{"unknown value", "close-or-release", `,"precheck":"bogus"`, "", "invalid precheck"},
 		{"unknown completion", "close-or-bogus", "", "", "invalid completion"},

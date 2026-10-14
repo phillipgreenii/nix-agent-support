@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/beads"
+	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/complete"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/item"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/query"
 	"github.com/phillipgreenii/pg-router-ccpool-handler/internal/roles"
@@ -39,6 +40,12 @@ const (
 	SkipBeadDeferred   = "skipped-bead-deferred"
 	SkipBeadBlocked    = "skipped-bead-blocked"
 )
+
+// SkipBeadNotEscalated is the "triage" precheck's reason for a bead that no
+// longer carries the escalated label (de-escalated since the event was queued).
+// Its other reasons are the "ready" set above; like them it starts with
+// "skipped-".
+const SkipBeadNotEscalated = "skipped-bead-not-escalated"
 
 // labelHasAcceptanceCriteria marks a bead as groomed: the drain query selects
 // on it, so a bead that lost it is no longer one a drain worker may take.
@@ -233,6 +240,8 @@ func Precheck(ctx context.Context, d DispatchContext, deps Deps, iss *beads.Issu
 	switch d.Role.CCPool.Precheck {
 	case roles.PrecheckReady:
 		return PrecheckReady(d, deps, iss)
+	case roles.PrecheckTriage:
+		return PrecheckTriage(d, deps, iss)
 	case roles.PrecheckReview:
 		return precheckReview(ctx, d, deps, iss)
 	}
@@ -290,6 +299,58 @@ func PrecheckReady(d DispatchContext, deps Deps, iss *beads.Issue) (Skip, bool) 
 	}
 	if !iss.HasLabel(labelHasAcceptanceCriteria) {
 		return decline(SkipBeadNotGroomed, "the bead no longer carries "+labelHasAcceptanceCriteria)
+	}
+	if iss.DeferredUntilAfter(deps.clock()) {
+		return decline(SkipBeadDeferred, "the bead's defer_until is in the future")
+	}
+	if iss.HasOpenBlocker() {
+		return decline(SkipBeadBlocked, "the bead has an open blocks dependency")
+	}
+	return Skip{}, false
+}
+
+// escalatedLabel is the label a triage role's discovery query selects on.
+const escalatedLabel = complete.EscalatedLabel
+
+// PrecheckTriage decides, at zero model cost, whether a dispatch of a
+// close-or-triage role (the escalation triager, which works a bead it does NOT
+// claim) should launch no session at all (INV-CCH-22, bead pg2-p9lcg). It
+// declines unless the bead still matches the role's own discovery query
+// (`ready --label escalated --exclude-label human`), reading only iss, the bead
+// RefreshItemIssue just fetched (no extra bd call). It declines when, in this
+// order:
+//
+//  1. the bead is not open (a deferred or blocked status gets its own reason);
+//  2. it carries human;
+//  3. it no longer carries escalated (it was de-escalated);
+//  4. its defer_until is in the future;
+//  5. it has an open blocks dependency.
+//
+// The assignee is deliberately NOT checked: `bd ready` lists an open bead
+// whatever its assignee, and the triager never claims its bead. A nil iss (the
+// bead could not be read) fails open, and so does an unparseable defer_until. A
+// decline writes nothing to the bead.
+func PrecheckTriage(d DispatchContext, deps Deps, iss *beads.Issue) (Skip, bool) {
+	if d.Role.CCPool == nil || iss == nil {
+		return Skip{}, false
+	}
+	decline := func(reason, detail string) (Skip, bool) {
+		return deps.skip(d, Skip{Reason: reason, Detail: detail}, ""), true
+	}
+	switch iss.Status {
+	case "open":
+	case "deferred":
+		return decline(SkipBeadDeferred, "the bead's status is deferred")
+	case "blocked":
+		return decline(SkipBeadBlocked, "the bead's status is blocked")
+	default:
+		return decline(SkipBeadNotOpen, "the bead's status is "+iss.Status+", not open")
+	}
+	if iss.HasLabel(beads.LabelHuman) {
+		return decline(SkipBeadHuman, "the bead now carries the "+beads.LabelHuman+" label")
+	}
+	if !iss.HasLabel(escalatedLabel) {
+		return decline(SkipBeadNotEscalated, "the bead no longer carries the "+escalatedLabel+" label")
 	}
 	if iss.DeferredUntilAfter(deps.clock()) {
 		return decline(SkipBeadDeferred, "the bead's defer_until is in the future")
@@ -378,6 +439,8 @@ func (d Deps) skip(dc DispatchContext, s Skip, pr string) Skip {
 		msg = "dispatch declined: bead is deferred"
 	case SkipBeadBlocked:
 		msg = "dispatch declined: bead is blocked"
+	case SkipBeadNotEscalated:
+		msg = "dispatch declined: bead is no longer escalated"
 	default:
 		msg = "dispatch declined: precheck"
 	}

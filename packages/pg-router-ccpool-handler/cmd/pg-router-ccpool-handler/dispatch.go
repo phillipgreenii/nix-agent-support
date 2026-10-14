@@ -264,7 +264,9 @@ func runDispatch(args []string) int {
 	// review dispatch whose bead is closed, whose PR is merged, or whose pending
 	// review already holds content for the head, and a "ready" role's dispatch
 	// whose bead is no longer open, unclaimed, groomed, undeferred and unblocked,
-	// launch no session. Read-only; fails open.
+	// and a "triage" role's dispatch whose bead no longer matches its discovery
+	// query (open, escalated, not human, undeferred, unblocked), launch no
+	// session. Read-only; fails open.
 	// After the reconciles above so their housekeeping still runs on a decline;
 	// the decline is the same pre-accept busy reply as every other, carrying the
 	// skip's own reason so pg-router core's declined metric counts it per reason.

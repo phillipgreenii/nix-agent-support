@@ -56,15 +56,20 @@ const (
 	// itself: the bead is still open, unclaimed, groomed, not for a human, not
 	// deferred and not blocked (an own-actor in_progress bead always proceeds).
 	PrecheckReady Precheck = "ready"
+	// PrecheckTriage is the precheck for a close-or-triage role (the escalation
+	// triager), which works a bead it does NOT claim: the bead must still match
+	// the role's own discovery query (open, undeferred, unblocked, labelled
+	// escalated, not for a human). Nothing about the assignee is checked.
+	PrecheckTriage Precheck = "triage"
 )
 
 func (p *Precheck) UnmarshalText(b []byte) error {
 	switch Precheck(b) {
-	case PrecheckNone, PrecheckReview, PrecheckReady:
+	case PrecheckNone, PrecheckReview, PrecheckReady, PrecheckTriage:
 		*p = Precheck(b)
 		return nil
 	}
-	return fmt.Errorf("invalid precheck %q (valid: review, ready, or empty for none)", b)
+	return fmt.Errorf("invalid precheck %q (valid: review, ready, triage, or empty for none)", b)
 }
 
 // FailureAction is what to do to the bead when a dispatch is flagged.

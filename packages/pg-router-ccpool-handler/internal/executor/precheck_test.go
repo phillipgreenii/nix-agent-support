@@ -425,6 +425,90 @@ func TestPrecheckReady_SkipReasons(t *testing.T) {
 	}
 }
 
+// --- the "triage" precheck (INV-CCH-22, bead pg2-p9lcg) ---
+
+const triageActor = "pgii-pool__triager"
+
+func triageRole(cfg config.Config) roles.Role {
+	r := releaseRole(cfg)
+	r.CCPool.Actor = triageActor
+	r.CCPool.Completion = roles.CloseOrTriage
+	r.CCPool.Precheck = roles.PrecheckTriage
+	return r
+}
+
+// escalated is a bead the triager's discovery query lists: open, labelled
+// escalated, not for a human. It carries no has-acceptance-criteria label, which
+// the triage check must not require.
+func escalated() beads.Issue {
+	return beads.Issue{ID: "zr-t", Status: "open", Labels: []string{"escalated", "agent-support"}}
+}
+
+func TestPrecheckTriage_SkipReasons(t *testing.T) {
+	cfg := fastCfg()
+	now := time.Unix(0, 0)
+	future := now.Add(time.Hour).UTC().Format(time.RFC3339)
+	past := now.Add(-time.Hour).UTC().Format(time.RFC3339)
+	with := func(f func(*beads.Issue)) *beads.Issue { i := escalated(); f(&i); return &i }
+	tests := []struct {
+		name string
+		bead *beads.Issue
+		want string // "" = proceeds
+	}{
+		{"unreadable bead fails open", nil, ""},
+		{"open escalated proceeds", with(func(*beads.Issue) {}), ""},
+		{"open escalated assigned to a peer proceeds (bd ready lists it)", with(func(i *beads.Issue) { i.Assignee = "someone-else" }), ""},
+		{"closed", with(func(i *beads.Issue) { i.Status = "closed" }), SkipBeadNotOpen},
+		{"in_progress", with(func(i *beads.Issue) { i.Status = "in_progress" }), SkipBeadNotOpen},
+		{"human", with(func(i *beads.Issue) { i.Labels = append(i.Labels, "human") }), SkipBeadHuman},
+		{"de-escalated", with(func(i *beads.Issue) { i.Labels = []string{"agent-support"} }), SkipBeadNotEscalated},
+		{"no labels at all", with(func(i *beads.Issue) { i.Labels = nil }), SkipBeadNotEscalated},
+		{"deferred status", with(func(i *beads.Issue) { i.Status = "deferred" }), SkipBeadDeferred},
+		{"future defer_until", with(func(i *beads.Issue) { i.DeferUntil = future }), SkipBeadDeferred},
+		{"past defer_until proceeds", with(func(i *beads.Issue) { i.DeferUntil = past }), ""},
+		{"unparseable defer_until fails open", with(func(i *beads.Issue) { i.DeferUntil = "tomorrow-ish" }), ""},
+		{"blocked status", with(func(i *beads.Issue) { i.Status = "blocked" }), SkipBeadBlocked},
+		{"open blocks dependency", with(func(i *beads.Issue) {
+			i.Dependencies = []beads.Dependency{{ID: "zr-x", Status: "open", DependencyType: "blocks"}}
+		}), SkipBeadBlocked},
+		{"closed blocker proceeds", with(func(i *beads.Issue) {
+			i.Dependencies = []beads.Dependency{{ID: "zr-x", Status: "closed", DependencyType: "blocks"}}
+		}), ""},
+		{"parent-child edge proceeds", with(func(i *beads.Issue) {
+			i.Dependencies = []beads.Dependency{{ID: "zr-e", Status: "open", DependencyType: "parent-child"}}
+		}), ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			logs := captureLog(t)
+			clk := time.Unix(0, 0)
+			deps := Deps{Cfg: cfg, Now: func() time.Time { return clk }}
+			got, skipped := PrecheckTriage(DispatchContext{Role: triageRole(cfg), Item: item.Item{ID: "zr-t"}}, deps, tc.bead)
+			if tc.want == "" {
+				if skipped {
+					t.Fatalf("must proceed, got skip %+v", got)
+				}
+				return
+			}
+			if !skipped || got.Reason != tc.want {
+				t.Fatalf("PrecheckTriage = (%+v, %v), want skip %q", got, skipped, tc.want)
+			}
+			if !strings.HasPrefix(got.Reason, "skipped-") {
+				t.Errorf("reason %q must start with skipped- (the failure-rate alert excludes only skipped-.+)", got.Reason)
+			}
+			if !strings.Contains(logs.String(), "reason="+tc.want) || strings.Contains(logs.String(), "dispatch declined: precheck ") {
+				t.Errorf("log must carry the reason and its own message: %s", logs.String())
+			}
+		})
+	}
+}
+
+func TestPrecheckTriage_NoCCPoolBlock(t *testing.T) {
+	if _, skipped := PrecheckTriage(DispatchContext{Role: roles.Role{Name: "t"}}, Deps{}, &beads.Issue{Status: "closed"}); skipped {
+		t.Error("a role with no ccpool block is never prechecked")
+	}
+}
+
 // TestPrecheck_selection: the role's precheck setting picks the check; with no
 // setting only the role named "review" is prechecked, as before.
 func TestPrecheck_selection(t *testing.T) {
@@ -443,6 +527,7 @@ func TestPrecheck_selection(t *testing.T) {
 		want string
 	}{
 		{"ready on any role name", mk("drain", roles.PrecheckReady), SkipBeadNotOpen},
+		{"triage on any role name", mk("escalation-triager", roles.PrecheckTriage), SkipBeadNotOpen},
 		{"explicit review on any role name", mk("drain", roles.PrecheckReview), SkipBeadClosed},
 		{"no setting, role named review (historical)", mk("review", roles.PrecheckNone), SkipBeadClosed},
 		{"no setting, other role: never prechecked", mk("drain", roles.PrecheckNone), ""},

@@ -1020,10 +1020,15 @@
         # needs_input stall), so its file filter also covers the executor,
         # complete, parknote and dtest packages (four more `bd init`s, about a
         # minute).
+        #
+        # pg2-p9lcg: it also runs `TestTriage_RealBD_Dispatch` (the real
+        # runDispatch against a real bd for the `triage` dispatch precheck),
+        # so its file filter also covers the roles package and the dispatch
+        # sources of cmd/pg-router-ccpool-handler (one more `bd init`).
         pg-router-ccpool-handler-bd-contract-test = {
           enable = true;
           name = "pg-router-ccpool-handler-bd-contract-test";
-          description = "pg-router-ccpool-handler: run the contract-tagged real-bd hard-stop and park-note tests (pg2-sx246, pg2-78mxs)";
+          description = "pg-router-ccpool-handler: run the contract-tagged real-bd hard-stop, park-note and triage-precheck tests (pg2-sx246, pg2-78mxs, pg2-p9lcg)";
           entry = "${
             pkgs.writeShellApplication {
               name = "pg-router-ccpool-handler-bd-contract-test-hook";
@@ -1045,12 +1050,12 @@
 
                 top="$(git rev-parse --show-toplevel)"
                 cd "$top/packages/pg-router-ccpool-handler"
-                exec nice -n 10 go test -p 4 -count=1 -tags contract -timeout 10m -run '^Test(Terminal|Park)_RealBD_' ./internal/watchdog/ ./internal/executor/
+                exec nice -n 10 go test -p 4 -count=1 -tags contract -timeout 10m -run '^Test(Terminal|Park|Triage)_RealBD_' ./internal/watchdog/ ./internal/executor/ ./cmd/pg-router-ccpool-handler/
               '';
             }
           }/bin/pg-router-ccpool-handler-bd-contract-test-hook";
           language = "system";
-          files = "^packages/pg-router-ccpool-handler/(internal/(watchdog|beads|executor|complete|parknote|dtest)/|go\\.(mod|sum)$)";
+          files = "^packages/pg-router-ccpool-handler/(internal/(watchdog|beads|executor|complete|parknote|dtest|roles)/|cmd/pg-router-ccpool-handler/dispatch[^/]*\\.go$|go\\.(mod|sum)$)";
           pass_filenames = false;
           require_serial = true;
         };
@@ -6665,6 +6670,20 @@
                           precheck = "ready";
                         };
                       };
+                      # triage (bead pg2-p9lcg): the close-or-triage completion
+                      # and the `triage` precheck render into this role's own JSON
+                      # only.
+                      triage = {
+                        type = "ccpool";
+                        ccpool = {
+                          actor = "triage-actor";
+                          completion = "close-or-triage";
+                          onFailure = "add-human";
+                          onDispatchFail = "unclaim";
+                          promptBody = "triage prompt";
+                          precheck = "triage";
+                        };
+                      };
                     };
                     # Handler-wide pool (bead pg2-h5vno): the pool every role
                     # WITHOUT its own pool dispatches into (the production
@@ -7128,6 +7147,8 @@
                         # precheck carries no such key.
                         [ "$(jq -r .ccpool.completion "$roleWithOwnPoolHandlerDir/drain.json")" = close-or-release ]
                         [ "$(jq -r .ccpool.precheck "$roleWithOwnPoolHandlerDir/drain.json")" = ready ]
+                        [ "$(jq -r .ccpool.completion "$roleWithOwnPoolHandlerDir/triage.json")" = close-or-triage ]
+                        [ "$(jq -r .ccpool.precheck "$roleWithOwnPoolHandlerDir/triage.json")" = triage ]
                         jq -e '.ccpool | has("precheck") | not' "$handlerCommandDir/feedback.json" >/dev/null
                         jq -e '.ccpool | has("precheck") | not' "$roleWithOwnPoolHandlerDir/review.json" >/dev/null
 

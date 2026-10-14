@@ -419,8 +419,8 @@ review`. The claim is still released (status open, assignee cleared) — the lab
   isolation, launch), a role that opts in MUST have the handler check, read-only and at zero model
   cost, that the dispatch is still worth running, and MUST decline it, launching no session and
   writing nothing, when the check says no. The check is chosen by the role's `precheck` setting:
-  `review` (also the default for the role named `review`, so that role is unchanged) or `ready`;
-  a role with neither is never prechecked. The decline is the pre-accept busy decline of
+  `review` (also the default for the role named `review`, so that role is unchanged), `ready` or
+  `triage`; a role with none of them is never prechecked. The decline is the pre-accept busy decline of
   `INV-CCH-6`, carrying one reason per case; every reason starts with `skipped-`, so the failure-rate
   alert can exclude them as routine; each decline is logged with a message distinct per case and
   written to the event log as a `precheck_skip` record carrying role, bead, PR (review only) and
@@ -465,6 +465,26 @@ review`. The claim is still released (status open, assignee cleared) — the lab
     read; the list reads a source query uses carry a different dependency shape and are never used
     for this check.
 
+  - **`triage`** (a `close-or-triage` role, such as the escalation triager, which works a bead it
+    does not claim). The check reads only the bead as just re-read at dispatch and declines unless
+    the bead still matches the role's own discovery query (open, undeferred, unblocked, carrying
+    `escalated`, not carrying `human`). It declines when ANY of these holds, in this order: (a)
+    the bead is not `open` (`skipped-bead-not-open`; a `deferred` or `blocked` status gets
+    `skipped-bead-deferred` or `skipped-bead-blocked` instead); (b) the bead carries `human`
+    (`skipped-bead-human`); (c) the bead no longer carries `escalated`, because it was
+    de-escalated after the event was queued (`skipped-bead-not-escalated`); (d) the bead's
+    deferral date is in the future (`skipped-bead-deferred`); (e) the bead has an open `blocks`
+    dependency (`skipped-bead-blocked`). Who holds the bead is NOT checked: the discovery query
+    lists an open bead whatever its assignee, and this role never claims its bead. An unreadable
+    bead (no bead came back) proceeds, and so does a deferral date that does not parse as a
+    timestamp. **Why.** An event for such a role queues behind a running session and can arrive
+    after the bead closed or was handled, and a removed change from the source re-enters as a
+    fresh event for a bead that is already closed; completion counts a closed bead as done on its
+    first poll, but only after the session has launched and spent its turn. Bead `pg2-p9lcg`. A
+    role config that names this value is read only by a handler that knows it (an unknown
+    precheck value is rejected at load), so the handler MUST be deployed before a role config
+    names `triage`.
+
   A role with `ready` prechecking narrows, but cannot close, the window in which a bead is taken
   or parked between the check and the worker's own claim; a peer winning that claim is handled by
   the completion mode of `INV-CCH-28`, not here. **Telemetry.** The handler has no metrics emitter;
@@ -476,7 +496,7 @@ review`. The claim is still released (status open, assignee cleared) — the lab
   declines is expected there, and (c) also skips a same-head re-dispatch after a session that died
   mid-review, leaving its pending review for the human; a drain event is born expired, so the core
   offers it once and drops it, and there is no retry. Bead `pg2-5x29j` (review); the `ready`
-  check and the generalisation are bead `pg2-nk6th.3`, plan `2026-10-08-drain-worker-roles`
+  check and the generalisation are bead `pg2-nk6th.3` (the `triage` check: `pg2-p9lcg`), plan `2026-10-08-drain-worker-roles`
   section A2; found by the 2026-10-07 router health review (about 11 of 50 review sessions in 72
   hours had nothing worth reviewing).
 

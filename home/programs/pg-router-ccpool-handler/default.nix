@@ -633,6 +633,7 @@ let
                   lib.types.enum [
                     "review"
                     "ready"
+                    "triage"
                   ]
                 );
                 default = null;
@@ -640,10 +641,17 @@ let
                   Opts this role in to a zero-model-cost dispatch precheck
                   (`roleFile.CCPool.Precheck` / `roles.Precheck`, bead pg2-nk6th.3,
                   INV-CCH-22): `review` (bead closed, PR merged, pending review
-                  already covers the head) or `ready` (for a role that claims its
+                  already covers the head), `ready` (for a role that claims its
                   own bead: the bead must still be open, unclaimed, groomed, not
                   for a human, not deferred and not blocked; a bead the role's own
-                  actor holds `in_progress` is never declined). Default `null`
+                  actor holds `in_progress` is never declined) or `triage` (for a
+                  `close-or-triage` role, which works a bead it does not claim: the
+                  bead must still match the role's own discovery query, so it is
+                  declined when it is not open, is deferred or blocked, carries
+                  `human`, or no longer carries `escalated`; bead pg2-p9lcg).
+                  The handler that reads the rendered role file MUST be deployed
+                  first, since it rejects a precheck value it does not know.
+                  Default `null`
                   leaves the historical behavior: only the role NAMED `review` is
                   prechecked. Omitted from the rendered role file when `null`.
                 '';
