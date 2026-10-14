@@ -1,0 +1,77 @@
+{
+  "instance": "pr",
+  "id": "acme-org/widget#1",
+  "ref": "acme-org/widget#1",
+  "node_id": "PR_node_1",
+  "last_access": "2026-10-13T12:00:00Z",
+  "keep_alive": true,
+  "groups": [
+    {
+      "group": "summary",
+      "fetched_at": "2026-10-13T12:00:00Z",
+      "fresh_until": "2026-10-13T12:01:00Z",
+      "fresh": true,
+      "expired_by_max_age": false,
+      "fetched_for_head": "head-1",
+      "fetched_for_base": "base-1",
+      "status": "fresh"
+    },
+    {
+      "group": "detail",
+      "fetched_at": "2026-10-13T12:00:00Z",
+      "fresh_until": "2026-10-13T12:10:00Z",
+      "max_age_at": "2026-10-13T12:30:00Z",
+      "fresh": true,
+      "expired_by_max_age": false,
+      "fetched_for_head": "head-1",
+      "fetched_for_base": "base-1",
+      "status": "fresh"
+    },
+    {
+      "group": "conversation",
+      "fetched_at": "2026-10-13T10:00:00Z",
+      "fresh_until": "2026-10-13T11:00:00Z",
+      "fresh": false,
+      "expired_by_max_age": false,
+      "last_error": "HTTP 502",
+      "fetched_for_head": "head-1",
+      "fetched_for_base": "base-1",
+      "queue_position": 1,
+      "status": "stale",
+      "reason": "past fresh_until"
+    },
+    {
+      "group": "files",
+      "fetched_at": "2026-10-13T12:00:00Z",
+      "fresh": false,
+      "expired_by_max_age": false,
+      "fetched_for_head": "head-older",
+      "fetched_for_base": "base-1",
+      "status": "stale",
+      "reason": "fetched for a different head",
+      "stamps_match": false
+    },
+    {
+      "group": "commits",
+      "fetched_at": "2026-10-11T12:00:00Z",
+      "max_age_at": "2026-10-13T12:00:00Z",
+      "fresh": false,
+      "expired_by_max_age": true,
+      "fetched_for_head": "head-1",
+      "fetched_for_base": "base-1",
+      "status": "hard_stale",
+      "reason": "past the maximum age",
+      "stamps_match": true
+    },
+    {
+      "group": "pending",
+      "fetched_at": "2026-10-13T12:00:00Z",
+      "fresh_until": "2026-10-13T12:02:00Z",
+      "fresh": true,
+      "expired_by_max_age": false,
+      "fetched_for_head": "head-1",
+      "fetched_for_base": "base-1",
+      "status": "fresh"
+    }
+  ]
+}

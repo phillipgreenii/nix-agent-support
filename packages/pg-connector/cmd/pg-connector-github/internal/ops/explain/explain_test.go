@@ -162,21 +162,27 @@ func TestExplainNeedsAnID(t *testing.T) {
 	}
 }
 
-func TestExplainOnTheCIInstanceHasNoCIGroupYet(t *testing.T) {
+func TestExplainOnTheCIInstanceAnswersTheSummaryAndRuns(t *testing.T) {
 	g := newRig(t)
 	g.putGroup(t, store.GroupRow{Group: "summary", FetchedAt: t0, FreshUntil: t0.Add(time.Minute)})
+	g.putGroup(t, store.GroupRow{Group: "detail", FetchedAt: t0, FreshUntil: t0.Add(time.Minute)})
 	res := decode(t, g.explain("ci", `{"id":"`+ref+`"}`))
-	if res.Instance != "ci" || res.Ref != ref || len(res.Groups) != 0 || res.Note == "" {
-		t.Errorf("%+v", res)
+	if res.Instance != "ci" || res.Ref != ref || len(res.Groups) != 1 || res.Groups[0].Group != "summary" || res.Note == "" {
+		t.Errorf("no runs group stored: %+v", res)
 	}
 
-	// The pr instance does not answer a CI group, and the ci instance does.
+	// The pr instance does not answer the runs group, and the ci instance does.
 	g.putGroup(t, store.GroupRow{Group: "runs", FetchedAt: t0, FreshUntil: t0.Add(time.Minute), FetchedForHead: "h"})
-	if res := decode(t, g.explain("ci", `{"id":"`+ref+`"}`)); len(res.Groups) != 1 || res.Groups[0].Group != "runs" || res.Note != "" {
+	res = decode(t, g.explain("ci", `{"id":"`+ref+`"}`))
+	if len(res.Groups) != 2 || res.Groups[0].Group != "summary" || res.Groups[1].Group != "runs" || res.Note != "" {
 		t.Errorf("ci: %+v", res)
 	}
-	if res := decode(t, g.explain("pr", `{"id":"`+ref+`"}`)); len(res.Groups) != 1 || res.Groups[0].Group != "summary" {
+	res = decode(t, g.explain("pr", `{"id":"`+ref+`"}`))
+	if len(res.Groups) != 2 || res.Groups[0].Group != "summary" || res.Groups[1].Group != "detail" {
 		t.Errorf("pr: %+v", res)
+	}
+	if res.Groups[0].Status != "" {
+		t.Errorf("a handler with no rules answers no verdict: %+v", res.Groups[0])
 	}
 }
 

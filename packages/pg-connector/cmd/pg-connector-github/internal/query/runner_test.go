@@ -522,6 +522,64 @@ func TestFetch_AnUnknownNameIsRefused(t *testing.T) {
 	}
 }
 
+func TestQueueRun_AClass2RerunRunsTheQueryEvenInsideItsTTLAndAClass3OneDoesNot(t *testing.T) {
+	r := newRig(t)
+	ctx := context.Background()
+	if err := r.runner.Schedule(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r.sched.Drain(ctx)
+	if r.gh.count() != 3 {
+		t.Fatalf("first drain made %d gh calls, want 3", r.gh.count())
+	}
+
+	r.clk.Advance(10 * time.Second) // inside query_ttl
+	if err := r.runner.QueueRun(Key{Name: "mine"}, governor.ClassQuery); err != nil {
+		t.Fatal(err)
+	}
+	r.sched.Drain(ctx)
+	if r.gh.count() != 3 {
+		t.Fatalf("a class 3 task re-ran a fresh query: %d gh calls, want 3", r.gh.count())
+	}
+
+	if err := r.runner.QueueRun(Key{Name: "mine"}, governor.ClassInvalidated); err != nil {
+		t.Fatal(err)
+	}
+	if c, queued := r.sched.InspectQueued(entityOf(Key{Name: "mine"}), Group); !queued || c != governor.ClassInvalidated {
+		t.Fatalf("queued = %v at class %d, want a class 2 task", queued, c)
+	}
+	r.sched.Drain(ctx)
+	if r.gh.count() != 4 {
+		t.Errorf("a class 2 re-run made %d gh calls in total, want 4 (mine only)", r.gh.count())
+	}
+	if got := r.row(t, "mine").FetchedAt; !got.Equal(t0.Add(10 * time.Second)) {
+		t.Errorf("mine fetched_at = %v, want the re-run's time", got)
+	}
+	// The run booked the next cycle at class 3 from the new result.
+	if c, queued := r.sched.InspectQueued(entityOf(Key{Name: "mine"}), Group); !queued || c != governor.ClassQuery {
+		t.Errorf("after the run the next cycle is queued = %v at class %d, want class 3", queued, c)
+	}
+}
+
+func TestQueueRun_RefusesAnUnknownNameAnAdhocKeyAndAnInvalidClass(t *testing.T) {
+	r := newRig(t)
+	for _, tc := range []struct {
+		key   Key
+		class governor.Class
+	}{
+		{Key{Name: "nope"}, governor.ClassInvalidated},
+		{Key{Name: "mine", Args: map[string]string{"author": "someone"}}, governor.ClassInvalidated},
+		{Key{Name: "mine"}, governor.Class(9)},
+	} {
+		if err := r.runner.QueueRun(tc.key, tc.class); err == nil {
+			t.Errorf("QueueRun(%v, %d) = nil, want an error", tc.key, tc.class)
+		}
+	}
+	if r.sched.State().Classes[1].Depth != 0 || r.gh.count() != 0 {
+		t.Error("a refused QueueRun queued or ran something")
+	}
+}
+
 func TestFetch_ConcurrentCallersShareOneRun(t *testing.T) {
 	r := newRig(t)
 	release := make(chan struct{})

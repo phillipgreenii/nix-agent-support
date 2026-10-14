@@ -291,6 +291,26 @@ func (r *Runner) Fetch(ctx context.Context, key Key) (store.QueryRow, error) {
 	return row, nil
 }
 
+// QueueRun queues a re-run of the configured query key at class (class 2, the
+// write-invalidated class, for a refresh) and returns at once: it neither runs
+// nor waits for the run. A task already queued for the key is merged the way
+// scheduler.Submit merges (the better class and the earlier due time win), and a
+// run queued at class 1 or 2 re-runs the query even while its stored result is
+// still fresh (the background classes skip a fresh one). A name the config does
+// not define, or an ad-hoc key (never re-run), is an error.
+func (r *Runner) QueueRun(key Key, class governor.Class) error {
+	if _, ok := r.Expr(key.Name); !ok {
+		return fmt.Errorf("query: %q is not a configured query", key.Name)
+	}
+	if key.Adhoc() {
+		return fmt.Errorf("query: %q is an ad-hoc key and is never re-run", key)
+	}
+	if !class.Valid() {
+		return fmt.Errorf("query: invalid class %d", int(class))
+	}
+	return r.cfg.Scheduler.Submit(taskOf(key, class, time.Time{}))
+}
+
 // run lists key's members from the origin and stores the result.
 func (r *Runner) run(ctx context.Context, key Key, class governor.Class) (store.QueryRow, error) {
 	expr, ok := r.Expr(key.Name)
@@ -371,9 +391,10 @@ func (r *Runner) execute(ctx context.Context, it scheduler.Item) scheduler.Resul
 	if _, ok := r.Expr(key.Name); !ok {
 		return scheduler.Result{Skipped: true} // the config no longer defines it
 	}
-	if !interactive {
+	if class > governor.ClassInvalidated {
 		// Another path may have re-run it since this task was queued: book the
-		// next cycle instead.
+		// next cycle instead. A task of class 1 or 2 (a caller waiting, or a
+		// refresh the caller asked for) re-runs the query whatever its age.
 		row, ok, err := r.Row(ctx, key)
 		if err != nil {
 			return scheduler.Result{Err: err}
