@@ -791,7 +791,11 @@ limit=<kind> used=<n> cap=<n>`, where the bracketed note appears only for `revie
     duplicates still works on the old one, and the source asks again for the new head once that
     attempt ends. The absorbing dispatch takes the session's lock and lease (`INV-CCH-18`), sends
     it nothing, measures its budget from its original launch, and settles it like a session of its
-    own (`INV-CCH-17`).
+    own (`INV-CCH-17`). It MUST also report that launch time to the core, as the optional
+    `startedAt` of its dispatch reply (`INTF-HANDLER`, `DEC-EVENT-5`), so that the dispatch's queue
+    wait and run are timed from its real start and not from the re-offer. A dispatch that launches
+    its own session, and an absorbed session that recorded no launch time (one an older build
+    launched), MUST reply with no `startedAt`.
   - **Any other attempt in flight: decline.** A dispatch that finds an attempt in flight it may not
     absorb (one still being launched; one whose turn has ended, or whose session has died, while its
     handler still holds the lease; one for another event, or for an event it cannot compare because

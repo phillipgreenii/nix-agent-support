@@ -1193,7 +1193,14 @@ func (r *ccpoolRun) absorbDuplicate(ctx context.Context, d DispatchContext, exis
 		start, _ := existing.LaunchedAt()
 		werr = r.workerWaitWithWatchdog(ctx, d, existing.ExternalID, existing.CWD, start)
 	}
-	return r.finishWait(ctx, cc, d, existing.ExternalID, existing.CWD, werr)
+	res, err := r.finishWait(ctx, cc, d, existing.ExternalID, existing.CWD, werr)
+	// Report the adopted session's own launch time so the core times this
+	// dispatch from its real start and not from this re-offer (DEC-EVENT-5,
+	// INV-CCH-30). Absent launched_at (an older build) reports nothing.
+	if launched, ok := existing.LaunchedAt(); ok {
+		res.StartedAt = launched
+	}
+	return res, err
 }
 
 // renderNudge builds the prompt sent to a ccpool session: the (non-editable) safety

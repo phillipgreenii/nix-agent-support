@@ -357,7 +357,7 @@ reported start, in place of the re-offer, as the dispatch's start for the accept
 the `queue_wait` and `run` measures and the event log row, when it lies between the event's enqueue
 instant and this offer's own start. It **MUST** ignore, and log, one outside that range or malformed,
 and a reply without the field **MUST** leave the offer's own start, so a handler that adopts nothing
-is unaffected (`DEC-EVENT-5`; see "Realization gaps").
+is unaffected (`DEC-EVENT-5`).
 
 **A handler's run status is not part of this contract.** The core's delivery responsibility ends at
 acceptance (`INV-EVT-1`, `INV-FAIL-1`), so how far a handler has got, what it is doing, and how it
@@ -605,7 +605,7 @@ sequenceDiagram
     wait **MUST** end, and the run **MUST** begin, at the dispatch's own start as the adopting handler
     reports it in its reply's optional `startedAt` (see `INTF-HANDLER`), not at the later re-offer, so a
     restart neither lengthens the wait nor shortens the run; a reply that reports no start leaves the
-    offer's own instant (`DEC-EVENT-5`; see "Realization gaps"). Both use the bucket boundaries 0.1,
+    offer's own instant (`DEC-EVENT-5`). Both use the bucket boundaries 0.1,
     0.5, 1, 2.5, 5, 10, 20, 30, 45, 60, 120, 300, 600, 1200, 1800, 3600 and 7200 seconds;
   - **queue_oldest_age** — gauge, per event `type`, in seconds: the age of the oldest retained event
     of that type that a bound handler has not yet settled, `0` when nothing of that type is owed. A

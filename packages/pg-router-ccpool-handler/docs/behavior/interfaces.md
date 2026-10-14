@@ -31,6 +31,12 @@ substrings a handler error carries for the core to classify (the "Budget-stop se
 emits the usage-limit one, `session ended on a usage limit or API outage`, in the error of an
 unclaimed end that died on a usage or spend limit or an API outage (`INV-CCH-28`).
 
+One reply field is this module's to fill in, and is stated here only to name where it comes from.
+A dispatch that adopts a session an earlier offer launched (`INV-CCH-30`'s one exception) reports
+that session's recorded launch time as the optional `startedAt` of its dispatch reply, as
+`INTF-HANDLER` allows an adopting handler to (`DEC-EVENT-5`). A dispatch that launches its own
+session, and an adopted session that recorded no launch time, reply with no `startedAt`.
+
 ## Boundary crossings (this module is the initiator; named, not fully specified)
 
 Per this set's floor, each backing tool's own internal behavior is out of extent — only what

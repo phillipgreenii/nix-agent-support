@@ -441,16 +441,17 @@ event. Four changes make the split computable from live data:
   binary that predates them ignores the unknown kind.
 
 **An adopted dispatch (decided 2026-10-14, bead `pg2-x3zkb`, `DEC-EVENT-5`; the core side is built, bead
-`pg2-dm6de`, the ccpool handler's report is not, bead `pg2-m2x35`).** The start
+`pg2-dm6de`, and the ccpool handler's report, bead `pg2-m2x35`).** The start
 instant above is the instant the offer became in-flight, which for a dispatch a restart re-offered is the
 re-offer, not the dispatch's own start: on 2026-10-12 the accept record said 2,696,857 ms, 44.95 min,
 for a dispatch that ran 4,459.52 s, 74.3 min, so 29.4 min of run time was recorded as queue wait. The
 handler that adopts a session an earlier daemon left running reports the dispatch's original start
 in an optional reply field (`startedAt`), and the core uses it, when it lies between the event's enqueue
 instant and the offer's own start, as the start in the accept record's `startedAt`, in the queue-wait and
-run histograms and in the `events.jsonl` row (`started_at`, `duration_ms`). Until the ccpool handler
-reports it an adopted ccpool dispatch is still timed from the re-offer; the lane fixtures of 2026-10-12
-and 2026-10-13 list the starts it moved. No metric changes name, labels or buckets.
+run histograms and in the `events.jsonl` row (`started_at`, `duration_ms`). The ccpool handler reports
+an adopted session's launch time; a dispatch timed before that reached an installed handler was timed
+from the re-offer, and the lane fixtures of 2026-10-12 and 2026-10-13 list the starts it moved. No
+metric changes name, labels or buckets.
 
 **Before the queue exists (decided 2026-10-14, bead `pg2-nzkjl`, `DEC-EVENT-5`).** Every gauge that
 reads the queue (the depth gauge and its backlog sum, `queue_oldest_age`, `listener_in_flight`, and the

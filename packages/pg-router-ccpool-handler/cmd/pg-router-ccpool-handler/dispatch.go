@@ -321,12 +321,26 @@ func runDispatch(args []string) int {
 		writeErrorReply(os.Stdout, "encode outcome: "+err.Error())
 		return conformance.ExitError
 	}
-	writeReply(os.Stdout, map[string]any{
-		"schemaVersion": schemas.SchemaVersion,
-		"id":            req.ID,
-		"outcome":       string(outcomeJSON),
-	})
+	writeReply(os.Stdout, outcomeReply(req.ID, string(outcomeJSON), result.StartedAt))
 	return conformance.ExitOK
+}
+
+// outcomeReply builds the inline-outcome handler.dispatch-reply. startedAt is
+// the launch time of a session this dispatch adopted (report.Result.StartedAt,
+// DEC-EVENT-5, INV-CCH-30): the reply carries it as the optional startedAt
+// (RFC3339, UTC) so the core times the dispatch from its real start and not
+// from the re-offer. A zero startedAt (a fresh session, or an adopted one that
+// recorded no launch time) omits the field entirely.
+func outcomeReply(id, outcome string, startedAt time.Time) map[string]any {
+	reply := map[string]any{
+		"schemaVersion": schemas.SchemaVersion,
+		"id":            id,
+		"outcome":       outcome,
+	}
+	if !startedAt.IsZero() {
+		reply["startedAt"] = ccpool.FormatMetaTime(startedAt)
+	}
+	return reply
 }
 
 // externalIDStampLayout is the per-attempt ccpool ExternalID's timestamp

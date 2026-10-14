@@ -16,6 +16,8 @@
 // realized here as a JSON shape (stringified) the core never interprets.
 package report
 
+import "time"
+
 type Verb string
 
 const (
@@ -39,6 +41,15 @@ type Action struct {
 
 type Result struct {
 	Actions []Action
+	// StartedAt is when the work this Result reports began, set ONLY by a
+	// dispatch that ADOPTED a session an earlier offer launched (DEC-EVENT-5,
+	// INV-CCH-30): the adopted session's launch time. Zero for a fresh dispatch
+	// and for an adopted session that recorded no launch time. The dispatch
+	// subcommand writes it as the reply's optional startedAt; it is NOT part of
+	// Fields() (the opaque outcome string), which stays as the core stores it.
+	// This field is this module's own addition to the otherwise verbatim copy
+	// of the core's report package.
+	StartedAt time.Time
 }
 
 // Fields renders the Result for eventlog.Emit's flat fields map: a slice of

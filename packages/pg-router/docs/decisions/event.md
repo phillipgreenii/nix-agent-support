@@ -292,8 +292,8 @@ flowchart LR
   gauge, and every series from the first collect after `bootCore` returns;
   `TestQueueReadyGatesEveryQueueBoundGauge` pins the option in `internal/metrics`.
 
-**(a) Decided; the core side is built (bead `pg2-dm6de`), the handler side is not (bead `pg2-m2x35`): the
-adopting handler reports the original start.**
+**(a) Decided and built, the core side (bead `pg2-dm6de`) and the ccpool handler's report (bead
+`pg2-m2x35`): the adopting handler reports the original start.**
 
 - A handler that adopts a session left running by an earlier daemon **MUST** be able to report the
   dispatch's original start in an **optional** `startedAt` field (RFC 3339, UTC) of its dispatch
@@ -332,7 +332,13 @@ adopting handler reports the original start.**
   reported start and its `duration_ms` is the offer's start minus the reported start plus the offer's
   own run, which is `settle - reported start` and so what the `run` histogram holds. A failed dispatch
   ignores the field. `run-role`'s single-event path is not queue-driven and does not read it. Still
-  open: the ccpool handler's own report of an adopted session's launch time (bead `pg2-m2x35`).
+  **Built in the ccpool handler (bead `pg2-m2x35`, 2026-10-14).** The executor's
+  adopt path returns the adopted session's `pgrouter.launched_at` as the dispatch result's start, and
+  the `dispatch` subcommand writes it as the inline reply's `startedAt` (RFC 3339, UTC, second
+  precision). A fresh session, and an adopted session that recorded no launch time (an older build),
+  reply with no field. Still open, as post-apply evidence only: that an installed daemon and handler
+  carry both slices, read as the accept record's `startedAt` equal to the session's launch time over a
+  restart.
 
 **Alternatives rejected.**
 
@@ -384,5 +390,5 @@ by more than 1 minute (decouple the two stages).
 from a session's launch time to the reply are the implementation slices' own. How `pg2-9uvm5` reads
 queue wait is that bead's. The behavior-doc side of (b) is `INV-LIFE-3`'s restart paragraph and the
 stopping-state and `listener_in_flight` text of the interfaces doc. (a)'s intent is stated in the
-interfaces doc's `queue_wait` text and registered as a gap against `INTF-MON` in the behavior set's
-"Realization gaps"; each slice **MUST** update that row as it lands, and the last one removes it.
+interfaces doc's `queue_wait` text; it was registered as a gap against `INTF-MON` in the behavior
+set's "Realization gaps" until the last slice (bead `pg2-m2x35`) removed that row.
