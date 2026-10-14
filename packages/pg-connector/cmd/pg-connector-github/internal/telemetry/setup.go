@@ -25,9 +25,13 @@
 // Metric names are dotted after the pa-monitor convention, prefixed
 // "pg_connector_github.". A label value is always drawn from a closed
 // vocabulary the code defines (a bucket, a class, a role, a registered op, a
-// handler's served_from word, a reduced pause reason); an entity id, a request
-// argument or an ad-hoc query key is never a label. A value the code cannot
-// bound is folded to a fixed word ("unknown", "none", "other").
+// handler's served_from word, a reduced pause reason, a change kind from
+// classify.Kinds(), one of the four origin words, a settle result word, a
+// configured query name, a consumer name that is stored in the consumer table);
+// an entity id, a request argument or an ad-hoc query key is never a label. A
+// value the code cannot bound is folded to a fixed word ("unknown", "none",
+// "other"): "unknown" for a change kind, origin or result word, "other" for a
+// consumer name that is not stored and a query name that is not configured.
 package telemetry
 
 import (

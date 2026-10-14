@@ -11,26 +11,37 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/feed"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/governor"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/router"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/scheduler"
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/connectord/store"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/pkg/scriptout"
 )
 
 // Metric names, after the pa-monitor convention (dotted, one service prefix).
 const (
-	MetricDaemonUp            = "pg_connector_github.daemon.up"
-	MetricBudgetSpent         = "pg_connector_github.budget.spent"
-	MetricBudgetRemaining     = "pg_connector_github.budget.remaining"
-	MetricGovernorPaused      = "pg_connector_github.governor.paused"
-	MetricQueueDepth          = "pg_connector_github.queue.depth"
-	MetricQueueOldestOverdue  = "pg_connector_github.queue.oldest_overdue_seconds"
-	MetricRequestDuration     = "pg_connector_github.request.duration"
-	MetricBatchIDs            = "pg_connector_github.batch.ids"
-	MetricRevalidation        = "pg_connector_github.revalidation"
-	MetricGroupStaleness      = "pg_connector_github.group.staleness_seconds"
-	MetricStoreBytes          = "pg_connector_github.store.bytes"
-	MetricStoreEvictions      = "pg_connector_github.store.evictions"
+	MetricDaemonUp           = "pg_connector_github.daemon.up"
+	MetricBudgetSpent        = "pg_connector_github.budget.spent"
+	MetricBudgetRemaining    = "pg_connector_github.budget.remaining"
+	MetricGovernorPaused     = "pg_connector_github.governor.paused"
+	MetricQueueDepth         = "pg_connector_github.queue.depth"
+	MetricQueueOldestOverdue = "pg_connector_github.queue.oldest_overdue_seconds"
+	MetricRequestDuration    = "pg_connector_github.request.duration"
+	MetricBatchIDs           = "pg_connector_github.batch.ids"
+	MetricRevalidation       = "pg_connector_github.revalidation"
+	MetricGroupStaleness     = "pg_connector_github.group.staleness_seconds"
+	MetricStoreBytes         = "pg_connector_github.store.bytes"
+	MetricStoreEvictions     = "pg_connector_github.store.evictions"
+
+	MetricChangeSettle          = "pg_connector_github.change.settle"
+	MetricChangeSettlePending   = "pg_connector_github.change.settle_pending"
+	MetricChangeDetectionDelay  = "pg_connector_github.change.detection_delay_seconds"
+	MetricConsumerLagRows       = "pg_connector_github.consumer.lag_rows"
+	MetricConsumerOldestUnacked = "pg_connector_github.consumer.oldest_unacked_age_seconds"
+	MetricConsumerRedeliveries  = "pg_connector_github.consumer.redeliveries"
+	MetricQueryLastSuccessAge   = "pg_connector_github.query.last_success_age_seconds"
+
 	meterName                 = "pg-connector-github"
 	spanRequest               = "pg_connector_github.request"
 	spanOriginCall            = "pg_connector_github.origin_call"
@@ -82,9 +93,31 @@ type Options struct {
 	// -shm siblings; empty leaves the gauge unreported.
 	StorePath string
 
-	// Now is the clock the request duration and the spans use; nil means
-	// time.Now.
+	// Now is the clock the request duration, the spans and the polled ages
+	// use; nil means time.Now.
 	Now func() time.Time
+
+	// Pending returns the stored pending-change row count, polled for
+	// change.settle_pending (store.Store.CountPending); nil leaves it
+	// unreported.
+	Pending func(context.Context) (int, error)
+	// Consumers returns every stored consumer key's position, polled for
+	// consumer.lag_rows and consumer.oldest_unacked_age_seconds
+	// (feed.Feed.Positions); nil leaves them unreported. The consumer names it
+	// returned are also the only values the consumer label of
+	// consumer.redeliveries may carry.
+	Consumers func(context.Context) ([]feed.Position, error)
+	// Queries returns the stored query rows, polled with ConfiguredQueries for
+	// query.last_success_age_seconds (store.Store.ListQueries); nil leaves it
+	// unreported.
+	Queries func(context.Context) ([]store.QueryRow, error)
+	// ConfiguredQueries names the configured queries: the only values the query
+	// label may carry (any other folds to "other") and the series
+	// query.last_success_age_seconds reports. nil means none.
+	ConfiguredQueries func() []string
+	// Started is when the daemon started: the age of a configured query that
+	// never succeeded counts from it. Zero means when New ran.
+	Started time.Time
 }
 
 // Telemetry holds the instruments of the daemon's metric table and records the
@@ -108,6 +141,16 @@ type Telemetry struct {
 	storeBytes   metric.Int64ObservableGauge
 	evictions    metric.Int64Counter
 
+	settle         metric.Int64Counter
+	settlePending  metric.Int64ObservableGauge
+	detectionDelay metric.Float64Histogram
+	consumerLag    metric.Int64ObservableGauge
+	consumerOldest metric.Float64ObservableGauge
+	redeliveries   metric.Int64Counter
+	queryAge       metric.Float64ObservableGauge
+	started        time.Time
+	consumerState
+
 	registration metric.Registration
 }
 
@@ -124,6 +167,10 @@ func New(opts Options) (*Telemetry, error) {
 	t := &Telemetry{opts: opts, tracer: tp.Tracer(meterName), now: opts.Now}
 	if t.now == nil {
 		t.now = time.Now
+	}
+	t.started = opts.Started
+	if t.started.IsZero() {
+		t.started = t.now()
 	}
 	m := mp.Meter(meterName)
 
@@ -191,7 +238,45 @@ func New(opts Options) (*Telemetry, error) {
 		return nil, err
 	}
 
-	t.registration, err = m.RegisterCallback(t.observe, t.up, t.remaining, t.paused, t.depth, t.overdue, t.storeBytes)
+	if t.settle, err = m.Int64Counter(MetricChangeSettle,
+		metric.WithDescription("Ended settle rows by result: settled, failed or timeout"),
+		metric.WithUnit("{row}")); err != nil {
+		return nil, err
+	}
+	if t.settlePending, err = m.Int64ObservableGauge(MetricChangeSettlePending,
+		metric.WithDescription("Change rows waiting on dependent groups"),
+		metric.WithUnit("{row}")); err != nil {
+		return nil, err
+	}
+	if t.detectionDelay, err = m.Float64Histogram(MetricChangeDetectionDelay,
+		metric.WithDescription("Per kind of every appended change row: its detection time minus the origin's updatedAt"),
+		metric.WithUnit("s"),
+		metric.WithExplicitBucketBoundaries(0, 1, 5, 15, 30, 60, 120, 300, 900, 1800, 3600, 7200, 21600, 86400)); err != nil {
+		return nil, err
+	}
+	if t.consumerLag, err = m.Int64ObservableGauge(MetricConsumerLagRows,
+		metric.WithDescription("Rows a poll of a stored consumer key would deliver after its acknowledged position"),
+		metric.WithUnit("{row}")); err != nil {
+		return nil, err
+	}
+	if t.consumerOldest, err = m.Float64ObservableGauge(MetricConsumerOldestUnacked,
+		metric.WithDescription("Age of the oldest unacknowledged row of a stored consumer key; zero when none"),
+		metric.WithUnit("s")); err != nil {
+		return nil, err
+	}
+	if t.redeliveries, err = m.Int64Counter(MetricConsumerRedeliveries,
+		metric.WithDescription("Rows handed out again to a consumer key that had not acknowledged them"),
+		metric.WithUnit("{row}")); err != nil {
+		return nil, err
+	}
+	if t.queryAge, err = m.Float64ObservableGauge(MetricQueryLastSuccessAge,
+		metric.WithDescription("Age of a configured query's last success, or of the daemon when it never succeeded"),
+		metric.WithUnit("s")); err != nil {
+		return nil, err
+	}
+
+	t.registration, err = m.RegisterCallback(t.observe, t.up, t.remaining, t.paused, t.depth, t.overdue, t.storeBytes,
+		t.settlePending, t.consumerLag, t.consumerOldest, t.queryAge)
 	if err != nil {
 		return nil, err
 	}
@@ -203,7 +288,7 @@ func (t *Telemetry) Close() error { return t.registration.Unregister() }
 
 // observe is the polled-gauge callback: it reads the governor's and the
 // scheduler's state at collection time.
-func (t *Telemetry) observe(_ context.Context, o metric.Observer) error {
+func (t *Telemetry) observe(ctx context.Context, o metric.Observer) error {
 	o.ObserveInt64(t.up, 1)
 	if t.opts.StorePath != "" {
 		o.ObserveInt64(t.storeBytes, storeSize(t.opts.StorePath))
@@ -229,6 +314,7 @@ func (t *Telemetry) observe(_ context.Context, o metric.Observer) error {
 			o.ObserveFloat64(t.overdue, c.OldestOverdue.Seconds(), class)
 		}
 	}
+	t.observeChanges(ctx, o)
 	return nil
 }
 
