@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -520,10 +521,22 @@ func TestExecCmd_honorsContextCancellation(t *testing.T) {
 	}
 }
 
+// unsetCCPoolPool removes CCPOOL_POOL from this test's environment (restored
+// when the test ends), so a test of the "no pool override" path measures what
+// execCmd adds rather than the pool the test process itself runs in (bead
+// pg2-q0bi4). A pool session exports it and the nix sandbox does not;
+// t.Setenv registers the restore, as testing has no t.Unsetenv.
+func unsetCCPoolPool(t *testing.T) {
+	t.Helper()
+	t.Setenv("CCPOOL_POOL", "")
+	_ = os.Unsetenv("CCPOOL_POOL")
+}
+
 // pg2-mr0sl: an empty poolDir must leave cmd.Env nil (inherit os.Environ()
 // unchanged) -- execCmd must not force CCPOOL_POOL into the child's
 // environment when no per-role pool override is configured.
 func TestExecCmd_emptyPoolDirInheritsEnvUnchanged(t *testing.T) {
+	unsetCCPoolPool(t)
 	stdout, _, err := execCmd(context.Background(), "sh", "", []string{"-c", "printf '%s' \"${CCPOOL_POOL-<unset>}\""})
 	if err != nil {
 		t.Fatalf("execCmd: %v", err)
@@ -571,6 +584,7 @@ func TestNewCLIRunnerForPool_runClosureOverridesEnv(t *testing.T) {
 // but through the real, unfaked run closure) -- a deployment that never
 // opts into a per-role pool observes byte-for-byte unchanged behavior.
 func TestNewCLIRunner_runClosureInheritsEnvUnchanged(t *testing.T) {
+	unsetCCPoolPool(t)
 	cli := NewCLIRunner(config.Default())
 	cli.bin = "sh"
 	stdout, _, err := cli.run(context.Background(), []string{"-c", "printf '%s' \"${CCPOOL_POOL-<unset>}\""})
@@ -580,6 +594,17 @@ func TestNewCLIRunner_runClosureInheritsEnvUnchanged(t *testing.T) {
 	if string(stdout) != "<unset>" {
 		t.Errorf("CCPOOL_POOL = %q, want unset", stdout)
 	}
+}
+
+// pg2-q0bi4: the two "inherits env unchanged" tests above assert CCPOOL_POOL is
+// absent from the child, so each must clear whatever the test process carries.
+// The nix sandbox exports none, so only a pool session would notice a test that
+// stopped clearing it; this guard exports a sentinel itself and runs both under
+// it, so such a regression fails in every environment.
+func TestInheritsEnvUnchanged_hermeticToAmbientCCPoolPool(t *testing.T) {
+	t.Setenv("CCPOOL_POOL", "/ambient/pool-session")
+	t.Run("execCmd", TestExecCmd_emptyPoolDirInheritsEnvUnchanged)
+	t.Run("runClosure", TestNewCLIRunner_runClosureInheritsEnvUnchanged)
 }
 
 // review follow-up: a per-call timeout must name the timeout in the error, not
