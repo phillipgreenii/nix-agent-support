@@ -31,18 +31,24 @@ package cmddesc
 // pinned under internal/effectpolicy/testdata/p15/: `gh pr edit` (the new
 // "pr-edit" remote operation), `rc-publish` (push-lease on origin,
 // pr-create-draft and pr-edit on github), `pjira comment|create|transition`
-// (tracker-write widened from the beads resource to also cover "jira") and
-// `gh stack unstack` without --local (the new "stack-unstack" operation).
-// Still held, listed in TestZiprecruiterUnlandedVerbsAreAbsent:
-// `gh stack link` (its help documents --open as "mark new and existing PRs as
-// ready for review" but nowhere says whether the PRs it creates are drafts
-// without it, and the unattended hook denies even `gh stack link --help`, so
-// the default is unverified) and `rc-validate` (its caller-supplied gate
-// command needs a child-command interpreter that rebases the child's working
-// directory onto <wt>, and a realistic Gradle gate such as `./gradlew test`
-// still cannot reach approve even then: no `gradlew` schema exists, so the
-// child abstains as "no schema for gradlew"; adding one is its own approval
-// decision, not a fact of rc-validate).
+// (tracker-write widened from the beads resource to also cover "jira"),
+// `gh stack unstack` without --local (the new "stack-unstack" operation) and
+// `gh stack link` without --open (a plain atomic push, draft PR creations,
+// "pr-edit" base fix-ups of existing PRs and the new "stack-link" operation).
+// link's draft default is what let it land: its help documents --open as
+// "mark new and existing PRs as ready for review" but never says whether the
+// PRs it creates are drafts without it, and the unattended hook denies even
+// `gh stack link --help`, so the default was verified from the extension's
+// upstream source instead (github/gh-stack cmd/link.go: new PRs are created
+// with draft = !open, branch arguments are pushed non-force and atomic via
+// git.Push(remote, branches, false, true), and fixBaseBranches edits the base
+// of EXISTING PRs through UpdatePRBase) and from its shipped skill doc.
+// Still held, listed in TestZiprecruiterUnlandedVerbsAreAbsent: `rc-validate`
+// (its caller-supplied gate command needs a child-command interpreter that
+// rebases the child's working directory onto <wt>, and a realistic Gradle
+// gate such as `./gradlew test` still cannot reach approve even then: no
+// `gradlew` schema exists, so the child abstains as "no schema for gradlew";
+// adding one is its own approval decision, not a fact of rc-validate).
 // Forms that collide with an explicit REJECT/ABSTAIN ruling are not
 // overridden: `gh stack merge` (mirrors `gh pr merge`, Reject),
 // `gh stack submit|link --open` (marks PRs ready, the `gh pr ready` Abstain
@@ -76,6 +82,13 @@ package cmddesc
 //     GitHub (the PRs and branches stay): Remote("stack-unstack") on
 //     "github", which RemoteMutation Permits (pg2-19hdz); --local retargets
 //     it to "read".
+//   - `gh stack link` (without --open) is four remote effects: a plain,
+//     non-force, atomic push of the branch arguments (Remote("push") on the
+//     default remote or the --remote operand), draft PR creations
+//     ("pr-create-draft"), base fix-ups of existing PRs ("pr-edit") and the
+//     stack grouping itself ("stack-link"), plus a read of the PRs it looks
+//     up. Every operation is one RemoteMutation already judges or now Permits
+//     on "github" (pg2-19hdz).
 //   - A Jira write (`pjira comment|create|transition`) is Remote(
 //     "tracker-write") on "jira": the same operation bd carries on "beads",
 //     which RemoteMutation now Permits for both resources by DATA (pg2-19hdz).
@@ -137,6 +150,21 @@ var zrStackRemoteFlag = map[string]FlagSpec{
 	"--remote": {Arity: ArityOne, Operand: Remote("push-lease")},
 }
 
+// zrPushPlainDefaultRemote is `gh stack link`'s implicit push of its branch
+// arguments to the default remote: a PLAIN push (the extension calls
+// git.Push(remote, branches, false, true): force=false, atomic=true, so no
+// --force and no --force-with-lease), the same implicit "<default-remote>"
+// effect `git push` uses, with the operation "push" instead of "push-lease".
+var zrPushPlainDefaultRemote = ImplicitEffect{Role: Remote("push"), Target: "<default-remote>", Dynamic: true}
+
+// zrLinkRemoteFlag is the `--remote <name>` flag of `gh stack link`. Its
+// operand is a plain "push" remote, so a URL or path remote abstains; the
+// default-remote effect is still emitted alongside (an over-report, in the
+// fail-closed direction).
+var zrLinkRemoteFlag = map[string]FlagSpec{
+	"--remote": {Arity: ArityOne, Operand: Remote("push")},
+}
+
 // zrFlags merges flag tables (later wins), so a persistent flag can be shared
 // by a parent and each of its verbs.
 func zrFlags(tables ...map[string]FlagSpec) map[string]FlagSpec {
@@ -180,6 +208,32 @@ func zrGhStackLeaf(verb string, flags map[string]FlagSpec, pos PositionalSpec, s
 	}
 }
 
+// zrGhStackLinkSchema is `gh stack link [--base B] [--remote R]
+// <stack-number | branch-or-pr> <branch-or-pr> [...]` (pg2-19hdz): "Create or
+// update a stack on GitHub from branch names, PR numbers, or PR URLs ... This
+// command does not rely on gh-stack local tracking state", so it declares no
+// local path effect. Its help: branch arguments are pushed to the remote, new
+// PRs are created for branches without one, existing PRs whose base does not
+// match the expected chain are corrected, and a stack is created or extended
+// (existing PRs are never removed). Upstream source (github/gh-stack
+// cmd/link.go): new PRs are DRAFTS unless --open (CreatePR(..., !opts.open));
+// the push is plain and atomic (git.Push(remote, branches, false, true));
+// fixBaseBranches edits existing PRs' bases (UpdatePRBase). --open (marks new
+// and existing PRs ready for review) is deliberately NOT modeled, so every
+// --open form abstains (the gh pr ready Abstain ruling, pg2-psiqh). The two
+// leading operands are the CLI's own minimum of two arguments.
+var zrGhStackLinkSchema = func() CommandSchema {
+	s := zrGhStackLeaf("link",
+		zrFlags(zrLinkRemoteFlag, map[string]FlagSpec{"--base": literal1}),
+		PositionalSpec{Leading: []OperandRole{Literal, Literal}, Rest: Literal}, StdoutMetadata,
+		zrPushPlainDefaultRemote, zrReadsGitHub,
+		ImplicitEffect{Role: Remote("pr-create-draft"), Target: "github"},
+		ImplicitEffect{Role: Remote("pr-edit"), Target: "github"},
+		ImplicitEffect{Role: Remote("stack-link"), Target: "github"})
+	s.Provenance = "gh stack link --help text embedded in the gh-stack 0.1.0 extension binary, and its upstream source (github/gh-stack cmd/link.go), this host 2026-10-14"
+	return s
+}()
+
 // zrGhSubcommands: only the `gh` forms the ZR plugins instruct. They are
 // folded into the ONE registered `gh` schema (ghSchema, registry_plugin_tools.go)
 // as its "auth", "extension" and "stack" subcommands, alongside pg2-cjfpy.2's
@@ -199,9 +253,10 @@ func zrGhStackLeaf(verb string, flags map[string]FlagSpec, pos PositionalSpec, s
 //     so it is not modeled. `add` takes -m/-A/-u for the stage-and-commit
 //     shortcut, the same access class as `git add` + `git commit`. `push`, `submit --auto`, `sync` and
 //     `unstack` (pg2-maars; pg2-19hdz added `unstack` without --local) follow
-//     the effect model above. ABSENT (abstain): link (its draft default is
-//     unverified, see the header), merge, modify, `submit` without --auto,
-//     `--open`, and the `delete` alias of `unstack`.
+//     the effect model above; `link` without --open (pg2-19hdz, draft default
+//     verified from the extension's upstream source, see the header) does too.
+//     ABSENT (abstain): merge, modify, `submit` without --auto, `--open` on
+//     any verb, and the `delete` alias of `unstack`.
 var zrGhSubcommands = map[string]CommandSchema{
 	"auth": {
 		Name:         "auth",
@@ -306,6 +361,7 @@ var zrGhSubcommands = map[string]CommandSchema{
 				zrFlags(zrStackRemoteFlag, map[string]FlagSpec{"--prune": inert}),
 				PositionalSpec{}, StdoutMetadata,
 				append([]ImplicitEffect{zrPushDefaultRemote, zrReadsGitHub}, zrCheckoutMutation...)...),
+			"link": zrGhStackLinkSchema,
 			// `gh stack unstack [--local] [<n>]`: "Remove a stack from local
 			// tracking and unstack it on GitHub"; "Use --local to only remove
 			// local tracking without touching remote (GitHub)"; "GitHub

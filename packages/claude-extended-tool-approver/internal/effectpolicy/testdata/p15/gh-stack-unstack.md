@@ -28,5 +28,4 @@ Each row is one spec fact probed through the real engine (default registry and p
 - (unmodeled) the delete alias: `gh stack delete` => **abstain**
 - (unmodeled) --open: `gh stack unstack --open` => **abstain**
 - (unmodeled) --remote: `gh stack unstack --remote origin` => **abstain**
-- (unmodeled) link stays held (draft default unverified): `gh stack link branch-a branch-b` => **abstain**
 - (unmodeled) merge is a ruling collision: `gh stack merge --yes` => **abstain**

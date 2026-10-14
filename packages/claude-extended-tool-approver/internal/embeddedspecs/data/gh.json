@@ -2572,6 +2572,153 @@
             "unknownFlag": "insufficient",
             "endOfOptions": true
           },
+          "link": {
+            "name": "link",
+            "provenance": "gh stack link --help text embedded in the gh-stack 0.1.0 extension binary, and its upstream source (github/gh-stack cmd/link.go), this host 2026-10-14",
+            "citations": {
+              "provenance": {
+                "source": "gh stack link --help: \"Create or update a stack on GitHub from branch names, PR numbers, or PR URLs.\" (the help text embedded in the gh-stack 0.1.0 binary; a live gh stack link --help is denied to an unattended session, so it was read from the binary)"
+              },
+              "stdin": {
+                "source": "gh stack link --help: \"Usage: gh stack link [flags] <stack-number | branch-or-pr> <branch-or-pr> [...]\" (no explicit stdin wording in the reviewed text; classified from the documented operand/argument shape in this synopsis)"
+              },
+              "stdout": {
+                "source": "gh stack link --help: \"Create or update a stack on GitHub from branch names, PR numbers, or PR URLs.\" (stdout classification taken from this description of what the command prints: progress lines such as \"Created PR #N for <branch> (base: <base>)\" per the extension's skill doc)"
+              },
+              "unknownFlag": {
+                "source": "gh stack link --help: full option listing reviewed (--base, --open, --remote); the reviewed text documents no behavior for an unrecognized/unmodeled flag, so this repo's fail-closed default (\"insufficient\") applies, and --open (\"Mark new and existing PRs as ready for review\"; a class C collision with the gh pr ready Abstain ruling) is deliberately not modeled"
+              }
+            },
+            "flags": {
+              "--base": {
+                "arity": "one",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack link --help: \"--base string Base branch for the bottom of the stack (defaults to the repository default branch)\""
+                }
+              },
+              "--help": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack link --help: \"-h, --help help for link\""
+                }
+              },
+              "--remote": {
+                "arity": "one",
+                "operand": {
+                  "kind": "remote",
+                  "operation": "push"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack link --help: \"--remote string Remote to push to (defaults to auto-detected remote)\""
+                }
+              },
+              "-h": {
+                "arity": "none",
+                "operand": {
+                  "kind": "literal"
+                },
+                "transform": {
+                  "kind": "none"
+                },
+                "citation": {
+                  "source": "gh stack link --help: \"-h, --help help for link\""
+                }
+              }
+            },
+            "positionals": {
+              "leading": [
+                {
+                  "kind": "literal"
+                },
+                {
+                  "kind": "literal"
+                }
+              ],
+              "rest": {
+                "kind": "literal"
+              },
+              "restOverride": {
+                "role": {
+                  "kind": "literal"
+                }
+              },
+              "citation": {
+                "source": "gh stack link --help: \"Usage: gh stack link [flags] <stack-number | branch-or-pr> <branch-or-pr> [...]\" and, in the extension's skill doc, \"Provide at least two branches/PRs to create or update a stack, or a stack number followed by the new branches/PRs to append them to the top of an existing stack\""
+              }
+            },
+            "implicitEffects": [
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "push"
+                },
+                "target": "<default-remote>",
+                "dynamic": true,
+                "citation": {
+                  "source": "gh stack link --help: \"Branch arguments are automatically pushed to the remote before creating or looking up PRs.\" (the effect declared here is what this command does, per this description); upstream github/gh-stack cmd/link.go pushBranchArgs calls git.Push(remote, branches, false, true), i.e. force=false, atomic=true: a plain atomic push, no --force and no --force-with-lease"
+                }
+              },
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "read"
+                },
+                "target": "github",
+                "citation": {
+                  "source": "gh stack link --help: \"For numeric arguments, the command first checks if a PR with that number exists; if not, it treats the argument as a branch name.\" (the effect declared here is what this command does, per this description: it looks pull requests up by number, URL and branch)"
+                }
+              },
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "pr-create-draft"
+                },
+                "target": "github",
+                "citation": {
+                  "source": "gh stack link --help: \"For branches without PRs, new PRs are created automatically with the correct base branch chaining.\" (the effect declared here is what this command does, per this description); draft default verified from upstream github/gh-stack cmd/link.go: client.CreatePR(baseBranch, arg, title, body, !opts.open), so new PRs are DRAFTS unless --open, and from the extension's skill doc, \"--open  Mark new and existing PRs as ready for review\" (skills/gh-stack/SKILL.md, section \"Link branches as a stack\")"
+                }
+              },
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "pr-edit"
+                },
+                "target": "github",
+                "citation": {
+                  "source": "gh stack link skill doc (skills/gh-stack/SKILL.md, section \"Link branches as a stack\"): \"Existing PRs whose base branch doesn't match the expected chain are corrected automatically\" (the effect declared here is what this command does, per this description); upstream github/gh-stack cmd/link.go fixBaseBranches edits the base of EXISTING PRs through client.UpdatePRBase (new PRs are skipped there)"
+                }
+              },
+              {
+                "role": {
+                  "kind": "remote",
+                  "operation": "stack-link"
+                },
+                "target": "github",
+                "citation": {
+                  "source": "gh stack link --help: \"If the PRs are not yet in a stack, a new stack is created. If some of the PRs are already in a stack, the existing stack is updated to include the new PRs (existing PRs are never removed).\" (the effect declared here is what this command does, per this description)"
+                }
+              }
+            ],
+            "stdin": "never",
+            "stdout": "metadata",
+            "unknownFlag": "insufficient",
+            "endOfOptions": true
+          },
           "push": {
             "name": "push",
             "provenance": "gh stack push --help (gh 2.101.0 + github/gh-stack extension, this host 2026-10-05)",

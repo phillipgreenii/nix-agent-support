@@ -6512,7 +6512,7 @@
     "settings": {},
     "rules_config": {},
     "expected_verdict": "not-approve",
-    "notes": "pg2-cjfpy.4 GUARDRAIL: instructed by the gh-stack plugin (SKILL.md link) but collides with an explicit REJECT/ABSTAIN ruling (gh pr merge Reject; gh pr ready Abstain, pg2-psiqh; ADR 0075 draft-first landing), so it is pinned not-approve, not overridden."
+    "notes": "pg2-cjfpy.4 GUARDRAIL (re-confirmed on pg2-19hdz, which landed gh stack link WITHOUT --open): instructed by the gh-stack plugin (SKILL.md link) but --open marks new and existing PRs ready for review, colliding with an explicit REJECT/ABSTAIN ruling (gh pr merge Reject; gh pr ready Abstain, pg2-psiqh; ADR 0075 draft-first landing), so it is pinned not-approve, not overridden: --open is not a modeled flag."
   },
   {
     "case": "zr_plugin_gs_git_add",
@@ -9377,8 +9377,8 @@
     "notes": "pg2-maars: instructed by the gh-stack plugin but held (NOT approve) until the --auto draft default is absent (the verb prompts and defaults new PRs to ready); pinned so the R4 cutover replay cannot approve it by accident."
   },
   {
-    "case": "zr_plugin_d_held_gs_link",
-    "tags": ["zr-plugin", "pg2-maars", "gh-stack"],
+    "case": "zr_plugin_d_gs_link",
+    "tags": ["zr-plugin", "pg2-19hdz", "gh-stack"],
     "tool_input": {
       "tool_name": "Bash",
       "tool_input": {
@@ -9392,8 +9392,84 @@
     "mode": "default",
     "settings": {},
     "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-19hdz (class D, operator ruling 2026-10-04/05 on pg2-cjfpy and pg2-maars; gate 5 P15 report internal/effectpolicy/testdata/p15/gh-stack-link.md): instructed by the gh-stack plugin; graded APPROVE. The draft default is verified from the extension's upstream source (github/gh-stack cmd/link.go: new PRs are created with draft = !open, the push is plain and atomic, existing PRs' bases are fixed through UpdatePRBase) and its shipped skill doc; only --open (class C) could make a ready PR, and it stays unmodeled. Replaces the pg2-maars not-approve pin."
+  },
+  {
+    "case": "zr_plugin_d_gs_link_stack_number",
+    "tags": ["zr-plugin", "pg2-19hdz", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack link 7 branch-c"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-19hdz (class D, gate 5 P15 report internal/effectpolicy/testdata/p15/gh-stack-link.md): a stack number followed by new branches appends them to the top of that stack (the skill doc's gh stack link 7 branch-c); graded APPROVE like the plain form."
+  },
+  {
+    "case": "zr_plugin_d_gs_link_base_remote",
+    "tags": ["zr-plugin", "pg2-19hdz", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack link --base develop --remote origin branch-a branch-b"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "approve",
+    "notes": "pg2-19hdz (class D, gate 5 P15 report internal/effectpolicy/testdata/p15/gh-stack-link.md): --base names the bottom of the stack and --remote a plain push remote name; graded APPROVE."
+  },
+  {
+    "case": "zr_plugin_d_held_gs_link_one_operand",
+    "tags": ["zr-plugin", "pg2-19hdz", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack link branch-a"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
     "expected_verdict": "not-approve",
-    "notes": "pg2-maars, re-checked on pg2-19hdz: instructed by the gh-stack plugin but still held (NOT approve). The extension documents --open as 'mark new and existing PRs as ready for review' but nowhere says whether the PRs link creates are drafts without it, and the unattended hook denies even gh stack link --help, so the default is unverified; it also edits existing PR bases. Pinned so the R4 cutover replay cannot approve it by accident."
+    "notes": "pg2-19hdz: gh stack link needs at least two branches or PRs (or a stack number and one new branch), so a single operand is not the instructed shape (NOT approve); pinned so the R4 cutover replay cannot approve it by accident."
+  },
+  {
+    "case": "zr_plugin_d_held_gs_link_url_remote",
+    "tags": ["zr-plugin", "pg2-19hdz", "gh-stack"],
+    "tool_input": {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "gh stack link --remote https://example.com/x.git branch-a branch-b"
+      }
+    },
+    "cwd_path_state": {
+      "cwd": "/repo",
+      "project_root": "/repo"
+    },
+    "mode": "default",
+    "settings": {},
+    "rules_config": {},
+    "expected_verdict": "not-approve",
+    "notes": "pg2-19hdz: a URL --remote is not a plain configured remote name (R6), so the push abstains (NOT approve); pinned so the R4 cutover replay cannot approve it by accident."
   },
   {
     "case": "zr_plugin_d_gs_unstack",

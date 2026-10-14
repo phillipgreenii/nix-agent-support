@@ -63,6 +63,14 @@ func TestP15ReportZRWriteForms(t *testing.T) {
 			"gh pr edit https://github.com/o/r/pull/12 --add-assignee @me",
 		},
 		"gh-stack-unstack": {"gh stack unstack", "gh stack unstack 7", "gh stack unstack --local 7"},
+		"gh-stack-link": {
+			"gh stack link branch-a branch-b",
+			"gh stack link branch-a branch-b branch-c",
+			"gh stack link 7 branch-c",
+			"gh stack link 10 20 30",
+			"gh stack link --base develop branch-a branch-b",
+			"gh stack link --remote origin branch-a branch-b",
+		},
 		"pjira-writes": {
 			"pjira comment ABC-123 'progress update'",
 			"pjira transition ABC-123 Done",
@@ -80,7 +88,16 @@ func TestP15ReportZRWriteForms(t *testing.T) {
 		},
 		"gh-stack-unstack": {
 			"gh stack delete", "gh stack unstack --open", "gh stack unstack --remote origin",
-			"gh stack unstack --local=false", "gh stack link branch-a branch-b", "gh stack merge --yes",
+			"gh stack unstack --local=false", "gh stack merge --yes",
+		},
+		"gh-stack-link": {
+			"gh stack link --open branch-a branch-b", "gh stack link --base develop --open branch-a branch-b branch-c",
+			"gh stack link branch-a branch-b --open", "gh stack link --open=true branch-a branch-b",
+			"gh stack link branch-a", "gh stack link",
+			`gh stack link "$A" branch-b`, `gh stack link branch-a "$B"`,
+			"gh stack link --remote https://example.com/x.git branch-a branch-b", "gh stack link --remote ../other branch-a branch-b",
+			"gh stack link --force branch-a branch-b", "gh stack link --force-with-lease branch-a branch-b", "gh stack link --draft branch-a branch-b",
+			"gh stack submit --auto --open",
 		},
 		"pjira-writes": {
 			"pjira comment ABC-123", "pjira transition ABC-123",

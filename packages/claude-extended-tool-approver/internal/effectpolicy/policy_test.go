@@ -122,6 +122,8 @@ func TestRemoteMutationPolicy(t *testing.T) {
 		{"pr-edit on jira unknown", on("pr-edit", "jira"), PolicyContext{}, Unknown},
 		{"stack-unstack on github permitted (pg2-19hdz)", on("stack-unstack", "github"), PolicyContext{}, Permitted},
 		{"stack-unstack elsewhere unknown", on("stack-unstack", "gitlab"), PolicyContext{}, Unknown},
+		{"stack-link on github permitted (pg2-19hdz)", on("stack-link", "github"), PolicyContext{}, Permitted},
+		{"stack-link elsewhere unknown", on("stack-link", "gitlab"), PolicyContext{}, Unknown},
 		{"pr-create-draft on github permitted", on("pr-create-draft", "github"), PolicyContext{}, Permitted},
 		{"pr-create-draft elsewhere unknown", on("pr-create-draft", "gitlab"), PolicyContext{}, Unknown},
 		{"non-draft pr-create forbidden", on("pr-create", "github"), PolicyContext{}, Forbidden},

@@ -220,12 +220,14 @@ func GenerateAssignSubstP15(root string) (*P15Report, error) {
 // ZRWriteFormReports is the ordered list of report keys GenerateZRWriteFormsP15
 // returns; each key is also the basename of the pinned
 // testdata/p15/<key>.md golden.
-var ZRWriteFormReports = []string{"gh-pr-edit", "gh-stack-unstack", "pjira-writes", "rc-publish"}
+var ZRWriteFormReports = []string{"gh-pr-edit", "gh-stack-link", "gh-stack-unstack", "pjira-writes", "rc-publish"}
 
 // GenerateZRWriteFormsP15 builds the P15 reports for the class D ZR plugin
 // write forms pg2-19hdz landed once this tooling existed (gate 5 of the
 // operator rulings on pg2-maars, 2026-10-05): `gh pr edit` (the new "pr-edit"
 // remote operation), `gh stack unstack` (the new "stack-unstack" operation),
+// `gh stack link` without --open (a plain atomic push, draft PR creations,
+// pr-edit base fix-ups and the new "stack-link" operation),
 // `pjira comment|create|transition` (tracker-write widened to the "jira"
 // resource) and `rc-publish` (push-lease on origin, draft PR creation and the
 // PR edit, in one script). Every flag of each schema is probed, plus the
@@ -246,6 +248,10 @@ func GenerateZRWriteFormsP15(root string) (map[string]*P15Report, error) {
 	unstack, ok := gh.Subcommands["stack"].Subcommands["unstack"]
 	if !ok {
 		return nil, fmt.Errorf("p15: no gh stack unstack schema registered")
+	}
+	link, ok := gh.Subcommands["stack"].Subcommands["link"]
+	if !ok {
+		return nil, fmt.Errorf("p15: no gh stack link schema registered")
 	}
 	pjira, ok := reg.Lookup("pjira")
 	if !ok {
@@ -310,10 +316,40 @@ func GenerateZRWriteFormsP15(root string) (map[string]*P15Report, error) {
 		{"(unmodeled) the delete alias", "gh stack delete"},
 		{"(unmodeled) --open", "gh stack unstack --open"},
 		{"(unmodeled) --remote", "gh stack unstack --remote origin"},
-		{"(unmodeled) link stays held (draft default unverified)", "gh stack link branch-a branch-b"},
 		{"(unmodeled) merge is a ruling collision", "gh stack merge --yes"},
 	})
 	out["gh-stack-unstack"] = r
+
+	r = newReport("gh stack link without --open (plain atomic push, draft PR creations, pr-edit base fix-ups and the stack-link remote operation)")
+	r.probeFlags(root, reg, link, "gh stack link", " branch-a branch-b")
+	probes(r, []struct{ fact, probe string }{
+		{"(positional) two branches (the skill form)", "gh stack link branch-a branch-b"},
+		{"(positional) three branches", "gh stack link branch-a branch-b branch-c"},
+		{"(positional) a stack number and one new branch", "gh stack link 7 branch-c"},
+		{"(positional) PR numbers", "gh stack link 10 20 30"},
+		{"(positional) PR URLs", "gh stack link https://github.com/o/r/pull/41 https://github.com/o/r/pull/42"},
+		{"(positional) PR numbers and branches mixed", "gh stack link 42 43 feature-auth feature-ui"},
+		{"(positional) the primary branch as an operand", "gh stack link main branch-a"},
+		{"(positional) one operand (the CLI requires two)", "gh stack link branch-a"},
+		{"(positional) no operand", "gh stack link"},
+		{"(positional) runtime-expanded first operand", `gh stack link "$A" branch-b`},
+		{"(positional) runtime-expanded second operand", `gh stack link branch-a "$B"`},
+		{"(positional) operands after end-of-options", "gh stack link -- branch-a branch-b"},
+		{"(combination) --base for the bottom of the stack", "gh stack link --base develop branch-a branch-b"},
+		{"(combination) --remote naming a configured remote", "gh stack link --remote origin branch-a branch-b"},
+		{"(combination) --remote naming a URL", "gh stack link --remote https://example.com/x.git branch-a branch-b"},
+		{"(combination) --remote naming a path", "gh stack link --remote ../other branch-a branch-b"},
+		{"(combination) --base and --remote together", "gh stack link --base develop --remote origin branch-a branch-b"},
+		{"(unmodeled) --open marks new and existing PRs ready for review (class C)", "gh stack link --open branch-a branch-b"},
+		{"(unmodeled) --base with --open (class C)", "gh stack link --base develop --open branch-a branch-b branch-c"},
+		{"(unmodeled) --open after the operands (class C)", "gh stack link branch-a branch-b --open"},
+		{"(unmodeled) --open=true (class C)", "gh stack link --open=true branch-a branch-b"},
+		{"(unmodeled) --force", "gh stack link --force branch-a branch-b"},
+		{"(unmodeled) --force-with-lease", "gh stack link --force-with-lease branch-a branch-b"},
+		{"(unmodeled) --draft is not a gh stack link flag", "gh stack link --draft branch-a branch-b"},
+		{"(unmodeled) submit --auto --open stays a class C collision", "gh stack submit --auto --open"},
+	})
+	out["gh-stack-link"] = r
 
 	r = newReport("pjira comment|create|transition (tracker-write on the jira resource)")
 	for _, verb := range []string{"comment", "create", "transition"} {

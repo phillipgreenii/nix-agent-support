@@ -42,10 +42,10 @@ func TestZiprecruiterSchemasAreFailClosedData(t *testing.T) {
 // each one carries is answered. Adding one is a policy change, not a schema
 // fact. pg2-maars landed the class D forms that reach APPROVE with the
 // existing operations and pg2-19hdz landed the ones that needed a NEW
-// effectpolicy judgment (see TestZiprecruiterClassDLandedForms); what is left:
-//   - `gh stack link`: nothing documents the draft default of the PRs it
-//     creates (its --open flag "marks new and existing PRs as ready for
-//     review"), and it also edits existing PR bases;
+// effectpolicy judgment (see TestZiprecruiterClassDLandedForms and
+// TestZiprecruiterPolicyJudgedWriteForms, which cover `gh stack link` without
+// --open: its draft default was verified from the extension's upstream
+// source); what is left:
 //   - `gh stack merge`, `gh stack modify`: ruling collisions / not instructed;
 //   - `rc-validate`: its caller-supplied gate command (after `--`) needs a
 //     child-command interpreter that rebases the child's cwd onto <wt>, and a
@@ -57,9 +57,16 @@ func TestZiprecruiterUnlandedVerbsAreAbsent(t *testing.T) {
 	if !ok {
 		t.Fatal("gh stack not registered")
 	}
-	for _, verb := range []string{"link", "merge", "modify", "delete"} {
+	for _, verb := range []string{"merge", "modify", "delete"} {
 		if _, present := stack.Subcommands[verb]; present {
-			t.Errorf("gh stack %s must stay unmodeled (undocumented draft default / ruling collision / not instructed alias)", verb)
+			t.Errorf("gh stack %s must stay unmodeled (ruling collision / not instructed alias)", verb)
+		}
+	}
+	// --open marks PRs ready for review (the gh pr ready Abstain ruling,
+	// pg2-psiqh): it is never modeled, on link or on any other verb.
+	for verb, sub := range stack.Subcommands {
+		if _, present := sub.Flags["--open"]; present {
+			t.Errorf("gh stack %s: --open must stay unmodeled (class C ruling collision)", verb)
 		}
 	}
 	if _, present := gh.Subcommands["extension"].Subcommands["install"]; present {
@@ -203,6 +210,30 @@ func TestZiprecruiterPolicyJudgedWriteForms(t *testing.T) {
 	if len(publish.Flags) != 2 {
 		t.Errorf("rc-publish takes no flags besides -h/--help, got %v", publish.Flags)
 	}
+	// gh stack link (draft default verified from the extension's upstream
+	// source): a PLAIN atomic push (never push-lease or force), draft PR
+	// creations, base fix-ups of existing PRs, the stack grouping, and a PR
+	// read; --open stays unmodeled and the CLI's minimum of two operands holds.
+	link, ok := gh.Subcommands["stack"].Subcommands["link"]
+	if !ok {
+		t.Fatal("gh stack link not registered")
+	}
+	wantLink := map[string]bool{"push <default-remote>": true, "read github": true, "pr-create-draft github": true, "pr-edit github": true, "stack-link github": true}
+	if got := effects(link); !reflect.DeepEqual(got, wantLink) {
+		t.Errorf("gh stack link: implicit remote effects = %v, want %v", got, wantLink)
+	}
+	if spec, ok := link.Flags["--remote"]; !ok || spec.Operand.Kind != KindRemote || spec.Operand.Operation != "push" {
+		t.Errorf("gh stack link: --remote must be a plain push remote operand, got %+v", spec)
+	}
+	if _, ok := link.Flags["--base"]; !ok {
+		t.Error("gh stack link: --base is the bottom-of-stack base branch the help documents")
+	}
+	if _, ok := link.Flags["--open"]; ok {
+		t.Error("gh stack link: --open (marks PRs ready for review) must stay unmodeled")
+	}
+	if len(link.Positionals.Leading) != 2 {
+		t.Errorf("gh stack link: want the CLI's minimum of two leading operands, got %d", len(link.Positionals.Leading))
+	}
 }
 
 // TestGhSchemaIsSingleAndFoldsBothSiblings pins the pg2-cjfpy.2/.4 merge:
@@ -233,7 +264,7 @@ func TestGhSchemaIsSingleAndFoldsBothSiblings(t *testing.T) {
 		"pr":        {"view", "list", "status", "diff", "checks", "create", "ready", "edit"},
 		"auth":      {"status"},
 		"extension": {"list"},
-		"stack":     {"view", "up", "down", "top", "bottom", "trunk", "init", "add", "rebase", "checkout", "push", "submit", "sync", "unstack"},
+		"stack":     {"view", "up", "down", "top", "bottom", "trunk", "init", "add", "rebase", "checkout", "push", "submit", "sync", "unstack", "link"},
 	} {
 		parent, ok := gh.Subcommands[path]
 		if !ok {

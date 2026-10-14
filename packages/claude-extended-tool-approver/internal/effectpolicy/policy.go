@@ -917,8 +917,10 @@ func (NetworkAccess) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) 
 //   - "pr-edit": `gh pr edit` — Permitted on the "github" resource: a PR
 //     METADATA write (the assignee, title or body of a pull request that
 //     already exists). It neither creates a PR nor moves any ref, and
-//     nothing in the modeled flag set changes the PR's base branch or marks
-//     it ready (both stay unmodeled, so they abstain). Operator ruling
+//     nothing in `gh pr edit`'s modeled flag set changes the PR's base branch
+//     or marks it ready (both stay unmodeled, so they abstain); `gh stack
+//     link` carries the same operation for the base fix-ups it makes on the
+//     existing PRs of a stack. Operator ruling
 //     (Phillip, 2026-10-04 on pg2-cjfpy, "any command which is supposed to
 //     work as part of a skill should be autoapproved", applied to the class
 //     D forms on pg2-maars 2026-10-05; gate 5 / P15 report
@@ -932,6 +934,18 @@ func (NetworkAccess) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool) 
 //     PRs and their branches are not deleted or closed. With --local the
 //     effect is retargeted to "read" (nothing remote is touched). Same
 //     provenance as "pr-edit" (P15 report testdata/p15/gh-stack-unstack.md).
+//
+//   - "stack-link": `gh stack link` (without --open) — Permitted on the
+//     "github" resource: it creates, or extends, the stack GROUPING of a set
+//     of PRs on GitHub (additive only: the extension's own help says existing
+//     PRs are never removed from a stack). The same verb also carries a plain
+//     atomic push, draft PR creations and "pr-edit" base fix-ups of existing
+//     PRs as SEPARATE effects, each judged by its own operation; "stack-link"
+//     is only the grouping. The draft default is what lets it approve: upstream
+//     cmd/link.go creates new PRs with draft = !open, so only the unmodeled
+//     --open flag could make a ready PR (it also marks existing drafts ready),
+//     and --open stays unapproved (the `gh pr ready` Abstain ruling, pg2-psiqh).
+//     Same provenance as "pr-edit" (P15 report testdata/p15/gh-stack-link.md).
 //
 //   - "fetch": `git fetch <remote>` — Permitted for a plain configured
 //     remote NAME (no scheme, no path separator, not option-shaped): objects
@@ -1084,6 +1098,11 @@ func (RemoteMutation) Judge(e cmddesc.Effect, ctx PolicyContext) (Finding, bool)
 			return Finding{Verdict: Permitted, Reason: "dissolving a stack grouping on GitHub (gh stack unstack; the PRs and branches stay; skill-instructed, operator ruling 2026-10-04 on pg2-cjfpy, pg2-19hdz)"}, true
 		}
 		return Finding{Verdict: Unknown, Reason: "stack-unstack is only covered for the github resource"}, true
+	case "stack-link":
+		if e.Resource == "github" {
+			return Finding{Verdict: Permitted, Reason: "creating or extending a stack grouping on GitHub (gh stack link without --open; additive only; skill-instructed, operator ruling 2026-10-04 on pg2-cjfpy, pg2-19hdz)"}, true
+		}
+		return Finding{Verdict: Unknown, Reason: "stack-link is only covered for the github resource"}, true
 	case "fetch":
 		if isPlainRemoteName(e.Resource) {
 			return Finding{Verdict: Permitted, Reason: "fetch from a named git remote only brings objects into this clone's own refs"}, true

@@ -1,11 +1,47 @@
 package effectpolicy
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/cmddesc"
 	"github.com/phillipgreenii/claude-extended-tool-approver/internal/evalcontract"
 )
+
+// TestRcValidateGateCannotApproveWithoutAGradleSchema is the executable
+// reason `rc-validate` (pg2-maars' class D form, re-checked on pg2-19hdz) was
+// NOT landed. Its caller-supplied gate command after `--` would need a
+// child-command interpreter that rebases the child's working directory onto
+// <wt> (ChildInvocation.Cwd), but the realistic gates (`./gradlew test`,
+// `gradle build --no-configuration-cache`) have no schema at all, so each one
+// abstains as "no schema for ..." whether it is run bare or already rebased
+// the way `env -C <wt>` would rebase it. A child interpreter could therefore
+// never make rc-validate approve. If a gradle schema is ever added (its own
+// approval decision: running gradle tasks is checkout-code execution, not a
+// fact of rc-validate), this test fails and rc-validate should be revisited.
+func TestRcValidateGateCannotApproveWithoutAGradleSchema(t *testing.T) {
+	root, _ := fixture(t)
+	reg := cmddesc.DefaultRegistry()
+	for _, name := range []string{"gradlew", "gradle", "rc-validate"} {
+		if _, ok := reg.Lookup(name); ok {
+			t.Errorf("%s now has a schema: revisit whether rc-validate can land (pg2-19hdz re-check)", name)
+		}
+	}
+	for _, cmd := range []string{
+		"./gradlew test",
+		"gradle build --no-configuration-cache",
+		"env -C " + root + "/wt ./gradlew test",
+		"rc-validate . proj --lock-wait 600 --run-timeout 1800 -- ./gradlew test",
+	} {
+		resp := Evaluate(evalcontract.Request{Command: cmd, CWD: root, ProjectRoot: root}, reg, DefaultPolicies(), DefaultGraphPolicies())
+		if resp.Decision == evalcontract.Approve {
+			t.Errorf("%q approved; a gradle gate has no schema, so it must not (reason: %s)", cmd, resp.Reason)
+		}
+		if !strings.Contains(resp.Reason, "no schema for") {
+			t.Errorf("%q: reason = %q, want it to name the missing schema", cmd, resp.Reason)
+		}
+	}
+}
 
 // TestZiprecruiterPluginCommands pins pg2-cjfpy.4 end to end: the command
 // forms the ZR marketplace plugins (gh-stack, daily-focus,
@@ -112,6 +148,16 @@ func TestZiprecruiterPluginCommands(t *testing.T) {
 		"gh stack unstack",
 		"gh stack unstack 7",
 		"gh stack unstack --local 7",
+		// gh stack link without --open: new PRs are drafts (the extension's
+		// upstream source, cmd/link.go: CreatePR(..., !opts.open)), the push is
+		// plain and atomic, and the stack grouping is additive.
+		"gh stack link branch-a branch-b",
+		"gh stack link branch-a branch-b branch-c",
+		"gh stack link 7 branch-c",
+		"gh stack link 10 20 30",
+		"gh stack link https://github.com/o/r/pull/41 https://github.com/o/r/pull/42",
+		"gh stack link --base develop branch-a branch-b",
+		"gh stack link --remote origin branch-a branch-b",
 		"pjira comment ABC-123 'progress update'",
 		"pjira create --project ABC --type Task --summary 'a summary' --description 'a description'",
 		"pjira transition ABC-123 Done",
@@ -139,11 +185,9 @@ func TestZiprecruiterPluginCommands(t *testing.T) {
 	})
 
 	abstain := []string{
-		// Still held: an undocumented draft default (gh stack link), a
-		// child-command interpreter plus an approvable gate (rc-validate: a
-		// realistic Gradle gate has no schema, so it cannot approve), and the
-		// plain forms the schemas leave unapproved.
-		"gh stack link branch-a branch-b",
+		// Still held: a child-command interpreter plus an approvable gate
+		// (rc-validate: a realistic Gradle gate has no schema, so it cannot
+		// approve), and the plain forms the schemas leave unapproved.
 		"gh stack submit",
 		"gh stack push --remote https://example.com/x.git",
 		"rc-validate . proj --lock-wait 600 --run-timeout 1800 -- ./gradlew test",
@@ -159,6 +203,11 @@ func TestZiprecruiterPluginCommands(t *testing.T) {
 		"gh pr edit 12 --add-assignee=@me --draft",
 		"gh stack delete",
 		"gh stack unstack --open",
+		"gh stack link branch-a",
+		"gh stack link --base develop --open branch-a branch-b",
+		"gh stack link --remote https://example.com/x.git branch-a branch-b",
+		"gh stack link --force branch-a branch-b",
+		"gh stack link --draft branch-a branch-b",
 		"pjira comment ABC-123",
 		"pjira comment --config pjira.toml ABC-123 'progress update'",
 		"pjira transition ABC-123",
