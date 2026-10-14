@@ -429,7 +429,7 @@ review`. The claim is still released (status open, assignee cleared) — the lab
   daemon's own credentials and so fails wherever the daemon cannot fetch; a commit already local
   is trusted as is. Bead `pg2-hh32y`.
 
-- **`INV-CCH-22`** — before a dispatch preflights anything that costs a session (capacity,
+- **`INV-CCH-22`** <!-- uuid: 347d82ef-4149-4a35-945b-754ba35a8e6a --> — before a dispatch preflights anything that costs a session (capacity,
   isolation, launch), a role that opts in MUST have the handler check, read-only and at zero model
   cost, that the dispatch is still worth running, and MUST decline it, launching no session and
   writing nothing, when the check says no. The check is chosen by the role's `precheck` setting:

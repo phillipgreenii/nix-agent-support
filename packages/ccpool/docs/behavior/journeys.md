@@ -28,7 +28,7 @@ what it includes (`INV-22`).
 **Primary actor:** `ACTOR-CCP-CALLER`.
 **Level:** user-goal.
 **Preconditions:** a session name (existing or new).
-_Requires:_ `INV-SESS-2`, `INV-STATE-2`, `INV-TRUST-1`.
+_Requires:_ `INV-SESS-2`, `INV-STATE-2`, `INV-TRUST-1`, `INV-POOL-4`.
 _Includes:_ `USECASE-CCP-ENSURE`.
 
 1. The caller dispatches a prompt to a named session, optionally marked autonomous.
@@ -39,6 +39,9 @@ Extensions:
 
 - 2a. The session is already `working`: the dispatch is refused as busy (`INV-SESS-2`); nothing
   is delivered.
+- 2b. The account's usage window is at its limit: the dispatch is refused with its own
+  usage-limit outcome naming the window and its reset — never reported as busy — and nothing is
+  launched or delivered (`INV-POOL-4`).
 - 3a. The turn ends in `needs_input`: the caller is told a question is pending, not a failure
   (`INV-STATE-2`).
 - 3b. The turn ends in `errored`: the caller is told it failed, unclassified until `INV-SESS-1`'s
@@ -49,7 +52,7 @@ Extensions:
 **Primary actor:** `ACTOR-CCP-CALLER`.
 **Level:** user-goal.
 **Preconditions:** a session name.
-_Requires:_ `INV-SESS-3`, `INV-STATE-2`.
+_Requires:_ `INV-SESS-3`, `INV-STATE-2`, `INV-POOL-4`.
 _Includes:_ `USECASE-CCP-ENSURE`.
 
 1. The caller dispatches a prompt and asks not to wait, optionally demanding ingestion
@@ -62,6 +65,8 @@ Extensions:
 
 - 2a. Confirmation was asked for and the prompt was never taken up: reported as its own distinct
   outcome, never as busy or a plain timeout (`INV-SESS-3`).
+- 2b. The account's usage window is at its limit: refused with the same usage-limit outcome as
+  `USECASE-CCP-DISPATCH` (extension 2b), nothing launched or delivered (`INV-POOL-4`).
 
 ### `USECASE-CCP-CANCEL` — interrupt the current turn <!-- uuid: 0c5400c6-98b7-4eb7-a4a2-32e68bd8e4b8 -->
 
