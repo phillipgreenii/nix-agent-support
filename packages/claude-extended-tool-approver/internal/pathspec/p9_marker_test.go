@@ -24,6 +24,8 @@
 package pathspec
 
 import (
+	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -146,32 +148,61 @@ func TestP9Marker(t *testing.T) {
 		t.Setenv("PATH", hangDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 		orig := gitProbeTimeout
-		gitProbeTimeout = 100 * time.Millisecond
 		t.Cleanup(func() { gitProbeTimeout = orig })
 
-		type result struct {
-			state WorktreeState
-			err   error
-		}
-		done := make(chan result, 1)
-		start := time.Now()
-		go func() {
-			state, err := realWorktreeState(t.TempDir())
-			done <- result{state, err}
-		}()
-		select {
-		case r := <-done:
-			if r.state != WorktreeUnknown || r.err == nil {
-				t.Fatalf("got (%s, %v), want (unknown, non-nil timeout error)", r.state, r.err)
+		// The production deadline is armed BEFORE git is exec'd, so on a loaded
+		// host a fixed tight value can expire before the hanging git ever
+		// starts (observed: load average 11-22, pg2-mvtyg), in which case the
+		// run says nothing about the kill path. The hang marker is the observed
+		// "git really started" signal: a probe counts only if the marker
+		// exists, and otherwise it is retried with a 4x larger deadline. A
+		// start is nearly instant on an idle host, so the first (tight)
+		// attempt normally decides and the test stays fast; the larger
+		// attempts only run when the host is too busy to start git in time.
+		// Each attempt still has to hit the deadline (the git sleeps 30s), so
+		// removing the production timeout makes every attempt fail by hanging.
+		const probeBudgetSlack = 10 * time.Second // wall-clock allowed past the deadline (process-group kill + WaitDelay)
+		timeouts := []time.Duration{250 * time.Millisecond, time.Second, 4 * time.Second, 16 * time.Second}
+		for i, timeout := range timeouts {
+			if err := os.Remove(hangMarker); err != nil && !os.IsNotExist(err) {
+				t.Fatalf("clear hang marker: %v", err)
 			}
-			if !markerPresent(hangMarker) {
-				t.Fatal("the trusted hanging git never started, so the test did not exercise the timeout")
+			gitProbeTimeout = timeout
+
+			type result struct {
+				state WorktreeState
+				err   error
 			}
-			if d := time.Since(start); d > 10*time.Second {
-				t.Fatalf("returned after %s; a 100ms timeout must bound the probe", d)
+			root := t.TempDir()
+			done := make(chan result, 1)
+			start := time.Now()
+			go func() {
+				state, err := realWorktreeState(root)
+				done <- result{state, err}
+			}()
+			select {
+			case r := <-done:
+				started := markerPresent(hangMarker)
+				if !started && i < len(timeouts)-1 {
+					t.Logf("hanging git did not start within %s (host busy); retrying with a larger deadline", timeout)
+					continue
+				}
+				if !started {
+					t.Fatalf("the trusted hanging git never started within %s, so the test did not exercise the timeout", timeout)
+				}
+				if r.state != WorktreeUnknown || r.err == nil {
+					t.Fatalf("got (%s, %v), want (unknown, non-nil timeout error)", r.state, r.err)
+				}
+				if !errors.Is(r.err, context.DeadlineExceeded) {
+					t.Fatalf("error %v does not wrap context.DeadlineExceeded; the hung git was not ended by the probe timeout", r.err)
+				}
+				if d := time.Since(start); d > timeout+probeBudgetSlack {
+					t.Fatalf("returned after %s; a %s timeout must bound the probe", d, timeout)
+				}
+			case <-time.After(timeout + probeBudgetSlack):
+				t.Fatalf("realWorktreeState did not return within %s of a %s timeout - it hung", probeBudgetSlack, timeout)
 			}
-		case <-time.After(15 * time.Second):
-			t.Fatal("realWorktreeState did not return within 15s of a 100ms timeout - it hung")
+			return
 		}
 	})
 }
