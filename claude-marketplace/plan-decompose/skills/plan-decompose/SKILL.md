@@ -178,7 +178,13 @@ the block.
    `pg2-93e5s`/`pg2-cjwfu`, 2026-09-23 — a flake-check-clean role wiring silently no-op'd every
    scheduled tick).
 7. **Acceptance criteria** — independently verifiable checklist (bead-grooming altitude for
-   the issue type); stored in the medium's dedicated acceptance field.
+   the issue type); stored ONLY in the medium's dedicated acceptance field (`bd show` prints it
+   under ACCEPTANCE CRITERIA, so the implementer's single read still covers it) and NEVER
+   repeated in the body. `create-packet.sh` and `update-packet.sh` refuse (exit 3) a body that
+   carries an "Acceptance criteria" heading followed by a checklist, or 2 or more whole
+   acceptance lines (operator ruling, Phillip, 2026-10-13: "only the aceptance field needs to
+   hold the acceptance"). The body may still restate a single verbatim line, such as an AC that
+   quotes a Binding decision.
 8. **Out of scope** — names the sibling packet holding each neighboring concern.
 9. **Lifecycle bounds + escalation pointer** — one line each: "this packet = implement +
    validate; isolation/landing/cleanup/claim hygiene are consumer-standard" (state deviations
@@ -256,7 +262,8 @@ deduplication.
    **Draft workflow**: draft each packet's content into scratch files with the Write tool and
    make fix-loop revisions to them with the Edit tool — never a full-content Bash heredoc rewrite
    of the whole packet. Bash stays for this plugin's helper scripts ("Helper scripts") and your
-   own mechanical pre-filter checks.
+   own mechanical pre-filter checks. A fix-loop revision is stored with `scripts/update-packet.sh`
+   (below), never a raw `bd update`.
 
    **Design file (one per run)**: materialize the design to ONE file per run and pass it as
    `--design` everywhere. A design stored in the medium (a bead) is written out ONCE via
@@ -313,8 +320,9 @@ deduplication.
    dedup check finds no match, and stamps `pd_curated_rev` to the docket's CURRENT `pd_rev` (read
    once, not re-read per packet); the stamp rule is "Curation stamp" under Metadata keys. A
    RE-ENTRY into this step from step 5's, step 6's, or step 7's loop-back revises an
-   ALREADY-CREATED packet's CONTENT only (the binding's "Revising an already-created packet's
-   content"). Record the PLANNED ORDERING (blocked-by pairs implied by Consumes/Produces) in the
+   ALREADY-CREATED packet's CONTENT only, written with `scripts/update-packet.sh --id <packet>
+--body-file <assembled body> [--acceptance-file <file>]` (never a raw `bd update`, never
+   `create-packet.sh` again; the binding's "Revising an already-created packet's content"). Record the PLANNED ORDERING (blocked-by pairs implied by Consumes/Produces) in the
    decomposition-report draft as you go — the draft is your working state (in-context or a
    scratch file); it becomes durable only via `write-report`, and the abort path writes its
    current content. Boundary rule: split only where a reviewer could reject one half while
@@ -333,7 +341,9 @@ deduplication.
    file-overlap collisions (extract each packet's Files paths, intersect, require a planned
    edge between any two packets sharing a path); out-of-scope pointer validity (each "that is
    packet X" claim checked against X's Objective); shared-preamble byte-identity (diff the
-   part-1 blocks); metadata completeness (stamps, policy, `pd_rev`); citation-target
+   part-1 blocks); metadata completeness (stamps, policy, `pd_rev`) and field placement (acceptance criteria only
+   in the acceptance field, none repeated in the assembled body — `create-packet.sh` and
+   `update-packet.sh` refuse a duplicate with exit 3, so catch it here first); citation-target
    existence (every `[design: <section>]` marker's target actually exists in the design
    text — a `Parent > Child` path counts as existing when `assemble-packet.sh` would resolve
    it to exactly one heading: the last element is the heading text, the earlier elements are
@@ -457,10 +467,20 @@ it by searching disk is both slower and redundant.
   (see `plan-decompose-beads/SKILL.md`'s `create-packet` section): never hand-type a
   `bd create`/`bd defer` pair for a packet yourself. It bakes `--no-inherit-labels` in as the
   default so the flag can no longer be dropped by accident (`--allow-inherit-labels` opts back
-  in explicitly).
+  in explicitly). It also runs the shared acceptance guard before `bd create` and exits 3, making
+  no bd call, when the body repeats the acceptance criteria (anatomy part 7).
   ALWAYS pass `--actor <your-session-id>[-<role>]` (your own explicit agent identity, the same one
   you claim with): the script forwards it to both its `bd create` and `bd defer`, so packets are
   attributed to you and not to the operator's git `user.name`.
+- `scripts/update-packet.sh --id <packet> --body-file <file> [--acceptance-file <file>] [--actor
+<id>]` — the ONLY way to rewrite the content of an already-created packet (the binding's
+  "Revising an already-created packet's content"; mode `reconcile`'s re-curation content write):
+  one `bd update <id> --body-file <file>` (plus `--acceptance` when `--acceptance-file` is given),
+  behind the same acceptance guard as `create-packet.sh`, run against the given acceptance file or,
+  without one, the packet's stored acceptance. It accepts `-h`/`--help`, rejects every other flag,
+  and never touches metadata, labels, status or creation, so a restamp stays its own explicit
+  `--set-metadata` call. Pass `--actor` as for `create-packet.sh`. Exit 3 = duplicated acceptance
+  in the body (drop it from the body), 2 usage, 1 generic.
 - `scripts/audit-docket-label-leak.sh` — read-only; run it once after each batch of
   `create-packet` calls, before `release-set`. It calls
   `bd list --label docket --status all -n 0 --json` and flags every returned bead whose
@@ -480,7 +500,7 @@ state the constraint in the prompt itself, since a fresh sub-agent has no other 
 **Cold-read** (mode `decompose` step 6; one Agent call per packet): `subagent_type:
 "plan-decompose:cold-reader"` (`model` only when the brief overrides the haiku tier); the prompt
 is ONLY two paths — the packet's ASSEMBLED body file and acceptance file, the same files passed to
-`create-packet.sh` (`--body-file`, `--acceptance-file`) or to the fix-loop `bd update` (criteria
+`create-packet.sh` (`--body-file`, `--acceptance-file`) or to the fix-loop `update-packet.sh` (criteria
 passed inline are first written to an acceptance file), so the reader judges the stored text.
 Never paste packet text into the prompt; the reader's own agent file (`agents/cold-reader.md`)
 carries its instructions. Dispatch one round's cold-reads as multiple Agent tool_use blocks in a

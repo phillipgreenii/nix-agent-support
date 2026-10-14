@@ -20,7 +20,15 @@
 # Creates one work-packet bead under --parent, defers it immediately
 # afterward (HELD is status-based, per create-packet's own convention),
 # and prints the new bead id to stdout.
+#
+# Before any bd call it runs the shared acceptance guard
+# (lib/acceptance-guard.bash): a body that repeats its acceptance criteria is
+# refused with exit 3, because acceptance lives ONLY in the acceptance field.
 set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/acceptance-guard.bash
+source "$SCRIPT_DIR/lib/acceptance-guard.bash"
 
 show_help() {
   cat <<'HELP'
@@ -33,6 +41,9 @@ Usage:
                     [--allow-inherit-labels] [--actor <id>]
 
 Runs, in order:
+  the acceptance guard (exit 3, no bd call, when the body repeats the acceptance
+    criteria: an "Acceptance criteria" heading followed by a checklist, or 2 or
+    more whole acceptance lines appearing as whole lines in the body)
   bd create "<title>" -t task --parent <docket-id> --no-inherit-labels \
     --body-file <file> --acceptance "<text>" [--metadata <json>] \
     [--labels <labels>] [--actor <id>] --silent
@@ -156,6 +167,8 @@ if [[ -n $ACCEPTANCE_FILE ]]; then
   [[ -f $ACCEPTANCE_FILE ]] || die "--acceptance-file not found: $ACCEPTANCE_FILE" 2
   ACCEPTANCE="$(cat "$ACCEPTANCE_FILE")"
 fi
+
+acceptance_guard_check "$BODY_FILE" "$ACCEPTANCE" || exit 3
 
 command -v bd >/dev/null 2>&1 || die "bd not found on PATH"
 

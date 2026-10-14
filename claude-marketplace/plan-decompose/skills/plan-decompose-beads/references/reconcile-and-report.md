@@ -19,7 +19,12 @@ even with a leftover assignee — a deferred packet is not being worked. Because
 be stored as a JSON number or a string (see `write-metadata` in `SKILL.md`), compare revisions — for order AND for
 equality — through jq `tonumber` on both sides (e.g.
 `(.metadata.pd_curated_rev | tonumber) < R`); never lexically (`"10" < "9"` is true) and
-never raw (`4 == "4"` is false). Mappings: HOLD a re-curated packet = `bd defer <packet-id>`
+never raw (`4 == "4"` is false). Mappings: re-curation CONTENT write =
+`claude-marketplace/plan-decompose/scripts/update-packet.sh --id <packet-id> --body-file <file>
+[--acceptance-file <file>] --actor "<session-id>[-<role>]"` (never a raw `bd update`; it cannot
+stamp, so the restamp below stays its own call; re-curating an old packet that carries a
+duplicated acceptance block drops the duplicate, because the script refuses a body that repeats
+it); HOLD a re-curated packet = `bd defer <packet-id>`
 plus `bd update <packet-id> --set-metadata pd_curated_rev=<R> --set-metadata pd_stale=<R>`;
 restamp an unaffected packet = `bd update <packet-id> --set-metadata pd_curated_rev=<R>`;
 clear a marker = `bd update <packet-id> --unset-metadata pd_stale`; release = `bd undefer

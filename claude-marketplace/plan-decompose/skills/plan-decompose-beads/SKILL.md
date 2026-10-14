@@ -80,8 +80,13 @@ draft that holds directives:
 ```bash
 claude-marketplace/plan-decompose/scripts/create-packet.sh \
   --parent <epic> --title "<title>" --body-file <content-file> \
-  --acceptance "<criteria>" --metadata '<json>' --actor "<session-id>[-<role>]"
+  --acceptance-file <acceptance-file> --metadata '<json>' --actor "<session-id>[-<role>]"
 ```
+
+The acceptance criteria live ONLY in the acceptance field: the script runs the shared acceptance
+guard (`scripts/lib/acceptance-guard.bash`) before any bd call and exits 3 when the body repeats
+them (an "Acceptance criteria" heading followed by a checklist, or 2 or more whole acceptance
+lines appearing as whole lines in the body).
 
 `--actor` is the caller's explicit agent identity (B-5): the script passes it to BOTH the inner
 `bd create` and `bd defer`. A caller MUST pass it. Without it `bd` records its default actor
@@ -118,9 +123,15 @@ is controlled by the explicit `--label`/`--no-inherit-labels` flags passed at cr
 the parent's own labels.
 
 **Revising an already-created packet's content** (core skill mode `decompose` steps 5-7's
-loop-backs to step 3; incident on docket `tc-rjzd3`, fixed as `tc-g7tmr`): `bd update
-<packet-id> --body-file <fixed-content-file>` (a re-assembled body) — content only; `create-packet` runs once per
-packet. The stamp rule that forbids `create-packet` again and any `--set-metadata
+loop-backs to step 3; incident on docket `tc-rjzd3`, fixed as `tc-g7tmr`):
+`claude-marketplace/plan-decompose/scripts/update-packet.sh --id <packet-id> --body-file
+<fixed-content-file> [--acceptance-file <file>] --actor "<session-id>[-<role>]"` (a re-assembled
+body) — never a raw `bd update`, never `create-packet` again. It issues ONE `bd update <packet-id>
+--body-file <file>` (plus `--acceptance` from `--acceptance-file`), after the acceptance guard run
+against the given acceptance file or, without one, the stored acceptance read with
+`bd show <packet-id> --json` (the `.data` envelope or bare array unwrapped; key
+`acceptance_criteria`, absent when empty). It rejects every other flag, so it cannot stamp, relabel
+or defer; `create-packet` runs once per packet. The stamp rule that forbids `create-packet` again and any `--set-metadata
 pd_curated_rev=...` here is the core skill's "Curation stamp". The restamps mode `reconcile`
 performs are in "Reconcile restamps" in `references/reconcile-and-report.md`.
 

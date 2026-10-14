@@ -199,3 +199,70 @@ MOCK
   [[ "$output" == *"bd defer xyz-1.10 failed"* ]]
   [[ "$output" == *"xyz-1.10 was created but is NOT held"* ]]
 }
+
+# --- acceptance guard (lib/acceptance-guard.bash; speedup plan P5) -----------
+
+@test "guard: a body repeating 2+ whole acceptance lines is refused with exit 3 and no bd call" {
+  mock_bd "xyz-1.20"
+  printf 'Objective: do the thing\n\n- [ ] first criterion\n- [ ] second criterion\n' >"$BODY_FILE"
+  printf -- '- [ ] first criterion\n- [ ] second criterion\n' >"$ACCEPT_FILE"
+  run "$SCRIPT" --parent xyz-1 --title "a packet" --body-file "$BODY_FILE" --acceptance-file "$ACCEPT_FILE"
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"first criterion"* ]]
+  [[ "$output" == *"second criterion"* ]]
+  [ ! -e "$CALL_LOG" ]
+}
+
+@test "guard: a duplicated block is refused when acceptance is passed inline" {
+  mock_bd "xyz-1.21"
+  printf 'intro\n  first criterion  \nsecond criterion\n' >"$BODY_FILE"
+  run "$SCRIPT" --parent xyz-1 --title "a packet" --body-file "$BODY_FILE" --acceptance "$(printf '[ ] first criterion\n[ ] second criterion')"
+  [ "$status" -eq 3 ]
+  [ ! -e "$CALL_LOG" ]
+}
+
+@test "guard: ONE matching acceptance line passes" {
+  mock_bd "xyz-1.22"
+  printf 'Binding decision:\nuse the flag\nmore text\n' >"$BODY_FILE"
+  run "$SCRIPT" --parent xyz-1 --title "a packet" --body-file "$BODY_FILE" --acceptance "$(printf -- '- [ ] use the flag\n- [ ] something else entirely')"
+  [ "$status" -eq 0 ]
+  [ "$output" = "xyz-1.22" ]
+}
+
+@test "guard: the same acceptance line repeated twice in the body is still ONE match" {
+  mock_bd "xyz-1.23"
+  printf 'use the flag\nuse the flag\n' >"$BODY_FILE"
+  run "$SCRIPT" --parent xyz-1 --title "a packet" --body-file "$BODY_FILE" --acceptance "$(printf -- '- [ ] use the flag\n- [ ] other')"
+  [ "$status" -eq 0 ]
+}
+
+@test "guard: an Acceptance criteria heading followed by a checklist is refused with exit 3" {
+  mock_bd "xyz-1.24"
+  printf '## Objective\n\nx\n\n## Acceptance criteria\n\n- [ ] something verifiable\n' >"$BODY_FILE"
+  run "$SCRIPT" --parent xyz-1 --title "a packet" --body-file "$BODY_FILE" --acceptance "unrelated text"
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"Acceptance criteria"* ]]
+  [[ "$output" == *"something verifiable"* ]]
+  [ ! -e "$CALL_LOG" ]
+}
+
+@test "guard: a numbered bold heading followed by a checklist is refused" {
+  mock_bd "xyz-1.25"
+  printf '7. **Acceptance criteria:**\n   - [x] done thing\n' >"$BODY_FILE"
+  run "$SCRIPT" --parent xyz-1 --title "a packet" --body-file "$BODY_FILE" --acceptance "unrelated text"
+  [ "$status" -eq 3 ]
+}
+
+@test "guard: an Acceptance criteria heading with no checklist before the next heading passes" {
+  mock_bd "xyz-1.26"
+  printf '## Acceptance criteria\n\nsee the acceptance field\n\n## Validation\n\n- [ ] run the thing\n' >"$BODY_FILE"
+  run "$SCRIPT" --parent xyz-1 --title "a packet" --body-file "$BODY_FILE" --acceptance "unrelated text"
+  [ "$status" -eq 0 ]
+}
+
+@test "guard: the guard runs before the bd-on-PATH check" {
+  PATH="/usr/bin:/bin"
+  printf -- '- [ ] a\n- [ ] b\n' >"$BODY_FILE"
+  run "$SCRIPT" --parent xyz-1 --title "a packet" --body-file "$BODY_FILE" --acceptance "$(printf -- '- [ ] a\n- [ ] b')"
+  [ "$status" -eq 3 ]
+}

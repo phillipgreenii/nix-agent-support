@@ -52,7 +52,10 @@ load-bearing:
    cites it), else the section goes on the not-decomposed list. Every other packet is
    UNAFFECTED: this step does not touch it — step 5 restamps it.
 
-   Re-curate every affected, UNCLAIMED packet, restamp it (`pd_curated_rev=R`), and HOLD it —
+   Re-curate every affected, UNCLAIMED packet — its content write is `scripts/update-packet.sh`
+   (never a raw `bd update`; the binding's reconcile mappings), and re-curating an old packet that
+   carries a duplicated acceptance block MUST drop the duplicate, since the script refuses it —
+   restamp it (`pd_curated_rev=R`, its own explicit `--set-metadata` call), and HOLD it —
    deferred, with `pd_stale=R` — until step 5. The hold keeps a not-yet-verified re-curation
    out of every consumer's hands (its stamp now matches `pd_rev`, but `pd_stale` is set), and
    because the marker equals its own stamp, a resume after an interruption classifies it
