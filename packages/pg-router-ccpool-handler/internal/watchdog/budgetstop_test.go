@@ -273,6 +273,22 @@ func (b *stopBD) has(prefix string) bool {
 
 const splitComment = "comment zr-1 budget stops reached threshold 2; queued for split review"
 
+// escScenario is the stop history an escalation test starts from. The drain
+// roles run at threshold 1 (bead pg2-izvr8: a session that fails on time
+// escalates at once), so a SINGLE stop with no prior history must escalate
+// exactly as the second stop does at threshold 2.
+type escScenario struct {
+	name      string
+	threshold int
+	prior     []string // budget-stop labels already on the bead
+	sessions  string   // expected "stop sessions:" list in the human comment
+}
+
+var escScenarios = []escScenario{
+	{"second stop at threshold 2", 2, []string{"budget-stop:s0"}, "s, s0"},
+	{"first stop at threshold 1", 1, nil, "s"},
+}
+
 func TestEscalate_belowThresholdDoesNothing(t *testing.T) {
 	bd := seeded()
 	newEscWD(bd, "worker", 3).terminal(context.Background(), "s", "zr-1", stopBE("worker"))
@@ -282,16 +298,20 @@ func TestEscalate_belowThresholdDoesNothing(t *testing.T) {
 }
 
 func TestEscalate_atThresholdQueuesSplitReviewBeforeUnclaim(t *testing.T) {
-	bd := seeded("budget-stop:s0")
-	newEscWD(bd, "worker", 2).terminal(context.Background(), "s", "zr-1", stopBE("worker"))
-	lab := bd.idx("update zr-1 --add-label needs-split-review")
-	cm := bd.idx(splitComment)
-	un := bd.idx(unclaim)
-	if lab < 0 || cm < 0 || un < 0 || !(lab < un && cm < un) {
-		t.Fatalf("want label+comment before unclaim; lab=%d cm=%d un=%d calls=%v", lab, cm, un, bd.calls)
-	}
-	if bd.has("update zr-1 --add-label human") {
-		t.Errorf("must not add human on the split path; calls=%v", bd.calls)
+	for _, sc := range escScenarios {
+		t.Run(sc.name, func(t *testing.T) {
+			bd := seeded(sc.prior...)
+			newEscWD(bd, "worker", sc.threshold).terminal(context.Background(), "s", "zr-1", stopBE("worker"))
+			lab := bd.idx("update zr-1 --add-label needs-split-review")
+			cm := bd.idx(fmt.Sprintf("comment zr-1 budget stops reached threshold %d; queued for split review", sc.threshold))
+			un := bd.idx(unclaim)
+			if lab < 0 || cm < 0 || un < 0 || !(lab < un && cm < un) {
+				t.Fatalf("want label+comment before unclaim; lab=%d cm=%d un=%d calls=%v", lab, cm, un, bd.calls)
+			}
+			if bd.has("update zr-1 --add-label human") {
+				t.Errorf("must not add human on the split path; calls=%v", bd.calls)
+			}
+		})
 	}
 }
 
@@ -307,25 +327,28 @@ func TestEscalate_humanBranches(t *testing.T) {
 		{"was-split", "worker", []string{"was-split"}, "already split"},
 		{"split-from child", "worker", []string{"split-from:pg2-abc"}, "split child"},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			bd := seeded(append([]string{"budget-stop:s0"}, tc.labels...)...)
-			newEscWD(bd, tc.role, 2).terminal(context.Background(), "s", "zr-1", stopBE(tc.role))
-			exact := "comment zr-1 budget stops reached threshold 2; escalated to human (" + tc.reason +
-				"; not split). stop sessions: s, s0. last stop: session=s limit=tokens used=1000 cap=1000"
-			lab, cm, un := bd.idx("update zr-1 --add-label human"), bd.idx(exact), bd.idx(unclaim)
-			if lab < 0 || cm < 0 || un < 0 || !(lab < un && cm < un) {
-				t.Fatalf("lab=%d cm=%d un=%d; calls=%v", lab, cm, un, bd.calls)
-			}
-			if bd.has("update zr-1 --add-label needs-split-review") {
-				t.Errorf("human path must not queue split review; calls=%v", bd.calls)
-			}
-			// pg2-47rsh: a triage session that hit its own budget drops
-			// needs-split-review (human instead); other human routes leave it.
-			rm := bd.idx("update zr-1 --remove-label needs-split-review")
-			if (tc.reason == "triage role") != (rm >= 0) || (rm >= 0 && rm > un) {
-				t.Errorf("remove-label needs-split-review at %d (unclaim %d); calls=%v", rm, un, bd.calls)
-			}
-		})
+		for _, sc := range escScenarios {
+			t.Run(tc.name+"/"+sc.name, func(t *testing.T) {
+				bd := seeded(append(append([]string{}, sc.prior...), tc.labels...)...)
+				newEscWD(bd, tc.role, sc.threshold).terminal(context.Background(), "s", "zr-1", stopBE(tc.role))
+				exact := fmt.Sprintf("comment zr-1 budget stops reached threshold %d; escalated to human (%s"+
+					"; not split). stop sessions: %s. last stop: session=s limit=tokens used=1000 cap=1000",
+					sc.threshold, tc.reason, sc.sessions)
+				lab, cm, un := bd.idx("update zr-1 --add-label human"), bd.idx(exact), bd.idx(unclaim)
+				if lab < 0 || cm < 0 || un < 0 || !(lab < un && cm < un) {
+					t.Fatalf("lab=%d cm=%d un=%d; calls=%v", lab, cm, un, bd.calls)
+				}
+				if bd.has("update zr-1 --add-label needs-split-review") {
+					t.Errorf("human path must not queue split review; calls=%v", bd.calls)
+				}
+				// pg2-47rsh: a triage session that hit its own budget drops
+				// needs-split-review (human instead); other human routes leave it.
+				rm := bd.idx("update zr-1 --remove-label needs-split-review")
+				if (tc.reason == "triage role") != (rm >= 0) || (rm >= 0 && rm > un) {
+					t.Errorf("remove-label needs-split-review at %d (unclaim %d); calls=%v", rm, un, bd.calls)
+				}
+			})
+		}
 	}
 }
 
