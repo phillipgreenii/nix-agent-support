@@ -73,7 +73,8 @@ false-allow set. A `denied` row now always carries a real decline reason in
 It is derived from `permission_mode`, `prompt_id`, and `hook_decision` by
 `asklog.ApprovalSource`; it is NOT a stored column. It classifies **context, not
 outcome**: a `denied` or `pending` row still gets a bucket (an auto-mode denial
-buckets as `auto`), which is what the false-denial calibration relies on.
+with no CETA allow and no prompt buckets as `auto`), which is what the
+false-denial calibration relies on.
 
 `subagent` is deliberately NOT a value on this axis — it would conflate two
 orthogonal axes. Segment subagents by crossing this axis with the separate
@@ -83,7 +84,10 @@ The derivation is an ordered decision list (first match wins):
 
 1. `permission_mode` is `null` → `unknown` — every pre-v5 (pre-migration) row, since the field was not captured then.
 2. `permission_mode == "bypassPermissions"` → `bypass`.
-3. `permission_mode` in {`auto`, `dontAsk`} → `auto`.
+3. `permission_mode` in {`auto`, `dontAsk`} → split by what the row itself proves (first match wins):
+   1. CETA's own decision returned Approve (`hook_decision == "allow"`) → `hook` (checked before the prompt: a CETA allow means no prompt was needed);
+   2. a prompt fired (`prompt_id` present) → `user`;
+   3. otherwise → `auto`, meaning the auto-mode classifier or an unknown mechanism decided. `auto` is therefore NOT "every row recorded under `auto`/`dontAsk`"; to select by raw mode, filter on `permission_mode`, not `approval_source`.
 4. no prompt (`prompt_id` absent): CETA's own decision returned Approve (`hook_decision == "allow"`) → `hook`; otherwise the tool ran with no prompt and no CETA approval, i.e. the user pre-authorized it in settings → `settings`.
 5. otherwise (a prompt fired, `prompt_id` present) → `user`.
 

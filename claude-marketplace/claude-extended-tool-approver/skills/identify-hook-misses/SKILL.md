@@ -26,7 +26,7 @@ Analyze the decision database to find patterns where the hook makes wrong decisi
 - `sandbox_enabled` — `0` or `1` (or `null`) indicating whether the OS bash sandbox was active for this invocation; from the `sandbox_enabled` field.
 - `command_class` — stable, non-truncated grouping key; the field to bucket "same command" on.
 - `replay_result` — the decision the _current_ rule engine returns when replaying the row (`allow`/`ask`/`deny`/`abstain`, or empty for rows the engine did not replay, e.g. `stale-cwd`).
-- `approval_source` — derived approval-MECHANISM bucket: `unknown`, `bypass`, `auto`, `settings`, `hook`, `user`. Classifies CONTEXT, not outcome (an auto-mode _denial_ still buckets as `auto`).
+- `approval_source` — derived approval-MECHANISM bucket: `unknown`, `bypass`, `auto`, `settings`, `hook`, `user`. Classifies CONTEXT, not outcome. Under `auto`/`dontAsk` a CETA allow buckets as `hook`, a prompted row as `user`, and only the rest (classifier/unknown, including an un-prompted auto-mode _denial_) as `auto` — use `permission_mode` to select by raw mode.
 - `permission_mode` — raw Claude Code permission mode at log time (`default`/`plan`/`acceptEdits`/`dontAsk`/`auto`/`bypassPermissions`), `null` on pre-v5 rows.
 - `agent_type` — the subagent that issued the call (e.g. `Explore`), or `null` for the main agent. A SEPARATE axis from `approval_source`.
 - `outcome_notes` — free-form resolution notes; carries the `auto_mode_classifier: <reason>` string on an auto-mode denial.
@@ -171,8 +171,10 @@ Two complementary lenses find commands that ran but are "actually risky" (DEFINE
 
 ```bash
 # (1) Commands that RAN under auto/bypass but are "actually risky" (replay deny/ask).
+#     Select on the raw permission_mode: approval_source=="auto" now means only
+#     "classifier/unknown", and CETA-allowed / user-prompted auto-mode rows are hook/user.
 jq '[.[]
-     | select(.approval_source=="auto" or .approval_source=="bypass")
+     | select(.permission_mode=="auto" or .permission_mode=="dontAsk" or .permission_mode=="bypassPermissions")
      | select(.replay_result=="deny" or .replay_result=="ask")]
     | group_by(.command_class)
     | map({pattern: .[0].command_class, replay: .[0].replay_result, count: length, sample_ids: ([.[].id][0:3])})

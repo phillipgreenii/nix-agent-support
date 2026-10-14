@@ -877,8 +877,17 @@ func TestApprovalSource_Classification(t *testing.T) {
 	}{
 		{"NULL permission_mode -> unknown (all pre-migration rows)", nil, nil, allow, "unknown"},
 		{"bypassPermissions -> bypass", sp("bypassPermissions"), nil, nil, "bypass"},
-		{"auto -> auto", sp("auto"), nil, nil, "auto"},
-		{"dontAsk -> auto", sp("dontAsk"), nil, nil, "auto"},
+		// Under auto/dontAsk the row is split by what the row itself proves:
+		// a CETA allow -> hook, a prompt -> user, neither -> auto (classifier/unknown).
+		{"auto: no hook allow, no prompt -> auto (classifier/unknown)", sp("auto"), nil, nil, "auto"},
+		{"dontAsk: no hook allow, no prompt -> auto (classifier/unknown)", sp("dontAsk"), nil, nil, "auto"},
+		{"auto: CETA allow, no prompt -> hook", sp("auto"), nil, allow, "hook"},
+		{"dontAsk: CETA allow, no prompt -> hook", sp("dontAsk"), nil, allow, "hook"},
+		{"auto: CETA abstain, prompt present -> user", sp("auto"), sp("p4"), sp("abstain"), "user"},
+		{"dontAsk: no hook decision, prompt present -> user", sp("dontAsk"), sp("p5"), nil, "user"},
+		{"auto: CETA allow wins over prompt_id -> hook", sp("auto"), sp("p6"), allow, "hook"},
+		{"auto: empty prompt_id counts as no prompt -> auto", sp("auto"), sp(""), sp("abstain"), "auto"},
+		{"auto: empty prompt_id + CETA allow -> hook", sp("auto"), sp(""), allow, "hook"},
 		{"acceptEdits falls through: prompt present -> user", sp("acceptEdits"), sp("p1"), nil, "user"},
 		{"acceptEdits falls through: no prompt + not approved -> settings", sp("acceptEdits"), nil, sp("deny"), "settings"},
 		{"acceptEdits falls through: no prompt + CETA approved -> hook", sp("acceptEdits"), nil, allow, "hook"},
@@ -889,7 +898,8 @@ func TestApprovalSource_Classification(t *testing.T) {
 		// approval_source classifies CONTEXT, not outcome: a denied/pending row
 		// still gets its mechanism bucket. An auto-mode DENIAL is the primary
 		// false-denial calibration signal for pg2-okd13.2, so it MUST bucket as auto.
-		{"auto-mode denial still buckets as auto", sp("auto"), nil, sp("deny"), "auto"},
+		{"auto-mode denial (no prompt, no CETA allow) still buckets as auto", sp("auto"), nil, sp("deny"), "auto"},
+		{"auto-mode CETA deny with no prompt is not a hook approval -> auto", sp("auto"), nil, sp("deny"), "auto"},
 		{"mode wins over prompt: bypass with a prompt_id still bypass", sp("bypassPermissions"), sp("p3"), allow, "bypass"},
 	}
 	for _, tt := range tests {

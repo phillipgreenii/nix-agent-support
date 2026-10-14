@@ -363,11 +363,20 @@ type DecisionRow struct {
 // its raw context. The axis is {unknown,bypass,auto,settings,hook,user}. It is
 // orthogonal to agent_type (subagent segmentation is a SEPARATE column) and
 // classifies CONTEXT, not outcome — a denied/pending row still gets its bucket
-// (e.g. an auto-mode denial derives to "auto"). Evaluated top-to-bottom:
+// (e.g. an auto-mode denial with no prompt derives to "auto"). Evaluated
+// top-to-bottom:
 //
 //  1. permission_mode IS NULL -> "unknown" (all pre-migration rows)
 //  2. "bypassPermissions"     -> "bypass"
-//  3. "auto" / "dontAsk"      -> "auto"
+//  3. "auto" / "dontAsk"      -> the mode cannot be named from the mode alone,
+//     so the row is split by the evidence that is knowable from the row:
+//     a. CETA returned Approve (hook_decision == "allow") -> "hook" (checked
+//     first: a CETA allow means no prompt was needed, and it is the one
+//     deciding party knowable from hook_decision alone)
+//     b. prompt present (prompt_id non-empty) -> "user"
+//     c. otherwise no hook allow and no prompt: the auto-mode classifier (or an
+//     unknown mechanism) decided -> "auto". "auto" therefore now means
+//     "classifier/unknown", NOT "any row recorded under auto/dontAsk".
 //  4. no prompt (prompt_id absent): CETA returned Approve -> "hook";
 //     otherwise the tool ran with no CETA approval and no prompt, i.e. the user
 //     pre-authorized it in settings -> "settings"
@@ -381,16 +390,25 @@ func ApprovalSource(permissionMode, promptID, hookDecision *string) string {
 	if permissionMode == nil {
 		return "unknown"
 	}
+	hookAllowed := hookDecision != nil && *hookDecision == "allow"
+	prompted := promptID != nil && *promptID != ""
 	switch *permissionMode {
 	case "bypassPermissions":
 		return "bypass"
 	case "auto", "dontAsk":
-		return "auto"
+		switch {
+		case hookAllowed:
+			return "hook"
+		case prompted:
+			return "user"
+		default:
+			return "auto"
+		}
 	}
-	if promptID != nil && *promptID != "" {
+	if prompted {
 		return "user"
 	}
-	if hookDecision != nil && *hookDecision == "allow" {
+	if hookAllowed {
 		return "hook"
 	}
 	return "settings"
