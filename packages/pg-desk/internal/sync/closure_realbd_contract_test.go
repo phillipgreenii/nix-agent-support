@@ -14,6 +14,8 @@ import (
 
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/gather"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-desk/internal/store"
+	"github.com/phillipgreenii/x/gitfixture"
+	"github.com/phillipgreenii/x/gittest"
 )
 
 // Real-bd regression guard for pg-desk's depth-first closure (beads
@@ -35,11 +37,16 @@ import (
 // Hermetic store: every test runs `bd init` in its own t.TempDir() and
 // asserts the resulting .beads/metadata.json says `"dolt_mode": "embedded"`,
 // i.e. a private on-disk engine owned by that directory. The environment
-// handed to bd and pg-connector drops BEADS_DIR, WORKSPACE_ROOT and every
-// BEADS_DOLT_* variable (so nothing can point at this machine's shared dolt
-// server) and pins BEADS_DOLT_AUTO_START=0; XDG_STATE_HOME is redirected so
-// the backend's event log stays in the temp tree. The test never reads or
-// writes any other beads workspace.
+// handed to bd and pg-connector is built from an ALLOWLIST (hermeticChildEnv),
+// not by scrubbing a list of known-bad names: only PATH, locale and a few
+// scratch/identity names are inherited, HOME is a private temp dir, and
+// nothing that selects a git repository or a beads workspace (GIT_DIR,
+// GIT_WORK_TREE, GIT_INDEX_FILE from a commit hook, BEADS_*, WORKSPACE_ROOT,
+// ...) can reach it, so nothing can point at this machine's shared dolt
+// server or at the repository the hook is running in (pg2-g3204).
+// BEADS_DOLT_AUTO_START=0 is pinned; XDG_STATE_HOME is redirected so the
+// backend's event log stays in the temp tree. The test never reads or writes
+// any other beads workspace.
 //
 // Behind the `contract` build tag, like the repo's other real-bd suites
 // (packages/pg-pr/pkg/beads, packages/pg-connector/cmd/pg-connector-issue-
@@ -100,6 +107,7 @@ func newClosureRealBD(t *testing.T) *closureRealBD {
 		ctx, cancel := context.WithTimeout(context.Background(), closureRealBDDeadline)
 		cmd := exec.CommandContext(ctx, goBin, "build", "-o", filepath.Join(f.bin, name), "./cmd/"+name)
 		cmd.Dir = moduleRoot
+		cmd.Env = goBuildEnv(os.Environ())
 		out, buildErr := cmd.CombinedOutput()
 		cancel()
 		if buildErr != nil {
@@ -138,27 +146,13 @@ func newClosureRealBD(t *testing.T) *closureRealBD {
 	return f
 }
 
-// hermeticEnv is this process's environment minus everything that could bind
-// bd to another workspace or to the shared dolt server, plus overrides.
+// hermeticEnv is the child environment for bd and pg-connector: an ALLOWLIST
+// (hermeticChildEnv, hermetic_env_test.go) with a private HOME, plus
+// overrides. Nothing that could bind bd to another workspace or to the shared
+// dolt server, notably the GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE a git hook
+// exports (pg2-g3204), is inherited, because nothing off the list is.
 func (f *closureRealBD) hermeticEnv(overrides map[string]string) []string {
-	var out []string
-	for _, kv := range os.Environ() {
-		k, _, _ := strings.Cut(kv, "=")
-		if _, over := overrides[k]; over {
-			continue
-		}
-		switch {
-		case k == "BEADS_DIR", k == "WORKSPACE_ROOT", k == "ZR_MACHINE_SUPPORT_WORKSPACE_ROOT",
-			k == "PG_CONNECTOR_ISSUE_BEADS_DIR", k == "PG_CONNECTOR_ISSUE_BEADS_ACTOR",
-			strings.HasPrefix(k, "BEADS_DOLT_"):
-			continue
-		}
-		out = append(out, kv)
-	}
-	for k, v := range overrides {
-		out = append(out, k+"="+v)
-	}
-	return out
+	return hermeticChildEnv(os.Environ(), f.t.TempDir(), overrides)
 }
 
 // bd runs the real bd in the throwaway workspace and returns its output.
@@ -273,6 +267,13 @@ func indexOf(order []string, id string) int {
 // anchor first is refused, so the run only succeeds if pg-desk closes
 // grandchild, then cycle, then anchor.
 func TestClosure_RealBD_AnchorCycleGrandchild_ClosesDepthFirst(t *testing.T) {
+	runAnchorCycleGrandchild(t)
+}
+
+// runAnchorCycleGrandchild is the body of the test above, shared with the
+// foreign-git-environment guard so the same real closure runs under both.
+func runAnchorCycleGrandchild(t *testing.T) {
+	t.Helper()
 	f := newClosureRealBD(t)
 	anchor := f.create("anchor", "merge-request", "")
 	cycle := f.create("process-feedback cycle", "task", anchor)
@@ -401,6 +402,91 @@ func TestClosure_RealBD_OpenChildRefusal_IsNonTransientAndRecovers(t *testing.T)
 	}
 	if st := f.status(anchor); st != "closed" {
 		t.Fatalf("anchor %s status after the re-run = %q, want closed", anchor, st)
+	}
+}
+
+// Git-hook environment guard (bead pg2-g3204). A git hook exports GIT_DIR,
+// GIT_WORK_TREE and GIT_INDEX_FILE pointing at the repository being
+// committed to, and that repository carries an initialised beads workspace.
+// The commit-time `pg-desk-closure-contract-test` hook runs these tests inside
+// exactly that environment; when the child environment was a deny-list scrub
+// that missed GIT_*, bd in the throwaway workspace followed GIT_DIR to the
+// outer workspace and `bd init` died with "already initialized", blocking
+// every commit that touched the hook's paths.
+//
+// "Another repository" here is a real fixture repository from the shared
+// hermetic library (x/gittest) holding a real-bd embedded workspace. The two
+// tests below are a pair: the guard proves the closure still passes under the
+// hook environment, and the control proves that environment is genuinely
+// hostile (it stops a bd that inherits it), so the guard cannot go vacuous.
+
+// foreignRepoWithBeads is another repository with a beads workspace in it.
+func foreignRepoWithBeads(t *testing.T) string {
+	t.Helper()
+	bdPath, err := exec.LookPath("bd")
+	if err != nil {
+		t.Skip("bd not on PATH")
+	}
+	repo := gittest.New(t, gitfixture.RepoOptions{Suite: "closure-foreign"})
+	env := hermeticChildEnv(os.Environ(), t.TempDir(), map[string]string{"BEADS_DOLT_AUTO_START": "0"})
+	if out, err := runRealBD(bdPath, repo.Dir, env, "init", "--prefix", "foreign", "--non-interactive", "-q", "--skip-agents", "--skip-hooks"); err != nil {
+		t.Fatalf("bd init in the foreign repository: %v\n%s", err, out)
+	}
+	return repo.Dir
+}
+
+// foreignGitEnv is what a git hook run inside repo exports.
+func foreignGitEnv(repo string) []string {
+	return []string{
+		"GIT_DIR=" + filepath.Join(repo, ".git"),
+		"GIT_WORK_TREE=" + repo,
+		"GIT_INDEX_FILE=" + filepath.Join(repo, ".git", "index"),
+	}
+}
+
+func runRealBD(bdPath, dir string, env []string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), closureRealBDDeadline)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bdPath, args...)
+	cmd.Dir = dir
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+// TestClosure_RealBD_ForeignGitEnv_ClosesDepthFirst runs the real closure with
+// GIT_DIR, GIT_WORK_TREE and GIT_INDEX_FILE exported to ANOTHER repository
+// that holds a beads workspace. Restoring any inheritance of those names makes
+// newClosureRealBD's `bd init` fail here, as it did under the commit hook.
+func TestClosure_RealBD_ForeignGitEnv_ClosesDepthFirst(t *testing.T) {
+	foreign := foreignRepoWithBeads(t)
+	for _, kv := range foreignGitEnv(foreign) {
+		k, v, _ := strings.Cut(kv, "=")
+		t.Setenv(k, v)
+	}
+	runAnchorCycleGrandchild(t)
+}
+
+// TestClosure_RealBD_ForeignGitEnv_StopsABdThatInheritsIt is the negative
+// control: the SAME environment, handed to a bd that inherits it, makes
+// `bd init` in a fresh directory fail. If bd ever stops following GIT_DIR this
+// test fails and says so, instead of the guard above passing for no reason.
+func TestClosure_RealBD_ForeignGitEnv_StopsABdThatInheritsIt(t *testing.T) {
+	foreign := foreignRepoWithBeads(t)
+	bdPath, err := exec.LookPath("bd")
+	if err != nil {
+		t.Skip("bd not on PATH")
+	}
+	leaky := append(
+		hermeticChildEnv(os.Environ(), t.TempDir(), map[string]string{"BEADS_DOLT_AUTO_START": "0"}),
+		foreignGitEnv(foreign)...,
+	)
+	out, err := runRealBD(bdPath, t.TempDir(), leaky, "init", "--prefix", "leak", "--non-interactive", "-q", "--skip-agents", "--skip-hooks")
+	if err == nil {
+		t.Fatalf("bd init succeeded under a foreign GIT_DIR/GIT_WORK_TREE: the hook environment no longer reaches bd, so the guard above proves nothing (revisit pg2-g3204)\n%s", out)
+	}
+	if !strings.Contains(out, "already initialized") {
+		t.Fatalf("bd init failed under the foreign git environment, but not with the 'already initialized' refusal pg2-g3204 recorded:\n%s", out)
 	}
 }
 

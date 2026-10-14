@@ -4,6 +4,7 @@ go 1.26.0
 
 require (
 	github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector v0.0.0
+	github.com/phillipgreenii/x v0.0.0-20261007115411-386c14bc447d
 	github.com/prometheus/client_golang v1.24.1
 	github.com/spf13/cobra v1.10.2
 	go.opentelemetry.io/contrib/bridges/otelslog v0.20.1
