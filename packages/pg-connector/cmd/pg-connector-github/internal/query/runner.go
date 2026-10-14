@@ -34,6 +34,21 @@
 // adhoc_query_ttl and never re-run in the background: it runs only for a caller
 // that is waiting (class 1, Fetch).
 //
+// # Membership changes
+//
+// A configured query keeps a membership baseline (the row's BaselineAt): the
+// first COMPLETE run sets it and appends no entered_query row, so a cold store
+// never logs every open PR as new; a truncated run sets nothing and a baseline
+// is never cleared. With Config.Changes set, a later run appends an
+// entered_query row per new member (only when the previous listing was
+// complete) and, for a departure from a COMPLETE listing, makes one confirming
+// entity read (Config.Confirm) and appends left_query carrying the read's state,
+// unless the read found the PR gone (its tombstone path logs removed). The
+// listings are compared by node id, so a repository rename is neither. The run's
+// row and these rows commit in ONE transaction; a departure that cannot be
+// confirmed fails the run and is recomputed by the next one, never dropped. An
+// ad-hoc key has no baseline and no rows.
+//
 // # Failure
 //
 // A failed run keeps the previous ids and times and records last_error (a
@@ -49,6 +64,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/changes"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/config"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/entity"
 	"github.com/phillipgreenii/phillipgreenii-nix-agent-support/packages/pg-connector/cmd/pg-connector-github/internal/ratefeed"
@@ -79,6 +95,9 @@ type Store interface {
 	PutQuery(ctx context.Context, q store.QueryRow) error
 	ListQueries(ctx context.Context, configuredOnly bool) ([]store.QueryRow, error)
 	DeleteQuery(ctx context.Context, key string) error
+	// InTx runs fn in one store transaction: the run's result and its
+	// membership rows commit together.
+	InTx(ctx context.Context, fn func(tx *store.Tx) error) error
 }
 
 var _ Store = (*store.Store)(nil)
@@ -118,6 +137,17 @@ type Config struct {
 	Auth Auth
 	// Clock is the time source; nil means the system clock.
 	Clock governor.Clock
+	// Changes records membership changes (entered_query, left_query); nil means
+	// none are recorded (the baseline still is) and Confirm is never called.
+	Changes Changes
+	// Confirm makes the entity read that confirms a departure; it is used only
+	// when Changes is set. With Changes set and Confirm nil a departure cannot be
+	// confirmed, so the run does not store its result (the departure is retried
+	// by the next run, never dropped).
+	Confirm Confirmer
+	// Log reports an event the run survives (a previous id that cannot be a
+	// departure candidate); nil discards.
+	Log func(event string, kv ...any)
 }
 
 // Runner runs queries.
@@ -325,6 +355,27 @@ func (r *Runner) run(ctx context.Context, key Key, class governor.Class) (store.
 	if err != nil {
 		return store.QueryRow{}, err
 	}
+	now := r.now()
+	// A configured key has a baseline and membership rows; an ad-hoc key neither.
+	var prev store.QueryRow
+	var plan membershipPlan
+	var left []changes.Membership
+	if !key.Adhoc() {
+		var err error
+		if prev, _, err = r.Row(ctx, key); err != nil {
+			return store.QueryRow{}, err
+		}
+		if r.cfg.Changes != nil {
+			// Before the alias writes below (they move a renamed PR's alias) and
+			// before the transaction (the lookups read the store).
+			if plan, err = r.planMembership(ctx, key, prev, l); err != nil {
+				return store.QueryRow{}, err
+			}
+			if left, err = r.confirmDepartures(ctx, key, plan.departures); err != nil {
+				return store.QueryRow{}, err
+			}
+		}
+	}
 	ids := make([]string, len(l.members))
 	for i, m := range l.members {
 		if _, err := r.cfg.Identity.Put(ctx, m.nodeID, m.ref); err != nil {
@@ -332,12 +383,32 @@ func (r *Runner) run(ctx context.Context, key Key, class governor.Class) (store.
 		}
 		ids[i] = m.ref.String()
 	}
-	now := r.now()
 	row := store.QueryRow{
 		Key: key.String(), Configured: !key.Adhoc(), IDs: ids, Complete: l.complete,
 		FetchedAt: now, FreshUntil: now.Add(r.TTL(key)), LastSuccessAt: now,
 	}
-	if err := r.cfg.Store.PutQuery(ctx, row); err != nil {
+	if !key.Adhoc() {
+		row.BaselineAt = baselineFor(prev, l.complete, now)
+	}
+	rows := membershipRows(key, plan.arrivals, left)
+	if len(rows) == 0 {
+		if err := r.cfg.Store.PutQuery(ctx, row); err != nil {
+			return store.QueryRow{}, err
+		}
+		return row, nil
+	}
+	err = r.cfg.Store.InTx(ctx, func(tx *store.Tx) error {
+		if err := tx.PutQuery(ctx, row); err != nil {
+			return err
+		}
+		for _, m := range rows {
+			if err := r.cfg.Changes.AppendMembership(ctx, tx, m); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
 		return store.QueryRow{}, err
 	}
 	return row, nil

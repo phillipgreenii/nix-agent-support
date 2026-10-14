@@ -93,6 +93,8 @@ var canned = map[string]struct {
 type countingFetcher struct {
 	mu    sync.Mutex
 	calls [][]string
+	// states overrides the canned State of a node id (a closed or merged PR).
+	states map[string]string
 }
 
 func (f *countingFetcher) Fetch(_ context.Context, _ ratefeed.Meta, ids []string) ([]summary.Summary, int64, error) {
@@ -106,7 +108,11 @@ func (f *countingFetcher) Fetch(_ context.Context, _ ratefeed.Meta, ids []string
 			out[i] = summary.Summary{NodeID: id, Gone: true}
 			continue
 		}
-		out[i] = summary.Summary{NodeID: id, Repo: c.repo, Number: c.number, State: "OPEN", Mergeable: "MERGEABLE", UpdatedAt: "2026-10-12T08:00:00Z"}
+		state := "OPEN"
+		if st, ok := f.states[id]; ok {
+			state = st
+		}
+		out[i] = summary.Summary{NodeID: id, Repo: c.repo, Number: c.number, State: state, Mergeable: "MERGEABLE", UpdatedAt: "2026-10-12T08:00:00Z"}
 	}
 	return out, 1, nil
 }
@@ -158,9 +164,14 @@ type rig struct {
 	runner *Runner
 	auth   *fakeAuth
 	cfg    *config.Config
+	id     *entity.Identity
 }
 
-func newRig(t *testing.T) *rig {
+func newRig(t *testing.T) *rig { return newRigWith(t) }
+
+// newRigWith is newRig with each opt applied to the runner's Config before the
+// runner is built.
+func newRigWith(t *testing.T, opts ...func(*Config)) *rig {
 	t.Helper()
 	st, _, err := store.Open(filepath.Join(t.TempDir(), "store.db"), store.Options{Synchronous: "OFF"})
 	if err != nil {
@@ -189,14 +200,18 @@ func newRig(t *testing.T) *rig {
 		t.Fatal(err)
 	}
 	auth := &fakeAuth{}
-	runner, err := New(Config{
+	rc := Config{
 		Settings: cfg, Store: st, Identity: id, Tracker: svc, GH: gh, Governor: gov,
 		Feed: ratefeed.New(gov, gh, clk), Scheduler: sched, Auth: auth, Clock: clk,
-	})
+	}
+	for _, o := range opts {
+		o(&rc)
+	}
+	runner, err := New(rc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &rig{st: st, clk: clk, gov: gov, sched: sched, svc: svc, gh: gh, fetch: fetch, runner: runner, auth: auth, cfg: cfg}
+	return &rig{st: st, clk: clk, gov: gov, sched: sched, svc: svc, gh: gh, fetch: fetch, runner: runner, auth: auth, cfg: cfg, id: id}
 }
 
 // run starts the scheduler loop for the test.
