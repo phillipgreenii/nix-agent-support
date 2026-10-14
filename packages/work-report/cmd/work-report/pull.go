@@ -112,6 +112,17 @@ func newPullCmd() *cobra.Command {
 					now.In(loc), repullCommand(rangeSpec, sources))
 				if recErr != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "work-report: degraded-source bead reconcile: %v\n", recErr)
+					// stderr is not read by anything (pg-router keeps a child's
+					// stderr only on a non-zero exit, and this must stay exit 0),
+					// so every failed tracker call is also recorded in the
+					// reconcile log.
+					if deps.Log != nil {
+						for _, f := range degraded.Failures(recErr) {
+							_ = deps.Log.LogReconcile(telemetry.ReconcileLog{
+								TS: now.UTC(), Source: f.Source, Action: f.Action, Bead: f.BeadID, Error: f.Err.Error(),
+							})
+						}
+					}
 				}
 			}
 

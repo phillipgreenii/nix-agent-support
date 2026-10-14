@@ -455,6 +455,49 @@ func TestNewDispatchTable_Close(t *testing.T) {
 	}
 }
 
+// forceFakeProvider additionally implements ForceCloser.
+type forceFakeProvider struct {
+	fakeProvider
+	forceFn func(ctx context.Context, id, reason string) error
+}
+
+func (f *forceFakeProvider) CloseForce(ctx context.Context, id, reason string) error {
+	return f.forceFn(ctx, id, reason)
+}
+
+// TestNewDispatchTable_Close_ForceRouting pins pg2-jp5m8: force:true goes to
+// CloseForce on a ForceCloser, a plain close never does, and a provider with
+// no ForceCloser treats force as an ordinary close.
+func TestNewDispatchTable_Close_ForceRouting(t *testing.T) {
+	var plain, forced int
+	fp := &forceFakeProvider{
+		fakeProvider: fakeProvider{closeFn: func(context.Context, string, string) error { plain++; return nil }},
+		forceFn:      func(context.Context, string, string) error { forced++; return nil },
+	}
+	table := NewDispatchTable(fp)
+	if _, err := table["close"].Handle(context.Background(), json.RawMessage(`{"id":"i","reason":"r","force":true}`)); err != nil {
+		t.Fatalf("force close: %v", err)
+	}
+	if plain != 0 || forced != 1 {
+		t.Fatalf("force:true: plain=%d forced=%d, want 0/1", plain, forced)
+	}
+	if _, err := table["close"].Handle(context.Background(), json.RawMessage(`{"id":"i","reason":"r"}`)); err != nil {
+		t.Fatalf("plain close: %v", err)
+	}
+	if plain != 1 || forced != 1 {
+		t.Fatalf("plain close: plain=%d forced=%d, want 1/1", plain, forced)
+	}
+
+	var noForce int
+	np := &fakeProvider{closeFn: func(context.Context, string, string) error { noForce++; return nil }}
+	if _, err := NewDispatchTable(np)["close"].Handle(context.Background(), json.RawMessage(`{"id":"i","reason":"r","force":true}`)); err != nil {
+		t.Fatalf("force close on a non-ForceCloser: %v", err)
+	}
+	if noForce != 1 {
+		t.Fatalf("a provider without ForceCloser must run its ordinary Close, got %d calls", noForce)
+	}
+}
+
 func TestNewDispatchTable_Close_NotFoundPassesThroughUnwrapped(t *testing.T) {
 	sentinelErr := scriptout.WrapError(scriptout.ErrNotFound, "issue issue-404 not found")
 	p := &fakeProvider{

@@ -1098,6 +1098,33 @@ func TestBackend_Close_Success(t *testing.T) {
 	}
 }
 
+func TestBackend_Close_NeverForces_CloseForceDoes(t *testing.T) {
+	var got [][]string
+	fr := &fakeRunner{handle: func(args []string) (string, error) {
+		got = append(got, args)
+		return `{"data":[{"id":"tp-1","title":"t","status":"closed"}],"schema_version":1}`, nil
+	}}
+	b := New(fr)
+	if err := b.Close(context.Background(), "tp-1", "r"); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if err := b.CloseForce(context.Background(), "tp-1", "r"); err != nil {
+		t.Fatalf("CloseForce: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("calls = %v", got)
+	}
+	if containsArg(got[0], "--force") {
+		t.Fatalf("a plain Close must not pass --force: %v", got[0])
+	}
+	if !containsArg(got[1], "--force") || !argsEndWith(got[1], "--json", "--", "tp-1") {
+		t.Fatalf("CloseForce must pass --force before the -- terminator: %v", got[1])
+	}
+	if err := b.CloseForce(context.Background(), " ", "r"); !errors.Is(err, scriptout.ErrInvalidArgument) {
+		t.Fatalf("CloseForce(empty id) = %v, want ErrInvalidArgument", err)
+	}
+}
+
 func TestBackend_Close_OmitsReasonWhenEmpty(t *testing.T) {
 	fr := &fakeRunner{handle: func(args []string) (string, error) {
 		if containsArg(args, "--reason") {

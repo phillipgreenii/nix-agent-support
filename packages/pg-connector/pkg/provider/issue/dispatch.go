@@ -142,11 +142,16 @@ func NewDispatchTable(p Provider) scriptout.DispatchTable {
 				var a struct {
 					ID     string `json:"id"`
 					Reason string `json:"reason"`
+					Force  bool   `json:"force"`
 				}
 				if err := scriptout.Decode(args, &a); err != nil {
 					return nil, scriptout.WrapError(scriptout.ErrInvalidArgument, "decode close args: "+err.Error())
 				}
-				if err := p.Close(ctx, a.ID, a.Reason); err != nil {
+				closeFn := p.Close
+				if fc, ok := p.(ForceCloser); ok && a.Force {
+					closeFn = fc.CloseForce
+				}
+				if err := closeFn(ctx, a.ID, a.Reason); err != nil {
 					return nil, err
 				}
 				return nil, nil

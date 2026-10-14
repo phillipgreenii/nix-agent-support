@@ -254,6 +254,30 @@ func TestRun_IssueUpdate_NotFound_Exit4(t *testing.T) {
 	}
 }
 
+// TestRun_IssueClose_ForceFlagOnTheWire pins pg2-jp5m8: --force reaches the
+// backend as "force":true, and a plain close sends no force key at all, so an
+// older backend is never handed an argument it did not ask for.
+func TestRun_IssueClose_ForceFlagOnTheWire(t *testing.T) {
+	writeEchoFakeBackend(t, "backend-issue-close-force")
+	writeIssueConfigFor(t, "backend-issue-close-force")
+
+	stdout, _, code := executePr(t, []string{"issue", "close", "issue-1", "--reason", "done", "--force"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	if !strings.Contains(stdout, `"force":true`) {
+		t.Fatalf("--force did not reach the backend request: %s", stdout)
+	}
+
+	stdout, _, code = executePr(t, []string{"issue", "close", "issue-1", "--reason", "done"})
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stdout=%s", code, stdout)
+	}
+	if strings.Contains(stdout, "force") {
+		t.Fatalf("a plain close must not send a force key: %s", stdout)
+	}
+}
+
 func TestRun_IssueClose_Success(t *testing.T) {
 	writeOpAwareFakeBackend(t, "backend-issue-close", map[string]string{
 		"close": `{"protocolVersion":1,"schemaVersion":1,"result":null}`,

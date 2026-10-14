@@ -85,10 +85,13 @@ func Reconcile(ctx context.Context, conn pgconn.Runner, backend string, rows []p
 
 	open, backend, err := listOpen(ctx, conn, backend)
 	if err != nil {
-		return items, fmt.Errorf("look up open degraded-source beads: %w", err)
+		return items, &Failure{Action: ActionLookup, Err: err}
 	}
 
 	var errs []error
+	fail := func(source, action, bead string, err error) {
+		errs = append(errs, &Failure{Source: source, Action: action, BeadID: bead, Err: err})
+	}
 	var validate validateCache
 	for _, row := range rows {
 		title := Title(row.Source)
@@ -98,13 +101,13 @@ func Reconcile(ctx context.Context, conn pgconn.Runner, backend string, rows []p
 			id := existing.ID
 			if found {
 				if err := comment(ctx, conn, backend, id, commentBody(row, rng, now)); err != nil {
-					errs = append(errs, fmt.Errorf("%s: append to %s: %w", row.Source, id, err))
+					fail(row.Source, ActionAppend, id, err)
 					continue
 				}
 			} else {
 				created, err := create(ctx, conn, backend, title, createBody(ctx, conn, &validate, row, rng, now, repull))
 				if err != nil {
-					errs = append(errs, fmt.Errorf("%s: create bead: %w", row.Source, err))
+					fail(row.Source, ActionCreate, "", err)
 					continue
 				}
 				id = created
@@ -120,13 +123,69 @@ func Reconcile(ctx context.Context, conn pgconn.Runner, backend string, rows []p
 				continue
 			}
 			if err := closeBead(ctx, conn, backend, existing.ID, closeReason(row, now)); err != nil {
-				errs = append(errs, fmt.Errorf("%s: close %s: %w", row.Source, existing.ID, err))
+				fail(row.Source, ActionClose, existing.ID, err)
 				continue
 			}
 			delete(open, title)
 		}
 	}
 	return items, errors.Join(errs...)
+}
+
+// Reconcile action names, as recorded in a Failure and in the reconcile log.
+const (
+	ActionLookup = "lookup"
+	ActionCreate = "create"
+	ActionAppend = "append"
+	ActionClose  = "close"
+)
+
+// Failure is one tracker call Reconcile could not complete. Reconcile's
+// returned error is the join of its Failures, so a caller that only prints it
+// loses nothing, and a caller that must RECORD each failure (the pull command
+// writes them to the reconcile log) recovers them with Failures.
+type Failure struct {
+	// Source is the degraded source the call was for; empty for ActionLookup.
+	Source string
+	// Action is one of the Action* constants.
+	Action string
+	// BeadID is the bead the call targeted; empty when there was none yet.
+	BeadID string
+	Err    error
+}
+
+func (f *Failure) Error() string {
+	switch f.Action {
+	case ActionLookup:
+		return fmt.Sprintf("look up open degraded-source beads: %v", f.Err)
+	case ActionCreate:
+		return fmt.Sprintf("%s: create bead: %v", f.Source, f.Err)
+	case ActionAppend:
+		return fmt.Sprintf("%s: append to %s: %v", f.Source, f.BeadID, f.Err)
+	default:
+		return fmt.Sprintf("%s: %s %s: %v", f.Source, f.Action, f.BeadID, f.Err)
+	}
+}
+
+func (f *Failure) Unwrap() error { return f.Err }
+
+// Failures returns every Failure inside an error returned by Reconcile.
+func Failures(err error) []*Failure {
+	var out []*Failure
+	var walk func(error)
+	walk = func(e error) {
+		switch x := e.(type) {
+		case nil:
+		case *Failure:
+			out = append(out, x)
+		case interface{ Unwrap() []error }:
+			for _, c := range x.Unwrap() {
+				walk(c)
+			}
+		}
+	}
+	walk(err)
+	return out
 }
 
 // needsTracker reports whether any row can require a tracker call.
@@ -398,6 +457,10 @@ func comment(ctx context.Context, conn pgconn.Runner, backend, id, body string) 
 }
 
 func closeBead(ctx context.Context, conn pgconn.Runner, backend, id, reason string) error {
-	_, err := call(ctx, conn, okTargeted, "issue", "close", id, "--reason", reason, "--backend", backend, "--output", "json")
+	// --force: the alert's close condition (its source pulled successfully) does
+	// not depend on whatever bead a person or procedure linked to it with a
+	// blocks edge, and bd refuses a plain close of a blocked issue. Closing
+	// the alert does not touch that blocker (pg2-jp5m8).
+	_, err := call(ctx, conn, okTargeted, "issue", "close", id, "--reason", reason, "--force", "--backend", backend, "--output", "json")
 	return err
 }

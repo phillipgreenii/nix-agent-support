@@ -1048,6 +1048,54 @@
           require_serial = true;
         };
 
+        # pg2-jp5m8: the degraded-source reconcile closes its own alert beads
+        # with `--force`, because bd refuses to close an issue that still has an
+        # open blocker and a blocks edge can be added to an alert after it was
+        # created. That refusal is a property of a REAL tool, so the regression
+        # guard runs against a real bd in a throwaway embedded store (global
+        # rule V-3): the `contract`-tagged `TestReconcile_RealBD_*` tests in
+        # packages/work-report/internal/degraded, which drive Reconcile through
+        # the real pg-connector and pg-connector-issue-beads binaries built from
+        # this repo. Like `pg-desk-closure-contract-test` above: no default
+        # check runs the `contract` tag and the nix sandbox has no bd, so this
+        # path-scoped hook puts the suite under the commit-time and
+        # `pg-hooks run pre-land` runs. A missing `bd` or `go` is a LOUD
+        # failure, never a skip.
+        work-report-degraded-contract-test = {
+          enable = true;
+          name = "work-report-degraded-contract-test";
+          description = "work-report degraded reconcile: run the contract-tagged real-bd close tests (pg2-jp5m8)";
+          entry = "${
+            pkgs.writeShellApplication {
+              name = "work-report-degraded-contract-test-hook";
+              runtimeInputs = [ pkgs.git ];
+              text = ''
+                # No bd in the nix build sandbox (and no network/module cache):
+                # this runs on the operator's machine via pg-hooks only.
+                if [ -n "''${IN_NIX_BUILD:-}" ] || [ -n "''${NIX_BUILD_TOP:-}" ]; then
+                  echo "work-report-degraded-contract-test: inside the nix build sandbox; skipping (needs a real bd)" >&2
+                  exit 0
+                fi
+
+                for tool in go bd; do
+                  if ! command -v "$tool" >/dev/null 2>&1; then
+                    echo "work-report-degraded-contract-test: $tool not found on PATH -- enter the devShell or install it before committing. Do NOT bypass with --no-verify." >&2
+                    exit 1
+                  fi
+                done
+
+                top="$(git rev-parse --show-toplevel)"
+                cd "$top/packages/work-report"
+                exec nice -n 10 go test -p 4 -count=1 -tags contract -timeout 10m -run '^TestReconcile_RealBD_' ./internal/degraded/
+              '';
+            }
+          }/bin/work-report-degraded-contract-test-hook";
+          language = "system";
+          files = "^packages/(work-report/(internal/(degraded|pgconn)/|go\\.(mod|sum)$)|pg-connector/(cmd/pg-connector/|cmd/pg-connector-issue-beads/|pkg/))";
+          pass_filenames = false;
+          require_serial = true;
+        };
+
         # pg2-m146l: prevent main's own history from being rewritten via a
         # direct `git rebase` again. Operator decision 2026-09-07 (bead
         # pg2-m146l comments): main's local reflog showed

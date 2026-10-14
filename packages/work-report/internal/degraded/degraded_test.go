@@ -228,6 +228,43 @@ func TestSucceedingPullClosesTheBeadWithAReason(t *testing.T) {
 	if reason := flagValue(closes[0], "--reason"); !strings.Contains(reason, "backend-a") || !strings.Contains(reason, "succeeded") {
 		t.Errorf("reason = %q", reason)
 	}
+	// pg2-jp5m8: the alert's close does not depend on any blocker a person
+	// linked to it, so the close forces past the tracker's blocked-close refusal.
+	if !containsArg(closes[0], "--force") {
+		t.Errorf("close argv lacks --force: %v", closes[0])
+	}
+}
+
+func containsArg(argv []string, want string) bool {
+	for _, a := range argv {
+		if a == want {
+			return true
+		}
+	}
+	return false
+}
+
+func TestFailuresRecoversEveryFailedCall(t *testing.T) {
+	fake.Install(
+		t,
+		fake.IssueListRoute(
+			fake.IssueEntity{ID: "bd-1", Title: "work-report: backend-a degraded"},
+			fake.IssueEntity{ID: "bd-2", Title: "work-report: backend-b degraded"},
+		),
+		fake.Route{Match: []string{"issue", "close"}, Stdout: "", Exit: 1},
+	)
+	_, err := reconcile(t, okRow("backend-a"), okRow("backend-b"))
+	fs := degraded.Failures(err)
+	if len(fs) != 2 {
+		t.Fatalf("failures = %+v (err %v), want 2", fs, err)
+	}
+	if fs[0].Source != "backend-a" || fs[0].Action != degraded.ActionClose || fs[0].BeadID != "bd-1" ||
+		fs[1].Source != "backend-b" || fs[1].BeadID != "bd-2" {
+		t.Errorf("failures = %+v", fs)
+	}
+	if got := degraded.Failures(nil); len(got) != 0 {
+		t.Errorf("Failures(nil) = %v", got)
+	}
 }
 
 func TestHealthyPullWithNoBeadMakesNoWrites(t *testing.T) {

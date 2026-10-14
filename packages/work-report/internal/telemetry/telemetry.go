@@ -1,6 +1,7 @@
 // Package telemetry implements work-report's telemetry declaration: one JSONL
-// line per source per pull in log/pull.jsonl and one line per report in
-// log/report.jsonl, under $XDG_STATE_HOME/work-report. No OpenTelemetry or
+// line per source per pull in log/pull.jsonl, one line per failed
+// degraded-source tracker call in log/reconcile.jsonl, and one line per report
+// in log/report.jsonl, under $XDG_STATE_HOME/work-report. No OpenTelemetry or
 // Prometheus metrics are emitted in v1.
 package telemetry
 
@@ -14,9 +15,10 @@ import (
 )
 
 const (
-	pullFile   = "pull.jsonl"
-	reportFile = "report.jsonl"
-	logDirName = "log"
+	pullFile      = "pull.jsonl"
+	reportFile    = "report.jsonl"
+	reconcileFile = "reconcile.jsonl"
+	logDirName    = "log"
 )
 
 // PullLog is one per-source record of a pull. Since and Before are RFC3339,
@@ -33,6 +35,18 @@ type PullLog struct {
 	Truncated  bool      `json:"truncated"`
 	DurationMS int64     `json:"duration_ms"`
 	Reason     string    `json:"reason"`
+}
+
+// ReconcileLog is one failed tracker call of the degraded-source reconcile
+// (a bead that could not be created, appended to or closed, or the lookup
+// itself). It exists so a refused close is visible somewhere an operator or a
+// probe reads, not only on stderr. Source and Bead are "" when not applicable.
+type ReconcileLog struct {
+	TS     time.Time `json:"ts"`
+	Source string    `json:"source"`
+	Action string    `json:"action"`
+	Bead   string    `json:"bead"`
+	Error  string    `json:"error"`
 }
 
 // ReportLog is one record per rendered report or report outcome. Status is
@@ -73,6 +87,9 @@ func (l *Logger) dir() string {
 
 // LogPull appends one line to log/pull.jsonl.
 func (l *Logger) LogPull(p PullLog) error { return l.append(pullFile, p) }
+
+// LogReconcile appends one line to log/reconcile.jsonl.
+func (l *Logger) LogReconcile(r ReconcileLog) error { return l.append(reconcileFile, r) }
 
 // LogReport appends one line to log/report.jsonl.
 func (l *Logger) LogReport(r ReportLog) error { return l.append(reportFile, r) }

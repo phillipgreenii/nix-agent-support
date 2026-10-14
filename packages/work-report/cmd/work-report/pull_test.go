@@ -550,3 +550,44 @@ func TestPullOutputFormatRejectsUnknownAndOtherVerbsRejectPGRouter(t *testing.T)
 		t.Error("--output pg-router is a pull-only mode")
 	}
 }
+
+// TestPullPGRouterRefusedCloseIsRecordedAndStillExitsZero pins pg2-jp5m8: a
+// tracker call that fails inside the degraded-source reconcile (here the close
+// of a recovered source's bead) is written to log/reconcile.jsonl, where an
+// operator or probe reads it, instead of living only on stderr, and the
+// pg-router mode still exits 0 and still emits the degraded source's item.
+func TestPullPGRouterRefusedCloseIsRecordedAndStillExitsZero(t *testing.T) {
+	home := isolate(t)
+	fixedNow(t)
+	fake.Install(
+		t,
+		fake.Route{Match: []string{"activity", "list"}, Stdout: pullDoc},
+		fake.IssueListRoute(
+			fake.IssueEntity{ID: "bd-ok", Title: "work-report: backend-ok degraded"},
+		),
+		fake.ConfigValidateRoute(), fake.IssueCreateRoute("bd-7"),
+		fake.Route{Match: []string{"issue", "close"}, Stdout: "", Exit: 1},
+	)
+	out, err := runCLI(t, "--store", filepath.Join(t.TempDir(), "s.db"), "--output", "pg-router", "pull")
+	if err != nil {
+		t.Fatalf("a refused close must not make pg-router mode exit non-zero: %v", err)
+	}
+	if !strings.Contains(out, "bd-7") {
+		t.Errorf("the degraded source's item must still be emitted:\n%s", out)
+	}
+	raw, err := os.ReadFile(filepath.Join(home, "state", "work-report", "log", "reconcile.jsonl"))
+	if err != nil {
+		t.Fatalf("the refused close was not recorded: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("reconcile.jsonl rows = %d, want exactly 1:\n%s", len(lines), raw)
+	}
+	var row struct{ Source, Action, Bead, Error string }
+	if err := json.Unmarshal([]byte(lines[0]), &row); err != nil {
+		t.Fatal(err)
+	}
+	if row.Source != "backend-ok" || row.Action != "close" || row.Bead != "bd-ok" || row.Error == "" {
+		t.Errorf("row = %+v", row)
+	}
+}

@@ -248,6 +248,7 @@ func newIssueUpdateCmd() *cobra.Command {
 // --reason`.
 func newIssueCloseCmd() *cobra.Command {
 	var reason string
+	var force bool
 	cmd := &cobra.Command{
 		Use:   "close <id>",
 		Short: "Close an issue",
@@ -262,14 +263,19 @@ func newIssueCloseCmd() *cobra.Command {
 		if err != nil {
 			return reportIssueTargetedOutcome(cmd, nil, err, humanize)
 		}
-		resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "issue", "close", map[string]string{
+		closeArgs := map[string]any{
 			"id":     args[0],
 			"reason": reason,
-		}, *backendFlag)
+		}
+		if force {
+			closeArgs["force"] = true
+		}
+		resp, dispatchErr := DispatchTargeted(cmd.Context(), reg, "issue", "close", closeArgs, *backendFlag)
 		return reportIssueTargetedOutcome(cmd, resp, dispatchErr, humanize)
 	}
 	cmd.Flags().StringVar(&reason, "reason", "", "reason for closing (required)")
 	_ = cmd.MarkFlagRequired("reason")
+	cmd.Flags().BoolVar(&force, "force", false, "close even when the tracker would refuse because the issue has open blockers (beads); a no-op for backends with no such refusal. Closing does not touch the blockers")
 	return cmd
 }
 

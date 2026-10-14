@@ -522,12 +522,27 @@ func (b *Backend) Update(ctx context.Context, id string, fields issue.IssueUpdat
 // wanting the resulting state re-fetches via Show, exactly as this
 // bead's own manual validation test does.
 func (b *Backend) Close(ctx context.Context, id, reason string) error {
+	return b.closeIssue(ctx, id, reason, false)
+}
+
+// CloseForce implements issue.ForceCloser (bead pg2-jp5m8) via `bd close
+// --force`: bd refuses a plain close of an issue that has open blockers
+// ("cannot close blocked issue"), and --force closes it anyway. The blockers
+// themselves are left untouched.
+func (b *Backend) CloseForce(ctx context.Context, id, reason string) error {
+	return b.closeIssue(ctx, id, reason, true)
+}
+
+func (b *Backend) closeIssue(ctx context.Context, id, reason string, force bool) error {
 	if strings.TrimSpace(id) == "" {
 		return scriptout.WrapError(scriptout.ErrInvalidArgument, "issue: id required")
 	}
 	args := []string{"close"}
 	if reason != "" {
 		args = append(args, "--reason", reason)
+	}
+	if force {
+		args = append(args, "--force")
 	}
 	args = append(args, "--json", "--", id)
 	_, err := b.run(ctx, args...)

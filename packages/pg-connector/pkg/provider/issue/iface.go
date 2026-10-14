@@ -193,3 +193,18 @@ type ChildrenLister interface {
 	// through to the next registered backend.
 	Children(ctx context.Context, id string) (*schema.IssueChildrenResult, error)
 }
+
+// ForceCloser is an OPTIONAL issue provider capability (bead pg2-jp5m8): a
+// backend whose tracker can REFUSE a close (beads refuses to close an issue
+// that still has an open blocker) implements it so a caller that owns the
+// issue can close it regardless. The "close" op's wire args carry
+// "force":true only when the caller passed --force, and the dispatch table
+// routes that call to CloseForce. A provider that does not implement it has
+// no refusal to override (issue-jira's resolving transition is never blocked
+// by a dependency), so the flag is a documented no-op there and the call runs
+// as an ordinary Close.
+type ForceCloser interface {
+	// CloseForce closes issue id like Close, but does not let an open
+	// blocker stop it. Closing the issue does not touch its blockers.
+	CloseForce(ctx context.Context, id, reason string) error
+}
