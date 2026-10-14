@@ -510,3 +510,152 @@ assemble() {
   [ "$status" -eq 0 ]
   [ "$(cat "$OUTSIDE/body.md")" = "$(printf 'The last section, no trailing newline.\n[design: Final]')" ]
 }
+
+@test "@@file refuses .git in any letter case (case-insensitive filesystems)" {
+  printf '@@file .GIT/config\n' >"$DRAFT"
+  assemble
+  [ "$status" -eq 3 ]
+  [ ! -e "$BODY" ]
+}
+
+# -------------------------------------------- review follow-ups (pg2-ltvod)
+
+@test "--out equal to --design, or a directory, exits 2 and destroys nothing" {
+  write_design
+  printf '@@design-section Final\n' >"$DRAFT"
+  before=$(cat "$DESIGN")
+  run "$SCRIPT" --design "$DESIGN" --in "$DRAFT" --out "$DESIGN"
+  [ "$status" -eq 2 ]
+  [ "$(cat "$DESIGN")" = "$before" ]
+  mkdir "$REPO/scratch/outdir"
+  run "$SCRIPT" --design "$DESIGN" --in "$DRAFT" --out "$REPO/scratch/outdir"
+  [ "$status" -eq 2 ]
+  run ls -A "$REPO/scratch/outdir"
+  [ -z "$output" ]
+}
+
+@test "--out in a missing directory exits 1" {
+  printf 'x\n' >"$DRAFT"
+  run "$SCRIPT" --in "$DRAFT" --out "$REPO/no-such-dir/body.md"
+  [ "$status" -eq 1 ]
+}
+
+@test "a --design path containing '=' is read as a file, not an awk assignment" {
+  write_design
+  cp "$DESIGN" "$REPO/scratch/design=v2.md"
+  printf '@@design-section Final\n' >"$DRAFT"
+  cd "$REPO/scratch"
+  run "$SCRIPT" --design "design=v2.md" --in "$DRAFT" --out "$BODY"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$BODY")" = "$(printf 'The last section, no trailing newline.\n[design: Final]')" ]
+}
+
+@test "the body gets the umask-default mode, not the temp file's 0600" {
+  printf 'x\n' >"$DRAFT"
+  run bash -c 'umask 022; "$1" --in "$2" --out "$3"' _ "$SCRIPT" "$DRAFT" "$BODY"
+  [ "$status" -eq 0 ]
+  run stat -f '%Lp' "$BODY"
+  if [ "$status" -ne 0 ]; then run stat -c '%a' "$BODY"; fi
+  [ "$output" = "644" ]
+}
+
+@test "two same-text headings under one parent exit 4 and say no parent path separates them" {
+  printf '## P\n\n### V\n\na\n\n### V\n\nb\n' >"$DESIGN"
+  printf '@@design-section P > V\n' >"$DRAFT"
+  assemble
+  [ "$status" -eq 4 ]
+  [[ $output == *"identical full paths"* ]]
+}
+
+@test "a literal heading containing ' > ' is found by its whole text" {
+  printf '## A > B\n\nbody\n' >"$DESIGN"
+  printf '@@design-section A > B\n' >"$DRAFT"
+  assemble
+  [ "$status" -eq 0 ]
+  [ "$(cat "$BODY")" = "$(printf 'body\n[design: A > B]')" ]
+}
+
+@test "CRLF directive lines expand, and a directive on the last line needs no trailing newline" {
+  write_design
+  printf '@@design-section Phase 1\r\n@@design-section --quote Final' >"$DRAFT"
+  assemble
+  [ "$status" -eq 0 ]
+  expected=$(printf 'Phase one overview.\n[design: Phase 1]\n> The last section, no trailing newline.\n> [design: Final]')
+  [ "$(cat "$BODY")" = "$expected" ]
+}
+
+@test "--quote on @@design-table-row is a usage error" {
+  write_design
+  printf '@@design-table-row --quote Table section | beta\n' >"$DRAFT"
+  assemble
+  [ "$status" -eq 2 ]
+}
+
+@test "@@file accepts a symlink that stays inside the toplevel, spaces, and a leading dash" {
+  printf 'target\n' >"$REPO/scratch/real.txt"
+  ln -s real.txt "$REPO/scratch/inner-link.txt"
+  printf 'spaced\n' >"$REPO/scratch/a b.txt"
+  printf 'dashed\n' >"$REPO/scratch/-dash.txt"
+  printf '@@file scratch/inner-link.txt\n@@file scratch/a b.txt\n@@file scratch/-dash.txt\n' >"$DRAFT"
+  assemble
+  [ "$status" -eq 0 ]
+  [ "$(cat "$BODY")" = "$(printf 'target\nspaced\ndashed')" ]
+  cd "$REPO/scratch"
+  printf '@@file -dash.txt\n' >"$DRAFT"
+  run "$SCRIPT" --in "$DRAFT" --out "$BODY"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$BODY")" = "dashed" ]
+}
+
+@test "@@file refuses a sibling directory that merely shares the toplevel's name prefix" {
+  mkdir "$REPO-evil"
+  printf 'SECRET\n' >"$REPO-evil/creds.txt"
+  printf '@@file %s-evil/creds.txt\n' "$REPO" >"$DRAFT"
+  assemble
+  [ "$status" -eq 3 ]
+}
+
+@test "@@file refuses an absolute path into .git" {
+  printf '@@file %s/.git/HEAD\n' "$REPO" >"$DRAFT"
+  assemble
+  [ "$status" -eq 3 ]
+}
+
+@test "@@file of an unreadable file exits 1 (generic), not 3" {
+  [ "$(id -u)" -ne 0 ] || skip "root can read mode 000 files"
+  printf 'x\n' >"$REPO/scratch/locked.txt"
+  chmod 000 "$REPO/scratch/locked.txt"
+  printf '@@file scratch/locked.txt\n' >"$DRAFT"
+  assemble
+  chmod 600 "$REPO/scratch/locked.txt"
+  [ "$status" -eq 1 ]
+}
+
+@test "caller-exported GIT_WORK_TREE / GIT_DIR cannot widen the @@file boundary" {
+  printf 'SECRET\n' >"$OUTSIDE/creds.txt"
+  printf '@@file %s\n' "$OUTSIDE/creds.txt" >"$DRAFT"
+  GIT_WORK_TREE=/ GIT_DIR="$REPO/.git" run "$SCRIPT" --in "$DRAFT" --out "$BODY"
+  [ "$status" -eq 3 ]
+  [ ! -e "$BODY" ]
+}
+
+@test "@@file works from a symlinked working directory" {
+  printf 'via link\n' >"$REPO/scratch/v.txt"
+  ln -s "$REPO" "$GFH_WORK/repo-link"
+  printf '@@file scratch/v.txt\n' >"$DRAFT"
+  cd "$GFH_WORK/repo-link"
+  run "$SCRIPT" --in "$DRAFT" --out "$BODY"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$BODY")" = "via link" ]
+}
+
+@test "running twice over the same --out is idempotent" {
+  write_design
+  printf '@@design-section Final\n' >"$DRAFT"
+  assemble
+  [ "$status" -eq 0 ]
+  first=$(cat "$BODY")
+  assemble
+  [ "$status" -eq 0 ]
+  [ "$(cat "$BODY")" = "$first" ]
+}

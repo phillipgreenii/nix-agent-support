@@ -73,7 +73,9 @@ moment it is created.
 
 ## `create-packet`
 
-Run the helper script — do NOT hand-type a `bd create`/`bd defer` pair for a packet:
+Run the helper script — do NOT hand-type a `bd create`/`bd defer` pair for a packet. The
+`--body-file` is the packet's ASSEMBLED body (core skill step 3, "Exact excerpts"), never the
+draft that holds directives:
 
 ```bash
 claude-marketplace/plan-decompose/scripts/create-packet.sh \
@@ -117,7 +119,7 @@ the parent's own labels.
 
 **Revising an already-created packet's content** (core skill mode `decompose` steps 5-7's
 loop-backs to step 3; incident on docket `tc-rjzd3`, fixed as `tc-g7tmr`): `bd update
-<packet-id> --body-file <fixed-content-file>` — content only; `create-packet` runs once per
+<packet-id> --body-file <fixed-content-file>` (a re-assembled body) — content only; `create-packet` runs once per
 packet. The stamp rule that forbids `create-packet` again and any `--set-metadata
 pd_curated_rev=...` here is the core skill's "Curation stamp". The restamps mode `reconcile`
 performs are in "Reconcile restamps" in `references/reconcile-and-report.md`.

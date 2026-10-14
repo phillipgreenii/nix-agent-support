@@ -269,7 +269,12 @@ deduplication.
    expanded by `scripts/assemble-packet.sh --design <design file> --in <draft> --out <body>`
    ("Helper scripts"); every other draft line passes through byte-for-byte. Verbatim sentences
    inside curated prose stay hand-written. A `@@design-section` / `@@design-table-row` block
-   already ends with its `[design: <heading path>]` marker, so write none for it. Exit 4
+   already ends with its `[design: <heading path>]` marker (`> `-prefixed under `--quote`, so
+   match it unanchored), so write none for it. A section is the text up to the next heading of
+   ANY level: a parent heading yields only its lead text, and each subsection needs its own
+   directive. `@@file` emits NO marker, so hand-write the `[design: …]` line after a `@@file`
+   block whenever it states a design clause. A draft line that must stay a literal
+   directive-looking line has no escape; reword it. Exit 4
    (ambiguous heading): rewrite the path as one of the `Parent > Child` forms the message lists.
    Exit 3 (not found): correct the path; if the design has no such text, state the gap. Exit 3
    on `@@file` can also mean the path is outside the repo toplevel; never work around that.
@@ -317,13 +322,14 @@ deduplication.
    packets — delete restated consumer discipline; keep docket-specific normative text as the
    shared preamble.
 
-4. **Size** each packet: fixed inputs (the ASSEMBLED body's text + expected read-set, bytes ÷ 4) MUST be
-   ≤ `pd_read_target`% of budget. Over ⇒ split. Unsplittable (no boundary passes the
+4. **Size** each packet: fixed inputs (the ASSEMBLED body's text + expected read-set,
+   bytes ÷ 4) MUST be ≤ `pd_read_target`% of budget. Over ⇒ split. Unsplittable (no boundary passes the
    reviewer-reject test) ⇒ write a packet-metadata deviation and PROCEED — sizing never
    halts. Estimates go in the report, not packet content.
 5. **Mechanical pre-filter** — checks YOU run yourself with shell tools over the drafted
    packets' ASSEMBLED bodies, never the drafts (no agent dispatch, no shipped script; near-zero
-   cost; gates the agent dispatches): uncited clauses (grep for the `[design:` marker per substantive clause);
+   cost; gates the agent dispatches): uncited clauses (grep for the `[design:` marker per
+   substantive clause);
    file-overlap collisions (extract each packet's Files paths, intersect, require a planned
    edge between any two packets sharing a path); out-of-scope pointer validity (each "that is
    packet X" claim checked against X's Objective); shared-preamble byte-identity (diff the
@@ -331,8 +337,8 @@ deduplication.
    existence (every `[design: <section>]` marker's target actually exists in the design
    text — a `Parent > Child` path counts as existing when `assemble-packet.sh` would resolve
    it to exactly one heading: the last element is the heading text, the earlier elements are
-   its ancestors in order; this catches a citation to a NONEXISTENT section, never a citation to a real
-   section that doesn't support the clause, which stays the semantic post-check's call);
+   its ancestors in order; this catches a citation to a NONEXISTENT section, never a
+   citation to a real section that doesn't support the clause, which stays the semantic post-check's call);
    whole-set coverage scan, ADVISORY ONLY (every design section/heading is named by at least
    one citation somewhere across the full packet set; a section cited by zero packets is
    reported, never a pre-filter failure — cross-check the in-flight decomposition-report
@@ -351,8 +357,8 @@ deduplication.
    packets that step 3 did not fold raises a hoisting flag (advisory, reported, never
    blocking). Failures loop to step 3 (content-only; see "Curation stamp").
 6. **Cold-read check** (one cheap-model agent per packet, read-only): input is the packet's
-   stored text only (the ASSEMBLED body, never the draft), delivered by file path; output `executable: yes|no` + `missing:` list,
-   plus any assumption the reader had to make about a sibling packet's Consumes/Produces shape
+   stored text only (the ASSEMBLED body, never the draft), delivered by file path; output
+   `executable: yes|no` + `missing:` list, plus any assumption the reader had to make about a sibling packet's Consumes/Produces shape
    that is not pinned by the design or a predecessor's Produces. Dispatch per "Sub-dispatch
    templates" (Cold-read). Any packet EDITED after its cold-read MUST be cold-read again AND
    re-sized — an editor holding the full design cannot certify self-containment. This edit is

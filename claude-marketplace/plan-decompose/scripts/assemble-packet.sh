@@ -44,11 +44,18 @@ emitted line, that last line included, with "> ".
 cell equals <first-cell text> from the first table in the heading's own section,
 then the "[design: <heading path>]" line.
 
-@@file <path> emits the file's bytes. A relative path resolves against the
+@@file <path> emits the file's bytes (plus a newline when the file lacks a
+final one) and no [design: ...] marker. A relative path resolves against the
 working directory. The resolved real path (symlinks followed) MUST lie inside
 the git toplevel of the working directory and MUST NOT pass through a ".git"
-component; anything else, and a working directory outside a git work tree, is
-refused with exit 3.
+component (any letter case, or the toplevel's .git itself); anything else,
+and a working directory outside a git work tree, is refused with exit 3. A
+file that exists but cannot be read exits 1. Needs realpath(1).
+
+Limits: the heading path and the first-cell text of @@design-table-row are
+split at the first " | ", so neither may contain one; a first-cell text
+cannot contain an unescaped "|". Setext headings are not recognized. A NUL
+byte in the draft is not preserved.
 
 --out is written only when every directive succeeds.
 
@@ -56,12 +63,13 @@ Options:
   --design FILE   Design text that @@design-* directives read (materialize it to
                   one file per run; reuse that file for every call)
   --in FILE       Packet draft
-  --out FILE      Assembled packet body (MUST differ from --in)
+  --out FILE      Assembled packet body (MUST differ from --in and --design,
+                  and MUST NOT be a directory)
   -h, --help      Show this help message
 
 Exit codes:
   0  assembled
-  1  generic error (unreadable file, missing tool)
+  1  generic error (unreadable file, missing tool, unreadable @@file target)
   2  usage error (bad flag or argument, empty directive argument)
   3  not found (heading, table, table row, or @@file path; or @@file refused)
   4  ambiguous heading (the message lists the parent paths that disambiguate)
@@ -105,8 +113,15 @@ done
 [[ -n $OUT ]] || die "--out is required" 2
 [[ -r $IN && -f $IN ]] || die "cannot read draft: $IN"
 [[ ! $IN -ef $OUT ]] || die "--out must differ from --in (the draft is never overwritten)" 2
+[[ ! -d $OUT ]] || die "--out is a directory: $OUT" 2
 if [[ -n $DESIGN ]]; then
   [[ -r $DESIGN && -f $DESIGN ]] || die "cannot read design: $DESIGN"
+  [[ ! $DESIGN -ef $OUT ]] || die "--out must differ from --design (the design is never overwritten)" 2
+  # awk treats an operand like "x=1.md" as a variable assignment, so anchor relative paths.
+  case "$DESIGN" in
+  /*) DESIGN_ARG=$DESIGN ;;
+  *) DESIGN_ARG=./$DESIGN ;;
+  esac
 fi
 
 # The design extractor. Reads the heading path (and, for rows, the first-cell
@@ -197,13 +212,17 @@ END {
   if (ncand == 0) fail("heading not found: " path, 3)
   if (ncand > 1) {
     print "assemble-packet.sh: ambiguous heading: " path " matches " ncand " headings; disambiguate with a parent path:" > "/dev/stderr"
+    dup = 0
     for (m = 1; m <= ncand; m++) {
       h = cand[m]
       full = ANC[h]
       gsub(SEP, " > ", full)
       full = (full == "" ? "" : full " > ") HT[h]
       print "  line " HL[h] ": " full > "/dev/stderr"
+      if (full in seen) dup = 1
+      seen[full] = 1
     }
+    if (dup) print "assemble-packet.sh: some matches have identical full paths, so no parent path separates them; rename one heading in the design" > "/dev/stderr"
     exit 4
   }
 
@@ -251,7 +270,8 @@ TOPLEVEL=""
 resolve_toplevel() {
   [[ -n $TOPLEVEL ]] && return 0
   local top
-  top=$(git rev-parse --show-toplevel 2>/dev/null) || return 1
+  # A caller-exported GIT_DIR / GIT_WORK_TREE (hook environments set them) MUST NOT move the boundary.
+  top=$(env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_INDEX_FILE git rev-parse --show-toplevel 2>/dev/null) || return 1
   TOPLEVEL=$(realpath -- "$top") || return 1
 }
 
@@ -263,7 +283,7 @@ checked_file_path() {
     echo "assemble-packet.sh: @@file path not found: $path" >&2
     return 3
   }
-  resolve_toplevel || {
+  [[ -n $TOPLEVEL ]] || {
     echo "assemble-packet.sh: @@file refused: working directory is not inside a git work tree" >&2
     return 3
   }
@@ -276,15 +296,30 @@ checked_file_path() {
     ;;
   esac
   rel=${real#"$TOPLEVEL"/}
+  # Lowercased so a case-insensitive filesystem cannot reach .GIT/ around the check.
+  rel=$(printf '%s' "$rel" | tr '[:upper:]' '[:lower:]')
   case "/$rel/" in
   */.git/*)
     echo "assemble-packet.sh: @@file refused: $path passes through a .git component" >&2
     return 3
     ;;
   esac
-  [[ -f $real && -r $real ]] || {
-    echo "assemble-packet.sh: @@file path is not a readable regular file: $path" >&2
+  # Identity check as well as the spelling check: no ancestor of the target may BE the toplevel's .git.
+  local d=$real
+  while [[ $d != "$TOPLEVEL" && $d != / ]]; do
+    if [[ $d -ef $TOPLEVEL/.git ]]; then
+      echo "assemble-packet.sh: @@file refused: $path is inside the repository's .git" >&2
+      return 3
+    fi
+    d=$(dirname -- "$d")
+  done
+  [[ -f $real ]] || {
+    echo "assemble-packet.sh: @@file path is not a regular file: $path" >&2
     return 3
+  }
+  [[ -r $real ]] || {
+    echo "assemble-packet.sh: @@file path is not readable: $path" >&2
+    return 1
   }
   printf '%s' "$real"
 }
@@ -293,6 +328,8 @@ OUT_DIR=$(dirname -- "$OUT")
 TMP=$(mktemp "$OUT_DIR/.assemble-packet.XXXXXX") || die "cannot create a temporary file next to $OUT"
 cleanup() { rm -f "$TMP"; }
 trap cleanup EXIT
+# mktemp creates 0600; give the body the mode a plain redirect would have had.
+chmod "$(printf '%03o' $((0666 & ~$(umask))))" "$TMP"
 
 need_design() {
   [[ -n $DESIGN ]] || {
@@ -326,6 +363,7 @@ while :; do
       echo "assemble-packet.sh: error: $IN:$lineno: @@file needs a path" >&2
       exit 2
     }
+    resolve_toplevel || true # resolved here so the cache survives the subshell below
     rc=0
     real=$(checked_file_path "$arg" </dev/null) || rc=$?
     [[ $rc -eq 0 ]] || fail_directive "$rc"
@@ -358,7 +396,7 @@ while :; do
     }
     rc=0
     ASM_MODE=section ASM_QUOTE=$quote ASM_HPATH=$arg LC_ALL=C \
-      awk "$EXTRACT_AWK" "$DESIGN" </dev/null || rc=$?
+      awk "$EXTRACT_AWK" "$DESIGN_ARG" </dev/null || rc=$?
     [[ $rc -eq 0 ]] || fail_directive "$rc"
     ;;
   '@@design-table-row '*)
@@ -385,7 +423,7 @@ while :; do
     fi
     rc=0
     ASM_MODE=row ASM_HPATH=$hpath ASM_CELL=$cell LC_ALL=C \
-      awk "$EXTRACT_AWK" "$DESIGN" </dev/null || rc=$?
+      awk "$EXTRACT_AWK" "$DESIGN_ARG" </dev/null || rc=$?
     [[ $rc -eq 0 ]] || fail_directive "$rc"
     ;;
   *)
