@@ -200,6 +200,12 @@ var negativeMatrix = map[string][]negativeCase{
 	},
 	"handler.dispatch-reply": {
 		{"neither branch", `{"schemaVersion":"1","id":"h"}`},
+		// DEC-EVENT-5's optional startedAt is RFC3339-shaped text on either reply shape.
+		// The core's own decode ignores (and logs) a bad one instead of failing the
+		// dispatch; a conforming handler must not send one.
+		{"startedAt of the wrong type", `{"schemaVersion":"1","id":"h","outcome":"ok","startedAt":900}`},
+		{"startedAt that is not an RFC3339 instant", `{"schemaVersion":"1","id":"h","outcome":"ok","startedAt":"yesterday"}`},
+		{"deferred ack with a startedAt lacking a date", `{"schemaVersion":"1","id":"h","deferred":true,"startedAt":"23:03:46Z"}`},
 	},
 	"handler.postStartup": {
 		{"missing id", `{"schemaVersion":"1"}`},

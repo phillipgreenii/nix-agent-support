@@ -33,8 +33,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
+	"time"
 
 	"github.com/phillipgreenii/pg-router/internal/eventqueue"
 	"github.com/phillipgreenii/pg-router/internal/roles"
@@ -66,6 +68,15 @@ type Reply struct {
 	ID       string // echoes the dsp-<...> tracking id
 	Deferred bool
 	Outcome  string // opaque; internal/complete no longer lives here to interpret it (Task 5.5)
+	// StartedAt is the dispatch's own start as the handler reports it in the
+	// reply's OPTIONAL startedAt (DEC-EVENT-5, bead pg2-dm6de): a handler that
+	// ADOPTED a dispatch an earlier daemon had started names the instant that
+	// dispatch began, so the core can time it from there rather than from the
+	// re-offer. It is the zero time when the reply carried none or carried one
+	// that is not an RFC 3339 instant (Dispatch logs a warning for the latter and
+	// keeps the dispatch's outcome: the field is advisory). This package does not
+	// range-check it; the caller, which knows the event and the offer, does.
+	StartedAt time.Time
 }
 
 // ErrBusy is returned when the invoked participant's dispatch subcommand
@@ -214,6 +225,11 @@ type dispatchReply struct {
 	Deferred      bool   `json:"deferred,omitempty"`
 	Outcome       string `json:"outcome,omitempty"`
 	Error         string `json:"error,omitempty"`
+	// StartedAt is the OPTIONAL adopted dispatch's own start (DEC-EVENT-5), kept
+	// raw so that a value of the wrong JSON type, like one that is not an RFC 3339
+	// instant, can be ignored with a warning (reportedStart) instead of failing
+	// the whole reply decode and with it a dispatch that worked.
+	StartedAt json.RawMessage `json:"startedAt,omitempty"`
 	// Reason is the OPTIONAL busy-decline body's own field (bead pg2-j4uwg;
 	// see BusyDecline's doc) — read ONLY on exit 9, alongside Error, which a
 	// participant's OTHER non-zero exits already used before this field
@@ -281,7 +297,7 @@ func (c *Client) Dispatch(ctx context.Context, role roles.Role, evt eventqueue.E
 		if reply.Error != "" {
 			return Reply{}, fmt.Errorf("wireclient: role %q: %s", role.Name, reply.Error)
 		}
-		return Reply{ID: reply.ID, Deferred: reply.Deferred, Outcome: reply.Outcome}, nil
+		return Reply{ID: reply.ID, Deferred: reply.Deferred, Outcome: reply.Outcome, StartedAt: reportedStart(role.Name, reply.StartedAt)}, nil
 	case 9: // DEC-WIRE-1's "Coarse exit codes": 9 is busy.
 		// The OPTIONAL busy-decline reply body (bead pg2-j4uwg): read
 		// opportunistically, exactly the same "peek at stdout on a non-zero
@@ -305,6 +321,29 @@ func (c *Client) Dispatch(ctx context.Context, role roles.Role, evt eventqueue.E
 		}
 		return Reply{}, &ExitError{Role: role.Name, Code: code}
 	}
+}
+
+// reportedStart decodes a reply's optional startedAt (DEC-EVENT-5, bead
+// pg2-dm6de). An absent or null field is the zero time, silently: a reply
+// without it is today's reply. A field that is not a JSON string holding an RFC
+// 3339 instant is ignored the same way but with a warning, because it is an
+// advisory field and a handler's slip in it must not fail, and so risk re-running,
+// a dispatch that worked.
+func reportedStart(role string, raw json.RawMessage) time.Time {
+	if len(raw) == 0 || string(raw) == "null" {
+		return time.Time{}
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		slog.Warn("wireclient: ignoring a startedAt that is not a string in a dispatch reply", "role", role, "startedAt", string(raw))
+		return time.Time{}
+	}
+	t, err := time.Parse(time.RFC3339Nano, s)
+	if err != nil {
+		slog.Warn("wireclient: ignoring a startedAt that is not an RFC 3339 instant in a dispatch reply", "role", role, "startedAt", s, "err", err)
+		return time.Time{}
+	}
+	return t
 }
 
 // ExitError is Dispatch's error for a handler subprocess that exited with a

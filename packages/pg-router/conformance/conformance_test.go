@@ -97,6 +97,23 @@ func TestAcceptanceAckShapes(t *testing.T) {
 	}
 }
 
+// A handler that ADOPTED a dispatch reports its own start in an optional startedAt
+// (DEC-EVENT-5), on either reply shape; a reply without it stays valid.
+func TestDispatchReplyOptionalStartedAt(t *testing.T) {
+	for name, reply := range map[string]map[string]any{
+		"sync outcome":                     {"schemaVersion": "1", "id": "h", "outcome": "delivered", "startedAt": "2026-10-12T23:03:46Z"},
+		"sync outcome, fractional seconds": {"schemaVersion": "1", "id": "h", "outcome": "delivered", "startedAt": "2026-10-12T23:03:46.480Z"},
+		"sync outcome, numeric offset":     {"schemaVersion": "1", "id": "h", "outcome": "delivered", "startedAt": "2026-10-12T19:03:46-04:00"},
+		"deferred ack":                     {"schemaVersion": "1", "id": "h", "deferred": true, "startedAt": "2026-10-12T23:03:46Z"},
+		"sync outcome without the field":   {"schemaVersion": "1", "id": "h", "outcome": "delivered"},
+		"deferred ack without the field":   {"schemaVersion": "1", "id": "h", "deferred": true},
+	} {
+		if err := Check("handler.dispatch-reply", reply); err != nil {
+			t.Errorf("%s rejected: %v", name, err)
+		}
+	}
+}
+
 // --- CLI transport round-trip (boundary proven live) ----------------------
 
 func TestCLIRoundTrip_SyncOutcome(t *testing.T) {

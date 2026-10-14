@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"time"
 
 	"github.com/phillipgreenii/pg-router/internal/backoff"
@@ -349,6 +350,12 @@ func (l *roleListener) shouldRetry(evt eventqueue.Event, err error) bool {
 // attempt still reaches handlerFailureObs; each scheduled re-run also reaches
 // retryObs. A deterministic failure, a cancelled run, or an exhausted budget
 // falls through to the unchanged accept.
+//
+// bead pg2-dm6de adds the one field an accepted OfferResult now carries: a
+// handler that adopted a dispatch an earlier daemon had started reports its
+// original start in the reply (DEC-EVENT-5), and Offer relays it as
+// OfferResult.StartedAt, after vetting it (adoptedStart), and times the
+// events.jsonl row from it. A reply without the field changes nothing.
 func (l *roleListener) Offer(o eventqueue.Offering) eventqueue.OfferResult {
 	if l.reg != nil && !l.reg.Available(l.role.Name) {
 		return eventqueue.OfferResult{Accepted: false, Decline: eventqueue.DeclineUnavailable}
@@ -364,6 +371,18 @@ func (l *roleListener) Offer(o eventqueue.Offering) eventqueue.OfferResult {
 	started := o.StartedAt
 	if started.IsZero() {
 		started = begun
+	}
+	// A handler that adopted this dispatch from an earlier daemon's offer reports
+	// the dispatch's own start (DEC-EVENT-5, bead pg2-dm6de). The row then times it
+	// from there, exactly as the queue does for the accept record and the wait and
+	// run metrics: the run is the time before this offer plus the offer's own.
+	adopted := time.Time{}
+	if err == nil {
+		adopted = l.adoptedStart(evt, started, reply)
+	}
+	if !adopted.IsZero() {
+		ran += started.Sub(adopted)
+		started = adopted
 	}
 	meta := newDispatchMeta(evt, started, ran)
 	if errors.Is(err, wireclient.ErrBusy) {
@@ -400,5 +419,24 @@ func (l *roleListener) Offer(o eventqueue.Offering) eventqueue.OfferResult {
 	}
 	l.retries.forget(evt.ID)
 	l.o.emitResult(l.ctx, l.role, d.Item.ID, l.o.buildResult(d, reply, err), err, meta)
-	return eventqueue.OfferResult{Accepted: true, Decline: eventqueue.DeclineNone}
+	return eventqueue.OfferResult{Accepted: true, Decline: eventqueue.DeclineNone, StartedAt: adopted}
+}
+
+// adoptedStart returns the start the handler reported in reply for a dispatch it
+// adopted (DEC-EVENT-5, bead pg2-dm6de), or the zero time when the reply reported
+// none, or one outside [the event's At, offerStart] (eventqueue.CheckAdoptedStart),
+// which is ignored with a warning and not clamped: the dispatch is then timed from
+// the offer, exactly as a reply without the field is. The queue applies the same
+// check to what Offer returns, so the accept record and the events.jsonl row can
+// never disagree about which start was used.
+func (l *roleListener) adoptedStart(evt eventqueue.Event, offerStart time.Time, reply wireclient.Reply) time.Time {
+	if reply.StartedAt.IsZero() {
+		return time.Time{}
+	}
+	if err := eventqueue.CheckAdoptedStart(reply.StartedAt, evt.At, offerStart); err != nil {
+		slog.Warn("orchestrator: ignoring a start the handler reported for a dispatch; timing it from the offer",
+			"role", l.role.Name, "event", evt.ID, "err", err)
+		return time.Time{}
+	}
+	return reply.StartedAt
 }

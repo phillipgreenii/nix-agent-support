@@ -67,6 +67,38 @@ type OfferResult struct {
 	// busy-decline reason tag verbatim, opaque to this package) sets this
 	// instead — the queue never interprets what it means, only forwards it.
 	DeclineDetail string
+	// StartedAt is the instant the dispatch this ACCEPTED offer ran actually
+	// began, for a Listener whose handler ADOPTED a dispatch an earlier core's
+	// offer started and left running (DEC-EVENT-5, bead pg2-dm6de): the handler
+	// reports that start in its reply and the Listener relays it here. The queue
+	// then uses it in place of Offering.StartedAt for the durable accept record
+	// and for DispatchTiming, so the queue wait ends and the run begins at the
+	// dispatch's own start rather than at the re-offer. The zero time (the
+	// default, and every Listener that predates this field) means this offer's
+	// own start, exactly as before. It is read only for an accepted offer, and a
+	// value CheckAdoptedStart rejects is ignored with a warning, so a Listener
+	// cannot move a start outside [the event's At, Offering.StartedAt].
+	StartedAt time.Time
+}
+
+// CheckAdoptedStart reports why start cannot be the start of a dispatch adopted
+// by the handler of an offer that began at offerStart, for an event enqueued at
+// enqueuedAt, or nil when it can (DEC-EVENT-5, bead pg2-dm6de). The range is
+// [enqueuedAt, offerStart], both ends inclusive: a dispatch cannot have begun
+// before its event existed, and an adopted one by definition began before this
+// offer, so a start after the offer's own is a handler's mistake, not an
+// adoption. A start outside it is IGNORED by every caller, never clamped to the
+// nearer end, because a value that wrong says nothing about where the true one
+// lies. A zero bound is not checked: an Event with no resolved At, or an
+// Offering built by hand without a StartedAt, leaves that side open.
+func CheckAdoptedStart(start, enqueuedAt, offerStart time.Time) error {
+	if !enqueuedAt.IsZero() && start.Before(enqueuedAt) {
+		return fmt.Errorf("start %s is before the event's enqueue instant %s", start.Format(time.RFC3339Nano), enqueuedAt.Format(time.RFC3339Nano))
+	}
+	if !offerStart.IsZero() && start.After(offerStart) {
+		return fmt.Errorf("start %s is after this offer's own start %s", start.Format(time.RFC3339Nano), offerStart.Format(time.RFC3339Nano))
+	}
+	return nil
 }
 
 // DeclineReason classifies a pre-accept decline (an OfferResult with
@@ -189,7 +221,10 @@ type DispatchTiming struct {
 	// EnqueuedAt is the event's resolved enqueue instant (Event.At), the same
 	// origin the dispatch-latency histogram has always measured from.
 	EnqueuedAt time.Time
-	// StartedAt is when the accepted offer became in-flight (queue clock).
+	// StartedAt is when the accepted offer became in-flight (queue clock) or, for a
+	// dispatch its handler adopted from an earlier core's offer, the start that
+	// handler reported (OfferResult.StartedAt, DEC-EVENT-5): never later than the
+	// former and never earlier than EnqueuedAt.
 	StartedAt time.Time
 	// SettledAt is when the offer settled, i.e. the handler run returned (queue clock).
 	SettledAt time.Time
@@ -1309,7 +1344,22 @@ func (q *Queue) settleOfferLocked(p pendingOffer, now time.Time, signals *[]disp
 	// "now"), which would make every Dispatch-settled run time zero. Only the
 	// timing/audit fields use it; no control-flow decision does.
 	settledAt := q.now()
-	if err := q.appendLocked(Record{Op: opAccept, EventID: p.evt.ID, ListenerID: lid, At: settledAt, StartedAt: p.startedAt}); err != nil {
+	startedAt := p.startedAt
+	if reported := p.result.StartedAt; !reported.IsZero() {
+		// An adopted dispatch began before this offer (DEC-EVENT-5, bead pg2-dm6de):
+		// its handler reported the start, and the accept record and the timing below
+		// read it instead of the re-offer. A Listener that already vetted the value
+		// (orchestrator.roleListener does) never reaches the warning; the queue
+		// checks it again because the accept record is durable and one bad start
+		// would be replayed and compacted forever.
+		if err := CheckAdoptedStart(reported, p.evt.At, p.startedAt); err != nil {
+			slog.Warn("eventqueue: ignoring a start a listener reported for an accepted dispatch; timing it from the offer",
+				"eventId", p.evt.ID, "listenerId", lid, "err", err)
+		} else {
+			startedAt = reported
+		}
+	}
+	if err := q.appendLocked(Record{Op: opAccept, EventID: p.evt.ID, ListenerID: lid, At: settledAt, StartedAt: startedAt}); err != nil {
 		// The in-memory accept already happened and the listener has taken
 		// delivery responsibility (INV-EVT-1); we do NOT roll back or change
 		// delivery semantics. But a swallowed accept-write is a durability
@@ -1326,7 +1376,7 @@ func (q *Queue) settleOfferLocked(p pendingOffer, now time.Time, signals *[]disp
 	q.delivered.Add(1)
 	*signals = append(*signals, dispatchSignal{kind: signalAccept, eventID: p.evt.ID, listener: lid, timing: DispatchTiming{
 		EventID: p.evt.ID, EventType: p.evt.Type, ListenerID: lid,
-		EnqueuedAt: p.evt.At, StartedAt: p.startedAt, SettledAt: settledAt,
+		EnqueuedAt: p.evt.At, StartedAt: startedAt, SettledAt: settledAt,
 	}})
 	rec, didEvict := q.maybeEvict(e)
 	return rec, didEvict, true

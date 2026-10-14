@@ -350,6 +350,15 @@ handler answers in one of exactly two ways:
   never holds an open call across long or paused work, and **the ack is the last thing the core is
   owed** for that dispatch.
 
+**An adopted dispatch reports its own start.** A handler that **adopts** a dispatch an earlier core's
+offer started and left running (the `stopping` state) **MAY** carry that dispatch's original
+start in an optional `startedAt` of either reply (an RFC 3339 instant). The core **MUST** use a
+reported start, in place of the re-offer, as the dispatch's start for the accepted-dispatch record,
+the `queue_wait` and `run` measures and the event log row, when it lies between the event's enqueue
+instant and this offer's own start. It **MUST** ignore, and log, one outside that range or malformed,
+and a reply without the field **MUST** leave the offer's own start, so a handler that adopts nothing
+is unaffected (`DEC-EVENT-5`; see "Realization gaps").
+
 **A handler's run status is not part of this contract.** The core's delivery responsibility ends at
 acceptance (`INV-EVT-1`, `INV-FAIL-1`), so how far a handler has got, what it is doing, and how it
 finished are the **handler's** to expose on the **handler's own** surface (for a ccpool-backed
@@ -572,9 +581,9 @@ sequenceDiagram
     still a sample (the core counts it as accepted, `INV-FAIL-1`). For a dispatch a handler **adopted**
     — work an earlier core's offer started and left running (`INTF-HANDLER`'s `stopping` state) — the
     wait **MUST** end, and the run **MUST** begin, at the dispatch's own start as the adopting handler
-    reports it in its reply, not at the later re-offer, so a restart neither lengthens the wait nor
-    shortens the run; a reply that reports no start leaves the offer's own instant (`DEC-EVENT-5`;
-    see "Realization gaps"). Both use the bucket boundaries 0.1,
+    reports it in its reply's optional `startedAt` (see `INTF-HANDLER`), not at the later re-offer, so a
+    restart neither lengthens the wait nor shortens the run; a reply that reports no start leaves the
+    offer's own instant (`DEC-EVENT-5`; see "Realization gaps"). Both use the bucket boundaries 0.1,
     0.5, 1, 2.5, 5, 10, 20, 30, 45, 60, 120, 300, 600, 1200, 1800, 3600 and 7200 seconds;
   - **queue_oldest_age** — gauge, per event `type`, in seconds: the age of the oldest retained event
     of that type that a bound handler has not yet settled, `0` when nothing of that type is owed. A

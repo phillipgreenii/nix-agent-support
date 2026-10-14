@@ -148,6 +148,16 @@ logs no actions; any other string is logged verbatim as the single verb (bead `p
 `{ "schemaVersion": "1", "id": "hs-771e", "deferred": true }` — which is itself the acceptance, so
 nothing further is owed for that dispatch.
 
+Either reply **MAY** also carry an optional `startedAt`, an RFC 3339 instant
+(`"2026-10-12T23:03:46Z"`; fractional seconds and a numeric offset are legal). It is how a handler
+that **adopted** a dispatch an earlier core's offer started and left running (`ADR 0085`) tells the
+core when that dispatch really began, so a restart does not read its earlier minutes as queue wait
+(`DEC-EVENT-5`). The core uses it as the dispatch's start only when it lies between the event's
+enqueue instant and this offer's own start, both ends included; a value outside that range, or one
+that is not an RFC 3339 instant, is **ignored** with a warning (never clamped, and never a failed
+dispatch), and a reply without the field leaves the offer's own start, so a handler that never
+adopts anything never sends it. The schema is `handler.dispatch-reply`.
+
 The `ingest-event` callback request, carrying one or more events (`INTF-CLI`, the manager→core
 direction):
 

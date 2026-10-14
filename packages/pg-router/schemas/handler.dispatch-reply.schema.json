@@ -1,6 +1,7 @@
 {
   "$id": "handler.dispatch-reply",
   "title": "INTF-HANDLER dispatch reply (sync outcome OR deferred ack)",
+  "description": "A handler's reply to one dispatch: an inline outcome, or a deferred ack. Either shape MAY carry startedAt (DEC-EVENT-5), the instant the dispatch ran or is running began, which a handler that ADOPTED a dispatch an earlier core's offer started reports so the core times the dispatch from there and not from the re-offer. It is OPTIONAL and advisory: an absent one means the offer's own start, and the core IGNORES (and logs) one that is not an RFC3339 instant, one earlier than the event's own enqueue instant, and one later than the offer's own start. Like the event's instants it is constrained to RFC3339 SHAPE by a `pattern` (fractional seconds optional, `Z` or a numeric offset); the semantic parse is the core's wireclient job.",
   "oneOf": [
     {
       "type": "object",
@@ -9,7 +10,11 @@
       "properties": {
         "schemaVersion": { "const": "1" },
         "id": { "type": "string" },
-        "outcome": { "type": "string" }
+        "outcome": { "type": "string" },
+        "startedAt": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$"
+        }
       }
     },
     {
@@ -19,7 +24,11 @@
       "properties": {
         "schemaVersion": { "const": "1" },
         "id": { "type": "string" },
-        "deferred": { "const": true }
+        "deferred": { "const": true },
+        "startedAt": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$"
+        }
       }
     }
   ]

@@ -421,15 +421,17 @@ event. Four changes make the split computable from live data:
   its limits. A replay ignores `archive` records, so queue state and delivery are unchanged, and a
   binary that predates them ignores the unknown kind.
 
-**An adopted dispatch (decided 2026-10-14, bead `pg2-x3zkb`, `DEC-EVENT-5`; not yet built).** The start
+**An adopted dispatch (decided 2026-10-14, bead `pg2-x3zkb`, `DEC-EVENT-5`; the core side is built, bead
+`pg2-dm6de`, the ccpool handler's report is not, bead `pg2-m2x35`).** The start
 instant above is the instant the offer became in-flight, which for a dispatch a restart re-offered is the
 re-offer, not the dispatch's own start: on 2026-10-12 the accept record said 2,696,857 ms, 44.95 min,
 for a dispatch that ran 4,459.52 s, 74.3 min, so 29.4 min of run time was recorded as queue wait. The
-handler that adopts a session an earlier daemon left running is to report the dispatch's original start
-in an optional reply field, and the core is then to use it as the start in the accept record's
-`startedAt`, in the queue-wait and run histograms and in the `events.jsonl` row (`started_at`,
-`duration_ms`). Until that is built an adopted dispatch is still timed from the re-offer; the lane
-fixtures of 2026-10-12 and 2026-10-13 list the starts it moved. No metric changes name, labels or buckets.
+handler that adopts a session an earlier daemon left running reports the dispatch's original start
+in an optional reply field (`startedAt`), and the core uses it, when it lies between the event's enqueue
+instant and the offer's own start, as the start in the accept record's `startedAt`, in the queue-wait and
+run histograms and in the `events.jsonl` row (`started_at`, `duration_ms`). Until the ccpool handler
+reports it an adopted ccpool dispatch is still timed from the re-offer; the lane fixtures of 2026-10-12
+and 2026-10-13 list the starts it moved. No metric changes name, labels or buckets.
 
 **Bounds.** `role` is config-bounded (`DEC-OBS-5`); `type` is bounded as above; neither adds an event
 id, bead or session as a label. The oldest-age gauge is a scan of the retained events at scrape time.
@@ -554,7 +556,8 @@ of 6 scrapes completes 3 minutes after the re-offer, and `for` is 5). `pg2-x3zkb
 this left (`DEC-EVENT-5`, 2026-10-14): the daemon now makes its first dispatch pass before its first producer
 tick, which on 2026-10-12 had stood in front of the re-offer, so a hole shrinks to the boot and the
 `postStartup` hooks (the 268.6 s of that restart held 6.25 s of boot); and the handler that adopts a surviving
-session is to report the dispatch's original start (decided, not yet built). The rule's expression needs no
+session is to report the dispatch's original start (decided; the core side is built, the ccpool handler's
+report is not yet). The rule's expression needs no
 change for either. The recorded
 `pr.changed` buildup of 2026-09-30 pages as two idle-with-backlog stretches the old rule could not see, and
 the absorbed `issue.changed` surge of 2026-10-01 pages nothing. The usage-limit decline storm of 2026-10-13

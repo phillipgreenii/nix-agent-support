@@ -255,7 +255,8 @@ flowchart LR
   re-offer and the gauge; `TestRunLongRunning_noStartupDispatchPassOnceShutdownWasRequested` pins the
   shutdown rule.
 
-**(a) Decided, not built: the adopting handler reports the original start.**
+**(a) Decided; the core side is built (bead `pg2-dm6de`), the handler side is not (bead `pg2-m2x35`): the
+adopting handler reports the original start.**
 
 - A handler that adopts a session left running by an earlier daemon **MUST** be able to report the
   dispatch's original start in an **optional** `startedAt` field (RFC 3339, UTC) of its dispatch
@@ -280,6 +281,21 @@ flowchart LR
   two agree. One interaction to carry into it: an awake-adjusted queue wait computed when the offer is
   created would end at the re-offer, whereas the wait of an adopted dispatch ends at the reported
   start, which the core learns only when the reply arrives.
+- **Built in the core (bead `pg2-dm6de`, 2026-10-14), the details the slice settled.** The field is
+  `startedAt` in `handler.dispatch-reply`, optional on both reply shapes, an RFC 3339 instant
+  (fractional seconds and a numeric offset allowed). `wireclient` decodes it as `Reply.StartedAt` and
+  ignores, with a warning, a value that is not such an instant, whatever its JSON type, so a handler's
+  slip in an advisory field never fails (and so never re-runs) a dispatch that worked. The valid range
+  is `[the event's At, the offer's own start]`, **both ends included**, and a start outside it is
+  **ignored, not clamped to the nearer end**: a value that wrong says nothing about where the true one
+  lies. The check (`eventqueue.CheckAdoptedStart`) runs twice on purpose, once in the role listener,
+  which relays a vetted start as `OfferResult.StartedAt` and times the `events.jsonl` row from it, and
+  once in the queue, before the durable accept record is written, because that record is replayed and
+  compacted forever and one bad start must not outlive its process. The row's `started_at` is the
+  reported start and its `duration_ms` is the offer's start minus the reported start plus the offer's
+  own run, which is `settle - reported start` and so what the `run` histogram holds. A failed dispatch
+  ignores the field. `run-role`'s single-event path is not queue-driven and does not read it. Still
+  open: the ccpool handler's own report of an adopted session's launch time (bead `pg2-m2x35`).
 
 **Alternatives rejected.**
 

@@ -78,8 +78,10 @@ type Record struct {
 	// enqueue/gate field above) is, on an accept record, the instant the accept was
 	// settled, and StartedAt the instant that listener's offer began (the instant it
 	// became in-flight), so settle - StartedAt is the run time and StartedAt - the
-	// event's At is the queue wait (bead pg2-n7da9). Both are absent on a record
-	// written by an older binary.
+	// event's At is the queue wait (bead pg2-n7da9). For a dispatch the handler
+	// adopted from an earlier daemon's offer, StartedAt is the start that handler
+	// reported instead, earlier than the re-offer (DEC-EVENT-5, bead pg2-dm6de).
+	// Both are absent on a record written by an older binary.
 	ListenerID string    `json:"listenerId,omitempty"`
 	StartedAt  time.Time `json:"startedAt,omitzero"`
 	// Evict fields. At is, on an evict record, the instant the event left the queue,
