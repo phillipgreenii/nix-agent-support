@@ -10,15 +10,11 @@ import (
 
 // Tests of the job table (schema version 2) and its accessors. The migration is
 // also covered with the other schema tests (TestOpenEmptyCreatesCurrentSchema,
-// TestOpenFromEachFixture); the tests here pin the 1 -> 2 step on a populated
-// store and the accessors' behavior.
-
-// ladderThroughJob is the shipped ladder cut to its first jobTableVersion steps,
-// so a test about the 1 -> 2 step keeps describing it after later steps are
-// added to the ladder.
-func ladderThroughJob() []Migration {
-	return slices.Clone(builtinMigrations[:jobTableVersion])
-}
+// TestOpenFromEachFixture); the tests here pin the job table's arrival on a
+// populated store and the accessors' behavior. They open with the whole shipped
+// ladder, not a truncated one: the typed accessors always read the current
+// schema (query.baseline_at, for one), so a store held at version 2 cannot be
+// read through them.
 
 func jobRow(run string, attempt int, fetched time.Time, jobs ...JobResult) JobRow {
 	return JobRow{RunID: run, Attempt: attempt, Jobs: jobs, FetchedAt: fetched}
@@ -37,19 +33,17 @@ func jobRowCount(t *testing.T, s *Store) int {
 	return n
 }
 
-func TestOpenVersion1FixtureMigratesToTheJobTable(t *testing.T) {
+func TestOpenVersion1FixtureGainsAnEmptyJobTable(t *testing.T) {
 	fx, ok := fixtures(t)[1]
 	if !ok {
 		t.Fatal("no version 1 fixture")
 	}
 	path := dbPath(t)
 	copyFile(t, fx, path)
-	opts := fastOpts()
-	opts.Migrations = ladderThroughJob()
-	s, res := mustOpen(t, path, opts)
+	s, res := mustOpen(t, path, fastOpts())
 
-	if res.Outcome != OutcomeMigrated || res.FromVersion != 1 || res.ToVersion != jobTableVersion {
-		t.Fatalf("result = %+v, want migrated 1 -> %d", res, jobTableVersion)
+	if res.Outcome != OutcomeMigrated || res.FromVersion != 1 || res.ToVersion != SchemaVersion {
+		t.Fatalf("result = %+v, want migrated 1 -> %d", res, SchemaVersion)
 	}
 	ctx := context.Background()
 	assertFixtureData(t, ctx, s)
@@ -71,19 +65,17 @@ func TestOpenVersion1FixtureMigratesToTheJobTable(t *testing.T) {
 	}
 }
 
-func TestOpenVersion2FixtureIsAPlainOpenWithItsSampleJob(t *testing.T) {
+func TestOpenVersion2FixtureMigratesAndKeepsItsSampleJob(t *testing.T) {
 	fx, ok := fixtures(t)[jobTableVersion]
 	if !ok {
 		t.Fatalf("no version %d fixture", jobTableVersion)
 	}
 	path := dbPath(t)
 	copyFile(t, fx, path)
-	opts := fastOpts()
-	opts.Migrations = ladderThroughJob()
-	s, res := mustOpen(t, path, opts)
+	s, res := mustOpen(t, path, fastOpts())
 
-	if res.Outcome != OutcomeOpened || res.FromVersion != jobTableVersion || res.ToVersion != jobTableVersion {
-		t.Fatalf("result = %+v, want opened at version %d (nothing to migrate)", res, jobTableVersion)
+	if res.Outcome != OutcomeMigrated || res.FromVersion != jobTableVersion || res.ToVersion != SchemaVersion {
+		t.Fatalf("result = %+v, want migrated %d -> %d", res, jobTableVersion, SchemaVersion)
 	}
 	ctx := context.Background()
 	assertFixtureData(t, ctx, s)

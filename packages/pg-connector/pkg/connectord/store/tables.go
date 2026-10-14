@@ -10,7 +10,8 @@ import (
 	"time"
 )
 
-// This file holds the typed accessors for the five version 1 tables. They
+// This file holds the typed accessors for the version 1 tables (the change engine's
+// tables are in changes.go). They
 // store and fetch rows; what a row MEANS (alias resolution, group content,
 // budget accounting) belongs to the packages that use them. A zero
 // time.Time is stored as NULL and read back as the zero time.
@@ -27,6 +28,15 @@ func timeOf(ms sql.NullInt64) time.Time {
 		return time.Time{}
 	}
 	return time.UnixMilli(ms.Int64).UTC()
+}
+
+// dbtx is what the shared statement helpers need: both *sql.DB (a statement of
+// its own) and *sql.Tx (a statement inside a store transaction, see Tx)
+// satisfy it, so a Store method and its Tx namesake run the same SQL.
+type dbtx interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
 func boolInt(b bool) int {
@@ -49,10 +59,19 @@ type QueryRow struct {
 	FreshUntil    time.Time
 	LastSuccessAt time.Time
 	LastError     string
+	// BaselineAt is when the first complete run of a configured query
+	// established its membership baseline; the zero time (NULL) means no
+	// baseline yet.
+	BaselineAt time.Time
 }
 
-// PutQuery inserts or replaces the row for q.Key.
+// PutQuery inserts or replaces the row for q.Key. A zero q.BaselineAt keeps the
+// stored baseline (it never clears one); a non-zero one replaces it.
 func (s *Store) PutQuery(ctx context.Context, q QueryRow) error {
+	return putQuery(ctx, s.db, q)
+}
+
+func putQuery(ctx context.Context, db dbtx, q QueryRow) error {
 	ids := q.IDs
 	if ids == nil {
 		ids = []string{}
@@ -61,22 +80,24 @@ func (s *Store) PutQuery(ctx context.Context, q QueryRow) error {
 	if err != nil {
 		return fmt.Errorf("store: encode query ids: %w", err)
 	}
-	_, err = s.db.ExecContext(ctx, `
-INSERT INTO query (key, configured, ids, complete, fetched_at, fresh_until, last_success_at, last_error)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	_, err = db.ExecContext(ctx, `
+INSERT INTO query (key, configured, ids, complete, fetched_at, fresh_until, last_success_at, last_error, baseline_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (key) DO UPDATE SET
   configured = excluded.configured, ids = excluded.ids, complete = excluded.complete,
   fetched_at = excluded.fetched_at, fresh_until = excluded.fresh_until,
-  last_success_at = excluded.last_success_at, last_error = excluded.last_error`,
+  last_success_at = excluded.last_success_at, last_error = excluded.last_error,
+  baseline_at = COALESCE(excluded.baseline_at, query.baseline_at)`,
 		q.Key, boolInt(q.Configured), string(raw), boolInt(q.Complete),
-		msOrNull(q.FetchedAt), msOrNull(q.FreshUntil), msOrNull(q.LastSuccessAt), q.LastError)
+		msOrNull(q.FetchedAt), msOrNull(q.FreshUntil), msOrNull(q.LastSuccessAt), q.LastError,
+		msOrNull(q.BaselineAt))
 	if err != nil {
 		return fmt.Errorf("store: put query %q: %w", q.Key, err)
 	}
 	return nil
 }
 
-const queryCols = `key, configured, ids, complete, fetched_at, fresh_until, last_success_at, last_error`
+const queryCols = `key, configured, ids, complete, fetched_at, fresh_until, last_success_at, last_error, baseline_at`
 
 func scanQuery(sc interface{ Scan(...any) error }) (QueryRow, error) {
 	var (
@@ -84,8 +105,9 @@ func scanQuery(sc interface{ Scan(...any) error }) (QueryRow, error) {
 		configured, complete     int
 		ids                      string
 		fetched, fresh, lastSucc sql.NullInt64
+		baseline                 sql.NullInt64
 	)
-	if err := sc.Scan(&q.Key, &configured, &ids, &complete, &fetched, &fresh, &lastSucc, &q.LastError); err != nil {
+	if err := sc.Scan(&q.Key, &configured, &ids, &complete, &fetched, &fresh, &lastSucc, &q.LastError, &baseline); err != nil {
 		return QueryRow{}, err
 	}
 	if err := json.Unmarshal([]byte(ids), &q.IDs); err != nil {
@@ -93,12 +115,17 @@ func scanQuery(sc interface{ Scan(...any) error }) (QueryRow, error) {
 	}
 	q.Configured, q.Complete = configured != 0, complete != 0
 	q.FetchedAt, q.FreshUntil, q.LastSuccessAt = timeOf(fetched), timeOf(fresh), timeOf(lastSucc)
+	q.BaselineAt = timeOf(baseline)
 	return q, nil
 }
 
 // GetQuery returns the row for key; ok is false when there is none.
-func (s *Store) GetQuery(ctx context.Context, key string) (q QueryRow, ok bool, err error) {
-	q, err = scanQuery(s.db.QueryRowContext(ctx, `SELECT `+queryCols+` FROM query WHERE key = ?`, key))
+func (s *Store) GetQuery(ctx context.Context, key string) (QueryRow, bool, error) {
+	return getQuery(ctx, s.db, key)
+}
+
+func getQuery(ctx context.Context, db dbtx, key string) (q QueryRow, ok bool, err error) {
+	q, err = scanQuery(db.QueryRowContext(ctx, `SELECT `+queryCols+` FROM query WHERE key = ?`, key))
 	if errors.Is(err, sql.ErrNoRows) {
 		return QueryRow{}, false, nil
 	}
@@ -111,7 +138,11 @@ func (s *Store) GetQuery(ctx context.Context, key string) (q QueryRow, ok bool, 
 // ListQueries returns every query row ordered by key; configuredOnly keeps
 // only the configured ones.
 func (s *Store) ListQueries(ctx context.Context, configuredOnly bool) ([]QueryRow, error) {
-	rows, err := s.db.QueryContext(ctx,
+	return listQueries(ctx, s.db, configuredOnly)
+}
+
+func listQueries(ctx context.Context, db dbtx, configuredOnly bool) ([]QueryRow, error) {
+	rows, err := db.QueryContext(ctx,
 		`SELECT `+queryCols+` FROM query WHERE (? = 0 OR configured = 1) ORDER BY key`, boolInt(configuredOnly))
 	if err != nil {
 		return nil, fmt.Errorf("store: list queries: %w", err)
@@ -214,7 +245,11 @@ type EntityRow struct {
 
 // PutEntity inserts or replaces the row for (e.Kind, e.ID).
 func (s *Store) PutEntity(ctx context.Context, e EntityRow) error {
-	_, err := s.db.ExecContext(ctx, `
+	return putEntity(ctx, s.db, e)
+}
+
+func putEntity(ctx context.Context, db dbtx, e EntityRow) error {
+	_, err := db.ExecContext(ctx, `
 INSERT INTO entity (kind, id, version, last_access, keep_alive, last_known_mergeable, tombstoned_at)
 VALUES (?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (kind, id) DO UPDATE SET
@@ -248,7 +283,11 @@ ON CONFLICT (kind, id) DO UPDATE SET last_access = excluded.last_access, keep_al
 // EnsureEntity creates an empty row for (kind, id) when there is none and
 // leaves an existing row exactly as it is.
 func (s *Store) EnsureEntity(ctx context.Context, kind, id string) error {
-	_, err := s.db.ExecContext(ctx, `
+	return ensureEntity(ctx, s.db, kind, id)
+}
+
+func ensureEntity(ctx context.Context, db dbtx, kind, id string) error {
+	_, err := db.ExecContext(ctx, `
 INSERT INTO entity (kind, id, version, last_access, keep_alive, last_known_mergeable, tombstoned_at)
 VALUES (?, ?, 0, NULL, 0, '', NULL)
 ON CONFLICT (kind, id) DO NOTHING`, kind, id)
@@ -274,8 +313,12 @@ func scanEntity(sc interface{ Scan(...any) error }) (EntityRow, error) {
 }
 
 // GetEntity returns the row for (kind, id); ok is false when there is none.
-func (s *Store) GetEntity(ctx context.Context, kind, id string) (e EntityRow, ok bool, err error) {
-	e, err = scanEntity(s.db.QueryRowContext(ctx,
+func (s *Store) GetEntity(ctx context.Context, kind, id string) (EntityRow, bool, error) {
+	return getEntity(ctx, s.db, kind, id)
+}
+
+func getEntity(ctx context.Context, db dbtx, kind, id string) (e EntityRow, ok bool, err error) {
+	e, err = scanEntity(db.QueryRowContext(ctx,
 		`SELECT `+entityCols+` FROM entity WHERE kind = ? AND id = ?`, kind, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return EntityRow{}, false, nil
@@ -343,7 +386,11 @@ type GroupRow struct {
 
 // PutGroup inserts or replaces the row for (g.Kind, g.ID, g.Group).
 func (s *Store) PutGroup(ctx context.Context, g GroupRow) error {
-	_, err := s.db.ExecContext(ctx, `
+	return putGroup(ctx, s.db, g)
+}
+
+func putGroup(ctx context.Context, db dbtx, g GroupRow) error {
+	_, err := db.ExecContext(ctx, `
 INSERT INTO entity_group (kind, id, group_name, content, fingerprint, fetched_at, fresh_until,
                           max_age_at, last_error, generation, fetched_for_head, fetched_for_base)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -377,8 +424,12 @@ func scanGroup(sc interface{ Scan(...any) error }) (GroupRow, error) {
 }
 
 // GetGroup returns one group; ok is false when there is none.
-func (s *Store) GetGroup(ctx context.Context, kind, id, group string) (g GroupRow, ok bool, err error) {
-	g, err = scanGroup(s.db.QueryRowContext(ctx,
+func (s *Store) GetGroup(ctx context.Context, kind, id, group string) (GroupRow, bool, error) {
+	return getGroup(ctx, s.db, kind, id, group)
+}
+
+func getGroup(ctx context.Context, db dbtx, kind, id, group string) (g GroupRow, ok bool, err error) {
+	g, err = scanGroup(db.QueryRowContext(ctx,
 		`SELECT `+groupCols+` FROM entity_group WHERE kind = ? AND id = ? AND group_name = ?`, kind, id, group))
 	if errors.Is(err, sql.ErrNoRows) {
 		return GroupRow{}, false, nil

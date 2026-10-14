@@ -38,7 +38,10 @@ func TestGenerateFixture(t *testing.T) {
 	path := filepath.Join(dir, "gen.db")
 	s, _ := mustOpen(t, path, fastOpts())
 	for _, q := range []string{
-		`INSERT INTO query VALUES ('open-prs:org/repo', 1, '["PR_1","PR_2"]', 1, 1760000000000, 1760000060000, 1760000000000, '')`,
+		// Named columns: the table has grown (baseline_at, version 3), and a
+		// positional INSERT would break with every added column.
+		`INSERT INTO query (key, configured, ids, complete, fetched_at, fresh_until, last_success_at, last_error, baseline_at)
+		 VALUES ('open-prs:org/repo', 1, '["PR_1","PR_2"]', 1, 1760000000000, 1760000060000, 1760000000000, '', 1760000000000)`,
 		`INSERT INTO alias VALUES ('PR_1', 'org/repo#1', 1760000000000)`,
 		`INSERT INTO entity VALUES ('pr', 'PR_1', 3, 1760000000000, 1, 'MERGEABLE', NULL)`,
 		`INSERT INTO entity_group (kind, id, group_name, content, fingerprint, fetched_at, fresh_until, max_age_at,
@@ -51,6 +54,19 @@ func TestGenerateFixture(t *testing.T) {
 		// this row as.
 		`INSERT INTO job (run_id, attempt, jobs, fetched_at)
 		 VALUES ('1001', 2, '[{"id":"2001","name":"build","status":"completed","conclusion":"success","url":"https://example.invalid/org/repo/actions/runs/1001/job/2001"},{"id":"2002","name":"test","status":"completed","conclusion":"failure"}]', 1760000000000)`,
+		// The change engine's tables (version 3); assertFixtureChanges is what the
+		// accessors must read these rows as.
+		`INSERT INTO change_log (kind, id, version, head_sha, kinds, fields, origin, origin_updated_at, at)
+		 VALUES ('pr', 'org/repo#1', 3, 'head-sha', '["title_changed"]',
+		   '[{"name":"title","before":"Old","after":"Sample"}]', 'refresh', 1760000000500, 1760000001000)`,
+		`INSERT INTO pending_change (kind, id, kinds, fields, awaited, head_sha, base_sha, origin,
+		   origin_updated_at, detected_at, deadline)
+		 VALUES ('pr', 'org/repo#2', '["ci_changed"]', '[{"name":"ci","before":"pending","after":"success"}]',
+		   '[{"group":"runs","since":1760000002000}]', 'head-sha-2', 'base-sha-2', 'query',
+		   1760000002500, 1760000003000, 1760000033000)`,
+		`INSERT INTO consumer (consumer, kind, query, acked_seq, seen_at)
+		 VALUES ('sample-consumer', 'pr', 'open-prs', 1, 1760000004000)`,
+		`INSERT INTO store_meta (key, value) VALUES ('moved_aside_at', '1760000005000')`,
 	} {
 		if _, err := s.DB().Exec(q); err != nil {
 			t.Fatal(err)
@@ -107,6 +123,93 @@ func assertFixtureJobs(t *testing.T, ctx context.Context, s *Store, fixtureVersi
 		t.Errorf("a version %d fixture has no job rows, but the migrated store returned %+v", fixtureVersion, got)
 	case fixtureVersion >= jobTableVersion && (!ok || !sameJobRow(got, want)):
 		t.Errorf("job row = %+v ok=%v, want %+v", got, ok, want)
+	}
+}
+
+// changeTablesVersion is the schema version that added the change engine's
+// tables and query.baseline_at.
+const changeTablesVersion = 3
+
+// assertFixtureChanges checks the change engine's tables of a store opened from
+// the fixture of schema version fixtureVersion: from version changeTablesVersion
+// on, the fixture's sample rows (and the query's baseline); before that, the
+// empty tables the migration created and a query with no baseline.
+func assertFixtureChanges(t *testing.T, ctx context.Context, s *Store, fixtureVersion int) {
+	t.Helper()
+	has := fixtureVersion >= changeTablesVersion
+
+	q, ok, err := s.GetQuery(ctx, "open-prs:org/repo")
+	if err != nil || !ok {
+		t.Fatalf("query = %+v ok=%v err=%v", q, ok, err)
+	}
+	if got, want := q.BaselineAt.UnixMilli(), int64(1760000000000); has && got != want {
+		t.Errorf("query baseline_at = %d, want %d", got, want)
+	} else if !has && !q.BaselineAt.IsZero() {
+		t.Errorf("a version %d fixture has no baseline, got %v", fixtureVersion, q.BaselineAt)
+	}
+
+	rows, err := s.ChangesAfter(ctx, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, err := s.ChangeHead(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldest, haveOldest, err := s.ChangeOldest(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, err := s.ListPending(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	consumers, err := s.ListConsumers(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta, metaOK, err := s.GetMeta(ctx, "moved_aside_at")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !has {
+		if len(rows) != 0 || head != 0 || haveOldest || len(pending) != 0 || len(consumers) != 0 || metaOK {
+			t.Errorf("a version %d store has no change rows, got log=%d head=%d oldest=%v pending=%d consumers=%d meta=%v",
+				fixtureVersion, len(rows), head, haveOldest, len(pending), len(consumers), metaOK)
+		}
+		return
+	}
+
+	if len(rows) != 1 || head != 1 || !haveOldest || oldest != 1 {
+		t.Fatalf("change log = %+v head=%d oldest=%d/%v, want one row at seq 1", rows, head, oldest, haveOldest)
+	}
+	c := rows[0]
+	if c.Seq != 1 || c.Kind != "pr" || c.ID != "org/repo#1" || c.Version != 3 || c.HeadSHA != "head-sha" ||
+		!slices.Equal(c.Kinds, []string{"title_changed"}) ||
+		string(c.Fields) != `[{"name":"title","before":"Old","after":"Sample"}]` || c.Origin != "refresh" ||
+		c.OriginUpdatedAt.UnixMilli() != 1760000000500 || c.At.UnixMilli() != 1760000001000 {
+		t.Errorf("change row = %+v", c)
+	}
+	if len(pending) != 1 {
+		t.Fatalf("pending = %+v, want one row", pending)
+	}
+	p := pending[0]
+	if p.Kind != "pr" || p.ID != "org/repo#2" || !slices.Equal(p.Kinds, []string{"ci_changed"}) ||
+		string(p.Fields) != `[{"name":"ci","before":"pending","after":"success"}]` ||
+		string(p.Awaited) != `[{"group":"runs","since":1760000002000}]` || p.HeadSHA != "head-sha-2" ||
+		p.BaseSHA != "base-sha-2" || p.Origin != "query" || p.OriginUpdatedAt.UnixMilli() != 1760000002500 ||
+		p.DetectedAt.UnixMilli() != 1760000003000 || p.Deadline.UnixMilli() != 1760000033000 {
+		t.Errorf("pending row = %+v", p)
+	}
+	if len(consumers) != 1 {
+		t.Fatalf("consumers = %+v, want one row", consumers)
+	}
+	if k := consumers[0]; k.Consumer != "sample-consumer" || k.Kind != "pr" || k.Query != "open-prs" ||
+		k.AckedSeq != 1 || k.SeenAt.UnixMilli() != 1760000004000 {
+		t.Errorf("consumer row = %+v", k)
+	}
+	if !metaOK || meta != "1760000005000" {
+		t.Errorf("meta = %q ok=%v", meta, metaOK)
 	}
 }
 

@@ -33,6 +33,19 @@ func (s *Store) PutGroupIf(ctx context.Context, g GroupRow, expectGeneration int
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	stored, err = putGroupIf(ctx, tx, g, expectGeneration)
+	if err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("store: put group if %s/%s/%s: %w", g.Kind, g.ID, g.Group, err)
+	}
+	return stored, nil
+}
+
+// putGroupIf is PutGroupIf's compare-and-swap, run on a transaction the caller
+// owns (PutGroupIf's own, or a Tx's).
+func putGroupIf(ctx context.Context, tx dbtx, g GroupRow, expectGeneration int64) (stored bool, err error) {
 	res, err := tx.ExecContext(ctx, `
 UPDATE entity_group SET
   content = ?, fingerprint = ?, fetched_at = ?, fresh_until = ?, max_age_at = ?,
@@ -67,9 +80,6 @@ ON CONFLICT (kind, id, group_name) DO NOTHING`,
 			return false, fmt.Errorf("store: put group if %s/%s/%s: %w", g.Kind, g.ID, g.Group, err)
 		}
 		stored = n == 1
-	}
-	if err := tx.Commit(); err != nil {
-		return false, fmt.Errorf("store: put group if %s/%s/%s: %w", g.Kind, g.ID, g.Group, err)
 	}
 	return stored, nil
 }

@@ -30,7 +30,9 @@ func dbPath(t *testing.T) string {
 
 // currentTables is the table set of the current schema version, sorted as
 // tableNames returns it. A migration that adds a table changes this list.
-var currentTables = []string{"alias", "budget", "entity", "entity_group", "job", "query"}
+var currentTables = []string{
+	"alias", "budget", "change_log", "consumer", "entity", "entity_group", "job", "pending_change", "query", "store_meta",
+}
 
 func mustOpen(t *testing.T, path string, opts Options) (*Store, Result) {
 	t.Helper()
@@ -121,11 +123,12 @@ func TestValidateLadderRejectsGapsAndNilApply(t *testing.T) {
 	}
 }
 
-// TestOpenEmptyCreatesCurrentSchema describes schema version 2: the five version
-// 1 tables plus job. A migration that bumps the version updates this test, its
+// TestOpenEmptyCreatesCurrentSchema describes schema version 3: the five version
+// 1 tables, job, and the change engine's pending_change, change_log, consumer and
+// store_meta, with query.baseline_at. A migration that bumps the version updates this test, its
 // table list and its column lists with it.
 func TestOpenEmptyCreatesCurrentSchema(t *testing.T) {
-	const wantVersion = 2
+	const wantVersion = 3
 	if SchemaVersion != wantVersion {
 		t.Fatalf("SchemaVersion = %d, this test describes version %d", SchemaVersion, wantVersion)
 	}
@@ -146,14 +149,11 @@ func TestOpenEmptyCreatesCurrentSchema(t *testing.T) {
 	if got := tableNames(t, s); !slices.Equal(got, currentTables) {
 		t.Errorf("tables = %v, want exactly %v", got, currentTables)
 	}
-	for _, absent := range []string{"pending_change", "change_log", "consumer"} {
-		if slices.Contains(tableNames(t, s), absent) {
-			t.Errorf("table %s must not exist in schema version 2", absent)
-		}
-	}
-
 	wantCols := map[string][]string{
-		"query": {"key", "configured", "ids", "complete", "fetched_at", "fresh_until", "last_success_at", "last_error"},
+		"query": {
+			"key", "configured", "ids", "complete", "fetched_at", "fresh_until", "last_success_at", "last_error",
+			"baseline_at",
+		},
 		"alias": {"node_id", "ref", "seen_at"},
 		"entity": {
 			"kind", "id", "version", "last_access", "keep_alive", "last_known_mergeable",
@@ -165,6 +165,15 @@ func TestOpenEmptyCreatesCurrentSchema(t *testing.T) {
 		},
 		"budget": {"bucket", "at", "remaining", "reset_at", "spent", "purpose"},
 		"job":    {"run_id", "attempt", "jobs", "fetched_at"},
+		"change_log": {
+			"seq", "kind", "id", "version", "head_sha", "kinds", "fields", "origin", "origin_updated_at", "at",
+		},
+		"pending_change": {
+			"kind", "id", "kinds", "fields", "awaited", "head_sha", "base_sha", "origin", "origin_updated_at",
+			"detected_at", "deadline",
+		},
+		"consumer":   {"consumer", "kind", "query", "acked_seq", "seen_at"},
+		"store_meta": {"key", "value"},
 	}
 	for table, cols := range wantCols {
 		got := columnNames(t, s, table)
@@ -272,13 +281,15 @@ func TestOpenFromEachFixture(t *testing.T) {
 			}
 			assertFixtureData(t, ctx, s)
 			assertFixtureJobs(t, ctx, s, v)
+			assertFixtureChanges(t, ctx, s, v)
 		})
 	}
 }
 
 // TestUpMigrationFromFixtureKeepsData climbs from the version 1 fixture
 // through the shipped ladder plus one test-only scratch step and checks the old
-// data survived, the shipped job step ran, and the scratch step ran exactly once.
+// data survived, the shipped job and change-table steps ran, and the scratch step
+// ran exactly once.
 func TestUpMigrationFromFixtureKeepsData(t *testing.T) {
 	fx, ok := fixtures(t)[1]
 	if !ok {
@@ -288,7 +299,8 @@ func TestUpMigrationFromFixtureKeepsData(t *testing.T) {
 	copyFile(t, fx, path)
 
 	// The scratch step is defined here and never shipped: it sits one past the
-	// shipped ladder (version 3 while the ladder ends at the job step, 2).
+	// shipped ladder (never a literal version: the shipped ladder ends at
+	// SchemaVersion).
 	scratch := SchemaVersion + 1
 	ran := 0
 	ladder := append(slices.Clone(builtinMigrations), Migration{
@@ -306,8 +318,11 @@ func TestUpMigrationFromFixtureKeepsData(t *testing.T) {
 		t.Fatalf("result = %+v ran=%d, want migrated 1 -> %d with one scratch step", res, ran, scratch)
 	}
 	assertFixtureData(t, context.Background(), s)
-	if !slices.Contains(tableNames(t, s), "job") {
-		t.Error("the shipped job step did not run on the way up")
+	assertFixtureChanges(t, context.Background(), s, 1)
+	for _, shipped := range []string{"job", "pending_change", "change_log", "consumer", "store_meta"} {
+		if !slices.Contains(tableNames(t, s), shipped) {
+			t.Errorf("the shipped step creating %s did not run on the way up", shipped)
+		}
 	}
 	if !slices.Contains(tableNames(t, s), "scratch") {
 		t.Errorf("step %d did not create its table", scratch)
