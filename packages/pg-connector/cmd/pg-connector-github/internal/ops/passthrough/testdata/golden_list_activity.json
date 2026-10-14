@@ -1,0 +1,72 @@
+{
+  "items": [
+    {
+      "id": "o/r#12#pr.opened",
+      "kind": "pr.opened",
+      "entity_type": "pr",
+      "entity_id": "o/r#12",
+      "occurred_at": "2026-09-05T10:00:00Z",
+      "summary": "opened o/r#12: Add feature",
+      "url": "https://example.invalid/o/r/pull/12",
+      "labels": ["repo:o/r"],
+      "fields": {
+        "author": "phillipgreenii",
+        "draft": false,
+        "title": "Add feature"
+      },
+      "as_of": "<as_of>",
+      "stale": false
+    },
+    {
+      "id": "o/r#12#pr.merged",
+      "kind": "pr.merged",
+      "entity_type": "pr",
+      "entity_id": "o/r#12",
+      "occurred_at": "2026-09-07T12:00:00Z",
+      "summary": "merged o/r#12: Add feature",
+      "url": "https://example.invalid/o/r/pull/12",
+      "labels": ["repo:o/r"],
+      "fields": {
+        "author": "phillipgreenii",
+        "base": "main",
+        "title": "Add feature"
+      },
+      "as_of": "<as_of>",
+      "stale": false
+    },
+    {
+      "id": "o/r#14#pr.closed",
+      "kind": "pr.closed",
+      "entity_type": "pr",
+      "entity_id": "o/r#14",
+      "occurred_at": "2026-09-09T08:30:00Z",
+      "summary": "closed o/r#14: Abandoned idea",
+      "url": "https://example.invalid/o/r/pull/14",
+      "labels": ["repo:o/r"],
+      "fields": {
+        "author": "phillipgreenii",
+        "title": "Abandoned idea"
+      },
+      "as_of": "<as_of>",
+      "stale": false
+    },
+    {
+      "id": "o/r#15#pr.reviewed#PRR_1",
+      "kind": "pr.reviewed",
+      "entity_type": "pr",
+      "entity_id": "o/r#15",
+      "occurred_at": "2026-09-10T08:00:00Z",
+      "summary": "reviewed o/r#15 (approved): Review me",
+      "url": "https://example.invalid/o/r/pull/15",
+      "labels": ["repo:o/r"],
+      "fields": {
+        "author": "teammate",
+        "state": "approved",
+        "title": "Review me"
+      },
+      "as_of": "<as_of>",
+      "stale": false
+    }
+  ],
+  "truncated": false
+}

@@ -1,0 +1,16 @@
+[
+  {
+    "type": "pr",
+    "id": "o/r#7",
+    "title": "Add feature",
+    "url": "https://example.invalid/o/r/pull/7",
+    "source": "pg-connector-pr-github"
+  },
+  {
+    "type": "pr",
+    "id": "o/r#8",
+    "title": "Fix the thing",
+    "url": "https://example.invalid/o/r/pull/8",
+    "source": "pg-connector-pr-github"
+  }
+]

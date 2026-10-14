@@ -206,6 +206,8 @@ packages/pg-connector/
                                          internal/ratefeed feeds the governor (GraphQL rateLimit, `gh api --include` headers);
                                          internal/metered is the Provider's governor-metered gh runner and the shared
                                          error mapping onto the wire taxonomy (rate limits are never auth failures);
+                                         internal/ops/passthrough serves the metered pass-through ops search and
+                                         list_activity (class 1, purpose passthrough, nothing stored);
                                          internal/serve assembles the daemon (startup order, ops table, origin gateway)
                                          and internal/servetest runs the real binary against a counting fake gh in tests
     pg-connector-pr-github/internal/     backend-private
