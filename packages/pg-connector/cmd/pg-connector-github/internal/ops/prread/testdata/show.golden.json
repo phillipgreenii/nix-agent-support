@@ -1,0 +1,103 @@
+{
+  "id": "octo/widgets#42",
+  "repo": "octo/widgets",
+  "number": 42,
+  "title": "Add widget cache",
+  "state": "open",
+  "branch": "feature/widget-cache",
+  "base": "main",
+  "author": "phillipgreenii",
+  "url": "https://github.com/octo/widgets/pull/42",
+  "draft": false,
+  "merged": false,
+  "body": "Adds a cache in front of the widget lookup.",
+  "labels": ["bug", "docs"],
+  "as_of": "",
+  "stale": false,
+  "comments": [
+    {
+      "id": "IC_1",
+      "author": "phillipgreenii",
+      "body": "top-level one",
+      "resolved": false
+    },
+    {
+      "id": "IC_2",
+      "author": "review-bot",
+      "body": "top-level two",
+      "resolved": false
+    },
+    {
+      "id": "RC_4",
+      "author": "teammate",
+      "body": "inline, review not joined",
+      "path": "util.go",
+      "line": 12,
+      "thread_id": "RC_4",
+      "review_thread_id": "PRRT_2",
+      "resolved": false
+    }
+  ],
+  "reviews": [
+    {
+      "id": "PRR_1",
+      "author": "teammate",
+      "state": "CHANGES_REQUESTED",
+      "body": "please fix",
+      "comments": [
+        {
+          "id": "RC_3",
+          "author": "teammate",
+          "body": "inline nested",
+          "path": "main.go",
+          "line": 10,
+          "thread_id": "RC_3",
+          "review_thread_id": "PRRT_1",
+          "resolved": true,
+          "thread_outdated": true
+        }
+      ],
+      "submitted_at": "2026-10-01T09:00:00Z",
+      "commit_oid": "abc123"
+    },
+    {
+      "id": "PRR_2",
+      "author": "review-bot",
+      "state": "APPROVED",
+      "submitted_at": "2026-10-01T09:30:00Z",
+      "commit_oid": ""
+    }
+  ],
+  "connections": {
+    "reviews": {
+      "truncated": false,
+      "total": 2,
+      "returned": 2
+    },
+    "threads": {
+      "truncated": false,
+      "total": 2,
+      "returned": 2
+    },
+    "comments": {
+      "truncated": true,
+      "total": 1001,
+      "returned": 1000
+    }
+  },
+  "head_sha": "1111111111111111111111111111111111111111",
+  "additions": 10,
+  "deletions": 2,
+  "changed_files": 3,
+  "mergeable": "MERGEABLE",
+  "merge_state_status": "CLEAN",
+  "review_requests": ["teammate", "reviewers"],
+  "checks_rollup": "success",
+  "node_id": "PR_kwDOExample1",
+  "updated_at": "2026-10-01T10:00:00Z",
+  "review_decision": "APPROVED",
+  "comment_count": 2,
+  "review_count": 2,
+  "label_count": 2,
+  "base_sha": "2222222222222222222222222222222222222222"
+}
