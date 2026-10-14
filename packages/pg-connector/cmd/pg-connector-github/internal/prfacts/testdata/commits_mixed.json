@@ -1,0 +1,47 @@
+{
+  "data": {
+    "rateLimit": {
+      "cost": 1,
+      "remaining": 4900,
+      "resetAt": "2026-10-12T10:00:00Z"
+    },
+    "repository": {
+      "pullRequest": {
+        "commits": {
+          "totalCount": 3,
+          "pageInfo": { "hasNextPage": false, "endCursor": "" },
+          "nodes": [
+            {
+              "commit": {
+                "oid": "1111111111111111111111111111111111111111",
+                "messageHeadline": "Add the widget",
+                "authors": {
+                  "nodes": [{ "user": { "login": "phillipgreenii" } }]
+                }
+              }
+            },
+            {
+              "commit": {
+                "oid": "2222222222222222222222222222222222222222",
+                "messageHeadline": "Fix the widget with no linked account",
+                "authors": { "nodes": [{ "user": null }] }
+              }
+            },
+            {
+              "commit": {
+                "oid": "3333333333333333333333333333333333333333",
+                "messageHeadline": "Second author is not the commit's author",
+                "authors": {
+                  "nodes": [
+                    { "user": { "login": "teammate" } },
+                    { "user": { "login": "review-bot" } }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}
