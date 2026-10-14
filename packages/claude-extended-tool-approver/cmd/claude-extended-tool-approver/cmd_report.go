@@ -79,23 +79,8 @@ func runReport(groupByVal string, missesOnlyVal bool, formatVal string, daysVal 
 
 	counts := map[string]int{}
 	for _, row := range rows {
-		if *missesOnly {
-			// A row nobody ever decided (pending / unresolved) can be neither
-			// correct nor a miss: there is no recorded decision to disagree with.
-			// Counting it also made the miss set depend on nothing but timing —
-			// the SAME row is 'pending' before SessionEnd and 'unresolved' after,
-			// so it would drift in and out of the miss set as sessions closed.
-			if !asklog.OutcomeIsDecision(row.Outcome) {
-				continue
-			}
-			hookDec := ""
-			if row.HookDecision != nil {
-				hookDec = *row.HookDecision
-			}
-			expected := outcomeToExpectedDecision(row.Outcome)
-			if expected != "" && hookDec == expected {
-				continue
-			}
+		if *missesOnly && !isReportMiss(row) {
+			continue
 		}
 
 		var key string
@@ -136,4 +121,24 @@ func runReport(groupByVal string, missesOnlyVal bool, formatVal string, daysVal 
 			fmt.Printf("%-50s %5d\n", e.Key, e.Count)
 		}
 	}
+}
+
+// isReportMiss reports whether a row belongs in the `report --misses-only` set.
+//
+// A row nobody ever decided (pending / unresolved) can be neither correct nor a
+// miss: there is no recorded decision to disagree with. Counting it also made
+// the miss set depend on nothing but timing — the SAME row is 'pending' before
+// SessionEnd and 'unresolved' after, so it would drift in and out of the miss
+// set as sessions closed. A decided row is a miss unless the hook's recorded
+// decision already matches the decision the outcome implies.
+func isReportMiss(row asklog.DecisionRow) bool {
+	if !asklog.OutcomeIsDecision(row.Outcome) {
+		return false
+	}
+	hookDec := ""
+	if row.HookDecision != nil {
+		hookDec = *row.HookDecision
+	}
+	expected := outcomeToExpectedDecision(row.Outcome)
+	return expected == "" || hookDec != expected
 }

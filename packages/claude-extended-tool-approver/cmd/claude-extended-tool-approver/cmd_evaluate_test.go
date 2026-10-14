@@ -39,6 +39,7 @@ func TestOutcomeToExpectedDecision_ThreeWayDistinction(t *testing.T) {
 		{asklog.OutcomeApproved, "allow"},
 		{asklog.OutcomeDenied, "deny"},   // somebody declined it
 		{asklog.OutcomeRejected, "deny"}, // the hook refused it itself
+		{asklog.OutcomeFailed, "allow"},  // the hook let it through; the tool then errored
 		{asklog.OutcomePending, ""},      // not resolved yet
 		{asklog.OutcomeUnresolved, ""},   // never resolved at all
 	} {
@@ -99,6 +100,61 @@ func TestCategorize_ThreeWayDistinction(t *testing.T) {
 		row := asklog.DecisionRow{Outcome: tc.outcome}
 		if got := categorize(evalResult{ReplayResult: tc.replay}, row); got != tc.want {
 			t.Errorf("%s: category = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// TestCategorize_FailedGradesAsAllow pins pg2-h4m8q: a 'failed' row is a call
+// the hook let through that then errored at run time (PostToolUseFailure), so
+// the hook's allow was the right verdict. A replayed allow is correct; a
+// replayed deny/ask/abstain still disagrees with it and stays a miss.
+func TestCategorize_FailedGradesAsAllow(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		replay   string
+		settings string
+		want     string
+	}{
+		{"failed + replay allow", "allow", "", "correct"},
+		{"failed + replay deny", "deny", "", "miss-uncaught"},
+		{"failed + replay ask", "ask", "", "miss-uncaught"},
+		{"failed + replay abstain", "abstain", "", "miss-uncaught"},
+		{"failed + replay deny, settings allow", "deny", "allow", "miss-caught-by-settings"},
+		{"failed + replay ask, settings allow", "ask", "allow", "miss-caught-by-settings"},
+	} {
+		row := asklog.DecisionRow{Outcome: asklog.OutcomeFailed}
+		got := categorize(evalResult{ReplayResult: tc.replay, SettingsResult: tc.settings}, row)
+		if got != tc.want {
+			t.Errorf("%s: category = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// TestIsReportMiss pins the report --misses-only filter. A 'failed' row whose
+// recorded hook decision was allow agrees with its expected decision and is
+// excluded; one the hook did NOT allow stays a miss. Non-decisions are never
+// misses.
+func TestIsReportMiss(t *testing.T) {
+	str := func(s string) *string { return &s }
+	for _, tc := range []struct {
+		name    string
+		outcome string
+		hook    *string
+		want    bool
+	}{
+		{"failed + hook allow", asklog.OutcomeFailed, str("allow"), false},
+		{"failed + hook deny", asklog.OutcomeFailed, str("deny"), true},
+		{"failed + hook ask", asklog.OutcomeFailed, str("ask"), true},
+		{"failed + hook nil", asklog.OutcomeFailed, nil, true},
+		{"approved + hook allow", asklog.OutcomeApproved, str("allow"), false},
+		{"approved + hook ask", asklog.OutcomeApproved, str("ask"), true},
+		{"denied + hook deny", asklog.OutcomeDenied, str("deny"), false},
+		{"pending + hook ask", asklog.OutcomePending, str("ask"), false},
+		{"unresolved + hook ask", asklog.OutcomeUnresolved, str("ask"), false},
+	} {
+		row := asklog.DecisionRow{Outcome: tc.outcome, HookDecision: tc.hook}
+		if got := isReportMiss(row); got != tc.want {
+			t.Errorf("%s: isReportMiss = %v, want %v", tc.name, got, tc.want)
 		}
 	}
 }

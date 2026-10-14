@@ -366,7 +366,11 @@ func categorize(r evalResult, row asklog.DecisionRow) string {
 // asklog.OutcomeIsDecision MUST be consulted before grading against them.
 func outcomeToExpectedDecision(outcome string) string {
 	switch outcome {
-	case asklog.OutcomeApproved:
+	case asklog.OutcomeApproved, asklog.OutcomeFailed:
+		// OutcomeFailed is a call the hook let through that then errored at
+		// run time (PostToolUseFailure): the hook's allow was the right
+		// verdict, so a replayed allow is correct for it exactly as for
+		// OutcomeApproved (pg2-h4m8q).
 		return "allow"
 	case asklog.OutcomeDenied, asklog.OutcomeRejected:
 		// Both are a refusal of the call, so a replayed "deny" is correct for
