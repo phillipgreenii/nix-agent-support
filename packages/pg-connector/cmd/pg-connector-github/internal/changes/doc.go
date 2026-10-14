@@ -22,7 +22,11 @@
 //
 // The timing side of settling (deadlines read off the clock, the SIGTERM append,
 // the restart re-queue) belongs to the settle lifecycle; it ends a row through
-// Complete.
+// Complete (see Lifecycle: Sweep and Run end the rows whose deadline has
+// passed, FlushAll ends every row, Recover re-queues the awaited groups of the
+// stored rows at start). A row ended without its barrier satisfied is reported
+// failed when a still-awaited group's stored row carries a last_error and
+// timeout otherwise.
 //
 // # Transactions
 //
