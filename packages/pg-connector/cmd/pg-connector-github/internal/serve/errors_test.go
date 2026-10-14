@@ -163,6 +163,20 @@ func TestErrorTable_GitHubTimeout_TheCallersDeadlineServesStale(t *testing.T) {
 // ---- Secondary rate limit ----------------------------------------------------------
 
 func TestErrorTable_SecondaryLimit_PausesTheBackgroundAndServesInteractiveReadsStale(t *testing.T) {
+	secondaryLimitPausesTheBackground(t, 0)
+}
+
+// TestErrorTable_SecondaryLimit_PausesTheBackgroundAndServesInteractiveReadsStale_AfterASlowFill
+// is the same scenario with every origin call of the fill answering a second
+// late (a host so loaded that the daemon's fetches stall longer than any quiet
+// period). The limit must still be met by the query refresh, whose answer shows
+// its Retry-After, and not by a group fetch left running: a group's gh answer
+// shows none, so it would pause the background for the fallback minute instead.
+func TestErrorTable_SecondaryLimit_PausesTheBackgroundAndServesInteractiveReadsStale_AfterASlowFill(t *testing.T) {
+	secondaryLimitPausesTheBackground(t, 1)
+}
+
+func secondaryLimitPausesTheBackground(t *testing.T, fillDelaySeconds int) {
 	d := servetest.NewDaemon(t, servetest.Options{
 		Hooks:  "poll_interval=200ms",
 		Before: seed,
@@ -170,7 +184,13 @@ func TestErrorTable_SecondaryLimit_PausesTheBackgroundAndServesInteractiveReadsS
 		Config: map[string]any{"query_ttl": map[string]any{servetest.QueryMine: "2s", servetest.QueryTeam: "1h"}},
 	})
 	d.Start(t)
+	d.Shim.Delay(fillDelaySeconds)
 	mustList(t, d, servetest.QueryMine, nil)
+	// The mine query's three pull requests are all the daemon fetches groups
+	// for. Their groups must be stored before the origin turns hostile, or a
+	// group fetch still to come meets the limit first (see the slow-fill test).
+	awaitFirstSightingFetches(t, d, 3)
+	d.Shim.Delay(0)
 	d.Shim.WaitQuiet(t, 300*time.Millisecond, 30*time.Second)
 
 	d.Shim.Mode("secondary") // Retry-After: 3600

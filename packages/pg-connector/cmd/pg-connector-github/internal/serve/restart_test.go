@@ -14,14 +14,30 @@ import (
 // downtime the catch-up must stay inside the budget.
 
 func TestRestartServesEveryFreshReadWithZeroOriginCalls(t *testing.T) {
+	restartServesEveryFreshRead(t, 0)
+}
+
+// TestRestartServesEveryFreshReadWithZeroOriginCalls_AfterASlowFill is the same
+// scenario with every origin call of the fill answering a second late: the
+// stand-in for a host so loaded that the daemon's fetches stall for longer than
+// any quiet period. A fill the test judges finished by the silence of the call
+// log would stop (and restart) with groups still unfetched.
+func TestRestartServesEveryFreshReadWithZeroOriginCalls_AfterASlowFill(t *testing.T) {
+	restartServesEveryFreshRead(t, 1)
+}
+
+func restartServesEveryFreshRead(t *testing.T, fillDelaySeconds int) {
 	d := servetest.NewDaemon(t, servetest.Options{Before: seed})
 	d.Start(t)
 
 	// Fill the store through list calls, and let the daemon's own refreshes of
 	// its configured queries and their members finish.
+	d.Shim.Delay(fillDelaySeconds)
 	for _, q := range []string{servetest.QueryMine, servetest.QueryTeam} {
 		mustList(t, d, q, nil)
 	}
+	awaitFirstSightingFetches(t, d, 3)
+	d.Shim.Delay(0)
 	filled := d.Shim.WaitQuiet(t, 500*time.Millisecond, 30*time.Second)
 	if d.Shim.CountKind("search") == 0 || d.Shim.CountKind("nodes") == 0 {
 		t.Fatalf("fixture: the fill made no origin calls (%d calls)", filled)

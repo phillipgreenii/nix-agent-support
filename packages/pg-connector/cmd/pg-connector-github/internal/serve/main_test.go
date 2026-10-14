@@ -84,3 +84,26 @@ func until(t *testing.T, timeout time.Duration, what string, cond func() bool) {
 	}
 	t.Fatalf("timed out after %s waiting for %s", timeout, what)
 }
+
+// firstSightingGroups are the entity groups the daemon fetches for every pull
+// request it sees: the summary (from the query's members), then the detail, the
+// conversation and the runs.
+var firstSightingGroups = []string{"summary", "detail", "conversation", "runs"}
+
+// awaitFirstSightingFetches waits until the daemon has stored every
+// first-sighting group of prs pull requests. The silence of the call log
+// (Shim.WaitQuiet) cannot say that: a host under load can leave a fetch in
+// flight, or the next one unstarted, for longer than any quiet period, and a
+// test that then stops the daemon, restarts it or flips the origin's mode acts
+// on a daemon that is still filling. The store is the daemon's own account of
+// what it has fetched.
+func awaitFirstSightingFetches(t *testing.T, d *servetest.Daemon, prs int) {
+	t.Helper()
+	db := d.OpenStore(t)
+	until(t, 60*time.Second, "every first-sighting group of the fixture pull requests to be stored", func() bool {
+		var n int
+		err := db.QueryRow(`SELECT COUNT(*) FROM entity_group WHERE kind = 'pr' AND fetched_at IS NOT NULL AND group_name IN (?, ?, ?, ?)`,
+			firstSightingGroups[0], firstSightingGroups[1], firstSightingGroups[2], firstSightingGroups[3]).Scan(&n)
+		return err == nil && n == prs*len(firstSightingGroups)
+	})
+}

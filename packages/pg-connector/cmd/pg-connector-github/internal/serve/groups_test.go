@@ -233,13 +233,18 @@ func TestJobResults_AreFetchedOnceAndAFailedFetchKeepsWhatIsKnown(t *testing.T) 
 	if got := jobsCalls(); got != 1 {
 		t.Fatalf("the failed run's jobs were fetched %d times, want once (the passing run has none)", got)
 	}
+	store := d.OpenStore(t)
 	jobRows := func() int {
 		var n int
-		if err := d.OpenStore(t).QueryRow(`SELECT COUNT(*) FROM job`).Scan(&n); err != nil {
+		if err := store.QueryRow(`SELECT COUNT(*) FROM job`).Scan(&n); err != nil {
 			t.Fatal(err)
 		}
 		return n
 	}
+	// The jobs call is logged when it starts; the row is stored when the runs
+	// fetch that made it commits, which a loaded host can delay past any quiet
+	// period.
+	until(t, 30*time.Second, "the failed run's jobs to be stored", func() bool { return jobRows() == 1 })
 	if got := jobRows(); got != 1 {
 		t.Fatalf("job rows = %d, want 1", got)
 	}
