@@ -1,0 +1,48 @@
+{
+  "runs": [
+    {
+      "id": "100",
+      "name": "ci",
+      "status": "completed",
+      "conclusion": "failure",
+      "url": "https://example.invalid/runs/100",
+      "provider": "github-actions",
+      "head_sha": "aaa111",
+      "repo": "example/widgets",
+      "pr_id": "PR_node_1",
+      "attempt": 1,
+      "jobs": [
+        {
+          "id": "11",
+          "name": "build",
+          "status": "completed",
+          "conclusion": "failure",
+          "url": "https://example.invalid/jobs/11"
+        },
+        {
+          "id": "12",
+          "name": "lint",
+          "status": "completed",
+          "conclusion": "failure",
+          "url": "https://example.invalid/jobs/12"
+        }
+      ],
+      "as_of": "2026-01-01T00:00:00Z",
+      "stale": false
+    },
+    {
+      "id": "101",
+      "name": "docs",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://example.invalid/runs/101",
+      "provider": "github-actions",
+      "head_sha": "aaa111",
+      "repo": "example/widgets",
+      "pr_id": "PR_node_1",
+      "attempt": 1,
+      "as_of": "2026-01-01T00:00:00Z",
+      "stale": false
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "kinds": [],
+  "fields": [
+    {
+      "name": "comment:c1",
+      "before": {
+        "body": "first comment",
+        "hash": "cdde0c8c9a62f39adb26f9978b027d1007c59446161b50fd6ca99008a9ce24ed"
+      },
+      "after": {
+        "body": "first comment, edited",
+        "hash": "b7aede44c37f27f9660788cbc38fa63d60413fa9e48465c8dc3f16757b048e5f"
+      }
+    }
+  ]
+}

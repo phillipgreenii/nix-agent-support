@@ -1,0 +1,16 @@
+{
+  "kinds": ["ci_changed"],
+  "fields": [
+    {
+      "name": "run:102",
+      "before": null,
+      "after": {
+        "attempt": 1,
+        "workflow": "ci",
+        "head_sha": "aaa111",
+        "status": "completed",
+        "conclusion": "cancelled"
+      }
+    }
+  ]
+}

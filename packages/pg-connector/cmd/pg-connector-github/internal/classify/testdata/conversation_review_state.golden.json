@@ -1,0 +1,10 @@
+{
+  "kinds": ["review_changed"],
+  "fields": [
+    {
+      "name": "review:r1",
+      "before": "COMMENTED",
+      "after": "APPROVED"
+    }
+  ]
+}

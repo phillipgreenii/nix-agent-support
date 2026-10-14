@@ -1,0 +1,10 @@
+{
+  "kinds": ["feedback_changed"],
+  "fields": [
+    {
+      "name": "comment_resolved:c3",
+      "before": false,
+      "after": true
+    }
+  ]
+}

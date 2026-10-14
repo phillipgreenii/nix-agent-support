@@ -1,0 +1,21 @@
+{
+  "kinds": ["ci_changed"],
+  "fields": [
+    {
+      "name": "job:100/build",
+      "before": null,
+      "after": {
+        "status": "completed",
+        "conclusion": "failure"
+      }
+    },
+    {
+      "name": "job:100/lint",
+      "before": null,
+      "after": {
+        "status": "completed",
+        "conclusion": "success"
+      }
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "comments": [
+    {
+      "id": "c1",
+      "author": "teammate",
+      "body": "first comment, edited",
+      "resolved": false
+    },
+    {
+      "id": "c2",
+      "author": "teammate",
+      "body": "second comment",
+      "resolved": false
+    }
+  ],
+  "reviews": [
+    {
+      "id": "r1",
+      "author": "review-bot",
+      "state": "COMMENTED",
+      "body": "looks fine",
+      "comments": [
+        {
+          "id": "c3",
+          "author": "review-bot",
+          "body": "inline note",
+          "path": "a.go",
+          "line": 3,
+          "resolved": false
+        }
+      ],
+      "submitted_at": "2026-01-01T00:00:00Z"
+    }
+  ],
+  "connections": {
+    "reviews": { "truncated": false, "total": 1, "returned": 1 },
+    "threads": { "truncated": false, "total": 1, "returned": 1 },
+    "comments": { "truncated": false, "total": 3, "returned": 3 }
+  }
+}
